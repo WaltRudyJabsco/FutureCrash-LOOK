@@ -584,3 +584,34 @@ The core rules:
 The unified installer installs `_lk` and `_lo` completion definitions under `~/.config/look/completions`.
 
 `lk` completion is context-sensitive for Ollama, memory, skills, system commands, paths, and saved remote host names. `lo` completes only its command/options layer before yielding to natural-language input.
+
+## Media transport
+
+LOOK exposes a small cross-platform transport surface:
+
+```sh
+lk media
+lk media toggle
+lk media next
+lk media prev
+lk media stop
+```
+
+macOS currently controls running Music or Spotify through AppleScript. Linux uses MPRIS through `playerctl`. The public LOOK command stays the same across platforms.
+
+## Versioned intelligence
+
+User memory and assistant craft are portable state, not application binaries.
+
+- `ollama_memory.json` carries `schema_version: 1`.
+- `skills.md` carries `schema: 1` and `bundled-version: 1`.
+- The Bundled skills section is release-owned.
+- The Learned section is local and preserved when Bundled craft is updated.
+
+```sh
+lk skills version
+lk skills update
+lk skills update /path/to/skills.md
+```
+
+`lk skills update` replaces compatible Bundled craft while preserving the local Learned section.

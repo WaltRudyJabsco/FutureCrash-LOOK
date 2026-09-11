@@ -1,5 +1,8 @@
 # LO Skills
 
+<!-- schema: 1 -->
+<!-- bundled-version: 1 -->
+
 ## Bundled
 
 - Inspect existing files before modifying them.

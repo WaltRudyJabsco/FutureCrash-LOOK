@@ -50,3 +50,15 @@ LO keeps at most 20 candidate memories on disk and offers at most eight to promp
 
 ## Completion
 `lk <Tab>` completes LOOK commands contextually. `lk ollama`, `lk memory`, and `lk skills` expose their subcommands; `lk ollama host` includes saved host names. `lo` completes access flags and `@host` choices, then leaves prompt text unconstrained.
+
+## Media
+`lk media` · `lk media toggle` · `lk media next` · `lk media prev` · `lk media stop`
+
+macOS: Music / Spotify adapter. Linux: MPRIS via `playerctl`.
+
+## Intelligence versions
+`lk skills version` shows the installed skills schema, bundled pack version, and learned-skill count.
+
+`lk skills update [FILE]` refreshes Bundled craft from the built-in pack or a compatible external pack while preserving Learned craft.
+
+Memory JSON uses schema version 1.

@@ -1,5 +1,14 @@
 # LOOK Shell changelog
 
+## 3.6.0 — media transport + portable intelligence versions
+
+- Adds `lk media` with macOS Music/Spotify and Linux MPRIS adapters.
+- Adds memory schema version 1.
+- Adds skills schema version 1 and bundled skills pack version 1.
+- Adds `lk skills version` and `lk skills update [FILE]`.
+- Preserves locally Learned skills while refreshing Bundled craft.
+
+
 ## 3.5.1 — durable memory lifecycle
 
 - Explicit durable-memory intent promotes into the long-term summary immediately.

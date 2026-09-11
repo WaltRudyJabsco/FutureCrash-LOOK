@@ -17,7 +17,7 @@ try:
 except Exception:
     readline = None
 
-VERSION="3.5.1"
+VERSION="3.6.0"
 
 LOOK_WORDMARK = r"""       ██╗      ██╗  ██╗
        ██║      ██║ ██╔╝
@@ -46,6 +46,9 @@ OLLAMA_SHARE_PID=STATE_DIR/"ollama_share_proxy.pid"
 LOCAL_OLLAMA_URL="http://127.0.0.1:11434"
 RECENT_MEMORY_SLOTS=8
 MEMORY_CANDIDATE_LIMIT=20
+MEMORY_SCHEMA_VERSION=1
+SKILLS_SCHEMA_VERSION=1
+BUNDLED_SKILLS_VERSION=1
 
 
 def _normalize_ollama_url(value):
@@ -616,6 +619,9 @@ MEMORY + CRAFT
   lk memory prune      remove known reasoning/meta artifacts
   lk clear-memory      short form of memory clear
   lk skills            show LO's bundled + learned assistant craft
+  lk skills version    show skills schema / bundled pack version
+  lk skills update [FILE]
+                       update Bundled craft; preserve Learned craft
   lk skills add TEXT   manually add a reusable learned skill
   lk skills forget TEXT
                        remove matching locally learned skills
@@ -623,6 +629,13 @@ MEMORY + CRAFT
                        clear only locally learned skills
   lk skills path       print the editable skills file path
                        auto-learning runs in workspace/power/unsafe; conservative never writes skills
+
+MEDIA
+  lk media             show current supported player / track
+  lk media toggle      play / pause
+  lk media next        next track
+  lk media prev        previous track
+  lk media stop        stop (or pause where player has no true stop)
 
 SYSTEM
   lk home              friendly LOOK home screen
@@ -839,7 +852,7 @@ def doctor():
 
 
 def _empty_memory():
-    return {"summary": "", "memories": [], "maintenance_cycles": 0}
+    return {"schema_version": MEMORY_SCHEMA_VERSION, "summary": "", "memories": [], "maintenance_cycles": 0}
 
 
 DEFAULT_CORE = """# LO Core
@@ -853,6 +866,9 @@ Keep user memory separate from reusable assistant craft.
 """
 
 DEFAULT_SKILLS = """# LO Skills
+
+<!-- schema: 1 -->
+<!-- bundled-version: 1 -->
 
 ## Bundled
 
@@ -871,6 +887,45 @@ DEFAULT_SKILLS = """# LO Skills
 """
 
 
+def _skills_metadata(text):
+    schema=re.search(r"<!--\s*schema:\s*(\d+)\s*-->",str(text or ""),re.I)
+    bundled=re.search(r"<!--\s*bundled-version:\s*(\d+)\s*-->",str(text or ""),re.I)
+    return {"schema":int(schema.group(1)) if schema else 0,
+            "bundled_version":int(bundled.group(1)) if bundled else 0}
+
+
+def _split_skills(text):
+    marker="## Learned"
+    text=str(text or "")
+    if marker in text:
+        head,tail=text.split(marker,1)
+        return head.rstrip(),tail.strip()
+    return text.rstrip(),""
+
+
+def _merge_skills_pack(existing, pack):
+    meta=_skills_metadata(pack)
+    if meta["schema"] not in {0,SKILLS_SCHEMA_VERSION}:
+        raise ValueError(f"unsupported skills schema: {meta['schema']}")
+    pack_head,_=_split_skills(pack)
+    _,learned=_split_skills(existing)
+    out=pack_head.rstrip()+"\n\n## Learned\n\n"
+    if learned:
+        out+=learned.rstrip()+"\n"
+    return out
+
+
+def _sync_bundled_skills(pack_text=None):
+    STATE_DIR.mkdir(parents=True,exist_ok=True)
+    pack_text=pack_text or DEFAULT_SKILLS
+    try:
+        existing=SKILLS_FILE.read_text(encoding="utf-8") if SKILLS_FILE.exists() else ""
+        SKILLS_FILE.write_text(_merge_skills_pack(existing,pack_text),encoding="utf-8")
+        return True
+    except (OSError,ValueError):
+        return False
+
+
 def _ensure_intelligence_files():
     try:
         STATE_DIR.mkdir(parents=True, exist_ok=True)
@@ -878,6 +933,15 @@ def _ensure_intelligence_files():
             CORE_FILE.write_text(DEFAULT_CORE, encoding="utf-8")
         if not SKILLS_FILE.exists():
             SKILLS_FILE.write_text(DEFAULT_SKILLS, encoding="utf-8")
+        else:
+            try:
+                current=SKILLS_FILE.read_text(encoding="utf-8")
+                installed=_skills_metadata(current)
+                available=_skills_metadata(DEFAULT_SKILLS)
+                if installed["bundled_version"] < available["bundled_version"] or installed["schema"] == 0:
+                    SKILLS_FILE.write_text(_merge_skills_pack(current,DEFAULT_SKILLS),encoding="utf-8")
+            except (OSError,ValueError):
+                pass
         if not MEMORY_FILE.exists():
             MEMORY_FILE.write_text(json.dumps(_empty_memory(), indent=2) + "\n", encoding="utf-8")
             os.chmod(MEMORY_FILE, 0o600)
@@ -900,7 +964,12 @@ def _migrate_old_memory(data):
         if text:
             memories.append({"text": text[:900], "importance": 60, "uses": 0})
     summary=str(data.get("long", "")).strip()[:3000]
-    return {"summary": summary, "memories": memories[-MEMORY_CANDIDATE_LIMIT:]}
+    return {
+        "schema_version": MEMORY_SCHEMA_VERSION,
+        "summary": summary,
+        "memories": memories[-MEMORY_CANDIDATE_LIMIT:],
+        "maintenance_cycles": 0,
+    }
 
 
 def _load_memory():
@@ -922,7 +991,8 @@ def _load_memory():
                 "uses": max(0, int(item.get("uses",0))),
             })
         cleaned.sort(key=lambda x:x["importance"], reverse=True)
-        result={"summary":str(data.get("summary",""))[:3000],
+        result={"schema_version":MEMORY_SCHEMA_VERSION,
+                "summary":str(data.get("summary",""))[:3000],
                 "memories":cleaned[:MEMORY_CANDIDATE_LIMIT],
                 "maintenance_cycles":max(0,int(data.get("maintenance_cycles",0) or 0))}
         result=_prune_contaminated_memory(result)
@@ -1151,7 +1221,7 @@ def _memory_command(args):
         shown=text if len(text)<=52 else text[:49]+"…"
         print(f"  {shown:<54} {int(item.get('importance',50)):3d}")
     print()
-    print(f"  {len(items)} candidates · prompt attention capped at {RECENT_MEMORY_SLOTS}")
+    print(f"  {len(items)} candidates · prompt attention capped at {RECENT_MEMORY_SLOTS} · schema {MEMORY_SCHEMA_VERSION}")
     return 0
 
 
@@ -1159,6 +1229,34 @@ def _skills_command(args):
     _ensure_intelligence_files()
     if args and args[0]=="path":
         print(SKILLS_FILE); return 0
+    if args and args[0]=="version":
+        try: installed=_skills_metadata(SKILLS_FILE.read_text(encoding="utf-8"))
+        except OSError: installed={"schema":0,"bundled_version":0}
+        available=_skills_metadata(DEFAULT_SKILLS)
+        print(f"skills schema {installed['schema'] or SKILLS_SCHEMA_VERSION}")
+        print(f"bundled pack {installed['bundled_version']} · built-in {available['bundled_version']}")
+        print(f"learned skills {len(_learned_skills())}")
+        return 0
+    if args and args[0]=="update":
+        pack_text=DEFAULT_SKILLS
+        source="built-in"
+        if len(args)>1:
+            pack=Path(" ".join(args[1:])).expanduser()
+            try:
+                pack_text=pack.read_text(encoding="utf-8"); source=str(pack)
+            except OSError as e:
+                print(f"LOOK: could not read skills pack: {e}"); return 1
+        before=_skills_metadata(SKILLS_FILE.read_text(encoding="utf-8"))
+        candidate=_skills_metadata(pack_text)
+        if candidate["schema"] not in {0,SKILLS_SCHEMA_VERSION}:
+            print(f"LOOK: unsupported skills schema {candidate['schema']}"); return 1
+        if _sync_bundled_skills(pack_text):
+            after=_skills_metadata(SKILLS_FILE.read_text(encoding="utf-8"))
+            print(f"✓ skills updated from {source}")
+            print(f"  schema {after['schema']} · bundled pack {before['bundled_version']} → {after['bundled_version']}")
+            print(f"  preserved {len(_learned_skills())} learned skill(s)")
+            return 0
+        print("LOOK: skills update failed"); return 1
     if args and args[0]=="add":
         skill=_sanitize_skill(" ".join(args[1:]))
         if not skill:
@@ -4694,6 +4792,109 @@ def ollama_key(args):
     print("Open a new shell, or run: source ~/.zsh_secrets")
     return 0
 
+
+def _media_macos_status_for(app):
+    if app=="Music":
+        script='''tell application "System Events"
+  if not (exists process "Music") then return ""
+end tell
+tell application "Music"
+  set st to (player state as text)
+  if st is "stopped" then return "Music|stopped||"
+  try
+    return "Music|" & st & "|" & (artist of current track) & "|" & (name of current track)
+  on error
+    return "Music|" & st & "||"
+  end try
+end tell'''
+    elif app=="Spotify":
+        script='''tell application "System Events"
+  if not (exists process "Spotify") then return ""
+end tell
+tell application "Spotify"
+  set st to (player state as text)
+  try
+    return "Spotify|" & st & "|" & (artist of current track) & "|" & (name of current track)
+  on error
+    return "Spotify|" & st & "||"
+  end try
+end tell'''
+    else:
+        return None
+    try:
+        p=subprocess.run(["osascript","-e",script],capture_output=True,text=True,timeout=3)
+        out=(p.stdout or "").strip()
+        if not out: return None
+        parts=(out.split("|",3)+["","","",""])[:4]
+        return {"player":parts[0],"state":parts[1],"artist":parts[2],"title":parts[3]}
+    except (OSError,subprocess.SubprocessError):
+        return None
+
+
+def _media_macos(action):
+    players=[x for x in (_media_macos_status_for("Music"),_media_macos_status_for("Spotify")) if x]
+    if not players:
+        print("LOOK media · no supported running player found (Music or Spotify)")
+        return 1
+    current=next((p for p in players if p["state"].lower()=="playing"),players[0])
+    app=current["player"]
+    if action=="status":
+        track=" — ".join(x for x in (current["artist"],current["title"]) if x)
+        print(f"{app} · {current['state'] or 'unknown'}" + (f" · {track}" if track else ""))
+        return 0
+    commands={"toggle":"playpause","next":"next track","prev":"previous track","stop":"stop" if app=="Music" else "pause"}
+    try:
+        p=subprocess.run(["osascript","-e",f'tell application "{app}" to {commands[action]}'],
+                         capture_output=True,text=True,timeout=3)
+        if p.returncode!=0:
+            print(f"LOOK media · {p.stderr.strip() or 'command failed'}")
+            return 1
+        return 0
+    except (OSError,subprocess.SubprocessError) as e:
+        print(f"LOOK media · {e}"); return 1
+
+
+def _media_linux(action):
+    playerctl=shutil.which("playerctl")
+    if not playerctl:
+        print("LOOK media · Linux media control needs playerctl (MPRIS)")
+        print("  install with your package manager, e.g. sudo apt install playerctl")
+        return 1
+    try:
+        p=subprocess.run([playerctl,"-l"],capture_output=True,text=True,timeout=3)
+        players=[x.strip() for x in (p.stdout or "").splitlines() if x.strip()]
+        if not players:
+            print("LOOK media · no MPRIS player found"); return 1
+        chosen=players[0]
+        for candidate in players:
+            st=subprocess.run([playerctl,"-p",candidate,"status"],capture_output=True,text=True,timeout=2)
+            if (st.stdout or "").strip().lower()=="playing":
+                chosen=candidate; break
+        if action=="status":
+            state=subprocess.run([playerctl,"-p",chosen,"status"],capture_output=True,text=True,timeout=2).stdout.strip()
+            artist=subprocess.run([playerctl,"-p",chosen,"metadata","artist"],capture_output=True,text=True,timeout=2).stdout.strip()
+            title=subprocess.run([playerctl,"-p",chosen,"metadata","title"],capture_output=True,text=True,timeout=2).stdout.strip()
+            track=" — ".join(x for x in (artist,title) if x)
+            print(f"{chosen} · {state or 'unknown'}" + (f" · {track}" if track else ""))
+            return 0
+        command={"toggle":"play-pause","next":"next","prev":"previous","stop":"stop"}[action]
+        return subprocess.run([playerctl,"-p",chosen,command],timeout=3).returncode
+    except (OSError,subprocess.SubprocessError) as e:
+        print(f"LOOK media · {e}"); return 1
+
+
+def media(args):
+    action=(args[0].lower() if args else "status")
+    aliases={"play":"toggle","pause":"toggle","playpause":"toggle","previous":"prev","back":"prev"}
+    action=aliases.get(action,action)
+    if action not in {"status","toggle","next","prev","stop"}:
+        print("usage: lk media [status|toggle|next|prev|stop]"); return 2
+    system=platform.system()
+    if system=="Darwin": return _media_macos(action)
+    if system=="Linux": return _media_linux(action)
+    print(f"LOOK media · unsupported platform: {system}"); return 1
+
+
 def main():
     # `lk o` remains the chat verb. In v2, bare `lk ollama` is inspection;
     # adding search/a prompt keeps the historical long-form chat spelling useful.
@@ -4752,6 +4953,7 @@ def main():
         n=_forget_memory(" ".join(rest)); print(f"Removed {n} matching memory item(s)."); return 0
     if cmd=="clear-memory": return _memory_command(["clear"])
     if cmd=="skills": return _skills_command(rest)
+    if cmd in {"media","music"}: return media(rest)
     if cmd=="_ollama-share-proxy": return _ollama_share_proxy()
     modes={"detail":"detail","dirs":"dirs","files":"files","tree":"tree","recent":"recent","size":"size"}
     if cmd in ("help","-h","--help"): return help_screen()

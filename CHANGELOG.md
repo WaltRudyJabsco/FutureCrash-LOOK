@@ -1,5 +1,13 @@
 # Future Crash + LOOK changelog
 
+## 1.3.0 — media transport + versioned intelligence
+
+- Adds `lk media` status/play-pause/next/previous/stop.
+- Separates application versions from memory schema and skills-pack versions.
+- Bundled skills can update without overwriting locally Learned craft.
+- Rewrites the GitHub README around installation, first use, architecture, AI, memory, skills, and reference material.
+
+
 ## 1.2.1 — durable memory lifecycle
 
 - Explicit long-term memory requests promote immediately into the semantic summary.

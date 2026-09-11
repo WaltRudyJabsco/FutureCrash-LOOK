@@ -1,4 +1,4 @@
-.TH LK 1 "September 2026" "LOOK 3.5.1 / Future Crash + LOOK 1.2.1" "User Commands"
+.TH LK 1 "September 2026" "LOOK 3.6.0 / Future Crash + LOOK 1.3.0" "User Commands"
 .SH NAME
 lk \- inspect, navigate, manipulate, and ask your computer
 .br
@@ -252,3 +252,33 @@ A current installer refuses to overwrite a newer unified release unless
 .B --force-downgrade
 is supplied deliberately.
 Historical installers predating this guard cannot be retroactively protected.
+
+.SH MEDIA
+.TP
+.B lk media
+Show the active supported media player and track.
+.TP
+.B lk media toggle
+Toggle play/pause.
+.TP
+.B lk media next
+Advance to the next track.
+.TP
+.B lk media prev
+Return to the previous track.
+.TP
+.B lk media stop
+Stop playback, or pause on players without a distinct stop command.
+.PP
+On macOS, LOOK currently controls running Music or Spotify applications.
+On Linux, LOOK uses the MPRIS ecosystem through playerctl.
+.SH INTELLIGENCE VERSIONS
+.TP
+.B lk skills version
+Show the installed skills schema, bundled skills-pack version, and count of locally learned skills.
+.TP
+.B lk skills update [FILE]
+Refresh the Bundled skills section from LOOK's built-in pack or a compatible external skills file.
+The locally Learned section is preserved.
+.PP
+LO user memory carries a data schema version independent of the LOOK application version.

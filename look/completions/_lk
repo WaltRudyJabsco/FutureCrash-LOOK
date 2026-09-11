@@ -46,6 +46,7 @@ _lk() {
     'path:PATH diagnostics'
     'why:explain command resolution'
     'ollama:Ollama models/hosts/search/access'
+    'media:system media transport'
     'memory:LO user memory'
     'forget:forget matching user memory'
     'clear-memory:clear LO user memory'
@@ -115,12 +116,16 @@ _lk() {
           ;;
       esac
       ;;
+    media|music)
+      (( CURRENT == 3 )) && _values 'media action' status toggle next prev stop
+      return
+      ;;
     memory)
       (( CURRENT == 3 )) && _values 'memory action' add forget clear clear-summary prune
       return
       ;;
     skills)
-      (( CURRENT == 3 )) && _values 'skills action' add forget clear-learned path
+      (( CURRENT == 3 )) && _values 'skills action' add forget clear-learned path version update
       return
       ;;
     port|pid)
