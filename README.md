@@ -376,6 +376,27 @@ That means the program can eventually stabilize while the reviewed assistant cra
 
 ---
 
+
+## Signal Field as an expressive channel
+
+### Signal wiring fix
+
+Future Crash preserves valid `[[SIGNAL]]` blocks even when an Ollama/Qwen model places them in structured thinking. Reasoning prose remains hidden; the Signal directives still reach the renderer. Workstation and Oracle views also restore a larger roughly half-screen Signal pane on ordinary desktop widths, and the built-in Dream thread has a visual fallback so every successful wake produces visible Signal activity.
+
+
+Future Crash can now treat Signal as part of its native language rather than a special-case drawing trick.
+
+- Ask and Workstation may use Signal when a visual genuinely improves the answer.
+- Signal renders produce a tiny persistent receipt: accepted/rejected commands, clipping, occupied bounds, title, and frame count.
+- The latest few receipts are fed back to Future Crash so later drawings can improve.
+- Signal supports tiny multi-frame animations with `FPS` + `FRAME`.
+- The Threads screen has a built-in **Signal Dream** preset: press `D` to toggle a roughly four-minute model-only dream thread.
+
+Signal history is intentionally tiny and bounded. It is craft feedback, not a screenshot archive.
+
+Future Crash memory is still lean, but its recent conversational buffer now keeps eight completed Workstation exchanges before consolidation rather than five, and the long-memory budget is modestly larger. The principle remains the same: keep enough continuity to be useful, then compress.
+
+
 ## Future Crash personality boundary
 
 Future Crash and LO share the same Ollama substrate, but they do **not** share personality selection.
@@ -388,7 +409,7 @@ Future Crash owns a fixed application personality in:
 
 LO remains user-selectable (`lo`, `robot`, `max`, `philosopher`). Switching LO personality therefore does not turn Future Crash into Philosopher or Space Robot.
 
-Short Future Crash artifacts—fortunes, ambient/oracle observations, and similar micro-generations—are **final-only**. Model reasoning is discarded before the text reaches the interface, including Qwen/Ollama template cases where a stray closing `</think>` appears in visible content.
+Short Future Crash artifacts—fortunes, ambient/oracle observations, and similar micro-generations—are **final-only**. Future Crash reserves a fixed three-line Fortune body beneath its `FORTUNE //` label, keeping the ambient layout stable as fortunes wrap. If a model returns only prompt-paraphrase/reasoning instead of a final artifact, Future Crash now fails closed to the local Future Crash seed rather than displaying model internals. Model reasoning is discarded before the text reaches the interface, including Qwen/Ollama template cases where a stray closing `</think>` appears in visible content.
 
 ---
 
@@ -642,9 +663,9 @@ This release establishes the following baseline:
 
 | Layer | Version |
 | --- | ---: |
-| Future Crash + LOOK | **1.5.1** |
+| Future Crash + LOOK | **1.6.1** |
 | LOOK | **3.8.0** |
-| Future Crash | **1.0.1** |
+| Future Crash | **1.1.1** |
 | Memory schema | **1** |
 | Skills schema | **1** |
 | Bundled skills pack | **1** |

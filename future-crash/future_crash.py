@@ -71,7 +71,7 @@ WHITE = CSI + "38;5;255m"
 GRAY = CSI + "38;5;245m"
 DARK = CSI + "38;5;239m"
 
-VERSION = "1.0.0"
+VERSION = "1.1.1"
 GLYPHS = "0123456789ABCDEF"
 SPARKS = "▁▂▃▄▅▆▇█"
 
@@ -605,7 +605,7 @@ class MemoryStore:
     to compress long memory + those five exchanges into a new long memory.
     """
 
-    RECENT_CAPACITY = 5
+    RECENT_CAPACITY = 8
 
     def __init__(self, path=None):
         self.path = Path(path or (Path.home() / ".future_crash_memory.json"))
@@ -651,19 +651,19 @@ class MemoryStore:
             "Compress the memory below into a durable working memory for Future Crash. "
             "Preserve concrete facts, preferences, decisions, ongoing projects, unresolved questions, "
             "and important context. Remove chit-chat, repetition, and transient wording. "
-            "Do not invent anything. Write at most 8 compact lines.\n\n"
+            "Do not invent anything. Write at most 10 compact lines.\n\n"
             f"EXISTING LONG MEMORY:\n{old}\n\n"
-            f"FIVE RECENT EXCHANGES:\n{recent_text}"
+            f"RECENT EXCHANGES:\n{recent_text}"
         )
 
     def finish_consolidation(self, compressed):
         compressed = (compressed or "").strip()
         if compressed:
-            self.long_memory = compressed[:7000]
+            self.long_memory = compressed[:9000]
         else:
             # Deterministic fallback: keep a bounded plain-text digest rather than lose memory.
             joined = "\n".join(self.recent[-self.RECENT_CAPACITY:])
-            self.long_memory = (self.long_memory + "\n" + joined)[-7000:].strip()
+            self.long_memory = (self.long_memory + "\n" + joined)[-9000:].strip()
         self.recent = []
         self.pending_consolidation = False
         self.save()
@@ -687,197 +687,250 @@ class MemoryStore:
 # ---------- Signal Canvas ----------
 
 class SignalCanvas:
-    """Validated 40x12 character framebuffer for model-generated sketches."""
+    """Validated 40x12 model-controlled framebuffer with tiny render memory."""
 
-    WIDTH = 40
-    HEIGHT = 12
-    DEFAULT_TTL = 45.0
-    COLORS = {
-        "green": GREEN, "cyan": CYAN, "amber": AMBER,
-        "magenta": MAGENTA, "red": RED, "white": WHITE, "dim": DARK,
+    WIDTH=40
+    HEIGHT=12
+    DEFAULT_TTL=45.0
+    HISTORY_LIMIT=6
+    COLORS={
+        "green":GREEN,"cyan":CYAN,"amber":AMBER,"magenta":MAGENTA,
+        "red":RED,"white":WHITE,"dim":DARK,
     }
-    SIGNAL_RE = re.compile(r"\[\[SIGNAL\]\](.*?)\[\[/SIGNAL\]\]", re.S | re.I)
+    SIGNAL_RE=re.compile(r"\[\[SIGNAL\]\](.*?)\[\[/SIGNAL\]\]",re.S|re.I)
 
-    def __init__(self):
-        self.cells = [[None for _ in range(self.WIDTH)] for _ in range(self.HEIGHT)]
-        self.expires_at = 0.0
-        self.title = ""
-        self.owner = None
+    def __init__(self,history_path=None):
+        self.history_path=Path(history_path or (Path.home()/".future_crash"/"signal_history.json"))
+        self.history=[]
+        self.cells=self._blank()
+        self.frames=[]
+        self.frame_fps=4.0
+        self.frame_started=time.time()
+        self.expires_at=0.0
+        self.title=""
+        self.owner=None
+        self._stats=None
+        self._load_history()
+
+    def _blank(self):
+        return [[None for _ in range(self.WIDTH)] for _ in range(self.HEIGHT)]
+
+    def _load_history(self):
+        try:
+            data=json.loads(self.history_path.read_text(encoding="utf-8"))
+            items=data.get("receipts",[]) if isinstance(data,dict) else []
+            self.history=[str(x) for x in items if str(x).strip()][-self.HISTORY_LIMIT:]
+        except Exception:
+            self.history=[]
+
+    def _save_history(self):
+        try:
+            self.history_path.parent.mkdir(parents=True,exist_ok=True)
+            tmp=self.history_path.with_suffix(".tmp")
+            tmp.write_text(json.dumps({"version":1,"receipts":self.history[-self.HISTORY_LIMIT:]},indent=2),encoding="utf-8")
+            tmp.replace(self.history_path)
+        except OSError:
+            pass
+
+    def context_packet(self):
+        if not self.history:
+            return ""
+        return "RECENT SIGNAL RENDER FEEDBACK:\n"+"\n".join(self.history[-3:])
 
     def clear(self):
-        self.cells = [[None for _ in range(self.WIDTH)] for _ in range(self.HEIGHT)]
-        self.expires_at = 0.0
-        self.title = ""
-        self.owner = None
+        self.cells=self._blank()
+        self.frames=[]
+        self.expires_at=0.0
+        self.title=""
+        self.owner=None
 
-    def clear_owner(self, owner):
-        """Clear the canvas only when it belongs to the specified Thread."""
-        if owner and self.owner == owner:
-            self.clear()
-            return True
+    def clear_owner(self,owner):
+        if owner and self.owner==owner:
+            self.clear(); return True
         return False
 
     def active(self):
-        if self.expires_at and time.time() >= self.expires_at:
+        if self.expires_at and time.time()>=self.expires_at:
             self.clear()
-        return any(c is not None for row in self.cells for c in row)
+        source=self._current_cells()
+        return any(c is not None for row in source for c in row)
 
-    def _put(self, x, y, ch, color="cyan"):
-        if 0 <= x < self.WIDTH and 0 <= y < self.HEIGHT:
-            self.cells[y][x] = ((ch or " ")[:1], color if color in self.COLORS else "cyan")
+    def _current_cells(self):
+        if self.frames:
+            idx=int((time.time()-self.frame_started)*self.frame_fps)%len(self.frames)
+            return self.frames[idx]
+        return self.cells
 
-    def _line(self, x0, y0, x1, y1, color, ch):
-        dx, sx = abs(x1-x0), (1 if x0 < x1 else -1)
-        dy, sy = -abs(y1-y0), (1 if y0 < y1 else -1)
-        err = dx + dy
+    def _put(self,x,y,ch,color="cyan"):
+        if 0<=x<self.WIDTH and 0<=y<self.HEIGHT:
+            self.cells[y][x]=((ch or " ")[:1],color if color in self.COLORS else "cyan")
+        elif self._stats is not None:
+            self._stats["clipped"]+=1
+
+    def _line(self,x0,y0,x1,y1,color,ch):
+        dx,sx=abs(x1-x0),(1 if x0<x1 else -1)
+        dy,sy=-abs(y1-y0),(1 if y0<y1 else -1)
+        err=dx+dy
         while True:
-            self._put(x0, y0, ch, color)
-            if x0 == x1 and y0 == y1:
-                break
-            e2 = 2 * err
-            if e2 >= dy:
-                err += dy; x0 += sx
-            if e2 <= dx:
-                err += dx; y0 += sy
+            self._put(x0,y0,ch,color)
+            if x0==x1 and y0==y1: break
+            e2=2*err
+            if e2>=dy: err+=dy; x0+=sx
+            if e2<=dx: err+=dx; y0+=sy
 
-    def _box(self, x, y, w, h, color, ch):
-        if w <= 0 or h <= 0:
-            return
-        self._line(x, y, x+w-1, y, color, ch)
-        self._line(x, y+h-1, x+w-1, y+h-1, color, ch)
-        self._line(x, y, x, y+h-1, color, ch)
-        self._line(x+w-1, y, x+w-1, y+h-1, color, ch)
+    def _box(self,x,y,w,h,color,ch):
+        if w<=0 or h<=0:return
+        self._line(x,y,x+w-1,y,color,ch); self._line(x,y+h-1,x+w-1,y+h-1,color,ch)
+        self._line(x,y,x,y+h-1,color,ch); self._line(x+w-1,y,x+w-1,y+h-1,color,ch)
 
-    def _fill(self, x, y, w, h, color, ch):
-        for yy in range(y, y + max(0, h)):
-            for xx in range(x, x + max(0, w)):
-                self._put(xx, yy, ch, color)
+    def _fill(self,x,y,w,h,color,ch):
+        for yy in range(y,y+max(0,h)):
+            for xx in range(x,x+max(0,w)): self._put(xx,yy,ch,color)
 
-    def _text(self, x, y, color, value):
-        for i, ch in enumerate(value):
-            self._put(x+i, y, ch, color)
+    def _text(self,x,y,color,value):
+        for i,ch in enumerate(value): self._put(x+i,y,ch,color)
 
-    def _circle(self, cx, cy, radius, color, ch):
-        """Rasterize a circle in logical-cell coordinates."""
-        radius = max(1, radius)
-        # Terminal cells are taller than they are wide. Sampling x more densely
-        # gives the model a circle that looks circular on an ordinary terminal.
-        steps = max(24, radius * 18)
+    def _circle(self,cx,cy,radius,color,ch):
+        radius=max(1,radius); steps=max(24,radius*18)
         for i in range(steps):
-            a = (2.0 * math.pi * i) / steps
-            x = int(round(cx + math.cos(a) * radius * 1.65))
-            y = int(round(cy + math.sin(a) * radius))
-            self._put(x, y, ch, color)
+            ang=2*math.pi*i/steps
+            self._put(int(round(cx+math.cos(ang)*radius*1.65)),int(round(cy+math.sin(ang)*radius)),ch,color)
 
-    def _ellipse(self, cx, cy, rx, ry, color, ch):
-        rx, ry = max(1, rx), max(1, ry)
-        steps = max(28, (rx + ry) * 10)
+    def _ellipse(self,cx,cy,rx,ry,color,ch):
+        rx,ry=max(1,rx),max(1,ry); steps=max(28,(rx+ry)*10)
         for i in range(steps):
-            a = (2.0 * math.pi * i) / steps
-            x = int(round(cx + math.cos(a) * rx))
-            y = int(round(cy + math.sin(a) * ry))
-            self._put(x, y, ch, color)
+            ang=2*math.pi*i/steps
+            self._put(int(round(cx+math.cos(ang)*rx)),int(round(cy+math.sin(ang)*ry)),ch,color)
 
-    def _arrow(self, x0, y0, x1, y1, color, ch):
-        self._line(x0, y0, x1, y1, color, ch)
-        dx, dy = x1 - x0, y1 - y0
-        # Simple terminal arrowhead. Host owns the geometry; the model only
-        # chooses endpoints.
-        if abs(dx) >= abs(dy):
-            head = ">" if dx >= 0 else "<"
-        else:
-            head = "v" if dy >= 0 else "^"
-        self._put(x1, y1, head, color)
+    def _arrow(self,x0,y0,x1,y1,color,ch):
+        self._line(x0,y0,x1,y1,color,ch)
+        dx,dy=x1-x0,y1-y0
+        head=(">" if dx>=0 else "<") if abs(dx)>=abs(dy) else ("v" if dy>=0 else "^")
+        self._put(x1,y1,head,color)
 
-    def _plot(self, values, color, ch):
-        """Plot normalized 0..1 values across the whole logical canvas."""
-        if not values:
-            return
-        count = len(values)
-        prev = None
-        for i, value in enumerate(values):
-            value = max(0.0, min(1.0, float(value)))
-            x = int(round(i * (self.WIDTH - 1) / max(1, count - 1)))
-            y = int(round((1.0 - value) * (self.HEIGHT - 1)))
-            if prev is not None:
-                self._line(prev[0], prev[1], x, y, color, ch)
-            self._put(x, y, ch, color)
-            prev = (x, y)
+    def _plot(self,values,color,ch):
+        if not values:return
+        prev=None
+        for i,value in enumerate(values):
+            value=max(0.0,min(1.0,float(value)))
+            x=int(round(i*(self.WIDTH-1)/max(1,len(values)-1)))
+            y=int(round((1-value)*(self.HEIGHT-1)))
+            if prev:self._line(prev[0],prev[1],x,y,color,ch)
+            self._put(x,y,ch,color); prev=(x,y)
 
-    def parse_from_response(self, response, owner=None, persist=False):
-        blocks = self.SIGNAL_RE.findall(response or "")
-        clean = self.SIGNAL_RE.sub("", response or "").strip()
-        if not blocks:
-            return clean, False
+    def _apply(self,line,ttl):
+        parts=line.split(); cmd=parts[0].upper()
+        if cmd=="CLEAR": self.cells=self._blank(); self._stats["accepted"]+=1
+        elif cmd=="TITLE" and len(parts)>=2: self.title=" ".join(parts[1:])[:28]; self._stats["accepted"]+=1
+        elif cmd=="TTL" and len(parts)>=2: ttl[0]=max(5.0,min(180.0,float(parts[1]))); self._stats["accepted"]+=1
+        elif cmd=="FPS" and len(parts)>=2: self.frame_fps=max(1.0,min(12.0,float(parts[1]))); self._stats["accepted"]+=1
+        elif cmd=="PUT" and len(parts)>=5: self._put(int(parts[1]),int(parts[2]),parts[4][0],parts[3].lower()); self._stats["accepted"]+=1
+        elif cmd=="TEXT" and len(parts)>=5: self._text(int(parts[1]),int(parts[2]),parts[3].lower(),line.split(None,4)[4]); self._stats["accepted"]+=1
+        elif cmd=="LINE" and len(parts)>=7: self._line(*map(int,parts[1:5]),parts[5].lower(),parts[6][0]); self._stats["accepted"]+=1
+        elif cmd=="BOX" and len(parts)>=7: self._box(*map(int,parts[1:5]),parts[5].lower(),parts[6][0]); self._stats["accepted"]+=1
+        elif cmd=="FILL" and len(parts)>=7: self._fill(*map(int,parts[1:5]),parts[5].lower(),parts[6][0]); self._stats["accepted"]+=1
+        elif cmd=="CIRCLE" and len(parts)>=6: self._circle(int(parts[1]),int(parts[2]),int(parts[3]),parts[4].lower(),parts[5][0]); self._stats["accepted"]+=1
+        elif cmd=="ELLIPSE" and len(parts)>=7: self._ellipse(int(parts[1]),int(parts[2]),int(parts[3]),int(parts[4]),parts[5].lower(),parts[6][0]); self._stats["accepted"]+=1
+        elif cmd=="ARROW" and len(parts)>=7: self._arrow(*map(int,parts[1:5]),parts[5].lower(),parts[6][0]); self._stats["accepted"]+=1
+        elif cmd=="PLOT" and len(parts)>=4: self._plot([float(v) for v in parts[3:]],parts[1].lower(),parts[2][0]); self._stats["accepted"]+=1
+        else: self._stats["rejected"]+=1
 
-        touched = False
-        ttl = self.DEFAULT_TTL
+    def _receipt(self):
+        cells=self._current_cells()
+        points=[(x,y) for y,row in enumerate(cells) for x,c in enumerate(row) if c is not None]
+        bounds="empty"
+        if points:
+            xs=[p[0] for p in points]; ys=[p[1] for p in points]
+            bounds=f"x={min(xs)}..{max(xs)} y={min(ys)}..{max(ys)}"
+        receipt=(f"SIGNAL RECEIPT · title={self.title or '-'} · accepted={self._stats['accepted']} "
+                 f"rejected={self._stats['rejected']} · clipped={self._stats['clipped']} · "
+                 f"frames={max(1,len(self.frames))} · {bounds}")
+        self.history.append(receipt)
+        self.history=self.history[-self.HISTORY_LIMIT:]
+        self._save_history()
+        return receipt
+
+    def parse_from_response(self,response,owner=None,persist=False):
+        blocks=self.SIGNAL_RE.findall(response or "")
+        clean=self.SIGNAL_RE.sub("",response or "").strip()
+        if not blocks:return clean,False
+
+        ttl=[self.DEFAULT_TTL]
+        self._stats={"accepted":0,"rejected":0,"clipped":0}
+        touched=False
         for block in blocks[-2:]:
-            for raw in block.splitlines():
-                line = raw.strip()
-                if not line or line.startswith("#"):
-                    continue
-                parts = line.split()
-                cmd = parts[0].upper()
-                try:
-                    if cmd == "CLEAR":
-                        self.clear(); touched = True
-                    elif cmd == "TTL" and len(parts) >= 2:
-                        ttl = max(5.0, min(180.0, float(parts[1])))
-                    elif cmd == "TITLE" and len(parts) >= 2:
-                        self.title = " ".join(parts[1:])[:28]; touched = True
-                    elif cmd == "PUT" and len(parts) >= 5:
-                        self._put(int(parts[1]), int(parts[2]), parts[4][0], parts[3].lower()); touched = True
-                    elif cmd == "TEXT" and len(parts) >= 5:
-                        self._text(int(parts[1]), int(parts[2]), parts[3].lower(), line.split(None,4)[4]); touched = True
-                    elif cmd == "LINE" and len(parts) >= 7:
-                        self._line(*map(int, parts[1:5]), parts[5].lower(), parts[6][0]); touched = True
-                    elif cmd == "BOX" and len(parts) >= 7:
-                        self._box(*map(int, parts[1:5]), parts[5].lower(), parts[6][0]); touched = True
-                    elif cmd == "FILL" and len(parts) >= 7:
-                        self._fill(*map(int, parts[1:5]), parts[5].lower(), parts[6][0]); touched = True
-                    elif cmd == "CIRCLE" and len(parts) >= 6:
-                        self._circle(int(parts[1]), int(parts[2]), int(parts[3]), parts[4].lower(), parts[5][0]); touched = True
-                    elif cmd == "ELLIPSE" and len(parts) >= 7:
-                        self._ellipse(int(parts[1]), int(parts[2]), int(parts[3]), int(parts[4]), parts[5].lower(), parts[6][0]); touched = True
-                    elif cmd == "ARROW" and len(parts) >= 7:
-                        self._arrow(*map(int, parts[1:5]), parts[5].lower(), parts[6][0]); touched = True
-                    elif cmd == "PLOT" and len(parts) >= 4:
-                        color, ch = parts[1].lower(), parts[2][0]
-                        values = [float(v) for v in parts[3:]]
-                        self._plot(values, color, ch); touched = True
-                except (ValueError, IndexError):
-                    continue
+            lines=[ln.strip() for ln in block.splitlines() if ln.strip() and not ln.strip().startswith("#")]
+            has_frames=any(ln.upper()=="FRAME" for ln in lines)
+            if has_frames:
+                globals_=[]; sections=[]; current=None
+                for line in lines:
+                    if line.upper()=="FRAME":
+                        if current is not None: sections.append(current)
+                        current=[]
+                    elif current is None:
+                        globals_.append(line)
+                    else:
+                        current.append(line)
+                if current is not None: sections.append(current)
+                self.frames=[]
+                for g in globals_:
+                    try:self._apply(g,ttl)
+                    except (ValueError,IndexError):self._stats["rejected"]+=1
+                global_title=self.title
+                for section in sections[:8]:
+                    self.cells=self._blank(); self.title=global_title
+                    for line in section:
+                        try:self._apply(line,ttl)
+                        except (ValueError,IndexError):self._stats["rejected"]+=1
+                    self.frames.append([[cell for cell in row] for row in self.cells])
+                self.frame_started=time.time()
+                touched=bool(self.frames)
+            else:
+                for line in lines:
+                    try:self._apply(line,ttl); touched=True
+                    except (ValueError,IndexError):self._stats["rejected"]+=1
 
         if touched:
-            self.owner = owner if persist else None
-            # Persistent Thread displays live until that Thread replaces/clears
-            # them. Ordinary Oracle drawings retain their short TTL.
-            self.expires_at = 0.0 if persist else (time.time() + ttl)
-        return clean, touched
+            self.owner=owner if persist else None
+            self.expires_at=0.0 if persist else time.time()+ttl[0]
+            self._receipt()
+        self._stats=None
+        return clean,touched
 
-    def sample(self, display_w, display_h):
-        self.active()
-        rows = []
-        for dy in range(max(0, display_h)):
-            sy = min(self.HEIGHT-1, int(dy * self.HEIGHT / max(1, display_h)))
-            row = []
-            for dx in range(max(0, display_w)):
-                sx = min(self.WIDTH-1, int(dx * self.WIDTH / max(1, display_w)))
-                row.append(self.cells[sy][sx])
+    def sample(self,display_w,display_h):
+        self.active(); source=self._current_cells()
+        rows=[]
+        for dy in range(max(0,display_h)):
+            sy=min(self.HEIGHT-1,int(dy*self.HEIGHT/max(1,display_h)))
+            row=[]
+            for dx in range(max(0,display_w)):
+                sx=min(self.WIDTH-1,int(dx*self.WIDTH/max(1,display_w)))
+                row.append(source[sy][sx])
             rows.append(row)
         return rows
 
-    def demo(self):
-        """Host-side test pattern: proves the Signal Canvas renderer is alive."""
+    def fallback_dream(self,owner=None):
+        """Host-side fallback: dream mode must always visibly do something."""
         self.clear()
-        self.title = "CANVAS TEST 40x12"
-        self._box(0, 0, self.WIDTH, self.HEIGHT, "cyan", "#")
-        self._text(3, 2, "white", "FUTURE CRASH SIGNAL CANVAS")
-        self._line(3, 5, 35, 5, "green", "*")
-        self._line(3, 8, 35, 3, "amber", "/")
-        self._text(3, 9, "magenta", "40 x 12 LOGICAL CELLS")
-        self.expires_at = time.time() + 30.0
+        self.title="SIGNAL DREAM"
+        phase=int(time.time())%7
+        color=("cyan","green","amber","magenta")[phase%4]
+        self._circle(20,6,2+(phase%3),color,"o")
+        self._put(20,6,"*","white")
+        self._line(4,9,35,9,"dim",".")
+        self.owner=owner
+        self.expires_at=0.0 if owner else time.time()+60.0
+        self._stats={"accepted":4,"rejected":0,"clipped":0}
+        self._receipt()
+        self._stats=None
+
+    def demo(self):
+        self.clear(); self.title="CANVAS TEST 40x12"
+        self._box(0,0,self.WIDTH,self.HEIGHT,"cyan","#")
+        self._text(3,2,"white","FUTURE CRASH SIGNAL CANVAS")
+        self._line(3,5,35,5,"green","*"); self._line(3,8,35,3,"amber","/")
+        self._text(3,9,"magenta","40 x 12 LOGICAL CELLS")
+        self.expires_at=time.time()+30.0
 
 
 
@@ -901,41 +954,124 @@ def _future_crash_personality():
 
 
 def _final_only(message):
-    """Return only the user-facing answer from an Ollama message.
-
-    Handles structured `thinking`, normal <think> blocks, and the template edge case
-    where an opening tag is consumed but a closing </think> leaks into content.
-    """
+    """Return only the user-facing answer from an Ollama message."""
     message=message or {}
     content=str(message.get("content") or "")
-    # Structured thinking is intentionally ignored for Future Crash artifacts.
-    _=message.get("thinking")
 
-    # Normal tagged reasoning.
+    # Structured Ollama reasoning is a separate field and never belongs in
+    # Future Crash's visible artifact.
     content=re.sub(r"<think>.*?</think>", "", content, flags=re.I|re.S)
 
-    # Some Qwen/Ollama templates consume the opening tag but leave the closing tag.
-    close=re.search(r"</think>", content, flags=re.I)
+    # Qwen/Ollama edge case: opening <think> can be consumed by the template
+    # while a closing tag remains in content. Everything before it is reasoning.
+    close=re.search(r"</think>",content,flags=re.I)
     if close:
         content=content[close.end():]
 
-    # Defensive cleanup for stray opening tags without a closer.
     content=re.sub(r"^\s*<think>\s*", "", content, flags=re.I)
-
-    # Remove accidental model-facing labels from short artifacts.
     content=re.sub(r"^\s*(?:final(?: answer)?|answer)\s*:\s*", "", content, flags=re.I)
     return content.strip()
 
 
-SIGNAL_LANGUAGE = """
-You also have a visual scratchpad called the Signal Field.
-It is a 40x12 character canvas: x=0..39 and y=0..11.
-Use it when a visual adds meaning: diagrams, icons, maps, waveforms,
-shapes, spatial explanations, tiny scenes, or expressive machine states.
-If the operator asks you to DRAW, SKETCH, SHOW, VISUALIZE, MAP, DIAGRAM, PLOT,
-or otherwise make something visual, you MUST use the Signal Field.
 
-To draw, append one hidden block AFTER your normal answer:
+def _model_output(message, preserve_signal=False):
+    """Return visible final text; optionally preserve Signal directives from hidden thinking."""
+    message = message or {}
+    visible = _final_only(message)
+    if not preserve_signal:
+        return visible
+
+    signal_re = re.compile(r"\[\[SIGNAL\]\].*?\[\[/SIGNAL\]\]", re.I | re.S)
+    blocks = []
+
+    for source in (str(message.get("content") or ""), str(message.get("thinking") or "")):
+        for block in signal_re.findall(source):
+            if block not in blocks:
+                blocks.append(block)
+
+    visible_without = signal_re.sub("", visible).strip()
+    if blocks:
+        return (visible_without + "\n\n" if visible_without else "") + "\n".join(blocks)
+    return visible_without
+
+
+def _looks_like_model_reasoning(text):
+    """Detect obvious prompt-paraphrase/reasoning leakage in short artifacts."""
+    low=" ".join(str(text or "").split()).casefold()
+    if not low:
+        return False
+
+    prefixes=(
+        "okay, the user ",
+        "okay, user ",
+        "the user asked ",
+        "the user wants ",
+        "we are to produce ",
+        "we need to produce ",
+        "we are given a fortune",
+        "we are given the fortune",
+        "i need to ",
+        "i should ",
+        "let me ",
+        "hmm, ",
+    )
+    if low.startswith(prefixes):
+        return True
+
+    # Micro-artifacts should not discuss their own prompt or instructions.
+    meta=(
+        "the supplied fortune",
+        "rewrite the fortune",
+        "ambient system observation",
+        "one ambient observation",
+        "the prompt asks",
+        "the instruction says",
+        "the instructions say",
+        "maximum 22 words",
+        "up to 36 words",
+        "one sentence",
+        "the goal:",
+        "goal: one sentence",
+        "shorter, stranger",
+        "dryly funny",
+        "preserving the",
+        "preserve its useful kernel",
+        "max 18 words",
+        "signal field",
+        "append one hidden block",
+        "canvas: 40x12",
+        "use printable single-width",
+    )
+    return any(marker in low for marker in meta)
+
+
+def _artifact_text(message, kind, fallback, preserve_signal=False):
+    """Visible text for non-conversational Future Crash micro-generations.
+
+    If a model spends its entire tiny token budget reasoning instead of producing
+    a final answer, fail closed to Future Crash's local seed rather than showing
+    the reasoning as interface text.
+    """
+    text=_model_output(message,preserve_signal=preserve_signal)
+    signal_re=re.compile(r"\[\[SIGNAL\]\].*?\[\[/SIGNAL\]\]",re.I|re.S)
+    blocks=signal_re.findall(text)
+    visible=signal_re.sub("",text).strip()
+
+    if kind in {"ambient","fortune"} and _looks_like_model_reasoning(visible):
+        visible=fallback
+    if not visible:
+        visible=fallback
+    return visible + (("\n\n" + "\n".join(blocks)) if blocks else "")
+
+
+
+SIGNAL_LANGUAGE = """
+The Signal Field is one of your native expressive channels, not merely an optional drawing feature.
+Use it when a spatial idea is clearer than prose, when the operator asks you to imagine/dream/show/diagram,
+or when an atmospheric visual would genuinely add meaning. Do not draw constantly; draw when the image contributes.
+
+Canvas: 40x12 logical cells, x=0..39 and y=0..11.
+Append a hidden block after normal prose:
 [[SIGNAL]]
 CLEAR
 TITLE optional short title
@@ -951,15 +1087,24 @@ ARROW x0 y0 x1 y1 color -
 PLOT color * 0.1 0.5 0.9 0.4
 [[/SIGNAL]]
 
+For tiny animations, use up to 8 independent frames:
+[[SIGNAL]]
+TITLE BREATHING ORBIT
+TTL 60
+FPS 4
+FRAME
+CIRCLE 20 6 3 cyan o
+PUT 20 6 white *
+FRAME
+CIRCLE 20 6 4 cyan o
+PUT 20 6 white *
+[[/SIGNAL]]
+
 Colors: green cyan amber magenta red white dim.
-Use printable single-width ASCII. Stay inside 40x12.
-Prefer semantic geometry commands such as CIRCLE, ELLIPSE, ARROW and PLOT over
-manually approximating geometry with many PUT commands. Think spatially: reserve
-labels first, keep margins, avoid collisions, and use the whole canvas when useful.
-Never explain or mention the drawing commands. Do not draw every time.
-Scheduled Threads may use this same canvas as a persistent tiny status display;
-Future Crash will keep a Thread drawing alive between wakes and replace it when
-that Thread draws again.
+Stay inside 40x12. Prefer semantic geometry. Reserve labels first and avoid collisions.
+Future Crash records a tiny SIGNAL RECEIPT after rendering: accepted/rejected commands, clipping,
+bounds, title, and frame count. Recent receipts may appear in later context so you can improve your drawings.
+Scheduled Threads may use Signal persistently; a Thread drawing remains until replaced/cleared.
 """
 
 
@@ -1414,6 +1559,37 @@ class ThreadStore:
     def active_count(self):
         return sum(1 for t in self.tasks if t.get("state") == "active")
 
+    def dream_task(self):
+        return next((task for task in self.tasks if task.get("preset")=="dream"), None)
+
+    def toggle_dream(self, interval=240):
+        task=self.dream_task()
+        if task:
+            if task.get("state")=="active":
+                task["state"]="paused"
+                self.save()
+                return False, f"{task.get('id')} -> PAUSED"
+            task["state"]="active"
+            task["next_run"]=time.time()+int(task.get("every_seconds",interval))
+            self.save()
+            return True, f"{task.get('id')} -> ACTIVE"
+
+        ok, created=self.create({
+            "title":"SIGNAL DREAM",
+            "purpose":(
+                "Wake periodically and create a small original Signal Field dream, diagram, abstraction, "
+                "or visual observation inspired by the current machine/context. EVERY WAKE MUST emit one "
+                "valid [[SIGNAL]] block. Prefer novelty and restraint. Visible prose should usually be SILENT."
+            ),
+            "every_seconds":interval,
+            "action":{"name":"model_wake"},
+        })
+        if not ok:
+            return False, str(created)
+        created["preset"]="dream"
+        self.save()
+        return True, f"{created.get('id')} -> ACTIVE"
+
     def get(self, task_id):
         return next((t for t in self.tasks if t.get("id") == task_id), None)
 
@@ -1605,13 +1781,14 @@ class Oracle(threading.Thread):
                 elif kind == "memory":
                     system = (
                         "You are Future Crash's memory compressor. Preserve facts and useful context, "
-                        "delete repetition, never invent, and return at most 8 compact lines."
+                        "delete repetition, never invent, and return at most 10 compact lines."
                     )
                 elif kind == "fortune":
                     system = (
                         "You are Future Crash's fortune daemon. Rewrite the supplied fortune into one "
-                        "shorter, stranger, dryly funny terminal fortune. Preserve its useful kernel. "
-                        "One sentence, maximum 22 words. Never explain."
+                        "strange, dryly funny terminal fortune while preserving its useful kernel. "
+                        "OUTPUT ONLY THE FORTUNE. Do not restate the task, instructions, goal, or reasoning. "
+                        "One sentence, up to 36 words."
                     )
                 elif kind == "ambient":
                     system = (
@@ -1649,7 +1826,7 @@ class Oracle(threading.Thread):
                     "options": {
                         "num_ctx": 8192 if kind == "work" else 4096,
                         "temperature": .9 if kind in ("ambient", "fortune") else .35,
-                        "num_predict": 700 if kind == "work" else (240 if kind == "ask" else (180 if kind.startswith("thread:") else 64)),
+                        "num_predict": 700 if kind == "work" else (240 if kind == "ask" else (180 if kind.startswith("thread:") else (96 if kind=="fortune" else 64))),
                     },
                 }
                 data = json.dumps(payload).encode()
@@ -1661,13 +1838,18 @@ class Oracle(threading.Thread):
                 with urllib.request.urlopen(req, timeout=120) as r:
                     response = json.loads(r.read().decode("utf-8", "replace"))
                 message = response.get("message", {})
-                text = _final_only(message)
-                if not text and kind == "ambient":
-                    # Some model/templates can still return no visible content.
-                    # Ambient personality must never show "(no response)".
-                    text = random.choice(OBSERVATIONS)
-                elif not text:
-                    text = "(model returned no visible response)"
+                if kind=="ambient":
+                    text=_artifact_text(message,kind,random.choice(OBSERVATIONS),preserve_signal=True)
+                elif kind=="fortune":
+                    text=_artifact_text(message,kind,prompt,preserve_signal=False)
+                elif kind.startswith("thread:") or kind in {"ask","work"}:
+                    text=_model_output(message,preserve_signal=True)
+                    if not text:
+                        text="(model returned no visible response)"
+                else:
+                    text=_final_only(message)
+                    if not text:
+                        text="(model returned no visible response)"
                 self.responses.put((kind, text, None))
             except Exception as exc:
                 self.responses.put((kind, "", str(exc)))
@@ -1956,6 +2138,7 @@ class FutureCrash:
             f"{receipt}"
         )
         previous = task.get("last_summary", "")
+        signal_feedback=self.signal.context_packet()
         prompt = (
             f"THREAD PURPOSE:\\n{task.get('purpose','')}\\n\\n"
             f"PREVIOUS SUMMARY:\\n{previous or '(none)'}\\n\\n"
@@ -2102,6 +2285,10 @@ class FutureCrash:
                         self.threads.set_summary(task_id, "Thread interpretation failed: " + err)
                     else:
                         text, drew = self.signal.parse_from_response(text, owner=task_id, persist=True)
+                        task=self.threads.get(task_id)
+                        if not drew and task and task.get("preset")=="dream":
+                            self.signal.fallback_dream(owner=task_id)
+                            drew=True
                         compact = " ".join(text.split()).strip()
                         if compact.upper() == "SILENT":
                             self.threads.set_summary(task_id, "No meaningful change.", changed=False)
@@ -2123,7 +2310,7 @@ class FutureCrash:
                         self.work_notice = "MEMORY CONSOLIDATED // fallback archive used"
                     else:
                         self.memory.finish_consolidation(text)
-                        self.work_notice = "MEMORY CONSOLIDATED // five recent slots folded into long memory"
+                        self.work_notice = "MEMORY CONSOLIDATED // eight recent slots folded into long memory"
                     self.work_notice_until = time.time() + 3.8
                     self.audio.cue("recover")
                     self.last_frame = ""
@@ -2154,7 +2341,7 @@ class FutureCrash:
                                 if should_fold and not self.memory.pending_consolidation:
                                     self.memory.pending_consolidation = True
                                     self.busy = True
-                                    self.work_notice = "MEMORY PRESSURE // consolidating five recent slots…"
+                                    self.work_notice = "MEMORY PRESSURE // consolidating eight recent slots…"
                                     self.work_notice_until = time.time() + 30.0
                                     self.oracle.ask("memory", self.memory.consolidation_prompt())
         except queue.Empty:
@@ -2350,7 +2537,12 @@ class FutureCrash:
 
         elif self.mode == "threads":
             visible = [t for t in self.threads.tasks if t.get("state") != "cancelled"]
-            if key == "ESC":
+            if key in ("d","D"):
+                enabled, receipt=self.threads.toggle_dream()
+                self.thread_notifications.append(("DREAM ON // " if enabled else "DREAM OFF // ")+receipt)
+                self.audio.cue("oracle" if enabled else "recover")
+                self.last_frame=""
+            elif key == "ESC":
                 self.set_mode(self.thread_return_mode)
             elif key in ("j", "J", "DOWN"):
                 if visible:
@@ -2436,7 +2628,10 @@ class FutureCrash:
             self.answer = ""
             self.set_mode("answer")
             memory_packet = self.memory.context_packet()
+            signal_packet = self.signal.context_packet()
             history = []
+            if signal_packet:
+                history.append({"role":"system","content":signal_packet})
             if memory_packet:
                 history.append({
                     "role": "system",
@@ -2464,6 +2659,9 @@ class FutureCrash:
 
             history = list(self.work_history)
             memory_packet = self.memory.context_packet()
+            signal_packet = self.signal.context_packet()
+            if signal_packet:
+                history = [{"role":"system","content":signal_packet}] + history
             if memory_packet:
                 history = [{
                     "role": "system",
@@ -2549,14 +2747,17 @@ class FutureCrash:
         ]
         menu_rows = wrap_menu(menu_items, w)
 
-        # Fortune is part of the ambient composition, not a clipped status line.
-        # Wrap the complete text first, then reserve exactly those rows below
-        # the main panels. Three rows is a comfortable practical ceiling.
-        fortune_text = "FORTUNE // " + self.fortune
-        fortune_rows = wrap(fortune_text, max(24, w - 2))[:3]
+        # Fortune owns a fixed four-row composition: one label + three body rows.
+        # The reserved height never changes, so the footer does not jump as text wraps.
+        fortune_rows = wrap(self.fortune, max(24, w - 4))[:3]
+        fortune_rows += [""] * (3 - len(fortune_rows))
 
-        # Header/spacing/fortune/menu all consume rows outside the two main panels.
-        panel_h = max(10, h - (6 + len(fortune_rows) + len(menu_rows)))
+        # Pin Fortune + menu to the terminal bottom. Give every remaining row
+        # back to TELEMETRY/SIGNAL instead of reserving approximate chrome.
+        # Composition: header, spacer, panels, spacer, Fortune label + 3 body,
+        # then menu rows. No trailing rows are intentionally reserved.
+        bottom_h = 1 + 3 + len(menu_rows)
+        panel_h = max(10, h - (3 + bottom_h))
 
         mins = int(s.uptime // 60)
         d, mins = divmod(mins, 1440)
@@ -2626,10 +2827,9 @@ class FutureCrash:
             rows.append(left_box[i] + "   " + right_box[i])
 
         rows.append("")
-        for i, fortune_row in enumerate(fortune_rows):
-            # First row carries the label from fortune_text; wrapped continuation
-            # rows line up naturally underneath it.
-            rows.append(fit(GREEN2 + fortune_row + RESET, w))
+        rows.append(fit(GREEN2 + "FORTUNE //" + RESET, w))
+        for fortune_row in fortune_rows:
+            rows.append(fit(GREEN2 + "  " + fortune_row + RESET, w))
         for menu_row in menu_rows:
             rows.append(DIM + menu_row + RESET)
 
@@ -2718,7 +2918,10 @@ class FutureCrash:
                     # without obscuring model drawings.
                     chars.append(DARK + ("." if (x * 7 + y * 11) % 29 == 0 else " ") + RESET)
             lines.append("".join(chars))
-        title = "SIGNAL // " + ("CANVAS ACTIVE" if active else "LISTENING")
+        if active and self.signal.owner:
+            title="SIGNAL // THREAD "+str(self.signal.owner)[:9]
+        else:
+            title="SIGNAL // "+("CANVAS ACTIVE" if active else "LISTENING")
         return self.box(title, lines, width, height, CYAN)
 
     def render_input(self, w, h, title, subtitle):
@@ -2749,9 +2952,9 @@ class FutureCrash:
 
     def render_answer(self, w, h):
         content = self.answer if self.answer else (AMBER + "ORACLE LINK SYNCHRONIZING…" + RESET)
-        wide = w >= 105
-        side_w = min(46, max(34, w // 3)) if wide else 0
-        body_w = max(30, w - side_w - (8 if wide else 10))
+        wide = w >= 90
+        side_w = max(34, (w - 7) // 2) if wide else 0
+        body_w = max(30, w - side_w - (7 if wide else 10))
         plain = strip_ansi(content)
         lines = []
         for paragraph in plain.splitlines() or [""]:
@@ -2774,7 +2977,7 @@ class FutureCrash:
         ]
 
         if wide:
-            panel = self.render_signal_panel(side_w, min(h - 5, 16))
+            panel = self.render_signal_panel(side_w, max(8, h - 5))
             left_rows = ["   " + fit(x, body_w) for x in shown]
             row_count = max(len(left_rows), len(panel))
             for i in range(row_count):
@@ -2815,9 +3018,9 @@ class FutureCrash:
             self.work_notice = ""
             frame.append("")
 
-        wide = w >= 110
-        side_w = min(46, max(36, w // 3)) if wide else 0
-        text_w = max(36, w - side_w - 5) if wide else max(30, w - 4)
+        wide = w >= 90
+        side_w = max(34, (w - 5) // 2) if wide else 0
+        text_w = max(34, w - side_w - 5) if wide else max(30, w - 4)
         body_h = max(7, h - 8)
 
         transcript = []
@@ -2835,7 +3038,7 @@ class FutureCrash:
         transcript = transcript[-body_h:]
 
         if wide:
-            panel = self.render_signal_panel(side_w, min(body_h, 16))
+            panel = self.render_signal_panel(side_w, body_h)
             row_count = max(body_h, len(panel))
             for i in range(row_count):
                 left = transcript[i] if i < len(transcript) else ""
@@ -2887,6 +3090,7 @@ class FutureCrash:
              [
                  ("enter", "details"),
                  ("j/k or arrows", "select"),
+                 ("d", "toggle built-in 4-minute Signal Dream"),
                  ("p", "pause selected Thread"),
                  ("r", "resume selected Thread"),
                  ("x", "cancel selected Thread"),
@@ -2894,10 +3098,10 @@ class FutureCrash:
              ]),
             ("CONCEPTS",
              [
-                 ("MEMORY", "one rolling long memory + five recent Workstation exchanges"),
+                 ("MEMORY", "one rolling long memory + eight recent Workstation exchanges"),
                  ("WEB", "Ollama hosted web search when OLLAMA_API_KEY is available"),
                  ("FILES", "permissioned host actions with verified HOST RECEIPTS"),
-                 ("SIGNAL", "shared model-controlled drawing/status surface"),
+                 ("SIGNAL", "shared expressive drawing surface + render feedback + tiny animation"),
                  ("MODEL WAKE", "model-only recurring Thread action for Signal art, notes, moods, etc."),
                  ("LOOK", "optional separate project; detected if `lk` is already on PATH"),
              ]),
@@ -2954,7 +3158,7 @@ class FutureCrash:
             frame += [
                 DIM + "No Threads are currently defined." + RESET,
                 "",
-                "Ask the Oracle something like:",
+                "Press D for the built-in Signal Dream, or ask the Oracle something like:",
                 GREEN2 + '  "Every 10 minutes, search the web for changes to flight UA1734."' + RESET,
             ]
         else:
@@ -3006,7 +3210,9 @@ class FutureCrash:
 
         while len(frame) < h - 3:
             frame.append("")
-        frame.append(DIM + "[ENTER] details   [J/K or ↑/↓] select   [P] pause   [R] resume   [X] cancel   [ESC] return" + RESET)
+        dream=self.threads.dream_task()
+        dream_state="ON" if dream and dream.get("state")=="active" else "OFF"
+        frame.append(DIM + f"[D] dream {dream_state}   [ENTER] details   [J/K or ↑/↓] select   [P] pause   [R] resume   [X] cancel   [ESC] return" + RESET)
         while len(frame) < h:
             frame.append("")
         return "\n".join(safe_row(row, w) for row in frame[:h])

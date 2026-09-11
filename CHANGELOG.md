@@ -1,5 +1,34 @@
 # Future Crash + LOOK changelog
 
+## 1.6.1 — Signal wiring fix
+
+- Preserves Signal directives from structured model thinking and restores the larger Workstation/Oracle Signal pane.
+- Dream wakes now always produce visible Signal activity.
+
+
+## 1.6.0 — expressive Signal Field
+
+- Adds Signal render receipts, feedback context, tiny animation frames, and a built-in dream thread preset.
+- Future Crash recent memory expands modestly from 5 to 8 exchanges before consolidation.
+
+
+## 1.5.4 — bottom anchoring
+
+- Pins Fortune/menu to the terminal bottom and returns unused height to the main panels.
+
+
+## 1.5.3 — Fortune visual polish
+
+- Gives Fortune a fixed label + three-line body so the ambient layout no longer jumps.
+- Loosens fortune length and hardens final-only cleanup.
+
+
+## 1.5.2 — Future Crash artifact hardening
+
+- Fixes the runtime Future Crash version header.
+- Rejects reasoning/prompt paraphrase in fortune and ambient micro-generations and falls back locally.
+
+
 ## 1.5.1 — Future Crash final-only output
 
 - Fixes reasoning leakage into fortunes and ambient/oracle observations.
