@@ -135,6 +135,12 @@ You do not need to memorize this to begin. Start with `future-crash`, `lk`, and 
 | `lk ollama key` | Configure the Ollama web-search key |
 | `lk ollama key status` | Check web-key configuration |
 | `lk ollama serve status` | Inspect Ollama/Tailscale serving state |
+| `lk memory` | Inspect LO memory and importance values |
+| `lk forget TEXT` | Remove matching user memory |
+| `lk clear-memory` | Clear LO user memory |
+| `lk memory clear-summary` | Clear only the long-term summary |
+| `lk memory prune` | Remove known reasoning/meta contamination |
+| `lk skills` | Inspect reusable LO craft |
 
 LOOK's interactive filter footer exposes the contextual keys for opening, editing and acting on results; the terminal itself is the documentation while you work.
 
@@ -143,6 +149,40 @@ For the complete LOOK vocabulary, see the bundled LOOK documentation and:
 ```sh
 man lk
 ```
+
+---
+
+## Future Crash shell nesting
+
+Pressing `Esc` inside Future Crash exposes the shell underneath the current session. That shell now carries a `FUTURE_CRASH_ACTIVE=1` marker.
+
+If `fc`, `rst`, or `future-crash` is launched again from that shell, the launcher refuses to nest another normal session:
+
+```text
+Already inside Future Crash.
+Type exit to return to the existing Future Crash session.
+```
+
+Use `future-crash --nested` only when an intentionally nested instance is actually desired.
+
+---
+
+## Recommended terminal experience
+
+Future Crash + LOOK works in an ordinary Zsh terminal. For the intended visual experience, the reference stack is:
+
+| macOS | Linux |
+| --- | --- |
+| iTerm2 | Kitty |
+| Zsh | Zsh |
+| Powerlevel10k | Powerlevel10k |
+| MesloLGS NF | MesloLGS NF |
+
+The installer can optionally install/check the pieces it can manage safely. Declining changes nothing about the core installation.
+
+MesloLGS NF is the reference font because it pairs naturally with Powerlevel10k and supplies the Nerd Font glyphs useful to a richer LOOK interface. The installer does not seize ownership of terminal preferences or rewrite a user's Powerlevel10k configuration.
+
+> **Portable by default. Gorgeous when equipped.**
 
 ---
 
@@ -222,6 +262,70 @@ lk ollama key status
 The key is kept outside the project source in the user's secrets configuration. Do not commit API keys to GitHub.
 
 Web search is optional. Local inference and LOOK's normal terminal features do not depend on it.
+
+---
+
+## Conversation-first LO
+
+LO is a conversational assistant first and a workspace agent when the request actually calls for one.
+
+Casual conversation, personal statements, preferences, and general-knowledge questions do **not** trigger filesystem searches merely because file tools are available. Workspace tools are reserved for requests about files, code, the current project, `here`, or explicit local inspection/action.
+
+Relevant memories are used naturally; LO does not expose memory scores or say “your memory [81] says…” unless memory internals are the subject.
+
+The Zsh shortcut is also `noglob`, so shell-safe punctuation such as `?`, `*`, and bracket characters can be used in one-shot prompts:
+
+```sh
+lo Do you know the band The Police?
+```
+
+Unmatched shell quotes/apostrophes are still parsed by Zsh before LO can receive them. For unrestricted prose, enter interactive LO first:
+
+```sh
+lo
+```
+
+---
+
+## Memory and accumulated craft
+
+LO now keeps three deliberately small, inspectable layers:
+
+```text
+core.md              what LO fundamentally is
+skills.md            reusable assistant craft
+ollama_memory.json   dynamic memory for this user
+```
+
+Memory is **selective and forgetful**, but not timid. Substantive preferences, favorites, recurring habits, project decisions, active state, and explicit “remember this” language are normally captured as candidate memories; decay decides later whether they deserve to survive. LO may keep up to 20 candidate memories on disk, but only up to eight are offered as working context. Each carries an importance value from 0–100. A completed memory-maintenance cycle reduces unused memories by one point; genuinely useful information can be reinforced. Retrieval itself is explicitly **not** reinforcement.
+
+The long-term summary is compressed from durable patterns rather than allowed to grow as a transcript.
+
+```sh
+lk memory
+lk memory add "Prefer surgical modifications" --importance 90
+lk memory forget "old topic"
+lk forget "old topic"
+lk clear-memory
+lk skills
+```
+
+User memory and assistant craft are separate. LO can now **learn reusable craft from successful exchanges**. The background worker asks whether an exchange taught one genuinely general lesson and, when it did, appends that lesson under `## Learned` in `skills.md`.
+
+Self-learning follows the capability boundary: **Conservative never writes skills**; Workspace, Power, and Unsafe may learn. The learned section is capped, deduplicated, inspectable, editable, and reversible.
+
+```sh
+lk skills
+lk skills add "Inspect the existing configuration before changing it"
+lk skills forget "configuration"
+lk skills clear-learned
+```
+
+User memory and assistant craft are separate. A fresh install begins with blank user memory but ships with reviewed bundled skills. `skills.md` has a visible `Learned` section so useful local discoveries can later be reviewed and promoted into a release.
+
+Existing LOOK 3.3 fixed-slot memory is migrated automatically into the new candidate format.
+
+> **Small context. Dynamic relevance. Natural forgetting. Accumulated craft.**
 
 ---
 

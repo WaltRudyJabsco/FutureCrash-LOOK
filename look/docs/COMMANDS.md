@@ -1,6 +1,6 @@
-# LOOK command reference
+# Future Crash + LOOK command reference
 
-`lk help` is canonical. This is the compact repository reference.
+`lk help` is canonical. This compact repository reference is synchronized with the live glossary.
 
 ## LOOK
 `lk [THING]` · `lk [PATH]` · `lk detail` · `lk dirs` · `lk files` · `lk tree` · `lk recent` · `lk size` · `lk run`
@@ -26,6 +26,15 @@
 `lk ollama key`
 `lk ollama key status`
 `lk ollama access [MODE]`
+
+## Memory + craft
+`lk memory` · `lk memory add TEXT [--importance N]` · `lk memory forget TEXT` · `lk memory clear` · `lk memory clear-summary` · `lk memory prune`
+
+`lk forget TEXT` · `lk clear-memory`
+
+`lk skills` · `lk skills add TEXT` · `lk skills forget TEXT` · `lk skills clear-learned` · `lk skills path`
+
+LO keeps at most 20 candidate memories on disk and offers at most eight to prompt attention. Importance is 0–100; unused memories decay during maintenance. Retrieval alone is not reinforcement. `skills.md` is separate from user memory.
 
 ## Unified settings
 `lk settings` — access profile, Ollama host, preferred model, web-search key, and tailnet share. It is a UI over the direct commands above.

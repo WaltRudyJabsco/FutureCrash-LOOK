@@ -279,7 +279,33 @@ The shell tool lets LO test code, run builds, install packages, use Git, inspect
 
 Thinking-capable models may return reasoning in Ollama's structured `message.thinking` field or through model-template `<think>...</think>` markup. LOOK handles both, including the Qwen compatibility case where the opening tag is stripped but a trailing `</think>` remains. Reasoning stays visible as a muted/italic `thinking ›` section before the normal high-contrast `lo ›` answer. Tool activity (`file ›`, `command ›`, `search ›`) remains visually separate as well.
 
-### Ollama anywhere: local, remote, or tailnet
+### Memory and accumulated craft
+
+LO's persistent intelligence remains deliberately inspectable:
+
+```text
+~/.local/share/look/core.md
+~/.local/share/look/skills.md
+~/.local/share/look/ollama_memory.json
+```
+
+`core.md` defines stable LO behavior. `skills.md` contains reusable assistant craft. `ollama_memory.json` contains this user's long-term summary and bounded dynamic memories.
+
+```sh
+lk memory
+lk memory add "Prefer surgical modifications" --importance 90
+lk memory forget "old topic"
+lk forget "old topic"
+lk memory clear
+lk memory clear-summary
+lk memory prune
+lk clear-memory
+lk skills
+```
+
+LO may retain up to 20 candidate memories while offering at most eight to immediate prompt attention. Memories have importance from 0–100 and unused candidates decay during maintenance. **Retrieval is not reinforcement.** A fresh installation begins with blank user memory but reviewed bundled skills.
+
+## Ollama anywhere: local, remote, or tailnet
 
 LOOK 3.1 separates the `lo` interface from the machine doing the inference. Local Ollama remains the default and nothing remote is required.
 

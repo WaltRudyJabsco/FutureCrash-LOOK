@@ -4,7 +4,7 @@ import http.client
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from contextlib import contextmanager
 from pathlib import Path
-VERSION="3.3.3"
+VERSION="3.4.3"
 
 LOOK_WORDMARK = r"""       ██╗      ██╗  ██╗
        ██║      ██║ ██╔╝
@@ -17,6 +17,8 @@ ROOT=Path(__file__).resolve().parent
 RENDERER=ROOT/"look_renderer.py"
 STATE_DIR=HOME/".local"/"share"/"look"
 MEMORY_FILE=STATE_DIR/"ollama_memory.json"
+CORE_FILE=STATE_DIR/"core.md"
+SKILLS_FILE=STATE_DIR/"skills.md"
 UNDO_FILE=STATE_DIR/"undo.json"
 UNDO_TRASH=STATE_DIR/"undo_trash"
 UNDO_LIMIT=20
@@ -29,7 +31,8 @@ LO_ACCESS_FILE=STATE_DIR/"lo_access"
 OLLAMA_SHARE_PORT=11435
 OLLAMA_SHARE_PID=STATE_DIR/"ollama_share_proxy.pid"
 LOCAL_OLLAMA_URL="http://127.0.0.1:11434"
-RECENT_MEMORY_SLOTS=5
+RECENT_MEMORY_SLOTS=8
+MEMORY_CANDIDATE_LIMIT=20
 
 
 def _normalize_ollama_url(value):
@@ -585,6 +588,29 @@ AI / OLLAMA
   lk ollama access      show persistent LO capability profile
   lk ollama access MODE set conservative/workspace/power/unsafe
 
+MEMORY + CRAFT
+  lk memory            inspect long-term summary + memory candidates
+                       substantive preferences/favorites/project state are captured automatically
+  lk memory add TEXT   save a memory (default importance 60)
+  lk memory add TEXT --importance N
+                       save with importance 1–100
+  lk memory forget TEXT
+                       remove matching candidate memories
+  lk forget TEXT       short form of memory forget
+  lk memory clear      clear this user's LO memory
+  lk memory clear-summary
+                       clear only the long-term summary
+  lk memory prune      remove known reasoning/meta artifacts
+  lk clear-memory      short form of memory clear
+  lk skills            show LO's bundled + learned assistant craft
+  lk skills add TEXT   manually add a reusable learned skill
+  lk skills forget TEXT
+                       remove matching locally learned skills
+  lk skills clear-learned
+                       clear only locally learned skills
+  lk skills path       print the editable skills file path
+                       auto-learning runs in workspace/power/unsafe; conservative never writes skills
+
 SYSTEM
   lk home              friendly LOOK home screen
   lk doctor            check the environment
@@ -592,7 +618,7 @@ SYSTEM
   lk config            show installed paths + state
   lk secrets           secrets status (never contents)
   lk undo              undo last safe local filesystem action
-  lk uninstall         remove LOOK; offer only owned dependencies
+  lk uninstall         remove Future Crash + LOOK owned files
   lk version           print version
   lk help              this complete command/key glossary
   LOOK_CLASSIC=1 lk    use the frozen classic presentation
@@ -800,42 +826,103 @@ def doctor():
 
 
 def _empty_memory():
-    return {"long": "", "recent": []}
+    return {"summary": "", "memories": []}
 
 
-def _ensure_memory_file():
-    import json
+DEFAULT_CORE = """# LO Core
+
+You are LO, the working AI inside Future Crash + LOOK.
+Seek maximum useful intelligence from minimum machinery.
+Use user memory only when relevant to the current request.
+Importance is historical usefulness, not current relevance.
+Retrieval is not reinforcement.
+Keep user memory separate from reusable assistant craft.
+"""
+
+DEFAULT_SKILLS = """# LO Skills
+
+## Bundled
+
+- Inspect existing files before modifying them.
+- Prefer surgical edits over rewrites of working systems.
+- Preserve unrelated behavior during modifications.
+- Test changes when a practical test is available.
+- Distinguish dependency failure from project failure.
+- Treat user-owned shell configuration conservatively.
+- Prefer canonical install locations over scattered files.
+- Make optional infrastructure fail softly when the core can still work.
+- Use structure when it improves readability; do not add machinery merely to describe machinery.
+
+## Learned
+
+"""
+
+
+def _ensure_intelligence_files():
     try:
         STATE_DIR.mkdir(parents=True, exist_ok=True)
+        if not CORE_FILE.exists():
+            CORE_FILE.write_text(DEFAULT_CORE, encoding="utf-8")
+        if not SKILLS_FILE.exists():
+            SKILLS_FILE.write_text(DEFAULT_SKILLS, encoding="utf-8")
         if not MEMORY_FILE.exists():
-            MEMORY_FILE.write_text(json.dumps(_empty_memory(), indent=2) + "\n")
+            MEMORY_FILE.write_text(json.dumps(_empty_memory(), indent=2) + "\n", encoding="utf-8")
             os.chmod(MEMORY_FILE, 0o600)
         return True
     except OSError:
         return False
 
 
+def _ensure_memory_file():
+    return _ensure_intelligence_files()
+
+
+def _migrate_old_memory(data):
+    """One-way, loss-minimizing migration from LOOK 3.3 fixed slots."""
+    if "memories" in data:
+        return data
+    memories=[]
+    for note in data.get("recent", []):
+        text=" ".join(str(note).split()).strip()
+        if text:
+            memories.append({"text": text[:900], "importance": 60, "uses": 0})
+    summary=str(data.get("long", "")).strip()[:3000]
+    return {"summary": summary, "memories": memories[-MEMORY_CANDIDATE_LIMIT:]}
+
+
 def _load_memory():
-    import json
     if not _ensure_memory_file():
         return _empty_memory()
     try:
-        data=json.loads(MEMORY_FILE.read_text())
-        recent=data.get("recent", [])
-        return {
-            "long": str(data.get("long", ""))[:3000],
-            "recent": [str(x)[:900] for x in recent[-RECENT_MEMORY_SLOTS:]],
-        }
+        data=json.loads(MEMORY_FILE.read_text(encoding="utf-8"))
+        data=_migrate_old_memory(data if isinstance(data, dict) else {})
+        cleaned=[]
+        for item in data.get("memories", []):
+            if isinstance(item, str):
+                item={"text": item, "importance": 50, "uses": 0}
+            text=" ".join(str(item.get("text","")).split()).strip()
+            if not text:
+                continue
+            cleaned.append({
+                "text": text[:900],
+                "importance": max(0, min(100, int(item.get("importance",50)))),
+                "uses": max(0, int(item.get("uses",0))),
+            })
+        cleaned.sort(key=lambda x:x["importance"], reverse=True)
+        result={"summary":str(data.get("summary",""))[:3000],
+                "memories":cleaned[:MEMORY_CANDIDATE_LIMIT]}
+        result=_prune_contaminated_memory(result)
+        _save_memory(result)
+        return result
     except Exception:
         return _empty_memory()
 
 
 def _save_memory(memory):
-    import json
     try:
         STATE_DIR.mkdir(parents=True, exist_ok=True)
         tmp=MEMORY_FILE.with_suffix(".tmp")
-        tmp.write_text(json.dumps(memory, ensure_ascii=False, indent=2) + "\n")
+        tmp.write_text(json.dumps(memory, ensure_ascii=False, indent=2) + "\n", encoding="utf-8")
         os.chmod(tmp, 0o600)
         tmp.replace(MEMORY_FILE)
         os.chmod(MEMORY_FILE, 0o600)
@@ -843,20 +930,265 @@ def _save_memory(memory):
         pass
 
 
+
+def _strip_reasoning_payload(text):
+    """Return only final-answer content from common Ollama/Qwen thinking variants."""
+    text=str(text or "")
+    m=re.search(r"<think>(.*?)</think>",text,flags=re.I|re.S)
+    if m:
+        return (text[:m.start()]+text[m.end():]).strip()
+    m=re.search(r"</think>",text,flags=re.I)
+    if m:
+        return text[m.end():].strip()
+    return text.strip()
+
+_MEMORY_META_PREFIXES=(
+    "hmm, the user wants me",
+    "okay, the user wants me",
+    "okay, let's see",
+    "okay, let’s see",
+    "okay, let's tackle",
+    "okay, let’s tackle",
+    "the user wants me",
+    "the user asked me",
+    "i need to",
+    "i should",
+    "looking at the current memory",
+    "double-checking",
+    "final decision:",
+    "revised long-term memory",
+)
+
+def _looks_like_model_meta(text):
+    t=" ".join(str(text or "").split()).strip()
+    if not t:
+        return True
+    low=t.casefold()
+    if "<think>" in low or "</think>" in low:
+        return True
+    if any(low.startswith(x) for x in _MEMORY_META_PREFIXES):
+        return True
+    bad=(
+        "current memory","new note","word count","all facts verified",
+        "do not invent","memory entry","compress a conversation",
+        "rewrite a long-term memory","assistant's previous","assistant’s previous",
+    )
+    return any(x in low for x in bad)
+
+def _sanitize_memory_text(text):
+    clean=" ".join(_strip_reasoning_payload(text).split()).strip()
+    if _looks_like_model_meta(clean):
+        return ""
+    return clean[:900]
+
+def _sanitize_summary(text):
+    clean=_strip_reasoning_payload(text).strip()
+    if not clean or _looks_like_model_meta(clean):
+        return ""
+    low=clean.casefold()
+    if "revised long-term memory" in low or "word count:" in low or "excluded:" in low:
+        return ""
+    return clean[:2200]
+
+def _prune_contaminated_memory(memory):
+    cleaned=[]
+    for item in memory.get("memories",[]):
+        text=_sanitize_memory_text(item.get("text",""))
+        if not text:
+            continue
+        item["text"]=text
+        cleaned.append(item)
+    cleaned.sort(key=lambda x:int(x.get("importance",0)),reverse=True)
+    memory["memories"]=cleaned[:MEMORY_CANDIDATE_LIMIT]
+    memory["summary"]=_sanitize_summary(memory.get("summary",""))
+    return memory
+
 def _memory_context(memory):
     parts=[]
-    if memory.get("long"):
-        parts.append("Long memory:\n" + memory["long"])
-    if memory.get("recent"):
-        recent="\n".join(f"{i+1}. {note}" for i,note in enumerate(memory["recent"]))
-        parts.append("Recent memory, oldest to newest:\n" + recent)
-    if not parts:
-        return ""
-    return (
-        "Persistent context from previous LOOK Ollama conversations follows. "
-        "Use it only when relevant; newer conversation content wins if there is a conflict.\n\n"
-        + "\n\n".join(parts)
+    summary=str(memory.get("summary","")).strip()
+    if summary:
+        parts.append("Long-term user summary:\n"+summary)
+
+    # Keep prompt attention small. Qwen receives candidates, then decides relevance.
+    candidates=sorted(
+        memory.get("memories", []),
+        key=lambda x:int(x.get("importance",0)),
+        reverse=True
+    )[:RECENT_MEMORY_SLOTS]
+    if candidates:
+        rows="\n".join(
+            f"- [{int(m.get('importance',50)):02d}] {m.get('text','')}"
+            for m in candidates
+        )
+        parts.append(
+            "Candidate user memories:\n"
+            "Use only those genuinely relevant to the current request. "
+            "Do not revive an abandoned topic merely because it appears here. "
+            "Retrieval alone does not reinforce a memory.\n"+rows
+        )
+
+    try:
+        core=CORE_FILE.read_text(encoding="utf-8").strip()
+        skills=SKILLS_FILE.read_text(encoding="utf-8").strip()
+    except OSError:
+        core=skills=""
+    if core: parts.insert(0, core)
+    if skills: parts.insert(1 if core else 0, skills)
+    return "\n\n".join(parts)
+
+
+def _decay_memories(memory, reinforced_text=None):
+    """Simple forgetting: unused candidates lose one point per maintenance cycle."""
+    reinforced=(reinforced_text or "").casefold()
+    kept=[]
+    for item in memory.get("memories", []):
+        text=str(item.get("text","")).strip()
+        importance=int(item.get("importance",50))
+        if reinforced and text.casefold() == reinforced:
+            importance=min(100, importance+5)
+            item["uses"]=int(item.get("uses",0))+1
+        else:
+            importance-=1
+        if importance>0:
+            item["importance"]=importance
+            kept.append(item)
+    kept.sort(key=lambda x:x["importance"], reverse=True)
+    memory["memories"]=kept[:MEMORY_CANDIDATE_LIMIT]
+    return memory
+
+
+def _add_memory(memory, text, importance=60):
+    text=" ".join(str(text).split()).strip()[:900]
+    if not text: return memory
+    for item in memory.get("memories", []):
+        if str(item.get("text","")).casefold()==text.casefold():
+            item["importance"]=min(100, max(int(item.get("importance",50)),importance)+5)
+            item["uses"]=int(item.get("uses",0))+1
+            return memory
+    memory.setdefault("memories",[]).append(
+        {"text":text,"importance":max(1,min(100,int(importance))),"uses":1}
     )
+    memory["memories"].sort(key=lambda x:x["importance"], reverse=True)
+    memory["memories"]=memory["memories"][:MEMORY_CANDIDATE_LIMIT]
+    return memory
+
+
+def _forget_memory(fragment):
+    memory=_load_memory()
+    fragment=str(fragment).casefold().strip()
+    before=len(memory.get("memories",[]))
+    memory["memories"]=[
+        m for m in memory.get("memories",[])
+        if fragment not in str(m.get("text","")).casefold()
+    ]
+    _save_memory(memory)
+    return before-len(memory["memories"])
+
+
+def _memory_command(args):
+    memory=_load_memory()
+    if args and args[0]=="clear":
+        if not _confirm("Clear LO user memory? [y/N] "): return 1
+        _save_memory(_empty_memory())
+        print("LO memory cleared.")
+        return 0
+    if args and args[0]=="clear-summary":
+        memory["summary"]=""
+        _save_memory(memory)
+        print("LO long-term summary cleared.")
+        return 0
+    if args and args[0]=="prune":
+        before=len(memory.get("memories",[]))
+        memory=_prune_contaminated_memory(memory)
+        _save_memory(memory)
+        print(f"Pruned {before-len(memory.get('memories',[]))} contaminated memory item(s).")
+        return 0
+    if args and args[0]=="forget":
+        if len(args)<2:
+            print("usage: lk memory forget <text>"); return 2
+        n=_forget_memory(" ".join(args[1:]))
+        print(f"Removed {n} matching memory item(s).")
+        return 0
+    if args and args[0]=="add":
+        words=args[1:]; importance=60
+        if "--importance" in words:
+            i=words.index("--importance")
+            try: importance=int(words[i+1])
+            except (ValueError,IndexError):
+                print("importance must be 1–100"); return 2
+            words=words[:i]+words[i+2:]
+        if not words:
+            print("usage: lk memory add <text> [--importance N]"); return 2
+        memory=_add_memory(memory," ".join(words),importance)
+        _save_memory(memory)
+        print("Memory saved.")
+        return 0
+
+    _title("LO memory")
+    summary=str(memory.get("summary","")).strip()
+    print("  LONG-TERM")
+    print("  "+(summary or "No durable summary yet."))
+    print()
+    print("  CANDIDATES                              IMPORTANCE")
+    items=sorted(memory.get("memories",[]),key=lambda x:int(x.get("importance",0)),reverse=True)
+    if not items: print("  No user memories yet.")
+    for item in items:
+        text=str(item.get("text",""))
+        shown=text if len(text)<=52 else text[:49]+"…"
+        print(f"  {shown:<54} {int(item.get('importance',50)):3d}")
+    print()
+    print(f"  {len(items)} candidates · prompt attention capped at {RECENT_MEMORY_SLOTS}")
+    return 0
+
+
+def _skills_command(args):
+    _ensure_intelligence_files()
+    if args and args[0]=="path":
+        print(SKILLS_FILE); return 0
+    if args and args[0]=="add":
+        skill=_sanitize_skill(" ".join(args[1:]))
+        if not skill:
+            print("usage: lk skills add <general reusable lesson>"); return 2
+        if _append_learned_skill(skill):
+            print("Learned skill saved.")
+        else:
+            print("Skill rejected, duplicate, or learned-skill limit reached.")
+        return 0
+    if args and args[0] in {"forget","remove"}:
+        fragment=" ".join(args[1:]).strip().casefold()
+        if not fragment:
+            print("usage: lk skills forget <text>"); return 2
+        try:
+            text=SKILLS_FILE.read_text(encoding="utf-8")
+            marker="## Learned"
+            if marker not in text:
+                print("Removed 0 learned skills."); return 0
+            head,tail=text.split(marker,1)
+            kept=[]; removed=0
+            for line in tail.splitlines():
+                if line.strip().startswith("- ") and fragment in line.casefold():
+                    removed+=1
+                    continue
+                kept.append(line)
+            SKILLS_FILE.write_text(head+marker+"\n" + "\n".join(kept).lstrip("\n"),encoding="utf-8")
+            print(f"Removed {removed} learned skill(s).")
+            return 0
+        except OSError as e:
+            print(f"LOOK: {e}"); return 1
+    if args and args[0]=="clear-learned":
+        if not _confirm("Clear locally learned LO skills? [y/N] "): return 1
+        try:
+            text=SKILLS_FILE.read_text(encoding="utf-8")
+            marker="## Learned"
+            bundled=text.split(marker,1)[0].rstrip()
+            SKILLS_FILE.write_text(bundled+"\n\n## Learned\n\n",encoding="utf-8")
+            print("Learned skills cleared.")
+            return 0
+        except OSError as e:
+            print(f"LOOK: {e}"); return 1
+    try: print(SKILLS_FILE.read_text(encoding="utf-8").rstrip())
+    except OSError as e: print(f"LOOK: {e}"); return 1
+    return 0
 
 
 def _local_chat_once(base, model, messages):
@@ -904,56 +1236,276 @@ def _activity(label):
         sys.stdout.write("\r\033[2K")
         sys.stdout.flush()
 
-def _compress_exchange(base, model, user_text, assistant_text):
-    prompt = f'''Compress this conversation exchange into one durable memory note, maximum 90 words.
-Keep concrete preferences, decisions, project state, names, commands, or unresolved tasks that may matter later.
-Drop pleasantries and disposable details. Do not invent anything.
+def _extract_memory_candidate(base, model, user_text, assistant_text):
+    prompt=f"""Capture the compact meat of this exchange when it would help conversational
+continuity later.
+
+Store ONE candidate memory when the user expresses a substantive preference, favorite,
+habit, personal choice, project decision, active project state, unresolved task, recurring
+tool/workflow preference, or explicit request to remember something.
+
+Important guidance:
+- "I like...", "I love...", "one of my favorites...", "I prefer...", "I usually...",
+  "remember this", and "this is important" are normally memory-worthy.
+- Recent conversational continuity matters even when a fact may not be permanent.
+  Decay will handle forgetting later.
+- User memory must be grounded in what the USER actually said or clearly confirmed.
+  Never turn an assistant suggestion into a user preference merely because the assistant proposed it.
+  A bare acknowledgement such as "nice", "thanks", or "okay" does not establish a new preference.
+- Return NONE for mechanical turns, acknowledgements, disposable commands, or content-free chatter.
+- Do not store assistant technique here; reusable assistant craft belongs in skills.
+- Do not output analysis, reasoning, headings, or commentary.
+
+Return exactly one line:
+NONE
+or:
+NN|compact memory text
+
+NN is importance 1-100.
+
+Suggested importance:
+40-59  useful recent conversational continuity
+60-79  meaningful preference/project state
+80-94  strong favorite/preference or recurring workflow
+95-100 explicit "remember this"/"this is important" when genuinely durable
+
+Maximum memory text: 70 words.
 
 USER:
 {user_text[:4000]}
 
 ASSISTANT:
-{assistant_text[:5000]}'''
+{assistant_text[:5000]}"""
     try:
-        return _local_chat_once(base, model, [
-            {"role":"system","content":"You maintain concise persistent memory for a terminal assistant."},
+        raw=_local_chat_once(base,model,[
+            {"role":"system","content":"You maintain compact conversational memory. Preserve substantive continuity; decay will forget weak memories later."},
             {"role":"user","content":prompt},
-        ])[:900]
+        ])
+        final=_strip_reasoning_payload(raw).strip()
+        if final.upper()=="NONE":
+            return None
+        if "\n" in final.strip():
+            return None
+        m=re.fullmatch(r"\s*(\d{1,3})\s*\|\s*(.+?)\s*", final)
+        if not m:
+            return None
+        text=_sanitize_memory_text(m.group(2))
+        if not text:
+            return None
+        return max(1,min(100,int(m.group(1)))), text
     except Exception:
-        return ("User: " + user_text[:350] + " | Assistant: " + assistant_text[:450])[:900]
+        return None
 
 
-def _fold_long_memory(base, model, old_long, evicted_note):
-    prompt = f'''Rewrite the long-term memory below so it incorporates the newly archived recent note.
-Maximum 260 words. Preserve durable facts, preferences, decisions, active project state, and unresolved tasks.
-Prefer newer information if it supersedes older information. Remove redundancy. Do not invent anything.
+def _rewrite_summary(base, model, old_summary, memories):
+    strong=[m for m in memories if int(m.get("importance",0))>=75]
+    if len(strong)<4:
+        return old_summary
+    material="\n".join(f"- {m['text']}" for m in strong[:12])
+    prompt=f"""Rewrite the durable user summary using only patterns that have demonstrated
+continuing value.
 
-CURRENT LONG MEMORY:
-{old_long or "(empty)"}
+Return ONLY the summary itself.
+No analysis. No <think> tags. No heading. No word count. No explanation of exclusions.
+Maximum 180 words. Do not include transient task details. Do not invent facts.
 
-NEW ARCHIVED NOTE:
-{evicted_note}'''
+CURRENT SUMMARY:
+{old_summary or "(empty)"}
+
+STRONG MEMORIES:
+{material}"""
     try:
-        return _local_chat_once(base, model, [
-            {"role":"system","content":"You maintain a compact rolling long-term memory."},
+        raw=_local_chat_once(base,model,[
+            {"role":"system","content":"Maintain one compact semantic long-term user summary. Output only the clean summary."},
             {"role":"user","content":prompt},
-        ])[:3000]
+        ])
+        clean=_sanitize_summary(raw)
+        return clean if clean else old_summary
     except Exception:
-        combined=(old_long + "\n" + evicted_note).strip()
-        return combined[-3000:]
+        return old_summary
 
 
-def _remember_exchange(base, model, memory, user_text, assistant_text):
-    note=_compress_exchange(base, model, user_text, assistant_text)
-    recent=list(memory.get("recent", []))
-    recent.append(note)
-    long_memory=memory.get("long", "")
-    if len(recent) > RECENT_MEMORY_SLOTS:
-        evicted=recent.pop(0)
-        long_memory=_fold_long_memory(base, model, long_memory, evicted)
-    updated={"long": long_memory, "recent": recent}
-    _save_memory(updated)
-    return updated
+def _explicit_memory_hint(user_text):
+    """Return a conservative fallback candidate for explicit user memory language."""
+    text=" ".join(str(user_text or "").split()).strip()
+    low=text.casefold()
+    markers=(
+        "remember this",
+        "remember that",
+        "this is important",
+        "one of my favorites",
+        "one of my favourite",
+        "my favorite",
+        "my favourite",
+        "i really like",
+        "i love ",
+        "i prefer ",
+    )
+    if not any(m in low for m in markers):
+        return None
+
+    # Avoid saving commands/meta requests as a fallback.
+    if len(text) < 8 or len(text) > 500:
+        return None
+
+    importance=95 if ("remember this" in low or "remember that" in low or "this is important" in low) else 82
+    cleaned=_sanitize_memory_text(text)
+    if not cleaned:
+        return None
+    return importance, cleaned
+
+
+def _learned_skills():
+    _ensure_intelligence_files()
+    try:
+        text=SKILLS_FILE.read_text(encoding="utf-8")
+    except OSError:
+        return []
+    marker="## Learned"
+    if marker not in text:
+        return []
+    tail=text.split(marker,1)[1]
+    result=[]
+    for line in tail.splitlines():
+        line=line.strip()
+        if line.startswith("- "):
+            item=" ".join(line[2:].split()).strip()
+            if item:
+                result.append(item)
+    return result
+
+
+def _skill_is_too_specific(text):
+    """Skills are reusable operating craft, never user/task history."""
+    low=str(text or "").casefold()
+    bad=(
+        "the user ", "user prefers", "user likes", "user loves",
+        "banana-test", "walrus-test", "the kinks", "the police",
+        "3090", "current project", "this conversation", "this user",
+        "remember that", "favorite band", "favourite band",
+    )
+    return any(x in low for x in bad)
+
+
+def _sanitize_skill(text):
+    clean=" ".join(_strip_reasoning_payload(text).split()).strip()
+    if not clean or _looks_like_model_meta(clean) or _skill_is_too_specific(clean):
+        return ""
+    if len(clean) > 320:
+        return ""
+    return clean.rstrip(".")
+
+
+def _extract_skill_candidate(base, model, user_text, assistant_text):
+    """Ask whether this exchange taught LO reusable operating craft."""
+    prompt=f"""Did this exchange reveal ONE reusable lesson that would make you a better
+assistant on many future tasks?
+
+Usually return NONE.
+
+A skill is generalized operating craft, such as:
+- inspect before modifying;
+- preserve unrelated behavior during a surgical change;
+- distinguish dependency failure from project failure;
+- prefer a stable canonical location when installing a tool.
+
+A skill is NOT:
+- a fact/preference about this user;
+- a filename, project-specific choice, model/host name, or conversation detail;
+- a summary of what happened;
+- praise or style mimicry;
+- a rule already obvious from the existing assistant instructions.
+
+Return exactly one line:
+NONE
+or:
+SKILL|concise generalized lesson
+
+No reasoning, headings, explanation, or <think> markup.
+Maximum skill length: 40 words.
+
+USER:
+{user_text[:4000]}
+
+ASSISTANT:
+{assistant_text[:5000]}"""
+    try:
+        raw=_local_chat_once(base,model,[
+            {"role":"system","content":"You review completed work for rare, genuinely reusable assistant craft. Usually answer NONE."},
+            {"role":"user","content":prompt},
+        ])
+        final=_strip_reasoning_payload(raw).strip()
+        if final.upper()=="NONE":
+            return None
+        if "\n" in final.strip():
+            return None
+        m=re.fullmatch(r"\s*SKILL\s*\|\s*(.+?)\s*",final,re.I)
+        if not m:
+            return None
+        skill=_sanitize_skill(m.group(1))
+        return skill or None
+    except Exception:
+        return None
+
+
+def _append_learned_skill(skill):
+    """Append one deduplicated learned skill; keep the section intentionally small."""
+    skill=_sanitize_skill(skill)
+    if not skill:
+        return False
+    _ensure_intelligence_files()
+    current=_learned_skills()
+    folded=skill.casefold()
+    # Exact/near-contained duplicate prevention is sufficient at this scale.
+    for old in current:
+        oldf=old.casefold()
+        if folded==oldf or folded in oldf or oldf in folded:
+            return False
+    if len(current)>=24:
+        return False
+    try:
+        text=SKILLS_FILE.read_text(encoding="utf-8")
+        marker="## Learned"
+        if marker not in text:
+            text=text.rstrip()+"\n\n## Learned\n\n"
+        if not text.endswith("\n"):
+            text+="\n"
+        text+=f"- {skill}.\n"
+        SKILLS_FILE.write_text(text,encoding="utf-8")
+        return True
+    except OSError:
+        return False
+
+
+def _learn_from_exchange(base, model, user_text, assistant_text, profile):
+    """Self-learning respects LO's capability boundary."""
+    if profile=="conservative":
+        return False
+    skill=_extract_skill_candidate(base,model,user_text,assistant_text)
+    return bool(skill and _append_learned_skill(skill))
+
+
+def _remember_exchange(base, model, memory, user_text, assistant_text, profile="workspace"):
+    # Every completed exchange is a maintenance cycle: unused memories fade.
+    memory=_decay_memories(memory)
+
+    candidate=_extract_memory_candidate(base,model,user_text,assistant_text)
+    # Explicit preference/remember language gets a small deterministic safety net.
+    # The semantic worker still gets first choice because it can generalize better.
+    if not candidate:
+        candidate=_explicit_memory_hint(user_text)
+
+    if candidate:
+        importance,text=candidate
+        memory=_add_memory(memory,text,importance)
+    memory["summary"]=_rewrite_summary(
+        base,model,str(memory.get("summary","")),memory.get("memories",[])
+    )
+    _save_memory(memory)
+
+    # Reusable assistant craft is separate from user memory.
+    _learn_from_exchange(base,model,user_text,assistant_text,profile)
+    return memory
 
 
 def _memory_job_files():
@@ -992,7 +1544,7 @@ def _start_memory_worker():
         pass
 
 
-def _queue_memory_exchange(base, model, user_text, assistant_text):
+def _queue_memory_exchange(base, model, user_text, assistant_text, profile="workspace"):
     """Durably enqueue an exchange, then let detached housekeeping own compression."""
     try:
         MEMORY_QUEUE.mkdir(parents=True, exist_ok=True)
@@ -1004,6 +1556,7 @@ def _queue_memory_exchange(base, model, user_text, assistant_text):
             "model":model,
             "user":user_text[:12000],
             "assistant":assistant_text[:16000],
+            "profile":profile if profile in LO_PROFILES else "workspace",
         }
         tmp.write_text(json.dumps(payload, ensure_ascii=False), encoding="utf-8")
         os.chmod(tmp, 0o600)
@@ -1045,6 +1598,7 @@ def _memory_worker():
                     memory,
                     str(job.get("user","")),
                     str(job.get("assistant","")),
+                    str(job.get("profile","workspace")),
                 )
                 job_path.unlink()
             except Exception:
@@ -2216,6 +2770,10 @@ def ollama_chat(force_search=False, initial_prompt=None, allow_start=True, host_
             "# / ## / ### headings, **bold**, *italics*, bullets, inline code, fenced code blocks, and Markdown links. "
             "LOOK renders these with terminal styling, and http/https Markdown links may be clickable in supporting terminals. "
             "Do not over-format simple answers. "
+            "Casual conversation, personal statements, preferences, and general-knowledge questions are valid on their own. "
+            "Do NOT search or inspect the workspace merely because file tools are available. Tool availability is not a reason to use a tool. "
+            "Use workspace tools only when the user actually refers to files, code, the current project, this folder/here, or asks for local inspection/action. "
+            "Use relevant user memories naturally when they help, but do not expose importance scores, memory IDs, or say 'your memory says' unless the user asks about memory internals. "
             "When the user refers to 'this folder', 'here', local files, or the current project, "
             "use the workspace context and file tools instead of guessing. "
             "You may list files, read bounded text files, search filenames/text, create or intentionally modify UTF-8 text, "
@@ -2381,13 +2939,13 @@ def ollama_chat(force_search=False, initial_prompt=None, allow_start=True, host_
             answer = message.get("content", "").strip()
             messages.append(message)
             _print_ollama_answer(message)
-            if _queue_memory_exchange(base, model, prompt, answer):
+            if _queue_memory_exchange(base, model, prompt, answer, profile):
                 if sys.stdout.isatty():
                     print(_c("  · remembering in background", "2"))
             else:
                 # If queueing ever fails, preserve memory rather than silently dropping it.
                 with _activity("remembering"):
-                    memory = _remember_exchange(base, model, memory, prompt, answer)
+                    memory = _remember_exchange(base, model, memory, prompt, answer, profile)
             break
 
 
@@ -4068,6 +4626,12 @@ def main():
     if not a: return render([])
     cmd=a[0]; rest=a[1:]
     if cmd=="_remember-worker": return _memory_worker()
+    if cmd=="memory": return _memory_command(rest)
+    if cmd=="forget":
+        if not rest: print("usage: lk forget <text>"); return 2
+        n=_forget_memory(" ".join(rest)); print(f"Removed {n} matching memory item(s)."); return 0
+    if cmd=="clear-memory": return _memory_command(["clear"])
+    if cmd=="skills": return _skills_command(rest)
     if cmd=="_ollama-share-proxy": return _ollama_share_proxy()
     modes={"detail":"detail","dirs":"dirs","files":"files","tree":"tree","recent":"recent","size":"size"}
     if cmd in ("help","-h","--help"): return help_screen()

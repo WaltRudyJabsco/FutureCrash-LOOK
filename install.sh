@@ -261,11 +261,72 @@ tmp.chmod(0o600)
 tmp.replace(state/"install_manifest.json")
 PY
 
+  # Seed LO intelligence without overwriting local memory or learned craft.
+  LOOK_STATE="$HOME/.local/share/look"
+  run mkdir -p "$LOOK_STATE"
+  [[ -f "$LOOK_STATE/core.md" ]] || run cp "$ROOT/look/core.md" "$LOOK_STATE/core.md"
+  [[ -f "$LOOK_STATE/skills.md" ]] || run cp "$ROOT/look/skills.md" "$LOOK_STATE/skills.md"
+  [[ -f "$LOOK_STATE/ollama_memory.json" ]] || run cp "$ROOT/look/memory.json" "$LOOK_STATE/ollama_memory.json"
+
   FUTURE_DIR="$HOME/.local/share/future-crash"
   run mkdir -p "$FUTURE_DIR"
   run cp "$ROOT/future-crash/future_crash.py" "$FUTURE_DIR/future_crash.py"
   run cp "$ROOT/future-crash/future-crash" "$HOME/.local/bin/future-crash"
   run chmod +x "$HOME/.local/bin/future-crash"
+
+  # Optional reference terminal experience. Core remains independent.
+  TERMINAL_OS="$(uname -s 2>/dev/null || echo unknown)"
+  echo
+  echo "TERMINAL EXPERIENCE"
+  if [[ "$TERMINAL_OS" == "Darwin" ]]; then
+    echo "  Recommended: iTerm2 · Zsh · Powerlevel10k · MesloLGS NF"
+  else
+    echo "  Recommended: Kitty · Zsh · Powerlevel10k · MesloLGS NF"
+  fi
+  echo "  Future Crash + LOOK works without these."
+  echo
+  if ask_yes_no "Install/check recommended terminal components?" "n"; then
+    if [[ "$TERMINAL_OS" == "Darwin" ]] && command -v brew >/dev/null 2>&1; then
+      [[ -d "/Applications/iTerm.app" || -d "$HOME/Applications/iTerm.app" ]] \
+        && echo "  ✓ iTerm2" \
+        || run brew install --cask iterm2
+      if system_profiler SPFontsDataType 2>/dev/null | grep -qi "MesloLGS"; then
+        echo "  ✓ MesloLGS NF"
+      else
+        echo "  Installing MesloLGS NF…"
+        if [[ "${DRY_RUN:-0}" == "1" ]]; then
+          echo "  [dry-run] brew install --cask font-meslo-lg-nerd-font"
+        else
+          brew install --cask font-meslo-lg-nerd-font || echo "  Optional font install failed; continuing."
+        fi
+      fi
+    elif [[ "$TERMINAL_OS" != "Darwin" ]]; then
+      if command -v kitty >/dev/null 2>&1; then
+        echo "  ✓ Kitty"
+      elif command -v apt-get >/dev/null 2>&1; then
+        run sudo apt-get install -y kitty
+      elif command -v dnf >/dev/null 2>&1; then
+        run sudo dnf install -y kitty
+      elif command -v pacman >/dev/null 2>&1; then
+        run sudo pacman -S --noconfirm kitty
+      else
+        echo "  Kitty not found; install it with your distribution's package manager."
+      fi
+      if command -v fc-list >/dev/null 2>&1 && fc-list | grep -qi "MesloLGS"; then
+        echo "  ✓ MesloLGS NF"
+      else
+        echo "  MesloLGS NF recommended; font installation left user-controlled on Linux."
+      fi
+    fi
+
+    if [[ -d "${ZSH_CUSTOM:-$HOME/.oh-my-zsh/custom}/themes/powerlevel10k" \
+       || -d "$HOME/powerlevel10k" || -d "$HOME/.powerlevel10k" ]]; then
+      echo "  ✓ Powerlevel10k"
+    else
+      echo "  Powerlevel10k recommended; prompt configuration remains user-owned."
+    fi
+    echo "  Terminal/font preferences remain untouched."
+  fi
 
   echo
   echo "LOOK + FUTURE CRASH installed."

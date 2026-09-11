@@ -399,7 +399,7 @@ alias lk='nocorrect lk'
 commands() { "$HOME/.local/bin/lk" help; }
 
 # LOOK Ollama — minimal on-demand chat; a resident model is reused when available.
-alias lo='lk o'
+alias lo='noglob lk o'
 
 webterm() {
   (( $+commands[ttyd] )) || { print "LOOK: webterm needs ttyd. Re-run the LOOK installer."; return 127; }

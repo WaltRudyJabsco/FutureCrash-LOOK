@@ -1,4 +1,4 @@
-.TH LK 1 "September 2026" "LOOK 3.3.3" "User Commands"
+.TH LK 1 "September 2026" "LOOK 3.4.0 / Future Crash + LOOK 1.1.1" "User Commands"
 .SH NAME
 lk \- inspect, navigate, manipulate, and ask your computer
 .br
@@ -129,6 +129,52 @@ Report key configuration without revealing it.
 .TP
 .B lk ollama access [MODE]
 Show/set conservative, workspace, power, or unsafe as the persistent profile.
+.SH MEMORY AND CRAFT
+.TP
+.B lk memory
+Show the durable summary and bounded candidate memories with importance values.
+.TP
+.B lk memory add TEXT [--importance N]
+Add a compact user memory. Importance defaults to 60 and is clamped to 1 through 100.
+.TP
+.B lk memory forget TEXT
+Remove candidate memories containing TEXT.
+.TP
+.B lk forget TEXT
+Short form of memory forget.
+.TP
+.B lk memory clear
+Clear this user's LO memory after confirmation.
+.TP
+.B lk memory clear-summary
+Clear only the long-term summary while preserving candidate memories.
+.TP
+.B lk memory prune
+Remove known reasoning/meta artifacts from persisted memory.
+.TP
+.B lk clear-memory
+Short form of memory clear.
+.TP
+.B lk skills
+Show LO's reusable bundled and locally learned assistant craft.
+.TP
+.B lk skills add TEXT
+Manually add one generalized reusable lesson to the Learned section.
+.TP
+.B lk skills forget TEXT
+Remove matching locally learned skills.
+.TP
+.B lk skills clear-learned
+Clear locally learned skills while preserving bundled release craft.
+.TP
+.B lk skills path
+Print the editable skills file path.
+.PP
+Automatic skill learning is enabled in workspace, power, and unsafe profiles and disabled in conservative.
+.PP
+LO keeps at most 20 candidate memories on disk and offers at most eight to immediate prompt attention.
+Unused memories decay during maintenance. Retrieval by itself does not reinforce a memory.
+User memory and reusable assistant skills are deliberately separate.
 .SH SETTINGS
 .TP
 .B lk settings

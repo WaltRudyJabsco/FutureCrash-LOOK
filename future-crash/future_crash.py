@@ -33,6 +33,7 @@ import struct
 import tempfile
 import wave
 import os
+os.environ["FUTURE_CRASH_ACTIVE"]="1"
 import queue
 import random
 import re

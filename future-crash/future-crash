@@ -4,6 +4,19 @@ set -euo pipefail
 APP="$HOME/.local/share/future-crash/future_crash.py"
 LOOK_STATE="$HOME/.local/share/look"
 
+if [[ "${FUTURE_CRASH_ACTIVE:-}" == "1" && "${1:-}" != "--nested" ]]; then
+  echo "Already inside Future Crash."
+  echo "Type exit to return to the existing Future Crash session."
+  exit 0
+fi
+
+if [[ "${1:-}" == "--nested" ]]; then
+  shift
+fi
+
+export FUTURE_CRASH_ACTIVE=1
+
+
 [[ -f "$APP" ]] || {
   echo "Future Crash is not installed: $APP" >&2
   exit 1
