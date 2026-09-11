@@ -597,7 +597,7 @@ lk media prev
 lk media stop
 ```
 
-macOS currently controls running Music or Spotify through AppleScript. Linux uses MPRIS through `playerctl`. The public LOOK command stays the same across platforms.
+macOS controls an already-open Music or Spotify instance through AppleScript. Linux uses MPRIS through `playerctl`. Every successful media transport command reports the resulting state/track immediately. Fast aliases: `mm` (toggle), `mn` (next), `mp` (previous).
 
 ## Versioned intelligence
 
@@ -615,3 +615,20 @@ lk skills update /path/to/skills.md
 ```
 
 `lk skills update` replaces compatible Bundled craft while preserving the local Learned section.
+
+## Smart make
+
+`lmk` is LOOK's unified creation command:
+
+```sh
+lmk notes.md        # file
+lmk project/        # directory + enter
+lmk -f Makefile     # explicit file
+lmk -d project      # explicit directory + enter
+```
+
+Names with a suffix and dotfiles imply file intent. A trailing slash implies directory intent. Extensionless names are prompted as `[d]irectory` or `[f]ile`.
+
+File and directory creation are journaled and available to `lk undo`. Undo refuses to remove a created file after it has changed or a created directory after it contains anything.
+
+`mkd DIR` remains as a compatibility wrapper around `lmk -d DIR`.

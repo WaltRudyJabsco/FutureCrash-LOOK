@@ -45,16 +45,29 @@ LO keeps at most 20 candidate memories on disk and offers at most eight to promp
 ## File actions
 `lcp` · `lmv` · `lscp` · `lrm` · `lmk` · `mkd`
 
+### `lmk` — LOOK make
+`lmk FILE.ext` creates an undoable empty file.
+
+`lmk DIR/` creates an undoable directory and enters it.
+
+`lmk -f NAME` forces file creation; `lmk -d NAME` forces directory creation + enter.
+
+Extensionless ambiguous names prompt for `[d]irectory` or `[f]ile`. The ambiguity prompt is single-key; no Return is required. Missing parent directories for a file are created only after confirmation.
+
+`mkd DIR` is a compatibility wrapper for `lmk -d DIR`.
+
+`lk undo` removes an unchanged empty file or an empty created directory; it refuses once the path has meaningful contents or changes.
+
 ## Shortcuts
 `l/ls` · `ll` · `ld` · `lf` · `lt` · `lr` · `lz` · `zll` · `cdl` · `f` · `lh` · `lo` · `rs` · `rb` · `webterm`
 
 ## Completion
-`lk <Tab>` completes LOOK commands contextually. `lk ollama`, `lk memory`, and `lk skills` expose their subcommands; `lk ollama host` includes saved host names. `lo` completes access flags and `@host` choices, then leaves prompt text unconstrained.
+`lk <Tab>` completes LOOK commands contextually. `lmk <Tab>` completes explicit mode flags and existing parent directories for a new path. `lk ollama`, `lk memory`, and `lk skills` expose their subcommands; `lk ollama host` includes saved host names. `lo` completes access flags and `@host` choices, then leaves prompt text unconstrained.
 
 ## Media
 `lk media` · `lk media toggle` · `lk media next` · `lk media prev` · `lk media stop`
 
-macOS: Music / Spotify adapter. Linux: MPRIS via `playerctl`.
+Every successful transport action reports the resulting player state/track. macOS controls an already-open Music or Spotify instance; Linux uses MPRIS via `playerctl`.
 
 ## Intelligence versions
 `lk skills version` shows the installed skills schema, bundled pack version, and learned-skill count.

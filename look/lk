@@ -17,7 +17,7 @@ try:
 except Exception:
     readline = None
 
-VERSION="3.6.3"
+VERSION="3.7.2"
 
 LOOK_WORDMARK = r"""       ██╗      ██╗  ██╗
        ██║      ██║ ██╔╝
@@ -630,12 +630,20 @@ MEMORY + CRAFT
   lk skills path       print the editable skills file path
                        auto-learning runs in workspace/power/unsafe; conservative never writes skills
 
+MAKE
+  lmk FILE.ext         create an empty file · undoable
+  lmk DIR/             create directory + enter it · undoable
+  lmk -f NAME          force file when the name is ambiguous
+  lmk -d NAME          force directory + enter it
+                       extensionless names ask: [d]irectory or [f]ile
+
 MEDIA
-  lk media             show current supported player / track
-  lk media toggle      play / pause
-  lk media next        next track
-  lk media prev        previous track
-  lk media stop        stop (or pause where player has no true stop)
+  lk media             show current player / state / track
+  lk media toggle      play / pause, then show current state
+  lk media next        next track, then show current state
+  lk media prev        previous track, then show current state
+  lk media stop        stop/pause, then show current state
+  mm / mn / mp         fast aliases: toggle / next / previous
 
 SYSTEM
   lk home              friendly LOOK home screen
@@ -2090,7 +2098,23 @@ def _undo_last():
             if not path.is_dir() or any(path.iterdir()):
                 raise RuntimeError("directory is no longer empty; refusing to remove it")
             path.rmdir()
+            _cleanup_created_dirs([p for p in entry.get("created_dirs",[]) if Path(p)!=path])
             detail=f"removed empty {path.name}/"
+        elif kind=="touch":
+            path=Path(entry["path"])
+            if not path.exists():
+                raise RuntimeError("created file no longer exists")
+            if not path.is_file():
+                raise RuntimeError("created path is no longer a regular file")
+            stat=path.stat()
+            if stat.st_size!=0:
+                raise RuntimeError("created file now contains data; refusing to remove it")
+            expected=entry.get("mtime_ns")
+            if expected is not None and stat.st_mtime_ns!=expected:
+                raise RuntimeError("created file has changed; refusing to remove it")
+            path.unlink()
+            _cleanup_created_dirs(entry.get("created_dirs",[]))
+            detail=f"removed empty {path.name}"
         elif kind=="batch":
             items=entry.get("items",[])
             for item in reversed(items):
@@ -2237,7 +2261,7 @@ def _action_result(text):
     """Color only the CLI presentation; tool/API text stays plain."""
     if not sys.stdout.isatty():
         return text
-    success_prefixes=("COPY OK","MOVE OK","REMOVE OK","MKDIR OK")
+    success_prefixes=("COPY OK","MOVE OK","REMOVE OK","MKDIR OK","FILE OK")
     if text.startswith(success_prefixes):
         head, sep, tail=text.partition(" · ")
         return f"{_c('✓','32')} {_c(head,'1;32')}{sep}{tail}"
@@ -2383,12 +2407,44 @@ def _journal_mkdir(path):
     target=Path(path).expanduser().resolve()
     if target.exists():
         return f"Directory already exists: {target}" if target.is_dir() else f"Create directory failed: path exists as a file: {target}"
+    missing=_missing_directories(target)
     try:
         target.mkdir(parents=True)
-        _record_undo({"kind":"mkdir","path":str(target),"time":time.time()})
+        created=[str(p) for p in missing]
+        _record_undo({"kind":"mkdir","path":str(target),"created_dirs":created,"time":time.time()})
         return f"MKDIR OK · {target} · undo available · lk undo"
     except OSError as exc:
         return f"Create directory failed: {exc}"
+
+
+def _journal_touch(path, create_missing=False):
+    target=Path(path).expanduser().resolve()
+    if target.exists():
+        return f"Create file refused: path already exists: {target}"
+
+    parent=target.parent
+    missing=_missing_directories(parent)
+    if missing and not create_missing:
+        return f"CREATE_DIR_REQUIRED · {parent}"
+
+    created=[]
+    try:
+        if missing:
+            created=_make_missing_directories(parent)
+        target.touch(exist_ok=False)
+        stat=target.stat()
+        _record_undo({
+            "kind":"touch",
+            "path":str(target),
+            "created_dirs":created,
+            "mtime_ns":stat.st_mtime_ns,
+            "time":time.time(),
+        })
+        return f"FILE OK · {target} · undo available · lk undo"
+    except OSError as exc:
+        _cleanup_created_dirs(created)
+        return f"Create file failed: {exc}"
+
 
 
 def _tool_copy_path(workspace, source, destination):
@@ -4798,12 +4854,14 @@ def ollama_key(args):
     return 0
 
 
-def _media_macos_script(app, body):
-    # Guard and control in one AppleScript call so LOOK never launches a player.
-    script = (
+def _media_macos_run(app, statement):
+    """Run one AppleScript statement only if the target app is already open."""
+    script=(
         f'if application "{app}" is running then\n'
-        f'  tell application "{app}"\n{body}\n  end tell\n'
-        'else\n  return "__LOOK_NOT_RUNNING__"\nend if'
+        f'  tell application "{app}" to {statement}\n'
+        'else\n'
+        '  return "__LOOK_NOT_RUNNING__"\n'
+        'end if'
     )
     try:
         return subprocess.run(["osascript","-e",script],capture_output=True,text=True,timeout=3)
@@ -4811,52 +4869,60 @@ def _media_macos_script(app, body):
         return None
 
 
-def _media_macos_status_for(app):
-    if app=="Music":
-        body='''    set st to (player state as text)
-    try
-      return "Music|" & st & "|" & (artist of current track) & "|" & (name of current track)
-    on error
-      return "Music|" & st & "||"
-    end try'''
-    elif app=="Spotify":
-        body='''    set st to (player state as text)
-    try
-      return "Spotify|" & st & "|" & (artist of current track) & "|" & (name of current track)
-    on error
-      return "Spotify|" & st & "||"
-    end try'''
-    else:
-        return None
-    p=_media_macos_script(app,body)
+def _media_macos_get(app, expression):
+    p=_media_macos_run(app,f'get {expression}')
     if p is None or p.returncode!=0:
         return None
     out=(p.stdout or "").strip()
     if not out or out=="__LOOK_NOT_RUNNING__":
         return None
-    parts=(out.split("|",3)+["","","",""])[:4]
-    return {"player":parts[0],"state":parts[1],"artist":parts[2],"title":parts[3]}
+    return out
+
+
+def _media_macos_status_for(app):
+    state=_media_macos_get(app,"player state")
+    if state is None:
+        return None
+
+    artist=_media_macos_get(app,"artist of current track") or ""
+    title=_media_macos_get(app,"name of current track") or ""
+
+    return {"player":app,"state":state,"artist":artist,"title":title}
+
+
+def _media_macos_show_status(preferred=None):
+    apps=[preferred] if preferred else ["Music","Spotify"]
+    if preferred:
+        apps += [app for app in ("Music","Spotify") if app!=preferred]
+
+    players=[x for x in (_media_macos_status_for(app) for app in apps) if x]
+    if not players:
+        print("LOOK media · no supported player is open (Music or Spotify)")
+        return 1
+
+    current=next((p for p in players if p["state"].lower()=="playing"),players[0])
+    track=" — ".join(x for x in (current["artist"],current["title"]) if x)
+    print(f"{current['player']} · {current['state'] or 'unknown'}" + (f" · {track}" if track else ""))
+    return 0
 
 
 def _media_macos(action):
     if action=="status":
-        players=[x for x in (_media_macos_status_for("Music"),_media_macos_status_for("Spotify")) if x]
-        if not players:
-            print("LOOK media · no supported player is open (Music or Spotify)")
-            return 1
-        current=next((p for p in players if p["state"].lower()=="playing"),players[0])
-        track=" — ".join(x for x in (current["artist"],current["title"]) if x)
-        print(f"{current['player']} · {current['state'] or 'unknown'}" + (f" · {track}" if track else ""))
-        return 0
+        return _media_macos_show_status()
 
     commands={
-        "Music":{"toggle":"    playpause","next":"    next track","prev":"    previous track","stop":"    stop"},
-        "Spotify":{"toggle":"    playpause","next":"    next track","prev":"    previous track","stop":"    pause"},
+        "Music":{"toggle":"playpause","next":"next track","prev":"previous track","stop":"stop"},
+        "Spotify":{"toggle":"playpause","next":"next track","prev":"previous track","stop":"pause"},
     }
+
     for app in ("Music","Spotify"):
-        p=_media_macos_script(app,commands[app][action])
-        if p is not None and p.returncode==0 and (p.stdout or "").strip()!="__LOOK_NOT_RUNNING__":
-            return 0
+        p=_media_macos_run(app,commands[app][action])
+        if p is None:
+            continue
+        out=(p.stdout or "").strip()
+        if p.returncode==0 and out!="__LOOK_NOT_RUNNING__":
+            return _media_macos_show_status(preferred=app)
+
     print("LOOK media · no supported player is open (Music or Spotify)")
     return 1
 
@@ -4986,6 +5052,13 @@ def main():
     if cmd=="_mkdir":
         if len(rest)!=1: return 2
         print(_action_result(_journal_mkdir(rest[0]))); return 0
+    if cmd=="_touch":
+        create_missing=False
+        if rest and rest[0]=="--parents":
+            create_missing=True
+            rest=rest[1:]
+        if len(rest)!=1: return 2
+        print(_action_result(_journal_touch(rest[0],create_missing=create_missing))); return 0
     if cmd=="doctor": return doctor()
     if cmd=="settings": return settings()
     if cmd=="uninstall": return uninstall()

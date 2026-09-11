@@ -1,5 +1,30 @@
 # LOOK Shell changelog
 
+## 3.7.2 — lmk directory-entry fix
+
+- `lmk -d` and prompted directory creation now call `_mkdir` directly and then `cd` only when the directory exists.
+
+
+## 3.7.1 — prompt input fix
+
+- `_look_prompt` now suppresses terminal echo before LOOK renders typed characters.
+- Adds `_look_choice` for immediate `lmk` d/f/y/n decisions.
+
+
+## 3.7.0 — smart make
+
+- `lmk` creates files or directories from one command.
+- Adds journaled empty-file creation and safe undo.
+- `mkd` now delegates to journaled `lmk -d`.
+- Adds `_lmk` completion.
+
+
+## 3.6.4 — media status feedback
+
+- `lk media` uses direct state/artist/title queries.
+- `mm`, `mn`, `mp`, and full media actions report resulting track/state.
+
+
 ## 3.6.2 — macOS media detection fix
 
 - `lk media` now detects Music and Spotify directly through AppleScript.

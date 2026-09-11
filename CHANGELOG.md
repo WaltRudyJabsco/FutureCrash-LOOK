@@ -1,5 +1,29 @@
 # Future Crash + LOOK changelog
 
+## 1.4.2 — lmk directory-entry fix
+
+- Removes output parsing from `lmk -d` and prompted directory creation.
+- Directory entry now follows successful creation and an actual filesystem existence check.
+
+
+## 1.4.1 — prompt input fix
+
+- Fixes doubled characters in LOOK action prompts.
+- `lmk` directory/file decisions now use immediate single-key choices.
+
+
+## 1.4.0 — LOOK smart make
+
+- `lmk` becomes a unified, journaled file/directory creation command.
+- Adds safe undo for new files, directory-and-enter behavior, ambiguity prompts, and completion.
+
+
+## 1.3.4 — media status feedback
+
+- Media transport reports resulting player state/track after every successful action.
+- macOS status uses direct state/artist/title queries.
+
+
 ## 1.3.2 — macOS media detection fix
 
 - Uses direct AppleScript app-running checks for Music and Spotify.

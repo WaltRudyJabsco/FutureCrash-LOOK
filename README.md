@@ -376,6 +376,55 @@ That means the program can eventually stabilize while the reviewed assistant cra
 
 ---
 
+## Smart make
+
+`lmk` — **LOOK make** — collapses the two ordinary Unix creation primitives into one predictable command.
+
+```sh
+lmk notes.txt       # create an empty file
+lmk project/        # create a directory and enter it
+lmk src/utils.py    # create a file inside src/
+lmk projects/demo/  # create the directory path and enter demo/
+```
+
+LOOK uses obvious syntax first:
+
+- a trailing `/` means **directory**;
+- a filename suffix such as `.md`, `.py`, or `.txt` means **file**;
+- dotfiles such as `.gitignore` are treated as files;
+- an extensionless name is genuinely ambiguous, so LOOK asks:
+
+```text
+LOOK make · project is ambiguous
+[d] directory + enter · [f] file · Esc cancel ›
+```
+
+The choice is immediate: press `d` or `f`; no Return is required.
+
+```text
+```
+
+For scripts or muscle memory, force the choice:
+
+```sh
+lmk -d project      # directory + enter
+lmk -f Makefile     # file
+```
+
+If a file path needs parent directories that do not exist, LOOK asks before creating them.
+
+Both files and directories are journaled through LOOK:
+
+```sh
+lk undo
+```
+
+A newly created empty file can be removed by undo while it is still unchanged. A newly created directory can be undone while it remains empty. LOOK refuses destructive undo once either object has acquired meaningful contents.
+
+The older `mkd DIR` helper remains as a compatibility shortcut for `lmk -d DIR`, so it now uses the same journal and undo behavior.
+
+---
+
 ## Media controls
 
 LOOK also exposes a tiny transport layer for music that is already playing:
@@ -398,7 +447,7 @@ mp    # previous track
 
 On macOS, LOOK currently controls running **Music** or **Spotify** through their system scripting interfaces. On Linux it uses the standard **MPRIS** ecosystem through `playerctl`.
 
-`lk media` reports the active supported player and track where available. The public interface stays the same even though the platform adapters underneath are different.
+`lk media` reports the active supported player, state, and track where available. Every successful transport command also reports the resulting state immediately, so `mn` both skips and confirms what is now playing. The public interface stays the same even though the platform adapters underneath are different.
 
 ---
 
@@ -415,6 +464,7 @@ lk ollama host <Tab>
 lk memory <Tab>
 lk skills <Tab>
 lk media <Tab>
+lmk <Tab>
 ```
 
 Saved Ollama host names are completed dynamically.
@@ -436,6 +486,7 @@ You do not need to memorize this. Start with `future-crash`, `lk`, and `lo`.
 | `lr` | Recent ordering |
 | `lz` | Size-oriented view |
 | `f` | Find under home |
+| `lmk` | Smart make: file or directory |
 | `lk machine` | Machine/system view |
 | `lk doctor` | Diagnose the environment |
 | `lk settings` | Unified settings |
@@ -529,8 +580,8 @@ This release establishes the following baseline:
 
 | Layer | Version |
 | --- | ---: |
-| Future Crash + LOOK | **1.3.3** |
-| LOOK | **3.6.3** |
+| Future Crash + LOOK | **1.4.2** |
+| LOOK | **3.7.2** |
 | Future Crash | **1.0.0** |
 | Memory schema | **1** |
 | Skills schema | **1** |

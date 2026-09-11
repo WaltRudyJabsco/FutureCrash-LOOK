@@ -3,8 +3,8 @@ set -euo pipefail
 
 ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 
-PRODUCT_VERSION="1.3.3"
-LOOK_VERSION="3.6.3"
+PRODUCT_VERSION="1.4.2"
+LOOK_VERSION="3.7.2"
 FUTURE_CRASH_VERSION="1.0.0"
 
 DRY=0
@@ -259,6 +259,7 @@ run cp "$ROOT/look/zshrc" "$LOOK_ZSH_FILE"
 run mkdir -p "$LOOK_ZSH_DIR/completions"
 run cp "$ROOT/look/completions/_lk" "$LOOK_ZSH_DIR/completions/_lk"
 run cp "$ROOT/look/completions/_lo" "$LOOK_ZSH_DIR/completions/_lo"
+run cp "$ROOT/look/completions/_lmk" "$LOOK_ZSH_DIR/completions/_lmk"
 
 if ((!DRY)); then
   touch "$HOME/.zshrc"
@@ -341,9 +342,9 @@ old_dirs = old.get("created_dirs") if isinstance(old.get("created_dirs"), list) 
 
 manifest = {
     "product": "future-crash-look",
-    "release": os.environ.get("FCL_RELEASE_VERSION", "1.3.3"),
+    "release": os.environ.get("FCL_RELEASE_VERSION", "1.4.2"),
     "components": {
-        "look": os.environ.get("FCL_LOOK_VERSION", "3.6.3"),
+        "look": os.environ.get("FCL_LOOK_VERSION", "3.7.2"),
         "future_crash": os.environ.get("FCL_FUTURE_CRASH_VERSION", "1.0.0"),
     },
     "packages": sorted(set(old_packages + [x for x in os.environ.get("LOOK_MANIFEST_PACKAGES","").splitlines() if x])),

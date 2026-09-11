@@ -1,4 +1,4 @@
-.TH LK 1 "September 2026" "LOOK 3.6.3 / Future Crash + LOOK 1.3.3" "User Commands"
+.TH LK 1 "September 2026" "LOOK 3.7.2 / Future Crash + LOOK 1.4.2" "User Commands"
 .SH NAME
 lk \- inspect, navigate, manipulate, and ask your computer
 .br
@@ -205,11 +205,31 @@ It uses the same underlying state and commands; it is not a second configuration
 .B lscp [PATH]
 ;
 .B lrm [PATH]
-;
-.B lmk PATH
-;
-.B mkd DIR
 .
+.TP
+.B lmk FILE.ext
+Create an empty file through LOOK's undo journal.
+.TP
+.B lmk DIR/
+Create a directory and enter it. The creation is journaled for
+.B lk undo
+.
+.TP
+.B lmk -f NAME
+Force file creation when the name is ambiguous.
+.TP
+.B lmk -d NAME
+Force directory creation and enter it.
+.TP
+.B mkd DIR
+Compatibility wrapper for
+.B lmk -d DIR
+.
+.PP
+A trailing slash is directory intent. Names with a filename suffix and dotfiles imply file intent.
+Extensionless names are prompted as directory or file. The choice is accepted immediately from a single key; Return is not required.
+Missing parent directories for file creation require confirmation.
+Undo removes only an unchanged empty created file or an empty created directory.
 .SH SHORTCUTS
 l/ls smart view; ll details; ld directories; lf files; lt tree; lr recent; lz sizes;
 zll fuzzy jump + look; cdl jump + details; f find anywhere; lh home; lo Ollama chat;
@@ -242,7 +262,9 @@ Commands such as
 .B lk memory
 , and
 .B lk skills
-complete their valid subcommands.
+complete their valid subcommands. The
+.B lmk
+completion exposes file/directory force flags and existing parent directories.
 Saved Ollama host names are completed dynamically.
 LO completion stops at its command/options layer so free-form prompt text remains free-form.
 .SH VERSION SAFETY
@@ -259,16 +281,16 @@ Historical installers predating this guard cannot be retroactively protected.
 Show the active supported media player and track.
 .TP
 .B lk media toggle
-Toggle play/pause.
+Toggle play/pause, then report the resulting player state and track.
 .TP
 .B lk media next
-Advance to the next track.
+Advance to the next track, then report the resulting player state and track.
 .TP
 .B lk media prev
-Return to the previous track.
+Return to the previous track, then report the resulting player state and track.
 .TP
 .B lk media stop
-Stop playback, or pause on players without a distinct stop command.
+Stop playback, or pause on players without a distinct stop command, then report the resulting state.
 .PP
 On macOS, LOOK currently controls running Music or Spotify applications.
 On Linux, LOOK uses the MPRIS ecosystem through playerctl.
