@@ -1,5 +1,16 @@
 # Future Crash + LOOK changelog
 
+## 1.3.2 — macOS media detection fix
+
+- Uses direct AppleScript app-running checks for Music and Spotify.
+
+
+## 1.3.1 — fast media aliases + paged intelligence views
+
+- Adds `mm`, `mn`, and `mp` for play/pause, next, and previous.
+- Routes `lk memory` and `lk skills` through LOOK's pager.
+
+
 ## 1.3.0 — media transport + versioned intelligence
 
 - Adds `lk media` status/play-pause/next/previous/stop.

@@ -412,6 +412,11 @@ commands() { "$HOME/.local/bin/lk" help; }
 # LOOK Ollama — minimal on-demand chat; a resident model is reused when available.
 alias lo='noglob lk o'
 
+# Fast media transport
+alias mm='lk media toggle'
+alias mn='lk media next'
+alias mp='lk media prev'
+
 webterm() {
   (( $+commands[ttyd] )) || { print "LOOK: webterm needs ttyd. Re-run the LOOK installer."; return 127; }
   (( $+commands[tailscale] )) || { print "LOOK: webterm needs Tailscale. Re-run ./install.sh or install Tailscale."; return 127; }

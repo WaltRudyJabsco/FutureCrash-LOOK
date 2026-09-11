@@ -386,6 +386,14 @@ lk media toggle
 lk media next
 lk media prev
 lk media stop
+
+Fast shell aliases:
+
+```sh
+mm    # play / pause
+mn    # next track
+mp    # previous track
+```
 ```
 
 On macOS, LOOK currently controls running **Music** or **Spotify** through their system scripting interfaces. On Linux it uses the standard **MPRIS** ecosystem through `playerctl`.
@@ -441,6 +449,8 @@ You do not need to memorize this. Start with `future-crash`, `lk`, and `lo`.
 | `lk media` | Show media state |
 | `lk media toggle` | Play/pause |
 | `lk media next` / `prev` | Next/previous track |
+
+Long informational displays such as `lk skills` and `lk memory` use LOOK's pager when appropriate, so they remain readable as they grow.
 
 For the complete LOOK vocabulary:
 
@@ -519,8 +529,8 @@ This release establishes the following baseline:
 
 | Layer | Version |
 | --- | ---: |
-| Future Crash + LOOK | **1.3.0** |
-| LOOK | **3.6.0** |
+| Future Crash + LOOK | **1.3.2** |
+| LOOK | **3.6.2** |
 | Future Crash | **1.0.0** |
 | Memory schema | **1** |
 | Skills schema | **1** |

@@ -1,5 +1,16 @@
 # LOOK Shell changelog
 
+## 3.6.2 — macOS media detection fix
+
+- `lk media` now detects Music and Spotify directly through AppleScript.
+
+
+## 3.6.1 — fast media aliases + paged intelligence views
+
+- Adds `mm`, `mn`, and `mp`.
+- Adds pager behavior to `lk memory` and `lk skills`.
+
+
 ## 3.6.0 — media transport + portable intelligence versions
 
 - Adds `lk media` with macOS Music/Spotify and Linux MPRIS adapters.

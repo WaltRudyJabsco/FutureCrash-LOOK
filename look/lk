@@ -17,7 +17,7 @@ try:
 except Exception:
     readline = None
 
-VERSION="3.6.0"
+VERSION="3.6.2"
 
 LOOK_WORDMARK = r"""       ██╗      ██╗  ██╗
        ██║      ██║ ██╔╝
@@ -1208,22 +1208,25 @@ def _memory_command(args):
         print("Memory saved.")
         return 0
 
-    _title("LO memory")
-    summary=str(memory.get("summary","")).strip()
-    print("  LONG-TERM")
-    print("  "+(summary or "No durable summary yet."))
-    print()
-    print("  CANDIDATES                              IMPORTANCE")
-    items=sorted(memory.get("memories",[]),key=lambda x:int(x.get("importance",0)),reverse=True)
-    if not items: print("  No user memories yet.")
-    for item in items:
-        text=str(item.get("text",""))
-        shown=text if len(text)<=52 else text[:49]+"…"
-        print(f"  {shown:<54} {int(item.get('importance',50)):3d}")
-    print()
-    print(f"  {len(items)} candidates · prompt attention capped at {RECENT_MEMORY_SLOTS} · schema {MEMORY_SCHEMA_VERSION}")
+    import io, contextlib
+    buf=io.StringIO()
+    with contextlib.redirect_stdout(buf):
+        _title("LO memory")
+        summary=str(memory.get("summary","")).strip()
+        print("  LONG-TERM")
+        print("  "+(summary or "No durable summary yet."))
+        print()
+        print("  CANDIDATES                              IMPORTANCE")
+        items=sorted(memory.get("memories",[]),key=lambda x:int(x.get("importance",0)),reverse=True)
+        if not items: print("  No user memories yet.")
+        for item in items:
+            text=str(item.get("text",""))
+            shown=text if len(text)<=52 else text[:49]+"…"
+            print(f"  {shown:<54} {int(item.get('importance',50)):3d}")
+        print()
+        print(f"  {len(items)} candidates · prompt attention capped at {RECENT_MEMORY_SLOTS} · schema {MEMORY_SCHEMA_VERSION}")
+    _page_text(buf.getvalue())
     return 0
-
 
 def _skills_command(args):
     _ensure_intelligence_files()
@@ -1298,8 +1301,10 @@ def _skills_command(args):
             return 0
         except OSError as e:
             print(f"LOOK: {e}"); return 1
-    try: print(SKILLS_FILE.read_text(encoding="utf-8").rstrip())
-    except OSError as e: print(f"LOOK: {e}"); return 1
+    try:
+        _page_text(SKILLS_FILE.read_text(encoding="utf-8").rstrip()+"\n")
+    except OSError as e:
+        print(f"LOOK: {e}"); return 1
     return 0
 
 
@@ -4793,43 +4798,40 @@ def ollama_key(args):
     return 0
 
 
+def _media_macos_app_running(app):
+    """Check whether a scriptable media app is running."""
+    try:
+        p=subprocess.run(
+            ["osascript","-e",f'application "{app}" is running'],
+            capture_output=True,text=True,timeout=2
+        )
+        return p.returncode==0 and (p.stdout or "").strip().lower()=="true"
+    except (OSError,subprocess.SubprocessError):
+        return False
+
+
 def _media_macos_status_for(app):
+    if not _media_macos_app_running(app):
+        return None
+
     if app=="Music":
-        script='''tell application "System Events"
-  if not (exists process "Music") then return ""
-end tell
-tell application "Music"
-  set st to (player state as text)
-  if st is "stopped" then return "Music|stopped||"
-  try
-    return "Music|" & st & "|" & (artist of current track) & "|" & (name of current track)
-  on error
-    return "Music|" & st & "||"
-  end try
-end tell'''
+        script='tell application "Music"\n  set st to (player state as text)\n  if st is "stopped" then return "Music|stopped||"\n  try\n    return "Music|" & st & "|" & (artist of current track) & "|" & (name of current track)\n  on error\n    return "Music|" & st & "||"\n  end try\nend tell'
     elif app=="Spotify":
-        script='''tell application "System Events"
-  if not (exists process "Spotify") then return ""
-end tell
-tell application "Spotify"
-  set st to (player state as text)
-  try
-    return "Spotify|" & st & "|" & (artist of current track) & "|" & (name of current track)
-  on error
-    return "Spotify|" & st & "||"
-  end try
-end tell'''
+        script='tell application "Spotify"\n  set st to (player state as text)\n  try\n    return "Spotify|" & st & "|" & (artist of current track) & "|" & (name of current track)\n  on error\n    return "Spotify|" & st & "||"\n  end try\nend tell'
     else:
         return None
+
     try:
         p=subprocess.run(["osascript","-e",script],capture_output=True,text=True,timeout=3)
+        if p.returncode!=0:
+            return None
         out=(p.stdout or "").strip()
-        if not out: return None
+        if not out:
+            return None
         parts=(out.split("|",3)+["","","",""])[:4]
         return {"player":parts[0],"state":parts[1],"artist":parts[2],"title":parts[3]}
     except (OSError,subprocess.SubprocessError):
         return None
-
 
 def _media_macos(action):
     players=[x for x in (_media_macos_status_for("Music"),_media_macos_status_for("Spotify")) if x]

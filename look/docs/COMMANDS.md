@@ -62,3 +62,8 @@ macOS: Music / Spotify adapter. Linux: MPRIS via `playerctl`.
 `lk skills update [FILE]` refreshes Bundled craft from the built-in pack or a compatible external pack while preserving Learned craft.
 
 Memory JSON uses schema version 1.
+
+## Fast media aliases
+`mm` → `lk media toggle` · `mn` → `lk media next` · `mp` → `lk media prev`
+
+`lk memory` and `lk skills` use LOOK's pager for readable long output.
