@@ -2,6 +2,8 @@
 
 **A local-first AI terminal environment for macOS and Linux.**
 
+![FC-LOOK shell normal](FC_screenshots/Normal.png)
+
 Future Crash is the place you inhabit. **LOOK is the machinery underneath it.**
 
 Future Crash gives a local language model a playful, persistent terminal front end. LOOK turns the terminal underneath it into a fast keyboard-driven environment for navigation, files, system inspection, Ollama, web search, remote AI hosts, and controlled agentic work.
@@ -38,6 +40,8 @@ Old historical installers that predate the version guard cannot be made version-
 
 ---
 
+![FC-LOOK shell normal](FC_screenshots/Normal.png)
+
 ## Quick start
 
 Unzip the release, open Terminal, enter the folder, and run:
@@ -56,6 +60,8 @@ future-crash
 
 That's the front door.
 
+![FC-LOOK shell normal](FC_screenshots/Normal_3.png)
+
 You can also launch it with:
 
 ```sh
@@ -73,6 +79,7 @@ LOOK is always underneath:
 ```sh
 lk
 ```
+![FC-LOOK shell normal](FC_screenshots/Error_2.png)
 
 The installer is designed to be rerunnable. Updating the project should update the files it owns rather than spraying duplicate PATH entries and aliases through your shell configuration.
 
@@ -81,6 +88,8 @@ The installer is designed to be rerunnable. Updating the project should update t
 ## What is this?
 
 There are three layers.
+
+![FC-LOOK shell normal](FC_screenshots/Normal_2.png)
 
 ### Future Crash — the front end
 
@@ -93,6 +102,7 @@ future-crash
 rst
 fc
 ```
+![FC-LOOK shell normal](FC_screenshots/LOOK_Shell_filter_find.png)
 
 ### LOOK — the terminal underneath
 
@@ -107,6 +117,7 @@ lr
 lz
 f
 ```
+![FC-LOOK shell normal](FC_screenshots/LOOK_AI.png)
 
 ### LO — the working AI
 
@@ -140,6 +151,8 @@ A normal install gives you the complete Future Crash + LOOK codebase:
 The environment remains useful without every optional component. LOOK itself does not require a local language model simply to navigate files or inspect a machine.
 
 ---
+
+![FC-LOOK shell normal](FC_screenshots/PNC.png)
 
 ## Context-sensitive completion
 
@@ -361,6 +374,8 @@ lo
 
 ---
 
+![FC-LOOK shell normal](FC_screenshots/LOOK_Shell_doctor.png)
+
 ## Memory and accumulated craft
 
 LO now keeps three deliberately small, inspectable layers:
@@ -446,6 +461,8 @@ lk settings
 ```
 
 ---
+
+![FC-LOOK shell normal](FC_screenshots/LOOK_home.png)
 
 ## Installation philosophy
 
@@ -563,6 +580,8 @@ One repository. One installer. One shell integration. One AI configuration. Two 
 **Readable machinery.** The project is Python, shell and ordinary configuration rather than an opaque application bundle.
 
 ---
+
+![FC-LOOK shell normal](FC_screenshots/Error.png)
 
 ## Updating
 
