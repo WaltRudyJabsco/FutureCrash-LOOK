@@ -1,5 +1,21 @@
 # LOOK Shell changelog
 
+## 3.5.1 — durable memory lifecycle
+
+- Explicit durable-memory intent promotes into the long-term summary immediately.
+- Adds duplicate candidate consolidation.
+- Adds periodic long-term summary pruning under a fixed budget.
+
+
+## 3.5.0 — unified version safety + Zsh command grammar
+
+- Establishes LOOK 3.5.0 as the component baseline inside Future Crash + LOOK 1.2.0.
+- Adds context-sensitive Zsh completion for `lk` and `lo`.
+- Completes Ollama, memory, skills, system commands, and saved remote host names.
+- Unified installer records component versions and refuses accidental downgrade from version-aware releases.
+- LOOK runtime behavior from 3.4.4 is otherwise preserved.
+
+
 ## 3.3.3 — thinking-output compatibility
 
 - Prefer Ollama's structured `message.thinking` field when available.

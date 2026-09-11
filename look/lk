@@ -17,7 +17,7 @@ try:
 except Exception:
     readline = None
 
-VERSION="3.4.4"
+VERSION="3.5.1"
 
 LOOK_WORDMARK = r"""       ██╗      ██╗  ██╗
        ██║      ██║ ██╔╝
@@ -839,7 +839,7 @@ def doctor():
 
 
 def _empty_memory():
-    return {"summary": "", "memories": []}
+    return {"summary": "", "memories": [], "maintenance_cycles": 0}
 
 
 DEFAULT_CORE = """# LO Core
@@ -923,7 +923,8 @@ def _load_memory():
             })
         cleaned.sort(key=lambda x:x["importance"], reverse=True)
         result={"summary":str(data.get("summary",""))[:3000],
-                "memories":cleaned[:MEMORY_CANDIDATE_LIMIT]}
+                "memories":cleaned[:MEMORY_CANDIDATE_LIMIT],
+                "maintenance_cycles":max(0,int(data.get("maintenance_cycles",0) or 0))}
         result=_prune_contaminated_memory(result)
         _save_memory(result)
         return result
@@ -1498,25 +1499,129 @@ def _learn_from_exchange(base, model, user_text, assistant_text, profile):
     return bool(skill and _append_learned_skill(skill))
 
 
+
+def _durable_memory_intent(user_text):
+    low=" ".join(str(user_text or "").split()).casefold()
+    phrases=(
+        "remember it long term",
+        "remember this long term",
+        "remember that long term",
+        "remember this permanently",
+        "remember that permanently",
+        "keep this in long-term memory",
+        "keep that in long-term memory",
+        "for long-term memory",
+        "for memory and context",
+        "memory and context sake",
+    )
+    return any(p in low for p in phrases)
+
+
+def _memory_similarity_key(text):
+    words=re.findall(r"[a-z0-9]+", str(text or "").casefold())
+    stop={"the","a","an","to","be","is","are","for","and","of","in","on","user","context","memory","long","term"}
+    return {w for w in words if w not in stop}
+
+
+def _consolidate_memory_candidates(memory):
+    """Merge only obvious duplicates; stronger wording survives."""
+    items=sorted(memory.get("memories",[]), key=lambda m:int(m.get("importance",0)), reverse=True)
+    kept=[]
+    for item in items:
+        text=str(item.get("text","")).strip()
+        key=_memory_similarity_key(text)
+        merged=False
+        for old in kept:
+            old_key=_memory_similarity_key(old.get("text",""))
+            if not key or not old_key:
+                continue
+            intersection=key & old_key
+            overlap=len(intersection)/max(1,min(len(key),len(old_key)))
+            # Two distinctive shared tokens is enough for short candidate memories
+            # such as "Portland OR context" vs "Portland OR location".
+            obvious=(overlap >= 0.60 and len(intersection) >= 2)
+            if obvious:
+                old["importance"]=max(int(old.get("importance",0)),int(item.get("importance",0)))
+                old["uses"]=max(int(old.get("uses",0)),int(item.get("uses",0)))
+                merged=True
+                break
+        if not merged:
+            kept.append(item)
+    memory["memories"]=kept[:MEMORY_CANDIDATE_LIMIT]
+    return memory
+
+
+def _rewrite_summary_maintenance(base, model, old_summary, memories, durable_text=""):
+    strong=[m for m in memories if int(m.get("importance",0))>=60]
+    material="\n".join(f"- [{int(m.get('importance',0))}] {m.get('text','')}" for m in strong[:14])
+    prompt=f"""Rewrite the long-term user summary from scratch.
+
+The summary is a compact current hypothesis about the user, not a permanent archive.
+Keep only durable knowledge that would materially improve future conversations.
+
+Preserve enduring preferences, current durable context, recurring projects/workflows,
+and explicit long-term memory requests unless newer information contradicts them.
+
+Remove or generalize stale implementation details, redundant facts, superseded facts,
+and trivia whose removal would not materially hurt future conversations.
+
+Hard maximum: 180 words.
+Return ONLY the summary. No headings, analysis, exclusions, or word counts.
+
+CURRENT SUMMARY:
+{old_summary or "(empty)"}
+
+STRONG CANDIDATES:
+{material or "(none)"}
+
+EXPLICIT DURABLE MEMORY:
+{durable_text or "(none)"}"""
+    try:
+        raw=_local_chat_once(base,model,[
+            {"role":"system","content":"Maintain a compact, current, forgetful long-term user summary. Output only the summary."},
+            {"role":"user","content":prompt},
+        ])
+        clean=_sanitize_summary(raw)
+        return clean if clean else old_summary
+    except Exception:
+        return old_summary
+
+
 def _remember_exchange(base, model, memory, user_text, assistant_text, profile="workspace"):
-    # Every completed exchange is a maintenance cycle: unused memories fade.
     memory=_decay_memories(memory)
 
     candidate=_extract_memory_candidate(base,model,user_text,assistant_text)
-    # Explicit preference/remember language gets a small deterministic safety net.
-    # The semantic worker still gets first choice because it can generalize better.
     if not candidate:
         candidate=_explicit_memory_hint(user_text)
 
+    durable=_durable_memory_intent(user_text)
+    durable_text=""
+
     if candidate:
         importance,text=candidate
+        if durable:
+            importance=max(importance,90)
+            durable_text=text
         memory=_add_memory(memory,text,importance)
-    memory["summary"]=_rewrite_summary(
-        base,model,str(memory.get("summary","")),memory.get("memories",[])
-    )
-    _save_memory(memory)
 
-    # Reusable assistant craft is separate from user memory.
+    memory=_consolidate_memory_candidates(memory)
+
+    if durable and durable_text:
+        memory["summary"]=_rewrite_summary_maintenance(
+            base,model,str(memory.get("summary","")),memory.get("memories",[]),durable_text
+        )
+    else:
+        memory["summary"]=_rewrite_summary(
+            base,model,str(memory.get("summary","")),memory.get("memories",[])
+        )
+        cycles=int(memory.get("maintenance_cycles",0))+1
+        memory["maintenance_cycles"]=cycles
+        if cycles % 12 == 0 or len(str(memory.get("summary","")).split()) > 180:
+            memory["summary"]=_rewrite_summary_maintenance(
+                base,model,str(memory.get("summary","")),memory.get("memories",[])
+            )
+
+    _save_memory(memory)
     _learn_from_exchange(base,model,user_text,assistant_text,profile)
     return memory
 
@@ -2787,6 +2892,8 @@ def ollama_chat(force_search=False, initial_prompt=None, allow_start=True, host_
             "Do NOT search or inspect the workspace merely because file tools are available. Tool availability is not a reason to use a tool. "
             "Use workspace tools only when the user actually refers to files, code, the current project, this folder/here, or asks for local inspection/action. "
             "Use relevant user memories naturally when they help, but do not expose importance scores, memory IDs, or say 'your memory says' unless the user asks about memory internals. "
+            "Persistent memory is maintained asynchronously by LOOK outside the conversational tool list. "
+            "If the user explicitly asks you to remember something, acknowledge that intent naturally; do not claim memory is limited to the current session merely because no memory tool is exposed in chat. "
             "When the user refers to 'this folder', 'here', local files, or the current project, "
             "use the workspace context and file tools instead of guessing. "
             "You may list files, read bounded text files, search filenames/text, create or intentionally modify UTF-8 text, "

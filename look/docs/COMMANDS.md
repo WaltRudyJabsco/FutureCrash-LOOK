@@ -47,3 +47,6 @@ LO keeps at most 20 candidate memories on disk and offers at most eight to promp
 
 ## Shortcuts
 `l/ls` · `ll` · `ld` · `lf` · `lt` · `lr` · `lz` · `zll` · `cdl` · `f` · `lh` · `lo` · `rs` · `rb` · `webterm`
+
+## Completion
+`lk <Tab>` completes LOOK commands contextually. `lk ollama`, `lk memory`, and `lk skills` expose their subcommands; `lk ollama host` includes saved host names. `lo` completes access flags and `@host` choices, then leaves prompt text unconstrained.

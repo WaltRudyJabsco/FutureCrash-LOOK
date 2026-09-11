@@ -2,9 +2,15 @@
 set -euo pipefail
 
 ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+
+PRODUCT_VERSION="1.2.1"
+LOOK_VERSION="3.5.1"
+FUTURE_CRASH_VERSION="1.0.0"
+
 DRY=0
 ASSUME_YES=0
 NO_OPTIONAL=0
+FORCE_DOWNGRADE=0
 BREW_BOOTSTRAPPED=0
 installed_packages=()
 created_dirs=()
@@ -15,11 +21,13 @@ usage() {
 LOOK + FUTURE CRASH — system installer
 
 Usage:
-  ./install.sh [--dry-run] [--yes] [--no-optional] [--uninstall]
+  ./install.sh [--dry-run] [--yes] [--no-optional] [--force-downgrade] [--uninstall]
 
-  --dry-run      show what LOOK would do
-  --yes          install offered Remote + AI components without prompting
-  --no-optional  install without optional Remote + AI\n  --uninstall    remove LOOK + Future Crash
+  --dry-run          show what the installer would do
+  --yes              accept optional component prompts
+  --no-optional      install without optional Remote + AI components
+  --force-downgrade  deliberately install over a newer unified release
+  --uninstall        remove Future Crash + LOOK owned files
 EOF
 }
 
@@ -28,6 +36,7 @@ while (($#)); do
     --dry-run) DRY=1 ;;
     --yes|-y) ASSUME_YES=1 ;;
     --no-optional) NO_OPTIONAL=1 ;;
+    --force-downgrade) FORCE_DOWNGRADE=1 ;;
     --uninstall)
       if command -v lk >/dev/null 2>&1; then
         exec lk uninstall
@@ -60,8 +69,61 @@ ask() {
   fi
 }
 
-echo "LOOK + FUTURE CRASH — terminal environment installer"
-echo "$(uname -s) · $(uname -m)"
+
+version_lt() {
+  local a="$1" b="$2"
+  local a1=0 a2=0 a3=0 b1=0 b2=0 b3=0
+  IFS=. read -r a1 a2 a3 <<< "${a%%[-+]*}"
+  IFS=. read -r b1 b2 b3 <<< "${b%%[-+]*}"
+  a1=${a1:-0}; a2=${a2:-0}; a3=${a3:-0}
+  b1=${b1:-0}; b2=${b2:-0}; b3=${b3:-0}
+  (( a1 < b1 )) && return 0
+  (( a1 > b1 )) && return 1
+  (( a2 < b2 )) && return 0
+  (( a2 > b2 )) && return 1
+  (( a3 < b3 ))
+}
+
+installed_release_version() {
+  local manifest="$HOME/.local/share/look/install_manifest.json"
+  [[ -f "$manifest" ]] || return 1
+  local value=""
+  value="$(sed -n 's/.*"release"[[:space:]]*:[[:space:]]*"\([^"]*\)".*/\1/p' "$manifest" | head -n1)"
+  if [[ -z "$value" ]]; then
+    value="$(sed -n 's/.*"version"[[:space:]]*:[[:space:]]*"future-crash-look-\([^"]*\)".*/\1/p' "$manifest" | head -n1)"
+  fi
+  [[ -n "$value" ]] || return 1
+  printf '%s\n' "$value"
+}
+
+preflight_version_guard() {
+  local installed=""
+  installed="$(installed_release_version || true)"
+  [[ -n "$installed" ]] || return 0
+
+  if version_lt "$PRODUCT_VERSION" "$installed"; then
+    echo
+    echo "VERSION GUARD"
+    echo "  installed: Future Crash + LOOK $installed"
+    echo "  requested: Future Crash + LOOK $PRODUCT_VERSION"
+    if ((FORCE_DOWNGRADE)); then
+      echo "  ! deliberate downgrade allowed by --force-downgrade"
+    else
+      echo "  Refusing to overwrite a newer unified installation."
+      echo "  Use --force-downgrade only if you intentionally want the older release."
+      exit 3
+    fi
+  elif [[ "$PRODUCT_VERSION" == "$installed" ]]; then
+    echo "  ✓ Future Crash + LOOK $PRODUCT_VERSION already installed; reconciling files"
+  else
+    echo "  ↑ updating Future Crash + LOOK $installed → $PRODUCT_VERSION"
+  fi
+}
+
+preflight_version_guard
+
+echo "FUTURE CRASH + LOOK $PRODUCT_VERSION — terminal environment installer"
+echo "LOOK $LOOK_VERSION · Future Crash $FUTURE_CRASH_VERSION · $(uname -s) · $(uname -m)"
 echo
 echo "One install: LOOK underneath, Future Crash on top."
 echo "Remote access and local AI remain optional."
@@ -194,6 +256,9 @@ fi
 
 # LOOK owns this fragment; the user's ~/.zshrc remains theirs.
 run cp "$ROOT/look/zshrc" "$LOOK_ZSH_FILE"
+run mkdir -p "$LOOK_ZSH_DIR/completions"
+run cp "$ROOT/look/completions/_lk" "$LOOK_ZSH_DIR/completions/_lk"
+run cp "$ROOT/look/completions/_lo" "$LOOK_ZSH_DIR/completions/_lo"
 
 if ((!DRY)); then
   touch "$HOME/.zshrc"
@@ -236,31 +301,6 @@ if ((!DRY)); then
   zsh -n "$LOOK_ZSH_FILE"
   zsh -n "$HOME/.zshrc"
 
-  # Record only what this installer can prove it added. `lk uninstall` uses
-  # this manifest so it never guesses that a pre-existing package belongs to LOOK.
-  export LOOK_MANIFEST_PACKAGES="$(printf '%s\n' "${installed_packages[@]-}")"
-  export LOOK_MANIFEST_DIRS="$(printf '%s\n' "${created_dirs[@]-}")"
-  export LOOK_MANIFEST_ZSH_BACKUP="$ZSH_BACKUP"
-  export LOOK_MANIFEST_BREW_BOOTSTRAPPED="$BREW_BOOTSTRAPPED"
-  python3 - <<'PY'
-import json, os
-from pathlib import Path
-
-state = Path.home()/".local/share/look"
-state.mkdir(parents=True, exist_ok=True)
-manifest = {
-    "version": "future-crash-look-1.0.0",
-    "packages": [x for x in os.environ.get("LOOK_MANIFEST_PACKAGES","").splitlines() if x],
-    "created_dirs": [x for x in os.environ.get("LOOK_MANIFEST_DIRS","").splitlines() if x],
-    "zsh_backup": os.environ.get("LOOK_MANIFEST_ZSH_BACKUP",""),
-    "brew_bootstrapped": os.environ.get("LOOK_MANIFEST_BREW_BOOTSTRAPPED","0") == "1",
-}
-tmp = state/"install_manifest.json.tmp"
-tmp.write_text(json.dumps(manifest, indent=2) + "\n")
-tmp.chmod(0o600)
-tmp.replace(state/"install_manifest.json")
-PY
-
   # Seed LO intelligence without overwriting local memory or learned craft.
   LOOK_STATE="$HOME/.local/share/look"
   run mkdir -p "$LOOK_STATE"
@@ -274,6 +314,49 @@ PY
   run cp "$ROOT/future-crash/future-crash" "$HOME/.local/bin/future-crash"
   run chmod +x "$HOME/.local/bin/future-crash"
 
+  # Record only what this installer can prove it added. `lk uninstall` uses
+  # this manifest so it never guesses that a pre-existing package belongs to LOOK.
+  export LOOK_MANIFEST_PACKAGES="$(printf '%s\n' "${installed_packages[@]-}")"
+  export LOOK_MANIFEST_DIRS="$(printf '%s\n' "${created_dirs[@]-}")"
+  export LOOK_MANIFEST_ZSH_BACKUP="$ZSH_BACKUP"
+  export LOOK_MANIFEST_BREW_BOOTSTRAPPED="$BREW_BOOTSTRAPPED"
+  export FCL_RELEASE_VERSION="$PRODUCT_VERSION"
+  export FCL_LOOK_VERSION="$LOOK_VERSION"
+  export FCL_FUTURE_CRASH_VERSION="$FUTURE_CRASH_VERSION"
+  python3 - <<'PY'
+import json, os
+from pathlib import Path
+
+state = Path.home()/".local/share/look"
+state.mkdir(parents=True, exist_ok=True)
+old = {}
+old_path = state/"install_manifest.json"
+try:
+    old = json.loads(old_path.read_text())
+except Exception:
+    old = {}
+
+old_packages = old.get("packages") if isinstance(old.get("packages"), list) else []
+old_dirs = old.get("created_dirs") if isinstance(old.get("created_dirs"), list) else []
+
+manifest = {
+    "product": "future-crash-look",
+    "release": os.environ.get("FCL_RELEASE_VERSION", "1.2.1"),
+    "components": {
+        "look": os.environ.get("FCL_LOOK_VERSION", "3.5.1"),
+        "future_crash": os.environ.get("FCL_FUTURE_CRASH_VERSION", "1.0.0"),
+    },
+    "packages": sorted(set(old_packages + [x for x in os.environ.get("LOOK_MANIFEST_PACKAGES","").splitlines() if x])),
+    "created_dirs": sorted(set(old_dirs + [x for x in os.environ.get("LOOK_MANIFEST_DIRS","").splitlines() if x])),
+    "zsh_backup": os.environ.get("LOOK_MANIFEST_ZSH_BACKUP","") or old.get("zsh_backup",""),
+    "brew_bootstrapped": (os.environ.get("LOOK_MANIFEST_BREW_BOOTSTRAPPED","0") == "1") or bool(old.get("brew_bootstrapped", False)),
+}
+tmp = state/"install_manifest.json.tmp"
+tmp.write_text(json.dumps(manifest, indent=2) + "\n")
+tmp.chmod(0o600)
+tmp.replace(state/"install_manifest.json")
+PY
+
   # Optional reference terminal experience. Core remains independent.
   TERMINAL_OS="$(uname -s 2>/dev/null || echo unknown)"
   echo
@@ -285,7 +368,7 @@ PY
   fi
   echo "  Future Crash + LOOK works without these."
   echo
-  if ask_yes_no "Install/check recommended terminal components?" "n"; then
+  if ask "  Install/check recommended terminal components?" N; then
     if [[ "$TERMINAL_OS" == "Darwin" ]] && command -v brew >/dev/null 2>&1; then
       [[ -d "/Applications/iTerm.app" || -d "$HOME/Applications/iTerm.app" ]] \
         && echo "  ✓ iTerm2" \
@@ -349,7 +432,7 @@ fi
 LOOK_MAN_SRC="$ROOT/look/lk.1"
 LOOK_MAN_DIR="${XDG_DATA_HOME:-$HOME/.local/share}/man/man1"
 if [[ -f "$LOOK_MAN_SRC" ]]; then
-  mkdir -p "$LOOK_MAN_DIR"
-  cp "$LOOK_MAN_SRC" "$LOOK_MAN_DIR/lk.1"
+  run mkdir -p "$LOOK_MAN_DIR"
+  run cp "$LOOK_MAN_SRC" "$LOOK_MAN_DIR/lk.1"
 fi
 

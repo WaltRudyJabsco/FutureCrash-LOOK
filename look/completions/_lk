@@ -1,0 +1,139 @@
+#compdef lk
+# LOOK context-sensitive completion.
+
+_look_saved_hosts() {
+  local file="$HOME/.local/share/look/ollama_hosts.json"
+  [[ -r "$file" ]] || { print -l local; return; }
+  python3 - "$file" 2>/dev/null <<'PY'
+import json,sys
+try:
+    d=json.load(open(sys.argv[1]))
+    print("local")
+    for name in sorted((d.get("hosts") or {}).keys()):
+        if name != "local":
+            print(name)
+except Exception:
+    print("local")
+PY
+}
+
+_lk() {
+  local context state line
+  typeset -A opt_args
+
+  local -a top
+  top=(
+    'detail:detailed filesystem view'
+    'dirs:directories only'
+    'files:files only'
+    'tree:tree view'
+    'recent:newest first'
+    'size:size-oriented view'
+    'run:project/action view'
+    'up:list listening services'
+    'ports:list listening ports'
+    'port:inspect a port'
+    'process:find a process'
+    'processes:browse processes'
+    'pid:inspect process ID'
+    'git:repository status'
+    'machine:machine capabilities'
+    'gpu:GPU information'
+    'disk:disk usage'
+    'net:network addresses'
+    'tailscale:tailnet status'
+    'env:environment'
+    'path:PATH diagnostics'
+    'why:explain command resolution'
+    'ollama:Ollama models/hosts/search/access'
+    'memory:LO user memory'
+    'forget:forget matching user memory'
+    'clear-memory:clear LO user memory'
+    'skills:LO assistant craft'
+    'settings:unified settings panel'
+    'home:LOOK home'
+    'doctor:diagnose environment'
+    'config:installed paths/state'
+    'secrets:secret status'
+    'undo:undo last safe filesystem action'
+    'uninstall:remove owned files'
+    'version:print version'
+    'help:command glossary'
+  )
+
+  if (( CURRENT == 2 )); then
+    _describe -t commands 'LOOK command' top
+    _files
+    return
+  fi
+
+  case "$words[2]" in
+    ollama)
+      local -a sub
+      sub=(
+        'models:model panel'
+        'test:benchmark model'
+        'host:manage Ollama hosts'
+        'share:Tailscale Ollama share'
+        'key:web-search key'
+        'access:LO capability profile'
+      )
+      if (( CURRENT == 3 )); then
+        _describe -t ollama 'Ollama command' sub
+        return
+      fi
+      case "$words[3]" in
+        host)
+          if (( CURRENT == 4 )); then
+            local -a hosts
+            hosts=("${(@f)$(_look_saved_hosts)}")
+            _describe -t hosts 'saved Ollama host' hosts
+            _values 'host action' forget
+            return
+          elif [[ "$words[4]" == "forget" && CURRENT == 5 ]]; then
+            local -a hosts
+            hosts=("${(@f)$(_look_saved_hosts)}")
+            _describe -t hosts 'saved Ollama host' hosts
+            return
+          fi
+          ;;
+        share)
+          (( CURRENT == 4 )) && _values 'share action' status off
+          return
+          ;;
+        key)
+          (( CURRENT == 4 )) && _values 'key action' status
+          return
+          ;;
+        access)
+          (( CURRENT == 4 )) && _values 'access profile' conservative workspace power unsafe
+          return
+          ;;
+        test)
+          (( CURRENT == 4 )) && _values 'test option' --all
+          return
+          ;;
+      esac
+      ;;
+    memory)
+      (( CURRENT == 3 )) && _values 'memory action' add forget clear clear-summary prune
+      return
+      ;;
+    skills)
+      (( CURRENT == 3 )) && _values 'skills action' add forget clear-learned path
+      return
+      ;;
+    port|pid)
+      _message 'number'
+      return
+      ;;
+    process|why|forget)
+      _message 'text'
+      return
+      ;;
+    detail|dirs|files|tree|recent|size|run|git)
+      _files
+      return
+      ;;
+  esac
+}

@@ -394,6 +394,17 @@ flightProgress() {
 [[ -f ~/.fzf.zsh ]] && source ~/.fzf.zsh
 [[ -f ~/.p10k.zsh ]] && source ~/.p10k.zsh
 
+
+# LOOK context-sensitive completion.
+fpath=("$HOME/.config/look/completions" $fpath)
+autoload -Uz compinit
+(( $+functions[compdef] )) || compinit -i
+autoload -Uz _lk _lo
+compdef _lk lk
+# lo is a noglob alias; COMPLETE_ALIASES lets its own grammar complete before expansion.
+setopt COMPLETE_ALIASES
+compdef _lo lo
+
 # LOOK unified command
 alias lk='nocorrect lk'
 commands() { "$HOME/.local/bin/lk" help; }

@@ -59,3 +59,15 @@ Controls:
 - `lk skills path`
 
 This is self-improvement in an inspectable Markdown layer, not unrestricted rewriting of LO's core.
+
+## Long-term pruning
+
+The long-term summary is not append-only. Explicit durable intent triggers an immediate
+summary rewrite. Otherwise, every 12 memory-maintenance cycles (or when the summary exceeds
+its budget), LO rebuilds the summary from the current summary plus strong surviving candidates.
+
+The rewrite may remove stale, contradicted, superseded, redundant, or low-value details.
+It must remain under 180 words. Candidate memories continue to carry importance and decay;
+the long-term summary uses semantic rewriting as its forgetting mechanism.
+
+Obvious duplicate candidates are consolidated before promotion.

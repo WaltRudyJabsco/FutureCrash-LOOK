@@ -1,4 +1,4 @@
-.TH LK 1 "September 2026" "LOOK 3.4.0 / Future Crash + LOOK 1.1.1" "User Commands"
+.TH LK 1 "September 2026" "LOOK 3.5.1 / Future Crash + LOOK 1.2.1" "User Commands"
 .SH NAME
 lk \- inspect, navigate, manipulate, and ask your computer
 .br
@@ -229,3 +229,26 @@ sections; tool activity remains distinct.
 .I ~/.zsh_secrets
 .br
 .I ~/.config/look/
+
+.SH COMPLETION
+LOOK installs context-sensitive Zsh completion for
+.B lk
+and
+.B lo
+under ~/.config/look/completions.
+Commands such as
+.B lk ollama
+,
+.B lk memory
+, and
+.B lk skills
+complete their valid subcommands.
+Saved Ollama host names are completed dynamically.
+LO completion stops at its command/options layer so free-form prompt text remains free-form.
+.SH VERSION SAFETY
+Future Crash + LOOK installers write a versioned install manifest under
+~/.local/share/look/install_manifest.json.
+A current installer refuses to overwrite a newer unified release unless
+.B --force-downgrade
+is supplied deliberately.
+Historical installers predating this guard cannot be retroactively protected.

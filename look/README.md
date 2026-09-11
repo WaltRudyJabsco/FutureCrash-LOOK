@@ -578,3 +578,9 @@ The core rules:
 - Do not make the user remember machinery that LOOK can remember for them.
 
 **Keep Unix. Lose some syntax.**
+
+## Zsh completion
+
+The unified installer installs `_lk` and `_lo` completion definitions under `~/.config/look/completions`.
+
+`lk` completion is context-sensitive for Ollama, memory, skills, system commands, paths, and saved remote host names. `lo` completes only its command/options layer before yielding to natural-language input.

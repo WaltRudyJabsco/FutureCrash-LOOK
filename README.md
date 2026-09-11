@@ -10,6 +10,34 @@ They began as separate projects. They now install and live as one system.
 
 ---
 
+## Release and component versions
+
+This release establishes a clean version baseline:
+
+| Layer | Version |
+| --- | ---: |
+| Future Crash + LOOK | **1.2.1** |
+| LOOK component | **3.5.1** |
+| Future Crash component | **1.0.0** |
+
+The unified repository is the canonical distribution. The `look/` and `future-crash/` directories remain clean component sources that can be mirrored into their individual repositories.
+
+The installer records these versions in:
+
+```text
+~/.local/share/look/install_manifest.json
+```
+
+A newer installer updates normally; the same version reconciles its owned files. An older **version-aware** installer refuses to overwrite a newer unified release unless you explicitly run:
+
+```sh
+./install.sh --force-downgrade
+```
+
+Old historical installers that predate the version guard cannot be made version-aware retroactively.
+
+---
+
 ## Quick start
 
 Unzip the release, open Terminal, enter the folder, and run:
@@ -110,6 +138,39 @@ A normal install gives you the complete Future Crash + LOOK codebase:
 - **Unified settings** — AI host, model and access configuration in one place.
 
 The environment remains useful without every optional component. LOOK itself does not require a local language model simply to navigate files or inspect a machine.
+
+---
+
+## Context-sensitive completion
+
+LOOK now teaches Zsh its command grammar instead of relying only on history.
+
+Examples:
+
+```text
+lk <Tab>
+  doctor  machine  memory  ollama  settings  skills ...
+
+lk ollama <Tab>
+  access  host  key  models  share  test
+
+lk ollama host <Tab>
+  local  3090  ...saved hosts
+
+lk memory <Tab>
+  add  forget  clear  clear-summary  prune
+
+lk skills <Tab>
+  add  forget  clear-learned  path
+```
+
+`lo` completes only its structural options (`--workspace`, `--power`, `@host`, etc.). After that, the input is natural language rather than a command tree.
+
+Completion files live in:
+
+```text
+~/.config/look/completions/
+```
 
 ---
 
@@ -339,6 +400,20 @@ User memory and assistant craft are separate. A fresh install begins with blank 
 Existing LOOK 3.3 fixed-slot memory is migrated automatically into the new candidate format.
 
 > **Small context. Dynamic relevance. Natural forgetting. Accumulated craft.**
+
+---
+
+## Long-term memory maintenance
+
+Candidate memory and long-term memory now have different lifecycles.
+
+Explicit phrases such as `remember this long term`, `keep this in long-term memory`, or `for memory and context` trigger immediate durable-summary promotion.
+
+The long-term summary is not append-only or permanent. Every 12 memory-maintenance cycles—or whenever it exceeds its budget—LO rewrites it under a hard **180-word** cap. That rewrite may remove stale, redundant, contradicted, superseded, or low-value facts and generalize details that no longer deserve individual prompt space.
+
+Obvious duplicate candidate memories are consolidated before promotion.
+
+> If removing a fact would not materially hurt future conversations, it probably does not belong in long-term memory.
 
 ---
 
