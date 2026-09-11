@@ -4,7 +4,20 @@ import http.client
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from contextlib import contextmanager
 from pathlib import Path
-VERSION="3.4.3"
+
+try:
+    import readline
+    try:
+        if "libedit" in (getattr(readline, "__doc__", "") or "").lower():
+            readline.parse_and_bind("bind ^I rl_complete")
+        else:
+            readline.parse_and_bind("set editing-mode emacs")
+    except Exception:
+        pass
+except Exception:
+    readline = None
+
+VERSION="3.4.4"
 
 LOOK_WORDMARK = r"""       ██╗      ██╗  ██╗
        ██║      ██║ ██╔╝

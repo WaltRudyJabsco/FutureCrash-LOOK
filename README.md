@@ -265,6 +265,19 @@ Web search is optional. Local inference and LOOK's normal terminal features do n
 
 ---
 
+## Interactive LO line editing
+
+The interactive `you ›` prompt uses the host system's readline/libedit support when available.
+
+- Left / Right arrows move within the line.
+- Up / Down arrows navigate input history.
+- Home / End work where supported.
+- Backspace/delete continue to behave normally.
+
+If readline/libedit is unavailable, LO falls back to ordinary Python input.
+
+---
+
 ## Conversation-first LO
 
 LO is a conversational assistant first and a workspace agent when the request actually calls for one.
