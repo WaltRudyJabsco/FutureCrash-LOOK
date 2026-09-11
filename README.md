@@ -529,8 +529,8 @@ This release establishes the following baseline:
 
 | Layer | Version |
 | --- | ---: |
-| Future Crash + LOOK | **1.3.2** |
-| LOOK | **3.6.2** |
+| Future Crash + LOOK | **1.3.3** |
+| LOOK | **3.6.3** |
 | Future Crash | **1.0.0** |
 | Memory schema | **1** |
 | Skills schema | **1** |

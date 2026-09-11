@@ -17,7 +17,7 @@ try:
 except Exception:
     readline = None
 
-VERSION="3.6.2"
+VERSION="3.6.3"
 
 LOOK_WORDMARK = r"""       ██╗      ██╗  ██╗
        ██║      ██║ ██╔╝
@@ -4798,62 +4798,67 @@ def ollama_key(args):
     return 0
 
 
-def _media_macos_app_running(app):
-    """Check whether a scriptable media app is running."""
+def _media_macos_script(app, body):
+    # Guard and control in one AppleScript call so LOOK never launches a player.
+    script = (
+        f'if application "{app}" is running then\n'
+        f'  tell application "{app}"\n{body}\n  end tell\n'
+        'else\n  return "__LOOK_NOT_RUNNING__"\nend if'
+    )
     try:
-        p=subprocess.run(
-            ["osascript","-e",f'application "{app}" is running'],
-            capture_output=True,text=True,timeout=2
-        )
-        return p.returncode==0 and (p.stdout or "").strip().lower()=="true"
+        return subprocess.run(["osascript","-e",script],capture_output=True,text=True,timeout=3)
     except (OSError,subprocess.SubprocessError):
-        return False
+        return None
 
 
 def _media_macos_status_for(app):
-    if not _media_macos_app_running(app):
-        return None
-
     if app=="Music":
-        script='tell application "Music"\n  set st to (player state as text)\n  if st is "stopped" then return "Music|stopped||"\n  try\n    return "Music|" & st & "|" & (artist of current track) & "|" & (name of current track)\n  on error\n    return "Music|" & st & "||"\n  end try\nend tell'
+        body='''    set st to (player state as text)
+    try
+      return "Music|" & st & "|" & (artist of current track) & "|" & (name of current track)
+    on error
+      return "Music|" & st & "||"
+    end try'''
     elif app=="Spotify":
-        script='tell application "Spotify"\n  set st to (player state as text)\n  try\n    return "Spotify|" & st & "|" & (artist of current track) & "|" & (name of current track)\n  on error\n    return "Spotify|" & st & "||"\n  end try\nend tell'
+        body='''    set st to (player state as text)
+    try
+      return "Spotify|" & st & "|" & (artist of current track) & "|" & (name of current track)
+    on error
+      return "Spotify|" & st & "||"
+    end try'''
     else:
         return None
-
-    try:
-        p=subprocess.run(["osascript","-e",script],capture_output=True,text=True,timeout=3)
-        if p.returncode!=0:
-            return None
-        out=(p.stdout or "").strip()
-        if not out:
-            return None
-        parts=(out.split("|",3)+["","","",""])[:4]
-        return {"player":parts[0],"state":parts[1],"artist":parts[2],"title":parts[3]}
-    except (OSError,subprocess.SubprocessError):
+    p=_media_macos_script(app,body)
+    if p is None or p.returncode!=0:
         return None
+    out=(p.stdout or "").strip()
+    if not out or out=="__LOOK_NOT_RUNNING__":
+        return None
+    parts=(out.split("|",3)+["","","",""])[:4]
+    return {"player":parts[0],"state":parts[1],"artist":parts[2],"title":parts[3]}
+
 
 def _media_macos(action):
-    players=[x for x in (_media_macos_status_for("Music"),_media_macos_status_for("Spotify")) if x]
-    if not players:
-        print("LOOK media · no supported running player found (Music or Spotify)")
-        return 1
-    current=next((p for p in players if p["state"].lower()=="playing"),players[0])
-    app=current["player"]
     if action=="status":
-        track=" — ".join(x for x in (current["artist"],current["title"]) if x)
-        print(f"{app} · {current['state'] or 'unknown'}" + (f" · {track}" if track else ""))
-        return 0
-    commands={"toggle":"playpause","next":"next track","prev":"previous track","stop":"stop" if app=="Music" else "pause"}
-    try:
-        p=subprocess.run(["osascript","-e",f'tell application "{app}" to {commands[action]}'],
-                         capture_output=True,text=True,timeout=3)
-        if p.returncode!=0:
-            print(f"LOOK media · {p.stderr.strip() or 'command failed'}")
+        players=[x for x in (_media_macos_status_for("Music"),_media_macos_status_for("Spotify")) if x]
+        if not players:
+            print("LOOK media · no supported player is open (Music or Spotify)")
             return 1
+        current=next((p for p in players if p["state"].lower()=="playing"),players[0])
+        track=" — ".join(x for x in (current["artist"],current["title"]) if x)
+        print(f"{current['player']} · {current['state'] or 'unknown'}" + (f" · {track}" if track else ""))
         return 0
-    except (OSError,subprocess.SubprocessError) as e:
-        print(f"LOOK media · {e}"); return 1
+
+    commands={
+        "Music":{"toggle":"    playpause","next":"    next track","prev":"    previous track","stop":"    stop"},
+        "Spotify":{"toggle":"    playpause","next":"    next track","prev":"    previous track","stop":"    pause"},
+    }
+    for app in ("Music","Spotify"):
+        p=_media_macos_script(app,commands[app][action])
+        if p is not None and p.returncode==0 and (p.stdout or "").strip()!="__LOOK_NOT_RUNNING__":
+            return 0
+    print("LOOK media · no supported player is open (Music or Spotify)")
+    return 1
 
 
 def _media_linux(action):
