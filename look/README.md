@@ -632,3 +632,14 @@ Names with a suffix and dotfiles imply file intent. A trailing slash implies dir
 File and directory creation are journaled and available to `lk undo`. Undo refuses to remove a created file after it has changed or a created directory after it contains anything.
 
 `mkd DIR` remains as a compatibility wrapper around `lmk -d DIR`.
+
+
+## Personality and thinking
+
+`lk personality [lo|robot|max|philosopher]` selects an inspectable Markdown personality pack.
+
+`lk thinking [light|adaptive|deep]` controls requested reasoning effort.
+
+`lk think-display [compact|full|quiet]` controls visible reasoning presentation. Compact is the default rolling live view.
+
+These settings are independent of LO's access/capability profile. Personality never grants tools or permissions.

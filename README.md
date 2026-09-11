@@ -376,6 +376,68 @@ That means the program can eventually stabilize while the reviewed assistant cra
 
 ---
 
+## Future Crash personality boundary
+
+Future Crash and LO share the same Ollama substrate, but they do **not** share personality selection.
+
+Future Crash owns a fixed application personality in:
+
+```text
+~/.local/share/future-crash/personality.md
+```
+
+LO remains user-selectable (`lo`, `robot`, `max`, `philosopher`). Switching LO personality therefore does not turn Future Crash into Philosopher or Space Robot.
+
+Short Future Crash artifacts—fortunes, ambient/oracle observations, and similar micro-generations—are **final-only**. Model reasoning is discarded before the text reaches the interface, including Qwen/Ollama template cases where a stray closing `</think>` appears in visible content.
+
+---
+
+## LO personality and thinking
+
+LO now has three independent controls. They deliberately do different jobs:
+
+```text
+CAPABILITY    what LO is allowed to do
+PERSONALITY   how LO speaks and approaches the interaction
+THINKING      how much deliberation and how that work is presented
+```
+
+Choose them interactively with `lk settings`, or directly:
+
+```sh
+lk personality lo
+lk personality robot
+lk personality max
+lk personality philosopher
+
+lk thinking light
+lk thinking adaptive
+lk thinking deep
+
+lk think-display compact
+lk think-display full
+lk think-display quiet
+```
+
+The four bundled personalities are ordinary Markdown instruction packs:
+
+- **LO** — balanced, concise, curious, practical.
+- **Space Robot** (`robot`) — dry, strange, retro-futurist, gently nonhuman.
+- **Max** — rapid, punchy, synthetic-TV energy without sacrificing technical clarity.
+- **Philosopher** — first-principles, reflective, with restrained poetic language.
+
+They live in `~/.local/share/look/personalities/`. The active selection is separate from the files, so personality packs can be replaced or updated independently of user memory, skills, model choice, and capability level.
+
+### Rolling thinking
+
+`compact` is the default thinking display. Rather than dumping a large reasoning block after the wait, LOOK consumes Ollama's streaming response and promotes readable chunks into a small live rolling view. The goal is to show that work is progressing without turning every answer into a wall of process text.
+
+`full` exposes the visible thinking stream as readable chunks. `quiet` minimizes reasoning display. These are presentation choices; they do not change capability permissions.
+
+Thinking depth defaults to `adaptive`: trivial questions should feel immediate while difficult coding or reasoning work can receive more deliberation.
+
+---
+
 ## Smart make
 
 `lmk` — **LOOK make** — collapses the two ordinary Unix creation primitives into one predictable command.
@@ -580,9 +642,9 @@ This release establishes the following baseline:
 
 | Layer | Version |
 | --- | ---: |
-| Future Crash + LOOK | **1.4.2** |
-| LOOK | **3.7.2** |
-| Future Crash | **1.0.0** |
+| Future Crash + LOOK | **1.5.1** |
+| LOOK | **3.8.0** |
+| Future Crash | **1.0.1** |
 | Memory schema | **1** |
 | Skills schema | **1** |
 | Bundled skills pack | **1** |

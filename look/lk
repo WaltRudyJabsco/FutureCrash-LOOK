@@ -17,7 +17,7 @@ try:
 except Exception:
     readline = None
 
-VERSION="3.7.2"
+VERSION="3.8.0"
 
 LOOK_WORDMARK = r"""       ██╗      ██╗  ██╗
        ██║      ██║ ██╔╝
@@ -41,6 +41,10 @@ OLLAMA_MODEL_FILE=STATE_DIR/"ollama_model"
 OLLAMA_MODELS_FILE=STATE_DIR/"ollama_models.json"
 OLLAMA_HOSTS_FILE=STATE_DIR/"ollama_hosts.json"
 LO_ACCESS_FILE=STATE_DIR/"lo_access"
+LO_PERSONALITY_FILE=STATE_DIR/"lo_personality"
+LO_THINKING_FILE=STATE_DIR/"lo_thinking"
+LO_THINK_DISPLAY_FILE=STATE_DIR/"lo_think_display"
+PERSONALITIES_DIR=STATE_DIR/"personalities"
 OLLAMA_SHARE_PORT=11435
 OLLAMA_SHARE_PID=STATE_DIR/"ollama_share_proxy.pid"
 LOCAL_OLLAMA_URL="http://127.0.0.1:11434"
@@ -645,6 +649,15 @@ MEDIA
   lk media stop        stop/pause, then show current state
   mm / mn / mp         fast aliases: toggle / next / previous
 
+LO PERSONALITY + THINKING
+  lk personality       show personality choices
+  lk personality NAME  lo · robot · max · philosopher
+  lk thinking          show thinking depth
+  lk thinking MODE     light · adaptive · deep
+  lk think-display     show thinking presentation
+  lk think-display MODE compact · full · quiet
+  lk settings          configure all of these interactively
+
 SYSTEM
   lk home              friendly LOOK home screen
   lk doctor            check the environment
@@ -1126,6 +1139,9 @@ def _memory_context(memory):
         core=skills=""
     if core: parts.insert(0, core)
     if skills: parts.insert(1 if core else 0, skills)
+    personality=_personality_text()
+    if personality:
+        parts.insert((1 if core else 0)+(1 if skills else 0), personality)
     return "\n\n".join(parts)
 
 
@@ -2485,6 +2501,82 @@ def _tool_make_directory(workspace, path):
 
 LO_PROFILES=("conservative","workspace","power","unsafe")
 
+
+LO_PERSONALITIES=("lo","robot","max","philosopher")
+LO_THINKING=("light","adaptive","deep")
+LO_THINK_DISPLAY=("compact","full","quiet")
+
+def _read_choice(path, allowed, default, env_name=None):
+    if env_name:
+        value=os.environ.get(env_name,"").strip().lower()
+        if value in allowed: return value
+    try:
+        value=path.read_text(encoding="utf-8").strip().lower()
+        if value in allowed: return value
+    except OSError:
+        pass
+    return default
+
+def _save_choice(path, value, allowed):
+    if value not in allowed: raise ValueError(value)
+    STATE_DIR.mkdir(parents=True,exist_ok=True)
+    tmp=path.with_suffix(".tmp")
+    tmp.write_text(value+"\n",encoding="utf-8")
+    os.chmod(tmp,0o600); tmp.replace(path); os.chmod(path,0o600)
+
+def _load_personality():
+    return _read_choice(LO_PERSONALITY_FILE,LO_PERSONALITIES,"lo","LOOK_LO_PERSONALITY")
+
+def _load_thinking():
+    return _read_choice(LO_THINKING_FILE,LO_THINKING,"adaptive","LOOK_LO_THINKING")
+
+def _load_think_display():
+    return _read_choice(LO_THINK_DISPLAY_FILE,LO_THINK_DISPLAY,"compact","LOOK_LO_THINK_DISPLAY")
+
+def _personality_text(name=None):
+    name=(name or _load_personality()).lower()
+    path=PERSONALITIES_DIR/f"{name}.md"
+    try: return path.read_text(encoding="utf-8").strip()
+    except OSError: return ""
+
+def _choice_command(label,args,path,allowed,default,descriptions):
+    current=_read_choice(path,allowed,default)
+    if not args or args[0] in {"status","list"}:
+        _title(label)
+        for name in allowed:
+            print(f"  {'✓' if name==current else ' '} {name:<12} {descriptions.get(name,'')}")
+        return 0
+    value=args[0].lower()
+    aliases={"space":"robot","space-robot":"robot","philosopher-poet":"philosopher","normal":"lo"}
+    value=aliases.get(value,value)
+    if value not in allowed:
+        print(f"LOOK · choose: {' · '.join(allowed)}"); return 1
+    _save_choice(path,value,allowed)
+    print(f"✓ {label} · {value}")
+    return 0
+
+def lo_personality(args):
+    return _choice_command("LO personality",args,LO_PERSONALITY_FILE,LO_PERSONALITIES,"lo",{
+        "lo":"balanced · concise · curious",
+        "robot":"dry · strange · retro-futurist",
+        "max":"rapid · punchy · synthetic-TV energy",
+        "philosopher":"reflective · first-principles · poetic restraint",
+    })
+
+def lo_thinking(args):
+    return _choice_command("LO thinking",args,LO_THINKING_FILE,LO_THINKING,"adaptive",{
+        "light":"favor fast responses",
+        "adaptive":"match effort to the task",
+        "deep":"favor deliberate reasoning",
+    })
+
+def lo_think_display(args):
+    return _choice_command("LO think display",args,LO_THINK_DISPLAY_FILE,LO_THINK_DISPLAY,"compact",{
+        "compact":"rolling live thought window",
+        "full":"stream full visible thinking",
+        "quiet":"minimal working indicator",
+    })
+
 def _load_lo_profile():
     env=os.environ.get("LOOK_LO_PROFILE","").strip().lower()
     if env in LO_PROFILES:
@@ -2969,6 +3061,61 @@ def _choose_ollama_model(running):
     return preferred, False
 
 
+class _RollingThinking:
+    def __init__(self, mode):
+        self.mode=mode
+        self.lines=[]
+        self.started=False
+        self.buffer=""
+
+    def feed(self,text):
+        if not text or self.mode=="quiet": return
+        self.buffer+=text
+        # Promote readable clauses/chunks instead of repainting every token.
+        while True:
+            m=re.search(r"(.{35,160}?(?:[.!?]\s+|\n)|.{120,160}(?:\s+|$))",self.buffer,re.S)
+            if not m: break
+            chunk=" ".join(m.group(1).split()).strip()
+            self.buffer=self.buffer[m.end():]
+            if chunk: self._show(chunk)
+
+    def _show(self,chunk):
+        if self.mode=="full":
+            if not self.started:
+                print("\\n"+_ansi_label("thinking ›","2"))
+                self.started=True
+            print("  "+_c(chunk,"2"),flush=True)
+            return
+        self.lines=(self.lines+[chunk])[-3:]
+        if not sys.stdout.isatty():
+            print("thinking › "+chunk,flush=True); return
+        if self.started:
+            sys.stdout.write(f"\\033[{len(self.lines)-1 if len(self.lines)>1 else 1}A")
+        else:
+            print()
+            self.started=True
+        for line in self.lines:
+            sys.stdout.write("\\r\\033[2K"+_ansi_label("thinking ›","2")+" "+_c(line[:150],"2")+"\\n")
+        sys.stdout.flush()
+
+    def finish(self):
+        tail=" ".join(self.buffer.split()).strip()
+        if tail and self.mode!="quiet": self._show(tail)
+        if self.started: print()
+
+def _ollama_stream_chat(base,payload_obj):
+    """Yield Ollama streaming message fragments as decoded JSON objects."""
+    import json, urllib.request
+    payload_obj=dict(payload_obj); payload_obj["stream"]=True
+    request=urllib.request.Request(
+        base+"/api/chat",data=json.dumps(payload_obj).encode(),
+        headers={"Content-Type":"application/json"},method="POST"
+    )
+    with urllib.request.urlopen(request) as response:
+        for raw in response:
+            if not raw.strip(): continue
+            yield json.loads(raw)
+
 def ollama_chat(force_search=False, initial_prompt=None, allow_start=True, host_override=None, host_name=None, access_profile=None):
     """Minimal local chat; optional first prompt and web-search mode."""
     import json
@@ -3017,7 +3164,7 @@ def ollama_chat(force_search=False, initial_prompt=None, allow_start=True, host_
     shown_host=host_name or _ollama_host_name(base)
     print(f"{mode} · {model} · {Path.cwd()}")
     print(f"host · {shown_host} · {base}")
-    print(f"access · {profile.upper()}")
+    print(f"access · {profile.upper()} · personality · {_load_personality()} · thinking · {_load_thinking()}/{_load_think_display()}")
     if not resident:
         print(f"model · idle · loads on first prompt")
     print(f"web · {web_state} · Ctrl-D to exit · Ctrl-C cancels work\n")
@@ -3086,6 +3233,13 @@ def ollama_chat(force_search=False, initial_prompt=None, allow_start=True, host_
         ),
     }
     messages.append({"role":"system","content":capability_notes[profile]})
+    thinking_mode=_load_thinking()
+    thinking_notes={
+        "light":"THINKING DEPTH: LIGHT. Favor fast direct responses; use extra deliberation only when correctness requires it.",
+        "adaptive":"THINKING DEPTH: ADAPTIVE. Match reasoning effort to task difficulty; trivial turns should feel immediate.",
+        "deep":"THINKING DEPTH: DEEP. Deliberate carefully on substantive work while avoiding repetitive self-commentary.",
+    }
+    messages.append({"role":"system","content":thinking_notes[thinking_mode]})
 
     memory_context = _memory_context(memory)
     if memory_context:
@@ -3148,18 +3302,22 @@ def ollama_chat(force_search=False, initial_prompt=None, allow_start=True, host_
                 tools.append(web_tool)
             payload_obj["tools"] = tools
 
-            payload = json.dumps(payload_obj).encode()
-            request = urllib.request.Request(
-                base + "/api/chat",
-                data=payload,
-                headers={"Content-Type": "application/json"},
-                method="POST",
-            )
-
             try:
-                with _activity("thinking"):
-                    with urllib.request.urlopen(request) as response:
-                        result = json.load(response)
+                aggregate={"role":"assistant","content":"","thinking":"","tool_calls":[]}
+                roller=_RollingThinking(_load_think_display())
+                for event in _ollama_stream_chat(base,payload_obj):
+                    fragment=event.get("message",{}) or {}
+                    thought=str(fragment.get("thinking") or "")
+                    content=str(fragment.get("content") or "")
+                    if thought:
+                        aggregate["thinking"]+=thought
+                        roller.feed(thought)
+                    if content:
+                        aggregate["content"]+=content
+                    if fragment.get("tool_calls"):
+                        aggregate["tool_calls"].extend(fragment.get("tool_calls") or [])
+                roller.finish()
+                result={"message":aggregate}
             except KeyboardInterrupt:
                 print("\n· cancelled\n")
                 messages.pop()
@@ -3217,7 +3375,12 @@ def ollama_chat(force_search=False, initial_prompt=None, allow_start=True, host_
 
             answer = message.get("content", "").strip()
             messages.append(message)
-            _print_ollama_answer(message)
+            # Thinking was already presented live according to the selected display mode.
+            final=_split_ollama_thinking(message)[1]
+            if final:
+                print(_ansi_label("lo ›","35")+" "+_ollama_markup(final)+"\n")
+            else:
+                print(_ansi_label("lo ›","35")+" "+_c("(no final response)","2")+"\n")
             if _queue_memory_exchange(base, model, prompt, answer, profile):
                 if sys.stdout.isatty():
                     print(_c("  · remembering in background", "2"))
@@ -4084,6 +4247,9 @@ def _settings_rows():
     base=_ollama_base()
     return [
         ("access", "AI", "Access profile", _load_lo_profile()),
+        ("personality", "AI", "Personality", _load_personality()),
+        ("thinking", "AI", "Thinking depth", _load_thinking()),
+        ("thinkdisplay", "AI", "Think display", _load_think_display()),
         ("host", "AI", "Ollama host", _ollama_host_name(base)),
         ("model", "AI", "Preferred model", _preferred_ollama_model()),
         ("key", "AI", "Web search key", "configured" if os.environ.get("OLLAMA_API_KEY") else "not configured"),
@@ -4112,6 +4278,34 @@ def _settings_pick_access():
     profile=result.stdout.split("\t",1)[0].strip()
     return lo_access([profile])
 
+
+def _settings_pick_choice(label,current,choices,callback):
+    if not shutil.which("fzf") or not (sys.stdin.isatty() and sys.stdout.isatty()):
+        return callback([])
+    payload="\n".join(f"{name}\t{'★ ' if name==current else '  '}{name:<13} {desc}" for name,desc in choices)+"\n"
+    result=subprocess.run(
+        ["fzf","--prompt",f"{label} › ","--header","Enter select · Esc back","--height","~45%",
+         "--reverse","--no-multi","--delimiter","\t","--with-nth","2..","--ansi"],
+        input=payload,text=True,capture_output=True
+    )
+    if result.returncode!=0 or not result.stdout.strip(): return 0
+    return callback([result.stdout.split("\t",1)[0].strip()])
+
+def _settings_pick_personality():
+    return _settings_pick_choice("personality",_load_personality(),[
+        ("lo","balanced · concise · curious"),("robot","dry · retro-futurist"),
+        ("max","rapid · synthetic-TV"),("philosopher","first-principles · poetic"),
+    ],lo_personality)
+
+def _settings_pick_thinking():
+    return _settings_pick_choice("thinking",_load_thinking(),[
+        ("light","fast"),("adaptive","task-matched"),("deep","deliberate")
+    ],lo_thinking)
+
+def _settings_pick_think_display():
+    return _settings_pick_choice("think display",_load_think_display(),[
+        ("compact","rolling live window"),("full","full visible stream"),("quiet","minimal indicator")
+    ],lo_think_display)
 
 def _settings_pick_host():
     data=_load_ollama_hosts()
@@ -4194,6 +4388,12 @@ def settings():
         key=result.stdout.split("\t",1)[0].strip()
         if key=="access":
             _settings_pick_access()
+        elif key=="personality":
+            _settings_pick_personality()
+        elif key=="thinking":
+            _settings_pick_thinking()
+        elif key=="thinkdisplay":
+            _settings_pick_think_display()
         elif key=="host":
             _settings_pick_host()
         elif key=="model":
@@ -5026,6 +5226,9 @@ def main():
         n=_forget_memory(" ".join(rest)); print(f"Removed {n} matching memory item(s)."); return 0
     if cmd=="clear-memory": return _memory_command(["clear"])
     if cmd=="skills": return _skills_command(rest)
+    if cmd=="personality": return lo_personality(rest)
+    if cmd=="thinking": return lo_thinking(rest)
+    if cmd in {"think-display","thinkdisplay"}: return lo_think_display(rest)
     if cmd in {"media","music"}: return media(rest)
     if cmd=="_ollama-share-proxy": return _ollama_share_proxy()
     modes={"detail":"detail","dirs":"dirs","files":"files","tree":"tree","recent":"recent","size":"size"}

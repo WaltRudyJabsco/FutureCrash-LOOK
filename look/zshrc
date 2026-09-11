@@ -380,6 +380,16 @@ lmk() {
   fi
   [[ -n "$dest" ]] || return
 
+  # Existing paths are not an intent question; report the filesystem fact first.
+  if [[ -e "$dest" ]]; then
+    if [[ -d "$dest" ]]; then
+      print "LOOK make · already exists as a directory: $dest"
+    else
+      print "LOOK make · already exists as a file: $dest"
+    fi
+    return 1
+  fi
+
   # A trailing slash is native Unix directory intent.
   if [[ "$force" == "dir" || "$dest" == */ ]]; then
     dest="${dest%/}"

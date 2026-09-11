@@ -3,9 +3,9 @@ set -euo pipefail
 
 ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 
-PRODUCT_VERSION="1.4.2"
-LOOK_VERSION="3.7.2"
-FUTURE_CRASH_VERSION="1.0.0"
+PRODUCT_VERSION="1.5.1"
+LOOK_VERSION="3.8.0"
+FUTURE_CRASH_VERSION="1.0.1"
 
 DRY=0
 ASSUME_YES=0
@@ -307,11 +307,17 @@ if ((!DRY)); then
   run mkdir -p "$LOOK_STATE"
   [[ -f "$LOOK_STATE/core.md" ]] || run cp "$ROOT/look/core.md" "$LOOK_STATE/core.md"
   [[ -f "$LOOK_STATE/skills.md" ]] || run cp "$ROOT/look/skills.md" "$LOOK_STATE/skills.md"
+  run mkdir -p "$LOOK_STATE/personalities"
+  # Bundled personalities are release-owned instruction packs; user selection is stored separately.
+  for personality in "$ROOT"/look/personalities/*.md; do
+    [[ -f "$personality" ]] && run cp "$personality" "$LOOK_STATE/personalities/"
+  done
   [[ -f "$LOOK_STATE/ollama_memory.json" ]] || run cp "$ROOT/look/memory.json" "$LOOK_STATE/ollama_memory.json"
 
   FUTURE_DIR="$HOME/.local/share/future-crash"
   run mkdir -p "$FUTURE_DIR"
   run cp "$ROOT/future-crash/future_crash.py" "$FUTURE_DIR/future_crash.py"
+run cp "$ROOT/future-crash/personality.md" "$FUTURE_DIR/personality.md"
   run cp "$ROOT/future-crash/future-crash" "$HOME/.local/bin/future-crash"
   run chmod +x "$HOME/.local/bin/future-crash"
 
@@ -342,10 +348,10 @@ old_dirs = old.get("created_dirs") if isinstance(old.get("created_dirs"), list) 
 
 manifest = {
     "product": "future-crash-look",
-    "release": os.environ.get("FCL_RELEASE_VERSION", "1.4.2"),
+    "release": os.environ.get("FCL_RELEASE_VERSION", "1.5.1"),
     "components": {
-        "look": os.environ.get("FCL_LOOK_VERSION", "3.7.2"),
-        "future_crash": os.environ.get("FCL_FUTURE_CRASH_VERSION", "1.0.0"),
+        "look": os.environ.get("FCL_LOOK_VERSION", "3.8.0"),
+        "future_crash": os.environ.get("FCL_FUTURE_CRASH_VERSION", "1.0.1"),
     },
     "packages": sorted(set(old_packages + [x for x in os.environ.get("LOOK_MANIFEST_PACKAGES","").splitlines() if x])),
     "created_dirs": sorted(set(old_dirs + [x for x in os.environ.get("LOOK_MANIFEST_DIRS","").splitlines() if x])),

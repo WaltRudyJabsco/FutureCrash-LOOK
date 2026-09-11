@@ -1,5 +1,13 @@
 # LOOK Shell changelog
 
+## 3.8.0 — personality + live thinking
+
+- Personality packs: LO, Space Robot, Max, Philosopher.
+- Thinking depth: light/adaptive/deep.
+- Thinking display: compact/full/quiet with streaming response handling.
+- Settings/completion/docs synchronized.
+
+
 ## 3.7.2 — lmk directory-entry fix
 
 - `lmk -d` and prompted directory creation now call `_mkdir` directly and then `cd` only when the directory exists.

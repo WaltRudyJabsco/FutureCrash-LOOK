@@ -80,3 +80,14 @@ Memory JSON uses schema version 1.
 `mm` → `lk media toggle` · `mn` → `lk media next` · `mp` → `lk media prev`
 
 `lk memory` and `lk skills` use LOOK's pager for readable long output.
+
+
+## LO personality + thinking
+
+- `lk personality` — list personality packs.
+- `lk personality lo|robot|max|philosopher` — select one.
+- `lk thinking light|adaptive|deep` — select reasoning depth.
+- `lk think-display compact|full|quiet` — select live thinking presentation.
+- `lk settings` — configure these alongside access, host, model, and web search.
+
+Bundled personality packs live under `~/.local/share/look/personalities/`. Capability, personality, model, thinking depth, and thinking display remain independent settings.

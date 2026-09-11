@@ -1,5 +1,11 @@
 # Future Crash changelog
 
+## 1.0.1 — final-only micro-generation
+
+- Strips structured/tagged/orphaned model reasoning before displaying Future Crash output.
+- Adds a dedicated application personality file.
+
+
 ## 1.0.0 — unified component baseline
 
 - Establishes Future Crash 1.0.0 as the component baseline inside Future Crash + LOOK 1.2.0.

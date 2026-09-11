@@ -51,6 +51,9 @@ _lk() {
     'forget:forget matching user memory'
     'clear-memory:clear LO user memory'
     'skills:LO assistant craft'
+    'personality:LO personality'
+    'thinking:LO thinking depth'
+    'think-display:LO thinking presentation'
     'settings:unified settings panel'
     'home:LOOK home'
     'doctor:diagnose environment'
@@ -115,6 +118,18 @@ _lk() {
           return
           ;;
       esac
+      ;;
+    personality)
+      (( CURRENT == 3 )) && _values 'personality' lo robot max philosopher
+      return
+      ;;
+    thinking)
+      (( CURRENT == 3 )) && _values 'thinking depth' light adaptive deep
+      return
+      ;;
+    think-display|thinkdisplay)
+      (( CURRENT == 3 )) && _values 'think display' compact full quiet
+      return
       ;;
     media|music)
       (( CURRENT == 3 )) && _values 'media action' status toggle next prev stop

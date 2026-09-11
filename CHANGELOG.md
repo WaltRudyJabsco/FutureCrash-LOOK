@@ -1,5 +1,19 @@
 # Future Crash + LOOK changelog
 
+## 1.5.1 — Future Crash final-only output
+
+- Fixes reasoning leakage into fortunes and ambient/oracle observations.
+- Adds a dedicated Future Crash personality file, independent of LO personality selection.
+
+
+## 1.5.0 — personality + live thinking
+
+- Adds four selectable/versionable LO personality packs.
+- Adds thinking depth and compact/full/quiet live thinking display.
+- Adds rolling Ollama streaming UX.
+- Polishes `lmk` existing-path reporting.
+
+
 ## 1.4.2 — lmk directory-entry fix
 
 - Removes output parsing from `lmk -d` and prompted directory creation.

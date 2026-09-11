@@ -880,6 +880,53 @@ class SignalCanvas:
         self.expires_at = time.time() + 30.0
 
 
+
+FUTURE_CRASH_PERSONALITY_FALLBACK = (
+    "You are Future Crash: a dry, intelligent terminal presence from a slightly broken future. "
+    "Useful first, strange second. Funny without performing jokes. Brief by default. "
+    "You notice the machine, time, chance, and the surrounding signal field. "
+    "You should feel like a forgotten intelligent workstation, not a generic chatbot."
+)
+
+def _future_crash_personality():
+    """Future Crash owns its personality; LO's selectable personalities do not leak into it."""
+    try:
+        path=Path(__file__).resolve().with_name("personality.md")
+        text=path.read_text(encoding="utf-8").strip()
+        if text:
+            return text
+    except OSError:
+        pass
+    return FUTURE_CRASH_PERSONALITY_FALLBACK
+
+
+def _final_only(message):
+    """Return only the user-facing answer from an Ollama message.
+
+    Handles structured `thinking`, normal <think> blocks, and the template edge case
+    where an opening tag is consumed but a closing </think> leaks into content.
+    """
+    message=message or {}
+    content=str(message.get("content") or "")
+    # Structured thinking is intentionally ignored for Future Crash artifacts.
+    _=message.get("thinking")
+
+    # Normal tagged reasoning.
+    content=re.sub(r"<think>.*?</think>", "", content, flags=re.I|re.S)
+
+    # Some Qwen/Ollama templates consume the opening tag but leave the closing tag.
+    close=re.search(r"</think>", content, flags=re.I)
+    if close:
+        content=content[close.end():]
+
+    # Defensive cleanup for stray opening tags without a closer.
+    content=re.sub(r"^\s*<think>\s*", "", content, flags=re.I)
+
+    # Remove accidental model-facing labels from short artifacts.
+    content=re.sub(r"^\s*(?:final(?: answer)?|answer)\s*:\s*", "", content, flags=re.I)
+    return content.strip()
+
+
 SIGNAL_LANGUAGE = """
 You also have a visual scratchpad called the Signal Field.
 It is a 40x12 character canvas: x=0..39 and y=0..11.
@@ -1538,7 +1585,9 @@ class Oracle(threading.Thread):
                 continue
 
             try:
-                messages = []
+                messages = [
+                    {"role":"system","content":_future_crash_personality()}
+                ]
                 if kind.startswith("thread:"):
                     system = (
                         "You are a scheduled Future Crash Thread waking from sleep. "
@@ -1612,7 +1661,7 @@ class Oracle(threading.Thread):
                 with urllib.request.urlopen(req, timeout=120) as r:
                     response = json.loads(r.read().decode("utf-8", "replace"))
                 message = response.get("message", {})
-                text = message.get("content", "").strip()
+                text = _final_only(message)
                 if not text and kind == "ambient":
                     # Some model/templates can still return no visible content.
                     # Ambient personality must never show "(no response)".
