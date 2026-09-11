@@ -1,0 +1,4151 @@
+#!/usr/bin/env python3
+import os, platform, re, select, shutil, subprocess, sys, termios, tty, threading, time, hashlib, json, uuid, signal
+import http.client
+from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
+from contextlib import contextmanager
+from pathlib import Path
+VERSION="3.3.3"
+
+LOOK_WORDMARK = r"""       ██╗      ██╗  ██╗
+       ██║      ██║ ██╔╝
+       ██║      █████╔╝
+       ██║      ██╔═██╗
+       ███████╗ ██║  ██╗
+       ╚══════╝ ╚═╝  ╚═╝"""
+HOME=Path.home()
+ROOT=Path(__file__).resolve().parent
+RENDERER=ROOT/"look_renderer.py"
+STATE_DIR=HOME/".local"/"share"/"look"
+MEMORY_FILE=STATE_DIR/"ollama_memory.json"
+UNDO_FILE=STATE_DIR/"undo.json"
+UNDO_TRASH=STATE_DIR/"undo_trash"
+UNDO_LIMIT=20
+MEMORY_QUEUE=STATE_DIR/"memory_queue"
+MEMORY_WORKER_LOCK=STATE_DIR/"memory_worker.lock"
+OLLAMA_MODEL_FILE=STATE_DIR/"ollama_model"
+OLLAMA_MODELS_FILE=STATE_DIR/"ollama_models.json"
+OLLAMA_HOSTS_FILE=STATE_DIR/"ollama_hosts.json"
+LO_ACCESS_FILE=STATE_DIR/"lo_access"
+OLLAMA_SHARE_PORT=11435
+OLLAMA_SHARE_PID=STATE_DIR/"ollama_share_proxy.pid"
+LOCAL_OLLAMA_URL="http://127.0.0.1:11434"
+RECENT_MEMORY_SLOTS=5
+
+
+def _normalize_ollama_url(value):
+    from urllib.parse import urlparse
+    value=str(value or "").strip().rstrip("/")
+    if not value:
+        return LOCAL_OLLAMA_URL
+    if "://" not in value:
+        value=f"http://{value}"
+    parsed=urlparse(value)
+    if not parsed.hostname:
+        raise ValueError("invalid Ollama host")
+    if parsed.port is None and parsed.scheme=="http":
+        value=value + ":11434"
+    return value.rstrip("/")
+
+
+def _load_ollama_hosts():
+    data={"default":"local","hosts":{}}
+    try:
+        loaded=json.loads(OLLAMA_HOSTS_FILE.read_text(encoding="utf-8"))
+        if isinstance(loaded,dict):
+            data["default"]=str(loaded.get("default") or "local")
+            hosts=loaded.get("hosts") or {}
+            if isinstance(hosts,dict):
+                for name,item in hosts.items():
+                    if isinstance(item,dict) and item.get("url"):
+                        try:
+                            data["hosts"][str(name)]={"url":_normalize_ollama_url(item["url"])}
+                        except ValueError:
+                            pass
+    except (OSError,ValueError,TypeError):
+        pass
+    data["hosts"]["local"]={"url":LOCAL_OLLAMA_URL}
+    if data["default"] not in data["hosts"]:
+        data["default"]="local"
+    return data
+
+
+def _save_ollama_hosts(data):
+    STATE_DIR.mkdir(parents=True,exist_ok=True)
+    payload={
+        "default":data.get("default","local"),
+        "hosts":{k:v for k,v in (data.get("hosts") or {}).items() if k!="local"},
+    }
+    tmp=OLLAMA_HOSTS_FILE.with_suffix(".tmp")
+    tmp.write_text(json.dumps(payload,indent=2,sort_keys=True)+"\n",encoding="utf-8")
+    os.chmod(tmp,0o600)
+    tmp.replace(OLLAMA_HOSTS_FILE)
+    os.chmod(OLLAMA_HOSTS_FILE,0o600)
+
+
+def _ollama_base(override=None):
+    if override:
+        return _normalize_ollama_url(override)
+    env=os.environ.get("OLLAMA_HOST","").strip()
+    if env:
+        return _normalize_ollama_url(env)
+    data=_load_ollama_hosts()
+    return data["hosts"].get(data["default"],{"url":LOCAL_OLLAMA_URL})["url"]
+
+
+def _ollama_host_name(base=None):
+    base=_ollama_base(base)
+    data=_load_ollama_hosts()
+    for name,item in data["hosts"].items():
+        if item.get("url")==base:
+            return name
+    try:
+        from urllib.parse import urlparse
+        return urlparse(base).hostname or base
+    except Exception:
+        return base
+
+
+def _is_local_ollama(base):
+    from urllib.parse import urlparse
+    try:
+        return (urlparse(base).hostname or "").lower() in {"127.0.0.1","localhost","::1"}
+    except Exception:
+        return False
+
+
+def _probe_ollama(base,timeout=.35):
+    import urllib.request
+    try:
+        with urllib.request.urlopen(base.rstrip("/")+"/api/tags",timeout=timeout) as response:
+            return response.status < 400
+    except Exception:
+        return False
+
+
+def _tailscale_candidates():
+    exe=shutil.which("tailscale")
+    if not exe:
+        return []
+    try:
+        proc=subprocess.run([exe,"status","--json"],capture_output=True,text=True,timeout=2)
+        if proc.returncode!=0:
+            return []
+        status=json.loads(proc.stdout)
+    except (OSError,subprocess.SubprocessError,ValueError,TypeError):
+        return []
+
+    peers=status.get("Peer") or {}
+    nodes=list(peers.values()) if isinstance(peers,dict) else list(peers) if isinstance(peers,list) else []
+    out=[]; seen=set()
+    for node in nodes:
+        if not isinstance(node,dict) or node.get("Online") is False:
+            continue
+        hostname=str(node.get("HostName") or "").strip()
+        dns=str(node.get("DNSName") or "").strip().rstrip(".")
+        ips=node.get("TailscaleIPs") or []
+        name=hostname or (dns.split(".")[0] if dns else "")
+        if not name:
+            continue
+        candidates=[]
+        if dns:
+            candidates.append(("serve",f"https://{dns}"))
+        for ip in ips[:2]:
+            candidates.append(("direct",f"http://{ip}:11434"))
+        for transport,url in candidates:
+            key=(name,url)
+            if key not in seen:
+                seen.add(key)
+                out.append({"name":name,"url":url,"transport":transport})
+    return out
+
+
+def _discover_ollama_hosts():
+    import concurrent.futures
+    candidates=_tailscale_candidates()
+    if not candidates:
+        return []
+    found=[]
+    with concurrent.futures.ThreadPoolExecutor(max_workers=min(12,len(candidates))) as pool:
+        futures={pool.submit(_probe_ollama,item["url"],.45):item for item in candidates}
+        for future,item in futures.items():
+            try:
+                if future.result():
+                    found.append(item)
+            except Exception:
+                pass
+    best={}
+    for item in found:
+        old=best.get(item["name"])
+        if old is None or (item["transport"]=="serve" and old["transport"]!="serve"):
+            best[item["name"]]=item
+    return sorted(best.values(),key=lambda x:x["name"].casefold())
+
+
+def _resolve_ollama_host(token):
+    token=str(token or "").strip()
+    if not token:
+        return None,None
+    if token=="local":
+        return "local",LOCAL_OLLAMA_URL
+    data=_load_ollama_hosts()
+    if token in data["hosts"]:
+        return token,data["hosts"][token]["url"]
+    if "://" in token:
+        try:
+            url=_normalize_ollama_url(token)
+            from urllib.parse import urlparse
+            return (urlparse(url).hostname or "remote"),url
+        except ValueError:
+            return None,None
+    for item in _discover_ollama_hosts():
+        if item["name"].casefold()==token.casefold():
+            return item["name"],item["url"]
+    return None,None
+
+
+def ollama_hosts(args):
+    args=list(args or [])
+    data=_load_ollama_hosts()
+
+    if args and args[0]=="forget":
+        if len(args)<2:
+            print("LOOK OLLAMA · host name required")
+            return 1
+        name=args[1]
+        if name=="local":
+            print("LOOK OLLAMA · local cannot be removed")
+            return 1
+        if name not in data["hosts"]:
+            print(f"LOOK OLLAMA · unknown host: {name}")
+            return 1
+        data["hosts"].pop(name,None)
+        if data["default"]==name:
+            data["default"]="local"
+        _save_ollama_hosts(data)
+        print(f"✓ forgot Ollama host · {name}")
+        return 0
+
+    if len(args)>=2 and args[0] not in {"list","status"}:
+        name=args[0]
+        try:
+            url=_normalize_ollama_url(args[1])
+        except ValueError:
+            print("LOOK OLLAMA · invalid host URL")
+            return 1
+        data["hosts"][name]={"url":url}
+        data["default"]=name
+        _save_ollama_hosts(data)
+        print(f"✓ Ollama host · {name} · {'ready' if _probe_ollama(url,.6) else 'saved · offline'}")
+        return 0
+
+    if len(args)==1 and args[0] not in {"list","status"}:
+        token=args[0]
+        name,url=_resolve_ollama_host(token)
+        if not url:
+            print(f"LOOK OLLAMA · host not found: {token}")
+            print("  run: lk ollama host")
+            return 1
+        data["hosts"][name]={"url":url}
+        data["default"]=name
+        _save_ollama_hosts(data)
+        print(f"✓ Ollama host · {name}")
+        return 0
+
+    discovered=_discover_ollama_hosts()
+    merged={name:{"url":item["url"],"source":"saved"} for name,item in data["hosts"].items()}
+    for item in discovered:
+        merged.setdefault(item["name"],{"url":item["url"],"source":"tailscale"})
+    current=_ollama_base()
+    current_name=_ollama_host_name(current)
+
+    _title("ollama hosts")
+    print(f"  current  {current_name} · {current}")
+    print()
+    for name in sorted(merged,key=str.casefold):
+        item=merged[name]
+        url=item["url"]
+        state=_c("ready","32") if _probe_ollama(url,.25) else _c("offline","2")
+        marker="✓" if url==current else " "
+        print(f"  {marker} {name:<18} {state:<18} {item['source']} · {url}")
+    if shutil.which("tailscale"):
+        print(f"\n  {_c('Tip','2')} · lo @NAME uses a host for one session")
+    else:
+        print(f"\n  {_c('Tailscale not installed','2')} · local and saved URL hosts still work")
+    return 0
+
+
+
+def _ollama_share_proxy():
+    """Local-only proxy: keep Ollama protected while making Tailscale Serve compatible."""
+    class Handler(BaseHTTPRequestHandler):
+        protocol_version="HTTP/1.1"
+        def log_message(self, fmt, *args):
+            return
+        def _forward(self):
+            try:
+                length=int(self.headers.get("Content-Length","0") or 0)
+            except ValueError:
+                length=0
+            body=self.rfile.read(length) if length else None
+            headers={k:v for k,v in self.headers.items()
+                     if k.lower() not in {"host","connection","proxy-connection","transfer-encoding"}}
+            # Ollama rejects reverse-proxy requests carrying the public tailnet Host.
+            headers["Host"]="localhost:11434"
+            try:
+                conn=http.client.HTTPConnection("127.0.0.1",11434,timeout=300)
+                conn.request(self.command,self.path,body=body,headers=headers)
+                response=conn.getresponse()
+                payload=response.read()
+                self.send_response(response.status,response.reason)
+                for key,value in response.getheaders():
+                    if key.lower() not in {"connection","transfer-encoding","content-length"}:
+                        self.send_header(key,value)
+                self.send_header("Content-Length",str(len(payload)))
+                self.end_headers()
+                if self.command!="HEAD" and payload:
+                    self.wfile.write(payload)
+                conn.close()
+            except Exception:
+                self.send_response(502,"Bad Gateway")
+                self.send_header("Content-Length","0")
+                self.end_headers()
+        do_GET=_forward
+        do_POST=_forward
+        do_PUT=_forward
+        do_PATCH=_forward
+        do_DELETE=_forward
+        do_OPTIONS=_forward
+        do_HEAD=_forward
+
+    STATE_DIR.mkdir(parents=True,exist_ok=True)
+    server=ThreadingHTTPServer(("127.0.0.1",OLLAMA_SHARE_PORT),Handler)
+    try:
+        server.serve_forever(poll_interval=.25)
+    except KeyboardInterrupt:
+        pass
+    finally:
+        server.server_close()
+    return 0
+
+
+def _ollama_share_proxy_alive():
+    try:
+        pid=int(OLLAMA_SHARE_PID.read_text().strip())
+        os.kill(pid,0)
+        return pid
+    except (OSError,ValueError,FileNotFoundError):
+        try: OLLAMA_SHARE_PID.unlink()
+        except OSError: pass
+        return None
+
+
+def _start_ollama_share_proxy():
+    if _ollama_share_proxy_alive():
+        return True
+    STATE_DIR.mkdir(parents=True,exist_ok=True)
+    with open(os.devnull,"wb") as quiet:
+        proc=subprocess.Popen(
+            [sys.executable,str(Path(__file__).resolve()),"_ollama-share-proxy"],
+            stdin=subprocess.DEVNULL,stdout=quiet,stderr=quiet,start_new_session=True
+        )
+    OLLAMA_SHARE_PID.write_text(str(proc.pid)+"\n")
+    os.chmod(OLLAMA_SHARE_PID,0o600)
+    deadline=time.monotonic()+2.0
+    url=f"http://127.0.0.1:{OLLAMA_SHARE_PORT}"
+    while time.monotonic()<deadline:
+        if proc.poll() is not None:
+            break
+        if _probe_ollama(url,.2):
+            return True
+        time.sleep(.05)
+    _stop_ollama_share_proxy()
+    return False
+
+
+def _stop_ollama_share_proxy():
+    pid=_ollama_share_proxy_alive()
+    if pid:
+        try: os.kill(pid,signal.SIGTERM)
+        except OSError: pass
+    try: OLLAMA_SHARE_PID.unlink()
+    except OSError: pass
+
+
+def ollama_share(args):
+    args=list(args or [])
+    tailscale=shutil.which("tailscale")
+    if not tailscale:
+        print("LOOK OLLAMA · Tailscale is not installed")
+        return 1
+    if args and args[0]=="status":
+        rc=subprocess.call([tailscale,"serve","status"])
+        state="ready" if _ollama_share_proxy_alive() else "off"
+        print(f"LOOK OLLAMA · host-rewrite proxy {state} · 127.0.0.1:{OLLAMA_SHARE_PORT}")
+        return rc
+    if args and args[0] in {"off","stop"}:
+        proc=subprocess.run([tailscale,"serve",str(OLLAMA_SHARE_PORT),"off"])
+        if proc.returncode==0:
+            _stop_ollama_share_proxy()
+            print("✓ Ollama tailnet share off")
+        else:
+            print("LOOK OLLAMA · Tailscale Serve needs elevated permission")
+            print(f"  run: sudo tailscale serve {OLLAMA_SHARE_PORT} off")
+        return proc.returncode
+
+    if not _probe_ollama(LOCAL_OLLAMA_URL,.6):
+        if _ensure_ollama_server(LOCAL_OLLAMA_URL,allow_start=True) is None:
+            print("LOOK OLLAMA · local server unavailable")
+            return 1
+    if not _start_ollama_share_proxy():
+        print("LOOK OLLAMA · could not start localhost share proxy")
+        return 1
+    print("LOOK OLLAMA · sharing localhost:11434 inside your tailnet")
+    proc=subprocess.run([tailscale,"serve","--bg",str(OLLAMA_SHARE_PORT)])
+    if proc.returncode==0:
+        print("✓ Ollama available to your Tailscale devices")
+        print("  discover it elsewhere with: lk ollama host")
+        return 0
+
+    # Tailscale commonly reserves Serve configuration changes for root/operator.
+    # Keep our localhost proxy alive so the one privileged Serve command can use it.
+    print("LOOK OLLAMA · Tailscale Serve needs elevated permission")
+    print(f"  run: sudo tailscale serve --bg {OLLAMA_SHARE_PORT}")
+    print("  then: lk ollama share status")
+    return proc.returncode
+
+
+def render(args):
+    return subprocess.call([sys.executable,str(RENDERER),*args])
+
+def _page_text(body: str) -> int:
+    """Page long system text only when it exceeds the current terminal."""
+    lines = body.rstrip("\n").splitlines()
+    height = max(6, shutil.get_terminal_size((80, 24)).lines - 1)
+
+    # Non-interactive output should stay pipe-friendly.
+    if len(lines) <= height or not sys.stdin.isatty() or not sys.stdout.isatty():
+        print(body, end="" if body.endswith("\n") else "\n")
+        return 0
+
+    top = 0
+    old = termios.tcgetattr(sys.stdin.fileno())
+    try:
+        tty.setcbreak(sys.stdin.fileno())
+        while True:
+            os.system("clear")
+            page = lines[top:top + height - 1]
+            sys.stdout.write("\n".join(page))
+            sys.stdout.write(
+                f"\n\033[2m{min(top + height - 1, len(lines))}/{len(lines)}"
+                " · j/k ↑/↓ line · Space/PgDn page · b/PgUp back · g/G ends · q quit\033[0m"
+            )
+            sys.stdout.flush()
+
+            # Read from the file descriptor directly. TextIO buffering can split
+            # an ANSI arrow sequence after ESC, which used to make ↑/↓ look like
+            # a bare Escape and drop out of the help pager.
+            fd = sys.stdin.fileno()
+            ch = os.read(fd, 1)
+            key = ch.decode("utf-8", "ignore")
+            if ch == b"\x1b":
+                seq = bytearray(ch)
+                while len(seq) < 6:
+                    ready, _, _ = select.select([fd], [], [], 0.10)
+                    if not ready:
+                        break
+                    seq.extend(os.read(fd, 1))
+                    if seq[-1:] in b"~ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz":
+                        break
+                key = {
+                    b"\x1b[A": "up",
+                    b"\x1b[B": "down",
+                    b"\x1b[5~": "pageup",
+                    b"\x1b[6~": "pagedown",
+                }.get(bytes(seq), "esc")
+
+            page_size = height - 1
+            max_top = max(0, len(lines) - page_size)
+            if key in {"q", "esc"}:
+                break
+            if key in {"j", "down"}:
+                top = min(max_top, top + 1)
+            elif key in {"k", "up"}:
+                top = max(0, top - 1)
+            elif key in {" ", "pagedown"}:
+                top = min(max_top, top + page_size)
+            elif key in {"b", "pageup"}:
+                top = max(0, top - page_size)
+            elif key == "g":
+                top = 0
+            elif key == "G":
+                top = max_top
+    finally:
+        termios.tcsetattr(sys.stdin.fileno(), termios.TCSADRAIN, old)
+        sys.stdout.write("\n")
+        sys.stdout.flush()
+    return 0
+
+
+def _help_color(body):
+    """Add restrained semantic ANSI color to LOOK's own help text."""
+    if not sys.stdout.isatty():
+        return body
+    reset="\033[0m"; bold="\033[1m"; cyan="\033[36m"; magenta="\033[35m"
+    section_names={"LOOK","INSPECT","SYSTEM","FILE CARD","FILE ACTIONS","SHORTCUTS","LIVE FILTER / SELECTION","HELP PAGER"}
+    shortcut_tokens=("l / ls","ll","ld","lf","lt","lr","lz","zll WORD","cdl WORD",
+                     "fznv","f","rs","rb","lh","lo","lo ASK")
+    out=[]
+    in_shortcuts=False
+    for line in body.splitlines():
+        stripped=line.strip()
+        if "LOOK " in line and ("filesystem, navigation, shell" in line or "inspect the computer" in line):
+            out.append(cyan+bold+line+reset); continue
+        if stripped in section_names:
+            in_shortcuts=(stripped=="SHORTCUTS")
+            out.append(magenta+bold+line+reset); continue
+        if in_shortcuts and stripped:
+            colored=line
+            for token in sorted(shortcut_tokens,key=len,reverse=True):
+                colored=re.sub(
+                    rf'(?<!\S){re.escape(token)}(?=\s|$)',
+                    lambda m: cyan+bold+m.group(0)+reset,
+                    colored
+                )
+            out.append(colored); continue
+        m=re.match(r'^(\s{2})(\S+(?:\s*/\s*\S+)?)(.*)$', line)
+        if m and stripped:
+            out.append(m.group(1)+cyan+bold+m.group(2)+reset+m.group(3)); continue
+        out.append(line)
+    return "\n".join(out)+"\n"
+
+def help_screen():
+    import re
+    body = f"""
+       ██╗      ██╗  ██╗
+       ██║      ██║ ██╔╝
+       ██║      █████╔╝
+       ██║      ██╔═██╗
+       ███████╗ ██║  ██╗
+       ╚══════╝ ╚═╝  ╚═╝
+
+       LOOK {VERSION} · inspect the computer
+
+LOOK
+  lk [THING]           inspect a path, command, port, or process
+  lk [PATH]            smart filesystem view
+  lk FILE              interactive file card + paged preview
+  lk detail [PATH]     detailed view
+  lk dirs [PATH]       directories
+  lk files [PATH]      files
+  lk tree [PATH]       tree
+  lk recent [PATH]     newest first
+  lk size [PATH]       size-oriented
+  lk run [PATH]        what can I do here? (project is an alias)
+
+INSPECT
+  lk up / ports        what is listening? (services is an alias)
+  lk port NUMBER       inspect one listening port
+  lk process TERM      find a running process (proc)
+  lk processes         browse/filter processes · Y copies PID (procs)
+  lk pid NUMBER        inspect one process ID
+  lk git [PATH]        repository status
+  lk machine / gpu     machine capabilities
+  lk disk              disk usage
+  lk net               browse network addresses · Y copies IP
+  lk tailscale         tailnet status
+  lk env / path        environment / PATH diagnostics
+  lk why COMMAND       explain command resolution
+
+AI / OLLAMA
+  lo [ASK]             Ollama chat / optional first prompt
+  lo search [ASK]      chat with Ollama web search
+  lo @HOST [ASK]       use another Ollama host for this session
+  lo --conservative      read/search only for this session
+  lo --workspace         bounded workspace tools (default)
+  lo --power             shell commands · confirm each
+  lo --unsafe            unrestricted shell for this session
+  lk o --no-start ...    never start a missing local server
+  lk ollama            Ollama + selected-host status
+  lk ollama models     model panel · Enter select · X enable/disable
+  lk ollama test       benchmark current model
+  lk ollama test --all compare enabled installed models
+  lk ollama host       list saved + reachable Ollama hosts
+  lk ollama host NAME  make NAME the persistent default
+  lk ollama host local return to localhost
+  lk ollama host NAME URL
+                       save URL as NAME and select it
+  lk ollama host forget NAME
+                       forget a saved remote host
+  lk ollama share      share local Ollama inside the tailnet
+  lk ollama share status
+                       Tailscale Serve + LOOK proxy status
+  lk ollama share off  stop the tailnet Ollama share
+  lk ollama key        securely save the Ollama web-search key
+  lk ollama key status report key configuration; never reveal it
+  lk ollama access      show persistent LO capability profile
+  lk ollama access MODE set conservative/workspace/power/unsafe
+
+SYSTEM
+  lk home              friendly LOOK home screen
+  lk doctor            check the environment
+  lk settings          unified interactive settings panel
+  lk config            show installed paths + state
+  lk secrets           secrets status (never contents)
+  lk undo              undo last safe local filesystem action
+  lk uninstall         remove LOOK; offer only owned dependencies
+  lk version           print version
+  lk help              this complete command/key glossary
+  LOOK_CLASSIC=1 lk    use the frozen classic presentation
+
+FILE ACTIONS
+  lcp [PATH]           LOOK-assisted copy
+  lmv [PATH]           LOOK-assisted move
+  lscp [PATH]          LOOK-assisted scp
+  lrm [PATH]           LOOK-assisted remove (confirmed)
+  lmk PATH             make directory path · undoable
+  mkd DIR              make directory and enter it
+  lk undo              undo last LOOK local filesystem transaction
+
+SHORTCUTS
+  l / ls   smart view          ll       details
+  ld       directories         lf       files
+  lt       tree                lr       recent
+  lz       sizes               zll WORD jump + look
+  cdl WORD jump + details      fznv     fuzzy edit
+  f        find anywhere → LOOK
+  lh       LOOK home           lo       Ollama chat
+  lo ASK   ask immediately     rs       reset ritual
+  rb       reload zsh          webterm  terminal over Tailscale
+  commands same as lk help     command ls = real Unix ls
+
+LIVE FILTER / SELECTION
+  Type       filter immediately
+  j/k/↑/↓    move selection; J/K/L/; are home-row directions
+  Tab        mark / unmark highlighted item
+  A          mark all matches / clear all marked matches
+  Enter      open file / enter folder
+  E          edit
+  O          open with another application
+  C / M / R  copy / move / remove
+  B          copy actual file object(s) to desktop clipboard
+  Y          copy absolute path(s) as text
+  P          print absolute path + exit
+  G          exit LOOK and make this the shell's directory
+  Esc        clear / back / cancel
+  q          quit
+
+FILE CARD
+  j / k / ↑ / ↓       scroll preview
+  Space / b            page forward / back
+  Enter                 open
+  E / O                  edit / open with
+  B / Y / P              clipboard file / copy path / print path
+  M / C / S / R          move / copy / scp / remove
+  q / Esc                quit
+
+HELP PAGER
+  j / k / ↑ / ↓       line down / up
+  Space / b            page forward / back
+  PgDn / PgUp          page forward / back
+  g / G                beginning / end
+  q / Esc              quit
+"""
+    return _page_text(_help_color(body))
+
+
+def home():
+    """Paint the LOOK 3 landing screen, then immediately return to the shell."""
+    import urllib.request
+
+    tty_out = sys.stdout.isatty()
+    if tty_out:
+        sys.stdout.write("\033[2J\033[H")
+
+    cwd=Path.cwd()
+    try:
+        shown='~/' + str(cwd.relative_to(HOME)) if cwd != HOME else '~'
+    except ValueError:
+        shown=str(cwd)
+
+    branch=''
+    dirty=False
+    try:
+        result=subprocess.run(
+            ['git','branch','--show-current'], cwd=cwd,
+            capture_output=True, text=True, timeout=0.5
+        )
+        if result.returncode == 0:
+            branch=result.stdout.strip()
+        status=subprocess.run(
+            ['git','status','--porcelain'], cwd=cwd,
+            capture_output=True, text=True, timeout=0.5
+        )
+        dirty=(status.returncode==0 and bool(status.stdout.strip()))
+    except (OSError, subprocess.SubprocessError):
+        pass
+
+    base=_ollama_base()
+    ollama='offline'
+    ollama_live=False
+    try:
+        with urllib.request.urlopen(base + '/api/ps', timeout=0.45) as response:
+            import json
+            models=json.load(response).get('models',[])
+        if models:
+            name=models[0].get('name') or models[0].get('model') or 'ready'
+            ollama=name
+            ollama_live=True
+        else:
+            ollama='ready · idle'
+    except Exception:
+        if _is_local_ollama(base) and shutil.which('ollama'):
+            ollama='available · idle'
+        elif not _is_local_ollama(base):
+            ollama=f"{_ollama_host_name(base)} · offline"
+
+    print(_c(f"LOOK {VERSION}", "1;36"))
+    git_tail=''
+    if branch:
+        git_state=_c("●", "33" if dirty else "32")
+        git_tail=f"  {_c('git','2')} {branch} {git_state}"
+    print(f"{_c('◆','36')} {_c(shown,'1')}{git_tail}")
+    lo_state=_c("●","32") if ollama_live else _c("○","2")
+    print(f"{_c('lo','1;36')} {lo_state} {_c(ollama,'2')}")
+    print(_c("─"*min(62, max(28, len(shown)+16)), "2"))
+    print()
+
+    fortune=shutil.which('fortune')
+    cowsay=shutil.which('cowsay')
+    if fortune and cowsay:
+        try:
+            quote=subprocess.run([fortune], capture_output=True, text=True, timeout=1).stdout
+            cow=subprocess.run([cowsay,'-r'], input=quote, capture_output=True, text=True, timeout=1).stdout
+            if cow.strip():
+                print(cow.rstrip())
+                print()
+        except (OSError, subprocess.SubprocessError):
+            pass
+
+    print(_c("What file do you want? What question do you have?", "2"))
+    print(f"{_c('l','36')} look around   {_c('lo','36')} ask   {_c('lk','36')} inspect   {_c('lh','36')} home")
+    return 0
+
+def _doctor_body():
+    import json
+    import urllib.request
+
+    tools=["zsh","python3","git","zoxide","fzf","fd","nvim","bat","fortune","cowsay","chafa","pdftotext","ttyd","lsof"]
+    checks=[(x,shutil.which(x) is not None) for x in tools]
+    checks.append(("neofetch/fastfetch", bool(shutil.which("neofetch") or shutil.which("fastfetch"))))
+    files=[("~/.zshrc",(HOME/".zshrc").exists()),
+           ("~/.zsh_secrets",(HOME/".zsh_secrets").exists()),
+           ("LOOK renderer",RENDERER.exists())]
+
+    base = _ollama_base()
+    ollama_bin = shutil.which("ollama") is not None
+    server = False
+    loaded = []
+    try:
+        with urllib.request.urlopen(base + "/api/ps", timeout=1.5) as response:
+            loaded = json.load(response).get("models", [])
+            server = True
+    except Exception:
+        pass
+
+    memory_ok = _ensure_memory_file()
+    web_key = bool(os.environ.get("OLLAMA_API_KEY"))
+
+    print(_c(LOOK_WORDMARK, "36"))
+    print(_c(f"LOOK {VERSION} · doctor", "2"))
+    print("─"*46)
+    print(f"\nSYSTEM\n  {platform.system()} {platform.release()} · {platform.machine()}")
+    print("\nTOOLS")
+    for n,ok in checks: print(f"  {'✓' if ok else '✗'} {n}")
+    print("\nSHELL")
+    for n,ok in files: print(f"  {'✓' if ok else '✗'} {n}")
+
+    print("\nOLLAMA · optional")
+    print(f"  {'✓' if ollama_bin else '·'} binary")
+    print(f"  {'✓' if server else '·'} server")
+    if server:
+        if loaded:
+            names = ", ".join((m.get("name") or m.get("model") or "?") for m in loaded)
+            print(f"  ✓ model loaded · {names}")
+        else:
+            preferred = os.environ.get("LOOK_OLLAMA_MODEL", "qwen3:8b").strip() or "qwen3:8b"
+            print(f"  · no model loaded · lo uses {preferred} on demand")
+    else:
+        print("  · model status unavailable")
+    print(f"  {'✓' if web_key else '·'} web search key")
+    print(f"  {'✓' if memory_ok else '✗'} persistent memory")
+
+    print("\nPREVIEW · optional")
+    image_preview=bool(shutil.which("chafa"))
+    pdf_preview=image_preview and bool(shutil.which("pdftoppm") or (platform.system()=="Darwin" and shutil.which("qlmanage")))
+    print(f"  {'✓' if image_preview else '·'} image preview" + ("" if image_preview else " · install chafa to enable"))
+    print(f"  {'✓' if pdf_preview else '·'} PDF image preview" + ("" if pdf_preview else " · needs image preview + PDF rasterizer"))
+
+    good=all(ok for _,ok in checks+files) and memory_ok
+    print("\n"+("Everything looks good." if good else "LOOK found something worth checking."))
+    return 0 if good else 1
+
+
+def doctor():
+    import io, contextlib
+    buf=io.StringIO()
+    with contextlib.redirect_stdout(buf):
+        code=_doctor_body()
+    _page_text(buf.getvalue())
+    return code
+
+
+def _empty_memory():
+    return {"long": "", "recent": []}
+
+
+def _ensure_memory_file():
+    import json
+    try:
+        STATE_DIR.mkdir(parents=True, exist_ok=True)
+        if not MEMORY_FILE.exists():
+            MEMORY_FILE.write_text(json.dumps(_empty_memory(), indent=2) + "\n")
+            os.chmod(MEMORY_FILE, 0o600)
+        return True
+    except OSError:
+        return False
+
+
+def _load_memory():
+    import json
+    if not _ensure_memory_file():
+        return _empty_memory()
+    try:
+        data=json.loads(MEMORY_FILE.read_text())
+        recent=data.get("recent", [])
+        return {
+            "long": str(data.get("long", ""))[:3000],
+            "recent": [str(x)[:900] for x in recent[-RECENT_MEMORY_SLOTS:]],
+        }
+    except Exception:
+        return _empty_memory()
+
+
+def _save_memory(memory):
+    import json
+    try:
+        STATE_DIR.mkdir(parents=True, exist_ok=True)
+        tmp=MEMORY_FILE.with_suffix(".tmp")
+        tmp.write_text(json.dumps(memory, ensure_ascii=False, indent=2) + "\n")
+        os.chmod(tmp, 0o600)
+        tmp.replace(MEMORY_FILE)
+        os.chmod(MEMORY_FILE, 0o600)
+    except OSError:
+        pass
+
+
+def _memory_context(memory):
+    parts=[]
+    if memory.get("long"):
+        parts.append("Long memory:\n" + memory["long"])
+    if memory.get("recent"):
+        recent="\n".join(f"{i+1}. {note}" for i,note in enumerate(memory["recent"]))
+        parts.append("Recent memory, oldest to newest:\n" + recent)
+    if not parts:
+        return ""
+    return (
+        "Persistent context from previous LOOK Ollama conversations follows. "
+        "Use it only when relevant; newer conversation content wins if there is a conflict.\n\n"
+        + "\n\n".join(parts)
+    )
+
+
+def _local_chat_once(base, model, messages):
+    import json
+    import urllib.request
+    payload=json.dumps({"model": model, "messages": messages, "stream": False}).encode()
+    request=urllib.request.Request(
+        base + "/api/chat", data=payload,
+        headers={"Content-Type": "application/json"}, method="POST"
+    )
+    with urllib.request.urlopen(request) as response:
+        result=json.load(response)
+    return result.get("message", {}).get("content", "").strip()
+
+
+
+@contextmanager
+def _activity(label):
+    """Show a small animated status while a synchronous Ollama step is busy."""
+    interactive = sys.stdout.isatty()
+    if not interactive:
+        print(f"· {label}", flush=True)
+        yield
+        return
+
+    stop = threading.Event()
+    frames = ("◐", "◓", "◑", "◒")
+
+    def animate():
+        i = 0
+        while not stop.is_set():
+            frame=_c(frames[i % len(frames)], "36")
+            sys.stdout.write(f"\r\033[2K{frame} {_c(label,'2')}")
+            sys.stdout.flush()
+            i += 1
+            stop.wait(0.12)
+
+    worker = threading.Thread(target=animate, daemon=True)
+    worker.start()
+    try:
+        yield
+    finally:
+        stop.set()
+        worker.join(timeout=0.5)
+        sys.stdout.write("\r\033[2K")
+        sys.stdout.flush()
+
+def _compress_exchange(base, model, user_text, assistant_text):
+    prompt = f'''Compress this conversation exchange into one durable memory note, maximum 90 words.
+Keep concrete preferences, decisions, project state, names, commands, or unresolved tasks that may matter later.
+Drop pleasantries and disposable details. Do not invent anything.
+
+USER:
+{user_text[:4000]}
+
+ASSISTANT:
+{assistant_text[:5000]}'''
+    try:
+        return _local_chat_once(base, model, [
+            {"role":"system","content":"You maintain concise persistent memory for a terminal assistant."},
+            {"role":"user","content":prompt},
+        ])[:900]
+    except Exception:
+        return ("User: " + user_text[:350] + " | Assistant: " + assistant_text[:450])[:900]
+
+
+def _fold_long_memory(base, model, old_long, evicted_note):
+    prompt = f'''Rewrite the long-term memory below so it incorporates the newly archived recent note.
+Maximum 260 words. Preserve durable facts, preferences, decisions, active project state, and unresolved tasks.
+Prefer newer information if it supersedes older information. Remove redundancy. Do not invent anything.
+
+CURRENT LONG MEMORY:
+{old_long or "(empty)"}
+
+NEW ARCHIVED NOTE:
+{evicted_note}'''
+    try:
+        return _local_chat_once(base, model, [
+            {"role":"system","content":"You maintain a compact rolling long-term memory."},
+            {"role":"user","content":prompt},
+        ])[:3000]
+    except Exception:
+        combined=(old_long + "\n" + evicted_note).strip()
+        return combined[-3000:]
+
+
+def _remember_exchange(base, model, memory, user_text, assistant_text):
+    note=_compress_exchange(base, model, user_text, assistant_text)
+    recent=list(memory.get("recent", []))
+    recent.append(note)
+    long_memory=memory.get("long", "")
+    if len(recent) > RECENT_MEMORY_SLOTS:
+        evicted=recent.pop(0)
+        long_memory=_fold_long_memory(base, model, long_memory, evicted)
+    updated={"long": long_memory, "recent": recent}
+    _save_memory(updated)
+    return updated
+
+
+def _memory_job_files():
+    try:
+        return sorted(MEMORY_QUEUE.glob("*.json"))
+    except OSError:
+        return []
+
+
+def _memory_worker_active():
+    try:
+        pid=int(MEMORY_WORKER_LOCK.read_text().strip())
+        os.kill(pid, 0)
+        return True
+    except (OSError, ValueError):
+        try:
+            MEMORY_WORKER_LOCK.unlink()
+        except OSError:
+            pass
+        return False
+
+
+def _start_memory_worker():
+    """Start one detached memory worker; duplicate launches exit harmlessly."""
+    try:
+        STATE_DIR.mkdir(parents=True, exist_ok=True)
+        subprocess.Popen(
+            [sys.executable, str(Path(__file__).resolve()), "_remember-worker"],
+            stdin=subprocess.DEVNULL,
+            stdout=subprocess.DEVNULL,
+            stderr=subprocess.DEVNULL,
+            start_new_session=True,
+            close_fds=True,
+        )
+    except OSError:
+        pass
+
+
+def _queue_memory_exchange(base, model, user_text, assistant_text):
+    """Durably enqueue an exchange, then let detached housekeeping own compression."""
+    try:
+        MEMORY_QUEUE.mkdir(parents=True, exist_ok=True)
+        token=f"{time.time_ns()}-{uuid.uuid4().hex[:8]}"
+        tmp=MEMORY_QUEUE/(token+".tmp")
+        job=MEMORY_QUEUE/(token+".json")
+        payload={
+            "base":base,
+            "model":model,
+            "user":user_text[:12000],
+            "assistant":assistant_text[:16000],
+        }
+        tmp.write_text(json.dumps(payload, ensure_ascii=False), encoding="utf-8")
+        os.chmod(tmp, 0o600)
+        tmp.replace(job)
+        os.chmod(job, 0o600)
+        _start_memory_worker()
+        return True
+    except OSError:
+        return False
+
+
+def _memory_worker():
+    """Drain queued memory jobs serially, then exit. Safe across lo sessions."""
+    STATE_DIR.mkdir(parents=True, exist_ok=True)
+
+    # Atomic lock creation gives us one worker without a daemon or dependency.
+    try:
+        fd=os.open(MEMORY_WORKER_LOCK, os.O_CREAT|os.O_EXCL|os.O_WRONLY, 0o600)
+    except FileExistsError:
+        return 0
+    try:
+        os.write(fd, str(os.getpid()).encode())
+    finally:
+        os.close(fd)
+
+    try:
+        while True:
+            jobs=_memory_job_files()
+            if not jobs:
+                break
+
+            job_path=jobs[0]
+            try:
+                job=json.loads(job_path.read_text(encoding="utf-8"))
+                memory=_load_memory()
+                _remember_exchange(
+                    job.get("base","http://127.0.0.1:11434"),
+                    job.get("model",os.environ.get("LOOK_OLLAMA_MODEL","qwen3:8b")),
+                    memory,
+                    str(job.get("user","")),
+                    str(job.get("assistant","")),
+                )
+                job_path.unlink()
+            except Exception:
+                # Leave the job for a future worker rather than losing memory.
+                break
+    finally:
+        try:
+            MEMORY_WORKER_LOCK.unlink()
+        except OSError:
+            pass
+
+    # Close the tiny shutdown race: if a job arrived while we released the lock,
+    # launch one fresh worker to pick it up.
+    if _memory_job_files():
+        _start_memory_worker()
+    return 0
+
+
+
+def _safe_workspace_path(workspace, raw_path="."):
+    """Resolve a path while keeping Ollama file tools inside the starting cwd."""
+    workspace = Path(workspace).resolve()
+    raw_path = raw_path or "."
+    candidate = Path(raw_path).expanduser()
+    if not candidate.is_absolute():
+        candidate = workspace / candidate
+    candidate = candidate.resolve()
+    try:
+        candidate.relative_to(workspace)
+    except ValueError:
+        raise ValueError("path is outside the LOOK Ollama workspace")
+    return candidate
+
+
+def _workspace_snapshot(workspace):
+    """Small guaranteed folder context; deeper inspection is handled by tools."""
+    workspace = Path(workspace).resolve()
+    try:
+        entries = sorted(workspace.iterdir(), key=lambda p: (not p.is_dir(), p.name.lower()))[:120]
+    except OSError as exc:
+        return f"Current workspace: {workspace}\nDirectory listing unavailable: {exc}"
+    shown=[]
+    for item in entries:
+        try:
+            suffix="/" if item.is_dir() else ""
+        except OSError:
+            suffix=""
+        shown.append(item.name + suffix)
+    more="\n…listing truncated" if len(entries) == 120 else ""
+    return (
+        f"Current workspace: {workspace}\n"
+        "Treat this as the user's current folder. File tools are restricted to this folder and its descendants.\n"
+        "Top-level contents:\n" + ("\n".join(shown) if shown else "(empty)") + more
+    )
+
+
+def _tool_list_files(workspace, path=".", depth=1):
+    target=_safe_workspace_path(workspace, path)
+    if not target.exists():
+        return f"Not found: {path}"
+    if not target.is_dir():
+        return f"Not a directory: {path}"
+    depth=max(1, min(int(depth or 1), 3))
+    lines=[]
+    def walk(folder, level):
+        if level > depth or len(lines) >= 250:
+            return
+        try:
+            children=sorted(folder.iterdir(), key=lambda p: (not p.is_dir(), p.name.lower()))
+        except (OSError, PermissionError):
+            return
+        for child in children:
+            if len(lines) >= 250:
+                return
+            rel=child.relative_to(workspace)
+            try:
+                is_dir=child.is_dir()
+            except OSError:
+                is_dir=False
+            lines.append(str(rel) + ("/" if is_dir else ""))
+            if is_dir:
+                walk(child, level+1)
+    walk(target, 1)
+    return "\n".join(lines) if lines else "(empty or unreadable)"
+
+
+def _tool_read_file(workspace, path):
+    target=_safe_workspace_path(workspace, path)
+    if not target.exists():
+        return f"Not found: {path}"
+    if not target.is_file():
+        return f"Not a file: {path}"
+
+    # PDF is a container format, not text. Extract deterministically at the
+    # edge and give the model only readable text.
+    if target.suffix.lower()==".pdf":
+        pdftotext=shutil.which("pdftotext")
+        if not pdftotext:
+            return "PDF text extraction unavailable; install pdftotext (Poppler)."
+        try:
+            result=subprocess.run(
+                [pdftotext,"-layout",str(target),"-"],
+                capture_output=True,text=True,timeout=8
+            )
+            if result.returncode!=0:
+                detail=result.stderr.strip()
+                return "PDF text extraction failed." + (f" {detail[:300]}" if detail else "")
+            text=result.stdout.strip()
+            if not text:
+                return "PDF contains no extractable text; it may be scanned/image-only."
+            return text[:16000] + ("\n…truncated" if len(text) > 16000 else "")
+        except (OSError,subprocess.SubprocessError) as exc:
+            return f"PDF text extraction failed: {exc}"
+
+    try:
+        if target.stat().st_size > 1_000_000:
+            return "File is larger than the 1 MB read limit."
+        data=target.read_bytes()
+        if b"\x00" in data[:4096]:
+            return "Binary file; text extraction unavailable for this format."
+        text=data.decode("utf-8", errors="replace")
+        return text[:16000] + ("\n…truncated" if len(text) > 16000 else "")
+    except OSError as exc:
+        return f"Read failed: {exc}"
+
+
+def _tool_search_files(workspace, query, path="."):
+    target=_safe_workspace_path(workspace, path)
+    if not target.exists() or not target.is_dir():
+        return f"Not a directory: {path}"
+    needle=(query or "").lower()
+    if not needle:
+        return "Search query is empty."
+    matches=[]
+    scanned=0
+    for root, dirs, files in os.walk(target):
+        rootp=Path(root)
+        try:
+            rel_depth=len(rootp.relative_to(target).parts)
+        except ValueError:
+            continue
+        dirs[:] = [d for d in dirs if not d.startswith('.') and rel_depth < 4]
+        for name in dirs + files:
+            rel=(rootp / name).relative_to(workspace)
+            if needle in name.lower():
+                matches.append(str(rel) + ("/" if name in dirs else ""))
+                if len(matches) >= 100:
+                    return "\n".join(matches)
+        for name in files:
+            if scanned >= 500 or len(matches) >= 100:
+                break
+            scanned += 1
+            filep=rootp / name
+            try:
+                if filep.stat().st_size > 300_000:
+                    continue
+                data=filep.read_bytes()
+                if b"\x00" in data[:4096]:
+                    continue
+                text=data.decode("utf-8", errors="ignore")
+            except OSError:
+                continue
+            if needle in text.lower():
+                rel=filep.relative_to(workspace)
+                if str(rel) not in matches:
+                    matches.append(str(rel))
+        if scanned >= 500 or len(matches) >= 100:
+            break
+    return "\n".join(matches) if matches else "No matches."
+
+
+def _tool_write_file(workspace, path, content, overwrite=False):
+    target=_safe_workspace_path(workspace, path)
+    if target.exists() and not overwrite:
+        return f"Refusing to overwrite existing file: {path}. Set overwrite=true only when the user explicitly asked to replace it."
+    if not target.parent.exists() or not target.parent.is_dir():
+        return f"Parent directory does not exist: {target.parent.relative_to(Path(workspace).resolve())}"
+    try:
+        target.write_text(content, encoding="utf-8")
+        return f"Wrote {len(content.encode('utf-8'))} bytes to {target.relative_to(Path(workspace).resolve())}"
+    except OSError as exc:
+        return f"Write failed: {exc}"
+
+
+
+def _sha256_file(path):
+    digest=hashlib.sha256()
+    with Path(path).open("rb") as handle:
+        for chunk in iter(lambda: handle.read(1024*1024), b""):
+            digest.update(chunk)
+    return digest.hexdigest()
+
+
+
+def _load_undo():
+    try:
+        data=json.loads(UNDO_FILE.read_text(encoding="utf-8"))
+        return data if isinstance(data, list) else []
+    except (OSError, ValueError, json.JSONDecodeError):
+        return []
+
+
+def _save_undo(entries):
+    STATE_DIR.mkdir(parents=True, exist_ok=True)
+    UNDO_FILE.write_text(json.dumps(entries[-UNDO_LIMIT:], indent=2), encoding="utf-8")
+    try: os.chmod(UNDO_FILE, 0o600)
+    except OSError: pass
+
+
+def _record_undo(entry):
+    entries=_load_undo()
+    entries.append(entry)
+    dropped=entries[:-UNDO_LIMIT]
+    entries=entries[-UNDO_LIMIT:]
+    _save_undo(entries)
+    for old in dropped:
+        trash=old.get("trash")
+        if trash:
+            try:
+                p=Path(trash)
+                if p.is_dir(): shutil.rmtree(p)
+                elif p.exists(): p.unlink()
+            except OSError:
+                pass
+
+
+def _undo_last():
+    entries=_load_undo()
+    if not entries:
+        print("LOOK undo · nothing to undo")
+        return 1
+    entry=entries[-1]
+    kind=entry.get("kind")
+    try:
+        if kind=="copy":
+            dst=Path(entry["destination"])
+            if not dst.exists():
+                raise RuntimeError("copied destination no longer exists")
+            expected=entry.get("sha256")
+            if expected and dst.is_file() and _sha256_file(dst) != expected:
+                raise RuntimeError("copied file has changed; refusing to remove it")
+            if dst.is_dir(): shutil.rmtree(dst)
+            else: dst.unlink()
+            _cleanup_created_dirs(entry.get("created_dirs",[]))
+            detail=f"removed copied {dst.name}"
+        elif kind=="move":
+            src=Path(entry["source"]); dst=Path(entry["destination"])
+            if not dst.exists():
+                raise RuntimeError("moved path no longer exists")
+            if src.exists():
+                raise RuntimeError("original location is occupied")
+            shutil.move(str(dst), str(src))
+            _cleanup_created_dirs(entry.get("created_dirs",[]))
+            detail=f"{dst.name} → {src}"
+        elif kind=="remove":
+            original=Path(entry["source"]); trash=Path(entry["trash"])
+            if original.exists():
+                raise RuntimeError("original location is occupied")
+            if not trash.exists():
+                raise RuntimeError("recoverable item is no longer available")
+            original.parent.mkdir(parents=True, exist_ok=True)
+            shutil.move(str(trash), str(original))
+            detail=f"{original.name} restored"
+        elif kind=="mkdir":
+            path=Path(entry["path"])
+            if not path.exists():
+                raise RuntimeError("directory no longer exists")
+            if not path.is_dir() or any(path.iterdir()):
+                raise RuntimeError("directory is no longer empty; refusing to remove it")
+            path.rmdir()
+            detail=f"removed empty {path.name}/"
+        elif kind=="batch":
+            items=entry.get("items",[])
+            for item in reversed(items):
+                ik=item.get("kind")
+                if ik=="copy":
+                    dst=Path(item["destination"])
+                    if not dst.exists(): raise RuntimeError(f"{dst.name} no longer exists")
+                    expected=item.get("sha256")
+                    if expected and dst.is_file() and _sha256_file(dst)!=expected:
+                        raise RuntimeError(f"{dst.name} changed; refusing batch undo")
+                    if dst.is_dir(): shutil.rmtree(dst)
+                    else: dst.unlink()
+                    _cleanup_created_dirs(item.get("created_dirs",[]))
+                elif ik=="move":
+                    src=Path(item["source"]); dst=Path(item["destination"])
+                    if not dst.exists(): raise RuntimeError(f"{dst.name} no longer exists")
+                    if src.exists(): raise RuntimeError(f"{src} is occupied")
+                    shutil.move(str(dst),str(src))
+                    _cleanup_created_dirs(item.get("created_dirs",[]))
+                elif ik=="remove":
+                    original=Path(item["source"]); trash=Path(item["trash"])
+                    if original.exists(): raise RuntimeError(f"{original} is occupied")
+                    if not trash.exists(): raise RuntimeError(f"{original.name} is no longer recoverable")
+                    original.parent.mkdir(parents=True,exist_ok=True)
+                    shutil.move(str(trash),str(original))
+            detail=f"{len(items)} items restored"
+        else:
+            raise RuntimeError("unknown undo record")
+    except (OSError, RuntimeError) as exc:
+        print(f"{_c('✗','31')} LOOK undo · refused · {exc}")
+        return 1
+    entries.pop()
+    _save_undo(entries)
+    print(f"{_c('↶ UNDO','1;32')} · {kind}")
+    print(f"  {detail}")
+    return 0
+
+
+
+
+
+def _batch_action(kind, destination, paths):
+    """Perform several LOOK mutations but expose them as one undo transaction."""
+    before=_load_undo()
+    before_len=len(before)
+    results=[]
+    try:
+        if kind in {"copy","move"}:
+            dest=Path(destination).expanduser()
+            # Multiple sources always target a directory.
+            if len(paths)>1:
+                raw=str(destination)
+                if not raw.endswith(("/",os.sep)):
+                    raw+=os.sep
+                destination=raw
+            for raw in paths:
+                result=_interactive_file_action(kind,raw,destination)
+                if not result.startswith(("COPY OK","MOVE OK")):
+                    raise RuntimeError(result)
+                results.append(result)
+        elif kind=="remove":
+            for raw in paths:
+                result=_journal_remove(raw)
+                if not result.startswith("REMOVE OK"):
+                    raise RuntimeError(result)
+                results.append(result)
+        else:
+            raise RuntimeError("unknown batch action")
+
+        after=_load_undo()
+        created=after[before_len:]
+        if len(created)!=len(paths):
+            raise RuntimeError("undo journal mismatch")
+        combined=before+[{"kind":"batch","items":created,"time":time.time()}]
+        _save_undo(combined)
+        print(f"{kind.upper()} OK · {len(paths)} item{'s' if len(paths)!=1 else ''} · undo available · lk undo")
+        return 0
+    except RuntimeError as exc:
+        # Roll back only mutations created by this batch. A failed batch should
+        # not leave half an operation behind or pollute the user's undo stack.
+        while len(_load_undo())>before_len:
+            if _undo_last()!=0:
+                break
+        print(f"{_c('✗','31')} {kind.upper()} failed · {exc}")
+        return 1
+
+
+def _interactive_file_action(kind, src, dest):
+    action=_journal_copy if kind=="copy" else _journal_move
+    result=action(src,dest)
+    if result.startswith("CREATE_DIR_REQUIRED · "):
+        needed=result.split(" · ",1)[1]
+        if not (sys.stdin.isatty() and sys.stdout.isatty()):
+            return result
+        try:
+            answer,cancelled=_prompt_line(
+                f"{needed} does not exist\nM create directory and continue · Esc/Enter cancel › "
+            )
+        except KeyboardInterrupt:
+            return "· cancelled"
+        if cancelled or answer.strip().lower()!="m":
+            return "· cancelled"
+        result=action(src,dest,create_missing=True)
+    return result
+
+
+def _prompt_line(prompt):
+    """Read one short action value; bare Esc cancels without Ctrl-C."""
+    if not (sys.stdin.isatty() and sys.stdout.isatty()):
+        try:
+            return input(prompt),False
+        except (EOFError,KeyboardInterrupt):
+            return '',True
+    fd=sys.stdin.fileno()
+    old=termios.tcgetattr(fd)
+    chars=[]
+    try:
+        tty.setcbreak(fd)
+        sys.stdout.write(prompt); sys.stdout.flush()
+        while True:
+            ch=os.read(fd,1)
+            if ch==b'\x1b':
+                sys.stdout.write('\n'); sys.stdout.flush()
+                return '',True
+            if ch in {b'\r',b'\n'}:
+                sys.stdout.write('\n'); sys.stdout.flush()
+                return ''.join(chars),False
+            if ch in {b'\x7f',b'\b'}:
+                if chars:
+                    chars.pop()
+                    sys.stdout.write('\b \b'); sys.stdout.flush()
+                continue
+            if ch==b'\x03':
+                raise KeyboardInterrupt
+            text=ch.decode('utf-8','ignore')
+            if text and text.isprintable():
+                chars.append(text)
+                sys.stdout.write(text); sys.stdout.flush()
+    finally:
+        termios.tcsetattr(fd,termios.TCSADRAIN,old)
+
+
+def _action_result(text):
+    """Color only the CLI presentation; tool/API text stays plain."""
+    if not sys.stdout.isatty():
+        return text
+    success_prefixes=("COPY OK","MOVE OK","REMOVE OK","MKDIR OK")
+    if text.startswith(success_prefixes):
+        head, sep, tail=text.partition(" · ")
+        return f"{_c('✓','32')} {_c(head,'1;32')}{sep}{tail}"
+    if any(word in text.lower() for word in ("failed","refused","mismatch")):
+        return f"{_c('✗','31')} {text}"
+    return text
+
+
+def _destination_plan(src, requested):
+    raw=str(requested)
+    req=Path(requested).expanduser().resolve()
+    directory_intent=raw.endswith(("/", os.sep)) or (req.exists() and req.is_dir())
+    dst=req/src.name if directory_intent else req
+    needed_root=req if directory_intent else dst.parent
+    return req,dst,directory_intent,needed_root
+
+
+def _copy_variant(path):
+    path=Path(path)
+    if path.is_dir() or not path.suffix:
+        base=path.name
+        suffix=""
+    else:
+        base=path.stem
+        suffix=path.suffix
+    parent=path.parent
+    candidate=parent/f"{base} copy{suffix}"
+    number=2
+    while candidate.exists():
+        candidate=parent/f"{base} copy {number}{suffix}"
+        number+=1
+    return candidate
+
+
+def _missing_directories(path):
+    path=Path(path)
+    missing=[]
+    cursor=path
+    while not cursor.exists():
+        missing.append(cursor)
+        parent=cursor.parent
+        if parent==cursor:
+            break
+        cursor=parent
+    return list(reversed(missing))
+
+
+def _make_missing_directories(path):
+    created=[]
+    for folder in _missing_directories(path):
+        folder.mkdir()
+        created.append(str(folder))
+    return created
+
+
+def _cleanup_created_dirs(paths):
+    for raw in reversed(paths or []):
+        p=Path(raw)
+        try:
+            if p.is_dir() and not any(p.iterdir()):
+                p.rmdir()
+        except OSError:
+            pass
+
+
+def _journal_copy(src, requested_destination, create_missing=False):
+    src=Path(src).expanduser().resolve()
+    req,dst,directory_intent,needed_root=_destination_plan(src, requested_destination)
+    if not src.exists():
+        return f"Copy failed: source not found: {src}"
+    if dst==src and req.exists() and req.is_dir():
+        dst=_copy_variant(src)
+        needed_root=dst.parent
+    elif dst.exists():
+        return f"Copy refused: destination already exists: {dst}"
+    missing=_missing_directories(needed_root)
+    if missing and not create_missing:
+        return f"CREATE_DIR_REQUIRED · {needed_root}"
+    created=[]
+    try:
+        if missing:
+            created=_make_missing_directories(needed_root)
+        if src.is_dir():
+            shutil.copytree(src,dst,copy_function=shutil.copy2)
+            files=sum(1 for p in dst.rglob("*") if p.is_file())
+            _record_undo({"kind":"copy","destination":str(dst),"created_dirs":created,"time":time.time()})
+            return f"COPY OK · {src.name} → {dst} · directory · {files} files · undo available · lk undo"
+        shutil.copy2(src,dst)
+        source_hash=_sha256_file(src); destination_hash=_sha256_file(dst)
+        if source_hash != destination_hash:
+            try: dst.unlink()
+            except OSError: pass
+            _cleanup_created_dirs(created)
+            return "Copy verification failed: SHA-256 mismatch; destination was removed."
+        _record_undo({"kind":"copy","destination":str(dst),"sha256":destination_hash,"created_dirs":created,"time":time.time()})
+        return f"COPY OK · {src.name} → {dst} · {src.stat().st_size} bytes · SHA-256 verified identical · undo available · lk undo"
+    except OSError as exc:
+        _cleanup_created_dirs(created)
+        return f"Copy failed: {exc}"
+
+
+def _journal_move(src, requested_destination, create_missing=False):
+    src=Path(src).expanduser().resolve()
+    req,dst,directory_intent,needed_root=_destination_plan(src, requested_destination)
+    if not src.exists():
+        return f"Move failed: source not found: {src}"
+    if dst.exists():
+        return f"Move refused: destination already exists: {dst}"
+    missing=_missing_directories(needed_root)
+    if missing and not create_missing:
+        return f"CREATE_DIR_REQUIRED · {needed_root}"
+    created=[]
+    try:
+        if missing:
+            created=_make_missing_directories(needed_root)
+        shutil.move(str(src),str(dst))
+        _record_undo({"kind":"move","source":str(src),"destination":str(dst),"created_dirs":created,"time":time.time()})
+        return f"MOVE OK · {src.name} → {dst} · undo available · lk undo"
+    except OSError as exc:
+        _cleanup_created_dirs(created)
+        return f"Move failed: {exc}"
+
+
+
+def _journal_remove(path):
+    target=Path(path).expanduser().resolve()
+    if not target.exists():
+        return f"Remove failed: not found: {target}"
+    if target == Path(target.anchor):
+        return "Remove refused: filesystem root cannot be removed."
+    try:
+        UNDO_TRASH.mkdir(parents=True,exist_ok=True)
+        token=f"{int(time.time()*1000)}-{uuid.uuid4().hex[:8]}"
+        stash=UNDO_TRASH/token
+        shutil.move(str(target),str(stash))
+        _record_undo({"kind":"remove","source":str(target),"trash":str(stash),"time":time.time()})
+        return f"REMOVE OK · {target.name} · recoverable · undo available · lk undo"
+    except OSError as exc:
+        return f"Remove failed: {exc}"
+
+
+def _journal_mkdir(path):
+    target=Path(path).expanduser().resolve()
+    if target.exists():
+        return f"Directory already exists: {target}" if target.is_dir() else f"Create directory failed: path exists as a file: {target}"
+    try:
+        target.mkdir(parents=True)
+        _record_undo({"kind":"mkdir","path":str(target),"time":time.time()})
+        return f"MKDIR OK · {target} · undo available · lk undo"
+    except OSError as exc:
+        return f"Create directory failed: {exc}"
+
+
+def _tool_copy_path(workspace, source, destination):
+    src=_safe_workspace_path(workspace,source)
+    raw=Path(destination).expanduser()
+    requested=raw if raw.is_absolute() else Path(workspace).resolve()/raw
+    dst=_safe_workspace_path(workspace,str(requested))
+    # Existing directory destination is allowed, but the resulting child must also remain inside workspace.
+    final=_final_destination(src,dst)
+    _safe_workspace_path(workspace,str(final))
+    return _journal_copy(src,dst)
+
+
+def _tool_move_path(workspace, source, destination):
+    src=_safe_workspace_path(workspace,source)
+    raw=Path(destination).expanduser()
+    requested=raw if raw.is_absolute() else Path(workspace).resolve()/raw
+    dst=_safe_workspace_path(workspace,str(requested))
+    final=_final_destination(src,dst)
+    _safe_workspace_path(workspace,str(final))
+    return _journal_move(src,dst)
+
+
+def _tool_remove_path(workspace, path, confirmed=False):
+    target=_safe_workspace_path(workspace,path)
+    if not confirmed:
+        return "Remove refused: confirmed=true is required, and may be used only when the user explicitly asked to remove this path."
+    if target == Path(workspace).resolve():
+        return "Remove refused: the LOOK workspace root cannot be removed."
+    return _journal_remove(target)
+
+
+def _tool_make_directory(workspace, path):
+    target=_safe_workspace_path(workspace,path)
+    return _journal_mkdir(target)
+
+
+
+LO_PROFILES=("conservative","workspace","power","unsafe")
+
+def _load_lo_profile():
+    env=os.environ.get("LOOK_LO_PROFILE","").strip().lower()
+    if env in LO_PROFILES:
+        return env
+    try:
+        saved=LO_ACCESS_FILE.read_text(encoding="utf-8").strip().lower()
+        if saved in LO_PROFILES:
+            return saved
+    except OSError:
+        pass
+    return "workspace"
+
+def _save_lo_profile(profile):
+    if profile not in LO_PROFILES:
+        raise ValueError(f"unknown LO profile: {profile}")
+    STATE_DIR.mkdir(parents=True,exist_ok=True)
+    tmp=LO_ACCESS_FILE.with_suffix(".tmp")
+    tmp.write_text(profile+"\n",encoding="utf-8")
+    os.chmod(tmp,0o600)
+    tmp.replace(LO_ACCESS_FILE)
+    os.chmod(LO_ACCESS_FILE,0o600)
+
+def lo_access(args):
+    args=list(args or [])
+    current=_load_lo_profile()
+    if not args or args[0] in {"status","list"}:
+        _title("lo access")
+        rows=[
+            ("conservative","read/search workspace + web; no writes"),
+            ("workspace","bounded LOOK file tools inside starting workspace"),
+            ("power","workspace tools + shell commands; confirm each command"),
+            ("unsafe","shell commands without per-command confirmation"),
+        ]
+        for name,desc in rows:
+            marker="✓" if name==current else " "
+            print(f"  {marker} {name:<13} {desc}")
+        print("\n  session override: lo --conservative | --workspace | --power | --unsafe")
+        return 0
+    profile=args[0].lower()
+    if profile not in LO_PROFILES:
+        print(f"LOOK OLLAMA · unknown access profile: {profile}")
+        print("  choose: conservative · workspace · power · unsafe")
+        return 1
+    _save_lo_profile(profile)
+    print(f"✓ LO access · {profile}")
+    return 0
+
+def _confirm_command(command):
+    print()
+    print(_ansi_label("command ›","33"),command)
+    try:
+        answer=input("Allow command? [y/N] ").strip().lower()
+    except (EOFError,KeyboardInterrupt):
+        print()
+        return False
+    return answer in {"y","yes"}
+
+def _confirm_unsafe_session():
+    print(_c("LO UNSAFE","31"))
+    print("  unrestricted shell commands are enabled for this LO session")
+    print("  commands run with your current user privileges and environment")
+    print("  LOOK will not ask again for individual commands")
+    try:
+        answer=input("Enter unsafe mode? [y/N] ").strip().lower()
+    except (EOFError,KeyboardInterrupt):
+        print()
+        return False
+    return answer in {"y","yes"}
+
+def _command_tool():
+    return {"type":"function","function":{
+        "name":"run_command",
+        "description":(
+            "Run a shell command on the computer running LOOK. Use this in power/unsafe sessions for executing, "
+            "testing, installing, inspecting, building, cleaning, or administering beyond LOOK's bounded file tools. "
+            "Prefer inspection before destructive or system-wide mutation."
+        ),
+        "parameters":{"type":"object","properties":{
+            "command":{"type":"string","description":"Shell command to execute with zsh -lc"},
+            "cwd":{"type":"string","description":"Working directory; default is the LO starting workspace"},
+            "timeout":{"type":"integer","description":"Timeout seconds, 1-600; default 120"}
+        },"required":["command"]}
+    }}
+
+def _run_command_tool(workspace,args,profile):
+    command=str(args.get("command","")).strip()
+    if not command:
+        return "Command tool failed: empty command"
+
+    cwd_raw=str(args.get("cwd","") or "").strip()
+    cwd=Path(cwd_raw).expanduser() if cwd_raw else workspace
+    if not cwd.is_absolute():
+        cwd=(workspace/cwd).resolve()
+    try:
+        cwd=cwd.resolve()
+    except OSError:
+        return f"Command tool failed: invalid cwd: {cwd}"
+    if not cwd.exists() or not cwd.is_dir():
+        return f"Command tool failed: cwd is not a directory: {cwd}"
+
+    try:
+        timeout=max(1,min(600,int(args.get("timeout",120) or 120)))
+    except (TypeError,ValueError):
+        timeout=120
+
+    if profile=="power" and not _confirm_command(command):
+        return "Command denied by user."
+
+    shell=shutil.which("zsh")
+    if not shell:
+        return "Command tool failed: zsh is not available on PATH"
+
+    try:
+        proc=subprocess.run(
+            [shell,"-lc",command],
+            cwd=str(cwd),
+            stdin=None,
+            stdout=subprocess.PIPE,
+            stderr=subprocess.STDOUT,
+            text=True,
+            timeout=timeout,
+        )
+        output=(proc.stdout or "").strip()
+        if len(output)>16000:
+            output="[output truncated to final 16000 characters]\n"+output[-16000:]
+        return f"exit {proc.returncode}" + (f"\n{output}" if output else "")
+    except subprocess.TimeoutExpired as exc:
+        partial=exc.stdout or ""
+        if isinstance(partial,bytes):
+            partial=partial.decode(errors="replace")
+        partial=partial.strip()
+        return f"Command timed out after {timeout}s" + (f"\n{partial[-8000:]}" if partial else "")
+    except OSError as exc:
+        return f"Command tool failed: {exc}"
+
+def _lo_tools(profile):
+    tools=_filesystem_tools()
+    if profile=="conservative":
+        tools=[t for t in tools if t.get("function",{}).get("name") in {"list_files","read_file","search_files"}]
+    if profile in {"power","unsafe"}:
+        tools.append(_command_tool())
+    return tools
+
+def _filesystem_tools():
+    return [
+        {"type":"function","function":{
+            "name":"list_files",
+            "description":"List files and folders inside the current LOOK workspace. Use this to inspect folder contents or hierarchy.",
+            "parameters":{"type":"object","properties":{
+                "path":{"type":"string","description":"Workspace-relative directory, default ."},
+                "depth":{"type":"integer","description":"Recursive depth 1-3, default 1"}
+            }}
+        }},
+        {"type":"function","function":{
+            "name":"read_file",
+            "description":"Read readable contents inside the current LOOK workspace. Text files are read directly; PDFs are converted to text with pdftotext when available. Reads are bounded.",
+            "parameters":{"type":"object","properties":{
+                "path":{"type":"string"}
+            },"required":["path"]}
+        }},
+        {"type":"function","function":{
+            "name":"search_files",
+            "description":"Search filenames and bounded text content recursively inside the current LOOK workspace.",
+            "parameters":{"type":"object","properties":{
+                "query":{"type":"string"},
+                "path":{"type":"string","description":"Workspace-relative directory, default ."}
+            },"required":["query"]}
+        }},
+        {"type":"function","function":{
+            "name":"write_file",
+            "description":"Create or intentionally replace UTF-8 text content inside the current LOOK workspace. Never use write_file to copy, duplicate, clone, back up, move, or rename an existing path; use copy_path or move_path instead. Existing files are protected unless overwrite=true and replacement was explicitly requested.",
+            "parameters":{"type":"object","properties":{
+                "path":{"type":"string"},
+                "content":{"type":"string"},
+                "overwrite":{"type":"boolean"}
+            },"required":["path","content"]}
+        }},
+        {"type":"function","function":{
+            "name":"copy_path",
+            "description":"Copy an existing file or directory exactly inside the LOOK workspace. Use this whenever the user asks to copy, duplicate, clone, or back up an existing path. Never simulate a copy with read_file + write_file. File copies are SHA-256 verified.",
+            "parameters":{"type":"object","properties":{
+                "source":{"type":"string"},
+                "destination":{"type":"string"}
+            },"required":["source","destination"]}
+        }},
+        {"type":"function","function":{
+            "name":"move_path",
+            "description":"Move or rename an existing file or directory inside the LOOK workspace. Use this whenever the user asks to move or rename an existing path. Do not recreate the content with write_file.",
+            "parameters":{"type":"object","properties":{
+                "source":{"type":"string"},
+                "destination":{"type":"string"}
+            },"required":["source","destination"]}
+        }},
+        {"type":"function","function":{
+            "name":"remove_path",
+            "description":"Remove an existing file or directory inside the LOOK workspace. Use only when the user explicitly asks to delete/remove it. Set confirmed=true only for that explicit user request.",
+            "parameters":{"type":"object","properties":{
+                "path":{"type":"string"},
+                "confirmed":{"type":"boolean","description":"Must be true, and only when the user explicitly requested removal."}
+            },"required":["path","confirmed"]}
+        }},
+        {"type":"function","function":{
+            "name":"make_directory",
+            "description":"Create one directory inside the LOOK workspace when the user explicitly asks for it.",
+            "parameters":{"type":"object","properties":{
+                "path":{"type":"string"}
+            },"required":["path"]}
+        }}
+    ]
+
+
+def _run_filesystem_tool(workspace, name, args):
+    try:
+        if name == "list_files":
+            return _tool_list_files(workspace, args.get("path", "."), args.get("depth", 1))
+        if name == "read_file":
+            return _tool_read_file(workspace, args.get("path", ""))
+        if name == "search_files":
+            return _tool_search_files(workspace, args.get("query", ""), args.get("path", "."))
+        if name == "write_file":
+            return _tool_write_file(workspace, args.get("path", ""), args.get("content", ""), bool(args.get("overwrite", False)))
+        if name == "copy_path":
+            return _tool_copy_path(workspace, args.get("source", ""), args.get("destination", ""))
+        if name == "move_path":
+            return _tool_move_path(workspace, args.get("source", ""), args.get("destination", ""))
+        if name == "remove_path":
+            return _tool_remove_path(workspace, args.get("path", ""), bool(args.get("confirmed", False)))
+        if name == "make_directory":
+            return _tool_make_directory(workspace, args.get("path", ""))
+    except (OSError, ValueError) as exc:
+        return f"File tool failed: {exc}"
+    return f"Unknown file tool: {name}"
+
+def _ollama_web_search(query):
+    """Search via Ollama's hosted web API using the inherited API key."""
+    import json
+    import urllib.request
+
+    key = os.environ.get("OLLAMA_API_KEY")
+    if not key:
+        raise RuntimeError("OLLAMA_API_KEY is not set")
+
+    payload = json.dumps({"query": query}).encode()
+    request = urllib.request.Request(
+        "https://ollama.com/api/web_search",
+        data=payload,
+        headers={
+            "Authorization": f"Bearer {key}",
+            "Content-Type": "application/json",
+        },
+        method="POST",
+    )
+    with urllib.request.urlopen(request, timeout=20) as response:
+        return json.load(response)
+
+
+def _search_text(result):
+    """Keep search context useful without flooding a local model's context."""
+    import json
+
+    results = result.get("results", [])[:5]
+    compact = [
+        {
+            "title": item.get("title", ""),
+            "url": item.get("url", ""),
+            "content": item.get("content", "")[:1800],
+        }
+        for item in results
+    ]
+    return json.dumps(compact, ensure_ascii=False)
+
+
+def _ansi_label(name, color):
+    """Small semantic labels; standard ANSI colors respect terminal themes."""
+    if not sys.stdout.isatty():
+        return name
+    return f"\033[{color}m\033[1m{name}\033[0m"
+
+
+def _ollama_markup(text):
+    """Render a restrained Markdown subset with terminal-native ANSI colors."""
+    import re
+    if not sys.stdout.isatty():
+        return text
+
+    reset="\033[0m"
+    bold="\033[1m"
+    italic="\033[3m"
+    underline="\033[4m"
+    cyan="\033[36m"
+    magenta="\033[35m"
+    yellow="\033[33m"
+    green="\033[32m"
+    blue="\033[34m"
+
+    out=[]
+    in_code=False
+    for line in text.splitlines():
+        if line.strip().startswith("```"):
+            in_code=not in_code
+            continue
+        if in_code:
+            out.append(green + line + reset)
+            continue
+
+        if line.startswith("# "):
+            out.append(bold + cyan + line[2:] + reset)
+            continue
+        if line.startswith("## "):
+            out.append(bold + magenta + line[3:] + reset)
+            continue
+        if line.startswith("### "):
+            out.append(bold + yellow + line[4:] + reset)
+            continue
+
+        # Protect inline code while applying the other lightweight markup.
+        code_spans=[]
+        def hold_code(match):
+            code_spans.append(match.group(1))
+            return f"\x00CODE{len(code_spans)-1}\x00"
+        line=re.sub(r'`([^`]+)`', hold_code, line)
+
+        # Keep the real URL visible. Terminal URL detection is more portable
+        # than hidden hyperlink metadata and remains easy to copy or right-click.
+        def render_link(match):
+            label, url = match.group(1), match.group(2)
+            return label + " — " + blue + underline + url + reset
+
+        line=re.sub(
+            r'\[([^\]]+)\]\((https?://[^)]+)\)',
+            render_link,
+            line,
+        )
+        # Style literal URLs too, while leaving the URL itself intact.
+        line=re.sub(
+            r'(?<!\x1b]8;;)(?<!\()(?<!\w)(https?://[^\s<>]+)',
+            lambda m: blue + underline + m.group(1) + reset,
+            line,
+        )
+        line=re.sub(r'\*\*(.+?)\*\*', lambda m: bold+m.group(1)+reset, line)
+        line=re.sub(r'(?<!\*)\*([^*\n]+)\*(?!\*)', lambda m: italic+m.group(1)+reset, line)
+        line=re.sub(r'(?<!_)_([^_\n]+)_(?!_)', lambda m: italic+m.group(1)+reset, line)
+
+        if line.startswith(('- ', '* ')):
+            line=cyan+'•'+reset+' '+line[2:]
+
+        for i, code in enumerate(code_spans):
+            line=line.replace(f"\x00CODE{i}\x00", green+code+reset)
+        out.append(line)
+    return "\n".join(out)
+
+
+
+def _split_ollama_thinking(message):
+    """Return (thinking, final) across structured and Qwen template variants."""
+    import re
+    message=message or {}
+    structured=str(message.get("thinking") or "").strip()
+    content=str(message.get("content") or "")
+
+    if structured:
+        final=re.sub(r"^\s*<think>\s*", "", content, flags=re.I)
+        final=re.sub(r"\s*</think>\s*", "", final, count=1, flags=re.I)
+        return structured, final.strip()
+
+    match=re.search(r"<think>(.*?)</think>", content, flags=re.I|re.S)
+    if match:
+        thinking=match.group(1).strip()
+        final=(content[:match.start()] + content[match.end():]).strip()
+        return thinking, final
+
+    close=re.search(r"</think>", content, flags=re.I)
+    if close:
+        return content[:close.start()].strip(), content[close.end():].strip()
+
+    return "", content.strip()
+
+
+def _print_ollama_answer(message):
+    """Render reasoning as process and the final response as the result."""
+    thinking,final=_split_ollama_thinking(message)
+
+    if thinking:
+        if sys.stdout.isatty():
+            dim="\033[2m"; italic="\033[3m"; reset="\033[0m"
+            print("\n" + _ansi_label("thinking ›","2"))
+            rendered=_ollama_markup(thinking)
+            for line in rendered.splitlines():
+                print("  " + dim + italic + line + reset)
+        else:
+            print("\nthinking ›")
+            for line in thinking.splitlines():
+                print("  "+line)
+        print()
+
+    if final:
+        print(_ansi_label("lo ›","35") + " " + _ollama_markup(final) + "\n")
+    else:
+        print(_ansi_label("lo ›","35") + " " + _c("(no final response)","2") + "\n")
+
+
+
+def _ollama_ps(base, timeout=2):
+    import json
+    import urllib.request
+    with urllib.request.urlopen(base + "/api/ps", timeout=timeout) as response:
+        return json.load(response).get("models", [])
+
+
+def _local_ollama_host(base):
+    from urllib.parse import urlparse
+    host = (urlparse(base).hostname or "").lower()
+    return host in {"127.0.0.1", "localhost", "::1"}
+
+
+def _ensure_ollama_server(base, allow_start=True):
+    """Return running models; start a missing local Ollama server only on explicit LO use."""
+    try:
+        return _ollama_ps(base)
+    except Exception:
+        pass
+
+    ollama = shutil.which("ollama")
+    if not allow_start or not ollama or not _local_ollama_host(base):
+        return None
+
+    try:
+        with _activity("starting Ollama"):
+            subprocess.Popen(
+                [ollama, "serve"],
+                stdin=subprocess.DEVNULL,
+                stdout=subprocess.DEVNULL,
+                stderr=subprocess.DEVNULL,
+                start_new_session=True,
+            )
+            deadline = time.monotonic() + 6.0
+            while time.monotonic() < deadline:
+                try:
+                    return _ollama_ps(base, timeout=0.6)
+                except Exception:
+                    time.sleep(0.2)
+    except OSError:
+        return None
+    return None
+
+
+def _preferred_ollama_model():
+    """Environment wins; otherwise remember the last model selected through LOOK."""
+    env=os.environ.get("LOOK_OLLAMA_MODEL","").strip()
+    if env:
+        return env
+    try:
+        saved=OLLAMA_MODEL_FILE.read_text(encoding="utf-8").strip()
+        if saved:
+            return saved
+    except OSError:
+        pass
+    return "qwen3:8b"
+
+
+def _save_preferred_ollama_model(model):
+    try:
+        STATE_DIR.mkdir(parents=True, exist_ok=True)
+        tmp=OLLAMA_MODEL_FILE.with_suffix(".tmp")
+        tmp.write_text(model.strip()+"\n", encoding="utf-8")
+        os.chmod(tmp,0o600)
+        tmp.replace(OLLAMA_MODEL_FILE)
+        os.chmod(OLLAMA_MODEL_FILE,0o600)
+    except OSError:
+        pass
+
+
+def _choose_ollama_model(running):
+    """Keep the selected/resident model when available; otherwise load the preferred model on demand."""
+    preferred=_preferred_ollama_model()
+    names=[(m.get("name") or m.get("model") or "").strip() for m in (running or [])]
+    names=[name for name in names if name]
+    if preferred in names:
+        return preferred, True
+    if names:
+        return names[0], True
+    return preferred, False
+
+
+def ollama_chat(force_search=False, initial_prompt=None, allow_start=True, host_override=None, host_name=None, access_profile=None):
+    """Minimal local chat; optional first prompt and web-search mode."""
+    import json
+    import urllib.request
+
+    base = _ollama_base(host_override)
+    profile=(access_profile or _load_lo_profile()).lower()
+    if profile not in LO_PROFILES:
+        print(f"LOOK OLLAMA · unknown access profile: {profile}")
+        return 1
+    if profile=="unsafe" and not _confirm_unsafe_session():
+        print("· cancelled")
+        return 0
+
+    running = _ensure_ollama_server(base, allow_start=(allow_start and _is_local_ollama(base)))
+    if running is None:
+        print("LOOK OLLAMA · server unavailable")
+        return 1
+
+    # Model preference is global, but availability belongs to the selected host.
+    # Never send a model name to a remote Ollama that does not actually have it.
+    preferred = _preferred_ollama_model()
+    running_names = [(m.get("name") or m.get("model") or "").strip() for m in (running or [])]
+    running_names = [name for name in running_names if name]
+    try:
+        installed = _ollama_tags(base)
+    except Exception:
+        installed = []
+    installed_names = [(m.get("name") or m.get("model") or "").strip() for m in installed]
+    installed_names = [name for name in installed_names if name]
+
+    if preferred in installed_names:
+        model = preferred
+    elif running_names:
+        model = running_names[0]
+    elif installed_names:
+        model = installed_names[0]
+    else:
+        print(f"LOOK OLLAMA · {shown_host if 'shown_host' in locals() else _ollama_host_name(base)} is reachable, but has no models installed")
+        return 1
+    resident = model in running_names
+
+    has_web = bool(os.environ.get("OLLAMA_API_KEY"))
+    mode = "LOOK OLLAMA SEARCH" if force_search else "LOOK OLLAMA"
+    web_state = "required" if force_search else ("available" if has_web else "off")
+    shown_host=host_name or _ollama_host_name(base)
+    print(f"{mode} · {model} · {Path.cwd()}")
+    print(f"host · {shown_host} · {base}")
+    print(f"access · {profile.upper()}")
+    if not resident:
+        print(f"model · idle · loads on first prompt")
+    print(f"web · {web_state} · Ctrl-D to exit · Ctrl-C cancels work\n")
+
+    web_tool = {
+        "type": "function",
+        "function": {
+            "name": "web_search",
+            "description": "Search the web for current or externally verifiable information. Use this when the answer depends on recent events, news, current facts, or information you are uncertain about.",
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "query": {"type": "string", "description": "The web search query"}
+                },
+                "required": ["query"],
+            },
+        },
+    }
+
+    workspace = Path.cwd().resolve()
+    memory = _load_memory()
+    messages = [
+        {"role": "system", "content": _workspace_snapshot(workspace)},
+        {"role": "system", "content": (
+            "You are LOOK Ollama, running inside the user's LOOK Shell terminal interface. "
+            "Keep answers concise and terminal-readable. Use lightweight Markdown naturally when it improves clarity: "
+            "# / ## / ### headings, **bold**, *italics*, bullets, inline code, fenced code blocks, and Markdown links. "
+            "LOOK renders these with terminal styling, and http/https Markdown links may be clickable in supporting terminals. "
+            "Do not over-format simple answers. "
+            "When the user refers to 'this folder', 'here', local files, or the current project, "
+            "use the workspace context and file tools instead of guessing. "
+            "You may list files, read bounded text files, search filenames/text, create or intentionally modify UTF-8 text, "
+            "and use bounded copy_path, move_path, remove_path, and make_directory tools inside the workspace. "
+            "When the user asks to copy, duplicate, clone, or back up an existing path, ALWAYS use copy_path; never reconstruct it with read_file + write_file. "
+            "When the user asks to move or rename an existing path, use move_path. When explicitly asked to remove one, use remove_path. "
+            "Use write_file only for intentional textual creation or editing. Only mutate files when the user explicitly asks. "
+            "Do not claim to have read or changed a file unless the corresponding tool supplied or confirmed it. "
+            "Do not claim filesystem access outside the starting LOOK workspace. "
+            "If web_search is available, use it when current or externally verifiable information is needed; "
+            "when citing or recommending web material, always preserve the exact http/https URL supplied by the search result and emit a complete Markdown link in the form [descriptive label](https://actual-url). Never emit citation placeholders such as [source], [1], or a site name styled like a link without an actual URL. Never invent a URL from a site name."
+        )},
+    ]
+    capability_notes={
+        "conservative": (
+            "ACCESS PROFILE: CONSERVATIVE. You may inspect/search/read the starting workspace and use web search when available. "
+            "Mutation and shell execution tools are intentionally absent."
+        ),
+        "workspace": (
+            "ACCESS PROFILE: WORKSPACE. You may use LOOK's bounded filesystem tools inside the starting workspace. "
+            "Arbitrary shell execution is intentionally unavailable."
+        ),
+        "power": (
+            "ACCESS PROFILE: POWER. You may use bounded workspace tools and run_command for computer-level work. "
+            "Every shell command requires user confirmation. Prefer inspection before mutation and briefly explain destructive/system-wide actions."
+        ),
+        "unsafe": (
+            "ACCESS PROFILE: UNSAFE. The user explicitly enabled unrestricted shell command execution for this session. "
+            "Use run_command when needed, including system-wide work, package installation, builds, cleanup, and administration. "
+            "Avoid unnecessary destructive actions and report command results accurately."
+        ),
+    }
+    messages.append({"role":"system","content":capability_notes[profile]})
+
+    memory_context = _memory_context(memory)
+    if memory_context:
+        messages.append({"role": "system", "content": memory_context})
+
+    pending_prompt = (initial_prompt or "").strip()
+    while True:
+        if pending_prompt:
+            prompt=pending_prompt
+            pending_prompt=""
+            print(f"{_ansi_label('you ›', '36')} {prompt}")
+        else:
+            try:
+                prompt = input(_ansi_label("you ›", "36") + " ").strip()
+            except EOFError:
+                print()
+                return 0
+            except KeyboardInterrupt:
+                print("\n· cancelled")
+                continue
+
+        if not prompt:
+            continue
+
+        messages.append({"role": "user", "content": prompt})
+
+        # Search mode is deliberately deterministic: search first, then answer.
+        if force_search:
+            if not has_web:
+                print("search › OLLAMA_API_KEY is not set\n")
+                messages.pop()
+                continue
+            try:
+                print(f"{_ansi_label('search ›', '33')} {prompt}")
+                with _activity("searching"):
+                    result = _ollama_web_search(prompt)
+                messages.append({
+                    "role": "system",
+                    "content": "Current web search results for the user's latest question:\n" + _search_text(result) +
+                               "\nUse these results when answering. When citing or recommending any result, preserve the exact URL from the result and emit a complete Markdown link in the form [descriptive label](https://actual-url). Never emit [source], [1], or a site name as a pseudo-link without an actual URL, and never invent a URL.",
+                })
+            except KeyboardInterrupt:
+                print("\n· cancelled\n")
+                messages.pop()
+                continue
+            except Exception as exc:
+                print(f"search › {exc}\n")
+                messages.pop()
+                continue
+
+        # Normal mode exposes search as a tool. Tool-capable models decide when to use it.
+        for _ in range(4):
+            payload_obj = {
+                "model": model,
+                "messages": messages,
+                "stream": False,
+            }
+            tools = _lo_tools(profile)
+            if has_web and not force_search:
+                tools.append(web_tool)
+            payload_obj["tools"] = tools
+
+            payload = json.dumps(payload_obj).encode()
+            request = urllib.request.Request(
+                base + "/api/chat",
+                data=payload,
+                headers={"Content-Type": "application/json"},
+                method="POST",
+            )
+
+            try:
+                with _activity("thinking"):
+                    with urllib.request.urlopen(request) as response:
+                        result = json.load(response)
+            except KeyboardInterrupt:
+                print("\n· cancelled\n")
+                messages.pop()
+                break
+            except Exception as exc:
+                print(f"LOOK OLLAMA · {exc}")
+                messages.pop()
+                break
+
+            message = result.get("message", {})
+            tool_calls = message.get("tool_calls") or []
+            if tool_calls:
+                messages.append(message)
+                for call in tool_calls:
+                    function = call.get("function", {})
+                    name = function.get("name", "")
+                    args = function.get("arguments", {}) or {}
+                    if isinstance(args, str):
+                        try:
+                            args=json.loads(args)
+                        except Exception:
+                            args={}
+
+                    if name == "web_search":
+                        if not has_web or force_search:
+                            tool_content = "Web search is unavailable in this session."
+                        else:
+                            query = args.get("query", prompt)
+                            try:
+                                print(f"{_ansi_label('search ›', '33')} {query}")
+                                with _activity("searching"):
+                                    search_result = _ollama_web_search(query)
+                                tool_content = _search_text(search_result)
+                            except Exception as exc:
+                                tool_content = f"Web search failed: {exc}"
+                    elif name in {"list_files", "read_file", "search_files", "write_file", "copy_path", "move_path", "remove_path", "make_directory"}:
+                        tool_content = _run_filesystem_tool(workspace, name, args)
+                        if name in {"write_file", "copy_path", "move_path", "remove_path", "make_directory"}:
+                            print(f"{_ansi_label('file ›', '32')} {tool_content}")
+                    elif name=="run_command":
+                        if profile not in {"power","unsafe"}:
+                            tool_content="Command execution is unavailable in this access profile."
+                        else:
+                            tool_content=_run_command_tool(workspace,args,profile)
+                            print(f"{_ansi_label('command ›', '33')} {tool_content.splitlines()[0]}")
+                    else:
+                        tool_content = f"Unknown tool: {name}"
+
+                    messages.append({
+                        "role": "tool",
+                        "tool_name": name,
+                        "content": tool_content,
+                    })
+                continue
+
+            answer = message.get("content", "").strip()
+            messages.append(message)
+            _print_ollama_answer(message)
+            if _queue_memory_exchange(base, model, prompt, answer):
+                if sys.stdout.isatty():
+                    print(_c("  · remembering in background", "2"))
+            else:
+                # If queueing ever fails, preserve memory rather than silently dropping it.
+                with _activity("remembering"):
+                    memory = _remember_exchange(base, model, memory, prompt, answer)
+            break
+
+
+def _c(text, code):
+    """Semantic terminal color with a truecolor LOOK 3 presentation path."""
+    if not sys.stdout.isatty():
+        return str(text)
+
+    classic=os.environ.get("LOOK_CLASSIC","").lower() in {"1","true","yes","on"}
+    truecolor=(not classic and (
+        os.environ.get("COLORTERM","").lower() in {"truecolor","24bit"}
+        or os.environ.get("TERM_PROGRAM") in {"iTerm.app","Apple_Terminal","WezTerm","ghostty"}
+    ))
+    if not truecolor:
+        return f"\033[{code}m{text}\033[0m"
+
+    rgb={
+        "36":(103,214,238), "1;36":(103,214,238),
+        "32":(139,214,145), "1;32":(139,214,145),
+        "33":(238,200,109),
+        "31":(239,125,135),
+    }
+    if code=="2":
+        return f"\033[38;2;128;139;154m{text}\033[0m"
+    if code=="1":
+        return f"\033[1m{text}\033[0m"
+    color=rgb.get(code)
+    if color:
+        bold="\033[1m" if code.startswith("1;") else ""
+        r,g,b=color
+        return f"{bold}\033[38;2;{r};{g};{b}m{text}\033[0m"
+    return f"\033[{code}m{text}\033[0m"
+
+
+def _title(name, detail=''):
+    tail=f"  {_c('· '+detail, '2')}" if detail else ''
+    print(f"{_c(name, '1;36')}{tail}")
+
+
+def _run_text(args, timeout=1.5):
+    try:
+        r=subprocess.run(args, capture_output=True, text=True, timeout=timeout)
+        return r.stdout.strip() if r.returncode == 0 else ''
+    except (OSError, subprocess.SubprocessError):
+        return ''
+
+
+def inspect_command(name):
+    """Explain how a command resolves without changing the shell."""
+    path=shutil.which(name)
+    _title(name, 'command')
+    if not path:
+        print(f"  {_c('✗', '31')} not found on PATH")
+        # zsh can know about aliases/functions that a child Python process cannot inspect directly.
+        print(f"  {_c('hint', '33')} run: type -a {name}")
+        return 1
+    real=str(Path(path).resolve())
+    print(f"  {_c('✓', '32')} executable  {path}")
+    if real != path:
+        print(f"  {_c('↗', '36')} resolves     {real}")
+    try:
+        st=Path(path).stat()
+        mode=oct(st.st_mode & 0o777)
+        print(f"  permissions {mode}")
+    except OSError:
+        pass
+    matches=[]
+    for folder in os.environ.get('PATH','').split(os.pathsep):
+        candidate=Path(folder).expanduser()/name
+        if candidate.exists() and os.access(candidate, os.X_OK):
+            val=str(candidate)
+            if val not in matches: matches.append(val)
+    if len(matches)>1:
+        print("  alternatives")
+        for m in matches[:8]: print(f"    · {m}")
+    return 0
+
+
+def inspect_port(port):
+    _title(str(port), 'port')
+    found=''
+    if shutil.which('lsof'):
+        found=_run_text(['lsof','-nP',f'-iTCP:{port}','-sTCP:LISTEN'])
+    elif shutil.which('ss'):
+        found='\n'.join(x for x in _run_text(['ss','-ltnp']).splitlines() if f':{port} ' in x or f':{port}\n' in x)
+    if found:
+        print(found)
+        return 0
+    print(f"  {_c('·', '33')} no listening TCP process found")
+    return 1
+
+
+def inspect_git(path='.'):
+    target=Path(path).expanduser().resolve()
+    root=_run_text(['git','-C',str(target),'rev-parse','--show-toplevel'])
+    _title('git', str(target))
+    if not root:
+        print(f"  {_c('·', '33')} not a Git repository")
+        return 1
+    branch=_run_text(['git','-C',root,'branch','--show-current']) or '(detached)'
+    status=_run_text(['git','-C',root,'status','--short'])
+    remote=_run_text(['git','-C',root,'remote','get-url','origin'])
+    print(f"  root    {root}")
+    print(f"  branch  {_c(branch, '36')}")
+    if remote: print(f"  origin  {remote}")
+    if status:
+        lines=status.splitlines()
+        print(f"  changes {_c(str(len(lines)), '33')}")
+        for line in lines[:10]: print(f"    {line}")
+        if len(lines)>10: print(f"    {_c('…', '2')} {len(lines)-10} more")
+    else:
+        print(f"  {_c('✓', '32')} clean")
+    return 0
+
+
+def inspect_project(path='.'):
+    """Recognize a project and show likely actions; never executes them."""
+    d=Path(path).expanduser().resolve()
+    _title('run', str(d))
+    if not d.is_dir():
+        print(f"  {_c('✗', '31')} not a directory")
+        return 1
+    actions=[]; kinds=[]
+    def has(name): return (d/name).exists()
+    if has('package.json'):
+        kinds.append('Node/Bun')
+        try:
+            import json
+            scripts=json.loads((d/'package.json').read_text()).get('scripts',{})
+            runner='bun run' if has('bun.lock') or has('bun.lockb') else 'npm run'
+            for key in ('dev','start','test','build','serve'):
+                if key in scripts: actions.append((key,f'{runner} {key}'))
+        except Exception: pass
+    if has('pyproject.toml') or has('requirements.txt') or has('setup.py'):
+        kinds.append('Python')
+        if has('pytest.ini') or (d/'tests').exists(): actions.append(('test','python -m pytest'))
+        if has('main.py'): actions.append(('start','python main.py'))
+        elif has('app.py'): actions.append(('start','python app.py'))
+    if has('Cargo.toml'):
+        kinds.append('Rust'); actions += [('run','cargo run'),('test','cargo test'),('build','cargo build')]
+    if has('Makefile'):
+        kinds.append('Make'); actions.append(('targets','make -n <target>'))
+    if has('docker-compose.yml') or has('compose.yml') or has('compose.yaml'):
+        kinds.append('Docker Compose'); actions.append(('start','docker compose up'),('stop','docker compose down'))
+    if has('Dockerfile'):
+        kinds.append('Docker'); actions.append(('build','docker build .'))
+    if has('index.html'):
+        kinds.append('web'); actions.append(('serve','python3 -m http.server'))
+    if has('.git'): kinds.append('Git')
+    if not kinds:
+        print(f"  {_c('·', '33')} no recognized project markers")
+        return 1
+    print(f"  type    {' + '.join(dict.fromkeys(kinds))}")
+    if actions:
+        print("  actions")
+        seen=set()
+        for label,cmd in actions:
+            if cmd in seen: continue
+            seen.add(cmd); print(f"    {_c(f'{label:<10}', '36')} {cmd}")
+    else:
+        print(f"  {_c('·', '33')} project recognized; no obvious standard action")
+    return 0
+
+
+def _copy_value(value):
+    try:
+        if platform.system()=="Darwin" and shutil.which("pbcopy"):
+            subprocess.run(["pbcopy"],input=str(value),text=True,check=True)
+            return True
+        if shutil.which("wl-copy"):
+            subprocess.run(["wl-copy"],input=str(value),text=True,check=True)
+            return True
+        if shutil.which("xclip"):
+            subprocess.run(["xclip","-selection","clipboard"],input=str(value),text=True,check=True)
+            return True
+    except (OSError,subprocess.SubprocessError):
+        pass
+    return False
+
+
+def _read_tty_key(fd, timeout=None):
+    if timeout is not None:
+        ready,_,_=select.select([fd],[],[],timeout)
+        if not ready:
+            return ""
+    ch=os.read(fd,1)
+    if ch != b"\x1b":
+        return ch.decode("utf-8","ignore")
+    seq=bytearray(ch)
+    while len(seq)<8:
+        ready,_,_=select.select([fd],[],[],0.035)
+        if not ready:
+            break
+        seq.extend(os.read(fd,1))
+        if seq[-1:] in b"~ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz":
+            break
+    return {
+        b"\x1b[A":"up",
+        b"\x1b[B":"down",
+        b"\x1b[5~":"pageup",
+        b"\x1b[6~":"pagedown",
+    }.get(bytes(seq),"esc")
+
+
+def _select_values(title, rows):
+    """Shared LOOK selector: browse, Enter to filter, arrows/J/K move, Y copies value."""
+    if not rows:
+        return 1
+    if not (sys.stdin.isatty() and sys.stdout.isatty()):
+        _title(title)
+        for label,value in rows:
+            print(f"  {label}  {value}")
+        return 0
+
+    fd=sys.stdin.fileno()
+    old=termios.tcgetattr(fd)
+    query=""
+    filtering=False
+    idx=0
+    notice=""
+    try:
+        tty.setcbreak(fd)
+        while True:
+            terms=query.casefold().split()
+            visible=[
+                row for row in rows
+                if all(term in f"{row[0]} {row[1]}".casefold() for term in terms)
+            ]
+            if visible:
+                idx=min(idx,len(visible)-1)
+            else:
+                idx=0
+
+            terminal=shutil.get_terminal_size((100,30))
+            height=max(8,terminal.lines)
+            width=max(40,terminal.columns)
+            usable=max(3,height-5)
+            top=max(0,min(max(0,len(visible)-usable),idx-usable+1))
+            page=visible[top:top+usable]
+
+            sys.stdout.write("\033[2J\033[H")
+            _title(title, f"{len(visible)} of {len(rows)}")
+            for n,(label,value) in enumerate(page,start=top):
+                mark=_c("›","1;36") if n==idx else " "
+                raw_value=str(value)
+                max_label=max(8,width-len(raw_value)-5)
+                shown_label=str(label)
+                if len(shown_label)>max_label:
+                    shown_label=shown_label[:max(1,max_label-1)]+"…"
+                value_text=_c(raw_value,"2")
+                print(f"{mark} {shown_label}  {value_text}")
+
+            if filtering:
+                footer=(f"{_c('FILTER','1;36')} {query}█  "
+                        f"{_c('↑↓ choose  Y copy  Enter done  Esc clear/back  q quit','2')}")
+            else:
+                footer=_c("↑↓ choose  Enter filter  Y copy  PgUp/PgDn page  Esc/q exit","2")
+            if notice:
+                footer += "  " + _c(notice,"33")
+                notice=""
+            print("\n"+footer,end="",flush=True)
+
+            key=_read_tty_key(fd)
+            if key in {"q","Q","\x03"}:
+                break
+            if key=="esc":
+                if filtering and query:
+                    query=""
+                    idx=0
+                    continue
+                if filtering:
+                    filtering=False
+                    continue
+                break
+            if key in {"up","k"} and visible:
+                idx=max(0,idx-1)
+                continue
+            if key in {"down","j"} and visible:
+                idx=min(len(visible)-1,idx+1)
+                continue
+            if key=="pageup" and visible:
+                idx=max(0,idx-usable)
+                continue
+            if key=="pagedown" and visible:
+                idx=min(len(visible)-1,idx+usable)
+                continue
+            if key in {"y","Y"} and visible:
+                notice="copied" if _copy_value(visible[idx][1]) else "clipboard unavailable"
+                continue
+            if key in {"\r","\n"}:
+                filtering=not filtering
+                continue
+            if filtering and key in {"\x7f","\b"}:
+                if query:
+                    query=query[:-1]
+                    idx=0
+                continue
+            if filtering and len(key)==1 and key.isprintable():
+                query+=key
+                idx=0
+                continue
+    finally:
+        termios.tcsetattr(fd,termios.TCSADRAIN,old)
+        print()
+    return 0
+
+
+
+def inspect_up():
+    _title('up', 'listening services')
+    text=''
+    if shutil.which('lsof'):
+        text=_run_text(['lsof','-nP','-iTCP','-sTCP:LISTEN'])
+    elif shutil.which('ss'):
+        text=_run_text(['ss','-ltnp'])
+    if not text:
+        print(f"  {_c('·', '33')} no listener information available")
+        return 1
+    lines=text.splitlines()
+    for line in lines[:24]: print(line)
+    if len(lines)>24: print(f"{_c('… '+str(len(lines)-24)+' more', '2')}")
+    return 0
+
+
+def inspect_machine():
+    _title(platform.node() or 'machine', 'machine')
+    print(f"  OS      {platform.system()} {platform.release()}")
+    print(f"  arch    {platform.machine()}")
+    cpu=platform.processor()
+    if platform.system()=='Darwin':
+        cpu=_run_text(['sysctl','-n','machdep.cpu.brand_string']) or cpu
+    print(f"  CPU     {cpu or (str(os.cpu_count() or '?')+' logical cores')}")
+    mem=''
+    if platform.system()=='Darwin':
+        raw=_run_text(['sysctl','-n','hw.memsize'])
+        if raw.isdigit(): mem=f"{int(raw)/(1024**3):.1f} GB"
+    elif Path('/proc/meminfo').exists():
+        m=re.search(r'MemTotal:\s+(\d+)',Path('/proc/meminfo').read_text())
+        if m: mem=f"{int(m.group(1))*1024/(1024**3):.1f} GB"
+    if mem: print(f"  RAM     {mem}")
+    usage=shutil.disk_usage(HOME)
+    print(f"  disk    {usage.free/(1024**3):.0f} GB free / {usage.total/(1024**3):.0f} GB")
+    gpu=''
+    if shutil.which('nvidia-smi'):
+        gpu=_run_text(['nvidia-smi','--query-gpu=name,memory.free,memory.total','--format=csv,noheader,nounits'])
+    elif platform.system()=='Darwin' and shutil.which('system_profiler'):
+        raw=_run_text(['system_profiler','SPDisplaysDataType'],2.5)
+        m=re.search(r'Chipset Model:\s*(.+)',raw)
+        if m: gpu=m.group(1).strip()
+    if gpu: print(f"  GPU     {gpu.splitlines()[0]}")
+    return 0
+
+
+def inspect_network():
+    import socket
+    local=[]
+    try:
+        for info in socket.getaddrinfo(socket.gethostname(), None, socket.AF_INET):
+            ip=info[4][0]
+            if not ip.startswith('127.') and ip not in local: local.append(ip)
+    except OSError:
+        pass
+    rows=[("local",ip) for ip in local]
+    if shutil.which('tailscale'):
+        ip=_run_text(['tailscale','ip','-4'])
+        if ip: rows.append(("tailnet",ip))
+    if rows:
+        return _select_values(f"network · {platform.node()}",rows)
+    _title('network', platform.node())
+    print("  local      unknown")
+    print(f"  tailscale {_c('not installed','2')}" if not shutil.which('tailscale') else f"  tailscale {_c('no address','2')}")
+    return 0
+
+def inspect_tailscale():
+    _title('tailscale')
+    if not shutil.which('tailscale'):
+        print(f"  {_c('·', '33')} not installed")
+        return 1
+    text=_run_text(['tailscale','status'])
+    if not text:
+        print(f"  {_c('·', '33')} installed but not connected")
+        return 1
+    lines=text.splitlines()
+    for line in lines[:24]: print(f"  {line}")
+    if len(lines)>24: print(f"  {_c('…', '2')} {len(lines)-24} more")
+    return 0
+
+
+
+def _ollama_tags(base):
+    import json, urllib.request
+    with urllib.request.urlopen(base+"/api/tags", timeout=2) as response:
+        return json.load(response).get("models", [])
+
+
+def _ollama_post(base, endpoint, payload, timeout=120):
+    import json, urllib.request
+    data=json.dumps(payload).encode("utf-8")
+    request=urllib.request.Request(
+        base+endpoint, data=data,
+        headers={"Content-Type":"application/json"}, method="POST"
+    )
+    with urllib.request.urlopen(request, timeout=timeout) as response:
+        return json.load(response)
+
+
+def _ollama_capabilities(base, model):
+    """Return Ollama-declared capabilities, or None when this server cannot report them."""
+    try:
+        shown=_ollama_post(base, "/api/show", {"model":model}, timeout=8)
+    except Exception:
+        return None
+    caps=shown.get("capabilities")
+    if not isinstance(caps, list):
+        return None
+    return [str(cap).strip().lower() for cap in caps if str(cap).strip()]
+
+
+def _load_ollama_model_prefs():
+    try:
+        data=json.loads(OLLAMA_MODELS_FILE.read_text(encoding="utf-8"))
+    except (OSError, ValueError, TypeError):
+        data={}
+    disabled=data.get("disabled",[])
+    return {str(name) for name in disabled if str(name).strip()}
+
+
+def _save_ollama_model_prefs(disabled):
+    STATE_DIR.mkdir(parents=True, exist_ok=True)
+    tmp=OLLAMA_MODELS_FILE.with_suffix(".tmp")
+    tmp.write_text(
+        json.dumps({"disabled":sorted(disabled)}, indent=2)+"\n",
+        encoding="utf-8",
+    )
+    os.chmod(tmp,0o600)
+    tmp.replace(OLLAMA_MODELS_FILE)
+    os.chmod(OLLAMA_MODELS_FILE,0o600)
+
+
+def _ollama_set_model(base, model):
+    """Unload resident models, preload the selected one, and remember the choice."""
+    running=_ollama_ps(base)
+    for item in running:
+        name=(item.get("name") or item.get("model") or "").strip()
+        if name and name != model:
+            try:
+                _ollama_post(base, "/api/generate", {"model":name, "keep_alive":0}, timeout=30)
+            except Exception:
+                pass
+
+    # An empty generation request loads the model without asking it to answer.
+    _ollama_post(base, "/api/generate", {"model":model, "prompt":"", "keep_alive":"10m"}, timeout=180)
+    _save_preferred_ollama_model(model)
+    return model
+
+
+def _model_capability_label(caps):
+    if caps is None:
+        return "capabilities ?"
+    useful=[c for c in ("tools","thinking","vision","embedding","completion") if c in caps]
+    return " · ".join(useful) if useful else "text"
+
+
+def _ollama_model_rows(base, names, resident, disabled):
+    rows=[]
+    preferred_name=_preferred_ollama_model()
+    for name in names:
+        caps=_ollama_capabilities(base,name)
+        enabled=name not in disabled
+        state=_c("✓","32") if enabled else _c("×","2")
+        live=_c("●","32") if name in resident else " "
+        preferred=_c("★","33") if name == preferred_name else " "
+        padded=f"{name:<28}"
+        shown_name=_c(padded,"1") if name == preferred_name else padded
+        raw_label=_model_capability_label(caps)
+        if raw_label=="capabilities ?":
+            label=_c(raw_label,"2")
+        else:
+            parts=[]
+            for cap in raw_label.split(" · "):
+                code={"tools":"36","thinking":"35","vision":"33"}.get(cap,"2")
+                parts.append(_c(cap,code))
+            label=" · ".join(parts)
+        # Raw name stays in field one; display decoration never affects parsing.
+        display=f"{state} {live}{preferred}  {shown_name} {label}"
+        rows.append((name,display,caps))
+    return rows
+
+
+def ollama_models(select_model=None):
+    """Tiny Ollama control panel: select a model or toggle LOOK benchmark inclusion with X."""
+    base=_ollama_base()
+    if _ensure_ollama_server(base, allow_start=_is_local_ollama(base)) is None:
+        print("LOOK OLLAMA · server unavailable")
+        return 1
+
+    try:
+        installed=_ollama_tags(base)
+        running=_ollama_ps(base)
+    except Exception as exc:
+        print(f"LOOK OLLAMA · {exc}")
+        return 1
+
+    names=[(m.get("name") or m.get("model") or "").strip() for m in installed]
+    names=[n for n in names if n]
+    resident={(m.get("name") or m.get("model") or "").strip() for m in running}
+    resident.discard("")
+    disabled=_load_ollama_model_prefs()
+
+    if not names:
+        print("LOOK OLLAMA · no installed models")
+        return 1
+
+    if select_model:
+        if select_model not in names:
+            print(f"LOOK OLLAMA · model not installed: {select_model}")
+            return 1
+        chosen=select_model
+    elif sys.stdin.isatty() and sys.stdout.isatty() and shutil.which("fzf"):
+        chosen=None
+        while chosen is None:
+            rows=_ollama_model_rows(base,names,resident,disabled)
+            payload="\n".join(f"{name}\t{display}" for name,display,_ in rows)+"\n"
+            result=subprocess.run(
+                [
+                    "fzf",
+                    "--prompt","model › ",
+                    "--header","Enter select · X enable/disable for LOOK test --all · ✓ enabled · × disabled · ● resident · ★ preferred",
+                    "--height","~60%",
+                    "--reverse",
+                    "--no-multi",
+                    "--delimiter","\t",
+                    "--with-nth","2..",
+                    "--ansi",
+                    "--expect","x,X,enter",
+                ],
+                input=payload, text=True, capture_output=True
+            )
+            if result.returncode != 0 or not result.stdout.strip():
+                return 0
+            lines=result.stdout.rstrip("\r\n").splitlines()
+            key=lines[0].lower() if lines else ""
+            selected=lines[1] if len(lines)>1 else ""
+            model=selected.split("\t",1)[0].strip()
+            if not model:
+                return 0
+            if key=="x":
+                if model in disabled:
+                    disabled.remove(model)
+                else:
+                    disabled.add(model)
+                _save_ollama_model_prefs(disabled)
+                continue
+            chosen=model
+    else:
+        rows=_ollama_model_rows(base,names,resident,disabled)
+        _title("ollama models")
+        print(f"  {_c('✓','32')} enabled · {_c('×','2')} disabled · {_c('●','32')} resident · {_c('★','33')} preferred")
+        for _,display,_ in rows:
+            print(f"  {display}")
+        return 0
+
+    try:
+        with _activity(f"loading {chosen}"):
+            _ollama_set_model(base, chosen)
+    except Exception as exc:
+        print(f"LOOK OLLAMA · could not load {chosen}: {exc}")
+        return 1
+
+    caps=_ollama_capabilities(base,chosen)
+    suffix=f" · {_model_capability_label(caps)}"
+    if chosen in disabled:
+        suffix+=" · disabled from test --all"
+    print(f"LOOK OLLAMA · {_c(chosen,'1;32')} selected{suffix}")
+    return 0
+
+
+def _benchmark_tool(name, description, properties, required):
+    return {
+        "type":"function",
+        "function":{
+            "name":name,
+            "description":description,
+            "parameters":{
+                "type":"object",
+                "properties":properties,
+                "required":required,
+            },
+        },
+    }
+
+
+def _benchmark_chat(base, model, prompt, tools=None):
+    payload={
+        "model":model,
+        "messages":[
+            {"role":"system","content":"You are being tested for concise, reliable terminal-assistant behavior. Follow the request exactly."},
+            {"role":"user","content":prompt},
+        ],
+        "stream":False,
+        "keep_alive":"10m",
+    }
+    if tools:
+        payload["tools"]=tools
+    return _ollama_post(base, "/api/chat", payload, timeout=180)
+
+
+def _benchmark_speed(base, model):
+    """Measure first content arrival and Ollama's reported generation rate."""
+    import json, urllib.request
+    payload=json.dumps({
+        "model":model,
+        "messages":[{"role":"user","content":"Reply with exactly: LOOK-OK"}],
+        "stream":True,
+        "keep_alive":"10m",
+    }).encode("utf-8")
+    request=urllib.request.Request(
+        base+"/api/chat", data=payload,
+        headers={"Content-Type":"application/json"}, method="POST"
+    )
+    start=time.monotonic()
+    first=None
+    text=[]
+    final={}
+    with urllib.request.urlopen(request, timeout=180) as response:
+        for raw in response:
+            if not raw.strip():
+                continue
+            item=json.loads(raw)
+            content=(item.get("message") or {}).get("content","")
+            if content:
+                if first is None:
+                    first=time.monotonic()
+                text.append(content)
+            if item.get("done"):
+                final=item
+    elapsed=time.monotonic()-start
+    ttft=(first-start) if first is not None else elapsed
+    eval_count=int(final.get("eval_count") or 0)
+    eval_duration=float(final.get("eval_duration") or 0)
+    rate=(eval_count/(eval_duration/1e9)) if eval_count and eval_duration else 0.0
+    exact="".join(text).strip()=="LOOK-OK"
+    return ttft, rate, elapsed, exact
+
+
+def _tool_call(result):
+    calls=(result.get("message") or {}).get("tool_calls") or []
+    if not calls:
+        return "", {}
+    fn=(calls[0] or {}).get("function") or {}
+    return str(fn.get("name") or ""), fn.get("arguments") or {}
+
+
+def _benchmark_one_model(base, model):
+    """Small LOOK-specific test: responsiveness first, then tools only when supported."""
+    results={"model":model}
+    caps=_ollama_capabilities(base,model)
+    results["caps"]=caps
+
+    # Warm/load before timing so model-load time does not masquerade as token latency.
+    _ollama_post(base, "/api/generate", {"model":model, "prompt":"", "keep_alive":"10m"}, timeout=180)
+
+    # Speed/basic behavior is useful even when the model cannot call tools.
+    try:
+        ttft, rate, total, exact=_benchmark_speed(base, model)
+        results.update(ttft=ttft, rate=rate, total=total, exact=exact)
+    except Exception as exc:
+        results["speed_error"]=str(exc)
+        return results
+
+    declared_tools=None if caps is None else ("tools" in caps)
+    results["declared_tools"]=declared_tools
+
+    # If Ollama explicitly says tools are unsupported, do not turn that into a benchmark crash.
+    if declared_tools is False:
+        results["tools"]=None
+        return results
+
+    read_tool=_benchmark_tool(
+        "read_file","Read a bounded UTF-8 text file from the current workspace.",
+        {"path":{"type":"string"}},["path"]
+    )
+    copy_tool=_benchmark_tool(
+        "copy_path","Copy an existing file or directory exactly. Use this for copy, duplicate, clone, or backup requests.",
+        {"source":{"type":"string"},"destination":{"type":"string"}},["source","destination"]
+    )
+    web_tool=_benchmark_tool(
+        "web_search","Search the web for current or externally verifiable information.",
+        {"query":{"type":"string"}},["query"]
+    )
+
+    checks=[]
+    tool_errors=[]
+    tests=[
+        (
+            "read",
+            "Read README.txt before answering what this project is.",
+            [read_tool],
+            lambda name,args: name=="read_file" and str(args.get("path","")).endswith("README.txt"),
+        ),
+        (
+            "copy",
+            "Copy alpha.txt to alpha-copy.txt. Do not rewrite the file.",
+            [copy_tool,read_tool],
+            lambda name,args: (
+                name=="copy_path"
+                and str(args.get("source","")).endswith("alpha.txt")
+                and str(args.get("destination","")).endswith("alpha-copy.txt")
+            ),
+        ),
+        (
+            "web",
+            "What is the latest Ollama release? Use current information.",
+            [web_tool],
+            lambda name,args: name=="web_search" and bool(str(args.get("query","")).strip()),
+        ),
+    ]
+    for label,prompt,tools,judge in tests:
+        try:
+            response=_benchmark_chat(base,model,prompt,tools)
+            name,args=_tool_call(response)
+            passed=bool(judge(name,args))
+            results[label]=passed
+            checks.append(passed)
+        except Exception as exc:
+            results[label]=False
+            checks.append(False)
+            tool_errors.append(f"{label}: {exc}")
+
+    results["tools"]=sum(checks)
+    if tool_errors:
+        results["tool_error"]="; ".join(tool_errors)
+    return results
+
+
+def ollama_test(all_models=False):
+    base=_ollama_base()
+    running=_ensure_ollama_server(base, allow_start=_is_local_ollama(base))
+    if running is None:
+        print("LOOK OLLAMA · server unavailable")
+        return 1
+
+    disabled=_load_ollama_model_prefs()
+    if all_models:
+        try:
+            installed=_ollama_tags(base)
+        except Exception as exc:
+            print(f"LOOK OLLAMA · {exc}")
+            return 1
+        models=[(m.get("name") or m.get("model") or "").strip() for m in installed]
+        models=[m for m in models if m and m not in disabled]
+    else:
+        model,_=_choose_ollama_model(running)
+        models=[model]
+
+    if not models:
+        if all_models and disabled:
+            print("LOOK OLLAMA · no enabled models to test · use lk ollama models and X to enable one")
+        else:
+            print("LOOK OLLAMA · no models to test")
+        return 1
+
+    print("LOOK MODEL TEST")
+    print("  warm-model TTFT · generation rate · exact response · LOOK tool judgment")
+    if all_models and disabled:
+        print(f"  enabled models only · {len(disabled)} disabled")
+    print()
+
+    rows=[]
+    for model in models:
+        print(f"  testing {model} ...", flush=True)
+        try:
+            row=_benchmark_one_model(base, model)
+            rows.append(row)
+        except Exception as exc:
+            rows.append({"model":model,"fatal_error":str(exc)})
+        if all_models:
+            try:
+                _ollama_post(base, "/api/generate", {"model":model, "keep_alive":0}, timeout=30)
+            except Exception:
+                pass
+
+    print()
+    print(f"{'MODEL':<28} {'TTFT':>7} {'TOK/S':>8} {'TOOLS':>9} {'EXACT':>7}  CAPABILITIES")
+    print("-"*86)
+    for row in rows:
+        model=row["model"]
+        if row.get("fatal_error"):
+            print(f"{model:<28} {'—':>7} {'—':>8} {'error':>9} {'—':>7}  fatal")
+            print(f"  error · {row['fatal_error']}")
+            continue
+        if row.get("speed_error"):
+            caps=_model_capability_label(row.get("caps"))
+            print(f"{model:<28} {'error':>7} {'—':>8} {'—':>9} {'—':>7}  {caps}")
+            print(f"  speed error · {row['speed_error']}")
+            continue
+
+        tools=row.get("tools")
+        if tools is None:
+            tools_text="n/a"
+        else:
+            tools_text=f"{tools}/3"
+        caps=_model_capability_label(row.get("caps"))
+        print(
+            f"{model:<28} "
+            f"{row['ttft']:>6.2f}s "
+            f"{row['rate']:>8.1f} "
+            f"{tools_text:>9} "
+            f"{('yes' if row['exact'] else 'no'):>7}  "
+            f"{caps}"
+        )
+        if row.get("tool_error"):
+            print(f"  tool note · {row['tool_error']}")
+
+    good=[r for r in rows if "ttft" in r]
+    tool_good=[r for r in good if isinstance(r.get("tools"),int)]
+    if tool_good:
+        winner=max(tool_good, key=lambda r:(r["tools"], bool(r["exact"]), -r["ttft"], r["rate"]))
+        print(
+            f"\n  LOOK fit   {winner['model']} · tools {winner['tools']}/3 · "
+            f"{winner['ttft']:.2f}s TTFT · {winner['rate']:.1f} tok/s"
+        )
+    elif good:
+        winner=max(good,key=lambda r:(bool(r["exact"]),-r["ttft"],r["rate"]))
+        print(
+            f"\n  chat fit   {winner['model']} · {winner['ttft']:.2f}s TTFT · "
+            f"{winner['rate']:.1f} tok/s · tools unavailable"
+        )
+
+    # Restore the user's preferred model after a sweep.
+    if all_models:
+        preferred=_preferred_ollama_model()
+        try:
+            _ollama_set_model(base, preferred)
+            print(f"  restored   {preferred}")
+        except Exception:
+            pass
+    return 0
+
+
+
+def _settings_share_state():
+    tailscale=shutil.which("tailscale")
+    if not tailscale:
+        return "unavailable"
+    try:
+        proc=subprocess.run([tailscale,"serve","status"],capture_output=True,text=True,timeout=2)
+        text=(proc.stdout or "")+(proc.stderr or "")
+        if proc.returncode==0 and ("11435" in text or "11434" in text):
+            return "on"
+    except (OSError,subprocess.SubprocessError):
+        pass
+    return "off"
+
+
+def _settings_rows():
+    base=_ollama_base()
+    return [
+        ("access", "AI", "Access profile", _load_lo_profile()),
+        ("host", "AI", "Ollama host", _ollama_host_name(base)),
+        ("model", "AI", "Preferred model", _preferred_ollama_model()),
+        ("key", "AI", "Web search key", "configured" if os.environ.get("OLLAMA_API_KEY") else "not configured"),
+        ("share", "REMOTE", "Ollama tailnet share", _settings_share_state()),
+    ]
+
+
+def _settings_pick_access():
+    current=_load_lo_profile()
+    choices=[
+        ("conservative","read/search only"),
+        ("workspace","bounded file tools"),
+        ("power","shell commands · confirm each"),
+        ("unsafe","unrestricted shell · session gate"),
+    ]
+    if not shutil.which("fzf") or not (sys.stdin.isatty() and sys.stdout.isatty()):
+        return lo_access([])
+    payload="\n".join(f"{name}\t{'★ ' if name==current else '  '}{name:<13} {desc}" for name,desc in choices)+"\n"
+    result=subprocess.run(
+        ["fzf","--prompt","access › ","--header","Enter select · Esc back","--height","~45%",
+         "--reverse","--no-multi","--delimiter","\t","--with-nth","2..","--ansi"],
+        input=payload,text=True,capture_output=True
+    )
+    if result.returncode!=0 or not result.stdout.strip():
+        return 0
+    profile=result.stdout.split("\t",1)[0].strip()
+    return lo_access([profile])
+
+
+def _settings_pick_host():
+    data=_load_ollama_hosts()
+    discovered=_discover_ollama_hosts()
+    merged={name:item["url"] for name,item in data["hosts"].items()}
+    for item in discovered:
+        merged.setdefault(item["name"],item["url"])
+    current=_ollama_host_name(_ollama_base())
+    if not shutil.which("fzf") or not (sys.stdin.isatty() and sys.stdout.isatty()):
+        return ollama_hosts([])
+    payload="\n".join(
+        f"{name}\t{'★ ' if name==current else '  '}{name:<20} {url}"
+        for name,url in sorted(merged.items(),key=lambda kv:kv[0].casefold())
+    )+"\n"
+    result=subprocess.run(
+        ["fzf","--prompt","host › ","--header","Enter select · Esc back","--height","~55%",
+         "--reverse","--no-multi","--delimiter","\t","--with-nth","2..","--ansi"],
+        input=payload,text=True,capture_output=True
+    )
+    if result.returncode!=0 or not result.stdout.strip():
+        return 0
+    name=result.stdout.split("\t",1)[0].strip()
+    return ollama_hosts([name])
+
+
+def _settings_share_menu():
+    if not shutil.which("tailscale"):
+        print("LOOK SETTINGS · Tailscale is not installed")
+        return 1
+    state=_settings_share_state()
+    if not shutil.which("fzf") or not (sys.stdin.isatty() and sys.stdout.isatty()):
+        print(f"Ollama tailnet share: {state}")
+        return 0
+    rows=[
+        ("status","show Tailscale Serve status"),
+        ("on","start/share local Ollama"),
+        ("off","stop Ollama tailnet share"),
+    ]
+    payload="\n".join(f"{key}\t{label}" for key,label in rows)+"\n"
+    result=subprocess.run(
+        ["fzf","--prompt","share › ","--header",f"current: {state} · Enter select · Esc back",
+         "--height","~40%","--reverse","--no-multi","--delimiter","\t","--with-nth","2.."],
+        input=payload,text=True,capture_output=True
+    )
+    if result.returncode!=0 or not result.stdout.strip():
+        return 0
+    action=result.stdout.split("\t",1)[0].strip()
+    if action=="status":
+        return ollama_share(["status"])
+    if action=="off":
+        return ollama_share(["off"])
+    return ollama_share([])
+
+
+def settings():
+    """Unified UI over LOOK's existing persistent settings and actions."""
+    if not (sys.stdin.isatty() and sys.stdout.isatty() and shutil.which("fzf")):
+        _title("settings")
+        for _,section,label,value in _settings_rows():
+            print(f"  {section:<7} {label:<22} {value}")
+        print("\n  interactive settings require fzf + a TTY")
+        return 0
+
+    while True:
+        rows=_settings_rows()
+        payload="\n".join(
+            f"{key}\t{section:<7} {label:<23} {_c(value,'33') if value in {'off','not configured','unavailable'} else value}"
+            for key,section,label,value in rows
+        )+"\n"
+        result=subprocess.run(
+            ["fzf",
+             "--prompt","settings › ",
+             "--header","Enter change/open · Esc/q leave · existing commands still work",
+             "--height","~65%","--reverse","--no-multi",
+             "--delimiter","\t","--with-nth","2..","--ansi"],
+            input=payload,text=True,capture_output=True
+        )
+        if result.returncode!=0 or not result.stdout.strip():
+            return 0
+        key=result.stdout.split("\t",1)[0].strip()
+        if key=="access":
+            _settings_pick_access()
+        elif key=="host":
+            _settings_pick_host()
+        elif key=="model":
+            ollama_models()
+        elif key=="key":
+            ollama_key([])
+        elif key=="share":
+            _settings_share_menu()
+        print()
+
+
+def inspect_ollama():
+    import json, urllib.request
+    _title('ollama')
+    binary=shutil.which('ollama')
+    print(f"  binary  {binary or _c('not installed','2')}")
+    base=_ollama_base()
+    host_name=_ollama_host_name(base)
+    print(f"  host      {host_name} · {base}")
+    try:
+        with urllib.request.urlopen(base+'/api/ps',timeout=.8) as r: models=json.load(r).get('models',[])
+        print(f"  server    {_c('ready','32')}")
+        print(f"  preferred {_preferred_ollama_model()}")
+        if models:
+            names=[m.get('name') or m.get('model') or '?' for m in models[:6]]
+            print(f"  resident  {', '.join(names)}")
+        else:
+            print(f"  resident  {_c('idle','33')}")
+    except Exception:
+        print(f"  server    {_c('offline','33')}")
+    print(f"  web       {'key present' if os.environ.get('OLLAMA_API_KEY') else _c('off','2')}")
+    print(f"  access    {_load_lo_profile()}")
+    pending=len(_memory_job_files())
+    if _memory_worker_active():
+        tail=f" · {pending} queued" if pending else ""
+        print(f"  memory  {_c('remembering','33')}{tail}")
+    elif pending:
+        print(f"  memory  {_c('queued','33')} · {pending} pending")
+        _start_memory_worker()
+    else:
+        print(f"  memory  {_c('idle','2')}")
+    return 0
+
+
+def inspect_env():
+    _title('environment')
+    keys=['SHELL','TERM','EDITOR','VISUAL','PAGER','LANG','OLLAMA_HOST','LOOK_OLLAMA_MODEL','VIRTUAL_ENV']
+    for key in keys:
+        val=os.environ.get(key)
+        if val: print(f"  {key:<18} {val}")
+    print(f"  PATH entries        {len(os.environ.get('PATH','').split(os.pathsep))}")
+    return 0
+
+
+def inspect_path():
+    _title('PATH')
+    seen=set()
+    for i,raw in enumerate(os.environ.get('PATH','').split(os.pathsep),1):
+        p=Path(raw).expanduser()
+        state=_c('✓','32') if p.is_dir() else _c('✗','31')
+        dup=' '+_c('duplicate','33') if str(p) in seen else ''
+        seen.add(str(p))
+        print(f"  {i:>2} {state} {p}{dup}")
+    return 0
+
+
+def inspect_gpu():
+    _title('gpu')
+    if shutil.which('nvidia-smi'):
+        q='name,driver_version,memory.used,memory.free,memory.total,utilization.gpu,temperature.gpu'
+        text=_run_text(['nvidia-smi',f'--query-gpu={q}','--format=csv,noheader'])
+        print(text or '  nvidia-smi returned no data'); return 0 if text else 1
+    if platform.system()=='Darwin':
+        raw=_run_text(['system_profiler','SPDisplaysDataType'],3)
+        if raw:
+            for line in raw.splitlines():
+                if any(k in line for k in ('Chipset Model:','Metal Support:','VRAM')): print('  '+line.strip())
+            return 0
+    print(f"  {_c('·','33')} no supported GPU inspector found")
+    return 1
+
+
+def inspect_pid(pid):
+    _title(str(pid), 'process')
+    text=_run_text(['ps','-p',str(pid),'-o','pid=,ppid=,etime=,command='],2)
+    if not text:
+        print(f"  {_c('·','33')} process not found")
+        return 1
+    print(f"  {text.strip()}")
+    return 0
+
+
+def inspect_disk():
+    _title('disk')
+    seen=set()
+    for label,path in [('cwd',Path.cwd()),('home',HOME)]:
+        try:
+            usage=shutil.disk_usage(path)
+        except OSError:
+            continue
+        key=(usage.total,usage.free)
+        if key in seen: continue
+        seen.add(key)
+        used=usage.total-usage.free
+        pct=(used/usage.total*100) if usage.total else 0
+        print(f"  {label:<5} {path}")
+        print(f"        {used/(1024**3):.0f} GB used · {usage.free/(1024**3):.0f} GB free · {usage.total/(1024**3):.0f} GB total · {pct:.0f}%")
+    return 0
+
+
+def _process_rows(term=None):
+    text=_run_text(['ps','-axo','pid=,command='],2)
+    rows=[]
+    for line in text.splitlines():
+        stripped=line.strip()
+        if not stripped: continue
+        parts=stripped.split(None,1)
+        if not parts or not parts[0].isdigit(): continue
+        pid=parts[0]; command=parts[1] if len(parts)>1 else ''
+        if int(pid)==os.getpid(): continue
+        if term and term.lower() not in stripped.lower(): continue
+        rows.append((command[:72] or "process",pid))
+    return rows
+
+def inspect_process(term):
+    """Best-effort process-name lookup with selectable PID values."""
+    rows=_process_rows(term)
+    if not rows: return None
+    return _select_values(f"{term} · process",rows)
+
+def inspect_processes():
+    return _select_values("processes",_process_rows())
+
+
+def _human_size(size):
+    if size < 1024: return f"{size} B"
+    if size < 1024**2: return f"{size/1024:.1f} KB"
+    if size < 1024**3: return f"{size/1024**2:.1f} MB"
+    return f"{size/1024**3:.1f} GB"
+
+
+def _file_preview_lines(p, kind):
+    """Return a generous but bounded preview for the interactive file card."""
+    suffix=p.suffix.lower()
+    textish = (
+        kind.startswith('ASCII') or 'text' in kind.lower() or 'script' in kind.lower()
+        or suffix in {'.md','.txt','.py','.js','.ts','.tsx','.jsx','.json','.toml','.yaml','.yml',
+                      '.html','.css','.sh','.zsh','.c','.h','.cpp','.rs','.go','.lua','.sql','.csv'}
+    )
+    if textish and p.stat().st_size <= 2_000_000:
+        try:
+            lines=p.read_text(encoding='utf-8',errors='replace').splitlines()
+            return ["", "  PREVIEW"] + ["  "+line[:220] for line in lines[:400]] + (
+                [f"  … {len(lines)-400} more lines"] if len(lines)>400 else []
+            )
+        except OSError:
+            return []
+    if suffix=='.pdf' and shutil.which('pdftotext'):
+        try:
+            r=subprocess.run(['pdftotext','-f','1','-l','3','-layout',str(p),'-'],
+                             capture_output=True,text=True,timeout=3)
+            lines=[x.rstrip() for x in r.stdout.splitlines() if x.strip()]
+            if lines:
+                return ["", "  PDF PREVIEW"] + ["  "+line[:220] for line in lines[:250]]
+        except (OSError,subprocess.SubprocessError):
+            pass
+    return []
+
+
+def _copy_path(path):
+    value=str(path)
+    try:
+        if platform.system()=="Darwin" and shutil.which("pbcopy"):
+            subprocess.run(["pbcopy"],input=value,text=True,check=True)
+            return True
+        if shutil.which("wl-copy"):
+            subprocess.run(["wl-copy"],input=value,text=True,check=True)
+            return True
+        if shutil.which("xclip"):
+            subprocess.run(["xclip","-selection","clipboard"],input=value,text=True,check=True)
+            return True
+    except (OSError,subprocess.SubprocessError):
+        pass
+    return False
+
+
+def _copy_file_clipboard(path):
+    p=Path(path).expanduser().resolve()
+    try:
+        if platform.system()=="Darwin" and shutil.which("osascript"):
+            if p.is_file():
+                clipboard_class={
+                    ".png":"PNGf",
+                    ".jpg":"JPEG",
+                    ".jpeg":"JPEG",
+                    ".tif":"TIFF",
+                    ".tiff":"TIFF",
+                }.get(p.suffix.lower())
+                if clipboard_class:
+                    quoted=json.dumps(str(p))
+                    script=(
+                        f'set the clipboard to '
+                        f'(read (POSIX file {quoted}) as «class {clipboard_class}»)'
+                    )
+                    subprocess.run(["osascript","-e",script],check=True,
+                                   stdout=subprocess.DEVNULL,stderr=subprocess.DEVNULL)
+                    return True
+
+            paths_json=json.dumps([str(p)])
+            script=f"""
+ObjC.import('AppKit');
+ObjC.import('Foundation');
+const paths = {paths_json};
+const pb = $.NSPasteboard.generalPasteboard;
+pb.clearContents;
+const urls = paths.map(p => $.NSURL.fileURLWithPath(p).js);
+if (!pb.writeObjects(urls)) throw new Error('NSPasteboard writeObjects failed');
+if ((pb.pasteboardItems.count * 1) < 1) throw new Error('clipboard verification failed');
+"""
+            subprocess.run(["osascript","-l","JavaScript","-e",script],check=True,
+                           stdout=subprocess.DEVNULL,stderr=subprocess.DEVNULL)
+            return True
+
+        uri=p.as_uri()+"\r\n"
+        if shutil.which("wl-copy"):
+            subprocess.run(["wl-copy","--type","text/uri-list"],input=uri,text=True,check=True)
+            return True
+        if shutil.which("xclip"):
+            subprocess.run(["xclip","-selection","clipboard","-t","text/uri-list"],
+                           input=uri,text=True,check=True)
+            return True
+    except (OSError,subprocess.SubprocessError):
+        pass
+    return False
+
+
+def _open_file(path, choose=False):
+    try:
+        if platform.system()=="Darwin":
+            if choose:
+                # `open -a` needs an app name; keep LOOK's card simple and use
+                # the default app here. The filesystem browser still provides
+                # the richer O/open-with chooser.
+                return subprocess.call(["open",str(path)])
+            return subprocess.call(["open",str(path)])
+        if shutil.which("xdg-open"):
+            subprocess.Popen(["xdg-open",str(path)],stdout=subprocess.DEVNULL,stderr=subprocess.DEVNULL)
+            return 0
+    except OSError:
+        pass
+    return 1
+
+
+def _edit_file(path):
+    editor=os.environ.get("EDITOR") or os.environ.get("VISUAL") or shutil.which("nvim") or shutil.which("vim")
+    if not editor:
+        print("LOOK: no editor found (set $EDITOR).")
+        return 1
+    if Path(editor).name=="nvim":
+        flag=STATE_DIR/"nvim_intro"
+        if not flag.exists():
+            print("\nLOOK is opening Neovim.\nTo leave: Esc  :q  Enter\nYou'll only be told this once.\n")
+            try:
+                flag.parent.mkdir(parents=True,exist_ok=True)
+                flag.touch()
+            except OSError:
+                pass
+    try:
+        return subprocess.call([editor,str(path)])
+    except OSError as exc:
+        print(f"LOOK: editor failed: {exc}")
+        return 1
+
+
+def _mutate_file(path, action):
+    """Explicit file mutation from the file card; all local LOOK mutations share one undo journal."""
+    p=Path(path)
+    if action in {"move","copy","send"}:
+        label={"move":"to","copy":"to","send":"to (host:path)"}[action]
+        try:
+            dest,cancelled=_prompt_line(f"{label} › ")
+        except KeyboardInterrupt:
+            return
+        dest=dest.strip()
+        if cancelled or not dest:
+            return
+        if action=="move":
+            print(_journal_move(p,dest))
+        elif action=="copy":
+            print(_journal_copy(p,dest))
+        else:
+            cmd=["scp",str(p),dest]
+            if p.is_dir(): cmd=["scp","-r",str(p),dest]
+            subprocess.call(cmd)
+        return
+    if action=="remove":
+        try:
+            answer,cancelled=_prompt_line(f"remove {p.name}? [r confirms · Esc/Enter cancels] › ")
+        except KeyboardInterrupt:
+            return
+        if cancelled or answer.strip().lower()!="r":
+            return
+        print(_journal_remove(p))
+
+
+def _file_card_lines(p):
+    p=Path(p).expanduser().resolve()
+    st=p.stat()
+    kind=_run_text(['file','-b',str(p)]) if shutil.which('file') else ''
+    lines=[
+        f"{p.name} · file",
+        "",
+        f"  path     {p}",
+        f"  size     {_human_size(st.st_size)}",
+        f"  mode     {oct(st.st_mode & 0o777)}",
+        f"  modified {time.strftime('%Y-%m-%d %H:%M', time.localtime(st.st_mtime))}",
+    ]
+    if kind:
+        lines.append(f"  type     {kind}")
+    lines += _file_preview_lines(p,kind)
+    return lines
+
+
+def inspect_file(path):
+    """Interactive file card: inspect first, act only on explicit keypress."""
+    p=Path(path).expanduser().resolve()
+    try:
+        lines=_file_card_lines(p)
+    except OSError as exc:
+        print(f"LOOK · {p.name}\n  {_c('✗','31')} {exc}")
+        return 1
+
+    # Non-interactive output stays composable.
+    if not sys.stdin.isatty() or not sys.stdout.isatty():
+        print("\n".join(lines))
+        return 0
+
+    fd=sys.stdin.fileno()
+    old=termios.tcgetattr(fd)
+    top=0
+    try:
+        tty.setcbreak(fd)
+        while True:
+            height=max(8,shutil.get_terminal_size((90,28)).lines)
+            page_size=max(3,height-3)
+            max_top=max(0,len(lines)-page_size)
+            os.system("clear")
+            visible=lines[top:top+page_size]
+            print("\n".join(visible))
+            if len(lines)>page_size:
+                print(_c(f"{min(top+page_size,len(lines))}/{len(lines)} · j/k ↑/↓ · Space/b page", "2"))
+            print(
+                f"{_c('Enter','36')} open  {_c('E','36')} edit  {_c('Y','36')} copy path  "
+                f"{_c('P','36')} print path  {_c('M','36')} move  {_c('C','36')} copy  "
+                f"{_c('S','36')} send  {_c('R','31')} remove  {_c('q','2')} quit"
+            )
+            sys.stdout.flush()
+
+            ch=os.read(fd,1)
+            key=ch.decode("utf-8","ignore")
+            if ch==b"\x1b":
+                seq=bytearray(ch)
+                while len(seq)<6:
+                    ready,_,_=select.select([fd],[],[],0.08)
+                    if not ready: break
+                    seq.extend(os.read(fd,1))
+                    if seq[-1:] in b"~ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz": break
+                key={b"\x1b[A":"up",b"\x1b[B":"down",b"\x1b[5~":"pageup",b"\x1b[6~":"pagedown"}.get(bytes(seq),"esc")
+
+            if key in {"q","esc"}: break
+            if key in {"j","down"}: top=min(max_top,top+1); continue
+            if key in {"k","up"}: top=max(0,top-1); continue
+            if key in {" ","pagedown"}: top=min(max_top,top+page_size); continue
+            if key in {"b","pageup"}: top=max(0,top-page_size); continue
+
+            # Restore cooked mode while an external app/prompt owns the terminal.
+            termios.tcsetattr(fd,termios.TCSADRAIN,old)
+            if key in {"\r","\n"}: _open_file(p)
+            elif key=="E": _edit_file(p)
+            elif key=="B":
+                print("copied file to clipboard" if _copy_file_clipboard(p) else "file clipboard unavailable")
+                input("press Enter › ")
+            elif key=="Y":
+                print("copied" if _copy_path(p) else str(p))
+                input("press Enter › ")
+            elif key=="P":
+                print(str(p))
+                return 0
+            elif key=="M":
+                _mutate_file(p,"move")
+                if not p.exists(): return 0
+            elif key=="C": _mutate_file(p,"copy")
+            elif key=="S": _mutate_file(p,"send")
+            elif key=="R":
+                _mutate_file(p,"remove")
+                if not p.exists(): return 0
+            old=termios.tcgetattr(fd)
+            tty.setcbreak(fd)
+    finally:
+        try: termios.tcsetattr(fd,termios.TCSADRAIN,old)
+        except Exception: pass
+    return 0
+
+def inspect_anything(term):
+    """Human-first classification for `lk <anything>`. Paths always win."""
+    if term.lower()=="xyzzy":
+        print(_c("A hollow voice says: magic hands.", "35"))
+        return 0
+    expanded=Path(term).expanduser()
+    if expanded.exists():
+        if expanded.is_dir(): return render([str(expanded)])
+        return inspect_file(expanded)
+    if term.isdigit():
+        n=int(term)
+        if 1 <= n <= 65535: return inspect_port(n)
+    if shutil.which(term): return inspect_command(term)
+    proc=inspect_process(term)
+    if proc is not None: return proc
+    print(f"LOOK · don't know how to inspect {_c(term, '1;36')}")
+    print(f"  {_c('hint','33')} path · command · port · process, or try lk help")
+    return 1
+
+
+
+def _confirm(prompt):
+    try:
+        answer=input(prompt).strip().lower()
+    except (EOFError, KeyboardInterrupt):
+        print()
+        return False
+    return answer in {"y","yes"}
+
+def uninstall():
+    """Remove LOOK without guessing ownership of the user's existing tools."""
+    manifest_path=STATE_DIR/"install_manifest.json"
+    try:
+        manifest=json.loads(manifest_path.read_text()) if manifest_path.exists() else {}
+    except Exception:
+        manifest={}
+
+    print(_c("LOOK + Future Crash uninstall", "36"))
+    print()
+    print("This will remove LOOK + Future Crash files owned by this environment and remove its managed shell hook.")
+    print("~/.zsh_secrets is always preserved.")
+    print()
+    if not _confirm("Uninstall LOOK + Future Crash? [y/N] "):
+        print("cancelled")
+        return 0
+
+    packages=[str(x) for x in manifest.get("packages",[]) if str(x).strip()]
+    created_dirs=[Path(x).expanduser() for x in manifest.get("created_dirs",[]) if str(x).strip()]
+    zsh_backup=str(manifest.get("zsh_backup","")).strip()
+
+    remove_owned=False
+    if packages or created_dirs:
+        print()
+        if packages:
+            print("Packages LOOK recorded as installing:")
+            print("  " + " ".join(packages))
+        if created_dirs:
+            print("Shell add-ons LOOK recorded as creating:")
+            for p in created_dirs:
+                print(f"  {p}")
+        print()
+        remove_owned=_confirm("Also remove these LOOK-installed packages/add-ons? [y/N] ")
+    elif not manifest:
+        print()
+        print("No install ownership manifest exists (this LOOK predates tracking).")
+        print("Packages and shell add-ons will be left untouched.")
+
+    # Preserve the current LOOK-era zshrc before restoring anything. This makes
+    # post-install user edits recoverable even when the original backup is restored.
+    current_zsh=HOME/".zshrc"
+    if current_zsh.exists():
+        stamp=time.strftime("%Y%m%d-%H%M%S")
+        preserved=HOME/f".zshrc.look-uninstalled.{stamp}"
+        try:
+            shutil.copy2(current_zsh,preserved)
+            print(f"preserved current ~/.zshrc → {preserved}")
+        except OSError as e:
+            print(f"LOOK: could not preserve current ~/.zshrc: {e}")
+            return 1
+
+    look_hook_start="# >>> LOOK Shell >>>"
+    look_hook_end="# <<< LOOK Shell <<<"
+    look_fragment=HOME/".config/look/look.zsh"
+
+    modern_hook=False
+    if current_zsh.exists():
+        try:
+            text=current_zsh.read_text()
+            if look_hook_start in text:
+                modern_hook=True
+                while look_hook_start in text:
+                    a=text.find(look_hook_start)
+                    b=text.find(look_hook_end,a)
+                    if b<0:
+                        text=text[:a].rstrip()+"\n"
+                        break
+                    b+=len(look_hook_end)
+                    left=text[:a].rstrip()
+                    right=text[b:].lstrip("\n")
+                    text=(left+"\n\n" if left else "")+right
+                current_zsh.write_text(text.rstrip()+"\n" if text.strip() else "")
+                print("removed LOOK hook from ~/.zshrc")
+        except OSError as e:
+            print(f"LOOK: could not update ~/.zshrc: {e}")
+            return 1
+
+    if not modern_hook:
+        if zsh_backup and Path(zsh_backup).expanduser().exists():
+            try:
+                shutil.copy2(Path(zsh_backup).expanduser(),current_zsh)
+                print(f"restored legacy ~/.zshrc ← {zsh_backup}")
+            except OSError as e:
+                print(f"LOOK: could not restore ~/.zshrc: {e}")
+                return 1
+        else:
+            print("LOOK: no managed ~/.zshrc hook or legacy backup found; leaving ~/.zshrc untouched")
+
+    try:
+        if look_fragment.exists():
+            look_fragment.unlink()
+        look_dir=look_fragment.parent
+        if look_dir.exists() and not any(look_dir.iterdir()):
+            look_dir.rmdir()
+    except OSError as e:
+        print(f"LOOK: could not completely remove shell fragment: {e}")
+
+    if remove_owned:
+        brew=shutil.which("brew")
+        if packages and brew:
+            for pkg in packages:
+                result=subprocess.run([brew,"uninstall",pkg],text=True)
+                if result.returncode:
+                    print(f"LOOK: brew left {pkg} installed")
+        elif packages:
+            print("LOOK: brew is unavailable; recorded packages were left installed.")
+
+        # Remove deepest paths first. Never recurse outside the exact paths the
+        # installer recorded as newly created by LOOK.
+        for p in sorted(created_dirs,key=lambda x:len(x.parts),reverse=True):
+            try:
+                if p.exists():
+                    shutil.rmtree(p)
+                    print(f"removed {p}")
+            except OSError as e:
+                print(f"LOOK: could not remove {p}: {e}")
+
+    # Preserve user secrets explicitly. Remove both launchers owned by the unified environment.
+    future_launcher=HOME/".local/bin/future-crash"
+    try:
+        if future_launcher.is_symlink() or future_launcher.exists():
+            future_launcher.unlink()
+    except OSError as e:
+        print(f"LOOK: could not remove {future_launcher}: {e}")
+
+    future_state=HOME/".local/share/future-crash"
+    try:
+        if future_state.exists():
+            shutil.rmtree(future_state)
+    except OSError as e:
+        print(f"LOOK: could not completely remove {future_state}: {e}")
+
+    launcher=HOME/".local/bin/lk"
+    try:
+        if launcher.is_symlink() or launcher.exists():
+            launcher.unlink()
+    except OSError as e:
+        print(f"LOOK: could not remove {launcher}: {e}")
+
+    # The running process may safely remove its own installed source on Unix.
+    try:
+        if STATE_DIR.exists():
+            shutil.rmtree(STATE_DIR)
+    except OSError as e:
+        print(f"LOOK: could not completely remove {STATE_DIR}: {e}")
+        return 1
+
+    print()
+    print("LOOK + Future Crash removed. Open a new shell or run: exec zsh")
+    return 0
+
+
+
+def _prompt_secret(prompt):
+    """Hidden input with LOOK's normal escape hatch."""
+    if not (sys.stdin.isatty() and sys.stdout.isatty()):
+        import getpass
+        try:
+            return getpass.getpass(prompt).strip(),False
+        except (EOFError,KeyboardInterrupt):
+            return "",True
+    fd=sys.stdin.fileno()
+    old=termios.tcgetattr(fd)
+    chars=[]
+    try:
+        tty.setcbreak(fd)
+        sys.stdout.write(prompt); sys.stdout.flush()
+        while True:
+            ch=os.read(fd,1)
+            if ch in {b'\x1b',b'\x03',b'\x04'}:
+                sys.stdout.write("\n"); sys.stdout.flush()
+                return "",True
+            if ch in {b'\r',b'\n'}:
+                sys.stdout.write("\n"); sys.stdout.flush()
+                return "".join(chars).strip(),False
+            if ch in {b'\x7f',b'\b'}:
+                if chars: chars.pop()
+                continue
+            text=ch.decode("utf-8","ignore")
+            if text and text.isprintable(): chars.append(text)
+    finally:
+        termios.tcsetattr(fd,termios.TCSADRAIN,old)
+
+def ollama_key(args):
+    """Configure the Ollama web-search key without exposing it."""
+    secrets=HOME/".zsh_secrets"
+    configured=bool(os.environ.get("OLLAMA_API_KEY",""))
+    try:
+        if secrets.exists():
+            configured=configured or bool(re.search(
+                r'^\s*(?:export\s+)?OLLAMA_API_KEY\s*=\s*.+$', secrets.read_text(), re.M))
+    except OSError:
+        pass
+
+    if args and args[0].lower()=="status":
+        print("Ollama web search key: configured" if configured
+              else "Ollama web search key: not configured")
+        return 0
+
+    value,cancelled=_prompt_secret("Ollama API key (hidden) › ")
+    if cancelled or not value:
+        print("· cancelled")
+        return 0
+
+    try:
+        text=secrets.read_text() if secrets.exists() else ""
+        line="export OLLAMA_API_KEY=" + repr(value) + "\n"
+        pattern=r'^\s*(?:export\s+)?OLLAMA_API_KEY\s*=.*(?:\n|$)'
+        if re.search(pattern,text,re.M):
+            text=re.sub(pattern,lambda _m: line,text,count=1,flags=re.M)
+        else:
+            if text and not text.endswith("\n"): text+="\n"
+            text+=line
+        tmp=secrets.with_name(secrets.name+".tmp")
+        tmp.write_text(text)
+        tmp.chmod(0o600)
+        tmp.replace(secrets)
+        secrets.chmod(0o600)
+        os.environ["OLLAMA_API_KEY"]=value
+    except OSError as e:
+        print(f"LOOK: could not save Ollama key: {e}")
+        return 1
+
+    print("✓ Ollama web search key saved")
+    print("Open a new shell, or run: source ~/.zsh_secrets")
+    return 0
+
+def main():
+    # `lk o` remains the chat verb. In v2, bare `lk ollama` is inspection;
+    # adding search/a prompt keeps the historical long-form chat spelling useful.
+    if len(sys.argv) >= 2 and (
+        sys.argv[1] == "o"
+        or (
+            sys.argv[1] == "ollama"
+            and len(sys.argv) >= 3
+            and sys.argv[2] not in {"models","test","key","host","hosts","share","access"}
+        )
+    ):
+        args=sys.argv[2:]
+        allow_start=True
+        host_override=None
+        host_name=None
+        access_profile=None
+        profile_flags={
+            "--conservative":"conservative",
+            "--workspace":"workspace",
+            "--power":"power",
+            "--unsafe":"unsafe",
+        }
+        while args:
+            if args[0] in profile_flags:
+                access_profile=profile_flags[args.pop(0)]
+                continue
+            if args[0] == "--no-start":
+                allow_start=False
+                args.pop(0)
+                continue
+            if args[0].startswith("@") and len(args[0])>1 and host_override is None:
+                token=args.pop(0)[1:]
+                host_name,host_override=_resolve_ollama_host(token)
+                if not host_override:
+                    print(f"LOOK OLLAMA · host not found: {token}")
+                    print("  run: lk ollama host")
+                    return 1
+                continue
+            break
+        force_search=bool(args and args[0] == "search")
+        if force_search:
+            args=args[1:]
+        initial_prompt=" ".join(args).strip() or None
+        return ollama_chat(
+            force_search=force_search, initial_prompt=initial_prompt,
+            allow_start=allow_start, host_override=host_override, host_name=host_name,
+            access_profile=access_profile
+        )
+    a=sys.argv[1:]
+    if not a: return render([])
+    cmd=a[0]; rest=a[1:]
+    if cmd=="_remember-worker": return _memory_worker()
+    if cmd=="_ollama-share-proxy": return _ollama_share_proxy()
+    modes={"detail":"detail","dirs":"dirs","files":"files","tree":"tree","recent":"recent","size":"size"}
+    if cmd in ("help","-h","--help"): return help_screen()
+    if cmd in ("version","--version","-V"): print(f"LOOK {VERSION}"); return 0
+    if cmd=="home": return home()
+    if cmd=="undo": return _undo_last()
+    if cmd=="_batch":
+        if len(rest)<3: return 2
+        kind=rest[0]
+        if kind=="remove":
+            paths=rest[2:] if rest[1]=="--" else rest[1:]
+            return _batch_action(kind,"",paths)
+        return _batch_action(kind,rest[1],rest[2:])
+    if cmd=="_copy":
+        if len(rest)!=2: return 2
+        print(_action_result(_interactive_file_action("copy",rest[0],rest[1]))); return 0
+    if cmd=="_move":
+        if len(rest)!=2: return 2
+        print(_action_result(_interactive_file_action("move",rest[0],rest[1]))); return 0
+    if cmd=="_remove":
+        if len(rest)!=1: return 2
+        print(_action_result(_journal_remove(rest[0]))); return 0
+    if cmd=="_mkdir":
+        if len(rest)!=1: return 2
+        print(_action_result(_journal_mkdir(rest[0]))); return 0
+    if cmd=="doctor": return doctor()
+    if cmd=="settings": return settings()
+    if cmd=="uninstall": return uninstall()
+    if cmd=="config":
+        print(f"LOOK {VERSION}\n  executable  {Path(__file__).resolve()}\n  renderer    {RENDERER}\n  zshrc       {HOME/'.zshrc'}\n  secrets     {HOME/'.zsh_secrets'}\n  memory      {MEMORY_FILE}\n  memory queue {MEMORY_QUEUE}\n  undo        {UNDO_FILE}\n  ollama model {_preferred_ollama_model()}\n  ollama models {OLLAMA_MODELS_FILE}")
+        return 0
+    if cmd=="secrets":
+        p=HOME/".zsh_secrets"
+        if not p.exists(): print("LOOK secrets: ~/.zsh_secrets is not present."); return 1
+        mode=oct(p.stat().st_mode & 0o777)
+        print(f"LOOK secrets: {p} exists · permissions {mode} · contents hidden")
+        return 0 if mode=="0o600" else 1
+    if cmd in modes: return render(["--mode", modes[cmd], *rest])
+    if cmd in {"run","project"}: return inspect_project(rest[0] if rest else '.')
+    if cmd in {"up","ports","services"}: return inspect_up()
+    if cmd=="port":
+        if not rest or not rest[0].isdigit(): print("usage: lk port <number>"); return 2
+        port=int(rest[0]); return inspect_port(port) if 1 <= port <= 65535 else 2
+    if cmd in {"processes","procs"}: return inspect_processes()
+    if cmd in {"process","proc"}:
+        if not rest: print("usage: lk process <name>"); return 2
+        query=" ".join(rest); result=inspect_process(query)
+        if result is None:
+            _title(query, 'process'); print(f"  {_c('·','33')} no matching process found"); return 1
+        return result
+    if cmd=="pid":
+        if not rest or not rest[0].isdigit(): print("usage: lk pid <number>"); return 2
+        return inspect_pid(int(rest[0]))
+    if cmd=="git": return inspect_git(rest[0] if rest else '.')
+    if cmd in {"machine","box"}: return inspect_machine()
+    if cmd in {"net","network"}: return inspect_network()
+    if cmd=="tailscale": return inspect_tailscale()
+    if cmd=="ollama":
+        if rest and rest[0]=="key":
+            return ollama_key(rest[1:])
+        if rest and rest[0] in {"host","hosts"}:
+            return ollama_hosts(rest[1:])
+        if rest and rest[0]=="share":
+            return ollama_share(rest[1:])
+        if rest and rest[0]=="access":
+            return lo_access(rest[1:])
+        if rest and rest[0]=="models":
+            return ollama_models(rest[1] if len(rest)>1 else None)
+        if rest and rest[0]=="test":
+            return ollama_test(all_models=("--all" in rest[1:]))
+        return inspect_ollama()
+    if cmd=="env": return inspect_env()
+    if cmd=="path": return inspect_path()
+    if cmd=="gpu": return inspect_gpu()
+    if cmd=="disk": return inspect_disk()
+    if cmd=="why":
+        if not rest: print("usage: lk why <command>"); return 2
+        return inspect_command(rest[0])
+    if len(a)==1: return inspect_anything(cmd)
+    return render(a)
+if __name__=="__main__": raise SystemExit(main())

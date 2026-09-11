@@ -1,0 +1,185 @@
+.TH LK 1 "September 2026" "LOOK 3.3.3" "User Commands"
+.SH NAME
+lk \- inspect, navigate, manipulate, and ask your computer
+.br
+lo \- Ollama assistant with selectable local capability profiles
+.SH SYNOPSIS
+.B lk
+.RI [ command " | " thing ]
+.br
+.B lo
+.RI [ --conservative | --workspace | --power | --unsafe ]
+.RI [ @host ]
+.RI [ prompt ]
+.SH DESCRIPTION
+LOOK is a terminal-native inspection/navigation layer with fuzzy filesystem workflows,
+safe file actions, system inspection, Ollama chat, optional web search, and private remote Ollama routing.
+.B lk help
+is the authoritative live command/key glossary.
+.SH LOOK
+.B lk [THING]
+inspects a path, command, port, process, or recognized target.
+.PP
+.B lk detail [PATH]
+,
+.B lk dirs [PATH]
+,
+.B lk files [PATH]
+,
+.B lk tree [PATH]
+,
+.B lk recent [PATH]
+,
+.B lk size [PATH]
+,
+.B lk run [PATH]
+provide filesystem/project views.
+.SH INSPECT
+.B lk up
+/
+.B lk ports
+; 
+.B lk port NUMBER
+;
+.B lk process TERM
+;
+.B lk processes
+;
+.B lk pid NUMBER
+;
+.B lk git [PATH]
+;
+.B lk machine
+;
+.B lk gpu
+;
+.B lk disk
+;
+.B lk net
+;
+.B lk tailscale
+;
+.B lk env
+;
+.B lk path
+;
+.B lk why COMMAND
+.
+.SH AI / OLLAMA
+.TP
+.B lo [ASK]
+Ollama chat.
+.TP
+.B lo search [ASK]
+Chat with web search.
+.TP
+.B lo @HOST [ASK]
+Use another Ollama host for one session.
+.TP
+.B lo --conservative
+Read/search only.
+.TP
+.B lo --workspace
+Bounded workspace tools.
+.TP
+.B lo --power
+Workspace tools plus shell commands; confirm every command.
+.TP
+.B lo --unsafe
+Unrestricted shell after one explicit session-entry confirmation.
+.TP
+.B lk ollama
+Show Ollama/selected-host status.
+.TP
+.B lk ollama models
+Interactive model panel.
+.TP
+.B lk ollama test [--all]
+Benchmark current or enabled installed models.
+.TP
+.B lk ollama host
+List saved/reachable hosts.
+.TP
+.B lk ollama host NAME
+Select persistent host.
+.TP
+.B lk ollama host local
+Return to localhost.
+.TP
+.B lk ollama host NAME URL
+Save and select a host.
+.TP
+.B lk ollama host forget NAME
+Forget a host.
+.TP
+.B lk ollama share
+Share local Ollama privately through Tailscale Serve.
+.TP
+.B lk ollama share status
+Show share/proxy status.
+.TP
+.B lk ollama share off
+Stop the share.
+.TP
+.B lk ollama key
+Securely save the Ollama web-search key.
+.TP
+.B lk ollama key status
+Report key configuration without revealing it.
+.TP
+.B lk ollama access [MODE]
+Show/set conservative, workspace, power, or unsafe as the persistent profile.
+.SH SETTINGS
+.TP
+.B lk settings
+Unified interactive panel for access profile, Ollama host, preferred model, web-search key, and Ollama tailnet share.
+It uses the same underlying state and commands; it is not a second configuration system.
+.SH SYSTEM
+.B lk home
+;
+.B lk doctor
+;
+.B lk config
+;
+.B lk secrets
+;
+.B lk undo
+;
+.B lk uninstall
+;
+.B lk version
+;
+.B lk help
+.
+.SH FILE ACTIONS
+.B lcp [PATH]
+;
+.B lmv [PATH]
+;
+.B lscp [PATH]
+;
+.B lrm [PATH]
+;
+.B lmk PATH
+;
+.B mkd DIR
+.
+.SH SHORTCUTS
+l/ls smart view; ll details; ld directories; lf files; lt tree; lr recent; lz sizes;
+zll fuzzy jump + look; cdl jump + details; f find anywhere; lh home; lo Ollama chat;
+rs reset ritual; rb reload zsh; webterm terminal over Tailscale.
+.SH CAPABILITY MODEL
+Remote inference and local authority are separate:
+.B lo @HOST --power
+runs inference on HOST while commands execute on the computer running LOOK.
+Thinking-capable output is visually separated into
+.B thinking >
+and
+.B lo >
+sections; tool activity remains distinct.
+.SH FILES
+.I ~/.config/look/look.zsh
+.br
+.I ~/.zsh_secrets
+.br
+.I ~/.config/look/
