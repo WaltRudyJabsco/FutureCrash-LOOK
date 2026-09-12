@@ -30,3 +30,10 @@ Application versioning and intelligence-data versioning are separate.
 - Learned skills remain local and survive Bundled updates.
 
 This lets LOOK stabilize while reviewed assistant craft continues to evolve without inventing a skills package manager or database.
+
+
+## LOOK 2.0 state boundary
+
+LOOK separates versioned program material from portable profile identity, machine-local trust/configuration, and disposable runtime state. See `STATE-ARCHITECTURE.md` and `PROFILE.md`.
+
+This boundary is also the long-term service contract: shell, filer, Future Crash, and future resident brokers may exchange jobs/events, while durable intelligence remains profile state.

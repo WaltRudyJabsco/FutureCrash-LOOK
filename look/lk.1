@@ -334,3 +334,75 @@ List or select requested reasoning depth.
 List or select visible thinking presentation. Compact uses a rolling live thought view.
 .PP
 Personality and thinking settings do not alter the LO access/capability profile.
+
+.SH SELECTED PATHS TO LO
+In the interactive filer FILTER or SELECT view, press
+.B L
+to launch LO with the current marked paths as explicit context.
+If no paths are marked, the highlighted path is used.
+The files are not bulk-loaded into the model context; LO receives a path manifest and reads only what it needs through its bounded file tools.
+
+.SH FILER NAVIGATION
+Use
+.B j
+and
+.B k
+(or uppercase J/K) and the up/down arrow keys for vertical movement.
+.B L
+is reserved for the selected-path LO context handoff.
+
+.SH FILESYSTEM PARENT
+In the plain filer browse state, press
+.B <
+(Shift-comma)
+to move to the real filesystem parent directory.
+This is distinct from Escape, which navigates LOOK history.
+While entering a filter, < is treated as ordinary filter text.
+
+.SH PERSISTENT WORKING SET
+Selections persist across filer directory navigation.
+Use Tab to toggle one item, A to toggle current matches, and X to clear the set.
+When the set spans locations, the status reports the total and the number visible here as
+.B SELECTED \(bu N / H HERE.
+Copy, move, remove, path-copy, clipboard, and LO-context actions use the persistent set when non-empty.
+
+.SH PATH COMPLETION
+LOOK copy and move destination prompts support Tab completion for filesystem paths.
+The lcp, lmv, lrm, and lscp helpers use normal repeated Zsh path completion for each operand.
+.SH GLOBAL FIND
+.B f
+performs a LOOK-native global find rooted at the user's home directory.
+.B fznv
+uses the same finder and opens the selected file in Neovim.
+.SH TEMPORAL MEMORY
+Recent exchanges and semantic memory candidates carry age information.
+Memory is historical context and must not be treated as pending work.
+.SH BACKGROUND LO
+.B lo bg REQUEST
+queues one-shot LO work in the background.
+Completed or failed jobs produce durable LOOK events, surfaced automatically at a subsequent Zsh prompt.
+Use
+.B lk jobs
+and
+.B lk events
+to inspect state.
+
+.SH PROFILE
+.B lk profile
+shows the portable LOOK identity.
+.B lk profile backup [DEST]
+creates rotating timestamped backups and remembers DEST.
+.B lk profile export [ZIP]
+creates a migration archive.
+.B lk profile restore SOURCE
+restores a profile after schema/path validation and creates a local safety snapshot first.
+Secrets and runtime state are excluded.
+.SH FEEDBACK
+.B lk feedback
+configures finite terminal motion and optional sound.
+.B lk sound
+toggles sound.
+Sound defaults off; motion defaults subtle; non-TTY output is silent and static.
+.SH SKILLS EXPORT
+.B lk skills export [FILE]
+writes only locally learned skills for review or promotion into a future distribution.

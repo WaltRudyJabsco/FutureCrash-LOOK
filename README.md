@@ -12,6 +12,99 @@ They started as separate projects. They now install and live as one system.
 
 ---
 
+
+
+
+
+## LOOK 2.0: your LOOK is portable
+
+LOOK now treats your evolving local AI as a first-class **profile**, separate from the software package and from disposable machine/runtime state.
+
+```text
+lk profile
+lk profile backup ~/Documents/LOOK
+lk profile export
+lk profile restore look-profile-....zip
+```
+
+Memory, recent continuity, core customization, learned skills, personalities, behavioral preferences, and feedback settings travel. Secrets, undo/trash, jobs/events, worker queues, PIDs, caches, and machine-specific host plumbing do not.
+
+For presentation preferences:
+
+```text
+lk feedback
+lk sound
+```
+
+Sound is off by default; motion is subtle by default. Both degrade to nothing for piped output.
+
+
+## Filer → LO context
+
+LOOK's filer can hand its current working set directly to LO.
+
+1. Filter/select files normally.
+2. Mark any number with `Tab` or `A` (or leave one highlighted).
+3. Press **`L`**.
+
+LO opens immediately with those paths named as the selected context:
+
+```text
+context · 6 selected paths
+you ›
+```
+
+The files are **not** blindly stuffed into the model context. LO receives their paths and uses its normal bounded `read_file`, `list_files`, `search_files`, and mutation tools only when the request requires them. The LO workspace is rooted at the nearest common selected directory, so the handed-off paths are actually accessible to the session.
+
+
+## LO execution receipts
+
+LO distinguishes **planning** from **execution**. For explicit filesystem changes, LOOK will not accept a prose-only success claim: an actual mutation tool must run first. Several new text files should use the bounded batch creator; routine process/port diagnosis uses read-only host inspection tools even in Workspace mode.
+
+Workspace remains bounded: it can inspect the host and mutate files inside the starting workspace, but arbitrary shell commands still require Power or Unsafe mode.
+
+
+## LO continuity
+
+LO keeps three deliberately different memory layers:
+
+- **Recent conversation:** a small literal cross-session ring. This is what lets a fresh `lo` session understand “what happened to those files?” from a recent exchange.
+- **Candidate memory:** semantic facts/project state with importance scores. Unreinforced candidates decay; zero means forgotten.
+- **Long-term:** a compact background summary periodically consolidated from candidates that remain strong or are reinforced.
+
+`lk memory` shows all three states. `lk memory clear-recent` clears only recent literal conversation.
+
+For filesystem work, LO can create several new text files in one bounded operation rather than spending one model/tool round per file. Direct shell helpers also accept batches:
+
+```text
+lcp a.txt b.txt archive/
+lmv one.md two.md notes/
+lrm old1.txt old2.txt
+```
+
+Copy/move batches use the existing LOOK undo transaction machinery.
+
+
+## Starter toolkit
+
+You can use all of LOOK while remembering only a few entrances:
+
+```text
+lk system    machine health, processes, ports
+lk ai        models, benchmark, thinking, personality
+lk net       addresses, Tailscale, sharing, web readiness
+lk clean     conservative maintenance
+lk config    LOOK and LO behavior
+
+lo           talk to LO
+fc           Future Crash
+```
+
+These are keyboard-driven control surfaces over the existing commands, not replacements. Experienced users can still go directly to `lk doctor`, `lk models`, `lk thinking deep`, `lk tailscale`, and the rest.
+
+Use `lk commands` for the terse vocabulary index and `lk help all` for the complete command/key glossary.
+
+
 ## Install
 
 Installation happens in Terminal, but it is intentionally simple.
@@ -682,7 +775,7 @@ This release establishes the following baseline:
 | Layer | Version |
 | --- | ---: |
 | Future Crash + LOOK | **1.6.10** |
-| LOOK | **3.9.1** |
+| LOOK | **3.12.1** |
 | Future Crash | **1.1.7** |
 
 Signal rendering is now compiled separately from conversation: explicit Signal requests use a focused no-thinking 1200-token render pass, while ordinary Workstation conversation retains its own reasoning budget.
@@ -783,3 +876,106 @@ This remains an enthusiast-built terminal environment with intentionally powerfu
 The point is not to make the terminal disappear.
 
 **The point is to see what the terminal becomes when it can think.**
+
+### Filer navigation note
+
+Filer navigation is deliberately vertical: `j/k` (or `J/K`) and ↑/↓ move through matches. `L` is reserved for handing the current highlighted/marked set to LO as context.
+
+
+### Filer parent navigation
+
+In ordinary browse mode, press `<` (Shift-,) to move up one real filesystem directory. Escape remains navigation-history back. While typing a filter, `<` stays ordinary filter text.
+
+
+## Persistent filer working set
+
+Selections now survive navigation. Mark files or directories with `Tab`/`A`, move through the filesystem with Enter and `<`, and keep collecting paths from other locations.
+
+```text
+SELECTED · 3
+SELECTED · 7 / 3 HERE
+```
+
+The first form is green and means the selected set is local to the current view. The second uses an amber accent and means the working set spans locations; seven paths are selected in total and three are here.
+
+`C` copy, `M` move, `R` remove, `Y` paths, clipboard actions, and `L` LO context use the accumulated working set. `X` clears it. Selecting a directory records the directory path; it does not recursively mark every descendant.
+
+
+### Filter navigation
+
+While actively typing a filter, lowercase `j` and `k` remain filter text. Navigate matches with `J/K` (Shift-J/Shift-K) or ↑/↓. Outside filter entry, ordinary `j/k` navigation remains available.
+
+
+## Path completion
+
+Filesystem destination fields are path-aware. In filer copy/move prompts:
+
+```text
+COPY 3 items · to › ~/Down<Tab>
+                         ↓
+                     ~/Downloads/
+```
+
+The same rule applies to shell helpers such as `lcp`, `lmv`, `lrm`, and `lscp`: every operand is a filesystem path and may be completed repeatedly with Tab.
+
+## LOOK-native global find
+
+`f` keeps its broad `$HOME` search scope but now uses LOOK's own filter, preview, selection, working-set, and action language instead of dropping into a stock fzf screen. `fd` remains the preferred fast catalog source when installed.
+
+`fznv` uses the same LOOK-native finder and opens the chosen file in Neovim.
+
+## Temporal LO memory
+
+LO now receives explicit age information for recent exchanges and semantic memories. Candidate memories carry creation and last-reinforcement timestamps.
+
+The governing rule is:
+
+> Memory describes what happened. It is not a pending instruction queue.
+
+An older unfinished request may provide context, but LO must not silently resume it unless the current request clearly asks to continue.
+
+## Background LO jobs and events
+
+LOOK now has a small durable message-passing layer:
+
+```text
+shell / filer / Future Crash
+        ↓
+      jobs/
+        ↓
+       LO
+        ↓
+      events/
+        ↓
+ next shell prompt
+```
+
+Queue work with:
+
+```text
+lo bg summarize these logs and tell me what failed
+```
+
+Continue using the terminal normally. When the job completes, LOOK emits a completion/failure event that is surfaced at the next shell prompt.
+
+Inspect state with:
+
+```text
+lk jobs
+lk events
+```
+
+This is intentionally not a resident daemon yet. The filesystem queue/event contract establishes the interface first; a future Unix-socket or localhost service can implement the same contract without changing callers.
+
+
+### Batch transaction safety
+
+Multi-file copy/move is one transaction even when the undo history is already full. LOOK tags each temporary mutation with a transaction ID, then commits one batch undo record. On failure, only that transaction is rolled back and the receipt identifies the source that failed.
+
+Interactive file-action prompts use Tab for completion and bare Escape for clean cancellation.
+
+
+### Streaming global find
+
+`f` and `fznv` intentionally use a streaming picker for the global `$HOME` search. You can begin typing immediately while `fd`/`find` continues producing candidates. The picker uses LOOK-style colors and indicators; `f` then hands the selected result into LOOK for normal actions.
+

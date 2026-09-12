@@ -215,42 +215,61 @@ displayFZFFiles() {
   fzf --preview 'bat --theme=gruvbox-dark --color=always --style=header,grid --line-range :400 -- {}'
 }
 
+# Shared streaming global finder.
+# fd/find begins producing paths immediately; fzf is interactive before the
+# catalog is complete, so typing never waits on a full-home scan.
+_look_global_pick() {
+  local prompt="${1:-FIND › }"
+
+  if (( $+commands[fd] )); then
+    fd --hidden --follow --absolute-path \
+      --exclude .git --exclude node_modules --exclude .Trash \
+      --exclude Library/Caches --exclude .cache \
+      . "$HOME" 2>/dev/null |
+    fzf \
+      --prompt="$prompt" \
+      --height=100% \
+      --layout=reverse \
+      --info=inline \
+      --border=none \
+      --pointer='▸' \
+      --marker='✓' \
+      --color='fg:#d7dde5,bg:#0f141a,hl:#67d6ee,fg+:#081218,bg+:#48bcd6,hl+:#081218,prompt:#67d6ee,pointer:#67d6ee,marker:#8bd691,spinner:#67d6ee,info:#808b9a'
+    return ${pipestatus[2]}
+  fi
+
+  command find "$HOME" \
+    \( -path "$HOME/.git" -o -path '*/.git' -o -path '*/node_modules' \
+       -o -path "$HOME/.Trash" -o -path "$HOME/Library/Caches" -o -path "$HOME/.cache" \) -prune -o \
+    -mindepth 1 -print 2>/dev/null |
+  fzf \
+    --prompt="$prompt" \
+    --height=100% \
+    --layout=reverse \
+    --info=inline \
+    --border=none \
+    --pointer='▸' \
+    --marker='✓' \
+    --color='fg:#d7dde5,bg:#0f141a,hl:#67d6ee,fg+:#081218,bg+:#48bcd6,hl+:#081218,prompt:#67d6ee,pointer:#67d6ee,marker:#8bd691,spinner:#67d6ee,info:#808b9a'
+  return ${pipestatus[2]}
+}
+
 fznv() {
   (( $+commands[nvim] )) || return 127
   local selection
-  selection=$(displayFZFFiles) || return
-  if [[ -n "$selection" ]]; then
-    _look_nvim_intro
-    nvim -- "$selection"
-  fi
+  selection=$(_look_global_pick 'FIND+NVIM › ') || return
+  [[ -n "$selection" ]] || return
+  _look_nvim_intro
+  nvim -- "$selection"
 }
 
-# Global retrieval: find from anywhere, then hand the result to LOOK.
-# fd is preferred because it is fast and respects the usual project junk;
-# find is the portable fallback.
+# Global retrieval stays streaming, then hands the exact result to LOOK.
 f() {
   local selection
-  if (( $+commands[fd] )); then
-    selection=$(
-      fd --hidden --follow --absolute-path \
-        --exclude .git --exclude node_modules --exclude .Trash \
-        --exclude Library/Caches --exclude .cache \
-        . "$HOME" 2>/dev/null |
-      fzf --prompt='FIND › ' --height=100% --layout=reverse
-    ) || return
-  else
-    selection=$(
-      command find "$HOME" \
-        \( -path "$HOME/.git" -o -path '*/.git' -o -path '*/node_modules' -o -path "$HOME/.Trash" -o -path "$HOME/Library/Caches" -o -path "$HOME/.cache" \) -prune -o \
-        -mindepth 1 -print 2>/dev/null |
-      fzf --prompt='FIND › ' --height=100% --layout=reverse
-    ) || return
-  fi
-
+  selection=$(_look_global_pick 'FIND › ') || return
   [[ -n "$selection" ]] || return
 
-  # Hand the exact result to LOOK's existing object-action language.
-  # Opening its parent lets both files and folders arrive already selected.
+  # LOOK owns the post-selection action language and preview.
   _look "${selection:h}" --mode smart --interactive --select "$selection"
 }
 
@@ -259,33 +278,40 @@ f() {
 # One-line LOOK prompt with a real bare-Esc cancel.
 # Zsh's normal `read` treats Esc as line-editor input, which is wrong for actions.
 _look_prompt() {
-  local prompt="$1" ch value=""
+  local prompt="$1"
   REPLY=""
-  print -n -- "$prompt"
 
+  # Dedicated ZLE keymap: normal shell completion, but bare Escape always means
+  # "cancel this LOOK action" rather than becoming an unfinished editor prefix.
+  if [[ -o interactive ]] && (( $+widgets[complete-word] )); then
+    bindkey -N look-prompt emacs
+    bindkey -M look-prompt '^I' expand-or-complete
+    bindkey -M look-prompt '^[' send-break
+    if vared -M look-prompt -p "$prompt" REPLY; then
+      bindkey -D look-prompt
+      return 0
+    fi
+    local rc=$?
+    bindkey -D look-prompt
+    REPLY=""
+    return 130
+  fi
+
+  # Fallback for unusual/non-ZLE shells.
+  local ch value=""
+  print -n -- "$prompt"
   while true; do
-    # -s keeps the terminal from echoing the key; LOOK owns the display.
     IFS= read -rsk1 ch || { print; return 1; }
     case "$ch" in
-      $'\e')
-        print
-        return 130
-        ;;
-      $'\r'|$'\n')
-        print
-        REPLY="$value"
-        return 0
-        ;;
+      $'\e') print; return 130 ;;
+      $'\r'|$'\n') print; REPLY="$value"; return 0 ;;
       $'\177'|$'\b')
         if [[ -n "$value" ]]; then
           value="${value[1,-2]}"
           print -n $'\b \b'
         fi
         ;;
-      *)
-        value+="$ch"
-        print -n -- "$ch"
-        ;;
+      *) value+="$ch"; print -n -- "$ch" ;;
     esac
   done
 }
@@ -320,29 +346,45 @@ _look_source() {
 
 lmv() {
   local src dest
+  local -a sources
   if (( $# >= 2 )); then
-    src="$1"; dest="$2"
-  else
-    src=$(_look_source "$@") || return
-    print -P "%F{cyan}MOVE%f  $src"
-    _look_prompt "to › " || { print -P "%F{242}· cancelled%f"; return 1; }
-    dest="$REPLY"
-    [[ -n "$dest" ]] || return
+    sources=("$@")
+    dest="${sources[-1]}"
+    sources[-1]=()
+    if (( ${#sources[@]} == 1 )); then
+      lk _move "${sources[1]}" "$dest"
+    else
+      lk _batch move "$dest" "${sources[@]}"
+    fi
+    return
   fi
+  src=$(_look_source "$@") || return
+  print -P "%F{cyan}MOVE%f  $src"
+  _look_prompt "to › " || { print -P "%F{242}· cancelled%f"; return 1; }
+  dest="$REPLY"
+  [[ -n "$dest" ]] || return
   lk _move "$src" "$dest"
 }
 
 lcp() {
   local src dest
+  local -a sources
   if (( $# >= 2 )); then
-    src="$1"; dest="$2"
-  else
-    src=$(_look_source "$@") || return
-    print -P "%F{cyan}COPY%f  $src"
-    _look_prompt "to [here] › " || { print -P "%F{242}· cancelled%f"; return 1; }
-    dest="$REPLY"
-    [[ -n "$dest" ]] || dest="."
+    sources=("$@")
+    dest="${sources[-1]}"
+    sources[-1]=()
+    if (( ${#sources[@]} == 1 )); then
+      lk _copy "${sources[1]}" "$dest"
+    else
+      lk _batch copy "$dest" "${sources[@]}"
+    fi
+    return
   fi
+  src=$(_look_source "$@") || return
+  print -P "%F{cyan}COPY%f  $src"
+  _look_prompt "to [here] › " || { print -P "%F{242}· cancelled%f"; return 1; }
+  dest="$REPLY"
+  [[ -n "$dest" ]] || dest="."
   lk _copy "$src" "$dest"
 }
 
@@ -445,6 +487,18 @@ mkd() {
 
 lrm() {
   local src answer
+  local -a sources
+  if (( $# > 1 )); then
+    sources=("$@")
+    print -P "%F{red}REMOVE%f  ${#sources[@]} items"
+    _look_prompt "remove these paths? [r confirms · Enter/Esc cancels] › " || {
+      print -P "%F{242}· cancelled%f"; return 1
+    }
+    answer="$REPLY"
+    [[ "${answer:l}" == "r" ]] || { print -P "%F{242}· cancelled%f"; return 1; }
+    lk _batch remove -- "${sources[@]}"
+    return
+  fi
   src=$(_look_source "$@") || return
   print -P "%F{red}REMOVE%f  $src"
   _look_prompt "remove this path? [r/Enter/Esc cancels] › " || {
@@ -483,9 +537,27 @@ setopt COMPLETE_ALIASES
 compdef _lo lo
 compdef _lmk lmk mkd
 
+# File-action helpers intentionally accept several path operands. Let Zsh do
+# ordinary filesystem completion for every position; lcp/lmv interpret the
+# final operand as the destination when multiple operands are supplied.
+# Every operand in LOOK file-action helpers is a filesystem path.
+# Use Zsh's native path completer repeatedly, including after each space.
+compdef _files lcp lmv lrm lscp
+
+
+# Surface completed background LO work at the next normal shell prompt.
+autoload -Uz add-zsh-hook
+_look_lo_events_precmd() {
+  local event_dir="$HOME/.local/share/look/events"
+  if [[ -d "$event_dir" ]] && [[ -n "$(command find "$event_dir" -type f -maxdepth 1 -name '*.json' -print -quit 2>/dev/null)" ]]; then
+    "$HOME/.local/bin/lk" events --drain
+  fi
+}
+add-zsh-hook precmd _look_lo_events_precmd
+
 # LOOK unified command
 alias lk='nocorrect lk'
-commands() { "$HOME/.local/bin/lk" help; }
+commands() { "$HOME/.local/bin/lk" commands; }
 
 # LOOK Ollama — minimal on-demand chat; a resident model is reused when available.
 alias lo='noglob lk o'

@@ -81,3 +81,21 @@ The LOOK 2.2 interaction grammar remains the behavioral compatibility baseline. 
 - `xyzzy`
 
 Presentation and capability layers may evolve, but established muscle memory should not silently change.
+
+## LOOK 4 / Future Crash + LOOK 2.0
+
+The program/profile boundary is now explicit. Installing or upgrading program files must not replace the live portable profile.
+
+Before migrating machines:
+
+```text
+lk profile export
+```
+
+or configure recurring snapshots:
+
+```text
+lk profile backup ~/Documents/LOOK
+```
+
+On the destination machine, install LOOK normally and then restore the profile. Secrets and machine-specific network/host state are intentionally reconfigured separately.

@@ -1,3 +1,105 @@
+## 4.0.0 — Explicit state architecture
+
+- Defined program, profile, machine, and runtime state as separate contracts.
+- Added schema-versioned profile inventory, backup, export, and restore.
+- Restore validates archive paths and creates a local safety snapshot before replacing live profile files.
+- Added learned-skills-only export for promoting local AI craft back into distributions.
+- Added centralized `feedback` engine with finite motion and optional synthesized sound.
+- Added `lk sound` and feedback controls to Settings/Config.
+- Non-TTY output remains deterministic and animation-free.
+
+## 3.13.3 — Responsive global find
+
+- `f`/`fznv` no longer precompute a 20k-entry catalog before accepting input.
+- Search is streaming again, so fzf accepts keystrokes immediately while paths continue arriving.
+- Finder colors/pointer/spinner are aligned with LOOK, while LOOK still owns post-selection actions.
+
+## 3.13.2 — File-action status codes
+
+- `_copy`, `_move`, `_remove`, `_mkdir`, and `_touch` now return status matching their textual result.
+- Missing-directory prompts/refusals are failures until the requested mutation actually completes.
+
+## 3.13.1 — Batch transaction hardening
+
+- Replaced undo-length inference with explicit batch transaction IDs.
+- Full undo rings and batches larger than the undo limit are now safe.
+- Batch rollback is transaction-local and reports the failed source.
+- LOOK's interactive Zsh prompt keymap binds bare Escape to cancel while preserving Tab completion.
+
+## 3.13.0 — Local message-passing foundation
+
+- Added Tab-completing destination prompts and simplified path completion for shell file actions.
+- Replaced stock-fzf `f`/`fznv` front ends with LOOK-native global find presentation.
+- Added temporal memory metadata and age-aware prompt context.
+- Explicitly separated historical memory from pending intent.
+- Added durable background LO jobs and terminal event delivery.
+- Shell prompt hook drains completed LO events without blocking current work.
+
+## 3.12.2 — Active-row contrast
+
+- Active filer row now uses a much stronger cyan/dark contrast in truecolor terminals.
+- Classic fallback adds bold to reverse video.
+
+## 3.12.1 — Preserve j/k in filter text
+
+- Filter input no longer consumes lowercase `j` or `k` as movement.
+- `J/K` and arrow keys navigate matches while filter text is active.
+- Browse/select mode keeps normal `j/k` navigation.
+
+## 3.12.0 — Cross-directory working set
+
+- Marked paths are owned by the filer session rather than a single directory view.
+- Navigation never clears the working set.
+- Status distinguishes local selection from cross-directory selection with color and `N / H HERE`.
+- `X` clears the set.
+- `<` is now filesystem parent; the temporary `>` binding is retired.
+
+## 3.11.0 — Parent directory key
+
+- In the plain filer browse state, `>` moves to the real filesystem parent.
+- Parent navigation and history navigation are now separate concepts.
+- Filter-entry mode still accepts `>` as normal text.
+
+## 3.10.5 — Simpler filer keys
+
+- `j/J` moves down; `k/K` moves up; arrows work as expected.
+- `L` is reserved for handing the selected/marked working set to LO.
+- Removed the unnecessary semicolon and pseudo-horizontal/home-row navigation bindings.
+
+## 3.10.4 — Selected paths become LO context
+
+- In filer FILTER/SELECT mode, `L` launches LO with the marked paths as its working context.
+- One unmarked highlighted path works the same way.
+- Paths are passed as a manifest, not bulk file contents.
+- LO's bounded workspace is rooted at the nearest common selected directory and its banner reports the context count.
+
+## 3.10.3 — Execution contract
+
+- Explicit local filesystem mutation requests must now produce an actual mutation tool call before LO may report success.
+- Prose-only mutation plans receive one silent tool-required repair pass.
+- Added bounded read-only host process, listening-port, and system snapshot tools for routine diagnostics in Workspace.
+- Added one extra tool-loop round for multi-step host work.
+
+## 3.10.2 — lmv/lcp argument hardening
+
+- Multi-source `lmv` and `lcp` now copy argv to an array, pop the final destination, and pass only true sources to the batch engine.
+- This removes an ambiguous Zsh parameter-slice expression that could accidentally include the destination as a source.
+
+## 3.10.1 — Continuity and reliable batches
+
+- Added literal cross-session recent conversation, distinct from semantic candidate and long-term memory.
+- Fixed long-term consolidation so useful candidates can graduate while strong rather than merely decay forever.
+- Added batch text-file creation for multi-file LO requests with unified undo.
+- Added multi-source `lcp`, `lmv`, and `lrm` command-line forms.
+- Added paging to the terse command index.
+
+## 3.10.0 — Human-sized map
+
+- Added five keyboard control surfaces: system, AI, network, maintenance, and configuration.
+- Added compact starter help and a terse complete command index.
+- Preserved direct expert commands and added short aliases for models, benchmark, and web status.
+- The maintenance surface is intentionally conservative and performs no broad automatic cleanup.
+
 ## 3.9.1 — Hidden games
 
 - Added undocumented `lk ttt` and `lk gtnw` terminal Easter eggs.

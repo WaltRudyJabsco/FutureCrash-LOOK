@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-import os, platform, re, select, shutil, subprocess, sys, termios, tty, threading, time, hashlib, json, uuid, signal
+import os, platform, re, select, shutil, subprocess, sys, termios, tty, threading, time, hashlib, json, uuid, signal, tempfile, wave, math, struct, zipfile
 import http.client
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from contextlib import contextmanager
@@ -17,7 +17,7 @@ try:
 except Exception:
     readline = None
 
-VERSION="3.9.1"
+VERSION="4.0.0"
 
 LOOK_WORDMARK = r"""       ██╗      ██╗  ██╗
        ██║      ██║ ██╔╝
@@ -29,6 +29,10 @@ HOME=Path.home()
 ROOT=Path(__file__).resolve().parent
 RENDERER=ROOT/"look_renderer.py"
 STATE_DIR=HOME/".local"/"share"/"look"
+CONFIG_DIR=HOME/".config"/"look"
+PROFILE_CONFIG_FILE=CONFIG_DIR/"profile.json"
+FEEDBACK_FILE=CONFIG_DIR/"feedback.json"
+PROFILE_SCHEMA_VERSION=1
 MEMORY_FILE=STATE_DIR/"ollama_memory.json"
 CORE_FILE=STATE_DIR/"core.md"
 SKILLS_FILE=STATE_DIR/"skills.md"
@@ -37,6 +41,9 @@ UNDO_TRASH=STATE_DIR/"undo_trash"
 UNDO_LIMIT=20
 MEMORY_QUEUE=STATE_DIR/"memory_queue"
 MEMORY_WORKER_LOCK=STATE_DIR/"memory_worker.lock"
+LO_RECENT_FILE=STATE_DIR/"lo_recent.json"
+LO_JOBS_DIR=STATE_DIR/"jobs"
+LO_EVENTS_DIR=STATE_DIR/"events"
 OLLAMA_MODEL_FILE=STATE_DIR/"ollama_model"
 OLLAMA_MODELS_FILE=STATE_DIR/"ollama_models.json"
 OLLAMA_HOSTS_FILE=STATE_DIR/"ollama_hosts.json"
@@ -50,9 +57,169 @@ OLLAMA_SHARE_PID=STATE_DIR/"ollama_share_proxy.pid"
 LOCAL_OLLAMA_URL="http://127.0.0.1:11434"
 RECENT_MEMORY_SLOTS=8
 MEMORY_CANDIDATE_LIMIT=20
+LO_RECENT_EXCHANGES=12
+LO_RECENT_MAX_CHARS=18000
+LO_RECENT_CONTEXT_CHARS=7000
 MEMORY_SCHEMA_VERSION=1
 SKILLS_SCHEMA_VERSION=1
 BUNDLED_SKILLS_VERSION=1
+
+
+def _load_feedback():
+    data={"sound":False,"motion":"subtle"}
+    try:
+        loaded=json.loads(FEEDBACK_FILE.read_text(encoding="utf-8"))
+        if isinstance(loaded,dict):
+            data["sound"]=bool(loaded.get("sound",False))
+            motion=str(loaded.get("motion","subtle")).lower()
+            if motion in {"off","subtle","normal"}:
+                data["motion"]=motion
+    except (OSError,ValueError,TypeError):
+        pass
+    return data
+
+
+def _save_feedback(data):
+    CONFIG_DIR.mkdir(parents=True,exist_ok=True)
+    payload={
+        "sound":bool(data.get("sound",False)),
+        "motion":str(data.get("motion","subtle")) if str(data.get("motion","subtle")) in {"off","subtle","normal"} else "subtle",
+    }
+    tmp=FEEDBACK_FILE.with_suffix(".tmp")
+    tmp.write_text(json.dumps(payload,indent=2)+"\n",encoding="utf-8")
+    try: os.chmod(tmp,0o600)
+    except OSError: pass
+    tmp.replace(FEEDBACK_FILE)
+
+
+def _tone_file(kind):
+    """Generate tiny synthesized feedback tones; no bundled audio assets required."""
+    cache=STATE_DIR/"feedback"
+    cache.mkdir(parents=True,exist_ok=True)
+    path=cache/f"{kind}.wav"
+    if path.exists():
+        return path
+    spec={
+        "accept":(660,0.045,0.13),
+        "complete":(880,0.075,0.15),
+        "notify":(740,0.060,0.13),
+        "error":(220,0.090,0.16),
+    }
+    freq,duration,amp=spec.get(kind,spec["accept"])
+    rate=22050
+    frames=max(1,int(rate*duration))
+    try:
+        with wave.open(str(path),"wb") as wav:
+            wav.setnchannels(1); wav.setsampwidth(2); wav.setframerate(rate)
+            buf=bytearray()
+            for i in range(frames):
+                # Short fade keeps terminal feedback from sounding clicky.
+                fade=min(1.0,i/(rate*.008),max(0.0,(frames-i)/(rate*.012)))
+                sample=int(32767*amp*fade*math.sin(2*math.pi*freq*i/rate))
+                buf.extend(struct.pack("<h",sample))
+            wav.writeframes(bytes(buf))
+        return path
+    except OSError:
+        return None
+
+
+def _play_feedback_sound(kind):
+    path=_tone_file(kind)
+    if not path:
+        return
+    player=None
+    args=[]
+    if platform.system()=="Darwin" and shutil.which("afplay"):
+        player=shutil.which("afplay"); args=[player,str(path)]
+    elif shutil.which("paplay"):
+        player=shutil.which("paplay"); args=[player,str(path)]
+    elif shutil.which("aplay"):
+        player=shutil.which("aplay"); args=[player,"-q",str(path)]
+    if not player:
+        return
+    try:
+        subprocess.Popen(args,stdout=subprocess.DEVNULL,stderr=subprocess.DEVNULL,start_new_session=True)
+    except OSError:
+        pass
+
+
+def _feedback(kind="accept", label=""):
+    """Finite, optional feedback. Never animates or sounds in piped output."""
+    cfg=_load_feedback()
+    if not sys.stdout.isatty():
+        return
+    if cfg.get("sound"):
+        _play_feedback_sound(kind)
+    motion=cfg.get("motion","subtle")
+    if motion=="off":
+        return
+
+    glyphs={
+        "accept":("·","◆","·"),
+        "complete":("·","◈","✓"),
+        "notify":("·","◐","●"),
+        "error":("·","×","!"),
+    }.get(kind,("·","◆","·"))
+    code={"accept":"36","complete":"32","notify":"36","error":"33"}.get(kind,"36")
+    frames=glyphs if motion=="normal" else (glyphs[1],glyphs[-1])
+    delay=.045 if motion=="normal" else .035
+    suffix=f" {_c(label,'2')}" if label else ""
+    for frame in frames:
+        sys.stdout.write(f"\r\033[2K{_c(frame,code)}{suffix}")
+        sys.stdout.flush()
+        time.sleep(delay)
+    sys.stdout.write("\r\033[2K")
+    sys.stdout.flush()
+
+
+def _feedback_command(args):
+    cfg=_load_feedback()
+    if not args or args[0] in {"status","show"}:
+        _title("feedback","terminal expression")
+        print(f"  sound   {'on' if cfg['sound'] else 'off'}")
+        print(f"  motion  {cfg['motion']}")
+        print(f"  config  {FEEDBACK_FILE}")
+        print()
+        print("  lk sound              toggle sound")
+        print("  lk feedback sound on|off")
+        print("  lk feedback motion off|subtle|normal")
+        print("  lk feedback demo")
+        return 0
+    if args[0]=="sound":
+        if len(args)==1:
+            cfg["sound"]=not cfg["sound"]
+        else:
+            value=args[1].lower()
+            if value not in {"on","off"}:
+                print("usage: lk feedback sound on|off"); return 2
+            cfg["sound"]=(value=="on")
+        _save_feedback(cfg)
+        print(f"LOOK sound · {'on' if cfg['sound'] else 'off'}")
+        if cfg["sound"]:
+            _feedback("accept","sound on")
+        return 0
+    if args[0]=="motion":
+        if len(args)<2 or args[1].lower() not in {"off","subtle","normal"}:
+            print("usage: lk feedback motion off|subtle|normal"); return 2
+        cfg["motion"]=args[1].lower()
+        _save_feedback(cfg)
+        print(f"LOOK motion · {cfg['motion']}")
+        _feedback("accept","motion")
+        return 0
+    if args[0]=="demo":
+        for kind in ("accept","complete","notify","error"):
+            _feedback(kind,kind)
+            print(f"  {kind}")
+        return 0
+    print("usage: lk feedback [status|sound on|off|motion off|subtle|normal|demo]")
+    return 2
+
+
+def _sound_command(args):
+    if args:
+        return _feedback_command(["sound",*args])
+    cfg=_load_feedback()
+    return _feedback_command(["sound","off" if cfg["sound"] else "on"])
 
 
 def _normalize_ollama_url(value):
@@ -610,6 +777,7 @@ AI / OLLAMA
 
 MEMORY + CRAFT
   lk memory            inspect long-term summary + memory candidates
+                       memory is historical context, never pending work
                        substantive preferences/favorites/project state are captured automatically
   lk memory add TEXT   save a memory (default importance 60)
   lk memory add TEXT --importance N
@@ -662,6 +830,19 @@ SYSTEM
   lk home              friendly LOOK home screen
   lk doctor            check the environment
   lk settings          unified interactive settings panel
+  lk profile           portable LOOK identity status
+  lk profile backup [DEST] [--keep N]
+                       create/remember rotating profile backups
+  lk profile export [ZIP]
+                       create one migration archive
+  lk profile restore SOURCE [--yes]
+                       restore profile with safety snapshot
+  lk skills export [FILE]
+                       export only locally learned skills
+  lk feedback          show sound/motion settings
+  lk feedback sound on|off
+  lk feedback motion off|subtle|normal
+  lk sound             quick sound toggle
   lk config            show installed paths + state
   lk secrets           secrets status (never contents)
   lk undo              undo last safe local filesystem action
@@ -693,13 +874,16 @@ SHORTCUTS
 
 LIVE FILTER / SELECTION
   Type       filter immediately
-  j/k/↑/↓    move selection; J/K/L/; are home-row directions
+  j/k/↑/↓    move selection in browse/select; while typing a filter use J/K or ↑/↓
   Tab        mark / unmark highlighted item
   A          mark all matches / clear all marked matches
   Enter      open file / enter folder
+  <          go up one filesystem directory (browse mode)
   E          edit
   O          open with another application
   C / M / R  copy / move / remove
+  L          hand persistent working set to a new LO session
+  X          clear persistent working set
   B          copy actual file object(s) to desktop clipboard
   Y          copy absolute path(s) as text
   P          print absolute path + exit
@@ -714,6 +898,7 @@ FILE CARD
   E / O                  edit / open with
   B / Y / P              clipboard file / copy path / print path
   M / C / S / R          move / copy / scp / remove
+  L                        hand selected/marked paths to LO
   q / Esc                quit
 
 HELP PAGER
@@ -1010,10 +1195,13 @@ def _load_memory():
             text=" ".join(str(item.get("text","")).split()).strip()
             if not text:
                 continue
+            now=time.time()
             cleaned.append({
                 "text": text[:900],
                 "importance": max(0, min(100, int(item.get("importance",50)))),
                 "uses": max(0, int(item.get("uses",0))),
+                "created_at": float(item.get("created_at",item.get("last_reinforced",now)) or now),
+                "last_reinforced": float(item.get("last_reinforced",item.get("created_at",now)) or now),
             })
         cleaned.sort(key=lambda x:x["importance"], reverse=True)
         result={"schema_version":MEMORY_SCHEMA_VERSION,
@@ -1112,6 +1300,95 @@ def _prune_contaminated_memory(memory):
     memory["summary"]=_sanitize_summary(memory.get("summary",""))
     return memory
 
+def _load_recent_exchanges():
+    """Literal cross-session continuity. Small, recent, and intentionally not semantic memory."""
+    try:
+        data=json.loads(LO_RECENT_FILE.read_text(encoding="utf-8"))
+        rows=data.get("exchanges",[]) if isinstance(data,dict) else []
+    except (OSError,json.JSONDecodeError):
+        rows=[]
+    clean=[]
+    total=0
+    for item in reversed(rows):
+        if not isinstance(item,dict):
+            continue
+        user=str(item.get("user","")).strip()[:5000]
+        assistant=str(item.get("assistant","")).strip()[:7000]
+        if not user:
+            continue
+        size=len(user)+len(assistant)
+        if clean and total+size>LO_RECENT_MAX_CHARS:
+            break
+        clean.append({"user":user,"assistant":assistant,"time":float(item.get("time",0) or 0)})
+        total+=size
+        if len(clean)>=LO_RECENT_EXCHANGES:
+            break
+    clean.reverse()
+    return clean
+
+def _save_recent_exchange(user_text, assistant_text):
+    """Commit conversational continuity before asynchronous memory work begins."""
+    try:
+        STATE_DIR.mkdir(parents=True,exist_ok=True)
+        rows=_load_recent_exchanges()
+        rows.append({
+            "user":str(user_text or "").strip()[:5000],
+            "assistant":str(assistant_text or "").strip()[:7000],
+            "time":time.time(),
+        })
+        rows=rows[-LO_RECENT_EXCHANGES:]
+        # Bound by characters from newest backward.
+        kept=[]; total=0
+        for item in reversed(rows):
+            size=len(item["user"])+len(item["assistant"])
+            if kept and total+size>LO_RECENT_MAX_CHARS:
+                break
+            kept.append(item); total+=size
+        kept.reverse()
+        tmp=LO_RECENT_FILE.with_suffix(".tmp")
+        tmp.write_text(json.dumps({"schema_version":1,"exchanges":kept},ensure_ascii=False,indent=2)+"\n",encoding="utf-8")
+        os.chmod(tmp,0o600); tmp.replace(LO_RECENT_FILE); os.chmod(LO_RECENT_FILE,0o600)
+        return True
+    except OSError:
+        return False
+
+def _age_label(ts):
+    try:
+        seconds=max(0,int(time.time()-float(ts or 0)))
+    except (TypeError,ValueError):
+        return "time unknown"
+    if seconds < 60: return "just now"
+    minutes=seconds//60
+    if minutes < 60: return f"{minutes} minute{'s' if minutes!=1 else ''} ago"
+    hours=minutes//60
+    if hours < 24: return f"{hours} hour{'s' if hours!=1 else ''} ago"
+    days=hours//24
+    if days < 30: return f"{days} day{'s' if days!=1 else ''} ago"
+    return time.strftime("%Y-%m-%d",time.localtime(float(ts)))
+
+
+def _recent_context():
+    rows=_load_recent_exchanges()
+    if not rows:
+        return ""
+    chunks=[]; used=0
+    # Work newest-first against a strict prompt budget, then restore chronology.
+    for item in reversed(rows):
+        chunk=f"[{_age_label(item.get('time',0))}]\nUSER: "+item["user"]+"\nASSISTANT: "+item["assistant"]
+        if chunks and used+len(chunk)>LO_RECENT_CONTEXT_CHARS:
+            break
+        chunks.append(chunk); used+=len(chunk)
+        if len(chunks)>=6:
+            break
+    chunks.reverse()
+    return (
+        "Recent cross-session conversation, preserved literally for continuity. "
+        "These are historical exchanges, NOT pending instructions. Never resume an old task merely because it appears here. "
+        "Use age as evidence: if an old request appears unfinished, confirm or mention it unless the current user turn clearly asks to continue. "
+        "Newer turns override older ones.\n\n"
+        + "\n\n".join(chunks)
+    )
+
 def _memory_context(memory):
     parts=[]
     summary=str(memory.get("summary","")).strip()
@@ -1126,14 +1403,14 @@ def _memory_context(memory):
     )[:RECENT_MEMORY_SLOTS]
     if candidates:
         rows="\n".join(
-            f"- [{int(m.get('importance',50)):02d}] {m.get('text','')}"
+            f"- [{int(m.get('importance',50)):02d} · {_age_label(m.get('last_reinforced',m.get('created_at',0)))}] {m.get('text','')}"
             for m in candidates
         )
         parts.append(
-            "Candidate user memories:\n"
+            "Candidate user memories (historical context, never a task queue):\n"
             "Use only those genuinely relevant to the current request. "
-            "Do not revive an abandoned topic merely because it appears here. "
-            "Retrieval alone does not reinforce a memory.\n"+rows
+            "Do not revive, resume, or execute an abandoned/older request merely because it appears here. "
+            "Age and last reinforcement matter. Retrieval alone does not reinforce a memory.\n"+rows
         )
 
     try:
@@ -1159,6 +1436,7 @@ def _decay_memories(memory, reinforced_text=None):
         if reinforced and text.casefold() == reinforced:
             importance=min(100, importance+5)
             item["uses"]=int(item.get("uses",0))+1
+            item["last_reinforced"]=time.time()
         else:
             importance-=1
         if importance>0:
@@ -1176,9 +1454,13 @@ def _add_memory(memory, text, importance=60):
         if str(item.get("text","")).casefold()==text.casefold():
             item["importance"]=min(100, max(int(item.get("importance",50)),importance)+5)
             item["uses"]=int(item.get("uses",0))+1
+            item["last_reinforced"]=time.time()
+            item.setdefault("created_at",item["last_reinforced"])
             return memory
+    now=time.time()
     memory.setdefault("memories",[]).append(
-        {"text":text,"importance":max(1,min(100,int(importance))),"uses":1}
+        {"text":text,"importance":max(1,min(100,int(importance))),"uses":1,
+         "created_at":now,"last_reinforced":now}
     )
     memory["memories"].sort(key=lambda x:x["importance"], reverse=True)
     memory["memories"]=memory["memories"][:MEMORY_CANDIDATE_LIMIT]
@@ -1208,6 +1490,13 @@ def _memory_command(args):
         memory["summary"]=""
         _save_memory(memory)
         print("LO long-term summary cleared.")
+        return 0
+    if args and args[0]=="clear-recent":
+        try:
+            LO_RECENT_FILE.unlink()
+        except FileNotFoundError:
+            pass
+        print("LO recent conversation cleared.")
         return 0
     if args and args[0]=="prune":
         before=len(memory.get("memories",[]))
@@ -1243,6 +1532,14 @@ def _memory_command(args):
         summary=str(memory.get("summary","")).strip()
         print("  LONG-TERM")
         print("  "+(summary or "No durable summary yet."))
+        recent=_load_recent_exchanges()
+        print("\n  RECENT CONVERSATION")
+        if recent:
+            for item in recent[-6:]:
+                u=" ".join(item["user"].split())
+                print(f"  · {_age_label(item.get('time',0)):<14} {u[:104]}{'…' if len(u)>104 else ''}")
+        else:
+            print("  No cross-session exchanges yet.")
         print()
         print("  CANDIDATES                              IMPORTANCE")
         items=sorted(memory.get("memories",[]),key=lambda x:int(x.get("importance",0)),reverse=True)
@@ -1250,9 +1547,11 @@ def _memory_command(args):
         for item in items:
             text=str(item.get("text",""))
             shown=text if len(text)<=52 else text[:49]+"…"
-            print(f"  {shown:<54} {int(item.get('importance',50)):3d}")
+            age=_age_label(item.get("last_reinforced",item.get("created_at",0)))
+            print(f"  {shown:<48} {int(item.get('importance',50)):3d}  {age}")
         print()
         print(f"  {len(items)} candidates · prompt attention capped at {RECENT_MEMORY_SLOTS} · schema {MEMORY_SCHEMA_VERSION}")
+        print("  candidates decay toward forgetting; strong/repeated candidates consolidate into LONG-TERM while still active")
     _page_text(buf.getvalue())
     return 0
 
@@ -1260,6 +1559,30 @@ def _skills_command(args):
     _ensure_intelligence_files()
     if args and args[0]=="path":
         print(SKILLS_FILE); return 0
+    if args and args[0]=="export":
+        skills=_learned_skills()
+        stamp=time.strftime("%Y%m%d-%H%M%S")
+        out=Path(" ".join(args[1:]).strip() or f"look-learned-skills-{stamp}.md").expanduser().resolve()
+        body=[
+            "# LOOK Learned Skills Export",
+            "",
+            f"Exported: {time.strftime('%Y-%m-%d %H:%M:%S')}",
+            f"LOOK: {VERSION}",
+            "",
+            "These are locally learned skills only; bundled skills are intentionally excluded.",
+            "",
+            "## Learned",
+            "",
+        ]
+        body.extend(f"- {item}" for item in skills)
+        try:
+            out.parent.mkdir(parents=True,exist_ok=True)
+            out.write_text("\n".join(body).rstrip()+"\n",encoding="utf-8")
+            print(f"SKILLS EXPORT OK · {out}")
+            print(f"  {len(skills)} learned skill(s)")
+            return 0
+        except OSError as exc:
+            print(f"LOOK skills · export failed · {exc}"); return 1
     if args and args[0]=="version":
         try: installed=_skills_metadata(SKILLS_FILE.read_text(encoding="utf-8"))
         except OSError: installed={"schema":0,"bundled_version":0}
@@ -1453,10 +1776,12 @@ ASSISTANT:
 
 
 def _rewrite_summary(base, model, old_summary, memories):
-    strong=[m for m in memories if int(m.get("importance",0))>=75]
-    if len(strong)<4:
+    # Long-term consolidation happens while useful candidates are alive, not when they decay away.
+    # Repetition raises importance; ordinary useful continuity can consolidate after several cycles.
+    strong=[m for m in memories if int(m.get("importance",0))>=55]
+    if len(strong)<2:
         return old_summary
-    material="\n".join(f"- {m['text']}" for m in strong[:12])
+    material="\n".join(f"- [{int(m.get('importance',0))}] {m['text']}" for m in strong[:12])
     prompt=f"""Rewrite the durable user summary using only patterns that have demonstrated
 continuing value.
 
@@ -1684,6 +2009,8 @@ def _consolidate_memory_candidates(memory):
             if obvious:
                 old["importance"]=max(int(old.get("importance",0)),int(item.get("importance",0)))
                 old["uses"]=max(int(old.get("uses",0)),int(item.get("uses",0)))
+                old["created_at"]=min(float(old.get("created_at",time.time())),float(item.get("created_at",time.time())))
+                old["last_reinforced"]=max(float(old.get("last_reinforced",0)),float(item.get("last_reinforced",0)))
                 merged=True
                 break
         if not merged:
@@ -1747,20 +2074,20 @@ def _remember_exchange(base, model, memory, user_text, assistant_text, profile="
 
     memory=_consolidate_memory_candidates(memory)
 
+    cycles=int(memory.get("maintenance_cycles",0))+1
+    memory["maintenance_cycles"]=cycles
     if durable and durable_text:
         memory["summary"]=_rewrite_summary_maintenance(
             base,model,str(memory.get("summary","")),memory.get("memories",[]),durable_text
         )
-    else:
+    elif cycles % 6 == 0:
         memory["summary"]=_rewrite_summary(
             base,model,str(memory.get("summary","")),memory.get("memories",[])
         )
-        cycles=int(memory.get("maintenance_cycles",0))+1
-        memory["maintenance_cycles"]=cycles
-        if cycles % 12 == 0 or len(str(memory.get("summary","")).split()) > 180:
-            memory["summary"]=_rewrite_summary_maintenance(
-                base,model,str(memory.get("summary","")),memory.get("memories",[])
-            )
+    if cycles % 18 == 0 or len(str(memory.get("summary","")).split()) > 180:
+        memory["summary"]=_rewrite_summary_maintenance(
+            base,model,str(memory.get("summary","")),memory.get("memories",[])
+        )
 
     _save_memory(memory)
     _learn_from_exchange(base,model,user_text,assistant_text,profile)
@@ -2043,6 +2370,64 @@ def _tool_write_file(workspace, path, content, overwrite=False):
 
 
 
+def _tool_create_text_files(workspace, files):
+    """Create several new text files atomically enough for chat use, with one undo record."""
+    if not isinstance(files,list) or not files:
+        return "Batch create refused: files must be a non-empty list."
+    if len(files)>32:
+        return "Batch create refused: maximum 32 files."
+
+    root=Path(workspace).resolve()
+    planned=[]
+    seen=set()
+    total_bytes=0
+    for item in files:
+        if not isinstance(item,dict):
+            return "Batch create refused: every item needs path and content."
+        raw=str(item.get("path","")).strip()
+        content=str(item.get("content",""))
+        if not raw:
+            return "Batch create refused: empty path."
+        target=_safe_workspace_path(workspace,raw)
+        key=str(target)
+        if key in seen:
+            return f"Batch create refused: duplicate path: {raw}"
+        seen.add(key)
+        if target.exists():
+            return f"Batch create refused: path already exists: {raw}"
+        if not target.parent.exists() or not target.parent.is_dir():
+            return f"Batch create refused: parent directory does not exist: {target.parent.relative_to(root)}"
+        size=len(content.encode("utf-8"))
+        total_bytes+=size
+        if total_bytes>2_000_000:
+            return "Batch create refused: combined text exceeds 2 MB."
+        planned.append((target,content))
+
+    created=[]
+    try:
+        for target,content in planned:
+            target.write_text(content,encoding="utf-8")
+            created.append({
+                "kind":"create_text",
+                "path":str(target),
+                "sha256":_sha256_file(target),
+            })
+        _record_undo({"kind":"batch","items":created,"time":time.time()})
+        names=", ".join(Path(x["path"]).name for x in created[:6])
+        more=f" +{len(created)-6} more" if len(created)>6 else ""
+        return f"CREATE FILES OK · {len(created)} files · {names}{more} · undo available · lk undo"
+    except OSError as exc:
+        for item in reversed(created):
+            try:
+                p=Path(item["path"])
+                if p.exists() and p.is_file() and _sha256_file(p)==item["sha256"]:
+                    p.unlink()
+            except OSError:
+                pass
+        return f"Batch create failed: {exc}"
+
+
+
 def _sha256_file(path):
     digest=hashlib.sha256()
     with Path(path).open("rb") as handle:
@@ -2060,16 +2445,28 @@ def _load_undo():
         return []
 
 
-def _save_undo(entries):
+def _save_undo(entries, trim=True):
     STATE_DIR.mkdir(parents=True, exist_ok=True)
-    UNDO_FILE.write_text(json.dumps(entries[-UNDO_LIMIT:], indent=2), encoding="utf-8")
+    stored=entries[-UNDO_LIMIT:] if trim else entries
+    UNDO_FILE.write_text(json.dumps(stored, indent=2), encoding="utf-8")
     try: os.chmod(UNDO_FILE, 0o600)
     except OSError: pass
 
 
-def _record_undo(entry):
+def _record_undo(entry, batch_id=None):
+    entry=dict(entry)
+    if batch_id:
+        entry["_batch_id"]=batch_id
     entries=_load_undo()
     entries.append(entry)
+
+    # During a batch, keep every temporary transaction record even if the
+    # normal undo ring is already full. `_batch_action` collapses them to one
+    # public record and restores the normal cap at commit/rollback.
+    if batch_id:
+        _save_undo(entries, trim=False)
+        return
+
     dropped=entries[:-UNDO_LIMIT]
     entries=entries[-UNDO_LIMIT:]
     _save_undo(entries)
@@ -2170,6 +2567,14 @@ def _undo_last():
                     if not trash.exists(): raise RuntimeError(f"{original.name} is no longer recoverable")
                     original.parent.mkdir(parents=True,exist_ok=True)
                     shutil.move(str(trash),str(original))
+                elif ik=="create_text":
+                    path=Path(item["path"])
+                    if not path.exists() or not path.is_file():
+                        raise RuntimeError(f"{path.name} no longer exists")
+                    expected=item.get("sha256")
+                    if expected and _sha256_file(path)!=expected:
+                        raise RuntimeError(f"{path.name} changed; refusing batch undo")
+                    path.unlink()
             detail=f"{len(items)} items restored"
         else:
             raise RuntimeError("unknown undo record")
@@ -2187,54 +2592,135 @@ def _undo_last():
 
 
 def _batch_action(kind, destination, paths):
-    """Perform several LOOK mutations but expose them as one undo transaction."""
-    before=_load_undo()
-    before_len=len(before)
+    """Perform several LOOK mutations as one transaction, independent of undo-ring fullness."""
+    if not paths:
+        print(f"{_c('✗','31')} {kind.upper()} failed · no source paths")
+        return 1
+
+    txid=uuid.uuid4().hex
     results=[]
+    failed_source=None
     try:
         if kind in {"copy","move"}:
-            dest=Path(destination).expanduser()
-            # Multiple sources always target a directory.
             if len(paths)>1:
                 raw=str(destination)
                 if not raw.endswith(("/",os.sep)):
                     raw+=os.sep
                 destination=raw
-            for raw in paths:
-                result=_interactive_file_action(kind,raw,destination)
+
+            for index,raw in enumerate(paths,1):
+                failed_source=str(raw)
+                result=_interactive_file_action(kind,raw,destination,batch_id=txid)
                 if not result.startswith(("COPY OK","MOVE OK")):
                     raise RuntimeError(result)
                 results.append(result)
+
         elif kind=="remove":
-            for raw in paths:
-                result=_journal_remove(raw)
+            for index,raw in enumerate(paths,1):
+                failed_source=str(raw)
+                result=_journal_remove(raw,batch_id=txid)
                 if not result.startswith("REMOVE OK"):
                     raise RuntimeError(result)
                 results.append(result)
         else:
             raise RuntimeError("unknown batch action")
 
-        after=_load_undo()
-        created=after[before_len:]
+        # Extract our records by transaction id, not journal length. This still
+        # works when the bounded undo ring was already full before the batch.
+        journal=_load_undo()
+        created=[entry for entry in journal if entry.get("_batch_id")==txid]
         if len(created)!=len(paths):
-            raise RuntimeError("undo journal mismatch")
-        combined=before+[{"kind":"batch","items":created,"time":time.time()}]
-        _save_undo(combined)
+            raise RuntimeError(
+                f"transaction record mismatch · expected {len(paths)} items, recorded {len(created)}"
+            )
+
+        # Remove temporary transaction tags before exposing the public undo record.
+        clean=[]
+        for entry in created:
+            item=dict(entry)
+            item.pop("_batch_id",None)
+            clean.append(item)
+
+        survivors=[entry for entry in journal if entry.get("_batch_id")!=txid]
+        survivors.append({
+            "kind":"batch",
+            "items":clean,
+            "time":time.time(),
+            "action":kind,
+        })
+        _save_undo(survivors[-UNDO_LIMIT:])
+
+        _feedback("complete",f"{kind} complete")
         print(f"{kind.upper()} OK · {len(paths)} item{'s' if len(paths)!=1 else ''} · undo available · lk undo")
+        receipt_limit=12
+        for raw,result in list(zip(paths,results))[:receipt_limit]:
+            # Compact receipt: show exactly what succeeded without repeating hashes.
+            detail=result.split(" · undo available",1)[0]
+            print(f"  ✓ {detail}")
+        if len(results)>receipt_limit:
+            print(f"  … {len(results)-receipt_limit} more succeeded")
         return 0
+
     except RuntimeError as exc:
-        # Roll back only mutations created by this batch. A failed batch should
-        # not leave half an operation behind or pollute the user's undo stack.
-        while len(_load_undo())>before_len:
-            if _undo_last()!=0:
-                break
-        print(f"{_c('✗','31')} {kind.upper()} failed · {exc}")
+        # Roll back only entries tagged with this transaction. We cannot use
+        # `_undo_last()` here because unrelated older records may surround a
+        # capped journal and the batch must remain self-contained.
+        journal=_load_undo()
+        created=[entry for entry in journal if entry.get("_batch_id")==txid]
+        rollback_errors=[]
+        rolled_back=0
+
+        for item in reversed(created):
+            try:
+                ik=item.get("kind")
+                if ik=="copy":
+                    dst=Path(item["destination"])
+                    if dst.exists():
+                        expected=item.get("sha256")
+                        if expected and dst.is_file() and _sha256_file(dst)!=expected:
+                            raise RuntimeError(f"{dst.name} changed")
+                        if dst.is_dir(): shutil.rmtree(dst)
+                        else: dst.unlink()
+                    _cleanup_created_dirs(item.get("created_dirs",[]))
+                elif ik=="move":
+                    src=Path(item["source"]); dst=Path(item["destination"])
+                    if dst.exists():
+                        if src.exists():
+                            raise RuntimeError(f"{src} is occupied")
+                        shutil.move(str(dst),str(src))
+                    _cleanup_created_dirs(item.get("created_dirs",[]))
+                elif ik=="remove":
+                    original=Path(item["source"]); trash=Path(item["trash"])
+                    if trash.exists():
+                        if original.exists():
+                            raise RuntimeError(f"{original} is occupied")
+                        original.parent.mkdir(parents=True,exist_ok=True)
+                        shutil.move(str(trash),str(original))
+                rolled_back+=1
+            except (OSError,RuntimeError) as rollback_exc:
+                rollback_errors.append(str(rollback_exc))
+
+        survivors=[entry for entry in journal if entry.get("_batch_id")!=txid]
+        _save_undo(survivors)
+
+        _feedback("error",f"{kind} failed")
+        print(f"{_c('✗','31')} {kind.upper()} failed")
+        if failed_source:
+            print(f"  at       {failed_source}")
+        print(f"  reason   {exc}")
+        if created:
+            if rollback_errors:
+                print(f"  rollback {rolled_back}/{len(created)} restored")
+                for error in rollback_errors[:4]:
+                    print(f"           {_c('!','33')} {error}")
+            else:
+                print(f"  rollback {rolled_back}/{len(created)} restored · no partial {kind} remains")
         return 1
 
 
-def _interactive_file_action(kind, src, dest):
+def _interactive_file_action(kind, src, dest, batch_id=None):
     action=_journal_copy if kind=="copy" else _journal_move
-    result=action(src,dest)
+    result=action(src,dest,batch_id=batch_id)
     if result.startswith("CREATE_DIR_REQUIRED · "):
         needed=result.split(" · ",1)[1]
         if not (sys.stdin.isatty() and sys.stdout.isatty()):
@@ -2247,7 +2733,7 @@ def _interactive_file_action(kind, src, dest):
             return "· cancelled"
         if cancelled or answer.strip().lower()!="m":
             return "· cancelled"
-        result=action(src,dest,create_missing=True)
+        result=action(src,dest,create_missing=True,batch_id=batch_id)
     return result
 
 
@@ -2357,7 +2843,7 @@ def _cleanup_created_dirs(paths):
             pass
 
 
-def _journal_copy(src, requested_destination, create_missing=False):
+def _journal_copy(src, requested_destination, create_missing=False, batch_id=None):
     src=Path(src).expanduser().resolve()
     req,dst,directory_intent,needed_root=_destination_plan(src, requested_destination)
     if not src.exists():
@@ -2377,7 +2863,7 @@ def _journal_copy(src, requested_destination, create_missing=False):
         if src.is_dir():
             shutil.copytree(src,dst,copy_function=shutil.copy2)
             files=sum(1 for p in dst.rglob("*") if p.is_file())
-            _record_undo({"kind":"copy","destination":str(dst),"created_dirs":created,"time":time.time()})
+            _record_undo({"kind":"copy","destination":str(dst),"created_dirs":created,"time":time.time()}, batch_id=batch_id)
             return f"COPY OK · {src.name} → {dst} · directory · {files} files · undo available · lk undo"
         shutil.copy2(src,dst)
         source_hash=_sha256_file(src); destination_hash=_sha256_file(dst)
@@ -2386,14 +2872,14 @@ def _journal_copy(src, requested_destination, create_missing=False):
             except OSError: pass
             _cleanup_created_dirs(created)
             return "Copy verification failed: SHA-256 mismatch; destination was removed."
-        _record_undo({"kind":"copy","destination":str(dst),"sha256":destination_hash,"created_dirs":created,"time":time.time()})
+        _record_undo({"kind":"copy","destination":str(dst),"sha256":destination_hash,"created_dirs":created,"time":time.time()}, batch_id=batch_id)
         return f"COPY OK · {src.name} → {dst} · {src.stat().st_size} bytes · SHA-256 verified identical · undo available · lk undo"
     except OSError as exc:
         _cleanup_created_dirs(created)
         return f"Copy failed: {exc}"
 
 
-def _journal_move(src, requested_destination, create_missing=False):
+def _journal_move(src, requested_destination, create_missing=False, batch_id=None):
     src=Path(src).expanduser().resolve()
     req,dst,directory_intent,needed_root=_destination_plan(src, requested_destination)
     if not src.exists():
@@ -2408,7 +2894,7 @@ def _journal_move(src, requested_destination, create_missing=False):
         if missing:
             created=_make_missing_directories(needed_root)
         shutil.move(str(src),str(dst))
-        _record_undo({"kind":"move","source":str(src),"destination":str(dst),"created_dirs":created,"time":time.time()})
+        _record_undo({"kind":"move","source":str(src),"destination":str(dst),"created_dirs":created,"time":time.time()}, batch_id=batch_id)
         return f"MOVE OK · {src.name} → {dst} · undo available · lk undo"
     except OSError as exc:
         _cleanup_created_dirs(created)
@@ -2416,7 +2902,7 @@ def _journal_move(src, requested_destination, create_missing=False):
 
 
 
-def _journal_remove(path):
+def _journal_remove(path, batch_id=None):
     target=Path(path).expanduser().resolve()
     if not target.exists():
         return f"Remove failed: not found: {target}"
@@ -2427,7 +2913,7 @@ def _journal_remove(path):
         token=f"{int(time.time()*1000)}-{uuid.uuid4().hex[:8]}"
         stash=UNDO_TRASH/token
         shutil.move(str(target),str(stash))
-        _record_undo({"kind":"remove","source":str(target),"trash":str(stash),"time":time.time()})
+        _record_undo({"kind":"remove","source":str(target),"trash":str(stash),"time":time.time()}, batch_id=batch_id)
         return f"REMOVE OK · {target.name} · recoverable · undo available · lk undo"
     except OSError as exc:
         return f"Remove failed: {exc}"
@@ -2529,7 +3015,7 @@ LO_LIGHT_OUTPUT_TOKENS=800
 LO_ADAPTIVE_OUTPUT_TOKENS=1400
 LO_DEEP_OUTPUT_TOKENS=2000
 LO_HISTORY_MAX_MESSAGES=20
-LO_HISTORY_MAX_CHARS=22000
+LO_HISTORY_MAX_CHARS=14000
 
 def _lo_prompt_needs_thinking(prompt):
     """Small, inspectable adaptive heuristic; avoid turning casual chat into a reasoning job."""
@@ -2542,6 +3028,23 @@ def _lo_prompt_needs_thinking(prompt):
         "step by step", "plan", "reason", "prove", "review this code",
     )
     return sum(1 for marker in structural if marker in text) >= 1
+
+_LO_MUTATION_TOOLS={"write_file","create_text_files","copy_path","move_path","remove_path","make_directory"}
+
+def _lo_requires_filesystem_action(prompt):
+    """Conservative host-side detector for explicit local mutation requests."""
+    text=" ".join(str(prompt or "").split()).casefold()
+    action=(
+        r"\b(create|make|write|save|copy|duplicate|move|rename|remove|delete|edit|replace)\b"
+    )
+    object_hint=(
+        r"\b(file|files|folder|folders|directory|directories|path|paths|txt|md|json|csv|yaml|yml|py|js|html)\b"
+        r"|[./~][^\s]*"
+    )
+    # Exclude obvious explanatory questions.
+    if re.search(r"\b(how (do|would|can)|what command|explain|show me how)\b",text):
+        return False
+    return bool(re.search(action,text) and re.search(object_hint,text))
 
 def _lo_runtime_policy(mode, prompt):
     mode=(mode or "adaptive").lower()
@@ -2789,9 +3292,91 @@ def _lo_tools(profile):
     if profile=="conservative":
         tools=[t for t in tools if t.get("function",{}).get("name") in {"list_files","read_file","search_files"}]
     tools.extend(_information_tools())
+    tools.extend(_system_inspection_tools())
     if profile in {"power","unsafe"}:
         tools.append(_command_tool())
     return tools
+
+def _system_inspection_tools():
+    """Read-only host observations safe enough for every LO access profile."""
+    return [
+        {"type":"function","function":{
+            "name":"list_processes",
+            "description":"Inspect running host processes. Use for questions about what is running, stuck applications, terminal/process ownership, or finding a PID. Optional query filters command lines. Read-only.",
+            "parameters":{"type":"object","properties":{
+                "query":{"type":"string","description":"Optional process-name or command-line substring"}
+            }}
+        }},
+        {"type":"function","function":{
+            "name":"listening_ports",
+            "description":"Inspect listening TCP ports and owning processes when the OS exposes them. Use for port conflicts, servers, and 'what is using port N?' questions. Read-only.",
+            "parameters":{"type":"object","properties":{
+                "port":{"type":"integer","minimum":1,"maximum":65535,"description":"Optional port number to filter"}
+            }}
+        }},
+        {"type":"function","function":{
+            "name":"system_snapshot",
+            "description":"Get a compact read-only host snapshot: OS, hostname, load, disk, memory, and basic Ollama/Tailscale availability.",
+            "parameters":{"type":"object","properties":{}}
+        }},
+    ]
+
+def _run_system_inspection_tool(name,args):
+    if name=="list_processes":
+        query=str(args.get("query","") or "").casefold().strip()
+        rows=_process_rows(query or None)
+        if not rows:
+            return "No matching processes."
+        shown=rows[:60]
+        body="\\n".join(f"{pid}\\t{command}" for command,pid in shown)
+        if len(rows)>len(shown):
+            body+=f"\\n… {len(rows)-len(shown)} more"
+        return body
+    if name=="listening_ports":
+        port=args.get("port")
+        try:
+            port=int(port) if port not in (None,"") else None
+        except (TypeError,ValueError):
+            return "Port must be an integer."
+        text=""
+        if shutil.which("lsof"):
+            cmd=["lsof","-nP","-iTCP","-sTCP:LISTEN"]
+            text=_run_text(cmd,2)
+        elif shutil.which("ss"):
+            text=_run_text(["ss","-ltnp"],2)
+        if not text:
+            return "No listener information available."
+        rows=text.splitlines()
+        if port is not None:
+            token=f":{port}"
+            header=rows[:1]
+            rows=header+[line for line in rows[1:] if token in line] if rows else []
+        if not rows or (port is not None and len(rows)<=1):
+            return f"No listening process found on TCP port {port}."
+        return "\\n".join(rows[:80])
+    if name=="system_snapshot":
+        usage=shutil.disk_usage(HOME)
+        mem="unknown"
+        if platform.system()=="Darwin":
+            raw=_run_text(["sysctl","-n","hw.memsize"])
+            if raw.isdigit(): mem=f"{int(raw)/(1024**3):.1f} GB"
+        elif Path("/proc/meminfo").exists():
+            m=re.search(r"MemTotal:\\s+(\\d+)",Path("/proc/meminfo").read_text())
+            if m: mem=f"{int(m.group(1))*1024/(1024**3):.1f} GB"
+        try: load=f"{os.getloadavg()[0]:.2f}"
+        except (AttributeError,OSError): load="unknown"
+        return (
+            f"host={platform.node()}\\n"
+            f"os={platform.system()} {platform.release()}\\n"
+            f"arch={platform.machine()}\\n"
+            f"load1={load}\\n"
+            f"memory={mem}\\n"
+            f"disk_free={usage.free/(1024**3):.1f} GB\\n"
+            f"ollama={'available' if shutil.which('ollama') else 'not found'}\\n"
+            f"tailscale={'available' if shutil.which('tailscale') else 'not found'}"
+        )
+    return f"Unknown system inspection tool: {name}"
+
 
 def _information_tools():
     return [
@@ -2834,6 +3419,16 @@ def _filesystem_tools():
                 "content":{"type":"string"},
                 "overwrite":{"type":"boolean"}
             },"required":["path","content"]}
+        }},
+        {"type":"function","function":{
+            "name":"create_text_files",
+            "description":"Create several NEW UTF-8 text files inside the current LOOK workspace in one deterministic operation. Prefer this when the user asks for multiple new text files. Existing paths are never overwritten. Parent directories must already exist. Maximum 32 files.",
+            "parameters":{"type":"object","properties":{
+                "files":{"type":"array","maxItems":32,"items":{"type":"object","properties":{
+                    "path":{"type":"string"},
+                    "content":{"type":"string"}
+                },"required":["path","content"]}}
+            },"required":["files"]}
         }},
         {"type":"function","function":{
             "name":"copy_path",
@@ -2879,6 +3474,8 @@ def _run_filesystem_tool(workspace, name, args):
             return _tool_search_files(workspace, args.get("query", ""), args.get("path", "."))
         if name == "write_file":
             return _tool_write_file(workspace, args.get("path", ""), args.get("content", ""), bool(args.get("overwrite", False)))
+        if name == "create_text_files":
+            return _tool_create_text_files(workspace, args.get("files", []))
         if name == "copy_path":
             return _tool_copy_path(workspace, args.get("source", ""), args.get("destination", ""))
         if name == "move_path":
@@ -3243,7 +3840,7 @@ def _ollama_stream_chat(base,payload_obj):
             if not raw.strip(): continue
             yield json.loads(raw)
 
-def ollama_chat(force_search=False, initial_prompt=None, allow_start=True, host_override=None, host_name=None, access_profile=None):
+def ollama_chat(force_search=False, initial_prompt=None, allow_start=True, host_override=None, host_name=None, access_profile=None, selected_paths=None, workspace_override=None, one_shot=False):
     """Minimal local chat; optional first prompt and web-search mode."""
     import json
     import urllib.request
@@ -3287,13 +3884,18 @@ def ollama_chat(force_search=False, initial_prompt=None, allow_start=True, host_
     model_caps=_ollama_capabilities(base, model)
     supports_thinking=bool(model_caps and "thinking" in model_caps)
 
+    workspace = Path(workspace_override).expanduser().resolve() if workspace_override else Path.cwd().resolve()
+    selected_paths=[Path(p).expanduser().resolve() for p in (selected_paths or [])]
+
     has_web = bool(os.environ.get("OLLAMA_API_KEY"))
     mode = "LOOK OLLAMA SEARCH" if force_search else "LOOK OLLAMA"
     web_state = "required" if force_search else ("available" if has_web else "off")
     shown_host=host_name or _ollama_host_name(base)
-    print(f"{mode} · {model} · {Path.cwd()}")
+    print(f"{mode} · {model} · {workspace}")
     print(f"host · {shown_host} · {base}")
     print(f"access · {profile.upper()} · personality · {_load_personality()} · thinking · {_load_thinking()}/{_load_think_display()}")
+    if selected_paths:
+        print(f"context · {len(selected_paths)} selected path{'s' if len(selected_paths)!=1 else ''}")
     if not resident:
         print(f"model · idle · loads on first prompt")
     print(f"web · {web_state} · Ctrl-D to exit · Ctrl-C cancels work\n")
@@ -3313,7 +3915,6 @@ def ollama_chat(force_search=False, initial_prompt=None, allow_start=True, host_
         },
     }
 
-    workspace = Path.cwd().resolve()
     memory = _load_memory()
     messages = [
         {"role": "system", "content": _workspace_snapshot(workspace)},
@@ -3332,16 +3933,38 @@ def ollama_chat(force_search=False, initial_prompt=None, allow_start=True, host_
             "When the user refers to 'this folder', 'here', local files, or the current project, "
             "use the workspace context and file tools instead of guessing. "
             "You may list files, read bounded text files, search filenames/text, create or intentionally modify UTF-8 text, "
-            "and use bounded copy_path, move_path, remove_path, and make_directory tools inside the workspace. "
+            "and use bounded copy_path, move_path, remove_path, make_directory, and create_text_files tools inside the workspace. ""When the user asks for several new text files, prefer create_text_files so the whole request is one verified operation. "
             "When the user asks to copy, duplicate, clone, or back up an existing path, ALWAYS use copy_path; never reconstruct it with read_file + write_file. "
             "When the user asks to move or rename an existing path, use move_path. When explicitly asked to remove one, use remove_path. "
             "Use write_file only for intentional textual creation or editing. Only mutate files when the user explicitly asks. "
             "Do not claim to have read or changed a file unless the corresponding tool supplied or confirmed it. "
+            "CRITICAL EXECUTION CONTRACT: when the user explicitly asks you to create, write, copy, move, rename, edit, or remove local files/folders, you must CALL the appropriate filesystem tool before reporting success. Planning or describing a tool call is not execution. Never say an operation succeeded unless a tool result confirms it. "
             "Do not claim filesystem access outside the starting LOOK workspace. "
             "Use weather for live weather, place_lookup for geographic resolution, and wikipedia for stable encyclopedic background. You MUST call weather for questions about current weather, temperature, rain, wind, or forecasts; never answer those from model memory. Prefer these canonical read-only tools over guessing or generic search when they fit. If web_search is available, use it when current or externally verifiable information is needed and no canonical tool fits; "
             "when citing or recommending web material, always preserve the exact http/https URL supplied by the search result and emit a complete Markdown link in the form [descriptive label](https://actual-url). Never emit citation placeholders such as [source], [1], or a site name styled like a link without an actual URL. Never invent a URL from a site name."
         )},
     ]
+    if selected_paths:
+        rows=[]
+        for p in selected_paths[:200]:
+            try:
+                rel=p.relative_to(workspace)
+                shown=str(rel) if str(rel)!="." else p.name
+            except ValueError:
+                shown=str(p)
+            suffix="/" if p.is_dir() else ""
+            rows.append(f"- {shown}{suffix}")
+        messages.append({
+            "role":"system",
+            "content":(
+                "SELECTED PATH CONTEXT\n"
+                "The operator explicitly handed these paths to this LO session as the current working set. "
+                "Treat them as relevant context, but do not assume their contents: use read_file/list_files/search_files as needed. "
+                "Do not modify them unless the operator explicitly asks.\n"
+                + "\n".join(rows)
+            )
+        })
+
     capability_notes={
         "conservative": (
             "ACCESS PROFILE: CONSERVATIVE. You may inspect/search/read the starting workspace and use web search when available. "
@@ -3373,6 +3996,9 @@ def ollama_chat(force_search=False, initial_prompt=None, allow_start=True, host_
     memory_context = _memory_context(memory)
     if memory_context:
         messages.append({"role": "system", "content": memory_context})
+    recent_context=_recent_context()
+    if recent_context:
+        messages.append({"role":"system","content":recent_context})
 
     base_message_count=len(messages)
     pending_prompt = (initial_prompt or "").strip()
@@ -3421,8 +4047,12 @@ def ollama_chat(force_search=False, initial_prompt=None, allow_start=True, host_
                 messages.pop()
                 continue
 
-        # Normal mode exposes search as a tool. Tool-capable models decide when to use it.
-        for _ in range(4):
+        # Normal mode exposes tools to the model, but explicit mutations are also
+        # enforced by the host so prose can never masquerade as execution.
+        mutation_required=(profile!="conservative" and _lo_requires_filesystem_action(prompt))
+        mutation_attempted=False
+        mutation_repair_sent=False
+        for _ in range(5):
             runtime=_lo_runtime_policy(thinking_mode, prompt)
             payload_obj = {
                 "model": model,
@@ -3513,10 +4143,15 @@ def ollama_chat(force_search=False, initial_prompt=None, allow_start=True, host_
                                 tool_content = _search_text(search_result)
                             except Exception as exc:
                                 tool_content = f"Web search failed: {exc}"
-                    elif name in {"list_files", "read_file", "search_files", "write_file", "copy_path", "move_path", "remove_path", "make_directory"}:
+                    elif name in {"list_files", "read_file", "search_files", "write_file", "create_text_files", "copy_path", "move_path", "remove_path", "make_directory"}:
                         tool_content = _run_filesystem_tool(workspace, name, args)
-                        if name in {"write_file", "copy_path", "move_path", "remove_path", "make_directory"}:
+                        if name in _LO_MUTATION_TOOLS:
+                            mutation_attempted=True
                             print(f"{_ansi_label('file ›', '32')} {tool_content}")
+                    elif name in {"list_processes","listening_ports","system_snapshot"}:
+                        print(f"{_ansi_label('system ›','36')} {name.replace('_',' ')}")
+                        with _activity("inspecting"):
+                            tool_content=_run_system_inspection_tool(name,args)
                     elif name=="run_command":
                         if profile not in {"power","unsafe"}:
                             tool_content="Command execution is unavailable in this access profile."
@@ -3534,6 +4169,24 @@ def ollama_chat(force_search=False, initial_prompt=None, allow_start=True, host_
                 continue
 
             answer = message.get("content", "").strip()
+
+            if mutation_required and not mutation_attempted:
+                if not mutation_repair_sent:
+                    mutation_repair_sent=True
+                    messages.append({
+                        "role":"system",
+                        "content":(
+                            "EXECUTION REQUIRED. The user's latest request explicitly asks for a local filesystem change, "
+                            "but you have not called any mutation tool yet. Do not explain or claim success. "
+                            "Call the appropriate filesystem tool now. For several new text files, prefer create_text_files. "
+                            "If a needed parent directory is missing, call make_directory first."
+                        )
+                    })
+                    continue
+                # Second prose-only completion is not allowed to become a false receipt.
+                answer="I did not execute a filesystem mutation tool, so I have not changed any files."
+                message={"role":"assistant","content":answer,"thinking":"","tool_calls":[]}
+
             messages.append(message)
             # Thinking was already presented live according to the selected display mode.
             final=_split_ollama_thinking(message)[1]
@@ -3541,6 +4194,7 @@ def ollama_chat(force_search=False, initial_prompt=None, allow_start=True, host_
                 print(_ansi_label("lo ›","35")+" "+_ollama_markup(final)+"\n")
             else:
                 print(_ansi_label("lo ›","35")+" "+_c("(no final response)","2")+"\n")
+            _save_recent_exchange(prompt, answer)
             if _queue_memory_exchange(base, model, prompt, answer, profile):
                 if sys.stdout.isatty():
                     print(_c("  · remembering in background", "2"))
@@ -3548,6 +4202,8 @@ def ollama_chat(force_search=False, initial_prompt=None, allow_start=True, host_
                 # If queueing ever fails, preserve memory rather than silently dropping it.
                 with _activity("remembering"):
                     memory = _remember_exchange(base, model, memory, prompt, answer, profile)
+            if one_shot:
+                return 0
             break
 
 
@@ -4414,6 +5070,9 @@ def _settings_rows():
         ("model", "AI", "Preferred model", _preferred_ollama_model()),
         ("key", "AI", "Web search key", "configured" if os.environ.get("OLLAMA_API_KEY") else "not configured"),
         ("share", "REMOTE", "Ollama tailnet share", _settings_share_state()),
+        ("sound", "EXPR", "Feedback sound", "on" if _load_feedback()["sound"] else "off"),
+        ("motion", "EXPR", "Feedback motion", _load_feedback()["motion"]),
+        ("profile", "PROFILE", "Portable profile", "configured" if _load_profile_config().get("backup_root") else "no backup"),
     ]
 
 
@@ -4466,6 +5125,20 @@ def _settings_pick_think_display():
     return _settings_pick_choice("think display",_load_think_display(),[
         ("compact","rolling live window"),("full","full visible stream"),("quiet","minimal indicator")
     ],lo_think_display)
+
+def _settings_pick_sound():
+    cfg=_load_feedback()
+    return _settings_pick_choice("sound","on" if cfg["sound"] else "off",[
+        ("on","audible feedback"),("off","silent")
+    ],lambda args:_feedback_command(["sound",args[0]] if args else ["sound"]))
+
+
+def _settings_pick_motion():
+    cfg=_load_feedback()
+    return _settings_pick_choice("motion",cfg["motion"],[
+        ("off","static"),("subtle","brief two-frame cues"),("normal","short three-frame cues")
+    ],lambda args:_feedback_command(["motion",args[0]] if args else ["motion","subtle"]))
+
 
 def _settings_pick_host():
     data=_load_ollama_hosts()
@@ -4562,6 +5235,12 @@ def settings():
             ollama_key([])
         elif key=="share":
             _settings_share_menu()
+        elif key=="sound":
+            _settings_pick_sound()
+        elif key=="motion":
+            _settings_pick_motion()
+        elif key=="profile":
+            _profile_status()
         print()
 
 
@@ -5582,9 +6261,786 @@ def media(args):
     print(f"LOOK media · unsupported platform: {system}"); return 1
 
 
+# --- Starter control surfaces -------------------------------------------------
+# These are maps over existing commands, not a second implementation of them.
+
+def _surface_clear():
+    if sys.stdout.isatty():
+        sys.stdout.write("\033[2J\033[H")
+
+def _surface_key():
+    if not (sys.stdin.isatty() and sys.stdout.isatty()):
+        return ""
+    fd=sys.stdin.fileno()
+    old=termios.tcgetattr(fd)
+    try:
+        tty.setcbreak(fd)
+        return _read_tty_key(fd)
+    finally:
+        termios.tcsetattr(fd,termios.TCSADRAIN,old)
+
+def _surface_pause():
+    if not (sys.stdin.isatty() and sys.stdout.isatty()):
+        return
+    print(f"\n  {_c('[any key]', '2')} back")
+    _surface_key()
+
+def _surface_run(fn, *args):
+    _surface_clear()
+    try:
+        fn(*args)
+    except KeyboardInterrupt:
+        pass
+    _surface_pause()
+
+def _ollama_surface_state():
+    import urllib.request
+    base=_ollama_base()
+    ready=False
+    resident="idle"
+    try:
+        with urllib.request.urlopen(base+"/api/ps",timeout=.45) as r:
+            data=json.load(r)
+        ready=True
+        models=data.get("models") or []
+        if models:
+            resident=models[0].get("name") or models[0].get("model") or "resident"
+    except Exception:
+        pass
+    return base,ready,resident
+
+def _surface_header(name, subtitle=""):
+    print(LOOK_WORDMARK)
+    print()
+    print(f"  {_c(name.upper(),'1;36')}" + (f"  {_c('· '+subtitle,'2')}" if subtitle else ""))
+    print()
+
+def _surface_ai():
+    if not (sys.stdin.isatty() and sys.stdout.isatty()):
+        return inspect_ollama()
+    while True:
+        _surface_clear()
+        base,ready,resident=_ollama_surface_state()
+        _surface_header("local ai","control surface")
+        print(f"  server       {_ollama_host_name(base)}")
+        print(f"  ollama       {_c('● ready','32') if ready else _c('○ offline','33')}")
+        print(f"  model        {_preferred_ollama_model()}")
+        print(f"  resident     {resident}")
+        print(f"  thinking     {_load_thinking()}")
+        print(f"  personality  {_load_personality()}")
+        print(f"  web          {'● ready' if os.environ.get('OLLAMA_API_KEY') else _c('○ no key','2')}")
+        print()
+        print(f"  {_c('[m]','36')} models       {_c('[b]','36')} benchmark")
+        print(f"  {_c('[t]','36')} thinking     {_c('[p]','36')} personality")
+        print(f"  {_c('[w]','36')} web/key      {_c('[o]','36')} ollama")
+        print(f"  {_c('[s]','36')} settings     {_c('[esc]','2')} done")
+        key=_surface_key().lower()
+        if key in {"esc","q"}: return 0
+        if key=="m": _surface_run(ollama_models)
+        elif key=="b": _surface_run(ollama_test,False)
+        elif key=="t": _surface_run(lo_thinking,[])
+        elif key=="p": _surface_run(lo_personality,[])
+        elif key=="w": _surface_run(ollama_key,["status"])
+        elif key=="o": _surface_run(inspect_ollama)
+        elif key=="s": _surface_run(settings)
+
+def _system_snapshot():
+    try:
+        load=os.getloadavg()[0]
+        load_text=f"{load:.2f}"
+    except (AttributeError,OSError):
+        load_text="?"
+    usage=shutil.disk_usage(HOME)
+    disk=f"{(usage.total-usage.free)/usage.total*100:.0f}%"
+    uptime="?"
+    try:
+        if platform.system()=="Darwin":
+            boot=_run_text(["sysctl","-n","kern.boottime"])
+            m=re.search(r"sec = (\d+)",boot)
+            if m:
+                seconds=max(0,time.time()-int(m.group(1)))
+                uptime=f"{int(seconds//86400)}d {int((seconds%86400)//3600)}h"
+        elif Path("/proc/uptime").exists():
+            seconds=float(Path("/proc/uptime").read_text().split()[0])
+            uptime=f"{int(seconds//86400)}d {int((seconds%86400)//3600)}h"
+    except Exception:
+        pass
+    return load_text,disk,uptime
+
+def _surface_system():
+    if not (sys.stdin.isatty() and sys.stdout.isatty()):
+        return doctor()
+    while True:
+        _surface_clear()
+        load,disk,uptime=_system_snapshot()
+        _,ollama_ready,_=_ollama_surface_state()
+        _surface_header("system",platform.node())
+        print(f"  load         {load}")
+        print(f"  disk         {disk} used")
+        print(f"  uptime       {uptime}")
+        print(f"  ollama       {_c('● ready','32') if ollama_ready else _c('○ offline','33')}")
+        print(f"  tailscale    {'● installed' if shutil.which('tailscale') else _c('○ absent','2')}")
+        print()
+        print(f"  {_c('[d]','36')} doctor       {_c('[p]','36')} processes")
+        print(f"  {_c('[u]','36')} ports        {_c('[k]','36')} disk")
+        print(f"  {_c('[m]','36')} machine      {_c('[e]','36')} environment")
+        print(f"  {_c('[esc]','2')} done")
+        key=_surface_key().lower()
+        if key in {"esc","q"}: return 0
+        if key=="d": _surface_run(doctor)
+        elif key=="p": _surface_run(inspect_processes)
+        elif key=="u": _surface_run(inspect_up)
+        elif key=="k": _surface_run(inspect_disk)
+        elif key=="m": _surface_run(inspect_machine)
+        elif key=="e": _surface_run(inspect_env)
+
+def _surface_net():
+    if not (sys.stdin.isatty() and sys.stdout.isatty()):
+        return inspect_network()
+    while True:
+        _surface_clear()
+        _surface_header("network","local + tailnet")
+        local="unknown"
+        try:
+            import socket
+            ips=[]
+            for info in socket.getaddrinfo(socket.gethostname(),None,socket.AF_INET):
+                ip=info[4][0]
+                if not ip.startswith("127.") and ip not in ips: ips.append(ip)
+            if ips: local=ips[0]
+        except OSError: pass
+        tail=_run_text(["tailscale","ip","-4"]) if shutil.which("tailscale") else ""
+        print(f"  local        {local}")
+        print(f"  tailnet      {tail or _c('not connected','2')}")
+        print(f"  web search   {'● ready' if os.environ.get('OLLAMA_API_KEY') else _c('○ no key','2')}")
+        print()
+        print(f"  {_c('[i]','36')} addresses     {_c('[t]','36')} tailscale")
+        print(f"  {_c('[p]','36')} ports         {_c('[s]','36')} ollama share")
+        print(f"  {_c('[w]','36')} web/key       {_c('[esc]','2')} done")
+        key=_surface_key().lower()
+        if key in {"esc","q"}: return 0
+        if key=="i": _surface_run(inspect_network)
+        elif key=="t": _surface_run(inspect_tailscale)
+        elif key=="p": _surface_run(inspect_up)
+        elif key=="s": _surface_run(ollama_share,["status"])
+        elif key=="w": _surface_run(ollama_key,["status"])
+
+def _surface_clean():
+    """Maintenance map. LOOK remains conservative: inspect first, remove only through existing safe actions."""
+    if not (sys.stdin.isatty() and sys.stdout.isatty()):
+        _title("clean")
+        print("  doctor     lk doctor")
+        print("  disk       lk disk")
+        print("  processes  lk processes")
+        print("  memory     lk memory")
+        print("  undo       lk undo")
+        return 0
+    while True:
+        _surface_clear()
+        _surface_header("clean","maintenance")
+        print("  LOOK does not perform broad automatic cleanup.")
+        print("  Inspect first; destructive actions stay explicit.")
+        print()
+        print(f"  {_c('[d]','36')} doctor        {_c('[k]','36')} disk")
+        print(f"  {_c('[p]','36')} processes     {_c('[m]','36')} memory")
+        print(f"  {_c('[u]','36')} undo status   {_c('[esc]','2')} done")
+        key=_surface_key().lower()
+        if key in {"esc","q"}: return 0
+        if key=="d": _surface_run(doctor)
+        elif key=="k": _surface_run(inspect_disk)
+        elif key=="p": _surface_run(inspect_processes)
+        elif key=="m": _surface_run(_memory_command,[])
+        elif key=="u": _surface_run(_undo_last)
+
+def _surface_config():
+    if not (sys.stdin.isatty() and sys.stdout.isatty()):
+        return settings()
+    while True:
+        _surface_clear()
+        _surface_header("config","LOOK behavior")
+        print(f"  access       {_load_lo_profile()}")
+        print(f"  personality  {_load_personality()}")
+        print(f"  thinking     {_load_thinking()}")
+        print(f"  display      {_load_think_display()}")
+        print(f"  host         {_ollama_host_name(_ollama_base())}")
+        fb=_load_feedback()
+        print(f"  feedback     sound {'on' if fb['sound'] else 'off'} · motion {fb['motion']}")
+        print(f"  profile      {'backup configured' if _load_profile_config().get('backup_root') else 'no backup'}")
+        print()
+        print(f"  {_c('[s]','36')} settings      {_c('[a]','36')} access")
+        print(f"  {_c('[p]','36')} personality   {_c('[t]','36')} thinking")
+        print(f"  {_c('[d]','36')} think display {_c('[h]','36')} host")
+        print(f"  {_c('[f]','36')} feedback      {_c('[r]','36')} profile")
+        print(f"  {_c('[k]','36')} secrets       {_c('[esc]','2')} done")
+        key=_surface_key().lower()
+        if key in {"esc","q"}: return 0
+        if key=="s": _surface_run(settings)
+        elif key=="a": _surface_run(lo_access,[])
+        elif key=="p": _surface_run(lo_personality,[])
+        elif key=="t": _surface_run(lo_thinking,[])
+        elif key=="d": _surface_run(lo_think_display,[])
+        elif key=="h": _surface_run(ollama_hosts,[])
+        elif key=="f": _surface_run(_feedback_command,[])
+        elif key=="r": _surface_run(_profile_status)
+        elif key=="k":
+            def show_secrets():
+                p=HOME/".zsh_secrets"
+                _title("secrets")
+                print(f"  {p} · {'present' if p.exists() else 'not present'} · contents hidden")
+            _surface_run(show_secrets)
+
+def commands_screen():
+    """Terse scan of LOOK vocabulary; unlike help, this is an index rather than a manual."""
+    body=f"""LOOK {VERSION} · commands
+
+START HERE
+  lk system        lk ai            lk net
+  lk clean         lk config        lk help
+
+FILES
+  lk [THING]       detail  dirs  files  tree  recent  size  run
+  lmk  lcp  lmv  lscp  lrm  mkd  undo
+
+SYSTEM
+  doctor  up  ports  port  processes  process  pid
+  machine  gpu  disk  env  path  why  git
+
+NETWORK
+  net  tailscale   ollama host   ollama share
+
+AI
+  lo  lo search    ollama  ollama models  ollama test
+  personality  thinking  think-display  settings
+  memory  skills   profile  feedback  sound
+  ollama access  ollama key
+
+MEDIA
+  media  mm  mn  mp
+
+META
+  home  config  secrets  version  uninstall
+  help            help all        commands
+
+  Direct commands remain first-class. Umbrella surfaces are optional.
+"""
+    return _page_text(body)
+
+def starter_help():
+    body=f"""LOOK {VERSION} · starter toolkit
+
+  lk               inspect something, or show LOOK home
+  lk system        machine health + processes + ports
+  lk ai            models + benchmark + thinking + personality
+  lk net           addresses + Tailscale + sharing + web readiness
+  lk clean         conservative maintenance surface
+  lk config        LOOK + LO behavior
+  lk profile       portable identity + backup
+  lk feedback      motion/sound expression
+
+  lo               talk to LO
+  fc               Future Crash
+
+DIRECT IS ALWAYS AVAILABLE
+  lk doctor        lk disk          lk models
+  lk personality  lk thinking      lk tailscale
+  lk <file>        lk port 3000     lk process NAME
+  filer: mark paths, then L to hand them to LO as context
+
+DISCOVER
+  lk commands      terse complete command index
+  lk help all      complete command + key glossary
+
+The five control surfaces are a map over LOOK, not a replacement for its commands.
+"""
+    return _page_text(body)
+
+
+PROFILE_STATE_FILES=(
+    "ollama_memory.json",
+    "lo_recent.json",
+    "core.md",
+    "skills.md",
+    "lo_access",
+    "lo_personality",
+    "lo_thinking",
+    "lo_think_display",
+    "ollama_model",
+)
+PROFILE_STATE_DIRS=("personalities",)
+PROFILE_CONFIG_FILES=("feedback.json",)
+
+
+def _load_profile_config():
+    data={"backup_root":"","keep":8}
+    try:
+        loaded=json.loads(PROFILE_CONFIG_FILE.read_text(encoding="utf-8"))
+        if isinstance(loaded,dict):
+            data["backup_root"]=str(loaded.get("backup_root") or "")
+            try: data["keep"]=max(1,min(50,int(loaded.get("keep",8))))
+            except (TypeError,ValueError): pass
+    except (OSError,ValueError,TypeError):
+        pass
+    return data
+
+
+def _save_profile_config(data):
+    CONFIG_DIR.mkdir(parents=True,exist_ok=True)
+    payload={
+        "backup_root":str(data.get("backup_root") or ""),
+        "keep":max(1,min(50,int(data.get("keep",8)))),
+    }
+    tmp=PROFILE_CONFIG_FILE.with_suffix(".tmp")
+    tmp.write_text(json.dumps(payload,indent=2)+"\n",encoding="utf-8")
+    try: os.chmod(tmp,0o600)
+    except OSError: pass
+    tmp.replace(PROFILE_CONFIG_FILE)
+
+
+def _profile_manifest():
+    return {
+        "profile_schema":PROFILE_SCHEMA_VERSION,
+        "look_version":VERSION,
+        "created_at":time.time(),
+        "created":time.strftime("%Y-%m-%dT%H:%M:%S%z"),
+        "platform":platform.system(),
+        "contents":{
+            "state_files":list(PROFILE_STATE_FILES),
+            "state_dirs":list(PROFILE_STATE_DIRS),
+            "config_files":list(PROFILE_CONFIG_FILES),
+        },
+        "excluded":[
+            "secrets",
+            "undo/undo_trash",
+            "jobs/events",
+            "memory worker queue/locks",
+            "PIDs/runtime proxies",
+            "machine-specific Ollama hosts",
+            "caches/generated feedback audio",
+        ],
+    }
+
+
+def _profile_entries():
+    """Yield (source, archive-relative-path) for curated portable identity."""
+    _ensure_intelligence_files()
+    for name in PROFILE_STATE_FILES:
+        src=STATE_DIR/name
+        if src.is_file():
+            yield src,Path("profile")/"state"/name
+    for dirname in PROFILE_STATE_DIRS:
+        base=STATE_DIR/dirname
+        if base.is_dir():
+            for src in sorted(base.rglob("*")):
+                if src.is_file():
+                    yield src,Path("profile")/"state"/dirname/src.relative_to(base)
+    for name in PROFILE_CONFIG_FILES:
+        src=CONFIG_DIR/name
+        if src.is_file():
+            yield src,Path("profile")/"config"/name
+
+
+def _profile_inventory():
+    entries=list(_profile_entries())
+    return entries,sum(src.stat().st_size for src,_ in entries if src.exists())
+
+
+def _profile_write_directory(destination):
+    destination=Path(destination).expanduser().resolve()
+    destination.mkdir(parents=True,exist_ok=False)
+    _atomic_json(destination/"manifest.json",_profile_manifest())
+    copied=0
+    for src,rel in _profile_entries():
+        dst=destination/rel
+        dst.parent.mkdir(parents=True,exist_ok=True)
+        shutil.copy2(src,dst)
+        copied+=1
+    return copied
+
+
+def _profile_export(output=None):
+    stamp=time.strftime("%Y%m%d-%H%M%S")
+    out=Path(output).expanduser() if output else Path.cwd()/f"look-profile-{stamp}.zip"
+    if out.suffix.lower()!=".zip":
+        out=out.with_suffix(".zip")
+    out=out.resolve()
+    if out.exists():
+        print(f"LOOK profile · export refused · already exists: {out}")
+        return 1
+    out.parent.mkdir(parents=True,exist_ok=True)
+    manifest=_profile_manifest()
+    entries=list(_profile_entries())
+    try:
+        with zipfile.ZipFile(out,"w",zipfile.ZIP_DEFLATED) as archive:
+            archive.writestr("manifest.json",json.dumps(manifest,indent=2)+"\n")
+            for src,rel in entries:
+                archive.write(src,rel.as_posix())
+        _feedback("complete","profile exported")
+        print(f"PROFILE EXPORT OK · {out}")
+        print(f"  {len(entries)} files · {out.stat().st_size/1024:.1f} KB")
+        print("  secrets/runtime state excluded")
+        return 0
+    except OSError as exc:
+        try: out.unlink()
+        except OSError: pass
+        print(f"LOOK profile · export failed · {exc}")
+        return 1
+
+
+def _profile_backup(args):
+    cfg=_load_profile_config()
+    root_arg=""
+    keep=cfg["keep"]
+    words=list(args)
+    if "--keep" in words:
+        i=words.index("--keep")
+        try:
+            keep=max(1,min(50,int(words[i+1])))
+        except (ValueError,IndexError):
+            print("usage: lk profile backup [DEST] [--keep N]"); return 2
+        words=words[:i]+words[i+2:]
+    if words:
+        root_arg=" ".join(words).strip()
+        cfg["backup_root"]=str(Path(root_arg).expanduser().resolve())
+        cfg["keep"]=keep
+        _save_profile_config(cfg)
+    root_text=cfg.get("backup_root","")
+    if not root_text:
+        print("LOOK profile · no backup destination configured")
+        print("  run: lk profile backup ~/Documents/LOOK")
+        return 1
+
+    root=Path(root_text).expanduser().resolve()
+    backups=root/"LOOK-profile-backups"
+    backups.mkdir(parents=True,exist_ok=True)
+    stamp=time.strftime("%Y-%m-%d-%H%M%S")
+    target=backups/stamp
+    try:
+        count=_profile_write_directory(target)
+        snapshots=sorted(p for p in backups.iterdir() if p.is_dir())
+        for old in snapshots[:-keep]:
+            shutil.rmtree(old,ignore_errors=True)
+        _feedback("complete","profile backed up")
+        print(f"PROFILE BACKUP OK · {target}")
+        print(f"  {count} files · keeping {keep} snapshots")
+        return 0
+    except (OSError,FileExistsError) as exc:
+        shutil.rmtree(target,ignore_errors=True)
+        print(f"LOOK profile · backup failed · {exc}")
+        return 1
+
+
+def _safe_profile_member(name):
+    path=Path(name)
+    return (
+        not path.is_absolute()
+        and ".." not in path.parts
+        and (name=="manifest.json" or (path.parts and path.parts[0]=="profile"))
+    )
+
+
+def _profile_restore(source,args):
+    source=Path(source).expanduser().resolve()
+    yes="--yes" in args
+    temp_root=None
+    try:
+        if source.is_file() and source.suffix.lower()==".zip":
+            temp_root=Path(tempfile.mkdtemp(prefix="look-profile-restore."))
+            with zipfile.ZipFile(source) as archive:
+                bad=[n for n in archive.namelist() if not _safe_profile_member(n)]
+                if bad:
+                    print("LOOK profile · restore refused · unsafe archive paths")
+                    return 1
+                archive.extractall(temp_root)
+            base=temp_root
+        elif source.is_dir():
+            base=source
+        else:
+            print(f"LOOK profile · restore source not found: {source}")
+            return 1
+
+        manifest_path=base/"manifest.json"
+        try:
+            manifest=json.loads(manifest_path.read_text(encoding="utf-8"))
+        except (OSError,ValueError):
+            print("LOOK profile · restore refused · manifest missing or invalid")
+            return 1
+        schema=int(manifest.get("profile_schema",0) or 0)
+        if schema!=PROFILE_SCHEMA_VERSION:
+            print(f"LOOK profile · unsupported profile schema {schema}")
+            return 1
+
+        files=[p for p in (base/"profile").rglob("*") if p.is_file()] if (base/"profile").exists() else []
+        if not files:
+            print("LOOK profile · restore refused · profile is empty")
+            return 1
+
+        if not yes and sys.stdin.isatty():
+            answer=input(f"Restore {len(files)} profile files into this LOOK installation? [y/N] ").strip().lower()
+            if answer not in {"y","yes"}:
+                print("· cancelled"); return 1
+
+        # Local safety snapshot independent of configured external backup.
+        safety=STATE_DIR/"restore_snapshots"/time.strftime("%Y%m%d-%H%M%S")
+        safety.mkdir(parents=True,exist_ok=True)
+        for live,_ in _profile_entries():
+            try:
+                if live.exists():
+                    rel=(Path("config")/live.name) if live.parent==CONFIG_DIR else (Path("state")/live.relative_to(STATE_DIR))
+                    dst=safety/rel
+                    dst.parent.mkdir(parents=True,exist_ok=True)
+                    shutil.copy2(live,dst)
+            except (OSError,ValueError):
+                pass
+
+        restored=0
+        state_src=base/"profile"/"state"
+        config_src=base/"profile"/"config"
+        if state_src.exists():
+            for src in sorted(state_src.rglob("*")):
+                if not src.is_file(): continue
+                rel=src.relative_to(state_src)
+                dst=STATE_DIR/rel
+                dst.parent.mkdir(parents=True,exist_ok=True)
+                shutil.copy2(src,dst); restored+=1
+        if config_src.exists():
+            for src in sorted(config_src.rglob("*")):
+                if not src.is_file(): continue
+                rel=src.relative_to(config_src)
+                dst=CONFIG_DIR/rel
+                dst.parent.mkdir(parents=True,exist_ok=True)
+                shutil.copy2(src,dst); restored+=1
+
+        _feedback("complete","profile restored")
+        print(f"PROFILE RESTORE OK · {restored} files")
+        print(f"  from    {source}")
+        print(f"  safety  {safety}")
+        return 0
+    finally:
+        if temp_root is not None:
+            shutil.rmtree(temp_root,ignore_errors=True)
+
+
+def _profile_status():
+    cfg=_load_profile_config()
+    entries,total=_profile_inventory()
+    _title("profile","portable LOOK identity")
+    print(f"  schema          {PROFILE_SCHEMA_VERSION}")
+    print(f"  live state      {STATE_DIR}")
+    print(f"  live config     {CONFIG_DIR}")
+    print(f"  portable files  {len(entries)} · {total/1024:.1f} KB")
+    backup=cfg.get("backup_root") or "not configured"
+    print(f"  backup root     {backup}")
+    print(f"  snapshots keep  {cfg.get('keep',8)}")
+    print()
+    print("  INCLUDED")
+    print("  memory · recent continuity · core · skills · personalities")
+    print("  access/personality/thinking preferences · model preference · feedback")
+    print()
+    print("  EXCLUDED")
+    print("  secrets · undo/trash · jobs/events · queues/locks/PIDs · hosts · caches")
+    return 0
+
+
+def _profile_command(args):
+    if not args or args[0] in {"status","show"}:
+        return _profile_status()
+    cmd=args[0]
+    if cmd=="backup":
+        return _profile_backup(args[1:])
+    if cmd=="export":
+        output=" ".join(args[1:]).strip() or None
+        return _profile_export(output)
+    if cmd=="restore":
+        if len(args)<2:
+            print("usage: lk profile restore <ZIP|BACKUP_DIR> [--yes]"); return 2
+        src=args[1]
+        return _profile_restore(src,args[2:])
+    if cmd=="path":
+        print(STATE_DIR); return 0
+    if cmd=="config":
+        print(CONFIG_DIR); return 0
+    if cmd=="files":
+        _title("profile","portable files")
+        for src,rel in _profile_entries():
+            print(f"  {rel}  {_c(str(src),'2')}")
+        return 0
+    print("usage: lk profile [status|backup [DEST]|export [ZIP]|restore SOURCE|files|path|config]")
+    return 2
+
+
+def _lo_context_handoff(paths):
+    """Launch LO with selected filesystem paths as explicit context."""
+    resolved=[]
+    for raw in paths:
+        p=Path(raw).expanduser().resolve()
+        if p.exists():
+            resolved.append(p)
+    if not resolved:
+        print("LOOK LO · no valid selected paths")
+        return 1
+
+    anchors=[p if p.is_dir() else p.parent for p in resolved]
+    try:
+        workspace=Path(os.path.commonpath([str(p) for p in anchors])).resolve()
+    except ValueError:
+        workspace=Path.cwd().resolve()
+
+    # Keep the workspace a directory and ensure every selected path is reachable
+    # by LOOK's bounded file tools. For a single selected directory, that directory
+    # itself is the workspace; for siblings, their nearest common ancestor is used.
+    return ollama_chat(
+        selected_paths=resolved,
+        workspace_override=workspace,
+    )
+
+
+def _atomic_json(path, data):
+    path=Path(path)
+    path.parent.mkdir(parents=True,exist_ok=True)
+    tmp=path.with_suffix(path.suffix+".tmp")
+    tmp.write_text(json.dumps(data,ensure_ascii=False,indent=2)+"\n",encoding="utf-8")
+    try: os.chmod(tmp,0o600)
+    except OSError: pass
+    tmp.replace(path)
+
+def _emit_event(kind, text, job_id=None):
+    LO_EVENTS_DIR.mkdir(parents=True,exist_ok=True)
+    event={
+        "id":uuid.uuid4().hex[:12],
+        "kind":str(kind),
+        "text":str(text).strip()[:8000],
+        "job_id":job_id,
+        "time":time.time(),
+    }
+    _atomic_json(LO_EVENTS_DIR/f"{time.time_ns()}-{event['id']}.json",event)
+    return event
+
+def _events_command(args):
+    drain="--drain" in args
+    try:
+        files=sorted(LO_EVENTS_DIR.glob("*.json"))
+    except OSError:
+        files=[]
+    if not files:
+        return 0
+    for path in files:
+        try:
+            event=json.loads(path.read_text(encoding="utf-8"))
+        except (OSError,json.JSONDecodeError):
+            continue
+        age=_age_label(event.get("time",0))
+        kind=str(event.get("kind","event")).upper()
+        _feedback("error" if kind=="FAILED" else "notify","LO event")
+        text=str(event.get("text","")).strip()
+        print(f"{_ansi_label('LO · '+kind,'35')} {_c('· '+age,'2')}")
+        if text:
+            for line in text.splitlines()[:12]:
+                print("  "+line)
+        if drain:
+            try: path.unlink()
+            except OSError: pass
+    return 0
+
+def _jobs_command(args):
+    try:
+        files=sorted(LO_JOBS_DIR.glob("*.json"))
+    except OSError:
+        files=[]
+    if not files:
+        print("LO jobs · none")
+        return 0
+    for path in files[-20:]:
+        try: job=json.loads(path.read_text(encoding="utf-8"))
+        except (OSError,json.JSONDecodeError): continue
+        print(f"{job.get('id','?')}  {job.get('status','?'):<8}  {_age_label(job.get('created_at',0)):<14}  {job.get('prompt','')[:80]}")
+    return 0
+
+def _queue_lo_background(prompt, workspace, profile):
+    prompt=str(prompt or "").strip()
+    if not prompt:
+        print("usage: lo bg <request>")
+        return 2
+    LO_JOBS_DIR.mkdir(parents=True,exist_ok=True)
+    job_id=uuid.uuid4().hex[:10]
+    path=LO_JOBS_DIR/f"{job_id}.json"
+    job={
+        "id":job_id,
+        "status":"queued",
+        "prompt":prompt,
+        "workspace":str(Path(workspace).resolve()),
+        "profile":profile,
+        "created_at":time.time(),
+        "started_at":None,
+        "finished_at":None,
+    }
+    _atomic_json(path,job)
+    try:
+        subprocess.Popen(
+            [sys.executable,str(Path(__file__).resolve()),"_lo-job",str(path)],
+            stdin=subprocess.DEVNULL,stdout=subprocess.DEVNULL,stderr=subprocess.DEVNULL,
+            start_new_session=True,close_fds=True,
+        )
+    except OSError as exc:
+        job["status"]="failed"; job["error"]=str(exc); job["finished_at"]=time.time(); _atomic_json(path,job)
+        print(f"LO background · failed to start: {exc}")
+        return 1
+    print(f"LO background · queued {job_id}")
+    return 0
+
+def _run_lo_job(path):
+    import io, contextlib
+    path=Path(path)
+    try:
+        job=json.loads(path.read_text(encoding="utf-8"))
+    except (OSError,json.JSONDecodeError):
+        return 1
+    job["status"]="running"; job["started_at"]=time.time(); _atomic_json(path,job)
+    old_cwd=Path.cwd()
+    buf=io.StringIO()
+    rc=1
+    try:
+        workspace=Path(job.get("workspace") or old_cwd).expanduser().resolve()
+        os.chdir(workspace)
+        with contextlib.redirect_stdout(buf), contextlib.redirect_stderr(buf):
+            rc=ollama_chat(
+                initial_prompt=job.get("prompt",""),
+                access_profile=job.get("profile","workspace"),
+                workspace_override=workspace,
+                one_shot=True,
+            )
+        job["status"]="done" if rc==0 else "failed"
+    except Exception as exc:
+        job["status"]="failed"; job["error"]=str(exc)
+    finally:
+        try: os.chdir(old_cwd)
+        except OSError: pass
+    job["finished_at"]=time.time()
+    output=re.sub(r"\x1b\[[0-9;?]*[A-Za-z]","",buf.getvalue()).strip()
+    job["output"]=output[-12000:]
+    _atomic_json(path,job)
+    if job["status"]=="done":
+        # Prefer the final LO line, but retain enough context to be useful.
+        lines=[x.strip() for x in output.splitlines() if x.strip()]
+        tail="\n".join(lines[-6:]) if lines else "completed"
+        _emit_event("complete",tail,job.get("id"))
+    else:
+        _emit_event("failed",job.get("error") or output[-1000:] or "background job failed",job.get("id"))
+    return 0 if job["status"]=="done" else 1
+
+
 def main():
+    if len(sys.argv)>=3 and sys.argv[1]=="_lo-job":
+        return _run_lo_job(sys.argv[2])
+    if len(sys.argv)>=2 and sys.argv[1]=="events":
+        return _events_command(sys.argv[2:])
+    if len(sys.argv)>=2 and sys.argv[1]=="jobs":
+        return _jobs_command(sys.argv[2:])
+
     # `lk o` remains the chat verb. In v2, bare `lk ollama` is inspection;
     # adding search/a prompt keeps the historical long-form chat spelling useful.
+    if len(sys.argv) >= 2 and sys.argv[1] == "_lo-context":
+        return _lo_context_handoff(sys.argv[2:])
+
     if len(sys.argv) >= 2 and (
         sys.argv[1] == "o"
         or (
@@ -5621,6 +7077,9 @@ def main():
                     return 1
                 continue
             break
+        if args and args[0]=="bg":
+            return _queue_lo_background(" ".join(args[1:]),Path.cwd(),access_profile or _load_lo_profile())
+
         force_search=bool(args and args[0] == "search")
         if force_search:
             args=args[1:]
@@ -5640,6 +7099,9 @@ def main():
         n=_forget_memory(" ".join(rest)); print(f"Removed {n} matching memory item(s)."); return 0
     if cmd=="clear-memory": return _memory_command(["clear"])
     if cmd=="skills": return _skills_command(rest)
+    if cmd=="profile": return _profile_command(rest)
+    if cmd=="feedback": return _feedback_command(rest)
+    if cmd=="sound": return _sound_command(rest)
     if cmd=="personality": return lo_personality(rest)
     if cmd=="thinking": return lo_thinking(rest)
     if cmd in {"think-display","thinkdisplay"}: return lo_think_display(rest)
@@ -5649,7 +7111,16 @@ def main():
     if cmd=="games": print("No games installed."); return 0
     if cmd=="ttt": return game_ttt()
     if cmd=="gtnw": return game_gtnw()
-    if cmd in ("help","-h","--help"): return help_screen()
+    if cmd in ("help","-h","--help"):
+        if rest and rest[0]=="all": return help_screen()
+        return starter_help()
+    if cmd=="commands": return commands_screen()
+    if cmd=="ai": return _surface_ai()
+    if cmd=="system": return _surface_system()
+    if cmd=="clean": return _surface_clean()
+    if cmd=="models": return ollama_models(rest[0] if rest else None)
+    if cmd=="benchmark": return ollama_test(all_models=("--all" in rest))
+    if cmd=="web": return ollama_key(["status"] if not rest else rest)
     if cmd in ("version","--version","-V"): print(f"LOOK {VERSION}"); return 0
     if cmd=="home": return home()
     if cmd=="undo": return _undo_last()
@@ -5662,29 +7133,41 @@ def main():
         return _batch_action(kind,rest[1],rest[2:])
     if cmd=="_copy":
         if len(rest)!=2: return 2
-        print(_action_result(_interactive_file_action("copy",rest[0],rest[1]))); return 0
+        result=_interactive_file_action("copy",rest[0],rest[1])
+        print(_action_result(result))
+        return 0 if result.startswith("COPY OK") else 1
     if cmd=="_move":
         if len(rest)!=2: return 2
-        print(_action_result(_interactive_file_action("move",rest[0],rest[1]))); return 0
+        result=_interactive_file_action("move",rest[0],rest[1])
+        print(_action_result(result))
+        return 0 if result.startswith("MOVE OK") else 1
     if cmd=="_remove":
         if len(rest)!=1: return 2
-        print(_action_result(_journal_remove(rest[0]))); return 0
+        result=_journal_remove(rest[0])
+        print(_action_result(result))
+        return 0 if result.startswith("REMOVE OK") else 1
     if cmd=="_mkdir":
         if len(rest)!=1: return 2
-        print(_action_result(_journal_mkdir(rest[0]))); return 0
+        result=_journal_mkdir(rest[0])
+        print(_action_result(result))
+        return 0 if result.startswith(("MKDIR OK","Directory already exists:")) else 1
     if cmd=="_touch":
         create_missing=False
         if rest and rest[0]=="--parents":
             create_missing=True
             rest=rest[1:]
         if len(rest)!=1: return 2
-        print(_action_result(_journal_touch(rest[0],create_missing=create_missing))); return 0
+        result=_journal_touch(rest[0],create_missing=create_missing)
+        print(_action_result(result))
+        return 0 if result.startswith("FILE OK") else 1
     if cmd=="doctor": return doctor()
     if cmd=="settings": return settings()
     if cmd=="uninstall": return uninstall()
     if cmd=="config":
-        print(f"LOOK {VERSION}\n  executable  {Path(__file__).resolve()}\n  renderer    {RENDERER}\n  zshrc       {HOME/'.zshrc'}\n  secrets     {HOME/'.zsh_secrets'}\n  memory      {MEMORY_FILE}\n  memory queue {MEMORY_QUEUE}\n  undo        {UNDO_FILE}\n  ollama model {_preferred_ollama_model()}\n  ollama models {OLLAMA_MODELS_FILE}")
-        return 0
+        if rest and rest[0] in {"paths","raw"}:
+            print(f"LOOK {VERSION}\n  executable  {Path(__file__).resolve()}\n  renderer    {RENDERER}\n  zshrc       {HOME/'.zshrc'}\n  secrets     {HOME/'.zsh_secrets'}\n  memory      {MEMORY_FILE}\n  memory queue {MEMORY_QUEUE}\n  undo        {UNDO_FILE}\n  ollama model {_preferred_ollama_model()}\n  ollama models {OLLAMA_MODELS_FILE}")
+            return 0
+        return _surface_config()
     if cmd=="secrets":
         p=HOME/".zsh_secrets"
         if not p.exists(): print("LOOK secrets: ~/.zsh_secrets is not present."); return 1
@@ -5709,7 +7192,8 @@ def main():
         return inspect_pid(int(rest[0]))
     if cmd=="git": return inspect_git(rest[0] if rest else '.')
     if cmd in {"machine","box"}: return inspect_machine()
-    if cmd in {"net","network"}: return inspect_network()
+    if cmd=="net": return _surface_net()
+    if cmd=="network": return inspect_network()
     if cmd=="tailscale": return inspect_tailscale()
     if cmd=="ollama":
         if rest and rest[0]=="key":

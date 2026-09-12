@@ -643,3 +643,52 @@ File and directory creation are journaled and available to `lk undo`. Undo refus
 `lk think-display [compact|full|quiet]` controls visible reasoning presentation. Compact is the default rolling live view.
 
 These settings are independent of LO's access/capability profile. Personality never grants tools or permissions.
+
+## Selected paths → LO
+
+Inside LOOK's interactive filer, filter and mark files with the existing selection controls, then press `L` to open LO with those paths as explicit context. If nothing is marked, the highlighted path is used.
+
+This is a path handoff, not a bulk content injection. LO stays within its bounded workspace and reads only what the task needs.
+
+
+## Filer keys
+
+Use `j/k` (or `J/K`) and ↑/↓ for vertical movement. `L` is reserved for the selected-path LO handoff.
+
+
+## Parent navigation
+
+Press `<` (Shift-,) in ordinary browse mode to move to the filesystem parent. This is separate from Escape/back history. Filter-entry mode continues to treat `>` as normal text.
+
+
+## Persistent working set
+
+Filer marks persist while navigating between directories. `Tab` toggles an item, `A` toggles current matches, and `X` clears the set. Actions operate on the full set. The status is green when all selections are local and amber with `N / H HERE` when selected paths exist elsewhere.
+
+
+## Completion and global find
+
+Copy/move destination prompts support Tab path completion. Shell file-action helpers use normal repeated Zsh filesystem completion for every operand.
+
+`f` and `fznv` now use LOOK's own global finder presentation over a fast `$HOME` catalog rather than exposing stock fzf directly.
+
+## Temporal memory contract
+
+Recent exchanges and semantic memories carry age information. Semantic candidates store creation and last-reinforcement timestamps.
+
+Memory is historical context, not queued intent. LO must never resume an older request solely because it appears in recent or semantic memory.
+
+## Background jobs and events
+
+`lo bg REQUEST` queues a one-shot LO job in LOOK state. Completion emits an event, and the Zsh prompt hook displays pending events when the user returns to a normal prompt.
+
+`lk jobs` and `lk events` expose the durable state. This is the message-passing boundary for future shell/Future Crash integration.
+
+
+## LOOK 4 / Profile architecture
+
+`lk profile` manages portable identity independently from the installed program. Use `backup`, `export`, and `restore` for durable migration.
+
+`lk feedback` controls finite motion and optional local synthesized sound. `lk sound` toggles sound quickly. Feedback is suppressed outside a TTY.
+
+See `../docs/STATE-ARCHITECTURE.md`, `../docs/PROFILE.md`, and `../docs/FEEDBACK.md`.

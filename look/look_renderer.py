@@ -52,12 +52,12 @@ if _TRUECOLOR:
     WHITE=_rgb(224,229,236)
     GRAY=_rgb(128,139,154)
     FAINT=_rgb(89,99,113)
-    ACTIVE=_bg(34,50,67)+_rgb(238,244,250)+BOLD
+    ACTIVE=_bg(72,188,214)+_rgb(8,18,24)+BOLD
 else:
     BLUE='\x1b[38;5;75m'; CYAN='\x1b[38;5;81m'; GREEN='\x1b[38;5;114m'
     YELLOW='\x1b[38;5;221m'; MAGENTA='\x1b[38;5;176m'; RED='\x1b[38;5;203m'
     WHITE='\x1b[38;5;252m'; GRAY='\x1b[38;5;244m'; FAINT=DIM
-    ACTIVE=REVERSE
+    ACTIVE=REVERSE+BOLD
 
 CLEAR='\x1b[2J\x1b[H'; HIDE='\x1b[?25l'; SHOW='\x1b[?25h'
 
@@ -610,6 +610,48 @@ def copy_path(path:Path)->bool:
     except (OSError,subprocess.CalledProcessError): return False
 
 
+def _complete_path_text(value:str)->str:
+    """Shell-like, deterministic path completion for LOOK action prompts."""
+    if not value:
+        value="./"
+    expanded=os.path.expanduser(value)
+    p=Path(expanded)
+    parent=p.parent if str(p.parent) else Path(".")
+    prefix=p.name
+    try:
+        names=sorted(
+            (x.name + ("/" if x.is_dir() else "") for x in parent.iterdir()),
+            key=str.casefold
+        )
+    except OSError:
+        return value
+
+    matches=[n for n in names if n.casefold().startswith(prefix.casefold())]
+    if not matches:
+        return value
+
+    # Extend to a unique/common prefix. A unique directory keeps its trailing slash.
+    if len(matches)==1:
+        completed=matches[0]
+    else:
+        common=os.path.commonprefix(matches)
+        if len(common)<=len(prefix):
+            return value
+        completed=common
+
+    # Preserve the user's spelling style (~, absolute, relative).
+    raw_parent=str(Path(value).parent)
+    if value.startswith("~"):
+        base=value[:value.rfind(prefix)] if prefix else value
+        return base+completed
+    if raw_parent in {"",".","./"}:
+        base="./" if value.startswith("./") else ""
+        return base+completed
+    sep="" if value[:value.rfind(prefix)].endswith(os.sep) else os.sep
+    base=value[:value.rfind(prefix)] if prefix else value
+    return base+completed
+
+
 def prompt_line(prompt:str)->tuple[str,bool]:
     """Tiny line editor for LOOK action prompts. Esc cancels immediately."""
     fd=sys.stdin.fileno()
@@ -634,6 +676,17 @@ def prompt_line(prompt:str)->tuple[str,bool]:
                     chars.pop()
                     sys.stdout.write('\b \b')
                     sys.stdout.flush()
+                continue
+            if ch==b'\t':
+                before=''.join(chars)
+                after=_complete_path_text(before)
+                if after!=before:
+                    # Redraw only the editable field after the prompt.
+                    sys.stdout.write('\r\x1b[2K'+prompt+after)
+                    sys.stdout.flush()
+                    chars=list(after)
+                else:
+                    sys.stdout.write('\a'); sys.stdout.flush()
                 continue
             if ch==b'\x03':
                 raise KeyboardInterrupt
@@ -730,7 +783,7 @@ def action_footer(parts:list[str],width:int)->list[str]:
     return lines
 
 
-def pager(rows:list[str],height:int,width:int,rebuild=None,candidates=None,on_browse=None,on_back=None,on_go=None,force_interactive=False,initial_select:Path|None=None)->None:
+def pager(rows:list[str],height:int,width:int,rebuild=None,candidates=None,on_browse=None,on_back=None,on_parent=None,on_go=None,on_activate=None,force_interactive=False,initial_select:Path|None=None,marked_set:set[Path]|None=None)->None:
     # Interactive state machine: browse -> filter -> select.
     usable=max(3,height-5)
     if (len(rows)<=height-1 and not force_interactive) or not (sys.stdin.isatty() and sys.stdout.isatty()):
@@ -740,7 +793,7 @@ def pager(rows:list[str],height:int,width:int,rebuild=None,candidates=None,on_br
     matches:list[Path]=[]
     notice=''
     pending=''
-    marked:set[Path]=set()
+    marked:set[Path]=marked_set if marked_set is not None else set()
 
     if initial_select is not None and candidates:
         matches=candidates('')
@@ -767,6 +820,32 @@ def pager(rows:list[str],height:int,width:int,rebuild=None,candidates=None,on_br
             return sorted(marked,key=lambda p:str(p).casefold())
         picked=selected_path()
         return [picked.resolve()] if picked else []
+
+    def selection_status()->str:
+        if not marked:
+            return ''
+        here={p.resolve() for p in (candidates('') if candidates else [])}
+        here_count=sum(1 for p in marked if p.resolve() in here)
+        if here_count==len(marked):
+            return f'{GREEN}{BOLD}SELECTED · {len(marked)}{RESET}'
+        return f'{YELLOW}{BOLD}SELECTED · {len(marked)} / {here_count} HERE{RESET}'
+
+    def run_lo_context()->None:
+        nonlocal notice
+        paths=action_paths()
+        if not paths:
+            notice='nothing selected'
+            return
+        lk=Path(__file__).resolve().parent/'lk'
+        sys.stdout.write(SHOW+RESET+'\n')
+        sys.stdout.flush()
+        try:
+            subprocess.call([sys.executable,str(lk),'_lo-context',*map(str,paths)])
+        except (OSError,KeyboardInterrupt):
+            pass
+        sys.stdout.write(HIDE)
+        sys.stdout.flush()
+        notice=f'LO returned · {len(paths)} context path{"s" if len(paths)!=1 else ""}'
 
     def run_action(kind:str)->None:
         nonlocal notice
@@ -841,18 +920,22 @@ def pager(rows:list[str],height:int,width:int,rebuild=None,candidates=None,on_br
             action_parts=[]
             if filtering:
                 match_word='match' if len(matches)==1 else 'matches'
+                sel=selection_status()
                 status=(f'  {CYAN}{BOLD}FILTER{RESET} {WHITE}{query}█{RESET}'
-                        f'  {GRAY}{len(matches)} {match_word} · {len(marked)} marked{RESET}')
-                action_parts=['J K L ; move','Tab mark','A all','Enter open',
+                        f'  {GRAY}{len(matches)} {match_word}{RESET}'
+                        + (f'  · {sel}' if sel else ''))
+                action_parts=['J/K move','Tab mark','A all','Enter open',
                               'C copy→','B clipboard','M move','R remove',
-                              'E edit','O open with','Y path','G go','Esc clear']
+                              'L LO context','X clear set','E edit','O open with','Y path','G go','Esc clear']
             elif selecting:
                 name=picked.name if picked else '(no matches)'
                 kind='folder' if picked and picked.is_dir() else 'file'
-                status=(f'  {CYAN}{BOLD}SELECT{RESET} {WHITE}{name}{RESET} {GRAY}· {kind} · {len(marked)} marked{RESET}')
-                action_parts=['J K L ; move','Tab mark','Enter open',
+                sel=selection_status()
+                status=(f'  {CYAN}{BOLD}SELECT{RESET} {WHITE}{name}{RESET} {GRAY}· {kind}{RESET}'
+                        + (f'  · {sel}' if sel else ''))
+                action_parts=['j/k move','Tab mark','Enter open',
                               'C copy→','B clipboard','M move','R remove',
-                              'E edit','O open with','Y path','G go','Esc filter','q quit']
+                              'L LO context','X clear set','E edit','O open with','Y path','G go','Esc filter','q quit']
             elif query:
                 status=(f'  {CYAN}{BOLD}FILTER{RESET} {WHITE}{query}{RESET}'
                         f'  {GRAY}{last}/{len(current)}{RESET}')
@@ -861,7 +944,7 @@ def pager(rows:list[str],height:int,width:int,rebuild=None,candidates=None,on_br
                 back_hint='Esc back' if on_back else 'Esc exit'
                 status=f'  {FAINT}{last}/{len(current)}{RESET}'
                 action_parts=['Enter filter','Space/PgDn next','b/PgUp back',
-                              'g/G ends',back_hint,'q quit']
+                              'g/G ends','< parent',back_hint,'q quit']
             if notice:
                 status=f'{status}  {YELLOW}{notice}{RESET}'
                 notice=''
@@ -877,6 +960,8 @@ def pager(rows:list[str],height:int,width:int,rebuild=None,candidates=None,on_br
                 if key in {'\r','\n'}:
                     picked=selected_path()
                     if picked:
+                        if on_activate:
+                            on_activate(picked); return
                         if picked.is_dir() and on_browse:
                             on_browse(picked); return
                         opened,message=open_default(picked)
@@ -884,18 +969,12 @@ def pager(rows:list[str],height:int,width:int,rebuild=None,candidates=None,on_br
                             break
                         notice=message
                     continue
-                elif key in {'\x1b[B','K'} and matches:
+                elif key in {'\x1b[B','J'} and matches:
                     selected=min(len(matches)-1,selected+1)
                     top=min(max(0,len(current)-usable),top+1)
-                elif key in {'\x1b[A','L'} and matches:
+                elif key in {'\x1b[A','K'} and matches:
                     selected=max(0,selected-1)
                     top=max(0,top-1)
-                elif key=='J' and matches:
-                    selected=max(0,selected-1)
-                    top=max(0,top-1)
-                elif key==';' and matches:
-                    selected=min(len(matches)-1,selected+1)
-                    top=min(max(0,len(current)-usable),top+1)
                 elif key=='\x1b[6~' and matches:
                     selected=min(len(matches)-1,selected+usable)
                     top=min(max(0,len(current)-usable),top+usable)
@@ -939,6 +1018,13 @@ def pager(rows:list[str],height:int,width:int,rebuild=None,candidates=None,on_br
                     picked=selected_path()
                     if picked and on_go:
                         on_go(picked if picked.is_dir() else picked.parent); return
+                elif key=='L' and matches:
+                    run_lo_context()
+                    refresh_filter()
+                elif key=='X':
+                    marked.clear()
+                    notice='selection cleared'
+                    refresh_filter()
                 elif key=='E' and matches:
                     picked=selected_path()
                     if picked and not picked.is_dir():
@@ -981,16 +1067,16 @@ def pager(rows:list[str],height:int,width:int,rebuild=None,candidates=None,on_br
             if selecting:
                 if key in {'q','Q','\x03'}: break
                 if key=='\x1b': selecting=False; filtering=True; continue
-                if key in {'j','K','\x1b[B'} and matches: selected=(selected+1)%len(matches); continue
-                if key in {'k','L','\x1b[A'} and matches: selected=(selected-1)%len(matches); continue
-                if key=='J' and matches: selected=(selected-1)%len(matches); continue
-                if key==';' and matches: selected=(selected+1)%len(matches); continue
+                if key in {'j','J','\x1b[B'} and matches: selected=(selected+1)%len(matches); continue
+                if key in {'k','K','\x1b[A'} and matches: selected=(selected-1)%len(matches); continue
                 if key=='\x1b[6~' and matches: selected=min(len(matches)-1,selected+usable); continue
                 if key=='\x1b[5~' and matches: selected=max(0,selected-usable); continue
                 if key.startswith('\x1b['): continue
                 picked=selected_path()
                 if not picked: continue
                 if key in {'\r','\n'}:
+                    if on_activate:
+                        on_activate(picked); return
                     if picked.is_dir() and on_browse:
                         on_browse(picked); return
                     opened,message=open_default(picked)
@@ -1017,6 +1103,13 @@ def pager(rows:list[str],height:int,width:int,rebuild=None,candidates=None,on_br
                     continue
                 if key in {'g','G'} and on_go:
                     on_go(picked if picked.is_dir() else picked.parent); return
+                if key=='L':
+                    run_lo_context()
+                    refresh_filter(); continue
+                if key=='X':
+                    marked.clear()
+                    notice='selection cleared'
+                    refresh_filter(); continue
                 if key in {'e','E'}:
                     if picked.is_dir(): notice='folders are browsed with Enter'; continue
                     sys.stdout.write(SHOW+RESET+'\n'); sys.stdout.flush(); edit_path(picked); return
@@ -1050,8 +1143,74 @@ def pager(rows:list[str],height:int,width:int,rebuild=None,candidates=None,on_br
             elif key in {'k','\x1b[A'}: top=max(0,top-1)
             elif key=='g': top=0
             elif key=='G': top=max(0,len(current)-usable)
+            elif key=='<' and on_parent:
+                on_parent()
+                return
     finally:
         sys.stdout.write(SHOW+RESET+'\n'); sys.stdout.flush()
+
+def _global_catalog(root:Path)->list[Path]:
+    """Fast home-scoped catalog; fd when available, find as portable fallback."""
+    root=root.expanduser().resolve()
+    out=[]
+    if shutil.which("fd"):
+        try:
+            proc=subprocess.run(
+                ["fd","--hidden","--follow","--absolute-path",
+                 "--exclude",".git","--exclude","node_modules","--exclude",".Trash",
+                 "--exclude","Library/Caches","--exclude",".cache",".",str(root)],
+                capture_output=True,text=True,timeout=12
+            )
+            if proc.returncode==0:
+                out=[Path(line) for line in proc.stdout.splitlines() if line.strip()]
+        except (OSError,subprocess.SubprocessError):
+            out=[]
+    if not out:
+        try:
+            for base,dirs,files in os.walk(root):
+                dirs[:]=[d for d in dirs if d not in {".git","node_modules",".Trash",".cache"}]
+                b=Path(base)
+                out.extend(b/d for d in dirs)
+                out.extend(b/f for f in files)
+                if len(out)>=20000:
+                    break
+        except OSError:
+            pass
+    return out[:20000]
+
+def _catalog_matches(paths:list[Path],query:str)->list[Path]:
+    if not query:
+        return paths[:]
+    return [p for p in paths if query_matches(p.name,query)]
+
+def _catalog_view(paths:list[Path],root:Path,width:int,query:str='',highlight_path:Path|None=None,marked:set[Path]|None=None)->list[str]:
+    matches=_catalog_matches(paths,query)
+    shown=matches[:800]
+    header=(f'{BOLD}{CYAN}LOOK FIND{RESET}  {WHITE}{root}{RESET}'
+            f'  {FAINT}{len(matches)} matches{RESET}')
+    rows=[header,FAINT+('─'*min(width,max(24,len(strip_ansi(header)))))+RESET]
+    for p in shown:
+        try:
+            rel=p.relative_to(root)
+        except ValueError:
+            rel=p
+        mark=(f'{GREEN}✓{RESET} ' if marked and p.resolve() in marked else '  ')
+        if highlight_path is not None and p.resolve()==highlight_path.resolve():
+            style=ACTIVE
+        elif p.is_dir():
+            style=BLUE+BOLD
+        else:
+            try:
+                st=p.lstat()
+                style=color_for(Entry(p,p.name,False,p.is_symlink(),st.st_size,st.st_mtime,st.st_mode))
+            except OSError:
+                style=WHITE
+        suffix='/' if p.is_dir() else ''
+        rows.append(style+fit(f'{mark}{rel}{suffix}',width)+RESET)
+    if not shown:
+        rows.append(FAINT+'· no matches'+RESET)
+    return rows
+
 
 def main():
     ap=argparse.ArgumentParser(add_help=False)
@@ -1061,14 +1220,48 @@ def main():
     ap.add_argument('--no-hidden',action='store_true')
     ap.add_argument('--interactive',action='store_true')
     ap.add_argument('--select',default=None,help=argparse.SUPPRESS)
+    ap.add_argument('--global-find',action='store_true',help=argparse.SUPPRESS)
+    ap.add_argument('--nvim-result',action='store_true',help=argparse.SUPPRESS)
     ap.add_argument('-h','--help',action='help')
     args=ap.parse_args()
     target=Path(os.path.expanduser(args.path))
     hidden=not args.no_hidden
 
+    if args.global_find:
+        root=target.expanduser().resolve()
+        catalog=_global_catalog(root)
+        selected_result:Path|None=None
+        def choose_global(path:Path)->None:
+            nonlocal selected_result
+            selected_result=path
+        pager(
+            _catalog_view(catalog,root,shutil.get_terminal_size((100,30)).columns),
+            shutil.get_terminal_size((100,30)).lines,
+            shutil.get_terminal_size((100,30)).columns,
+            rebuild=lambda q,h=None,w=None,m=None: _catalog_view(catalog,root,w or 100,q,h,m),
+            candidates=lambda q: _catalog_matches(catalog,q),
+            on_browse=choose_global,
+            on_go=choose_global,
+            on_activate=choose_global,
+            force_interactive=True,
+        )
+        if selected_result is not None:
+            if args.nvim_result and not selected_result.is_dir():
+                editor=shutil.which("nvim")
+                if editor:
+                    return subprocess.call([editor,"--",str(selected_result)])
+            # Re-enter ordinary LOOK at the result's containing directory, selected.
+            parent=selected_result if selected_result.is_dir() else selected_result.parent
+            return subprocess.call([
+                sys.executable,str(Path(__file__).resolve()),str(parent),
+                "--mode","smart","--interactive","--select",str(selected_result)
+            ])
+        return 0
+
     browsed_once=False
     initial_select=Path(os.path.expanduser(args.select)).resolve() if args.select else None
     history:list[Path]=[]
+    working_set:set[Path]=set()
     while True:
         if not target.is_dir():
             print(f'look: not a directory: {target}',file=sys.stderr); return 1
@@ -1076,6 +1269,7 @@ def main():
         rows=build_view(target,args.mode,hidden,sz.columns,args.depth)
         browsed:Path|None=None
         went_back=False
+        went_parent=False
         go_to:Path|None=None
         def choose_dir(path:Path)->None:
             nonlocal browsed
@@ -1083,6 +1277,9 @@ def main():
         def choose_back()->None:
             nonlocal went_back
             went_back=True
+        def choose_parent()->None:
+            nonlocal went_parent
+            went_parent=True
         def choose_go(path:Path)->None:
             nonlocal go_to
             go_to=path.resolve()
@@ -1091,9 +1288,11 @@ def main():
               candidates=lambda q: matching_paths(target,args.mode,hidden,q,args.depth),
               on_browse=choose_dir,
               on_back=choose_back if history else None,
+              on_parent=choose_parent if target.resolve()!=target.resolve().parent else None,
               on_go=choose_go,
               force_interactive=(args.interactive or browsed_once),
-              initial_select=initial_select if not browsed_once else None)
+              initial_select=initial_select if not browsed_once else None,
+              marked_set=working_set)
         if go_to is not None:
             request=Path.home()/'.local'/'share'/'look'/'cd_request'
             request.parent.mkdir(parents=True,exist_ok=True)
@@ -1101,6 +1300,13 @@ def main():
             return 0
         if went_back:
             target=history.pop()
+            browsed_once=True
+            continue
+        if went_parent:
+            parent=target.resolve().parent
+            if parent!=target.resolve():
+                history.append(target)
+                target=parent
             browsed_once=True
             continue
         if browsed is None: return 0

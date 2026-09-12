@@ -32,12 +32,33 @@
 
 `lk forget TEXT` · `lk clear-memory`
 
-`lk skills` · `lk skills add TEXT` · `lk skills forget TEXT` · `lk skills clear-learned` · `lk skills path`
+`lk skills` · `lk skills add TEXT` · `lk skills forget TEXT` · `lk skills clear-learned` · `lk skills path` · `lk skills export [FILE]`
 
 LO keeps at most 20 candidate memories on disk and offers at most eight to prompt attention. Importance is 0–100; unused memories decay during maintenance. Retrieval alone is not reinforcement. `skills.md` is separate from user memory.
 
+
+## Profile
+`lk profile` · `lk profile files`
+
+`lk profile backup [DEST] [--keep N]` — remember a backup root and create rotating timestamped snapshots.
+
+`lk profile export [ZIP]` — create one portable migration archive.
+
+`lk profile restore SOURCE [--yes]` — restore a compatible ZIP/backup directory after validation; LOOK creates a local safety snapshot first.
+
+Portable profile data includes memory, recent continuity, core, skills, personalities, AI behavior preferences, preferred model name, and feedback settings. Secrets, undo/trash, jobs/events, queues/locks/PIDs, caches, and machine-specific host configuration are excluded.
+
+## Feedback
+`lk feedback` · `lk feedback demo`
+
+`lk feedback sound on|off` · `lk sound`
+
+`lk feedback motion off|subtle|normal`
+
+Sound defaults off. Motion defaults subtle. Feedback is automatically silent/static outside a TTY.
+
 ## Unified settings
-`lk settings` — access profile, Ollama host, preferred model, web-search key, and tailnet share. It is a UI over the direct commands above.
+`lk settings` — access profile, Ollama host, preferred model, web-search key, tailnet share, feedback, and profile status. It is a UI over the direct commands above.
 
 ## System
 `lk home` · `lk doctor` · `lk config` · `lk secrets` · `lk undo` · `lk uninstall` · `lk version` · `lk help`
