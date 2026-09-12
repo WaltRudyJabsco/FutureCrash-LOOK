@@ -1,3 +1,23 @@
+## 1.6.10 — Two games that are not installed
+
+- Added two deliberately undocumented LOOK Easter eggs: `lk ttt` and `lk gtnw`.
+- `lk ttt` is a full-screen blue-CRT tic-tac-toe game with a perfect minimax opponent.
+- Tic-tac-toe accepts both `1–9` numpad geometry and the laptop-friendly `U I O / J K L / M , .` grid; `r` restarts and `esc` exits.
+- `lk gtnw` is a randomized fictional WOPR-style terminal simulation with an abstract world map, animated red/blue trajectories, counters, speed control, restart, and escape. It contains no real target selection or operational data.
+- `lk games` insists that no games are installed. Neither game appears in help.
+- LOOK home has a very low-probability `SHALL WE PLAY A GAME?` line.
+- Future Crash remains 1.1.7.
+
+## 1.6.9 — LO information edges
+
+- Added three canonical, read-only information tools to LO: live weather, geographic place lookup, and Wikipedia lookup.
+- Weather and place resolution use Open-Meteo directly and require no API key.
+- Stable encyclopedic questions can use Wikipedia's machine-readable search API instead of generic web snippets.
+- Generic Ollama web search remains the broad fallback for current and open-ended research.
+- Tool activity is visible as `weather ›`, `place ›`, or `wiki ›` while retrieval is in flight.
+- Canonical tools are available even when `OLLAMA_API_KEY` is absent; only generic web search depends on that key.
+- Future Crash remains 1.1.7.
+
 ## 1.6.8 — Explicit LO model budgets
 
 - Gives LO an explicit 8192-token working context and bounded recent conversation history instead of allowing the transcript to grow indefinitely.

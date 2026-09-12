@@ -1,3 +1,20 @@
+## 3.9.1 — Hidden games
+
+- Added undocumented `lk ttt` and `lk gtnw` terminal Easter eggs.
+- Added dual spatial keyboard controls for tic-tac-toe and a perfect minimax opponent.
+- Added a randomized abstract WOPR-style simulation with restart, speed control, and clean terminal restoration.
+- `lk games` reports `No games installed.`
+- Added a rare home-screen `SHALL WE PLAY A GAME?` Easter egg.
+
+## 3.9.0 — Canonical information edges
+
+- LO gained direct weather, place, and Wikipedia tools.
+- Live weather uses Open-Meteo current + forecast data instead of search snippets.
+- Geographic name resolution uses Open-Meteo geocoding.
+- Wikipedia search provides compact canonical article matches for stable background knowledge.
+- Generic web search remains available for everything that does not fit a canonical edge.
+- Each retrieval announces itself in the terminal so information flow stays visible.
+
 # LOOK Shell changelog
 
 ## 3.8.1 — Explicit model-resource policy

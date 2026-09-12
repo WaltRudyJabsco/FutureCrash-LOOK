@@ -104,7 +104,18 @@ Nested Future Crash sessions are blocked by default so you do not accidentally e
 
 ![Future Crash view](FC_screenshots/Error_2.png)
 
-### LOOK
+### LO information edges
+
+LO has a deliberately small set of canonical read-only sources before generic web search:
+
+- `weather` — live current conditions and short forecast via Open-Meteo; no key required.
+- `place_lookup` — place-name/postal-code resolution to coordinates and timezone via Open-Meteo.
+- `wikipedia` — compact English Wikipedia article search for stable encyclopedic background.
+- `web_search` — Ollama-hosted generic search for current/open-ended material when `OLLAMA_API_KEY` is configured.
+
+The model chooses the appropriate edge. Retrieval is visible in the terminal (`weather ›`, `place ›`, `wiki ›`, `search ›`) and the returned data is compact so it does not flood the local model's context.
+
+## LOOK
 
 LOOK is the practical layer underneath Future Crash:
 
@@ -670,8 +681,8 @@ This release establishes the following baseline:
 
 | Layer | Version |
 | --- | ---: |
-| Future Crash + LOOK | **1.6.7** |
-| LOOK | **3.8.0** |
+| Future Crash + LOOK | **1.6.10** |
+| LOOK | **3.9.1** |
 | Future Crash | **1.1.7** |
 
 Signal rendering is now compiled separately from conversation: explicit Signal requests use a focused no-thinking 1200-token render pass, while ordinary Workstation conversation retains its own reasoning budget.

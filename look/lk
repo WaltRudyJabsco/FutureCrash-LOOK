@@ -17,7 +17,7 @@ try:
 except Exception:
     readline = None
 
-VERSION="3.8.1"
+VERSION="3.9.1"
 
 LOOK_WORDMARK = r"""       ██╗      ██╗  ██╗
        ██║      ██║ ██╔╝
@@ -786,6 +786,10 @@ def home():
     print(f"{_c('lo','1;36')} {lo_state} {_c(ollama,'2')}")
     print(_c("─"*min(62, max(28, len(shown)+16)), "2"))
     print()
+
+    import random
+    if random.randrange(96)==0:
+        print(_c("SHALL WE PLAY A GAME?", "1;36")); print()
 
     fortune=shutil.which('fortune')
     cowsay=shutil.which('cowsay')
@@ -2784,9 +2788,18 @@ def _lo_tools(profile):
     tools=_filesystem_tools()
     if profile=="conservative":
         tools=[t for t in tools if t.get("function",{}).get("name") in {"list_files","read_file","search_files"}]
+    tools.extend(_information_tools())
     if profile in {"power","unsafe"}:
         tools.append(_command_tool())
     return tools
+
+def _information_tools():
+    return [
+        {"type":"function","function":{"name":"weather","description":"Get current weather and today's forecast for a named place from Open-Meteo. Prefer this for live weather instead of guessing or generic web search.","parameters":{"type":"object","properties":{"location":{"type":"string"}},"required":["location"]}}},
+        {"type":"function","function":{"name":"place_lookup","description":"Resolve a city, town, region, postal code, or named geographic place to coordinates and timezone using Open-Meteo geocoding. Not a business search or directions tool.","parameters":{"type":"object","properties":{"query":{"type":"string"}},"required":["query"]}}},
+        {"type":"function","function":{"name":"wikipedia","description":"Search English Wikipedia for compact canonical article matches. Prefer this for stable encyclopedic background; use web_search for current events.","parameters":{"type":"object","properties":{"query":{"type":"string"}},"required":["query"]}}},
+    ]
+
 
 def _filesystem_tools():
     return [
@@ -2877,6 +2890,52 @@ def _run_filesystem_tool(workspace, name, args):
     except (OSError, ValueError) as exc:
         return f"File tool failed: {exc}"
     return f"Unknown file tool: {name}"
+
+LOOK_INFO_USER_AGENT="LOOK-Shell/3.9 (local text client)"
+
+def _http_json(url, timeout=12):
+    import json, urllib.request
+    request=urllib.request.Request(url,headers={"User-Agent":LOOK_INFO_USER_AGENT,"Accept":"application/json"})
+    with urllib.request.urlopen(request,timeout=timeout) as response:
+        return json.load(response)
+
+def _place_lookup(query,count=5):
+    import json
+    from urllib.parse import urlencode
+    query=str(query or "").strip()
+    if not query: return "Place lookup requires a location."
+    data=_http_json("https://geocoding-api.open-meteo.com/v1/search?"+urlencode({"name":query,"count":max(1,min(int(count),5)),"language":"en","format":"json"}))
+    rows=[]
+    for item in (data.get("results") or [])[:5]:
+        rows.append({"name":item.get("name"),"region":", ".join(x for x in [item.get("admin1"),item.get("country")] if x),"latitude":item.get("latitude"),"longitude":item.get("longitude"),"timezone":item.get("timezone")})
+    return json.dumps({"source":"Open-Meteo geocoding","query":query,"results":rows},ensure_ascii=False)
+
+def _weather_lookup(location):
+    import json
+    from urllib.parse import urlencode
+    location=str(location or "").strip()
+    geo=json.loads(_place_lookup(location,1)); matches=geo.get("results") or []
+    if not matches: return f"No weather location match for {location!r}."
+    place=matches[0]
+    params={"latitude":place["latitude"],"longitude":place["longitude"],"timezone":"auto","temperature_unit":"fahrenheit","wind_speed_unit":"mph","precipitation_unit":"inch","current":"temperature_2m,apparent_temperature,relative_humidity_2m,precipitation,weather_code,cloud_cover,wind_speed_10m,wind_direction_10m","daily":"weather_code,temperature_2m_max,temperature_2m_min,precipitation_probability_max,precipitation_sum,sunrise,sunset","forecast_days":3}
+    data=_http_json("https://api.open-meteo.com/v1/forecast?"+urlencode(params)); daily=data.get("daily") or {}; days=[]
+    for i,day in enumerate((daily.get("time") or [])[:3]):
+        def at(k):
+            v=daily.get(k) or []; return v[i] if i<len(v) else None
+        days.append({"date":day,"weather_code":at("weather_code"),"high_f":at("temperature_2m_max"),"low_f":at("temperature_2m_min"),"precip_probability_pct":at("precipitation_probability_max"),"precipitation_in":at("precipitation_sum"),"sunrise":at("sunrise"),"sunset":at("sunset")})
+    return json.dumps({"source":"Open-Meteo","location":place,"observed_at":(data.get("current") or {}).get("time"),"current":data.get("current") or {},"current_units":data.get("current_units") or {},"forecast":days},ensure_ascii=False)
+
+def _wikipedia_lookup(query):
+    import json,re
+    from urllib.parse import urlencode,quote
+    query=str(query or "").strip()
+    if not query: return "Wikipedia lookup requires a topic."
+    data=_http_json("https://en.wikipedia.org/w/rest.php/v1/search/page?"+urlencode({"q":query,"limit":3})); rows=[]
+    for page in (data.get("pages") or [])[:3]:
+        title=page.get("title") or ""
+        rows.append({"title":title,"description":page.get("description"),"excerpt":re.sub(r"<[^>]+>","",page.get("excerpt") or ""),"url":"https://en.wikipedia.org/wiki/"+quote(title.replace(" ","_"),safe="()_,-")})
+    return json.dumps({"source":"Wikipedia","query":query,"results":rows},ensure_ascii=False)
+
 
 def _ollama_web_search(query):
     """Search via Ollama's hosted web API using the inherited API key."""
@@ -3279,7 +3338,7 @@ def ollama_chat(force_search=False, initial_prompt=None, allow_start=True, host_
             "Use write_file only for intentional textual creation or editing. Only mutate files when the user explicitly asks. "
             "Do not claim to have read or changed a file unless the corresponding tool supplied or confirmed it. "
             "Do not claim filesystem access outside the starting LOOK workspace. "
-            "If web_search is available, use it when current or externally verifiable information is needed; "
+            "Use weather for live weather, place_lookup for geographic resolution, and wikipedia for stable encyclopedic background. You MUST call weather for questions about current weather, temperature, rain, wind, or forecasts; never answer those from model memory. Prefer these canonical read-only tools over guessing or generic search when they fit. If web_search is available, use it when current or externally verifiable information is needed and no canonical tool fits; "
             "when citing or recommending web material, always preserve the exact http/https URL supplied by the search result and emit a complete Markdown link in the form [descriptive label](https://actual-url). Never emit citation placeholders such as [source], [1], or a site name styled like a link without an actual URL. Never invent a URL from a site name."
         )},
     ]
@@ -3421,7 +3480,28 @@ def ollama_chat(force_search=False, initial_prompt=None, allow_start=True, host_
                         except Exception:
                             args={}
 
-                    if name == "web_search":
+                    if name == "weather":
+                        location=args.get("location","")
+                        try:
+                            print(f"{_ansi_label('weather ›', '36')} {location}")
+                            with _activity("weather"):
+                                tool_content=_weather_lookup(location)
+                        except Exception as exc: tool_content=f"Weather lookup failed: {exc}"
+                    elif name == "place_lookup":
+                        query=args.get("query","")
+                        try:
+                            print(f"{_ansi_label('place ›', '36')} {query}")
+                            with _activity("geocoding"):
+                                tool_content=_place_lookup(query)
+                        except Exception as exc: tool_content=f"Place lookup failed: {exc}"
+                    elif name == "wikipedia":
+                        query=args.get("query","")
+                        try:
+                            print(f"{_ansi_label('wiki ›', '35')} {query}")
+                            with _activity("wikipedia"):
+                                tool_content=_wikipedia_lookup(query)
+                        except Exception as exc: tool_content=f"Wikipedia lookup failed: {exc}"
+                    elif name == "web_search":
                         if not has_web or force_search:
                             tool_content = "Web search is unavailable in this session."
                         else:
@@ -5134,6 +5214,260 @@ def ollama_key(args):
     return 0
 
 
+
+# ── hidden games ─────────────────────────────────────────────────────────────
+# Deliberately absent from help. These are terminal Easter eggs, not product UI.
+
+@contextmanager
+def _game_terminal():
+    if not (sys.stdin.isatty() and sys.stdout.isatty()):
+        raise RuntimeError("games require an interactive terminal")
+    fd=sys.stdin.fileno()
+    old=termios.tcgetattr(fd)
+    try:
+        tty.setcbreak(fd)
+        sys.stdout.write("\033[?1049h\033[?25l\033[2J\033[H")
+        sys.stdout.flush()
+        yield fd
+    finally:
+        termios.tcsetattr(fd,termios.TCSADRAIN,old)
+        sys.stdout.write("\033[?25h\033[?1049l")
+        sys.stdout.flush()
+
+
+def _game_key(fd, timeout=None):
+    key=_read_tty_key(fd,timeout)
+    return key.lower() if isinstance(key,str) else key
+
+
+def _ttt_winner(board):
+    lines=((0,1,2),(3,4,5),(6,7,8),(0,3,6),(1,4,7),(2,5,8),(0,4,8),(2,4,6))
+    for a,b,c in lines:
+        if board[a] and board[a]==board[b]==board[c]:
+            return board[a]
+    return "D" if all(board) else None
+
+
+def _ttt_score(board, ai_turn):
+    result=_ttt_winner(board)
+    if result=="O": return 10
+    if result=="X": return -10
+    if result=="D": return 0
+    if ai_turn:
+        best=-99
+        for i,v in enumerate(board):
+            if not v:
+                board[i]="O"; best=max(best,_ttt_score(board,False)); board[i]=""
+        return best
+    best=99
+    for i,v in enumerate(board):
+        if not v:
+            board[i]="X"; best=min(best,_ttt_score(board,True)); board[i]=""
+    return best
+
+
+def _ttt_ai(board):
+    # Perfect, but varied among equally good moves so repeat games do not feel scripted.
+    import random
+    scored=[]
+    for i,v in enumerate(board):
+        if not v:
+            board[i]="O"; score=_ttt_score(board,False); board[i]=""
+            scored.append((score,i))
+    if not scored: return None
+    best=max(x[0] for x in scored)
+    return random.choice([i for score,i in scored if score==best])
+
+
+def _ttt_screen(board, notice="YOUR MOVE", draws=0):
+    blue="\033[38;5;45m"; dim="\033[38;5;31m"; bright="\033[1;38;5;51m"; reset="\033[0m"
+    def cell(i):
+        v=board[i]
+        if v=="X": return bright+"X"+blue
+        if v=="O": return "\033[1;38;5;39mO"+blue
+        return " "
+    rows=[]
+    for r in range(3):
+        a,b,c=(r*3,r*3+1,r*3+2)
+        rows.append(f"       {cell(a)}       │       {cell(b)}       │       {cell(c)}")
+        if r<2: rows.append("   ────────────┼───────────────┼────────────")
+    out=[
+        "\033[2J\033[H", bright,
+        "                 TIC-TAC-TOE", reset,"", blue,
+        *rows, reset,"",
+        f"                 {notice}","",
+        dim+"        7 8 9     or     U I O",
+        "        4 5 6            J K L",
+        "        1 2 3            M , ."+reset,
+        "",dim+"              r restart   esc exit"+reset,
+    ]
+    if draws>=2:
+        out += ["",dim+f"                  draws {draws}"+reset]
+    sys.stdout.write("\n".join(out)); sys.stdout.flush()
+
+
+def game_ttt():
+    try:
+        with _game_terminal() as fd:
+            board=[""]*9; draws=0; notice="YOUR MOVE"
+            keymap={
+                "7":0,"8":1,"9":2,"4":3,"5":4,"6":5,"1":6,"2":7,"3":8,
+                "u":0,"i":1,"o":2,"j":3,"k":4,"l":5,"m":6,",":7,".":8,
+            }
+            while True:
+                _ttt_screen(board,notice,draws)
+                key=_game_key(fd)
+                if key=="esc": return 0
+                if key=="r": board=[""]*9; notice="YOUR MOVE"; continue
+                move=keymap.get(key)
+                if move is None or board[move]:
+                    notice="ILLEGAL MOVE" if move is not None else "YOUR MOVE"
+                    continue
+                board[move]="X"
+                result=_ttt_winner(board)
+                if result:
+                    if result=="D":
+                        draws+=1; notice="DRAW"
+                    else: notice="YOU WIN"
+                else:
+                    notice="THINKING"
+                    _ttt_screen(board,notice,draws); time.sleep(0.18)
+                    ai=_ttt_ai(board)
+                    if ai is not None: board[ai]="O"
+                    result=_ttt_winner(board)
+                    notice="DRAW" if result=="D" else ("COMPUTER WINS" if result=="O" else "YOUR MOVE")
+                    if result=="D": draws+=1
+                if result:
+                    _ttt_screen(board,notice,draws)
+                    time.sleep(0.25)
+                    if draws>=3:
+                        sys.stdout.write("\n\033[1;38;5;45m          STRANGE GAME.\n\n       NO ADVANTAGE DISCOVERED.\033[0m")
+                        sys.stdout.flush()
+                    while True:
+                        k=_game_key(fd)
+                        if k=="esc": return 0
+                        if k in {"r"," ","enter","\r","\n"}:
+                            board=[""]*9; notice="YOUR MOVE"; break
+    except RuntimeError as exc:
+        print(f"LOOK game · {exc}"); return 1
+
+
+_GTNW_MAP=(
+"                  .------.                         _____                 ",
+"           _..---'        `--._              _..-'     `-.__            ",
+"       _.-'                    `-._       _.-'              `---._      ",
+"     .'      NORTH AMERICA         `-----'       EURASIA           `.    ",
+"    /                                                               \\   ",
+"   /        .----.                            .------------.          |   ",
+"  |       .'      `._                       .'              `-.       |   ",
+"   \\     /          `--.                 /                   /      /    ",
+"    `---'               `-.           _.-'                  /    _.'     ",
+"                           `---------'          __..------'---'           ",
+"              .                              .'                           ",
+"               `-.                        _.'                             ",
+"                  `---.___          __..-'                                ",
+"                          `--------'                                      ",
+)
+
+
+def _gtnw_canvas(width=74,height=22):
+    grid=[list(" "*width) for _ in range(height)]
+    for y,line in enumerate(_GTNW_MAP):
+        if y+3>=height: break
+        for x,ch in enumerate(line[:width]):
+            if ch!=" ": grid[y+3][x]=ch
+    return grid
+
+
+def _gtnw_arc(start,end,steps=22,bend=None):
+    import random, math
+    x0,y0=start; x1,y1=end
+    if bend is None: bend=random.uniform(-5.5,-2.5)
+    pts=[]
+    for n in range(steps):
+        t=n/(steps-1)
+        x=x0+(x1-x0)*t
+        y=y0+(y1-y0)*t + bend*4*t*(1-t)
+        pts.append((int(round(x)),int(round(y))))
+    return pts
+
+
+def _gtnw_render(arcs, frame, sim_no, speed, outcome=None):
+    blue="\033[38;5;45m"; red="\033[38;5;196m"; dim="\033[38;5;31m"; white="\033[1;38;5;255m"; reset="\033[0m"
+    grid=_gtnw_canvas()
+    us_launch=ru_launch=us_impact=ru_impact=0
+    for side,pts,delay in arcs:
+        age=frame-delay
+        if age<0: continue
+        upto=min(len(pts),max(1,age+1))
+        if side=="US": us_launch+=1
+        else: ru_launch+=1
+        if upto>=len(pts):
+            if side=="US": ru_impact+=1
+            else: us_impact+=1
+        for j,(x,y) in enumerate(pts[:upto]):
+            if 0<=y<len(grid) and 0<=x<len(grid[y]):
+                marker="•" if j==upto-1 and upto<len(pts) else "."
+                grid[y][x]=(blue+marker+reset) if side=="US" else (red+marker+reset)
+    lines=["".join(row) for row in grid]
+    header=[
+        "\033[2J\033[H"+white+"                 GLOBAL THERMONUCLEAR WAR"+reset,
+        dim+f"                 SIMULATION {sim_no:02d}    SPEED {speed}x"+reset,
+        "",
+    ]
+    footer=[
+        "",
+        blue+f" UNITED STATES  launches {us_launch:02d}  impacts {us_impact:02d}"+reset+
+        "        "+red+f"SOVIET UNION  launches {ru_launch:02d}  impacts {ru_impact:02d}"+reset,
+        dim+"             space accelerate   r restart   esc exit"+reset,
+    ]
+    if outcome:
+        footer += ["",white+"                         WINNER"+reset,"",red+"                          NONE"+reset]
+    sys.stdout.write("\n".join(header+lines+footer)); sys.stdout.flush()
+
+
+def _gtnw_make_sim():
+    import random
+    # Abstract coast-to-coast arcs only. No real targets, weapon data, or operational geography.
+    us=[(12,9),(17,7),(21,11),(25,8)]
+    ru=[(54,8),(58,7),(61,10),(65,8)]
+    arcs=[]
+    total=random.randint(12,20)
+    for n in range(total):
+        side="US" if n%2==0 else "USSR"
+        start=random.choice(us if side=="US" else ru)
+        end=random.choice(ru if side=="US" else us)
+        arcs.append((side,_gtnw_arc(start,end,random.randint(18,28)),n*random.randint(2,4)))
+    return arcs
+
+
+def game_gtnw():
+    try:
+        with _game_terminal() as fd:
+            sim_no=1; speed=1; frame=0; arcs=_gtnw_make_sim(); finished_at=None
+            while True:
+                max_frame=max(delay+len(pts) for _,pts,delay in arcs)
+                done=frame>=max_frame
+                _gtnw_render(arcs,frame,sim_no,speed,outcome=done)
+                if done and finished_at is None: finished_at=time.monotonic()
+                if done and time.monotonic()-finished_at>2.4:
+                    if sim_no>=3:
+                        sys.stdout.write("\n\033[1;38;5;45m                 SIMULATIONS COMPLETE\n\n"
+                                         "                 US VICTORIES       0\n"
+                                         "                 USSR VICTORIES     0\n"
+                                         f"                 MUTUAL LOSSES      {sim_no}\n\n"
+                                         "                      INTERESTING.\033[0m")
+                        sys.stdout.flush(); time.sleep(2.0)
+                    sim_no+=1; frame=0; arcs=_gtnw_make_sim(); finished_at=None; continue
+                key=_game_key(fd,0.10/max(1,speed))
+                if key=="esc": return 0
+                if key=="r": sim_no=1; speed=1; frame=0; arcs=_gtnw_make_sim(); finished_at=None; continue
+                if key==" ": speed=2 if speed==1 else (4 if speed==2 else 1)
+                if not done: frame+=speed
+    except RuntimeError as exc:
+        print(f"LOOK game · {exc}"); return 1
+
+
 def _media_macos_run(app, statement):
     """Run one AppleScript statement only if the target app is already open."""
     script=(
@@ -5312,6 +5646,9 @@ def main():
     if cmd in {"media","music"}: return media(rest)
     if cmd=="_ollama-share-proxy": return _ollama_share_proxy()
     modes={"detail":"detail","dirs":"dirs","files":"files","tree":"tree","recent":"recent","size":"size"}
+    if cmd=="games": print("No games installed."); return 0
+    if cmd=="ttt": return game_ttt()
+    if cmd=="gtnw": return game_gtnw()
     if cmd in ("help","-h","--help"): return help_screen()
     if cmd in ("version","--version","-V"): print(f"LOOK {VERSION}"); return 0
     if cmd=="home": return home()
