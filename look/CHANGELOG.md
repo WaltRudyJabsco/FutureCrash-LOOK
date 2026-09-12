@@ -1,5 +1,13 @@
 # LOOK Shell changelog
 
+## 3.8.1 — Explicit model-resource policy
+
+- LO now uses an explicit 8192-token context window with bounded recent working history.
+- `light`, `adaptive`, and `deep` now drive Ollama thinking behavior on thinking-capable models instead of acting only as prompt guidance.
+- Interactive output ceilings are 800 / 1400 / 2000 tokens respectively.
+- Memory and learned-skill housekeeping use small no-thinking budgets.
+- History trimming preserves complete user-led tool transactions rather than retaining arbitrary transcript tails.
+
 ## 3.8.0 — personality + live thinking
 
 - Personality packs: LO, Space Robot, Max, Philosopher.

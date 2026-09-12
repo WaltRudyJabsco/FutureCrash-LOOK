@@ -71,7 +71,7 @@ WHITE = CSI + "38;5;255m"
 GRAY = CSI + "38;5;245m"
 DARK = CSI + "38;5;239m"
 
-VERSION = "1.1.1"
+VERSION = "1.1.7"
 GLYPHS = "0123456789ABCDEF"
 SPARKS = "▁▂▃▄▅▆▇█"
 
@@ -691,7 +691,7 @@ class SignalCanvas:
 
     WIDTH=40
     HEIGHT=12
-    DEFAULT_TTL=45.0
+    DEFAULT_TTL=0.0
     HISTORY_LIMIT=6
     COLORS={
         "green":GREEN,"cyan":CYAN,"amber":AMBER,"magenta":MAGENTA,
@@ -761,6 +761,12 @@ class SignalCanvas:
             return self.frames[idx]
         return self.cells
 
+    def scan_row(self, display_h):
+        """Continuous host-side CRT scan position; independent of model animation FPS."""
+        if display_h <= 0:
+            return -1
+        return int(time.time() * 18.0) % display_h
+
     def _put(self,x,y,ch,color="cyan"):
         if 0<=x<self.WIDTH and 0<=y<self.HEIGHT:
             self.cells[y][x]=((ch or " ")[:1],color if color in self.COLORS else "cyan")
@@ -818,33 +824,98 @@ class SignalCanvas:
             if prev:self._line(prev[0],prev[1],x,y,color,ch)
             self._put(x,y,ch,color); prev=(x,y)
 
+    def _sprite(self,x,y,color,rows):
+        # Sprite spaces are transparent: ASCII art can sit over geometry/rain.
+        for dy,row in enumerate(rows):
+            for dx,ch in enumerate(row):
+                if ch != " ":
+                    self._put(x+dx,y+dy,ch,color)
+
+    def _bars(self,x,y,color,values):
+        # Values are normalized 0..1; y is the baseline and Python owns rasterization.
+        max_h=max(0,min(self.HEIGHT,y+1))
+        for dx,value in enumerate(values):
+            value=max(0.0,min(1.0,float(value)))
+            height=int(round(value*max_h))
+            for step in range(height):
+                self._put(x+dx,y-step,"█",color)
+
+    def _new_stats(self,accepted=0,rejected=0,clipped=0):
+        # One schema for every receipt path; keeps fallback and parser receipts compatible.
+        return {"accepted":accepted,"rejected":rejected,"clipped":clipped,"modes":set()}
+
+    def _mark_mode(self,mode):
+        if self._stats is not None:
+            self._stats["modes"].add(mode)
+
     def _apply(self,line,ttl):
         parts=line.split(); cmd=parts[0].upper()
         if cmd=="CLEAR": self.cells=self._blank(); self._stats["accepted"]+=1
         elif cmd=="TITLE" and len(parts)>=2: self.title=" ".join(parts[1:])[:28]; self._stats["accepted"]+=1
         elif cmd=="TTL" and len(parts)>=2: ttl[0]=max(5.0,min(180.0,float(parts[1]))); self._stats["accepted"]+=1
         elif cmd=="FPS" and len(parts)>=2: self.frame_fps=max(1.0,min(12.0,float(parts[1]))); self._stats["accepted"]+=1
-        elif cmd=="PUT" and len(parts)>=5: self._put(int(parts[1]),int(parts[2]),parts[4][0],parts[3].lower()); self._stats["accepted"]+=1
-        elif cmd=="TEXT" and len(parts)>=5: self._text(int(parts[1]),int(parts[2]),parts[3].lower(),line.split(None,4)[4]); self._stats["accepted"]+=1
-        elif cmd=="LINE" and len(parts)>=7: self._line(*map(int,parts[1:5]),parts[5].lower(),parts[6][0]); self._stats["accepted"]+=1
-        elif cmd=="BOX" and len(parts)>=7: self._box(*map(int,parts[1:5]),parts[5].lower(),parts[6][0]); self._stats["accepted"]+=1
-        elif cmd=="FILL" and len(parts)>=7: self._fill(*map(int,parts[1:5]),parts[5].lower(),parts[6][0]); self._stats["accepted"]+=1
-        elif cmd=="CIRCLE" and len(parts)>=6: self._circle(int(parts[1]),int(parts[2]),int(parts[3]),parts[4].lower(),parts[5][0]); self._stats["accepted"]+=1
-        elif cmd=="ELLIPSE" and len(parts)>=7: self._ellipse(int(parts[1]),int(parts[2]),int(parts[3]),int(parts[4]),parts[5].lower(),parts[6][0]); self._stats["accepted"]+=1
-        elif cmd=="ARROW" and len(parts)>=7: self._arrow(*map(int,parts[1:5]),parts[5].lower(),parts[6][0]); self._stats["accepted"]+=1
-        elif cmd=="PLOT" and len(parts)>=4: self._plot([float(v) for v in parts[3:]],parts[1].lower(),parts[2][0]); self._stats["accepted"]+=1
+        elif cmd=="PUT" and len(parts)>=5: self._put(int(parts[1]),int(parts[2]),parts[4][0],parts[3].lower()); self._mark_mode("raster"); self._stats["accepted"]+=1
+        elif cmd=="TEXT" and len(parts)>=5: self._text(int(parts[1]),int(parts[2]),parts[3].lower(),line.split(None,4)[4]); self._mark_mode("vector"); self._stats["accepted"]+=1
+        elif cmd=="LINE" and len(parts)>=7: self._line(*map(int,parts[1:5]),parts[5].lower(),parts[6][0]); self._mark_mode("vector"); self._stats["accepted"]+=1
+        elif cmd=="BOX" and len(parts)>=7: self._box(*map(int,parts[1:5]),parts[5].lower(),parts[6][0]); self._mark_mode("vector"); self._stats["accepted"]+=1
+        elif cmd=="FILL" and len(parts)>=7: self._fill(*map(int,parts[1:5]),parts[5].lower(),parts[6][0]); self._mark_mode("vector"); self._stats["accepted"]+=1
+        elif cmd=="CIRCLE" and len(parts)>=6: self._circle(int(parts[1]),int(parts[2]),int(parts[3]),parts[4].lower(),parts[5][0]); self._mark_mode("semantic"); self._stats["accepted"]+=1
+        elif cmd=="ELLIPSE" and len(parts)>=7: self._ellipse(int(parts[1]),int(parts[2]),int(parts[3]),int(parts[4]),parts[5].lower(),parts[6][0]); self._mark_mode("semantic"); self._stats["accepted"]+=1
+        elif cmd=="ARROW" and len(parts)>=7: self._arrow(*map(int,parts[1:5]),parts[5].lower(),parts[6][0]); self._mark_mode("semantic"); self._stats["accepted"]+=1
+        elif cmd=="PLOT" and len(parts)>=4: self._plot([float(v) for v in parts[3:]],parts[1].lower(),parts[2][0]); self._mark_mode("semantic"); self._stats["accepted"]+=1
+        elif cmd=="BARS" and len(parts)>=5: self._bars(int(parts[1]),int(parts[2]),parts[3].lower(),[float(v) for v in parts[4:]]); self._mark_mode("semantic"); self._stats["accepted"]+=1
         else: self._stats["rejected"]+=1
+
+    def _apply_sprite(self,header,rows):
+        parts=header.split()
+        if len(parts)<4 or parts[0].upper()!="SPRITE":
+            self._stats["rejected"]+=1; return
+        self._sprite(int(parts[1]),int(parts[2]),parts[3].lower(),rows)
+        self._mark_mode("raster")
+        self._stats["accepted"]+=1
+
+    def _parse_items(self,block):
+        """Parse commands while preserving leading/trailing spaces inside SPRITE blocks."""
+        raw=block.splitlines()
+        items=[]; i=0
+        while i<len(raw):
+            stripped=raw[i].strip()
+            if not stripped or stripped.startswith("#"):
+                i+=1; continue
+            if stripped.upper().startswith("SPRITE "):
+                rows=[]; i+=1; closed=False
+                while i<len(raw):
+                    if raw[i].strip().upper()=="END":
+                        closed=True; i+=1; break
+                    rows.append(raw[i].rstrip("\r"))
+                    i+=1
+                items.append(("sprite",stripped,rows,closed))
+                continue
+            items.append(("line",stripped,None,True))
+            i+=1
+        return items
+
+    def _apply_item(self,item,ttl):
+        kind,text,rows,closed=item
+        if kind=="sprite":
+            if not closed:
+                self._stats["rejected"]+=1; return
+            self._apply_sprite(text,rows)
+        else:
+            self._apply(text,ttl)
 
     def _receipt(self):
         cells=self._current_cells()
         points=[(x,y) for y,row in enumerate(cells) for x,c in enumerate(row) if c is not None]
-        bounds="empty"
+        bounds="empty"; occupied="0x0"
         if points:
             xs=[p[0] for p in points]; ys=[p[1] for p in points]
             bounds=f"x={min(xs)}..{max(xs)} y={min(ys)}..{max(ys)}"
-        receipt=(f"SIGNAL RECEIPT · title={self.title or '-'} · accepted={self._stats['accepted']} "
+            occupied=f"{max(xs)-min(xs)+1}x{max(ys)-min(ys)+1}"
+        mode="+".join(sorted(self._stats["modes"])) or "control"
+        receipt=(f"SIGNAL RECEIPT · title={self.title or '-'} · mode={mode} · accepted={self._stats['accepted']} "
                  f"rejected={self._stats['rejected']} · clipped={self._stats['clipped']} · "
-                 f"frames={max(1,len(self.frames))} · {bounds}")
+                 f"nonempty={len(points)} · occupied={occupied} · frames={max(1,len(self.frames))} · {bounds}")
         self.history.append(receipt)
         self.history=self.history[-self.HISTORY_LIMIT:]
         self._save_history()
@@ -856,43 +927,45 @@ class SignalCanvas:
         if not blocks:return clean,False
 
         ttl=[self.DEFAULT_TTL]
-        self._stats={"accepted":0,"rejected":0,"clipped":0}
+        self._stats=self._new_stats()
         touched=False
         for block in blocks[-2:]:
-            lines=[ln.strip() for ln in block.splitlines() if ln.strip() and not ln.strip().startswith("#")]
-            has_frames=any(ln.upper()=="FRAME" for ln in lines)
+            items=self._parse_items(block)
+            has_frames=any(item[0]=="line" and item[1].upper()=="FRAME" for item in items)
             if has_frames:
                 globals_=[]; sections=[]; current=None
-                for line in lines:
-                    if line.upper()=="FRAME":
+                for item in items:
+                    if item[0]=="line" and item[1].upper()=="FRAME":
                         if current is not None: sections.append(current)
                         current=[]
                     elif current is None:
-                        globals_.append(line)
+                        globals_.append(item)
                     else:
-                        current.append(line)
+                        current.append(item)
                 if current is not None: sections.append(current)
                 self.frames=[]
-                for g in globals_:
-                    try:self._apply(g,ttl)
+                for item in globals_:
+                    try:self._apply_item(item,ttl)
                     except (ValueError,IndexError):self._stats["rejected"]+=1
                 global_title=self.title
                 for section in sections[:8]:
                     self.cells=self._blank(); self.title=global_title
-                    for line in section:
-                        try:self._apply(line,ttl)
+                    for item in section:
+                        try:self._apply_item(item,ttl)
                         except (ValueError,IndexError):self._stats["rejected"]+=1
                     self.frames.append([[cell for cell in row] for row in self.cells])
                 self.frame_started=time.time()
                 touched=bool(self.frames)
             else:
-                for line in lines:
-                    try:self._apply(line,ttl); touched=True
+                before=self._stats["accepted"]
+                for item in items:
+                    try:self._apply_item(item,ttl)
                     except (ValueError,IndexError):self._stats["rejected"]+=1
+                touched=touched or self._stats["accepted"]>before
 
         if touched:
             self.owner=owner if persist else None
-            self.expires_at=0.0 if persist else time.time()+ttl[0]
+            self.expires_at=0.0 if persist or ttl[0] <= 0 else time.time()+ttl[0]
             self._receipt()
         self._stats=None
         return clean,touched
@@ -920,7 +993,8 @@ class SignalCanvas:
         self._line(4,9,35,9,"dim",".")
         self.owner=owner
         self.expires_at=0.0 if owner else time.time()+60.0
-        self._stats={"accepted":4,"rejected":0,"clipped":0}
+        self._stats=self._new_stats(accepted=4)
+        self._mark_mode("semantic")
         self._receipt()
         self._stats=None
 
@@ -1065,17 +1139,29 @@ def _artifact_text(message, kind, fallback, preserve_signal=False):
 
 
 
-SIGNAL_LANGUAGE = """
+SIGNAL_LANGUAGE = r"""
 The Signal Field is one of your native expressive channels, not merely an optional drawing feature.
 Use it when a spatial idea is clearer than prose, when the operator asks you to imagine/dream/show/diagram,
 or when an atmospheric visual would genuinely add meaning. Do not draw constantly; draw when the image contributes.
 
-Canvas: 40x12 logical cells, x=0..39 and y=0..11.
+MENTAL MODEL
+Signal is a 40x12 addressable character framebuffer: x=0..39, y=0..11.
+Every cell may contain one printable single-width character and one supported color. Think of it as extremely
+low-resolution pixel art where characters add luminance, texture, and shape. You can build the same image at
+three levels; choose the highest-level representation that expresses your intent cleanly:
+- SEMANTIC: PLOT / BARS / CIRCLE / ELLIPSE / ARROW — you know what you want to depict; the host rasterizes it.
+- VECTOR: LINE / BOX / FILL / TEXT — you know the geometry.
+- RASTER: SPRITE / PUT — you know the exact character cells.
+Mix levels freely. Python should do deterministic geometry; do not waste tokens calculating pixels it can derive.
+
+Useful visual grammars include charts, meters, spectra/EQ displays, oscilloscope traces, maps, diagrams, icons,
+faces, machines, landscapes, abstract pixel art, status dashboards, and animation frames.
+
 Append a hidden block after normal prose:
 [[SIGNAL]]
 CLEAR
 TITLE optional short title
-TTL 45
+TTL seconds
 TEXT x y color words
 PUT x y color X
 LINE x0 y0 x1 y1 color *
@@ -1085,27 +1171,75 @@ CIRCLE cx cy radius color o
 ELLIPSE cx cy rx ry color o
 ARROW x0 y0 x1 y1 color -
 PLOT color * 0.1 0.5 0.9 0.4
+BARS x baseline_y color 0.15 0.32 0.75 0.91 0.67 0.40
+SPRITE x y color
+  .----.
+ / o  o \
+|   --   |
+ \______/
+END
 [[/SIGNAL]]
 
-For tiny animations, use up to 8 independent frames:
+SPRITE copies printable characters starting at x,y. Spaces are transparent, so indentation and holes matter.
+Keep sprite art within 40x12. BARS values are normalized 0..1; baseline_y is the bottom row of the bars.
+
+For tiny animations, use up to 8 independent frames. Frames may mix semantic, vector, and raster commands:
 [[SIGNAL]]
-TITLE BREATHING ORBIT
-TTL 60
+TITLE PULSE
 FPS 4
 FRAME
-CIRCLE 20 6 3 cyan o
-PUT 20 6 white *
+BARS 10 10 green 0.2 0.5 0.9 0.5 0.2
+SPRITE 18 3 cyan
+ .--.
+( oo )
+ '--'
+END
 FRAME
-CIRCLE 20 6 4 cyan o
-PUT 20 6 white *
+BARS 10 10 green 0.5 0.8 1.0 0.8 0.5
+SPRITE 18 3 cyan
+ .--.
+( OO )
+ '--'
+END
 [[/SIGNAL]]
 
-Colors: green cyan amber magenta red white dim.
-Stay inside 40x12. Prefer semantic geometry. Reserve labels first and avoid collisions.
-Future Crash records a tiny SIGNAL RECEIPT after rendering: accepted/rejected commands, clipping,
-bounds, title, and frame count. Recent receipts may appear in later context so you can improve your drawings.
-Scheduled Threads may use Signal persistently; a Thread drawing remains until replaced/cleared.
+Colors: green cyan amber magenta red white dim. TTL is optional; omit it for the normal persistent CRT behavior, and use it only when you intentionally want the image to expire.
+Stay inside 40x12. Reserve labels first and avoid collisions. Prefer semantic commands when the host can
+rasterize the idea; use SPRITE when the character composition itself is the picture.
+Future Crash records a tiny SIGNAL RECEIPT after rendering: modes used, accepted/rejected commands, clipping,
+nonempty cells, occupied dimensions, bounds, title, and frame count. Recent receipts may appear in later context
+so you can improve your drawings. Signal programs remain on the display until replaced or cleared. Use TTL only for intentionally temporary imagery.
+Scheduled Threads may also own Signal persistently; a Thread drawing remains until replaced/cleared.
 """
+
+
+VISUAL_WORDS = (
+    "draw", "sketch", "visualize", "visualise", "diagram", "map", "plot",
+    "signal", "animated", "animation", "sprite", "bars", "eq", "dashboard",
+    "oscilloscope", "spectrum", "framebuffer", "crt", "shape", "art",
+)
+
+def _wants_signal(text):
+    low = str(text or "").casefold()
+    return any(word in low for word in VISUAL_WORDS)
+
+def _signal_compile_prompt(request):
+    return (
+        "OPERATOR REQUEST:\n" + str(request or "") +
+        "\n\nCompile this directly for the Future Crash Signal Field. "
+        "OUTPUT ONLY one valid [[SIGNAL]]...[[/SIGNAL]] block. "
+        "No explanation, planning, analysis, markdown fence, or prose. "
+        "If animation was requested, include FPS and at least two FRAME sections."
+    )
+
+def _signal_repair_prompt(request, failed=""):
+    return (
+        "OPERATOR REQUEST:\n" + str(request or "") +
+        "\n\nPREVIOUS SIGNAL COMPILE DID NOT EMIT A PARSEABLE PROGRAM.\n" +
+        ("FAILED OUTPUT (do not imitate its narration):\n" + str(failed or "")[:1200] + "\n\n" if failed else "") +
+        "Compile the requested visual again. OUTPUT ONLY one valid [[SIGNAL]]...[[/SIGNAL]] block. "
+        "No explanation, planning, analysis, markdown fence, or prose. If animation was requested, include FPS and at least two FRAME sections."
+    )
 
 
 # ---------- Permissioned Host Tools ----------
@@ -1764,7 +1898,16 @@ class Oracle(threading.Thread):
                 messages = [
                     {"role":"system","content":_future_crash_personality()}
                 ]
-                if kind.startswith("thread:"):
+                if kind.startswith("signalcompile:") or kind.startswith("signalrepair:"):
+                    repair = kind.startswith("signalrepair:")
+                    system = (
+                        ("You are the Future Crash Signal compiler repair pass. The previous compile failed the display protocol. " if repair else "You are the Future Crash Signal compiler. ") +
+                        "Translate the operator's visual request directly into the Signal language. "
+                        "Do not reason visibly and do not discuss what you will draw. "
+                        "Return exactly one parseable Signal block and nothing else.\n" +
+                        SIGNAL_LANGUAGE
+                    )
+                elif kind.startswith("thread:"):
                     system = (
                         "You are a scheduled Future Crash Thread waking from sleep. "
                         "You receive the thread purpose, previous summary, and a verified HOST RECEIPT. "
@@ -1820,13 +1963,13 @@ class Oracle(threading.Thread):
                     "messages": messages,
                     "stream": False,
                     "keep_alive": -1,
-                    # Ambient and quick Ask should return immediately. Workstation
-                    # keeps model-default reasoning available for heavier work.
-                    "think": False if (kind in ("ambient", "ask", "fortune", "memory") or kind.startswith("thread:")) else True,
+                    # Conversation may reason; rendering is compilation and should not.
+                    "think": False if (kind in ("ambient", "ask", "fortune", "memory") or kind.startswith("thread:") or kind.startswith("signalcompile:") or kind.startswith("signalrepair:")) else True,
                     "options": {
                         "num_ctx": 8192 if kind == "work" else 4096,
-                        "temperature": .9 if kind in ("ambient", "fortune") else .35,
-                        "num_predict": 700 if kind == "work" else (240 if kind == "ask" else (180 if kind.startswith("thread:") else (96 if kind=="fortune" else 64))),
+                        "temperature": (.25 if (kind.startswith("signalcompile:") or kind.startswith("signalrepair:")) else (.9 if kind in ("ambient", "fortune") else .35)),
+                        # Separate prose and render budgets so Signal never competes with chat reasoning.
+                        "num_predict": 1600 if kind == "work" else (1200 if (kind.startswith("signalcompile:") or kind.startswith("signalrepair:")) else (400 if kind == "ask" else (300 if kind.startswith("thread:") else (96 if kind=="fortune" else 64)))),
                     },
                 }
                 data = json.dumps(payload).encode()
@@ -1842,7 +1985,7 @@ class Oracle(threading.Thread):
                     text=_artifact_text(message,kind,random.choice(OBSERVATIONS),preserve_signal=True)
                 elif kind=="fortune":
                     text=_artifact_text(message,kind,prompt,preserve_signal=False)
-                elif kind.startswith("thread:") or kind in {"ask","work"}:
+                elif kind.startswith("thread:") or kind.startswith("signalcompile:") or kind.startswith("signalrepair:") or kind in {"ask","work"}:
                     text=_model_output(message,preserve_signal=True)
                     if not text:
                         text="(model returned no visible response)"
@@ -1938,6 +2081,8 @@ class FutureCrash:
         self.answer = ""
         self.scroll = 0
         self.busy = False
+        self.activity_kind = ""
+        self.activity_started = 0.0
         self.online = False
         self.last_health = 0.0
         self.last_frame = ""
@@ -1958,11 +2103,63 @@ class FutureCrash:
         self.quit_from = "ambient"
         self.memory_from = "work"
         self.work_history = []
+        self.ask_signal_required = False
+        self.ask_signal_request = ""
+        self.work_signal_required = False
+        self.work_signal_request = ""
         self.work_log = []
         self.work_pending_user = None
         self.work_notice = ""
         self.work_notice_until = 0.0
         self.rain = [self.rng.randint(0, 30) for _ in range(80)]
+
+    def _activity_label(self, kind):
+        """Human-scale label for the one Oracle job currently in flight."""
+        kind = str(kind or "")
+        if kind.startswith("signalcompile:") or kind.startswith("signalrepair:"):
+            return "SIGNAL COMPILE"
+        if kind.startswith("thread:"):
+            task_id = kind.split(":", 1)[1]
+            task = self.threads.get(task_id)
+            title = str(task.get("title", "THREAD")) if task else "THREAD"
+            return "THREAD " + title[:18]
+        return {
+            "work": "WORKSTATION",
+            "ask": "ORACLE",
+            "memory": "MEMORY",
+            "ambient": "ORACLE",
+            "fortune": "FORTUNE",
+        }.get(kind, "WORKING")
+
+    def _ask_oracle(self, kind, prompt, history=None):
+        """Start one background Oracle operation and expose its persistent UI state."""
+        self.busy = True
+        self.activity_kind = self._activity_label(kind)
+        self.activity_started = time.time()
+        self.last_frame = ""
+        self.oracle.ask(kind, prompt, history)
+
+    def _clear_activity(self):
+        self.busy = False
+        self.activity_kind = ""
+        self.activity_started = 0.0
+
+    def _decorate_activity(self, frame, width):
+        """Paint LOOK's tiny cyan half-circle spinner into every Future Crash view."""
+        if not self.busy or not frame:
+            return frame
+        frames = ("◐", "◓", "◑", "◒")
+        index = int(time.time() / 0.12) % len(frames)
+        elapsed = max(0, int(time.time() - self.activity_started)) if self.activity_started else 0
+        label = self.activity_kind or "WORKING"
+        suffix = f" {elapsed}s" if elapsed >= 2 else ""
+        badge = CYAN + frames[index] + RESET + DIM + " " + label + suffix + RESET
+        rows = frame.splitlines()
+        if not rows:
+            return frame
+        room = max(1, width - len(strip_ansi(badge)) - 1)
+        rows[0] = fit(rows[0], room) + " " + badge
+        return "\n".join(rows)
 
     def set_mode(self, mode):
         """Change UI state and force a clean repaint."""
@@ -2060,7 +2257,7 @@ class FutureCrash:
         response, request, tool_error = self.host.parse(response)
         if drew:
             self.last_frame = ""
-        return response, request, tool_error
+        return response, request, tool_error, drew
 
     def _thread_receipt(self):
         active = [t for t in self.threads.tasks if t.get("state") != "cancelled"]
@@ -2148,8 +2345,13 @@ class FutureCrash:
             "visual update, emit a fresh valid [[SIGNAL]] block on every wake. You may return "
             "SILENT as visible text while still drawing."
         )
+        if signal_feedback:
+            prompt += "\n\n" + signal_feedback
         self.busy = True
-        self.oracle.ask("thread:" + str(task.get("id")), prompt)
+        if task.get("preset") == "dream" or _wants_signal(task.get("purpose", "")):
+            self._ask_oracle("signalcompile:thread:" + str(task.get("id")), _signal_compile_prompt(prompt))
+        else:
+            self._ask_oracle("thread:" + str(task.get("id")), prompt)
 
     def _queue_tool_request(self, request, origin, visible_text, history=None):
         self.pending_tool = request
@@ -2205,14 +2407,14 @@ class FutureCrash:
             else:
                 self.answer = AMBER + "HOST OPERATION COMPLETED // Oracle continuing…" + RESET
             self.set_mode("answer")
-            self.oracle.ask("ask", continuation, history)
+            self._ask_oracle("ask", continuation, history)
         else:
             if visible_text:
                 self.work_log.append(("oracle", visible_text))
             self.work_log.append(("host", host_receipt))
             history.append({"role": "system", "content": host_receipt})
             self.set_mode("work")
-            self.oracle.ask("work", continuation, history)
+            self._ask_oracle("work", continuation, history)
 
 
     def start(self):
@@ -2248,7 +2450,7 @@ class FutureCrash:
         try:
             while True:
                 kind, text, err = self.oracle.responses.get_nowait()
-                self.busy = False
+                self._clear_activity()
                 if kind == "ambient":
                     if not err and text:
                         text, drew = self.signal.parse_from_response(text)
@@ -2268,16 +2470,91 @@ class FutureCrash:
                         self.answer = f"ORACLE LINK FAILED: {err}"
                         self.set_mode("answer")
                     else:
-                        text, request, tool_error = self._parse_model_payload(text)
+                        text, request, tool_error, drew = self._parse_model_payload(text)
                         if tool_error:
                             self.answer = (text + "\n\n" if text else "") + "TOOL REQUEST REJECTED // " + tool_error
                             self.set_mode("answer")
                         elif request:
                             self.answer = text
                             self._queue_tool_request(request, "ask", text)
+                        elif self.ask_signal_required and not drew:
+                            self.busy = True
+                            self._ask_oracle("signalrepair:ask", _signal_repair_prompt(self.ask_signal_request, text))
                         else:
+                            self.ask_signal_required = False
                             self.answer = text
                             self.set_mode("answer")
+                elif kind.startswith("signalcompile:"):
+                    target = kind.split(":", 1)[1]
+                    if target == "ask":
+                        clean, drew = self.signal.parse_from_response(text) if not err else ("", False)
+                        if not drew:
+                            self._ask_oracle("signalrepair:ask", _signal_repair_prompt(self.ask_signal_request, text))
+                            self.last_frame = ""
+                            continue
+                        self.ask_signal_required = False
+                        self.answer = clean.strip() if clean.strip() else "SIGNAL UPDATED"
+                        self.set_mode("answer")
+                        self.audio.cue("oracle")
+                    elif target == "work":
+                        clean, drew = self.signal.parse_from_response(text) if not err else ("", False)
+                        if not drew:
+                            self._ask_oracle("signalrepair:work", _signal_repair_prompt(self.work_signal_request, text))
+                            self.last_frame = ""
+                            continue
+                        self.work_signal_required = False
+                        final = clean.strip() if clean.strip() else "SIGNAL UPDATED"
+                        self.work_log.append(("oracle", final))
+                        self.work_history.append({"role":"assistant","content":final})
+                        if self.work_pending_user is not None:
+                            self.memory.add_exchange(self.work_pending_user, final)
+                            self.work_pending_user = None
+                        self.audio.cue("oracle")
+                    elif target.startswith("thread:"):
+                        task_id = target.split(":", 1)[1]
+                        clean, drew = self.signal.parse_from_response(text, owner=task_id, persist=True) if not err else ("", False)
+                        if not drew:
+                            task = self.threads.get(task_id)
+                            purpose = task.get("purpose", "") if task else ""
+                            self._ask_oracle("signalrepair:thread:" + task_id, _signal_repair_prompt(purpose, text))
+                            self.last_frame = ""
+                            continue
+                        self.thread_running_id = None
+                        self.threads.set_summary(task_id, "Signal updated.", changed=True)
+                        self.audio.cue("oracle")
+                    self.last_frame = ""
+                elif kind.startswith("signalrepair:"):
+                    target = kind.split(":", 1)[1]
+                    if target == "ask":
+                        clean, drew = self.signal.parse_from_response(text) if not err else ("", False)
+                        self.ask_signal_required = False
+                        self.answer = (clean.strip() if clean.strip() else ("SIGNAL UPDATED" if drew else "SIGNAL PROGRAM FAILED // no parseable display program returned"))
+                        self.set_mode("answer")
+                        if drew:
+                            self.audio.cue("oracle")
+                    elif target == "work":
+                        clean, drew = self.signal.parse_from_response(text) if not err else ("", False)
+                        self.work_signal_required = False
+                        final = clean.strip() if clean.strip() else ("SIGNAL UPDATED" if drew else "SIGNAL PROGRAM FAILED // no parseable display program returned")
+                        self.work_log.append(("oracle", final))
+                        self.work_history.append({"role":"assistant","content":final})
+                        if self.work_pending_user is not None:
+                            self.memory.add_exchange(self.work_pending_user, final)
+                            self.work_pending_user = None
+                        if drew:
+                            self.audio.cue("oracle")
+                    elif target.startswith("thread:"):
+                        task_id = target.split(":", 1)[1]
+                        self.thread_running_id = None
+                        clean, drew = self.signal.parse_from_response(text, owner=task_id, persist=True) if not err else ("", False)
+                        task = self.threads.get(task_id)
+                        if not drew and task and task.get("preset") == "dream":
+                            self.signal.fallback_dream(owner=task_id)
+                            drew = True
+                        self.threads.set_summary(task_id, "Signal updated." if drew else "Signal program failed.", changed=drew)
+                        if drew:
+                            self.last_frame = ""
+                    self.last_frame = ""
                 elif kind.startswith("thread:"):
                     task_id = kind.split(":", 1)[1]
                     self.thread_running_id = None
@@ -2286,9 +2563,13 @@ class FutureCrash:
                     else:
                         text, drew = self.signal.parse_from_response(text, owner=task_id, persist=True)
                         task=self.threads.get(task_id)
-                        if not drew and task and task.get("preset")=="dream":
-                            self.signal.fallback_dream(owner=task_id)
-                            drew=True
+                        visual_thread = bool(task and (task.get("preset") == "dream" or _wants_signal(task.get("purpose", ""))))
+                        if visual_thread and not drew:
+                            self.busy = True
+                            self.thread_running_id = task_id
+                            self._ask_oracle("signalrepair:thread:" + task_id, _signal_repair_prompt(task.get("purpose", ""), text))
+                            self.last_frame = ""
+                            continue
                         compact = " ".join(text.split()).strip()
                         if compact.upper() == "SILENT":
                             self.threads.set_summary(task_id, "No meaningful change.", changed=False)
@@ -2320,7 +2601,7 @@ class FutureCrash:
                         self.work_log.append(("oracle", final))
                         self.work_pending_user = None
                     else:
-                        text, request, tool_error = self._parse_model_payload(text)
+                        text, request, tool_error, drew = self._parse_model_payload(text)
                         if tool_error:
                             final = (text + "\n\n" if text else "") + "TOOL REQUEST REJECTED // " + tool_error
                             self.work_log.append(("oracle", final))
@@ -2331,7 +2612,13 @@ class FutureCrash:
                             # host operation chain has actually completed.
                             history = list(self.work_history)
                             self._queue_tool_request(request, "work", text, history)
+                        elif self.work_signal_required and not drew:
+                            # A visual request is not complete until a parseable Signal block exists.
+                            # One silent compiler pass prevents planning chatter from masquerading as output.
+                            self.busy = True
+                            self._ask_oracle("signalrepair:work", _signal_repair_prompt(self.work_signal_request, text))
                         else:
+                            self.work_signal_required = False
                             final = text
                             self.work_log.append(("oracle", final))
                             self.work_history.append({"role":"assistant","content":final})
@@ -2343,7 +2630,7 @@ class FutureCrash:
                                     self.busy = True
                                     self.work_notice = "MEMORY PRESSURE // consolidating eight recent slots…"
                                     self.work_notice_until = time.time() + 30.0
-                                    self.oracle.ask("memory", self.memory.consolidation_prompt())
+                                    self._ask_oracle("memory", self.memory.consolidation_prompt())
         except queue.Empty:
             pass
 
@@ -2378,7 +2665,7 @@ class FutureCrash:
             and now >= self.next_ambient
         ):
             self.busy = True
-            self.oracle.ask("ambient", "Produce one ambient system observation.")
+            self._ask_oracle("ambient", "Produce one ambient system observation.")
 
         if self.mode == "ambient" and now >= self.next_fortune:
             seed = self.rng.choice(FORTUNES)
@@ -2386,7 +2673,7 @@ class FutureCrash:
             self.next_fortune = now + self.rng.uniform(38, 85)
             if self.online and not self.busy:
                 self.busy = True
-                self.oracle.ask("fortune", seed)
+                self._ask_oracle("fortune", seed)
             else:
                 # Local seed remains a graceful fallback while Ollama is
                 # offline or occupied by more important work.
@@ -2437,7 +2724,7 @@ class FutureCrash:
                 self.audio.cue("fortune")
                 if self.online and not self.busy:
                     self.busy = True
-                    self.oracle.ask("fortune", seed)
+                    self._ask_oracle("fortune", seed)
             elif key in ("m", "M"):
                 self.toggle_audio()
             elif key in ("?", "h", "H"):
@@ -2452,7 +2739,7 @@ class FutureCrash:
             elif key in ("r", "R") and self.online and not self.busy:
                 self.busy = True
                 self.observation = "Oracle is listening to the static…"
-                self.oracle.ask("ambient", "Produce one ambient system observation.")
+                self._ask_oracle("ambient", "Produce one ambient system observation.")
             elif key in ("s", "S"):
                 self.signal.clear()
                 self.audio.cue("recover")
@@ -2644,14 +2931,13 @@ class FutureCrash:
                         memory_packet
                     ),
                 })
-            visual_words = ("draw", "sketch", "show", "visualize", "visualise", "diagram", "map", "plot")
-            ask_prompt = text
-            if any(word in text.lower() for word in visual_words):
-                ask_prompt += (
-                    "\n\nSYSTEM VISUAL REQUEST: use the Signal Field for this answer. "
-                    "Include one valid [[SIGNAL]] block after the prose; prefer semantic geometry primitives."
-                )
-            self.oracle.ask("ask", ask_prompt, history)
+            self.ask_signal_required = _wants_signal(text)
+            self.ask_signal_request = text
+            if self.ask_signal_required:
+                signal_history = [{"role":"system","content":signal_packet}] if signal_packet else []
+                self._ask_oracle("signalcompile:ask", _signal_compile_prompt(text), signal_history)
+            else:
+                self._ask_oracle("ask", text, history)
         else:
             self.work_log.append(("you", text))
             self.work_history.append({"role":"user","content":text})
@@ -2677,14 +2963,13 @@ class FutureCrash:
 
             if history and history[-1].get("role") == "user" and history[-1].get("content") == text:
                 history = history[:-1]
-            visual_words = ("draw", "sketch", "show", "visualize", "visualise", "diagram", "map", "plot")
-            work_prompt = text
-            if any(word in text.lower() for word in visual_words):
-                work_prompt += (
-                    "\n\nSYSTEM VISUAL REQUEST: use the Signal Field for this answer. "
-                    "Include one valid [[SIGNAL]] block after the prose; prefer semantic geometry primitives."
-                )
-            self.oracle.ask("work", work_prompt, history)
+            self.work_signal_required = _wants_signal(text)
+            self.work_signal_request = text
+            if self.work_signal_required:
+                signal_history = [{"role":"system","content":signal_packet}] if signal_packet else []
+                self._ask_oracle("signalcompile:work", _signal_compile_prompt(text), signal_history)
+            else:
+                self._ask_oracle("work", text, history)
 
     def box(self, title, lines, width, height, color=GREEN):
         inner = max(1, width - 4)
@@ -2705,22 +2990,24 @@ class FutureCrash:
         w = max(71, physical_w - 1)
         h = max(22, h)
         if self.mode == "ambient":
-            return self.render_ambient(w, h)
-        if self.mode == "ask":
-            return self.render_input(w, h, "ASK THE ORACLE", "quick / disposable / host actions require permission")
-        if self.mode == "answer":
-            return self.render_answer(w, h)
-        if self.mode == "quit":
-            return self.render_quit(w, h)
-        if self.mode == "tool_approval":
-            return self.render_tool_approval(w, h)
-        if self.mode == "threads":
-            return self.render_threads(w, h)
-        if self.mode == "help":
-            return self.render_help(w, h)
-        if self.mode == "memory_clear":
-            return self.render_memory_clear(w, h)
-        return self.render_work(w, h)
+            frame = self.render_ambient(w, h)
+        elif self.mode == "ask":
+            frame = self.render_input(w, h, "ASK THE ORACLE", "quick / disposable / host actions require permission")
+        elif self.mode == "answer":
+            frame = self.render_answer(w, h)
+        elif self.mode == "quit":
+            frame = self.render_quit(w, h)
+        elif self.mode == "tool_approval":
+            frame = self.render_tool_approval(w, h)
+        elif self.mode == "threads":
+            frame = self.render_threads(w, h)
+        elif self.mode == "help":
+            frame = self.render_help(w, h)
+        elif self.mode == "memory_clear":
+            frame = self.render_memory_clear(w, h)
+        else:
+            frame = self.render_work(w, h)
+        return self._decorate_activity(frame, w)
 
     def render_ambient(self, w, h):
         s = self.telemetry.snapshot()
@@ -2793,13 +3080,15 @@ class FutureCrash:
         rain_w = max(10, right_w - 6)
         rain_h = max(5, panel_h - 9)
         overlay = self.signal.sample(rain_w, rain_h) if self.signal.active() else None
+        scan_row = self.signal.scan_row(rain_h) if overlay else -1
         for row in range(rain_h):
             chars = []
             for col in range(rain_w):
                 painted = overlay[row][col] if overlay else None
                 if painted is not None:
                     ch, color_name = painted
-                    chars.append(SignalCanvas.COLORS.get(color_name, CYAN) + ch + RESET)
+                    glow = BOLD if row == scan_row else ""
+                    chars.append(glow + SignalCanvas.COLORS.get(color_name, CYAN) + ch + RESET)
                     continue
                 idx = col % len(self.rain)
                 delta = (self.rain[idx] - row) % 32
@@ -2905,6 +3194,7 @@ class FutureCrash:
         inner_h = max(3, height - 2)
         active = self.signal.active()
         sampled = self.signal.sample(inner_w, inner_h) if active else None
+        scan_row = self.signal.scan_row(inner_h) if sampled else -1
         lines = []
         for y in range(inner_h):
             chars = []
@@ -2912,7 +3202,8 @@ class FutureCrash:
                 cell = sampled[y][x] if sampled else None
                 if cell:
                     ch, color_name = cell
-                    chars.append(SignalCanvas.COLORS.get(color_name, CYAN) + ch + RESET)
+                    glow = BOLD if y == scan_row else ""
+                    chars.append(glow + SignalCanvas.COLORS.get(color_name, CYAN) + ch + RESET)
                 else:
                     # A very faint living field makes the pane feel connected
                     # without obscuring model drawings.
@@ -2943,7 +3234,7 @@ class FutureCrash:
         lines.append(CYAN + "┌" + "─" * (usable + 2) + "┐" + RESET)
         lines.append(CYAN + "│ " + RESET + fit(shown, usable) + CYAN + " │" + RESET)
         lines.append(CYAN + "└" + "─" * (usable + 2) + "┘" + RESET)
-        lines += ["", DIM + "[ENTER] send   [CTRL-U] clear   [ESC] return" + RESET]
+        lines += ["", DIM + "[enter] send   [ctrl-u] clear   [esc] return" + RESET]
         pad_top = max(1, (h - len(lines)) // 3)
         frame = [""] * pad_top + ["   " + x for x in lines]
         while len(frame) < h:
@@ -3056,7 +3347,7 @@ class FutureCrash:
             frame.append("")
         prompt = "> " + self.input + ("_" if not self.busy else "")
         frame.append(fit(prompt, w - 1))
-        frame.append(DIM + "[ENTER] send   [CTRL-T] threads   [CTRL-U] clear conversation   [CTRL-K] erase memory   [ESC] return" + RESET)
+        frame.append(DIM + "[enter] send   [ctrl-t] threads   [ctrl-u] clear conversation   [ctrl-k] erase memory   [esc] return" + RESET)
         while len(frame) < h:
             frame.append("")
         return "\n".join(safe_row(row, w) for row in frame[:h])
@@ -3212,7 +3503,7 @@ class FutureCrash:
             frame.append("")
         dream=self.threads.dream_task()
         dream_state="ON" if dream and dream.get("state")=="active" else "OFF"
-        frame.append(DIM + f"[D] dream {dream_state}   [ENTER] details   [J/K or ↑/↓] select   [P] pause   [R] resume   [X] cancel   [ESC] return" + RESET)
+        frame.append(DIM + f"[d] dream {dream_state}   [enter] details   [j/k or ↑/↓] select   [p] pause   [r] resume   [x] cancel   [esc] return" + RESET)
         while len(frame) < h:
             frame.append("")
         return "\n".join(safe_row(row, w) for row in frame[:h])

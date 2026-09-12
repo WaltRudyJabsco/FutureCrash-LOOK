@@ -17,7 +17,7 @@ try:
 except Exception:
     readline = None
 
-VERSION="3.8.0"
+VERSION="3.8.1"
 
 LOOK_WORDMARK = r"""       ██╗      ██╗  ██╗
        ██║      ██║ ██╔╝
@@ -1332,10 +1332,20 @@ def _skills_command(args):
     return 0
 
 
-def _local_chat_once(base, model, messages):
+def _local_chat_once(base, model, messages, *, num_ctx=4096, num_predict=128, think=False, temperature=0.2):
     import json
     import urllib.request
-    payload=json.dumps({"model": model, "messages": messages, "stream": False}).encode()
+    payload=json.dumps({
+        "model": model,
+        "messages": messages,
+        "stream": False,
+        "think": think,
+        "options": {
+            "num_ctx": int(num_ctx),
+            "num_predict": int(num_predict),
+            "temperature": float(temperature),
+        },
+    }).encode()
     request=urllib.request.Request(
         base + "/api/chat", data=payload,
         headers={"Content-Type": "application/json"}, method="POST"
@@ -1421,7 +1431,7 @@ ASSISTANT:
         raw=_local_chat_once(base,model,[
             {"role":"system","content":"You maintain compact conversational memory. Preserve substantive continuity; decay will forget weak memories later."},
             {"role":"user","content":prompt},
-        ])
+        ], num_ctx=4096, num_predict=128, think=False, temperature=0.15)
         final=_strip_reasoning_payload(raw).strip()
         if final.upper()=="NONE":
             return None
@@ -1459,7 +1469,7 @@ STRONG MEMORIES:
         raw=_local_chat_once(base,model,[
             {"role":"system","content":"Maintain one compact semantic long-term user summary. Output only the clean summary."},
             {"role":"user","content":prompt},
-        ])
+        ], num_ctx=4096, num_predict=300, think=False, temperature=0.15)
         clean=_sanitize_summary(raw)
         return clean if clean else old_summary
     except Exception:
@@ -1574,7 +1584,7 @@ ASSISTANT:
         raw=_local_chat_once(base,model,[
             {"role":"system","content":"You review completed work for rare, genuinely reusable assistant craft. Usually answer NONE."},
             {"role":"user","content":prompt},
-        ])
+        ], num_ctx=4096, num_predict=96, think=False, temperature=0.1)
         final=_strip_reasoning_payload(raw).strip()
         if final.upper()=="NONE":
             return None
@@ -1707,7 +1717,7 @@ EXPLICIT DURABLE MEMORY:
         raw=_local_chat_once(base,model,[
             {"role":"system","content":"Maintain a compact, current, forgetful long-term user summary. Output only the summary."},
             {"role":"user","content":prompt},
-        ])
+        ], num_ctx=4096, num_predict=300, think=False, temperature=0.15)
         clean=_sanitize_summary(raw)
         return clean if clean else old_summary
     except Exception:
@@ -2506,6 +2516,64 @@ LO_PERSONALITIES=("lo","robot","max","philosopher")
 LO_THINKING=("light","adaptive","deep")
 LO_THINK_DISPLAY=("compact","full","quiet")
 
+# LO keeps a bounded working set. Persistent continuity belongs to memory, not an
+# ever-growing chat transcript. Output ceilings are intentionally generous: they
+# are limits, not targets, and modern local hardware benefits more from headroom
+# than from prematurely truncating useful work.
+LO_CONTEXT_TOKENS=8192
+LO_LIGHT_OUTPUT_TOKENS=800
+LO_ADAPTIVE_OUTPUT_TOKENS=1400
+LO_DEEP_OUTPUT_TOKENS=2000
+LO_HISTORY_MAX_MESSAGES=20
+LO_HISTORY_MAX_CHARS=22000
+
+def _lo_prompt_needs_thinking(prompt):
+    """Small, inspectable adaptive heuristic; avoid turning casual chat into a reasoning job."""
+    text=" ".join(str(prompt or "").split()).casefold()
+    if len(text) >= 260 or "```" in text or "traceback" in text:
+        return True
+    structural=(
+        "debug", "diagnose", "analy", "compare", "tradeoff", "trade-off",
+        "architect", "design", "refactor", "implement", "why does", "why is",
+        "step by step", "plan", "reason", "prove", "review this code",
+    )
+    return sum(1 for marker in structural if marker in text) >= 1
+
+def _lo_runtime_policy(mode, prompt):
+    mode=(mode or "adaptive").lower()
+    if mode=="light":
+        return {"think":False,"num_predict":LO_LIGHT_OUTPUT_TOKENS,"temperature":0.35}
+    if mode=="deep":
+        return {"think":True,"num_predict":LO_DEEP_OUTPUT_TOKENS,"temperature":0.30}
+    return {
+        "think":_lo_prompt_needs_thinking(prompt),
+        "num_predict":LO_ADAPTIVE_OUTPUT_TOKENS,
+        "temperature":0.35,
+    }
+
+def _lo_message_size(message):
+    try:
+        return len(json.dumps(message, ensure_ascii=False, default=str))
+    except Exception:
+        return len(str(message))
+
+def _trim_lo_history(messages, base_count):
+    """Keep core system context plus a bounded recent working conversation."""
+    base=list(messages[:base_count])
+    tail=list(messages[base_count:])[-LO_HISTORY_MAX_MESSAGES:]
+    kept=[]
+    used=0
+    for item in reversed(tail):
+        size=_lo_message_size(item)
+        if kept and used+size > LO_HISTORY_MAX_CHARS:
+            break
+        kept.append(item); used+=size
+    kept.reverse()
+    # Never begin retained history in the middle of a tool-call transaction.
+    while kept and kept[0].get("role") != "user":
+        kept.pop(0)
+    return base+kept
+
 def _read_choice(path, allowed, default, env_name=None):
     if env_name:
         value=os.environ.get(env_name,"").strip().lower()
@@ -3157,6 +3225,8 @@ def ollama_chat(force_search=False, initial_prompt=None, allow_start=True, host_
         print(f"LOOK OLLAMA · {shown_host if 'shown_host' in locals() else _ollama_host_name(base)} is reachable, but has no models installed")
         return 1
     resident = model in running_names
+    model_caps=_ollama_capabilities(base, model)
+    supports_thinking=bool(model_caps and "thinking" in model_caps)
 
     has_web = bool(os.environ.get("OLLAMA_API_KEY"))
     mode = "LOOK OLLAMA SEARCH" if force_search else "LOOK OLLAMA"
@@ -3235,9 +3305,9 @@ def ollama_chat(force_search=False, initial_prompt=None, allow_start=True, host_
     messages.append({"role":"system","content":capability_notes[profile]})
     thinking_mode=_load_thinking()
     thinking_notes={
-        "light":"THINKING DEPTH: LIGHT. Favor fast direct responses; use extra deliberation only when correctness requires it.",
-        "adaptive":"THINKING DEPTH: ADAPTIVE. Match reasoning effort to task difficulty; trivial turns should feel immediate.",
-        "deep":"THINKING DEPTH: DEEP. Deliberate carefully on substantive work while avoiding repetitive self-commentary.",
+        "light":"THINKING DEPTH: LIGHT. Give fast, direct answers.",
+        "adaptive":"THINKING DEPTH: ADAPTIVE. Use deliberate reasoning only when the task actually needs it.",
+        "deep":"THINKING DEPTH: DEEP. Deliberate carefully on substantive work without repetitive self-commentary.",
     }
     messages.append({"role":"system","content":thinking_notes[thinking_mode]})
 
@@ -3245,6 +3315,7 @@ def ollama_chat(force_search=False, initial_prompt=None, allow_start=True, host_
     if memory_context:
         messages.append({"role": "system", "content": memory_context})
 
+    base_message_count=len(messages)
     pending_prompt = (initial_prompt or "").strip()
     while True:
         if pending_prompt:
@@ -3264,6 +3335,7 @@ def ollama_chat(force_search=False, initial_prompt=None, allow_start=True, host_
         if not prompt:
             continue
 
+        messages=_trim_lo_history(messages, base_message_count)
         messages.append({"role": "user", "content": prompt})
 
         # Search mode is deliberately deterministic: search first, then answer.
@@ -3292,11 +3364,19 @@ def ollama_chat(force_search=False, initial_prompt=None, allow_start=True, host_
 
         # Normal mode exposes search as a tool. Tool-capable models decide when to use it.
         for _ in range(4):
+            runtime=_lo_runtime_policy(thinking_mode, prompt)
             payload_obj = {
                 "model": model,
                 "messages": messages,
                 "stream": False,
+                "options": {
+                    "num_ctx": LO_CONTEXT_TOKENS,
+                    "num_predict": runtime["num_predict"],
+                    "temperature": runtime["temperature"],
+                },
             }
+            if supports_thinking:
+                payload_obj["think"]=runtime["think"]
             tools = _lo_tools(profile)
             if has_web and not force_search:
                 tools.append(web_tool)

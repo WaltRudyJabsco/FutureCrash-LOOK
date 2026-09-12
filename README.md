@@ -287,7 +287,9 @@ lo --unsafe
 
 LO does not dump a giant transcript into every prompt.
 
-It keeps a bounded pool of candidate memories and only exposes a small working set to the model. Candidate memories have importance values, decay when they stop mattering, and strengthen when they genuinely prove useful.
+Its live working context is explicitly bounded at 8192 tokens. Core system/workspace context stays fixed while recent conversation is retained under both a message-count and serialized-size budget; older continuity is expected to survive through memory rather than an endlessly growing transcript.
+
+It also keeps a bounded pool of candidate memories and only exposes a small working set to the model. Candidate memories have importance values, decay when they stop mattering, and strengthen when they genuinely prove useful.
 
 ```sh
 lk memory
@@ -387,7 +389,10 @@ Future Crash preserves valid `[[SIGNAL]]` blocks even when an Ollama/Qwen model 
 Future Crash can now treat Signal as part of its native language rather than a special-case drawing trick.
 
 - Ask and Workstation may use Signal when a visual genuinely improves the answer.
-- Signal renders produce a tiny persistent receipt: accepted/rejected commands, clipping, occupied bounds, title, and frame count.
+- Signal is explicitly modeled as a **40×12 addressable character framebuffer**. It can work at three levels: semantic primitives (`PLOT`, `BARS`, circles/arrows), vector geometry (`LINE`, `BOX`, `TEXT`), or exact raster composition (`SPRITE`, `PUT`).
+- `SPRITE x y color ... END` preserves character-art whitespace; spaces are transparent, so sprites can layer over other Signal content.
+- `BARS x baseline_y color ...` turns normalized values into deterministic host-rasterized columns for EQs, meters, spectra, and dashboards.
+- Signal renders produce a tiny persistent receipt with modes used, accepted/rejected commands, clipping, nonempty cells, occupied dimensions/bounds, title, and frame count.
 - The latest few receipts are fed back to Future Crash so later drawings can improve.
 - Signal supports tiny multi-frame animations with `FPS` + `FRAME`.
 - The Threads screen has a built-in **Signal Dream** preset: press `D` to toggle a roughly four-minute model-only dream thread.
@@ -455,7 +460,9 @@ They live in `~/.local/share/look/personalities/`. The active selection is separ
 
 `full` exposes the visible thinking stream as readable chunks. `quiet` minimizes reasoning display. These are presentation choices; they do not change capability permissions.
 
-Thinking depth defaults to `adaptive`: trivial questions should feel immediate while difficult coding or reasoning work can receive more deliberation.
+Thinking depth defaults to `adaptive`. On models that advertise Ollama thinking support, these are real runtime controls rather than prompt-only hints: `light` disables deliberate thinking with an 800-token output ceiling, `deep` enables it with 2000 tokens, and `adaptive` uses a 1400-token ceiling while enabling thinking only for clearly analytical, debugging, coding, or multi-step requests. All modes use an 8192-token working context.
+
+The ceilings are intentionally generous and are not targets: a short answer still stops early. Background memory/skill maintenance is separate and uses much smaller no-thinking budgets.
 
 ---
 
@@ -663,9 +670,11 @@ This release establishes the following baseline:
 
 | Layer | Version |
 | --- | ---: |
-| Future Crash + LOOK | **1.6.1** |
+| Future Crash + LOOK | **1.6.7** |
 | LOOK | **3.8.0** |
-| Future Crash | **1.1.1** |
+| Future Crash | **1.1.7** |
+
+Signal rendering is now compiled separately from conversation: explicit Signal requests use a focused no-thinking 1200-token render pass, while ordinary Workstation conversation retains its own reasoning budget.
 | Memory schema | **1** |
 | Skills schema | **1** |
 | Bundled skills pack | **1** |

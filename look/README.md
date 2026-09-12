@@ -638,7 +638,7 @@ File and directory creation are journaled and available to `lk undo`. Undo refus
 
 `lk personality [lo|robot|max|philosopher]` selects an inspectable Markdown personality pack.
 
-`lk thinking [light|adaptive|deep]` controls requested reasoning effort.
+`lk thinking [light|adaptive|deep]` controls actual reasoning effort on Ollama models that advertise thinking support. Light uses no deliberate thinking and an 800-token output ceiling; adaptive uses up to 1400 tokens and escalates deliberate thinking for structurally complex work; deep enables thinking with a 2000-token ceiling. LO uses an 8192-token working context with bounded recent history.
 
 `lk think-display [compact|full|quiet]` controls visible reasoning presentation. Compact is the default rolling live view.
 

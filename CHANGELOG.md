@@ -1,4 +1,59 @@
+## 1.6.8 — Explicit LO model budgets
+
+- Gives LO an explicit 8192-token working context and bounded recent conversation history instead of allowing the transcript to grow indefinitely.
+- Makes `lk thinking light/adaptive/deep` control Ollama reasoning behavior when the selected model advertises thinking support.
+- Uses generous interactive ceilings: 800 tokens light, 1400 adaptive, and 2000 deep.
+- Adaptive thinking stays immediate for simple conversation and escalates for clearly analytical, debugging, coding, or multi-step requests.
+- Gives memory extraction, skill extraction, and summary maintenance small explicit no-thinking budgets so background housekeeping cannot waste hidden deliberation.
+- Keeps capability/tool behavior unchanged; this release changes model-resource policy, not permissions.
+
+## 1.6.7 — Conversation/render budget split
+
+- Routes explicit Signal requests directly to a dedicated no-thinking Signal compiler instead of making Workstation narration and rendering compete for one response.
+- Signal compile/repair gets 1200 output tokens at temperature 0.25; ordinary Workstation gets 1600, Quick Ask 400, and ordinary Threads 300.
+- Visual Threads use the same Signal compiler while retaining their verified host receipt and recent Signal receipt.
+- Signal compilation receives only the visual request and recent Signal feedback, not unrelated conversation/memory context.
+- Keeps one silent repair pass if the dedicated compiler still returns malformed Signal.
+
+## 1.6.7 — Conversation/render budget split
+
+- Routes explicit Signal requests directly to a dedicated no-thinking Signal compiler instead of making Workstation narration and rendering compete for one response.
+- Signal compile/repair gets 1200 output tokens at temperature 0.25; ordinary Workstation gets 1600, Quick Ask 400, and ordinary Threads 300.
+- Visual Threads use the same Signal compiler while retaining their verified host receipt and recent Signal receipt.
+- Signal compilation receives only the visual request and recent Signal feedback, not unrelated conversation/memory context.
+- Keeps one silent repair pass if the dedicated compiler still returns malformed Signal.
+
+## 1.6.6 — Persistent activity + full Signal compile budget
+
+- Added LOOK-style cyan `◐ ◓ ◑ ◒` activity feedback across Future Crash views while Oracle work is in flight.
+- Activity state survives leaving Workstation, so `esc` can return to Ambient without making a running request look stalled or cancelled.
+- Labels distinguish Workstation, Oracle, Thread, Memory, Fortune, and Signal compiler activity.
+- Fixed the Signal repair pass output budget: complex sprites/animations now receive 600 output tokens instead of the generic 64-token fallback.
+- Signal repair runs without model reasoning so the budget is spent on the display program itself.
+- LOOK behavior is otherwise unchanged.
+
+## 1.6.5 — Signal protocol completion
+
+- Treat visual requests as incomplete until a parseable `[[SIGNAL]]` program is actually received.
+- Add one silent Signal compiler-repair pass for Workstation, Quick Oracle, and visual Threads.
+- Suppress prose-only planning chatter from failed visual Thread attempts instead of presenting it as completed work.
+- Keep the existing deterministic framebuffer/animation renderer; no model-driven timing loop added.
+- Normalize Workstation control hints to lowercase key labels.
+- Correct installer/version metadata drift from earlier 1.6.x packaging.
+
+## 1.6.3
+
+- Fix Signal fallback-dream receipt crash introduced in 1.6.2 by centralizing Signal receipt stats initialization.
+
 # Future Crash + LOOK changelog
+
+## 1.6.2 — raster Signal Field
+
+- Teaches Signal its full 40x12 addressable character-framebuffer mental model.
+- Adds whitespace-preserving `SPRITE` raster art and host-rasterized normalized `BARS`.
+- Signal receipts now report render modes, nonempty-cell count, and occupied dimensions.
+- Animation frames may freely mix semantic, vector, and raster primitives.
+
 
 ## 1.6.1 — Signal wiring fix
 
@@ -112,3 +167,10 @@
 - Adds context-sensitive Zsh completion for `lk`.
 - Adds LO option/host completion without trying to complete natural-language prompts.
 - Saved Ollama hosts are read dynamically for completion.
+
+## 1.6.4
+
+- Signal is now a persistent CRT-style display by default; `TTL` is opt-in for temporary imagery.
+- Signal playback remains host-timed and continues independently of the Workstation conversation.
+- Added a subtle continuous CRT scan glow over active Signal content.
+- Visual-request detection now recognizes Signal/animation/sprite/EQ/dashboard language and explicitly requires emitted Signal code rather than prose-only discussion.
