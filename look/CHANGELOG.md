@@ -1,3 +1,10 @@
+## 4.0.1 — Canonical information edges
+
+- Added Wikidata, Crossref, and Internet Archive read-only tools.
+- Unified information-tool provenance receipts.
+- Taught LO the DIRECT / DERIVED / SEARCHED / MODEL distinction.
+- Added human-facing Living With LOOK and information-edge documentation.
+
 ## 4.0.0 — Explicit state architecture
 
 - Defined program, profile, machine, and runtime state as separate contracts.

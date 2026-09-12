@@ -979,3 +979,8 @@ Interactive file-action prompts use Tab for completion and bare Escape for clean
 
 `f` and `fznv` intentionally use a streaming picker for the global `$HOME` search. You can begin typing immediately while `fd`/`find` continues producing candidates. The picker uses LOOK-style colors and indicators; `f` then hands the selected result into LOOK for normal actions.
 
+
+
+## Living with LOOK
+
+For a non-reference explanation of how Future Crash, LOOK, LO, files, background work, and canonical information sources fit into an ordinary workflow, see `docs/LIVING-WITH-LOOK.md`. Information provenance is documented in `docs/INFORMATION-EDGES.md`.

@@ -17,7 +17,7 @@ try:
 except Exception:
     readline = None
 
-VERSION="4.0.0"
+VERSION="4.0.1"
 
 LOOK_WORDMARK = r"""       ██╗      ██╗  ██╗
        ██║      ██║ ██╔╝
@@ -3380,9 +3380,12 @@ def _run_system_inspection_tool(name,args):
 
 def _information_tools():
     return [
-        {"type":"function","function":{"name":"weather","description":"Get current weather and today's forecast for a named place from Open-Meteo. Prefer this for live weather instead of guessing or generic web search.","parameters":{"type":"object","properties":{"location":{"type":"string"}},"required":["location"]}}},
-        {"type":"function","function":{"name":"place_lookup","description":"Resolve a city, town, region, postal code, or named geographic place to coordinates and timezone using Open-Meteo geocoding. Not a business search or directions tool.","parameters":{"type":"object","properties":{"query":{"type":"string"}},"required":["query"]}}},
-        {"type":"function","function":{"name":"wikipedia","description":"Search English Wikipedia for compact canonical article matches. Prefer this for stable encyclopedic background; use web_search for current events.","parameters":{"type":"object","properties":{"query":{"type":"string"}},"required":["query"]}}},
+        {"type":"function","function":{"name":"weather","description":"Canonical live weather edge. Get current weather and forecast from Open-Meteo. MUST use for current weather rather than model memory.","parameters":{"type":"object","properties":{"location":{"type":"string"}},"required":["location"]}}},
+        {"type":"function","function":{"name":"place_lookup","description":"Canonical PLACE edge. Resolve a geographic place to coordinates and timezone. Not a business search or directions tool.","parameters":{"type":"object","properties":{"query":{"type":"string"}},"required":["query"]}}},
+        {"type":"function","function":{"name":"wikipedia","description":"Canonical WIKI edge. Search English Wikipedia for stable human-readable encyclopedic background.","parameters":{"type":"object","properties":{"query":{"type":"string"}},"required":["query"]}}},
+        {"type":"function","function":{"name":"wikidata","description":"Canonical DATA edge. Search Wikidata for structured entities, identifiers, descriptions, and canonical entity URLs.","parameters":{"type":"object","properties":{"query":{"type":"string"}},"required":["query"]}}},
+        {"type":"function","function":{"name":"papers","description":"Canonical PAPERS edge. Search Crossref DOI metadata for papers, books, authors, journals, publication dates, and DOI records.","parameters":{"type":"object","properties":{"query":{"type":"string"},"rows":{"type":"integer","minimum":1,"maximum":5}},"required":["query"]}}},
+        {"type":"function","function":{"name":"archive","description":"Canonical ARCHIVE edge. Search Internet Archive metadata for historical texts, audio, video, software, and other archived objects.","parameters":{"type":"object","properties":{"query":{"type":"string"},"rows":{"type":"integer","minimum":1,"maximum":5}},"required":["query"]}}},
     ]
 
 
@@ -3496,6 +3499,19 @@ def _http_json(url, timeout=12):
     with urllib.request.urlopen(request,timeout=timeout) as response:
         return json.load(response)
 
+def _info_envelope(source, edge, payload, *, as_of=None, source_url=None, direct=True):
+    """Shared epistemic receipt for canonical information edges."""
+    return {
+        "edge":edge,
+        "source":source,
+        "confidence":"DIRECT" if direct else "DERIVED",
+        "as_of":as_of,
+        "retrieved_at":time.strftime("%Y-%m-%dT%H:%M:%S%z"),
+        "source_url":source_url,
+        **payload,
+    }
+
+
 def _place_lookup(query,count=5):
     import json
     from urllib.parse import urlencode
@@ -3505,7 +3521,7 @@ def _place_lookup(query,count=5):
     rows=[]
     for item in (data.get("results") or [])[:5]:
         rows.append({"name":item.get("name"),"region":", ".join(x for x in [item.get("admin1"),item.get("country")] if x),"latitude":item.get("latitude"),"longitude":item.get("longitude"),"timezone":item.get("timezone")})
-    return json.dumps({"source":"Open-Meteo geocoding","query":query,"results":rows},ensure_ascii=False)
+    return json.dumps(_info_envelope("Open-Meteo geocoding","PLACE",{"query":query,"results":rows},source_url="https://geocoding-api.open-meteo.com/"),ensure_ascii=False)
 
 def _weather_lookup(location):
     import json
@@ -3520,7 +3536,7 @@ def _weather_lookup(location):
         def at(k):
             v=daily.get(k) or []; return v[i] if i<len(v) else None
         days.append({"date":day,"weather_code":at("weather_code"),"high_f":at("temperature_2m_max"),"low_f":at("temperature_2m_min"),"precip_probability_pct":at("precipitation_probability_max"),"precipitation_in":at("precipitation_sum"),"sunrise":at("sunrise"),"sunset":at("sunset")})
-    return json.dumps({"source":"Open-Meteo","location":place,"observed_at":(data.get("current") or {}).get("time"),"current":data.get("current") or {},"current_units":data.get("current_units") or {},"forecast":days},ensure_ascii=False)
+    return json.dumps(_info_envelope("Open-Meteo","WEATHER",{"location":place,"observed_at":(data.get("current") or {}).get("time"),"current":data.get("current") or {},"current_units":data.get("current_units") or {},"forecast":days},as_of=(data.get("current") or {}).get("time"),source_url="https://open-meteo.com/"),ensure_ascii=False)
 
 def _wikipedia_lookup(query):
     import json,re
@@ -3531,7 +3547,62 @@ def _wikipedia_lookup(query):
     for page in (data.get("pages") or [])[:3]:
         title=page.get("title") or ""
         rows.append({"title":title,"description":page.get("description"),"excerpt":re.sub(r"<[^>]+>","",page.get("excerpt") or ""),"url":"https://en.wikipedia.org/wiki/"+quote(title.replace(" ","_"),safe="()_,-")})
-    return json.dumps({"source":"Wikipedia","query":query,"results":rows},ensure_ascii=False)
+    return json.dumps(_info_envelope("Wikipedia","WIKI",{"query":query,"results":rows},source_url="https://en.wikipedia.org/"),ensure_ascii=False)
+
+
+def _wikidata_lookup(query):
+    import json
+    from urllib.parse import urlencode
+    query=str(query or "").strip()
+    if not query: return "Wikidata lookup requires a topic."
+    params={"action":"wbsearchentities","search":query,"language":"en","format":"json","limit":5,"origin":"*"}
+    data=_http_json("https://www.wikidata.org/w/api.php?"+urlencode(params)); rows=[]
+    for item in (data.get("search") or [])[:5]:
+        qid=item.get("id")
+        rows.append({"id":qid,"label":item.get("label"),"description":item.get("description"),
+                     "url":f"https://www.wikidata.org/wiki/{qid}" if qid else None})
+    return json.dumps(_info_envelope("Wikidata","DATA",{"query":query,"results":rows},
+                      source_url="https://www.wikidata.org/"),ensure_ascii=False)
+
+
+def _papers_lookup(query,rows=5):
+    import json
+    from urllib.parse import urlencode
+    query=str(query or "").strip()
+    if not query: return "Papers lookup requires a query."
+    rows=max(1,min(int(rows or 5),5))
+    data=_http_json("https://api.crossref.org/works?"+urlencode({"query.bibliographic":query,"rows":rows}))
+    out=[]
+    for item in ((data.get("message") or {}).get("items") or [])[:rows]:
+        title=(item.get("title") or [""])[0]
+        authors=[" ".join(x for x in [a.get("given"),a.get("family")] if x) for a in (item.get("author") or [])[:6]]
+        date_parts=(((item.get("published-print") or item.get("published-online") or item.get("issued") or {}).get("date-parts") or [[]])[0])
+        published="-".join(str(x) for x in date_parts) if date_parts else None
+        doi=item.get("DOI")
+        out.append({"title":title,"authors":authors,"published":published,
+                    "container":(item.get("container-title") or [None])[0],"doi":doi,
+                    "url":f"https://doi.org/{doi}" if doi else item.get("URL")})
+    return json.dumps(_info_envelope("Crossref","PAPERS",{"query":query,"results":out},
+                      source_url="https://api.crossref.org/"),ensure_ascii=False)
+
+
+def _archive_lookup(query,rows=5):
+    import json
+    from urllib.parse import urlencode
+    query=str(query or "").strip()
+    if not query: return "Archive lookup requires a query."
+    rows=max(1,min(int(rows or 5),5))
+    params={"q":query,"fl[]":["identifier","title","creator","date","mediatype"],"rows":rows,"page":1,"output":"json"}
+    # urlencode(doseq=True) keeps Archive.org's repeated fl[] parameters intact.
+    data=_http_json("https://archive.org/advancedsearch.php?"+urlencode(params,doseq=True))
+    out=[]
+    for item in ((data.get("response") or {}).get("docs") or [])[:rows]:
+        ident=item.get("identifier")
+        out.append({"identifier":ident,"title":item.get("title"),"creator":item.get("creator"),
+                    "date":item.get("date"),"mediatype":item.get("mediatype"),
+                    "url":f"https://archive.org/details/{ident}" if ident else None})
+    return json.dumps(_info_envelope("Internet Archive","ARCHIVE",{"query":query,"results":out},
+                      source_url="https://archive.org/"),ensure_ascii=False)
 
 
 def _ollama_web_search(query):
@@ -3940,7 +4011,7 @@ def ollama_chat(force_search=False, initial_prompt=None, allow_start=True, host_
             "Do not claim to have read or changed a file unless the corresponding tool supplied or confirmed it. "
             "CRITICAL EXECUTION CONTRACT: when the user explicitly asks you to create, write, copy, move, rename, edit, or remove local files/folders, you must CALL the appropriate filesystem tool before reporting success. Planning or describing a tool call is not execution. Never say an operation succeeded unless a tool result confirms it. "
             "Do not claim filesystem access outside the starting LOOK workspace. "
-            "Use weather for live weather, place_lookup for geographic resolution, and wikipedia for stable encyclopedic background. You MUST call weather for questions about current weather, temperature, rain, wind, or forecasts; never answer those from model memory. Prefer these canonical read-only tools over guessing or generic search when they fit. If web_search is available, use it when current or externally verifiable information is needed and no canonical tool fits; "
+            "Use canonical information edges before generic search whenever they fit: weather=WEATHER, place_lookup=PLACE, wikipedia=WIKI, wikidata=DATA, papers=PAPERS, archive=ARCHIVE. You MUST call weather for current weather, temperature, rain, wind, or forecasts; never answer those from model memory. Use WIKI for readable stable background, DATA for structured entity facts, PAPERS for bibliographic/DOI questions, and ARCHIVE when the historical object or primary artifact matters. Canonical tool results include an epistemic receipt: edge, source, confidence, as_of when available, retrieved_at, and source_url. Preserve that provenance compactly in factual answers. DIRECT means the canonical source returned the fact; DERIVED means LOOK computed it from canonical data; SEARCHED means general web results were interpreted; MODEL means no external verification. Never invent numerical confidence percentages. If web_search is available, use it when current or externally verifiable information is needed and no canonical tool fits; "
             "when citing or recommending web material, always preserve the exact http/https URL supplied by the search result and emit a complete Markdown link in the form [descriptive label](https://actual-url). Never emit citation placeholders such as [source], [1], or a site name styled like a link without an actual URL. Never invent a URL from a site name."
         )},
     ]
@@ -4131,6 +4202,27 @@ def ollama_chat(force_search=False, initial_prompt=None, allow_start=True, host_
                             with _activity("wikipedia"):
                                 tool_content=_wikipedia_lookup(query)
                         except Exception as exc: tool_content=f"Wikipedia lookup failed: {exc}"
+                    elif name == "wikidata":
+                        query=args.get("query","")
+                        try:
+                            print(f"{_ansi_label('data ›', '35')} {query}")
+                            with _activity("wikidata"):
+                                tool_content=_wikidata_lookup(query)
+                        except Exception as exc: tool_content=f"Wikidata lookup failed: {exc}"
+                    elif name == "papers":
+                        query=args.get("query","")
+                        try:
+                            print(f"{_ansi_label('papers ›', '36')} {query}")
+                            with _activity("crossref"):
+                                tool_content=_papers_lookup(query,args.get("rows",5))
+                        except Exception as exc: tool_content=f"Papers lookup failed: {exc}"
+                    elif name == "archive":
+                        query=args.get("query","")
+                        try:
+                            print(f"{_ansi_label('archive ›', '33')} {query}")
+                            with _activity("archive"):
+                                tool_content=_archive_lookup(query,args.get("rows",5))
+                        except Exception as exc: tool_content=f"Archive lookup failed: {exc}"
                     elif name == "web_search":
                         if not has_web or force_search:
                             tool_content = "Web search is unavailable in this session."

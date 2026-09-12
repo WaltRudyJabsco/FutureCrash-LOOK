@@ -1,3 +1,13 @@
+## 2.0.1 — Information receipts
+
+- Added canonical DATA (Wikidata), PAPERS (Crossref), and ARCHIVE (Internet Archive) LO information edges.
+- WEATHER, PLACE, WIKI, DATA, PAPERS, and ARCHIVE now return a common provenance envelope.
+- Added DIRECT / DERIVED / SEARCHED / MODEL epistemic vocabulary; no fake confidence percentages.
+- LO is instructed to prefer canonical edges over generic search when the question fits.
+- Added `docs/LIVING-WITH-LOOK.md`, a human-oriented description of ordinary use rather than another command manual.
+- Added `docs/INFORMATION-EDGES.md` documenting the source/provenance contract.
+- Future Crash remains 1.1.7.
+
 ## 2.0.0 — Portable identity
 
 LOOK 2.0 formalizes four kinds of state:
