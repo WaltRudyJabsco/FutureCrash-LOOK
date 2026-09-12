@@ -1,3 +1,32 @@
+## 2.0.3 — Deterministic inspection + reinforced learning
+
+- Added `inspect_directory`, a bounded read-only filesystem tool for exact file/folder/symlink counts, recursive counts, file bytes, truncation status, and elapsed time.
+- LO is explicitly instructed to prefer deterministic directory inspection over listing entries and counting them in model context.
+- `inspect_directory` is available even in Conservative access because it is read-only and workspace-bounded.
+- Natural positive/negative feedback such as “great job” or “that didn’t work” can now trigger detached background reflection on the immediately preceding interaction.
+- Feedback reflection is conservative: it may return NONE, NEW, REINFORCE, WEAKEN, or CORRECT.
+- Learned skills remain human-readable in `skills.md`; reinforcement metadata lives separately in `skill_state.json`.
+- Skill metadata tracks confidence, positive hits, negative hits, creation time, and last reinforcement.
+- Confidence-zero learned skills remain inspectable on disk but are omitted from LO’s active skill prompt.
+- Added `lk skills state` to inspect reinforcement state.
+- `lk skills export` now includes a reinforcement-state appendix.
+- `skill_state.json` is part of the portable LOOK profile; feedback queues/locks remain runtime state and are excluded.
+- Substantive learning emits a normal LOOK event; NONE stays silent.
+- Future Crash remains 1.1.7.
+
+## 2.0.2 — Give LO room to finish
+
+- Replaced the single 8k / 5-round LO runtime ceiling with task-tiered FAST, STANDARD, and DEEP budgets.
+- FAST: 8k context, 1,500 output tokens, 4 tool rounds.
+- STANDARD: 16k context, 3,500 output tokens, 8 tool rounds.
+- DEEP: 24k context, 6,000 output tokens, 12 tool rounds.
+- Budgets are ceilings, not targets; short requests still stop naturally when complete.
+- Adaptive task classification considers request structure, length, selected-file count, and explicit deep-thinking mode.
+- Conversation working history headroom increased from 20 messages / 14k characters to 28 messages / 28k characters.
+- Thinking policy remains independent from budget selection.
+- Added `lk budget <request>` as an inspectable tuning aid.
+- Future Crash remains 1.1.7.
+
 ## 2.0.1 — Information receipts
 
 - Added canonical DATA (Wikidata), PAPERS (Crossref), and ARCHIVE (Internet Archive) LO information edges.

@@ -1,3 +1,19 @@
+## 4.0.3 — Learn from successful use
+
+- Added deterministic `inspect_directory` counts/statistics.
+- Added weak-supervision feedback detection and a detached skill-reflection worker.
+- Added reinforced learned-skill metadata without sacrificing editable `skills.md`.
+- Failed skills can weaken out of prompt attention without being silently deleted.
+- Added `lk skills state`.
+
+## 4.0.2 — Adaptive LO headroom
+
+- LO now chooses FAST, STANDARD, or DEEP runtime ceilings per request.
+- Standard filesystem inspection/counting/comparison tasks receive materially more generation and tool-call headroom.
+- Deep tasks can use 24k context, 6k output, and 12 tool rounds.
+- Runtime thinking and runtime capacity are separate controls.
+- Added `lk budget` for inspecting classification during model tuning.
+
 ## 4.0.1 — Canonical information edges
 
 - Added Wikidata, Crossref, and Internet Archive read-only tools.

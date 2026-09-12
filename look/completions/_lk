@@ -143,7 +143,7 @@ _lk() {
       return
       ;;
     skills)
-      (( CURRENT == 3 )) && _values 'skills action' add forget clear-learned path version update export
+      (( CURRENT == 3 )) && _values 'skills action' add forget clear-learned path state version update export
       if [[ "$words[3]" == "export" && CURRENT -ge 4 ]]; then
         _files
       fi

@@ -17,7 +17,7 @@ try:
 except Exception:
     readline = None
 
-VERSION="4.0.1"
+VERSION="4.0.3"
 
 LOOK_WORDMARK = r"""       ██╗      ██╗  ██╗
        ██║      ██║ ██╔╝
@@ -44,6 +44,9 @@ MEMORY_WORKER_LOCK=STATE_DIR/"memory_worker.lock"
 LO_RECENT_FILE=STATE_DIR/"lo_recent.json"
 LO_JOBS_DIR=STATE_DIR/"jobs"
 LO_EVENTS_DIR=STATE_DIR/"events"
+SKILL_STATE_FILE=STATE_DIR/"skill_state.json"
+SKILL_FEEDBACK_QUEUE=STATE_DIR/"skill_feedback_queue"
+SKILL_FEEDBACK_LOCK=STATE_DIR/"skill_feedback.lock"
 OLLAMA_MODEL_FILE=STATE_DIR/"ollama_model"
 OLLAMA_MODELS_FILE=STATE_DIR/"ollama_models.json"
 OLLAMA_HOSTS_FILE=STATE_DIR/"ollama_hosts.json"
@@ -800,7 +803,9 @@ MEMORY + CRAFT
   lk skills clear-learned
                        clear only locally learned skills
   lk skills path       print the editable skills file path
+  lk skills state      show reinforcement confidence and feedback hits
                        auto-learning runs in workspace/power/unsafe; conservative never writes skills
+                       natural praise/criticism may trigger conservative background reflection
 
 MAKE
   lmk FILE.ext         create an empty file · undoable
@@ -1389,6 +1394,33 @@ def _recent_context():
         + "\n\n".join(chunks)
     )
 
+def _effective_skills_text():
+    """Prompt view: bundled craft plus active learned skills ordered by reinforcement."""
+    try:
+        raw=SKILLS_FILE.read_text(encoding="utf-8")
+    except OSError:
+        return ""
+    marker="## Learned"
+    if marker not in raw:
+        return raw.strip()
+
+    bundled,_=raw.split(marker,1)
+    state=_load_skill_state().get("skills",{})
+    rows=[]
+    for skill in _learned_skills():
+        meta=state.get(_skill_key(skill),{})
+        confidence=int(meta.get("confidence",1))
+        if confidence<=0:
+            continue
+        rows.append((confidence,skill))
+    rows.sort(key=lambda x:(-x[0],x[1].casefold()))
+
+    text=bundled.rstrip()+"\n\n## Learned\n"
+    if rows:
+        text+="\n"+"\n".join(f"- {skill}." for _,skill in rows)+"\n"
+    return text.strip()
+
+
 def _memory_context(memory):
     parts=[]
     summary=str(memory.get("summary","")).strip()
@@ -1415,7 +1447,7 @@ def _memory_context(memory):
 
     try:
         core=CORE_FILE.read_text(encoding="utf-8").strip()
-        skills=SKILLS_FILE.read_text(encoding="utf-8").strip()
+        skills=_effective_skills_text()
     except OSError:
         core=skills=""
     if core: parts.insert(0, core)
@@ -1575,6 +1607,15 @@ def _skills_command(args):
             "",
         ]
         body.extend(f"- {item}" for item in skills)
+        state=_load_skill_state().get("skills",{})
+        if state:
+            body.extend(["","## Reinforcement State",""])
+            for item in skills:
+                meta=state.get(_skill_key(item),{})
+                body.append(
+                    f"- confidence {int(meta.get('confidence',1))} · "
+                    f"+{int(meta.get('positive_hits',0))}/-{int(meta.get('negative_hits',0))} · {item}"
+                )
         try:
             out.parent.mkdir(parents=True,exist_ok=True)
             out.write_text("\n".join(body).rstrip()+"\n",encoding="utf-8")
@@ -1583,6 +1624,15 @@ def _skills_command(args):
             return 0
         except OSError as exc:
             print(f"LOOK skills · export failed · {exc}"); return 1
+    if args and args[0]=="state":
+        state=_load_skill_state().get("skills",{})
+        _title("learned skills","reinforcement state")
+        if not state:
+            print("  (none)")
+            return 0
+        for item in sorted(state.values(), key=lambda x:(-int(x.get("confidence",1)),str(x.get("text","")).casefold())):
+            print(f"  {int(item.get('confidence',1)):2d}  +{int(item.get('positive_hits',0))}/-{int(item.get('negative_hits',0))}  {item.get('text','')}")
+        return 0
     if args and args[0]=="version":
         try: installed=_skills_metadata(SKILLS_FILE.read_text(encoding="utf-8"))
         except OSError: installed={"schema":0,"bundled_version":0}
@@ -1630,13 +1680,16 @@ def _skills_command(args):
             if marker not in text:
                 print("Removed 0 learned skills."); return 0
             head,tail=text.split(marker,1)
-            kept=[]; removed=0
+            kept=[]; removed=0; removed_skills=[]
             for line in tail.splitlines():
                 if line.strip().startswith("- ") and fragment in line.casefold():
                     removed+=1
+                    removed_skills.append(" ".join(line.strip()[2:].rstrip(".").split()))
                     continue
                 kept.append(line)
             SKILLS_FILE.write_text(head+marker+"\n" + "\n".join(kept).lstrip("\n"),encoding="utf-8")
+            for removed_skill in removed_skills:
+                _remove_skill_meta(removed_skill)
             print(f"Removed {removed} learned skill(s).")
             return 0
         except OSError as e:
@@ -1648,6 +1701,7 @@ def _skills_command(args):
             marker="## Learned"
             bundled=text.split(marker,1)[0].rstrip()
             SKILLS_FILE.write_text(bundled+"\n\n## Learned\n\n",encoding="utf-8")
+            _save_skill_state({"schema_version":1,"skills":{}})
             print("Learned skills cleared.")
             return 0
         except OSError as e:
@@ -1835,6 +1889,91 @@ def _explicit_memory_hint(user_text):
     return importance, cleaned
 
 
+def _load_skill_state():
+    try:
+        data=json.loads(SKILL_STATE_FILE.read_text(encoding="utf-8"))
+        if isinstance(data,dict) and isinstance(data.get("skills"),dict):
+            return data
+    except (OSError,ValueError,TypeError):
+        pass
+    return {"schema_version":1,"skills":{}}
+
+
+def _save_skill_state(state):
+    STATE_DIR.mkdir(parents=True,exist_ok=True)
+    tmp=SKILL_STATE_FILE.with_suffix(".tmp")
+    tmp.write_text(json.dumps(state,ensure_ascii=False,indent=2)+"\n",encoding="utf-8")
+    try: os.chmod(tmp,0o600)
+    except OSError: pass
+    tmp.replace(SKILL_STATE_FILE)
+
+
+def _skill_key(skill):
+    text=" ".join(str(skill or "").split()).strip()
+    return text.rstrip(".;:").casefold()
+
+
+def _update_skill_meta(skill, signal="new"):
+    skill=_sanitize_skill(skill)
+    if not skill:
+        return False
+    state=_load_skill_state()
+    skills=state.setdefault("skills",{})
+    key=_skill_key(skill)
+    now=time.time()
+    item=skills.get(key,{
+        "text":skill,
+        "confidence":1,
+        "positive_hits":0,
+        "negative_hits":0,
+        "created_at":now,
+        "last_reinforced":now,
+    })
+    item["text"]=skill
+    if signal=="positive":
+        item["positive_hits"]=int(item.get("positive_hits",0))+1
+        item["confidence"]=min(10,int(item.get("confidence",1))+1)
+        item["last_reinforced"]=now
+    elif signal=="negative":
+        item["negative_hits"]=int(item.get("negative_hits",0))+1
+        item["confidence"]=max(0,int(item.get("confidence",1))-2)
+        item["last_reinforced"]=now
+    elif signal=="corrective":
+        item["confidence"]=max(2,int(item.get("confidence",1)))
+        item["last_reinforced"]=now
+    else:
+        item["confidence"]=max(1,int(item.get("confidence",1)))
+    skills[key]=item
+    _save_skill_state(state)
+    return True
+
+
+def _remove_skill_meta(skill):
+    state=_load_skill_state()
+    state.setdefault("skills",{}).pop(_skill_key(skill),None)
+    _save_skill_state(state)
+
+
+def _feedback_polarity(text):
+    low=" ".join(str(text or "").split()).casefold()
+    positive=(
+        "great job","good job","perfect","exactly right","that's right","that worked",
+        "works perfectly","nice job","excellent","nailed it","that's correct","well done",
+    )
+    negative=(
+        "that didn't work","that did not work","this didn't work","this did not work",
+        "that's wrong","that is wrong","that's not correct","that is not correct",
+        "you made that up","you were too slow","that was too slow","that wasn't good",
+        "that was wrong","you didn't do","you did not do","you failed",
+        "not what i asked","that's broken","that is broken",
+    )
+    if any(x in low for x in negative):
+        return "negative"
+    if any(x in low for x in positive):
+        return "positive"
+    return None
+
+
 def _learned_skills():
     _ensure_intelligence_files()
     try:
@@ -1928,19 +2067,21 @@ ASSISTANT:
         return None
 
 
-def _append_learned_skill(skill):
-    """Append one deduplicated learned skill; keep the section intentionally small."""
+def _append_learned_skill(skill, signal="new"):
+    """Append/reinforce one generalized skill while keeping skills.md human-readable."""
     skill=_sanitize_skill(skill)
     if not skill:
         return False
     _ensure_intelligence_files()
     current=_learned_skills()
     folded=skill.casefold()
-    # Exact/near-contained duplicate prevention is sufficient at this scale.
+
     for old in current:
         oldf=old.casefold()
         if folded==oldf or folded in oldf or oldf in folded:
+            _update_skill_meta(old, "positive" if signal=="positive" else signal)
             return False
+
     if len(current)>=24:
         return False
     try:
@@ -1952,9 +2093,21 @@ def _append_learned_skill(skill):
             text+="\n"
         text+=f"- {skill}.\n"
         SKILLS_FILE.write_text(text,encoding="utf-8")
+        _update_skill_meta(skill,signal)
         return True
     except OSError:
         return False
+
+
+def _find_learned_skill(fragment):
+    frag=" ".join(str(fragment or "").split()).strip().casefold()
+    if not frag:
+        return None
+    for skill in _learned_skills():
+        sf=skill.casefold()
+        if frag==sf or frag in sf or sf in frag:
+            return skill
+    return None
 
 
 def _learn_from_exchange(base, model, user_text, assistant_text, profile):
@@ -2092,6 +2245,175 @@ def _remember_exchange(base, model, memory, user_text, assistant_text, profile="
     _save_memory(memory)
     _learn_from_exchange(base,model,user_text,assistant_text,profile)
     return memory
+
+
+def _skill_feedback_job_files():
+    try:
+        return sorted(SKILL_FEEDBACK_QUEUE.glob("*.json"))
+    except OSError:
+        return []
+
+
+def _skill_feedback_worker_active():
+    try:
+        pid=int(SKILL_FEEDBACK_LOCK.read_text().strip())
+        os.kill(pid,0)
+        return True
+    except (OSError,ValueError):
+        try: SKILL_FEEDBACK_LOCK.unlink()
+        except OSError: pass
+        return False
+
+
+def _start_skill_feedback_worker():
+    if _skill_feedback_worker_active():
+        return
+    try:
+        STATE_DIR.mkdir(parents=True,exist_ok=True)
+        subprocess.Popen(
+            [sys.executable,str(Path(__file__).resolve()),"_skill-feedback-worker"],
+            stdin=subprocess.DEVNULL,stdout=subprocess.DEVNULL,stderr=subprocess.DEVNULL,
+            start_new_session=True,close_fds=True,
+        )
+    except OSError:
+        pass
+
+
+def _queue_skill_feedback(base,model,feedback_text,profile="workspace"):
+    polarity=_feedback_polarity(feedback_text)
+    if not polarity or profile=="conservative":
+        return False
+    previous=_load_recent_exchanges()
+    if not previous:
+        return False
+    target=previous[-1]
+    try:
+        SKILL_FEEDBACK_QUEUE.mkdir(parents=True,exist_ok=True)
+        token=f"{time.time_ns()}-{uuid.uuid4().hex[:8]}"
+        tmp=SKILL_FEEDBACK_QUEUE/(token+".tmp")
+        job=SKILL_FEEDBACK_QUEUE/(token+".json")
+        payload={
+            "base":base,
+            "model":model,
+            "profile":profile,
+            "polarity":polarity,
+            "feedback":str(feedback_text)[:2000],
+            "request":str(target.get("user",""))[:7000],
+            "answer":str(target.get("assistant",""))[:10000],
+            "created_at":time.time(),
+        }
+        tmp.write_text(json.dumps(payload,ensure_ascii=False),encoding="utf-8")
+        os.chmod(tmp,0o600)
+        tmp.replace(job); os.chmod(job,0o600)
+        _start_skill_feedback_worker()
+        return True
+    except OSError:
+        return False
+
+
+def _reflect_on_feedback(base,model,job):
+    polarity=str(job.get("polarity",""))
+    learned=_learned_skills()
+    existing="\n".join(f"- {x}" for x in learned) or "(none)"
+    prompt=f"""The user gave {polarity.upper()} feedback about the immediately preceding completed interaction.
+
+PREVIOUS REQUEST:
+{job.get('request','')}
+
+PREVIOUS ANSWER:
+{job.get('answer','')}
+
+USER FEEDBACK:
+{job.get('feedback','')}
+
+EXISTING LEARNED SKILLS:
+{existing}
+
+Decide whether there is one genuinely reusable operational lesson.
+
+Return exactly ONE line:
+NONE
+NEW|general reusable lesson
+REINFORCE|exact existing skill
+WEAKEN|exact existing skill
+CORRECT|general corrective lesson
+
+Rules:
+- Praise/criticism itself is not a skill.
+- Never store user facts, filenames, project-specific facts, or wording/style mimicry.
+- REINFORCE/WEAKEN only when one existing skill clearly applies to the success/failure.
+- NEW/CORRECT only for craft useful on many future tasks.
+- Prefer NONE over speculation.
+- Maximum lesson length 40 words.
+"""
+    raw=_local_chat_once(base,model,[
+        {"role":"system","content":"You are a conservative background reviewer improving reusable assistant craft. Output exactly one action line."},
+        {"role":"user","content":prompt},
+    ],num_ctx=6144,num_predict=120,think=False,temperature=0.1)
+    final=_strip_reasoning_payload(raw).strip()
+    m=re.fullmatch(r"\s*(NONE|NEW|REINFORCE|WEAKEN|CORRECT)(?:\|(.*))?\s*",final,re.I)
+    if not m:
+        return "none",None
+    action=m.group(1).lower()
+    payload=(m.group(2) or "").strip()
+    if action=="none":
+        return action,None
+    if action in {"reinforce","weaken"}:
+        skill=_find_learned_skill(payload)
+        return action,skill
+    skill=_sanitize_skill(payload)
+    return action,skill or None
+
+
+def _skill_feedback_worker():
+    STATE_DIR.mkdir(parents=True,exist_ok=True)
+    try:
+        fd=os.open(SKILL_FEEDBACK_LOCK,os.O_CREAT|os.O_EXCL|os.O_WRONLY,0o600)
+    except FileExistsError:
+        return 0
+    try:
+        os.write(fd,str(os.getpid()).encode())
+    finally:
+        os.close(fd)
+
+    try:
+        while True:
+            jobs=_skill_feedback_job_files()
+            if not jobs:
+                break
+            path=jobs[0]
+            try:
+                job=json.loads(path.read_text(encoding="utf-8"))
+                action,skill=_reflect_on_feedback(
+                    job.get("base","http://127.0.0.1:11434"),
+                    job.get("model",os.environ.get("LOOK_OLLAMA_MODEL","qwen3:8b")),
+                    job,
+                )
+                changed=False
+                if action=="new" and skill:
+                    changed=_append_learned_skill(skill,"positive" if job.get("polarity")=="positive" else "new")
+                elif action=="correct" and skill:
+                    changed=_append_learned_skill(skill,"corrective")
+                elif action=="reinforce" and skill:
+                    changed=_update_skill_meta(skill,"positive")
+                elif action=="weaken" and skill:
+                    changed=_update_skill_meta(skill,"negative")
+
+                # Only substantive learning emits an event; NONE remains silent.
+                if changed and skill:
+                    verb={"new":"learned","correct":"corrected","reinforce":"reinforced","weaken":"weakened"}.get(action,"updated")
+                    _emit_event("learned",f"{verb}: {skill}")
+                path.unlink()
+            except Exception:
+                # Preserve the job for a later retry.
+                break
+    finally:
+        try: SKILL_FEEDBACK_LOCK.unlink()
+        except OSError: pass
+
+    if _skill_feedback_job_files():
+        _start_skill_feedback_worker()
+    return 0
 
 
 def _memory_job_files():
@@ -3010,12 +3332,74 @@ LO_THINK_DISPLAY=("compact","full","quiet")
 # ever-growing chat transcript. Output ceilings are intentionally generous: they
 # are limits, not targets, and modern local hardware benefits more from headroom
 # than from prematurely truncating useful work.
-LO_CONTEXT_TOKENS=8192
-LO_LIGHT_OUTPUT_TOKENS=800
-LO_ADAPTIVE_OUTPUT_TOKENS=1400
-LO_DEEP_OUTPUT_TOKENS=2000
-LO_HISTORY_MAX_MESSAGES=20
-LO_HISTORY_MAX_CHARS=14000
+# LO budgets are ceilings, not targets. Local inference benefits from enough
+# headroom to finish a thought rather than forcing an extra human turn.
+LO_FAST_CONTEXT_TOKENS=8192
+LO_STANDARD_CONTEXT_TOKENS=16384
+LO_DEEP_CONTEXT_TOKENS=24576
+
+LO_FAST_OUTPUT_TOKENS=1500
+LO_STANDARD_OUTPUT_TOKENS=3500
+LO_DEEP_OUTPUT_TOKENS=6000
+
+LO_FAST_TOOL_ROUNDS=4
+LO_STANDARD_TOOL_ROUNDS=8
+LO_DEEP_TOOL_ROUNDS=12
+
+LO_HISTORY_MAX_MESSAGES=28
+LO_HISTORY_MAX_CHARS=28000
+
+def _lo_task_tier(prompt, selected_paths=None):
+    """Cheap deterministic budget selection: fast, standard, or deep."""
+    text=" ".join(str(prompt or "").split()).casefold()
+    selected_count=len(selected_paths or [])
+    if selected_count >= 8:
+        return "deep"
+    deep_markers=(
+        "debug", "diagnose", "refactor", "architect", "design", "analyze these",
+        "compare these", "review these", "traceback", "root cause", "why does this fail",
+        "implement", "rewrite", "across these files", "all these files",
+    )
+    if len(text)>=700 or sum(1 for m in deep_markers if m in text)>=2:
+        return "deep"
+    standard_markers=(
+        "compare", "analy", "count", "inspect", "search", "find all", "summar",
+        "explain", "why", "plan", "review", "check these", "look through",
+    )
+    if len(text)>=220 or selected_count>=3 or any(m in text for m in standard_markers):
+        return "standard"
+    return "fast"
+
+
+def _lo_budget_for(prompt, thinking, selected_paths=None):
+    tier=_lo_task_tier(prompt,selected_paths)
+    # Explicit deep thinking is authoritative.
+    if thinking=="deep":
+        tier="deep"
+    elif thinking=="adaptive" and tier=="fast" and _lo_prompt_needs_thinking(prompt):
+        tier="standard"
+    table={
+        "fast":{"context":LO_FAST_CONTEXT_TOKENS,"output":LO_FAST_OUTPUT_TOKENS,"tool_rounds":LO_FAST_TOOL_ROUNDS},
+        "standard":{"context":LO_STANDARD_CONTEXT_TOKENS,"output":LO_STANDARD_OUTPUT_TOKENS,"tool_rounds":LO_STANDARD_TOOL_ROUNDS},
+        "deep":{"context":LO_DEEP_CONTEXT_TOKENS,"output":LO_DEEP_OUTPUT_TOKENS,"tool_rounds":LO_DEEP_TOOL_ROUNDS},
+    }
+    return tier,table[tier]
+
+
+def _lo_budget_command(args):
+    prompt=" ".join(args).strip()
+    if not prompt:
+        print("usage: lk budget <example request>")
+        return 2
+    thinking=_load_thinking()
+    tier,budget=_lo_budget_for(prompt,thinking)
+    _title("LO budget",tier)
+    print(f"  context      {budget['context']:,}")
+    print(f"  output       {budget['output']:,}")
+    print(f"  tool rounds  {budget['tool_rounds']}")
+    print(f"  thinking     {thinking}")
+    return 0
+
 
 def _lo_prompt_needs_thinking(prompt):
     """Small, inspectable adaptive heuristic; avoid turning casual chat into a reasoning job."""
@@ -3047,14 +3431,14 @@ def _lo_requires_filesystem_action(prompt):
     return bool(re.search(action,text) and re.search(object_hint,text))
 
 def _lo_runtime_policy(mode, prompt):
+    """Thinking behavior is separate from token/tool budget selection."""
     mode=(mode or "adaptive").lower()
     if mode=="light":
-        return {"think":False,"num_predict":LO_LIGHT_OUTPUT_TOKENS,"temperature":0.35}
+        return {"think":False,"temperature":0.35}
     if mode=="deep":
-        return {"think":True,"num_predict":LO_DEEP_OUTPUT_TOKENS,"temperature":0.30}
+        return {"think":True,"temperature":0.30}
     return {
         "think":_lo_prompt_needs_thinking(prompt),
-        "num_predict":LO_ADAPTIVE_OUTPUT_TOKENS,
         "temperature":0.35,
     }
 
@@ -3290,7 +3674,7 @@ def _run_command_tool(workspace,args,profile):
 def _lo_tools(profile):
     tools=_filesystem_tools()
     if profile=="conservative":
-        tools=[t for t in tools if t.get("function",{}).get("name") in {"list_files","read_file","search_files"}]
+        tools=[t for t in tools if t.get("function",{}).get("name") in {"list_files","inspect_directory","read_file","search_files"}]
     tools.extend(_information_tools())
     tools.extend(_system_inspection_tools())
     if profile in {"power","unsafe"}:
@@ -3389,6 +3773,88 @@ def _information_tools():
     ]
 
 
+def _tool_inspect_directory(workspace, raw_path=".", recursive=False, max_entries=200000):
+    """Count filesystem objects deterministically without feeding listings to the model."""
+    target=_safe_workspace_path(workspace,raw_path)
+    if not target.exists():
+        raise ValueError(f"Path does not exist: {raw_path}")
+    if not target.is_dir():
+        raise ValueError(f"Not a directory: {raw_path}")
+
+    recursive=bool(recursive)
+    max_entries=max(100,min(int(max_entries or 200000),500000))
+    started=time.perf_counter()
+    files=directories=symlinks=other=0
+    total_bytes=0
+    scanned=0
+    truncated=False
+
+    def count_entry(path):
+        nonlocal files,directories,symlinks,other,total_bytes,scanned,truncated
+        if scanned>=max_entries:
+            truncated=True
+            return False
+        scanned+=1
+        try:
+            if path.is_symlink():
+                symlinks+=1
+            elif path.is_file():
+                files+=1
+                try: total_bytes+=path.stat().st_size
+                except OSError: pass
+            elif path.is_dir():
+                directories+=1
+            else:
+                other+=1
+        except OSError:
+            other+=1
+        return True
+
+    if recursive:
+        # os.scandir is substantially cheaper than materializing directory listings.
+        stack=[target]
+        while stack and not truncated:
+            current=stack.pop()
+            try:
+                with os.scandir(current) as it:
+                    for entry in it:
+                        p=Path(entry.path)
+                        if not count_entry(p):
+                            break
+                        try:
+                            if entry.is_dir(follow_symlinks=False) and not entry.is_symlink():
+                                stack.append(p)
+                        except OSError:
+                            pass
+            except (OSError,PermissionError):
+                other+=1
+    else:
+        try:
+            with os.scandir(target) as it:
+                for entry in it:
+                    if not count_entry(Path(entry.path)):
+                        break
+        except (OSError,PermissionError) as exc:
+            raise ValueError(f"Could not inspect directory: {exc}")
+
+    elapsed_ms=(time.perf_counter()-started)*1000
+    payload={
+        "path":str(target),
+        "recursive":recursive,
+        "files":files,
+        "directories":directories,
+        "symlinks":symlinks,
+        "other":other,
+        "total_entries":files+directories+symlinks+other,
+        "file_bytes":total_bytes,
+        "scanned_entries":scanned,
+        "truncated":truncated,
+        "limit":max_entries,
+        "elapsed_ms":round(elapsed_ms,2),
+    }
+    return json.dumps(payload,ensure_ascii=False)
+
+
 def _filesystem_tools():
     return [
         {"type":"function","function":{
@@ -3397,6 +3863,15 @@ def _filesystem_tools():
             "parameters":{"type":"object","properties":{
                 "path":{"type":"string","description":"Workspace-relative directory, default ."},
                 "depth":{"type":"integer","description":"Recursive depth 1-3, default 1"}
+            }}
+        }},
+        {"type":"function","function":{
+            "name":"inspect_directory",
+            "description":"Get exact counts and size statistics for a directory without listing every item into model context. Prefer this for questions like how many files/folders are here, recursive file counts, or directory size/count summaries.",
+            "parameters":{"type":"object","properties":{
+                "path":{"type":"string","description":"Workspace-relative directory, default ."},
+                "recursive":{"type":"boolean","description":"Count the full subtree when true; default false"},
+                "max_entries":{"type":"integer","minimum":100,"maximum":500000,"description":"Safety ceiling, default 200000"}
             }}
         }},
         {"type":"function","function":{
@@ -3471,6 +3946,8 @@ def _run_filesystem_tool(workspace, name, args):
     try:
         if name == "list_files":
             return _tool_list_files(workspace, args.get("path", "."), args.get("depth", 1))
+        if name == "inspect_directory":
+            return _tool_inspect_directory(workspace, args.get("path", "."), bool(args.get("recursive", False)), args.get("max_entries", 200000))
         if name == "read_file":
             return _tool_read_file(workspace, args.get("path", ""))
         if name == "search_files":
@@ -3491,7 +3968,7 @@ def _run_filesystem_tool(workspace, name, args):
         return f"File tool failed: {exc}"
     return f"Unknown file tool: {name}"
 
-LOOK_INFO_USER_AGENT="LOOK-Shell/3.9 (local text client)"
+LOOK_INFO_USER_AGENT="LOOK-Shell/4.0.3 (local text client)"
 
 def _http_json(url, timeout=12):
     import json, urllib.request
@@ -4003,7 +4480,8 @@ def ollama_chat(force_search=False, initial_prompt=None, allow_start=True, host_
             "If the user explicitly asks you to remember something, acknowledge that intent naturally; do not claim memory is limited to the current session merely because no memory tool is exposed in chat. "
             "When the user refers to 'this folder', 'here', local files, or the current project, "
             "use the workspace context and file tools instead of guessing. "
-            "You may list files, read bounded text files, search filenames/text, create or intentionally modify UTF-8 text, "
+            "For exact questions about how many files/folders exist, recursive counts, or directory size/count summaries, prefer inspect_directory instead of listing entries and counting them yourself. "
+            "You may list files, inspect directory counts, read bounded text files, search filenames/text, create or intentionally modify UTF-8 text, "
             "and use bounded copy_path, move_path, remove_path, make_directory, and create_text_files tools inside the workspace. ""When the user asks for several new text files, prefer create_text_files so the whole request is one verified operation. "
             "When the user asks to copy, duplicate, clone, or back up an existing path, ALWAYS use copy_path; never reconstruct it with read_file + write_file. "
             "When the user asks to move or rename an existing path, use move_path. When explicitly asked to remove one, use remove_path. "
@@ -4123,15 +4601,17 @@ def ollama_chat(force_search=False, initial_prompt=None, allow_start=True, host_
         mutation_required=(profile!="conservative" and _lo_requires_filesystem_action(prompt))
         mutation_attempted=False
         mutation_repair_sent=False
-        for _ in range(5):
-            runtime=_lo_runtime_policy(thinking_mode, prompt)
+        runtime=_lo_runtime_policy(thinking_mode, prompt)
+        task_tier,budget=_lo_budget_for(prompt,thinking_mode,selected_paths)
+
+        for _ in range(budget["tool_rounds"]):
             payload_obj = {
                 "model": model,
                 "messages": messages,
                 "stream": False,
                 "options": {
-                    "num_ctx": LO_CONTEXT_TOKENS,
-                    "num_predict": runtime["num_predict"],
+                    "num_ctx": budget["context"],
+                    "num_predict": budget["output"],
                     "temperature": runtime["temperature"],
                 },
             }
@@ -4235,7 +4715,7 @@ def ollama_chat(force_search=False, initial_prompt=None, allow_start=True, host_
                                 tool_content = _search_text(search_result)
                             except Exception as exc:
                                 tool_content = f"Web search failed: {exc}"
-                    elif name in {"list_files", "read_file", "search_files", "write_file", "create_text_files", "copy_path", "move_path", "remove_path", "make_directory"}:
+                    elif name in {"list_files", "inspect_directory", "read_file", "search_files", "write_file", "create_text_files", "copy_path", "move_path", "remove_path", "make_directory"}:
                         tool_content = _run_filesystem_tool(workspace, name, args)
                         if name in _LO_MUTATION_TOOLS:
                             mutation_attempted=True
@@ -4286,7 +4766,10 @@ def ollama_chat(force_search=False, initial_prompt=None, allow_start=True, host_
                 print(_ansi_label("lo ›","35")+" "+_ollama_markup(final)+"\n")
             else:
                 print(_ansi_label("lo ›","35")+" "+_c("(no final response)","2")+"\n")
+            feedback_queued=_queue_skill_feedback(base,model,prompt,profile)
             _save_recent_exchange(prompt, answer)
+            if feedback_queued and sys.stdout.isatty():
+                print(_c("  · reflecting in background","2"))
             if _queue_memory_exchange(base, model, prompt, answer, profile):
                 if sys.stdout.isatty():
                     print(_c("  · remembering in background", "2"))
@@ -6652,6 +7135,7 @@ PROFILE_STATE_FILES=(
     "lo_recent.json",
     "core.md",
     "skills.md",
+    "skill_state.json",
     "lo_access",
     "lo_personality",
     "lo_thinking",
@@ -7185,6 +7669,7 @@ def main():
     if not a: return render([])
     cmd=a[0]; rest=a[1:]
     if cmd=="_remember-worker": return _memory_worker()
+    if cmd=="_skill-feedback-worker": return _skill_feedback_worker()
     if cmd=="memory": return _memory_command(rest)
     if cmd=="forget":
         if not rest: print("usage: lk forget <text>"); return 2
@@ -7192,6 +7677,7 @@ def main():
     if cmd=="clear-memory": return _memory_command(["clear"])
     if cmd=="skills": return _skills_command(rest)
     if cmd=="profile": return _profile_command(rest)
+    if cmd=="budget": return _lo_budget_command(rest)
     if cmd=="feedback": return _feedback_command(rest)
     if cmd=="sound": return _sound_command(rest)
     if cmd=="personality": return lo_personality(rest)

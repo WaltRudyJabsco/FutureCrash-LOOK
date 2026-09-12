@@ -30,6 +30,7 @@ Portable profile content:
 - `lo_recent.json`
 - `core.md`
 - `skills.md`
+- `skill_state.json` — reinforcement metadata for learned skills
 - `personalities/`
 - `lo_access`
 - `lo_personality`

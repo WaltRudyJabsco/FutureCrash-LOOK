@@ -32,7 +32,7 @@
 
 `lk forget TEXT` · `lk clear-memory`
 
-`lk skills` · `lk skills add TEXT` · `lk skills forget TEXT` · `lk skills clear-learned` · `lk skills path` · `lk skills export [FILE]`
+`lk skills` · `lk skills add TEXT` · `lk skills forget TEXT` · `lk skills clear-learned` · `lk skills path` · `lk skills state` · `lk skills export [FILE]`
 
 LO keeps at most 20 candidate memories on disk and offers at most eight to prompt attention. Importance is 0–100; unused memories decay during maintenance. Retrieval alone is not reinforcement. `skills.md` is separate from user memory.
 
@@ -112,3 +112,7 @@ Memory JSON uses schema version 1.
 - `lk settings` — configure these alongside access, host, model, and web search.
 
 Bundled personality packs live under `~/.local/share/look/personalities/`. Capability, personality, model, thinking depth, and thinking display remain independent settings.
+
+
+## Learning feedback
+Clear positive/negative conversational feedback may trigger background reflection on the preceding interaction. `lk skills state` shows reinforced learned-skill metadata. This is weak supervision: ambiguous feedback produces no update.

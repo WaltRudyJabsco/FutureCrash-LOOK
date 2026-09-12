@@ -984,3 +984,29 @@ Interactive file-action prompts use Tab for completion and bare Escape for clean
 ## Living with LOOK
 
 For a non-reference explanation of how Future Crash, LOOK, LO, files, background work, and canonical information sources fit into an ordinary workflow, see `docs/LIVING-WITH-LOOK.md`. Information provenance is documented in `docs/INFORMATION-EDGES.md`.
+
+### Adaptive LO headroom
+
+LO now selects a FAST, STANDARD, or DEEP runtime budget instead of forcing every request through the same 8k context and short generation ceiling. Standard tasks get 16k context / 3.5k output / 8 tool rounds; deep tasks get 24k / 6k / 12.
+
+These values are maximums, not targets. Inspect classification with:
+
+```text
+lk budget count only the files in this directory tree
+```
+
+This makes model benchmarking fairer: compare 4B/8B/30B against the same adequately provisioned LO runtime rather than against an artificially cramped agent.
+
+### Deterministic directory inspection
+
+LO has a dedicated read-only directory inspector for exact file/folder counts and size statistics. It should use that instead of asking the model to count a long listing.
+
+### Learning from feedback
+
+Natural feedback can act as weak supervision. Clear praise or criticism queues a quiet background review of the previous interaction. Reusable lessons may be added, reinforced, weakened, or corrected; ambiguous feedback does nothing.
+
+```text
+lk skills state
+```
+
+shows the reinforcement state. `skills.md` stays human-readable while `skill_state.json` carries confidence metadata and is included in the portable profile.
