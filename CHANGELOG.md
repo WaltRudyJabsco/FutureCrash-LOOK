@@ -1,3 +1,11 @@
+## 2.3.1 — Query-aware memory startup fix
+
+- Fixed LO startup crash in 2.3.0: memory retrieval referenced `prompt` before the first prompt had been assigned.
+- Memory now occupies one stable system-message slot and is refreshed against the current user prompt immediately before every inference turn.
+- The memory file is reloaded between turns, so background Living Memory updates can become visible during a long-running LO session.
+- Relevant memory snapshots no longer accumulate in chat history.
+- No memory schema, permissions, file tools, or Future Crash behavior changed.
+
 ## 2.3.0 — Living Memory compiler
 
 - Living Memory schema 3 separates cheap candidates from durable atomic memory.
