@@ -17,7 +17,7 @@ try:
 except Exception:
     readline = None
 
-VERSION="4.3.0"
+VERSION="4.3.1"
 
 LOOK_WORDMARK = r"""       ██╗      ██╗  ██╗
        ██║      ██║ ██╔╝
@@ -5310,7 +5310,7 @@ def _run_filesystem_tool_impl(workspace, name, args):
         return f"File tool internal error: {type(exc).__name__}: {exc}"
     return f"Unknown file tool: {name}"
 
-LOOK_INFO_USER_AGENT="LOOK-Shell/4.3.0 (local text client)"
+LOOK_INFO_USER_AGENT="LOOK-Shell/4.3.1 (local text client)"
 
 def _run_filesystem_tool(workspace, name, args):
     try:
@@ -5900,9 +5900,12 @@ def ollama_chat(force_search=False, initial_prompt=None, allow_start=True, host_
     }
     messages.append({"role":"system","content":thinking_notes[thinking_mode]})
 
-    memory_context = _memory_context(memory,prompt)
-    if memory_context:
-        messages.append({"role": "system", "content": memory_context})
+    # Keep one stable system-message slot for user memory. Its contents are
+    # refreshed against the *current* user prompt immediately before each
+    # inference turn, so retrieval stays relevant without accumulating old
+    # memory snapshots in chat history.
+    memory_message_index=len(messages)
+    messages.append({"role":"system","content":""})
     recent_context=_recent_context()
     if recent_context:
         messages.append({"role":"system","content":recent_context})
@@ -5928,6 +5931,10 @@ def ollama_chat(force_search=False, initial_prompt=None, allow_start=True, host_
             continue
 
         _ai_foreground(True,"lo")
+        # Memory can change asynchronously between turns. Reload cheaply from
+        # disk, then retrieve only what is relevant to this exact prompt.
+        memory=_load_memory()
+        messages[memory_message_index]["content"]=_memory_context(memory,prompt)
         messages=_trim_lo_history(messages, base_message_count)
         messages.append({"role": "user", "content": prompt})
 

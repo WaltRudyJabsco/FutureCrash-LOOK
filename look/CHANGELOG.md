@@ -1,3 +1,9 @@
+## 4.3.1 — Current-prompt memory retrieval
+
+- Fix `UnboundLocalError: prompt` introduced in 4.3.0.
+- Refresh the stable memory context slot only after the current user prompt exists.
+- Reload memory between turns so asynchronous compiler updates can be used by the active session.
+
 ## 4.3.0 — Living Memory compiler
 
 - Memory schema 3: candidates → durable atoms → domain summaries → compact core.

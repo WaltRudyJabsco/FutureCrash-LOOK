@@ -774,8 +774,8 @@ This release establishes the following baseline:
 
 | Layer | Version |
 | --- | ---: |
-| Future Crash + LOOK | **2.3.0** |
-| LOOK | **4.3.0** |
+| Future Crash + LOOK | **2.3.1** |
+| LOOK | **4.3.1** |
 | Future Crash | **1.1.10** |
 
 Signal rendering is now compiled separately from conversation: explicit Signal requests use a focused no-thinking 1200-token render pass, while ordinary Workstation conversation retains its own reasoning budget.
