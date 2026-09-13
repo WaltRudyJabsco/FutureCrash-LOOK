@@ -545,6 +545,17 @@ compdef _lmk lmk mkd
 compdef _files lcp lmv lrm lscp
 
 
+# Living AI broker — resident local coordinator. Silent, cheap, and optional.
+# It owns background memory/skill/job scheduling; the durable queues remain on disk.
+_look_ai_boot() {
+  local cli="$HOME/.local/bin/lk"
+  [[ -x "$cli" ]] || return 0
+  # Let lk perform the real socket/PID health check; background it so shell
+  # startup never waits on broker startup or stale-socket recovery.
+  "$cli" ai start >/dev/null 2>&1 &!
+}
+_look_ai_boot
+
 # Surface completed background LO work at the next normal shell prompt.
 autoload -Uz add-zsh-hook
 _look_lo_events_precmd() {

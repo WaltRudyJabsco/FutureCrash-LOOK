@@ -3,8 +3,8 @@ set -euo pipefail
 
 ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 
-PRODUCT_VERSION="2.0.3"
-LOOK_VERSION="4.0.3"
+PRODUCT_VERSION="2.1.1"
+LOOK_VERSION="4.1.1"
 FUTURE_CRASH_VERSION="1.1.7"
 
 DRY=0
@@ -237,6 +237,8 @@ fi
 
 run cp "$ROOT/look/lk" "$HOME/.local/share/look/lk"
 run cp "$ROOT/look/look_renderer.py" "$HOME/.local/share/look/look_renderer.py"
+run cp "$ROOT/look/look_ai.py" "$HOME/.local/share/look/look_ai.py"
+run chmod +x "$HOME/.local/share/look/look_ai.py"
 run chmod +x "$HOME/.local/share/look/lk"
 if ((!DRY)); then ln -sfn "$HOME/.local/share/look/lk" "$HOME/.local/bin/lk"; fi
 

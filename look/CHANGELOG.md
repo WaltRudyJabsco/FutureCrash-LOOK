@@ -1,3 +1,15 @@
+## 4.1.1 — Broker status semantics
+
+- `lk ai status` returns exit code 0 when it successfully reports a stopped broker.
+- Release metadata synchronized for multi-machine/Git distribution.
+
+## 4.1.0 — Living AI broker + Living Memory
+
+- Resident `look_ai.py` broker coordinates background LO jobs, memory, and skill reflection.
+- Unix socket provides fast status/wake control; disk queues preserve crash recovery.
+- Foreground leases prevent new maintenance work from starting during interactive LO turns.
+- Memory uses elapsed-time decay, semantic reinforcement, event-driven consolidation, and candidate retirement after promotion.
+
 ## 4.0.3 — Learn from successful use
 
 - Added deterministic `inspect_directory` counts/statistics.

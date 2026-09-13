@@ -1,3 +1,30 @@
+## 2.1.1 — Living AI release hardening
+
+- `lk ai status` now returns success for both running and stopped states; status is inspection, not a health assertion.
+- Synchronized canonical README/version metadata with 2.1.1 / LOOK 4.1.1 / Future Crash 1.1.7.
+- Updated LOOK information user-agent version.
+- Revalidated Living AI broker, Living Memory policy, documentation inventory, installer metadata, completions, and archive integrity.
+
+## 2.1.0 — Living AI
+
+- Added `look_ai.py`, a resident local AI broker using a private Unix-domain socket.
+- Shell startup launches the broker silently; AI-producing commands also lazily start it if needed.
+- Durable filesystem queues remain the source of truth: the socket is the fast coordinator, not the persistence layer.
+- Broker priority: foreground interactive work blocks new background starts; explicit `lo bg` jobs outrank memory/skill housekeeping.
+- Background work is processed one unit at a time so foreground interaction can win between model calls.
+- Added `lk ai [status|start|stop|wake]`.
+- Replaced per-conversation memory decay with elapsed-time decay.
+- Candidate extraction now semantically matches new observations against active candidates and the long-term summary.
+- Repeated semantic matches reinforce importance/uses instead of creating paraphrased duplicates.
+- Long-term consolidation is event-driven by durable/repeated evidence, not modulo-six conversation counts.
+- Successfully consolidated candidates leave the active pool, freeing room for new observations.
+- `lk memory` now shows importance/uses, broker state, queue depth, and last maintenance age.
+- Recent continuity still stores both user and assistant sides while displaying the user side compactly.
+- Memory schema advances to v2 with maintenance/evidence timestamps.
+- Memory queue consumption now preflights Ollama reachability; unavailable inference leaves durable jobs intact.
+- Resident broker backs off after maintenance failures instead of tight-loop retrying.
+- Future Crash remains 1.1.7.
+
 ## 2.0.3 — Deterministic inspection + reinforced learning
 
 - Added `inspect_directory`, a bounded read-only filesystem tool for exact file/folder/symlink counts, recursive counts, file bytes, truncation status, and elapsed time.

@@ -116,3 +116,11 @@ Bundled personality packs live under `~/.local/share/look/personalities/`. Capab
 
 ## Learning feedback
 Clear positive/negative conversational feedback may trigger background reflection on the preceding interaction. `lk skills state` shows reinforced learned-skill metadata. This is weak supervision: ambiguous feedback produces no update.
+
+
+## Living AI
+`lk ai` — AI control surface; now includes broker state.
+
+`lk ai status` · `lk ai start` · `lk ai stop` · `lk ai wake` — inspect/control the resident background coordinator.
+
+The broker coordinates `lo bg`, memory maintenance, and skill reflection. Interactive LO turns have foreground priority.

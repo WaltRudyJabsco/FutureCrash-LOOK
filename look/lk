@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-import os, platform, re, select, shutil, subprocess, sys, termios, tty, threading, time, hashlib, json, uuid, signal, tempfile, wave, math, struct, zipfile
+import os, platform, re, select, shutil, subprocess, sys, termios, tty, threading, time, hashlib, json, uuid, signal, tempfile, wave, math, struct, zipfile, socket
 import http.client
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from contextlib import contextmanager
@@ -17,7 +17,7 @@ try:
 except Exception:
     readline = None
 
-VERSION="4.0.3"
+VERSION="4.1.1"
 
 LOOK_WORDMARK = r"""       ██╗      ██╗  ██╗
        ██║      ██║ ██╔╝
@@ -44,6 +44,10 @@ MEMORY_WORKER_LOCK=STATE_DIR/"memory_worker.lock"
 LO_RECENT_FILE=STATE_DIR/"lo_recent.json"
 LO_JOBS_DIR=STATE_DIR/"jobs"
 LO_EVENTS_DIR=STATE_DIR/"events"
+AI_SOCKET=STATE_DIR/"ai.sock"
+AI_PID_FILE=STATE_DIR/"ai.pid"
+AI_FOREGROUND_FILE=STATE_DIR/"ai_foreground.json"
+AI_LOG_FILE=STATE_DIR/"ai.log"
 SKILL_STATE_FILE=STATE_DIR/"skill_state.json"
 SKILL_FEEDBACK_QUEUE=STATE_DIR/"skill_feedback_queue"
 SKILL_FEEDBACK_LOCK=STATE_DIR/"skill_feedback.lock"
@@ -63,9 +67,119 @@ MEMORY_CANDIDATE_LIMIT=20
 LO_RECENT_EXCHANGES=12
 LO_RECENT_MAX_CHARS=18000
 LO_RECENT_CONTEXT_CHARS=7000
-MEMORY_SCHEMA_VERSION=1
+MEMORY_SCHEMA_VERSION=2
 SKILLS_SCHEMA_VERSION=1
 BUNDLED_SKILLS_VERSION=1
+
+
+def _ai_broker_path():
+    return Path(__file__).resolve().with_name("look_ai.py")
+
+
+def _ai_broker_request(command, **payload):
+    """Best-effort local broker RPC. The filesystem queues remain durable truth."""
+    message={"command":command,**payload}
+    try:
+        sock=socket.socket(socket.AF_UNIX,socket.SOCK_STREAM)
+        sock.settimeout(.35)
+        sock.connect(str(AI_SOCKET))
+        sock.sendall((json.dumps(message,ensure_ascii=False)+"\n").encode())
+        data=b""
+        while not data.endswith(b"\n") and len(data)<65536:
+            chunk=sock.recv(4096)
+            if not chunk: break
+            data+=chunk
+        sock.close()
+        return json.loads(data.decode() or "{}") if data else {"ok":True}
+    except (OSError,ValueError,json.JSONDecodeError):
+        return None
+
+
+def _ai_broker_start():
+    """Lazily ensure the resident Living AI broker exists."""
+    reply=_ai_broker_request("status")
+    if reply and reply.get("ok"):
+        return True
+    broker=_ai_broker_path()
+    if not broker.exists():
+        return False
+    try:
+        STATE_DIR.mkdir(parents=True,exist_ok=True)
+        log=open(AI_LOG_FILE,"ab",buffering=0)
+        subprocess.Popen(
+            [sys.executable,str(broker),"--daemon"],
+            stdin=subprocess.DEVNULL,stdout=log,stderr=log,
+            start_new_session=True,close_fds=True,
+        )
+        log.close()
+    except OSError:
+        return False
+    for _ in range(12):
+        time.sleep(.05)
+        reply=_ai_broker_request("status")
+        if reply and reply.get("ok"):
+            return True
+    return False
+
+
+def _ai_broker_wake(kind="work"):
+    # Work already running inside the broker needs no recursive socket wake;
+    # returning True also prevents legacy fallback workers from being spawned.
+    if os.environ.get("LOOK_AI_BROKER_PROCESS")=="1":
+        return True
+    if _ai_broker_start():
+        return bool(_ai_broker_request("wake",kind=kind))
+    return False
+
+
+def _ai_foreground(active, label="interactive"):
+    """Foreground lease: broker will not START maintenance while this is fresh."""
+    if active:
+        try:
+            _atomic_json(AI_FOREGROUND_FILE,{"pid":os.getpid(),"label":label,"time":time.time()})
+        except Exception:
+            pass
+        _ai_broker_request("foreground",active=True,label=label,pid=os.getpid())
+    else:
+        try: AI_FOREGROUND_FILE.unlink()
+        except OSError: pass
+        _ai_broker_request("foreground",active=False,pid=os.getpid())
+
+
+def _ai_command(args):
+    cmd=(args[0] if args else "status").lower()
+    if cmd=="start":
+        ok=_ai_broker_start()
+        print("LOOK AI · running" if ok else "LOOK AI · failed to start")
+        return 0 if ok else 1
+    if cmd=="stop":
+        reply=_ai_broker_request("stop")
+        print("LOOK AI · stopping" if reply else "LOOK AI · not running")
+        return 0
+    if cmd=="wake":
+        ok=_ai_broker_wake("manual")
+        print("LOOK AI · wake sent" if ok else "LOOK AI · unavailable")
+        return 0 if ok else 1
+    if cmd=="status":
+        reply=_ai_broker_request("status")
+        _title("LOOK AI","living broker")
+        if not reply:
+            print("  state       stopped")
+            print(f"  socket      {AI_SOCKET}")
+            print("  start       lk ai start")
+            # Status is an inspection command: "stopped" is valid state, not failure.
+            return 0
+        print(f"  state       {reply.get('state','running')}")
+        print(f"  pid         {reply.get('pid','?')}")
+        print(f"  foreground  {'busy' if reply.get('foreground') else 'idle'}")
+        print(f"  jobs        {reply.get('jobs',0)}")
+        print(f"  memory      {reply.get('memory',0)}")
+        print(f"  skills      {reply.get('skills',0)}")
+        print(f"  current     {reply.get('current') or 'idle'}")
+        print(f"  uptime      {int(reply.get('uptime',0))}s")
+        return 0
+    print("usage: lk ai [status|start|stop|wake]")
+    return 2
 
 
 def _load_feedback():
@@ -1067,7 +1181,9 @@ def doctor():
 
 
 def _empty_memory():
-    return {"schema_version": MEMORY_SCHEMA_VERSION, "summary": "", "memories": [], "maintenance_cycles": 0}
+    return {"schema_version": MEMORY_SCHEMA_VERSION, "summary": "", "memories": [], "maintenance_cycles": 0,
+            "last_decay_at": time.time(), "last_evidence_at": 0, "last_maintenance_at": 0,
+            "last_consolidated_at": 0, "last_change": ""}
 
 
 DEFAULT_CORE = """# LO Core
@@ -1212,7 +1328,14 @@ def _load_memory():
         result={"schema_version":MEMORY_SCHEMA_VERSION,
                 "summary":str(data.get("summary",""))[:3000],
                 "memories":cleaned[:MEMORY_CANDIDATE_LIMIT],
-                "maintenance_cycles":max(0,int(data.get("maintenance_cycles",0) or 0))}
+                "maintenance_cycles":max(0,int(data.get("maintenance_cycles",0) or 0)),
+                "last_decay_at":float(data.get("last_decay_at",time.time()) or time.time()),
+                "last_evidence_at":float(data.get("last_evidence_at",0) or 0),
+                "last_maintenance_at":float(data.get("last_maintenance_at",0) or 0),
+                "last_consolidated_at":float(data.get("last_consolidated_at",0) or 0),
+                "last_change":str(data.get("last_change", ""))[:80],
+                "summary_last_reinforced_at":float(data.get("summary_last_reinforced_at",0) or 0),
+                "last_worker_error":str(data.get("last_worker_error", ""))[:500]}
         result=_prune_contaminated_memory(result)
         _save_memory(result)
         return result
@@ -1358,8 +1481,10 @@ def _save_recent_exchange(user_text, assistant_text):
         return False
 
 def _age_label(ts):
+    if not ts:
+        return "never"
     try:
-        seconds=max(0,int(time.time()-float(ts or 0)))
+        seconds=max(0,int(time.time()-float(ts)))
     except (TypeError,ValueError):
         return "time unknown"
     if seconds < 60: return "just now"
@@ -1458,24 +1583,25 @@ def _memory_context(memory):
     return "\n\n".join(parts)
 
 
-def _decay_memories(memory, reinforced_text=None):
-    """Simple forgetting: unused candidates lose one point per maintenance cycle."""
-    reinforced=(reinforced_text or "").casefold()
+def _decay_memories(memory, now=None):
+    """Time-based forgetting. Conversation volume must not accelerate forgetting."""
+    now=float(now or time.time())
+    last=float(memory.get("last_decay_at",now) or now)
+    # One point per 12 elapsed hours, capped so a machine returning after months
+    # cannot vaporize the whole candidate pool in one maintenance pass.
+    points=max(0,min(12,int((now-last)//(12*3600))))
+    if points<=0:
+        memory.setdefault("last_decay_at",now)
+        return memory
     kept=[]
-    for item in memory.get("memories", []):
-        text=str(item.get("text","")).strip()
-        importance=int(item.get("importance",50))
-        if reinforced and text.casefold() == reinforced:
-            importance=min(100, importance+5)
-            item["uses"]=int(item.get("uses",0))+1
-            item["last_reinforced"]=time.time()
-        else:
-            importance-=1
+    for item in memory.get("memories",[]):
+        importance=max(0,int(item.get("importance",50))-points)
         if importance>0:
             item["importance"]=importance
             kept.append(item)
-    kept.sort(key=lambda x:x["importance"], reverse=True)
+    kept.sort(key=lambda x:int(x.get("importance",0)),reverse=True)
     memory["memories"]=kept[:MEMORY_CANDIDATE_LIMIT]
+    memory["last_decay_at"]=now
     return memory
 
 
@@ -1573,17 +1699,21 @@ def _memory_command(args):
         else:
             print("  No cross-session exchanges yet.")
         print()
-        print("  CANDIDATES                              IMPORTANCE")
+        print("  CANDIDATES                              IMPORTANCE / USES")
         items=sorted(memory.get("memories",[]),key=lambda x:int(x.get("importance",0)),reverse=True)
         if not items: print("  No user memories yet.")
         for item in items:
             text=str(item.get("text",""))
             shown=text if len(text)<=52 else text[:49]+"…"
             age=_age_label(item.get("last_reinforced",item.get("created_at",0)))
-            print(f"  {shown:<48} {int(item.get('importance',50)):3d}  {age}")
+            print(f"  {shown:<46} {int(item.get('importance',50)):3d} / {int(item.get('uses',1)):2d}  {age}")
         print()
-        print(f"  {len(items)} candidates · prompt attention capped at {RECENT_MEMORY_SLOTS} · schema {MEMORY_SCHEMA_VERSION}")
-        print("  candidates decay toward forgetting; strong/repeated candidates consolidate into LONG-TERM while still active")
+        queue_n=len(_memory_job_files())
+        broker=_ai_broker_request("status") or {}
+        print(f"  {len(items)} candidates · prompt attention {RECENT_MEMORY_SLOTS} · schema {MEMORY_SCHEMA_VERSION}")
+        print(f"  living AI · {'running' if broker.get('ok') else 'stopped'} · memory queue {queue_n} · last maintenance {_age_label(memory.get('last_maintenance_at',0))}")
+        print("  recent stores both sides of each exchange; display shows user side only")
+        print("  candidates decay by elapsed time; semantic reinforcement promotes durable patterns into LONG-TERM")
     _page_text(buf.getvalue())
     return 0
 
@@ -2142,6 +2272,88 @@ def _memory_similarity_key(text):
     return {w for w in words if w not in stop}
 
 
+def _semantic_memory_match(base,model,text,memory):
+    """Resolve a candidate against active candidates AND long-term summary."""
+    items=list(memory.get("memories",[]))[:MEMORY_CANDIDATE_LIMIT]
+    summary=str(memory.get("summary","")).strip()
+    if not items and not summary:
+        return "new",None
+    rows="\n".join(f"{i+1}|{m.get('text','')}" for i,m in enumerate(items)) or "(none)"
+    prompt=f"""A new candidate memory may repeat an existing memory.
+Return exactly one line:
+NEW
+SUMMARY
+MATCH|N
+
+Use SUMMARY only when the durable summary already clearly contains the same meaning.
+Use MATCH only for semantic equivalence or direct reinforcement, not mere topic similarity.
+Prefer NEW when uncertain.
+
+LONG-TERM SUMMARY:
+{summary or '(empty)'}
+
+ACTIVE CANDIDATES:
+{rows}
+
+NEW CANDIDATE:
+{text}
+"""
+    try:
+        raw=_local_chat_once(base,model,[
+            {"role":"system","content":"Conservatively deduplicate semantic user memory. Output one action line only."},
+            {"role":"user","content":prompt},
+        ],num_ctx=4096,num_predict=32,think=False,temperature=0.05)
+        final=_strip_reasoning_payload(raw).strip().upper()
+        if final=="SUMMARY": return "summary",None
+        if final=="NEW": return "new",None
+        m=re.fullmatch(r"MATCH\|(\d+)",final)
+        if m:
+            idx=int(m.group(1))-1
+            if 0<=idx<len(items): return "match",idx
+    except Exception:
+        pass
+    return "new",None
+
+
+def _reinforce_memory_item(item,new_text,new_importance):
+    item["importance"]=min(100,max(int(item.get("importance",50)),int(new_importance))+8)
+    item["uses"]=int(item.get("uses",0))+1
+    item["last_reinforced"]=time.time()
+    # Keep established wording; it is usually less volatile than a new paraphrase.
+    return item
+
+
+def _promotion_candidates(memory,durable_text=""):
+    promoted=[]
+    for item in memory.get("memories",[]):
+        importance=int(item.get("importance",0))
+        uses=int(item.get("uses",1))
+        text=str(item.get("text",""))
+        if (durable_text and text.casefold()==durable_text.casefold()) or importance>=88 or (uses>=3 and importance>=62):
+            promoted.append(item)
+    return promoted
+
+
+def _living_memory_maintain(base,model,memory,durable_text=""):
+    """Event-driven consolidation. One evidence change causes at most one rewrite."""
+    promoted=_promotion_candidates(memory,durable_text)
+    if not promoted:
+        memory["last_maintenance_at"]=time.time()
+        return memory,False
+    before=str(memory.get("summary","")).strip()
+    durable="\n".join(str(x.get("text","")) for x in promoted)
+    after=_rewrite_summary_maintenance(base,model,before,memory.get("memories",[]),durable)
+    changed=bool(after and after!=before)
+    if after:
+        memory["summary"]=after
+        # A successfully represented durable candidate leaves the active pool.
+        promoted_ids={id(x) for x in promoted}
+        memory["memories"]=[x for x in memory.get("memories",[]) if id(x) not in promoted_ids]
+        memory["last_consolidated_at"]=time.time()
+    memory["last_maintenance_at"]=time.time()
+    return memory,changed
+
+
 def _consolidate_memory_candidates(memory):
     """Merge only obvious duplicates; stronger wording survives."""
     items=sorted(memory.get("memories",[]), key=lambda m:int(m.get("importance",0)), reverse=True)
@@ -2209,7 +2421,10 @@ EXPLICIT DURABLE MEMORY:
 
 
 def _remember_exchange(base, model, memory, user_text, assistant_text, profile="workspace"):
-    memory=_decay_memories(memory)
+    """Living Memory: evidence-driven extraction, semantic reinforcement, consolidation."""
+    now=time.time()
+    memory=_decay_memories(memory,now)
+    memory["last_evidence_at"]=now
 
     candidate=_extract_memory_candidate(base,model,user_text,assistant_text)
     if not candidate:
@@ -2217,30 +2432,36 @@ def _remember_exchange(base, model, memory, user_text, assistant_text, profile="
 
     durable=_durable_memory_intent(user_text)
     durable_text=""
+    evidence_changed=False
 
     if candidate:
         importance,text=candidate
         if durable:
-            importance=max(importance,90)
+            importance=max(importance,95)
             durable_text=text
-        memory=_add_memory(memory,text,importance)
+        action,idx=_semantic_memory_match(base,model,text,memory)
+        if action=="match" and idx is not None:
+            memory["memories"][idx]=_reinforce_memory_item(memory["memories"][idx],text,importance)
+            durable_text=str(memory["memories"][idx].get("text","")) if durable else durable_text
+            evidence_changed=True
+        elif action=="summary":
+            # Already represented durably: don't refill the candidate pool.
+            memory["summary_last_reinforced_at"]=now
+        else:
+            memory=_add_memory(memory,text,importance)
+            evidence_changed=True
 
     memory=_consolidate_memory_candidates(memory)
+    memory["maintenance_cycles"]=int(memory.get("maintenance_cycles",0))+1
 
-    cycles=int(memory.get("maintenance_cycles",0))+1
-    memory["maintenance_cycles"]=cycles
-    if durable and durable_text:
-        memory["summary"]=_rewrite_summary_maintenance(
-            base,model,str(memory.get("summary","")),memory.get("memories",[]),durable_text
-        )
-    elif cycles % 6 == 0:
-        memory["summary"]=_rewrite_summary(
-            base,model,str(memory.get("summary","")),memory.get("memories",[])
-        )
-    if cycles % 18 == 0 or len(str(memory.get("summary","")).split()) > 180:
-        memory["summary"]=_rewrite_summary_maintenance(
-            base,model,str(memory.get("summary","")),memory.get("memories",[])
-        )
+    if evidence_changed or durable_text:
+        memory,consolidated=_living_memory_maintain(base,model,memory,durable_text)
+        if consolidated:
+            memory["last_change"]="consolidated"
+        elif candidate:
+            memory["last_change"]="candidate"
+    else:
+        memory["last_maintenance_at"]=now
 
     _save_memory(memory)
     _learn_from_exchange(base,model,user_text,assistant_text,profile)
@@ -2266,15 +2487,13 @@ def _skill_feedback_worker_active():
 
 
 def _start_skill_feedback_worker():
+    if _ai_broker_wake("skills"):
+        return
     if _skill_feedback_worker_active():
         return
     try:
         STATE_DIR.mkdir(parents=True,exist_ok=True)
-        subprocess.Popen(
-            [sys.executable,str(Path(__file__).resolve()),"_skill-feedback-worker"],
-            stdin=subprocess.DEVNULL,stdout=subprocess.DEVNULL,stderr=subprocess.DEVNULL,
-            start_new_session=True,close_fds=True,
-        )
+        subprocess.Popen([sys.executable,str(Path(__file__).resolve()),"_skill-feedback-worker"],stdin=subprocess.DEVNULL,stdout=subprocess.DEVNULL,stderr=subprocess.DEVNULL,start_new_session=True,close_fds=True)
     except OSError:
         pass
 
@@ -2437,17 +2656,12 @@ def _memory_worker_active():
 
 
 def _start_memory_worker():
-    """Start one detached memory worker; duplicate launches exit harmlessly."""
+    """Wake Living AI; fall back to the legacy one-shot worker if unavailable."""
+    if _ai_broker_wake("memory"):
+        return
     try:
         STATE_DIR.mkdir(parents=True, exist_ok=True)
-        subprocess.Popen(
-            [sys.executable, str(Path(__file__).resolve()), "_remember-worker"],
-            stdin=subprocess.DEVNULL,
-            stdout=subprocess.DEVNULL,
-            stderr=subprocess.DEVNULL,
-            start_new_session=True,
-            close_fds=True,
-        )
+        subprocess.Popen([sys.executable,str(Path(__file__).resolve()),"_remember-worker"],stdin=subprocess.DEVNULL,stdout=subprocess.DEVNULL,stderr=subprocess.DEVNULL,start_new_session=True,close_fds=True)
     except OSError:
         pass
 
@@ -2499,9 +2713,11 @@ def _memory_worker():
             job_path=jobs[0]
             try:
                 job=json.loads(job_path.read_text(encoding="utf-8"))
+                base=job.get("base","http://127.0.0.1:11434")
+                _ollama_tags(base)  # do not consume durable memory work while inference is unavailable
                 memory=_load_memory()
                 _remember_exchange(
-                    job.get("base","http://127.0.0.1:11434"),
+                    base,
                     job.get("model",os.environ.get("LOOK_OLLAMA_MODEL","qwen3:8b")),
                     memory,
                     str(job.get("user","")),
@@ -3968,7 +4184,7 @@ def _run_filesystem_tool(workspace, name, args):
         return f"File tool failed: {exc}"
     return f"Unknown file tool: {name}"
 
-LOOK_INFO_USER_AGENT="LOOK-Shell/4.0.3 (local text client)"
+LOOK_INFO_USER_AGENT="LOOK-Shell/4.1.1 (local text client)"
 
 def _http_json(url, timeout=12):
     import json, urllib.request
@@ -4569,12 +4785,14 @@ def ollama_chat(force_search=False, initial_prompt=None, allow_start=True, host_
         if not prompt:
             continue
 
+        _ai_foreground(True,"lo")
         messages=_trim_lo_history(messages, base_message_count)
         messages.append({"role": "user", "content": prompt})
 
         # Search mode is deliberately deterministic: search first, then answer.
         if force_search:
             if not has_web:
+                _ai_foreground(False,"lo")
                 print("search › OLLAMA_API_KEY is not set\n")
                 messages.pop()
                 continue
@@ -4588,10 +4806,12 @@ def ollama_chat(force_search=False, initial_prompt=None, allow_start=True, host_
                                "\nUse these results when answering. When citing or recommending any result, preserve the exact URL from the result and emit a complete Markdown link in the form [descriptive label](https://actual-url). Never emit [source], [1], or a site name as a pseudo-link without an actual URL, and never invent a URL.",
                 })
             except KeyboardInterrupt:
+                _ai_foreground(False,"lo")
                 print("\n· cancelled\n")
                 messages.pop()
                 continue
             except Exception as exc:
+                _ai_foreground(False,"lo")
                 print(f"search › {exc}\n")
                 messages.pop()
                 continue
@@ -4639,10 +4859,12 @@ def ollama_chat(force_search=False, initial_prompt=None, allow_start=True, host_
                 roller.finish()
                 result={"message":aggregate}
             except KeyboardInterrupt:
+                _ai_foreground(False,"lo")
                 print("\n· cancelled\n")
                 messages.pop()
                 break
             except Exception as exc:
+                _ai_foreground(False,"lo")
                 print(f"LOOK OLLAMA · {exc}")
                 messages.pop()
                 break
@@ -4777,6 +4999,7 @@ def ollama_chat(force_search=False, initial_prompt=None, allow_start=True, host_
                 # If queueing ever fails, preserve memory rather than silently dropping it.
                 with _activity("remembering"):
                     memory = _remember_exchange(base, model, memory, prompt, answer, profile)
+            _ai_foreground(False,"lo")
             if one_shot:
                 return 0
             break
@@ -6379,6 +6602,10 @@ def uninstall():
     except OSError as e:
         print(f"LOOK: could not remove {launcher}: {e}")
 
+    # Stop the resident broker before removing its socket/state tree.
+    _ai_broker_request("stop")
+    time.sleep(.05)
+
     # The running process may safely remove its own installed source on Unix.
     try:
         if STATE_DIR.exists():
@@ -6904,11 +7131,15 @@ def _surface_ai():
         print(f"  thinking     {_load_thinking()}")
         print(f"  personality  {_load_personality()}")
         print(f"  web          {'● ready' if os.environ.get('OLLAMA_API_KEY') else _c('○ no key','2')}")
+        broker=_ai_broker_request("status") or {}
+        bstate=(f"● {broker.get('current') or 'idle'}" if broker.get('ok') else "○ stopped")
+        print(f"  broker       {bstate}")
         print()
         print(f"  {_c('[m]','36')} models       {_c('[b]','36')} benchmark")
         print(f"  {_c('[t]','36')} thinking     {_c('[p]','36')} personality")
         print(f"  {_c('[w]','36')} web/key      {_c('[o]','36')} ollama")
-        print(f"  {_c('[s]','36')} settings     {_c('[esc]','2')} done")
+        print(f"  {_c('[r]','36')} broker       {_c('[s]','36')} settings")
+        print(f"  {_c('[esc]','2')} done")
         key=_surface_key().lower()
         if key in {"esc","q"}: return 0
         if key=="m": _surface_run(ollama_models)
@@ -6917,6 +7148,7 @@ def _surface_ai():
         elif key=="p": _surface_run(lo_personality,[])
         elif key=="w": _surface_run(ollama_key,["status"])
         elif key=="o": _surface_run(inspect_ollama)
+        elif key=="r": _surface_run(_ai_command,["status"])
         elif key=="s": _surface_run(settings)
 
 def _system_snapshot():
@@ -7086,7 +7318,7 @@ NETWORK
 AI
   lo  lo search    ollama  ollama models  ollama test
   personality  thinking  think-display  settings
-  memory  skills   profile  feedback  sound
+  memory  skills   profile  ai  feedback  sound
   ollama access  ollama key
 
 MEDIA
@@ -7105,7 +7337,7 @@ def starter_help():
 
   lk               inspect something, or show LOOK home
   lk system        machine health + processes + ports
-  lk ai            models + benchmark + thinking + personality
+  lk ai            models + benchmark + thinking + personality + broker
   lk net           addresses + Tailscale + sharing + web readiness
   lk clean         conservative maintenance surface
   lk config        LOOK + LO behavior
@@ -7188,7 +7420,7 @@ def _profile_manifest():
             "secrets",
             "undo/undo_trash",
             "jobs/events",
-            "memory worker queue/locks",
+            "Living AI queues/locks/socket/log",
             "PIDs/runtime proxies",
             "machine-specific Ollama hosts",
             "caches/generated feedback audio",
@@ -7550,16 +7782,13 @@ def _queue_lo_background(prompt, workspace, profile):
         "finished_at":None,
     }
     _atomic_json(path,job)
-    try:
-        subprocess.Popen(
-            [sys.executable,str(Path(__file__).resolve()),"_lo-job",str(path)],
-            stdin=subprocess.DEVNULL,stdout=subprocess.DEVNULL,stderr=subprocess.DEVNULL,
-            start_new_session=True,close_fds=True,
-        )
-    except OSError as exc:
-        job["status"]="failed"; job["error"]=str(exc); job["finished_at"]=time.time(); _atomic_json(path,job)
-        print(f"LO background · failed to start: {exc}")
-        return 1
+    if not _ai_broker_wake("job"):
+        try:
+            subprocess.Popen([sys.executable,str(Path(__file__).resolve()),"_lo-job",str(path)],stdin=subprocess.DEVNULL,stdout=subprocess.DEVNULL,stderr=subprocess.DEVNULL,start_new_session=True,close_fds=True)
+        except OSError as exc:
+            job["status"]="failed"; job["error"]=str(exc); job["finished_at"]=time.time(); _atomic_json(path,job)
+            print(f"LO background · failed to start: {exc}")
+            return 1
     print(f"LO background · queued {job_id}")
     return 0
 
@@ -7693,7 +7922,9 @@ def main():
         if rest and rest[0]=="all": return help_screen()
         return starter_help()
     if cmd=="commands": return commands_screen()
-    if cmd=="ai": return _surface_ai()
+    if cmd=="ai":
+        if rest and rest[0] in {"status","start","stop","wake"}: return _ai_command(rest)
+        return _surface_ai()
     if cmd=="system": return _surface_system()
     if cmd=="clean": return _surface_clean()
     if cmd=="models": return ollama_models(rest[0] if rest else None)

@@ -774,8 +774,8 @@ This release establishes the following baseline:
 
 | Layer | Version |
 | --- | ---: |
-| Future Crash + LOOK | **1.6.10** |
-| LOOK | **3.12.1** |
+| Future Crash + LOOK | **2.1.1** |
+| LOOK | **4.1.1** |
 | Future Crash | **1.1.7** |
 
 Signal rendering is now compiled separately from conversation: explicit Signal requests use a focused no-thinking 1200-token render pass, while ordinary Workstation conversation retains its own reasoning budget.
@@ -1010,3 +1010,10 @@ lk skills state
 ```
 
 shows the reinforcement state. `skills.md` stays human-readable while `skill_state.json` carries confidence metadata and is included in the portable profile.
+
+
+## Living AI (2.1)
+
+LOOK runs a tiny resident local broker (`look_ai.py`) that coordinates explicit background jobs, memory maintenance, and skill reflection against the configured local/remote Ollama service. Interactive LO work establishes foreground priority; background cognition happens while you are doing something else.
+
+`lk ai` shows the live queue/broker state. Memory consolidation is now semantic, time-aware, and event-driven rather than tied to conversation count.

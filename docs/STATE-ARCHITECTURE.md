@@ -72,3 +72,8 @@ Runtime state is intentionally excluded from profile backups.
 ## Rule
 
 **Program may be reinstalled. Runtime may be discarded. Machine state may be reconfigured. Profile is the user's durable LOOK.**
+
+
+## Living AI broker
+
+`~/.local/share/look/ai.sock`, `ai.pid`, `ai.log`, foreground leases, and queue locks are runtime state. They are deliberately excluded from the portable profile. Durable memory/skills remain profile state; queued work and events remain recoverable runtime state.

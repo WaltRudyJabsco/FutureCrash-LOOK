@@ -52,6 +52,7 @@ _lk() {
     'clear-memory:clear LO user memory'
     'skills:LO assistant craft'
     'profile:portable LOOK identity'
+    'ai:Living AI broker'
     'feedback:terminal motion/sound feedback'
     'sound:toggle feedback sound'
     'personality:LO personality'
@@ -147,6 +148,10 @@ _lk() {
       if [[ "$words[3]" == "export" && CURRENT -ge 4 ]]; then
         _files
       fi
+      return
+      ;;
+    ai)
+      (( CURRENT == 3 )) && _values 'AI action' status start stop wake
       return
       ;;
     profile)
