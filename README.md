@@ -774,9 +774,9 @@ This release establishes the following baseline:
 
 | Layer | Version |
 | --- | ---: |
-| Future Crash + LOOK | **2.1.1** |
-| LOOK | **4.1.1** |
-| Future Crash | **1.1.7** |
+| Future Crash + LOOK | **2.1.9** |
+| LOOK | **4.1.9** |
+| Future Crash | **1.1.8** |
 
 Signal rendering is now compiled separately from conversation: explicit Signal requests use a focused no-thinking 1200-token render pass, while ordinary Workstation conversation retains its own reasoning budget.
 | Memory schema | **1** |
@@ -1017,3 +1017,36 @@ shows the reinforcement state. `skills.md` stays human-readable while `skill_sta
 LOOK runs a tiny resident local broker (`look_ai.py`) that coordinates explicit background jobs, memory maintenance, and skill reflection against the configured local/remote Ollama service. Interactive LO work establishes foreground priority; background cognition happens while you are doing something else.
 
 `lk ai` shows the live queue/broker state. Memory consolidation is now semantic, time-aware, and event-driven rather than tied to conversation count.
+
+
+## Shared inference coordination
+
+LOOK 2.1.2 keeps LO and Future Crash as separate minds while coordinating the inference resource underneath them.
+
+- LO/LOOK and Future Crash keep separate personalities, memories, permissions, and tool contracts.
+- Explicit Future Crash Ask/Workstation activity registers an interactive inference lease with Living AI.
+- Future Crash ambient observations, automatic fortunes, scheduled model Threads, and private memory consolidation enter only when Living AI reports the shared background lane idle.
+- Thread repair passes count as continuations of already-admitted work and are not stranded between frames.
+- If Living AI is unavailable, Future Crash remains standalone and behaves normally.
+
+The rule is: **one inference infrastructure, several distinct minds.**
+
+
+### Living Memory receipts
+
+`lk memory` now reports the result of background extraction as well as queue state. Model extraction remains primary, with a conservative deterministic fallback for obvious user preferences and project-state statements so a small/local model cannot leave candidate memory inert merely by returning `NONE` repeatedly.
+
+
+### Living Memory reinforcement
+
+Repeated equivalent evidence now increments candidate USES and importance, and strong overlap with an active candidate can reinforce it even when model extraction returns NONE.
+
+
+### AI performance
+
+`lk ai stats` shows rolling LO latency and throughput telemetry plus current Ollama model residency/VRAM information. LOOK stores only timings, token counts, rounds and tool counts—not conversation content.
+
+
+### Warm model residency
+
+Interactive LO keeps the selected Ollama model resident with `keep_alive=-1`, avoiding repeated cold-load penalties on dedicated local/remote AI hosts. `lk ai stats` marks tasks warm/cold and distinguishes GPU-resident model memory from model size.

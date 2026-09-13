@@ -9,11 +9,48 @@ STATE=HOME/'.local/share/look'
 SOCKET=STATE/'ai.sock'
 PID=STATE/'ai.pid'
 FOREGROUND=STATE/'ai_foreground.json'
+LEASES=STATE/'ai_leases'
 STARTED=time.time()
 RUN=True
 CURRENT='idle'
 WAKE=True
 BACKOFF_UNTIL=0.0
+
+ERROR_LOG=STATE/'ai_errors.log'
+
+
+def _log_error(where,exc):
+    try:
+        STATE.mkdir(parents=True,exist_ok=True)
+        with ERROR_LOG.open('a',encoding='utf-8') as f:
+            f.write(f"{time.strftime('%Y-%m-%d %H:%M:%S')} {where}: {type(exc).__name__}: {exc}\n")
+    except Exception:
+        pass
+
+
+def _socket_broker_alive():
+    """The socket protocol, not PID reuse, is the authority for singleton state."""
+    if not SOCKET.exists():
+        return False
+    sock=socket.socket(socket.AF_UNIX,socket.SOCK_STREAM)
+    sock.settimeout(.25)
+    try:
+        sock.connect(str(SOCKET))
+        sock.sendall(b'{"command":"status"}\n')
+        data=b''
+        while not data.endswith(b'\n') and len(data)<65536:
+            chunk=sock.recv(4096)
+            if not chunk:
+                break
+            data+=chunk
+        reply=json.loads(data.decode() or '{}')
+        return bool(reply.get('ok'))
+    except Exception:
+        return False
+    finally:
+        try: sock.close()
+        except Exception: pass
+
 
 
 os.environ["LOOK_AI_BROKER_PROCESS"]="1"
@@ -30,24 +67,91 @@ def load_core():
 core=load_core()
 
 
+def _pid_alive(pid):
+    try:
+        os.kill(int(pid),0)
+        return True
+    except Exception:
+        return False
+
+
+def _client_leases():
+    """Return live external inference leases; remove stale/crashed clients."""
+    live=[]
+    try:
+        LEASES.mkdir(parents=True,exist_ok=True)
+        for path in LEASES.glob('*.json'):
+            try:
+                data=json.loads(path.read_text())
+                age=time.time()-float(data.get('time',0))
+                pid=int(data.get('pid',0))
+                if age>900 or not _pid_alive(pid):
+                    path.unlink(missing_ok=True)
+                    continue
+                live.append(data)
+            except Exception:
+                try: path.unlink()
+                except OSError: pass
+    except OSError:
+        pass
+    return live
+
+
 def foreground_busy():
+    # Legacy LOOK foreground lease remains supported unchanged.
     try:
         data=json.loads(FOREGROUND.read_text())
         age=time.time()-float(data.get('time',0))
         pid=int(data.get('pid',0))
-        if age>180:
+        if age>180 or not _pid_alive(pid):
             try: FOREGROUND.unlink()
             except OSError: pass
+        else:
+            return True
+    except Exception:
+        pass
+    return bool(_client_leases())
+
+
+def _set_client_lease(msg):
+    """Per-process lease so independent AI surfaces can coordinate without identity sharing."""
+    try:
+        LEASES.mkdir(parents=True,exist_ok=True)
+        pid=int(msg.get('pid',0))
+        if pid<=0:
             return False
-        try:
-            os.kill(pid,0)
-        except OSError:
-            try: FOREGROUND.unlink()
+        path=LEASES/f'{pid}.json'
+        if bool(msg.get('active')):
+            data={
+                'pid':pid,
+                'label':str(msg.get('label') or 'client')[:80],
+                'priority':str(msg.get('priority') or 'interactive')[:32],
+                'time':time.time(),
+            }
+            tmp=path.with_suffix('.tmp')
+            tmp.write_text(json.dumps(data))
+            os.chmod(tmp,0o600)
+            tmp.replace(path)
+        else:
+            try: path.unlink()
             except OSError: pass
-            return False
         return True
     except Exception:
         return False
+
+
+def _permit(priority='ambient'):
+    """Interactive work may start immediately; background only enters a truly idle lane."""
+    priority=str(priority or 'ambient').lower()
+    if priority=='interactive':
+        return True
+    if foreground_busy():
+        return False
+    if CURRENT!='idle':
+        return False
+    if time.time()<BACKOFF_UNTIL:
+        return False
+    return not any(counts())
 
 
 def counts():
@@ -66,9 +170,14 @@ def counts():
 
 def status():
     jobs,memory,skills=counts()
+    leases=_client_leases()
     return {
         'ok':True,'state':'running','pid':os.getpid(),'foreground':foreground_busy(),
         'jobs':jobs,'memory':memory,'skills':skills,'current':CURRENT,
+        'clients':len(leases),
+        'client_labels':[str(x.get('label','client')) for x in leases[:6]],
+        'core_version':str(getattr(core,'VERSION','unknown')),
+        'protocol_version':2,
         'uptime':time.time()-STARTED,
     }
 
@@ -82,9 +191,14 @@ def process_lo_job():
         except Exception: continue
         if job.get('status')!='queued': continue
         CURRENT=f"background job {job.get('id','?')}"
-        core._run_lo_job(path)
-        CURRENT='idle'
-        return True
+        try:
+            core._run_lo_job(path)
+            return True
+        except Exception as exc:
+            _log_error("background job",exc)
+            return False
+        finally:
+            CURRENT='idle'
     return False
 
 
@@ -174,6 +288,13 @@ def handle(conn):
         if cmd=='status': reply=status()
         elif cmd=='wake': WAKE=True; BACKOFF_UNTIL=0.0; reply={'ok':True}
         elif cmd=='foreground': WAKE=True; reply={'ok':True}
+        elif cmd=='permit':
+            priority=str(msg.get('priority') or 'ambient')
+            reply={'ok':True,'allowed':_permit(priority),'priority':priority,'current':CURRENT}
+        elif cmd=='lease':
+            ok=_set_client_lease(msg)
+            WAKE=True
+            reply={'ok':ok}
         elif cmd=='stop': RUN=False; reply={'ok':True}
         else: reply={'ok':False,'error':'unknown command'}
         conn.sendall((json.dumps(reply)+'\n').encode())
@@ -191,22 +312,29 @@ def serve():
     global WAKE
     STATE.mkdir(parents=True,exist_ok=True)
 
-    # Atomic singleton claim. Never unlink a live broker's socket during a
-    # simultaneous shell startup race.
-    while True:
-        try:
-            fd=os.open(PID,os.O_CREAT|os.O_EXCL|os.O_WRONLY,0o600)
-            os.write(fd,str(os.getpid()).encode()); os.close(fd)
-            break
-        except FileExistsError:
-            try:
-                old=int(PID.read_text().strip()); os.kill(old,0)
+    # The socket protocol is authoritative. A stale PID can point to an
+    # unrelated reused process and must never prevent Living AI from starting.
+    if _socket_broker_alive():
+        return 0
+
+    # No responsive broker exists: clear stale runtime identity and claim it.
+    try: SOCKET.unlink()
+    except OSError: pass
+    try: PID.unlink()
+    except OSError: pass
+
+    try:
+        fd=os.open(PID,os.O_CREAT|os.O_EXCL|os.O_WRONLY,0o600)
+        os.write(fd,str(os.getpid()).encode()); os.close(fd)
+    except FileExistsError:
+        # A simultaneous starter won the race. Trust it only if it becomes
+        # responsive; otherwise this invocation fails softly and the caller's
+        # one-shot fallback can still process durable work.
+        for _ in range(10):
+            time.sleep(.05)
+            if _socket_broker_alive():
                 return 0
-            except Exception:
-                try: PID.unlink()
-                except OSError: return 0
-                try: SOCKET.unlink()
-                except OSError: pass
+        return 1
 
     try: SOCKET.unlink()
     except OSError: pass
@@ -221,11 +349,17 @@ def serve():
                 with conn: handle(conn)
             except socket.timeout: pass
             if not RUN: break
-            if foreground_busy(): continue
-            if time.time()<BACKOFF_UNTIL: continue
-            # Drain one unit at a time so foreground can win between calls.
-            if WAKE or any(counts()):
-                next_background_work()
+            try:
+                if foreground_busy(): continue
+                if time.time()<BACKOFF_UNTIL: continue
+                # Drain one unit at a time so foreground can win between calls.
+                if WAKE or any(counts()):
+                    next_background_work()
+                    WAKE=False
+            except Exception as exc:
+                # A malformed job or unexpected helper error must never kill the
+                # resident coordinator. Durable queues remain for the next pass.
+                _log_error("serve loop",exc)
                 WAKE=False
     finally:
         server.close()

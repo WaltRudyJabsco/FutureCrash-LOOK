@@ -17,7 +17,7 @@ try:
 except Exception:
     readline = None
 
-VERSION="4.1.1"
+VERSION="4.1.9"
 
 LOOK_WORDMARK = r"""       ██╗      ██╗  ██╗
        ██║      ██║ ██╔╝
@@ -48,6 +48,7 @@ AI_SOCKET=STATE_DIR/"ai.sock"
 AI_PID_FILE=STATE_DIR/"ai.pid"
 AI_FOREGROUND_FILE=STATE_DIR/"ai_foreground.json"
 AI_LOG_FILE=STATE_DIR/"ai.log"
+AI_STATS_FILE=STATE_DIR/"ai_stats.json"
 SKILL_STATE_FILE=STATE_DIR/"skill_state.json"
 SKILL_FEEDBACK_QUEUE=STATE_DIR/"skill_feedback_queue"
 SKILL_FEEDBACK_LOCK=STATE_DIR/"skill_feedback.lock"
@@ -95,11 +96,55 @@ def _ai_broker_request(command, **payload):
         return None
 
 
+def _ai_pid_alive(pid):
+    try:
+        os.kill(int(pid),0)
+        return True
+    except Exception:
+        return False
+
+
+def _ai_wait_broker_cleanup(timeout=2.5):
+    """Wait until the old broker has finished unlinking its runtime identity."""
+    deadline=time.time()+timeout
+    while time.time()<deadline:
+        if not AI_SOCKET.exists() and not AI_PID_FILE.exists():
+            return True
+        time.sleep(.05)
+    return not AI_SOCKET.exists() and not AI_PID_FILE.exists()
+
+
 def _ai_broker_start():
-    """Lazily ensure the resident Living AI broker exists."""
+    """Ensure the resident broker exists and is running THIS installed LOOK core."""
     reply=_ai_broker_request("status")
     if reply and reply.get("ok"):
-        return True
+        running=str(reply.get("core_version") or "")
+        if running==VERSION:
+            return True
+
+        # The broker imports LOOK once at process start. After an upgrade, a live
+        # old broker would otherwise keep executing stale memory/tool policy.
+        old_pid=int(reply.get("pid",0) or 0)
+        _ai_broker_request("stop")
+        cleaned=_ai_wait_broker_cleanup(2.5)
+
+        if not cleaned and old_pid>0:
+            try: os.kill(old_pid,signal.SIGTERM)
+            except OSError: pass
+            cleaned=_ai_wait_broker_cleanup(1.5)
+
+        # If the old process is gone but left stale identity files behind, clear
+        # only those stale files. Never unlink a socket owned by a live process.
+        if not cleaned and old_pid>0 and not _ai_pid_alive(old_pid):
+            try: AI_SOCKET.unlink()
+            except OSError: pass
+            try: AI_PID_FILE.unlink()
+            except OSError: pass
+            cleaned=True
+
+        if not cleaned:
+            return False
+
     broker=_ai_broker_path()
     if not broker.exists():
         return False
@@ -114,10 +159,11 @@ def _ai_broker_start():
         log.close()
     except OSError:
         return False
-    for _ in range(12):
+
+    for _ in range(50):
         time.sleep(.05)
         reply=_ai_broker_request("status")
-        if reply and reply.get("ok"):
+        if reply and reply.get("ok") and str(reply.get("core_version") or "")==VERSION:
             return True
     return False
 
@@ -160,6 +206,8 @@ def _ai_command(args):
         ok=_ai_broker_wake("manual")
         print("LOOK AI · wake sent" if ok else "LOOK AI · unavailable")
         return 0 if ok else 1
+    if cmd=="stats":
+        return _ai_stats_command()
     if cmd=="status":
         reply=_ai_broker_request("status")
         _title("LOOK AI","living broker")
@@ -176,9 +224,16 @@ def _ai_command(args):
         print(f"  memory      {reply.get('memory',0)}")
         print(f"  skills      {reply.get('skills',0)}")
         print(f"  current     {reply.get('current') or 'idle'}")
+        runtime=str(reply.get('core_version') or 'legacy')
+        version_note="" if runtime==VERSION else f" · installed {VERSION} · restart pending"
+        print(f"  core        {runtime}{version_note}")
+        clients=int(reply.get('clients',0) or 0)
+        labels=reply.get('client_labels') or []
+        client_text=(f"{clients}" + (f" · {', '.join(labels)}" if labels else ""))
+        print(f"  clients     {client_text}")
         print(f"  uptime      {int(reply.get('uptime',0))}s")
         return 0
-    print("usage: lk ai [status|start|stop|wake]")
+    print("usage: lk ai [status|stats|start|stop|wake]")
     return 2
 
 
@@ -1183,7 +1238,10 @@ def doctor():
 def _empty_memory():
     return {"schema_version": MEMORY_SCHEMA_VERSION, "summary": "", "memories": [], "maintenance_cycles": 0,
             "last_decay_at": time.time(), "last_evidence_at": 0, "last_maintenance_at": 0,
-            "last_consolidated_at": 0, "last_change": ""}
+            "last_consolidated_at": 0, "last_change": "",
+            "last_extraction_at": 0, "last_extraction": "never",
+            "extractions_total": 0, "extractions_candidate": 0, "extractions_none": 0,
+            "consolidations_total": 0}
 
 
 DEFAULT_CORE = """# LO Core
@@ -1335,7 +1393,13 @@ def _load_memory():
                 "last_consolidated_at":float(data.get("last_consolidated_at",0) or 0),
                 "last_change":str(data.get("last_change", ""))[:80],
                 "summary_last_reinforced_at":float(data.get("summary_last_reinforced_at",0) or 0),
-                "last_worker_error":str(data.get("last_worker_error", ""))[:500]}
+                "last_worker_error":str(data.get("last_worker_error", ""))[:500],
+                "last_extraction_at":float(data.get("last_extraction_at",0) or 0),
+                "last_extraction":str(data.get("last_extraction","never"))[:120],
+                "extractions_total":max(0,int(data.get("extractions_total",0) or 0)),
+                "extractions_candidate":max(0,int(data.get("extractions_candidate",0) or 0)),
+                "extractions_none":max(0,int(data.get("extractions_none",0) or 0)),
+                "consolidations_total":max(0,int(data.get("consolidations_total",0) or 0))}
         result=_prune_contaminated_memory(result)
         _save_memory(result)
         return result
@@ -1710,8 +1774,19 @@ def _memory_command(args):
         print()
         queue_n=len(_memory_job_files())
         broker=_ai_broker_request("status") or {}
+        if queue_n and not broker.get("ok"):
+            # Durable work plus no coordinator is a recoverable condition, not
+            # merely a status line. Wake/start Living AI (or one-shot fallback).
+            _start_memory_worker()
+            time.sleep(.05)
+            broker=_ai_broker_request("status") or {}
         print(f"  {len(items)} candidates · prompt attention {RECENT_MEMORY_SLOTS} · schema {MEMORY_SCHEMA_VERSION}")
         print(f"  living AI · {'running' if broker.get('ok') else 'stopped'} · memory queue {queue_n} · last maintenance {_age_label(memory.get('last_maintenance_at',0))}")
+        total=int(memory.get("extractions_total",0)); kept=int(memory.get("extractions_candidate",0)); none=int(memory.get("extractions_none",0))
+        consolidated=int(memory.get("consolidations_total",0))
+        print(f"  extraction · {memory.get('last_extraction','never')} {_age_label(memory.get('last_extraction_at',0))} · {kept}/{total} candidate · {none} none · {consolidated} consolidated")
+        if memory.get("last_worker_error"):
+            print(f"  worker error · {str(memory.get('last_worker_error'))[:120]}")
         print("  recent stores both sides of each exchange; display shows user side only")
         print("  candidates decay by elapsed time; semantic reinforcement promotes durable patterns into LONG-TERM")
     _page_text(buf.getvalue())
@@ -1898,6 +1973,154 @@ def _activity(label):
         sys.stdout.write("\r\033[2K")
         sys.stdout.flush()
 
+class _ActivityHandle:
+    """Start/stop spinner for streaming waits; disappears on first model event."""
+    def __init__(self,label):
+        self.label=label; self.stop=threading.Event(); self.worker=None
+    def start(self):
+        if not sys.stdout.isatty(): return self
+        frames=("◐","◓","◑","◒")
+        def animate():
+            i=0
+            while not self.stop.is_set():
+                sys.stdout.write(f"\r\033[2K{_c(frames[i%4],'36')} {_c(self.label,'2')}")
+                sys.stdout.flush(); i+=1; self.stop.wait(.12)
+        self.worker=threading.Thread(target=animate,daemon=True); self.worker.start()
+        return self
+    def finish(self):
+        if self.worker:
+            self.stop.set(); self.worker.join(timeout=.4)
+            sys.stdout.write("\r\033[2K"); sys.stdout.flush(); self.worker=None
+
+
+def _load_ai_stats():
+    try:
+        data=json.loads(AI_STATS_FILE.read_text(encoding="utf-8"))
+        rows=data.get("requests",[]) if isinstance(data,dict) else []
+        return [x for x in rows if isinstance(x,dict)][-100:]
+    except Exception:
+        return []
+
+
+def _record_ai_stats(row):
+    """Rolling telemetry only; never store prompts or response content."""
+    try:
+        STATE_DIR.mkdir(parents=True,exist_ok=True)
+        rows=(_load_ai_stats()+[dict(row)])[-100:]
+        tmp=AI_STATS_FILE.with_suffix(".tmp")
+        tmp.write_text(json.dumps({"schema_version":1,"requests":rows},indent=2)+"\n",encoding="utf-8")
+        os.chmod(tmp,0o600); tmp.replace(AI_STATS_FILE); os.chmod(AI_STATS_FILE,0o600)
+    except OSError:
+        pass
+
+
+def _median(values):
+    vals=sorted(float(x) for x in values if x is not None)
+    if not vals: return 0.0
+    n=len(vals); m=n//2
+    return vals[m] if n%2 else (vals[m-1]+vals[m])/2
+
+
+def _ai_stats_command():
+    rows=_load_ai_stats(); base=_ollama_base()
+    _title("LO performance","rolling local telemetry")
+    loaded=[]
+    try:
+        import urllib.request
+        with urllib.request.urlopen(base+"/api/ps",timeout=1.2) as response:
+            loaded=json.load(response).get("models",[])
+    except Exception:
+        pass
+    print(f"  host         {_ollama_host_name(base)}")
+    print(f"  model        {_preferred_ollama_model()}")
+    if loaded:
+        current=loaded[0]
+        size_vram=int(current.get("size_vram") or 0); size=int(current.get("size") or 0)
+        ctx=int(current.get("context_length") or 0)
+        if size_vram:
+            print(f"  GPU resident {size_vram/1024**3:.1f} GB")
+        if size:
+            print(f"  model size   {size/1024**3:.1f} GB")
+        if ctx: print(f"  context      {ctx:,}")
+        print(f"  loaded       {len(loaded)} model{'s' if len(loaded)!=1 else ''}")
+    else:
+        print("  loaded       none / unavailable")
+
+    if _is_local_ollama(base) and shutil.which("nvidia-smi"):
+        try:
+            raw=_run_text(["nvidia-smi","--query-gpu=name,memory.used,memory.total,utilization.gpu,temperature.gpu",
+                           "--format=csv,noheader,nounits"],timeout=1.2)
+            parts=[x.strip() for x in raw.splitlines()[0].split(",")] if raw else []
+            if len(parts)>=5:
+                print(f"  GPU          {parts[0]} · {parts[1]}/{parts[2]} MiB · {parts[3]}% · {parts[4]}°C")
+        except Exception: pass
+
+    if not rows:
+        print("\n  No LO request telemetry yet. Use LO normally, then run `lk ai stats` again.")
+        return 0
+
+    last=rows[-1]
+    def rate(count,dur): return float(count)/float(dur) if count and dur else 0.0
+    print("\n  LAST TASK")
+    print(f"  wall         {float(last.get('wall_s',0)):.2f}s · {str(last.get('residency') or ('cold' if float(last.get('load_s',0))>=1.0 else 'warm'))}")
+    print(f"  rounds       {int(last.get('rounds',0))} · tool calls {int(last.get('tool_calls',0))}")
+    print(f"  prompt       {int(last.get('prompt_tokens',0)):,} tok · {float(last.get('prompt_s',0)):.2f}s"
+          + (f" · {rate(last.get('prompt_tokens'),last.get('prompt_s')):,.0f} tok/s" if last.get('prompt_s') else ""))
+    print(f"  generation   {int(last.get('eval_tokens',0)):,} tok · {float(last.get('eval_s',0)):.2f}s"
+          + (f" · {rate(last.get('eval_tokens'),last.get('eval_s')):.1f} tok/s" if last.get('eval_s') else ""))
+    print(f"  model load   {float(last.get('load_s',0)):.3f}s")
+    recent=rows[-20:]
+    print(f"\n  LAST {len(recent)}")
+    print(f"  median wall  {_median([x.get('wall_s',0) for x in recent]):.2f}s")
+    print(f"  median rounds {_median([x.get('rounds',0) for x in recent]):.1f}")
+    print(f"  median tools {_median([x.get('tool_calls',0) for x in recent]):.1f}")
+    print(f"  median prompt {int(_median([x.get('prompt_tokens',0) for x in recent])):,} tok")
+    cold=sum(1 for x in recent if str(x.get("residency") or ("cold" if float(x.get("load_s",0))>=1.0 else "warm"))=="cold")
+    print(f"  residency    {len(recent)-cold} warm · {cold} cold")
+    rates=[x.get("eval_tokens",0)/x.get("eval_s",1) for x in recent if x.get("eval_tokens") and x.get("eval_s")]
+    if rates: print(f"  median gen   {_median(rates):.1f} tok/s")
+    return 0
+
+
+def _obvious_memory_candidate(user_text):
+    """Deterministic fallback for explicit preferences/project-state language.
+
+    This does not replace model extraction. It prevents the semantic system from
+    becoming inert when a small local model returns NONE too aggressively.
+    """
+    text=" ".join(str(user_text or "").split()).strip()
+    if not text:
+        return None
+    low=text.casefold()
+
+    # Skip obvious command-only/mechanical turns.
+    if len(text)<12:
+        return None
+
+    strong_markers=(
+        "remember this","remember that","this is important",
+        "i prefer ","i really prefer ","i love ","i really like ",
+        "my favorite ","my favourite ","from now on ","going forward ",
+    )
+    medium_markers=(
+        "we are using ","we're using ","we use ","we decided ",
+        "we're building ","we are building ","the current version ",
+        "our current ","i usually ","i always ","i don't want ","i do not want ",
+        "i want to keep ","let's keep ","we should keep ",
+    )
+
+    if any(m in low for m in strong_markers):
+        importance=88 if not ("remember this" in low or "remember that" in low or "this is important" in low) else 96
+    elif any(m in low for m in medium_markers):
+        importance=68
+    else:
+        return None
+
+    # Keep user wording compact; the semantic matcher will merge paraphrases later.
+    compact=text[:420].rstrip()
+    return importance,compact
+
+
 def _extract_memory_candidate(base, model, user_text, assistant_text):
     prompt=f"""Capture the compact meat of this exchange when it would help conversational
 continuity later.
@@ -1915,6 +2138,8 @@ Important guidance:
   Never turn an assistant suggestion into a user preference merely because the assistant proposed it.
   A bare acknowledgement such as "nice", "thanks", or "okay" does not establish a new preference.
 - Return NONE for mechanical turns, acknowledgements, disposable commands, or content-free chatter.
+- When the exchange changes the state of an ongoing project, establishes a working convention,
+  or states a preference likely to affect later answers, prefer a candidate over NONE.
 - Do not store assistant technique here; reusable assistant craft belongs in skills.
 - Do not output analysis, reasoning, headings, or commentary.
 
@@ -2272,6 +2497,39 @@ def _memory_similarity_key(text):
     return {w for w in words if w not in stop}
 
 
+def _deterministic_memory_match(text,memory):
+    """Return an active-candidate index only for strong distinctive-token overlap."""
+    key=_memory_similarity_key(text)
+    if not key:
+        return None
+    items=list(memory.get("memories",[]))[:MEMORY_CANDIDATE_LIMIT]
+    best=None
+    for idx,item in enumerate(items):
+        old_key=_memory_similarity_key(item.get("text",""))
+        if not old_key:
+            continue
+        inter=key & old_key
+        overlap=len(inter)/max(1,min(len(key),len(old_key)))
+        if len(inter)>=3 and overlap>=0.65:
+            score=(overlap,len(inter))
+            if best is None or score>best[0]:
+                best=(score,idx)
+    return best[1] if best else None
+
+
+def _reinforcement_from_existing(user_text,memory):
+    """Treat a strongly overlapping user statement as evidence even if extraction said NONE."""
+    idx=_deterministic_memory_match(user_text,memory)
+    if idx is None:
+        return None
+    item=memory.get("memories",[])[idx]
+    # Use the established candidate's importance as the baseline; reinforcement
+    # itself supplies the +8 bump in _reinforce_memory_item.
+    importance=max(40,int(item.get("importance",50)))
+    text=" ".join(str(user_text or "").split()).strip()[:420]
+    return importance,text,idx
+
+
 def _semantic_memory_match(base,model,text,memory):
     """Resolve a candidate against active candidates AND long-term summary."""
     items=list(memory.get("memories",[]))[:MEMORY_CANDIDATE_LIMIT]
@@ -2372,10 +2630,11 @@ def _consolidate_memory_candidates(memory):
             # such as "Portland OR context" vs "Portland OR location".
             obvious=(overlap >= 0.60 and len(intersection) >= 2)
             if obvious:
-                old["importance"]=max(int(old.get("importance",0)),int(item.get("importance",0)))
-                old["uses"]=max(int(old.get("uses",0)),int(item.get("uses",0)))
+                old_importance=max(int(old.get("importance",0)),int(item.get("importance",0)))
+                old["importance"]=min(100,old_importance+8)
+                old["uses"]=int(old.get("uses",1))+int(item.get("uses",1))
                 old["created_at"]=min(float(old.get("created_at",time.time())),float(item.get("created_at",time.time())))
-                old["last_reinforced"]=max(float(old.get("last_reinforced",0)),float(item.get("last_reinforced",0)))
+                old["last_reinforced"]=max(float(old.get("last_reinforced",0)),float(item.get("last_reinforced",0)),time.time())
                 merged=True
                 break
         if not merged:
@@ -2427,8 +2686,29 @@ def _remember_exchange(base, model, memory, user_text, assistant_text, profile="
     memory["last_evidence_at"]=now
 
     candidate=_extract_memory_candidate(base,model,user_text,assistant_text)
+    source="model"
+    forced_idx=None
+    if not candidate:
+        candidate=_obvious_memory_candidate(user_text)
+        source="obvious"
     if not candidate:
         candidate=_explicit_memory_hint(user_text)
+        source="explicit"
+    if not candidate:
+        reinforcement=_reinforcement_from_existing(user_text,memory)
+        if reinforcement:
+            importance,text,forced_idx=reinforcement
+            candidate=(importance,text)
+            source="reinforce"
+
+    memory["last_extraction_at"]=now
+    memory["extractions_total"]=int(memory.get("extractions_total",0))+1
+    if candidate:
+        memory["extractions_candidate"]=int(memory.get("extractions_candidate",0))+1
+        memory["last_extraction"]=f"candidate:{source}"
+    else:
+        memory["extractions_none"]=int(memory.get("extractions_none",0))+1
+        memory["last_extraction"]="none"
 
     durable=_durable_memory_intent(user_text)
     durable_text=""
@@ -2439,7 +2719,16 @@ def _remember_exchange(base, model, memory, user_text, assistant_text, profile="
         if durable:
             importance=max(importance,95)
             durable_text=text
-        action,idx=_semantic_memory_match(base,model,text,memory)
+
+        if forced_idx is not None:
+            action,idx="match",forced_idx
+        else:
+            deterministic_idx=_deterministic_memory_match(text,memory)
+            if deterministic_idx is not None:
+                action,idx="match",deterministic_idx
+            else:
+                action,idx=_semantic_memory_match(base,model,text,memory)
+
         if action=="match" and idx is not None:
             memory["memories"][idx]=_reinforce_memory_item(memory["memories"][idx],text,importance)
             durable_text=str(memory["memories"][idx].get("text","")) if durable else durable_text
@@ -2458,6 +2747,7 @@ def _remember_exchange(base, model, memory, user_text, assistant_text, profile="
         memory,consolidated=_living_memory_maintain(base,model,memory,durable_text)
         if consolidated:
             memory["last_change"]="consolidated"
+            memory["consolidations_total"]=int(memory.get("consolidations_total",0))+1
         elif candidate:
             memory["last_change"]="candidate"
     else:
@@ -4184,7 +4474,7 @@ def _run_filesystem_tool(workspace, name, args):
         return f"File tool failed: {exc}"
     return f"Unknown file tool: {name}"
 
-LOOK_INFO_USER_AGENT="LOOK-Shell/4.1.1 (local text client)"
+LOOK_INFO_USER_AGENT="LOOK-Shell/4.1.9 (local text client)"
 
 def _http_json(url, timeout=12):
     import json, urllib.request
@@ -4823,12 +5113,24 @@ def ollama_chat(force_search=False, initial_prompt=None, allow_start=True, host_
         mutation_repair_sent=False
         runtime=_lo_runtime_policy(thinking_mode, prompt)
         task_tier,budget=_lo_budget_for(prompt,thinking_mode,selected_paths)
+        task_started=time.monotonic()
+        task_rounds=0
+        task_tool_calls=0
+        task_prompt_tokens=0
+        task_prompt_s=0.0
+        task_eval_tokens=0
+        task_eval_s=0.0
+        task_load_s=0.0
 
         for _ in range(budget["tool_rounds"]):
             payload_obj = {
                 "model": model,
                 "messages": messages,
                 "stream": False,
+                # LOOK is an interactive shell assistant. On a dedicated Ollama
+                # host, unloading the primary model between turns only creates
+                # cold-start latency with no user benefit.
+                "keep_alive": -1,
                 "options": {
                     "num_ctx": budget["context"],
                     "num_predict": budget["output"],
@@ -4845,18 +5147,35 @@ def ollama_chat(force_search=False, initial_prompt=None, allow_start=True, host_
             try:
                 aggregate={"role":"assistant","content":"","thinking":"","tool_calls":[]}
                 roller=_RollingThinking(_load_think_display())
-                for event in _ollama_stream_chat(base,payload_obj):
-                    fragment=event.get("message",{}) or {}
-                    thought=str(fragment.get("thinking") or "")
-                    content=str(fragment.get("content") or "")
-                    if thought:
-                        aggregate["thinking"]+=thought
-                        roller.feed(thought)
-                    if content:
-                        aggregate["content"]+=content
-                    if fragment.get("tool_calls"):
-                        aggregate["tool_calls"].extend(fragment.get("tool_calls") or [])
+                waiting=_ActivityHandle("waiting for model").start()
+                first_event=True
+                final_event={}
+                task_rounds+=1
+                try:
+                    for event in _ollama_stream_chat(base,payload_obj):
+                        fragment=event.get("message",{}) or {}
+                        thought=str(fragment.get("thinking") or "")
+                        content=str(fragment.get("content") or "")
+                        calls=fragment.get("tool_calls") or []
+                        if first_event and (thought or content or calls or event.get("done")):
+                            waiting.finish(); first_event=False
+                        if thought:
+                            aggregate["thinking"]+=thought
+                            roller.feed(thought)
+                        if content:
+                            aggregate["content"]+=content
+                        if calls:
+                            aggregate["tool_calls"].extend(calls)
+                        if event.get("done"):
+                            final_event=event
+                finally:
+                    waiting.finish()
                 roller.finish()
+                task_prompt_tokens+=int(final_event.get("prompt_eval_count") or 0)
+                task_prompt_s+=float(final_event.get("prompt_eval_duration") or 0)/1e9
+                task_eval_tokens+=int(final_event.get("eval_count") or 0)
+                task_eval_s+=float(final_event.get("eval_duration") or 0)/1e9
+                task_load_s+=float(final_event.get("load_duration") or 0)/1e9
                 result={"message":aggregate}
             except KeyboardInterrupt:
                 _ai_foreground(False,"lo")
@@ -4872,6 +5191,7 @@ def ollama_chat(force_search=False, initial_prompt=None, allow_start=True, host_
             message = result.get("message", {})
             tool_calls = message.get("tool_calls") or []
             if tool_calls:
+                task_tool_calls+=len(tool_calls)
                 messages.append(message)
                 for call in tool_calls:
                     function = call.get("function", {})
@@ -4938,7 +5258,8 @@ def ollama_chat(force_search=False, initial_prompt=None, allow_start=True, host_
                             except Exception as exc:
                                 tool_content = f"Web search failed: {exc}"
                     elif name in {"list_files", "inspect_directory", "read_file", "search_files", "write_file", "create_text_files", "copy_path", "move_path", "remove_path", "make_directory"}:
-                        tool_content = _run_filesystem_tool(workspace, name, args)
+                        with _activity(name.replace("_"," ")):
+                            tool_content = _run_filesystem_tool(workspace, name, args)
                         if name in _LO_MUTATION_TOOLS:
                             mutation_attempted=True
                             print(f"{_ansi_label('file ›', '32')} {tool_content}")
@@ -4950,7 +5271,8 @@ def ollama_chat(force_search=False, initial_prompt=None, allow_start=True, host_
                         if profile not in {"power","unsafe"}:
                             tool_content="Command execution is unavailable in this access profile."
                         else:
-                            tool_content=_run_command_tool(workspace,args,profile)
+                            with _activity("running command"):
+                                tool_content=_run_command_tool(workspace,args,profile)
                             print(f"{_ansi_label('command ›', '33')} {tool_content.splitlines()[0]}")
                     else:
                         tool_content = f"Unknown tool: {name}"
@@ -4988,6 +5310,16 @@ def ollama_chat(force_search=False, initial_prompt=None, allow_start=True, host_
                 print(_ansi_label("lo ›","35")+" "+_ollama_markup(final)+"\n")
             else:
                 print(_ansi_label("lo ›","35")+" "+_c("(no final response)","2")+"\n")
+            _record_ai_stats({
+                "time":time.time(),"model":model,"host":_ollama_host_name(base),
+                "wall_s":max(0.0,time.monotonic()-task_started),
+                "rounds":task_rounds,"tool_calls":task_tool_calls,
+                "prompt_tokens":task_prompt_tokens,"prompt_s":task_prompt_s,
+                "eval_tokens":task_eval_tokens,"eval_s":task_eval_s,
+                "load_s":task_load_s,
+                "residency":"cold" if task_load_s>=1.0 else "warm",
+                "thinking":thinking_mode,
+            })
             feedback_queued=_queue_skill_feedback(base,model,prompt,profile)
             _save_recent_exchange(prompt, answer)
             if feedback_queued and sys.stdout.isatty():
@@ -7129,6 +7461,7 @@ def _surface_ai():
         print(f"  model        {_preferred_ollama_model()}")
         print(f"  resident     {resident}")
         print(f"  thinking     {_load_thinking()}")
+        print(f"  display      {_load_think_display()}")
         print(f"  personality  {_load_personality()}")
         print(f"  web          {'● ready' if os.environ.get('OLLAMA_API_KEY') else _c('○ no key','2')}")
         broker=_ai_broker_request("status") or {}
@@ -7136,15 +7469,18 @@ def _surface_ai():
         print(f"  broker       {bstate}")
         print()
         print(f"  {_c('[m]','36')} models       {_c('[b]','36')} benchmark")
-        print(f"  {_c('[t]','36')} thinking     {_c('[p]','36')} personality")
-        print(f"  {_c('[w]','36')} web/key      {_c('[o]','36')} ollama")
+        print(f"  {_c('[v]','36')} performance  {_c('[t]','36')} thinking")
+        print(f"  {_c('[d]','36')} think display {_c('[p]','36')} personality")
+        print(f"  {_c('[w]','36')} web/key       {_c('[o]','36')} ollama")
         print(f"  {_c('[r]','36')} broker       {_c('[s]','36')} settings")
         print(f"  {_c('[esc]','2')} done")
         key=_surface_key().lower()
         if key in {"esc","q"}: return 0
         if key=="m": _surface_run(ollama_models)
         elif key=="b": _surface_run(ollama_test,False)
+        elif key=="v": _surface_run(_ai_stats_command)
         elif key=="t": _surface_run(lo_thinking,[])
+        elif key=="d": _surface_run(lo_think_display,[])
         elif key=="p": _surface_run(lo_personality,[])
         elif key=="w": _surface_run(ollama_key,["status"])
         elif key=="o": _surface_run(inspect_ollama)
@@ -7317,7 +7653,7 @@ NETWORK
 
 AI
   lo  lo search    ollama  ollama models  ollama test
-  personality  thinking  think-display  settings
+  personality  thinking  think-display  ai stats  settings
   memory  skills   profile  ai  feedback  sound
   ollama access  ollama key
 
@@ -7337,7 +7673,7 @@ def starter_help():
 
   lk               inspect something, or show LOOK home
   lk system        machine health + processes + ports
-  lk ai            models + benchmark + thinking + personality + broker
+  lk ai            models + performance + thinking + personality + broker
   lk net           addresses + Tailscale + sharing + web readiness
   lk clean         conservative maintenance surface
   lk config        LOOK + LO behavior
@@ -7923,7 +8259,7 @@ def main():
         return starter_help()
     if cmd=="commands": return commands_screen()
     if cmd=="ai":
-        if rest and rest[0] in {"status","start","stop","wake"}: return _ai_command(rest)
+        if rest and rest[0] in {"status","stats","start","stop","wake"}: return _ai_command(rest)
         return _surface_ai()
     if cmd=="system": return _surface_system()
     if cmd=="clean": return _surface_clean()

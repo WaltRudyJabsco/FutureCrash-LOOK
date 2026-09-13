@@ -21,6 +21,8 @@ import sys
 import termios
 import tty
 import tempfile
+import threading
+from contextlib import contextmanager
 from dataclasses import dataclass
 from datetime import datetime, timedelta
 from pathlib import Path
@@ -60,6 +62,30 @@ else:
     ACTIVE=REVERSE+BOLD
 
 CLEAR='\x1b[2J\x1b[H'; HIDE='\x1b[?25l'; SHOW='\x1b[?25h'
+
+@contextmanager
+def activity(label:str):
+    """Small terminal activity indicator for genuinely blocking renderer work."""
+    if not sys.stdout.isatty():
+        yield
+        return
+    stop=threading.Event()
+    frames=("◐","◓","◑","◒")
+    def animate():
+        i=0
+        while not stop.is_set():
+            sys.stdout.write(f"\r\033[2K{CYAN}{frames[i%4]}{RESET} {FAINT}{label}{RESET}")
+            sys.stdout.flush()
+            i+=1
+            stop.wait(.12)
+    worker=threading.Thread(target=animate,daemon=True)
+    worker.start()
+    try:
+        yield
+    finally:
+        stop.set(); worker.join(timeout=.4)
+        sys.stdout.write("\r\033[2K"); sys.stdout.flush()
+
 
 @dataclass
 class Entry:
@@ -866,7 +892,8 @@ def pager(rows:list[str],height:int,width:int,rebuild=None,candidates=None,on_br
             dest=dest.strip()
             if cancelled or not dest:
                 notice='cancelled'; return
-            proc=subprocess.run([sys.executable,str(lk),'_batch',kind,dest,*map(str,paths)])
+            with activity(f"{'copying' if kind=='copy' else 'moving'} {len(paths)} item{'s' if len(paths)!=1 else ''}"):
+                proc=subprocess.run([sys.executable,str(lk),'_batch',kind,dest,*map(str,paths)])
         elif kind=='remove':
             sys.stdout.write(SHOW+RESET+'\n'); sys.stdout.flush()
             try:
@@ -878,7 +905,8 @@ def pager(rows:list[str],height:int,width:int,rebuild=None,candidates=None,on_br
             sys.stdout.write(HIDE); sys.stdout.flush()
             if cancelled or answer.strip().lower()!='r':
                 notice='cancelled'; return
-            proc=subprocess.run([sys.executable,str(lk),'_batch','remove','--',*map(str,paths)])
+            with activity(f"removing {len(paths)} item{'s' if len(paths)!=1 else ''}"):
+                proc=subprocess.run([sys.executable,str(lk),'_batch','remove','--',*map(str,paths)])
         marked.clear()
         notice='done · lk undo' if proc.returncode==0 else 'action failed'
 
@@ -924,18 +952,18 @@ def pager(rows:list[str],height:int,width:int,rebuild=None,candidates=None,on_br
                 status=(f'  {CYAN}{BOLD}FILTER{RESET} {WHITE}{query}█{RESET}'
                         f'  {GRAY}{len(matches)} {match_word}{RESET}'
                         + (f'  · {sel}' if sel else ''))
-                action_parts=['J/K move','Tab mark','A all','Enter open',
-                              'C copy→','B clipboard','M move','R remove',
-                              'L LO context','X clear set','E edit','O open with','Y path','G go','Esc clear']
+                action_parts=['J/K move','Tab mark','A all','Enter/→ open','B clipboard',
+                              'C Copy To','M Move To','R remove','L LO context','X clear set',
+                              'E edit','O open with','Y path','G go','← parent','Esc clear']
             elif selecting:
                 name=picked.name if picked else '(no matches)'
                 kind='folder' if picked and picked.is_dir() else 'file'
                 sel=selection_status()
                 status=(f'  {CYAN}{BOLD}SELECT{RESET} {WHITE}{name}{RESET} {GRAY}· {kind}{RESET}'
                         + (f'  · {sel}' if sel else ''))
-                action_parts=['j/k move','Tab mark','Enter open',
-                              'C copy→','B clipboard','M move','R remove',
-                              'L LO context','X clear set','E edit','O open with','Y path','G go','Esc filter','q quit']
+                action_parts=['j/k move','Tab mark','Enter/→ open','B clipboard',
+                              'C Copy To','M Move To','R remove','L LO context','X clear set',
+                              'E edit','O open with','Y path','G go','← parent','Esc filter','q quit']
             elif query:
                 status=(f'  {CYAN}{BOLD}FILTER{RESET} {WHITE}{query}{RESET}'
                         f'  {GRAY}{last}/{len(current)}{RESET}')
@@ -943,8 +971,8 @@ def pager(rows:list[str],height:int,width:int,rebuild=None,candidates=None,on_br
             else:
                 back_hint='Esc back' if on_back else 'Esc exit'
                 status=f'  {FAINT}{last}/{len(current)}{RESET}'
-                action_parts=['Enter filter','Space/PgDn next','b/PgUp back',
-                              'g/G ends','< parent',back_hint,'q quit']
+                action_parts=['Enter/→ filter','Space/PgDn next','b/PgUp back',
+                              'g/G ends','←/< parent',back_hint,'q quit']
             if notice:
                 status=f'{status}  {YELLOW}{notice}{RESET}'
                 notice=''
@@ -957,7 +985,7 @@ def pager(rows:list[str],height:int,width:int,rebuild=None,candidates=None,on_br
 
             if filtering:
                 if key in {'q','Q','\x03'}: break
-                if key in {'\r','\n'}:
+                if key in {'\r','\n','\x1b[C'}:
                     picked=selected_path()
                     if picked:
                         if on_activate:
@@ -983,7 +1011,9 @@ def pager(rows:list[str],height:int,width:int,rebuild=None,candidates=None,on_br
                     top=max(0,top-usable)
                 elif key=='\x1b':
                     query=''; filtering=False; selecting=False; refresh_filter()
-                elif key.startswith('\x1b['):
+                elif key=='\x1b[D' and on_parent:
+                    on_parent(); return
+                elif key.startswith('\x1b[') and key!='\x1b[Z':
                     # Ignore other terminal escape sequences without leaving filter mode.
                     pass
                 elif key=='A' and matches:
@@ -995,7 +1025,7 @@ def pager(rows:list[str],height:int,width:int,rebuild=None,candidates=None,on_br
                         marked.update(resolved)
                         notice=f'{len(matches)} marked'
                     current=rebuild(query,selected_path(),None,marked) if rebuild else current
-                elif key=='\t' and matches:
+                elif key in {'\t','\x1b[Z'} and matches:
                     picked=selected_path()
                     if picked:
                         rp=picked.resolve()
@@ -1071,10 +1101,12 @@ def pager(rows:list[str],height:int,width:int,rebuild=None,candidates=None,on_br
                 if key in {'k','K','\x1b[A'} and matches: selected=(selected-1)%len(matches); continue
                 if key=='\x1b[6~' and matches: selected=min(len(matches)-1,selected+usable); continue
                 if key=='\x1b[5~' and matches: selected=max(0,selected-usable); continue
-                if key.startswith('\x1b['): continue
+                if key=='\x1b[D' and on_parent:
+                    on_parent(); return
                 picked=selected_path()
+                if key.startswith('\x1b[') and key not in {'\x1b[C','\x1b[Z'}: continue
                 if not picked: continue
-                if key in {'\r','\n'}:
+                if key in {'\r','\n','\x1b[C'}:
                     if on_activate:
                         on_activate(picked); return
                     if picked.is_dir() and on_browse:
@@ -1084,7 +1116,7 @@ def pager(rows:list[str],height:int,width:int,rebuild=None,candidates=None,on_br
                         break
                     notice=message
                     continue
-                if key=='\t':
+                if key in {'\t','\x1b[Z'}:
                     rp=picked.resolve()
                     if rp in marked: marked.remove(rp)
                     else: marked.add(rp)
@@ -1124,7 +1156,7 @@ def pager(rows:list[str],height:int,width:int,rebuild=None,candidates=None,on_br
                 continue
 
             if key in {'q','Q','\x03'}: break
-            if key in {'\r','\n','/'}:
+            if key in {'\r','\n','/','\x1b[C'}:
                 filtering=True
                 refresh_filter()
             elif key=='\x1b':
@@ -1143,7 +1175,7 @@ def pager(rows:list[str],height:int,width:int,rebuild=None,candidates=None,on_br
             elif key in {'k','\x1b[A'}: top=max(0,top-1)
             elif key=='g': top=0
             elif key=='G': top=max(0,len(current)-usable)
-            elif key=='<' and on_parent:
+            elif key in {'<','\x1b[D'} and on_parent:
                 on_parent()
                 return
     finally:
@@ -1229,7 +1261,8 @@ def main():
 
     if args.global_find:
         root=target.expanduser().resolve()
-        catalog=_global_catalog(root)
+        with activity('scanning files'):
+            catalog=_global_catalog(root)
         selected_result:Path|None=None
         def choose_global(path:Path)->None:
             nonlocal selected_result

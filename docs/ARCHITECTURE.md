@@ -37,3 +37,22 @@ This lets LOOK stabilize while reviewed assistant craft continues to evolve with
 LOOK separates versioned program material from portable profile identity, machine-local trust/configuration, and disposable runtime state. See `STATE-ARCHITECTURE.md` and `PROFILE.md`.
 
 This boundary is also the long-term service contract: shell, filer, Future Crash, and future resident brokers may exchange jobs/events, while durable intelligence remains profile state.
+
+
+## Shared inference coordination (2.1.2)
+
+Living AI coordinates access to inference capacity across independent clients without merging their identities.
+
+Future Crash is an optional client. Explicit Ask/Workstation operations register a per-process interactive lease. Automatic Future Crash work requests admission to the idle background lane. LOOK's own foreground lease, queued LO jobs, Living Memory, and skill reflection retain precedence over ambient Future Crash inference.
+
+The coordination boundary is intentionally below personality, memory, permissions, and tools:
+
+```text
+Future Crash Oracle ─┐
+                     ├─ Living AI inference lane ─ Ollama
+LO / LOOK ───────────┘
+
+identity/memory/tool state remain separate above the lane
+```
+
+If Living AI is unavailable, Future Crash remains a direct Ollama client.

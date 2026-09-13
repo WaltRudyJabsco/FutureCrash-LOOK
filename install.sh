@@ -3,9 +3,9 @@ set -euo pipefail
 
 ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 
-PRODUCT_VERSION="2.1.1"
-LOOK_VERSION="4.1.1"
-FUTURE_CRASH_VERSION="1.1.7"
+PRODUCT_VERSION="2.1.9"
+LOOK_VERSION="4.1.9"
+FUTURE_CRASH_VERSION="1.1.8"
 
 DRY=0
 ASSUME_YES=0
@@ -227,7 +227,20 @@ if have lk; then
 fi
 
 run mkdir -p "$HOME/.local/share/look" "$HOME/.local/bin"
+
+# A resident Living AI process has imported the currently installed LOOK code.
+# Stop it BEFORE replacing those files so an upgrade can never leave old policy
+# executing against new on-disk state.
 if ((!DRY)); then
+  OLD_LOOK="$HOME/.local/share/look/lk"
+  if [[ -x "$OLD_LOOK" ]]; then
+    "$OLD_LOOK" ai stop >/dev/null 2>&1 || true
+    for _ in {1..50}; do
+      [[ ! -S "$HOME/.local/share/look/ai.sock" && ! -f "$HOME/.local/share/look/ai.pid" ]] && break
+      sleep 0.05
+    done
+  fi
+
   MEMORY="$HOME/.local/share/look/ollama_memory.json"
   if [[ ! -f "$MEMORY" ]]; then
     printf '{"long":"","recent":[]}\n' > "$MEMORY"
@@ -240,7 +253,11 @@ run cp "$ROOT/look/look_renderer.py" "$HOME/.local/share/look/look_renderer.py"
 run cp "$ROOT/look/look_ai.py" "$HOME/.local/share/look/look_ai.py"
 run chmod +x "$HOME/.local/share/look/look_ai.py"
 run chmod +x "$HOME/.local/share/look/lk"
-if ((!DRY)); then ln -sfn "$HOME/.local/share/look/lk" "$HOME/.local/bin/lk"; fi
+if ((!DRY)); then
+  ln -sfn "$HOME/.local/share/look/lk" "$HOME/.local/bin/lk"
+  # Start the newly installed broker now. The shell hook remains a fallback.
+  "$HOME/.local/share/look/lk" ai start >/dev/null 2>&1 || true
+fi
 
 LOOK_ZSH_DIR="$HOME/.config/look"
 LOOK_ZSH_FILE="$LOOK_ZSH_DIR/look.zsh"
@@ -350,10 +367,10 @@ old_dirs = old.get("created_dirs") if isinstance(old.get("created_dirs"), list) 
 
 manifest = {
     "product": "future-crash-look",
-    "release": os.environ.get("FCL_RELEASE_VERSION", "2.0.0"),
+    "release": os.environ.get("FCL_RELEASE_VERSION", "2.1.9"),
     "components": {
-        "look": os.environ.get("FCL_LOOK_VERSION", "4.0.0"),
-        "future_crash": os.environ.get("FCL_FUTURE_CRASH_VERSION", "1.1.7"),
+        "look": os.environ.get("FCL_LOOK_VERSION", "4.1.9"),
+        "future_crash": os.environ.get("FCL_FUTURE_CRASH_VERSION", "1.1.8"),
     },
     "packages": sorted(set(old_packages + [x for x in os.environ.get("LOOK_MANIFEST_PACKAGES","").splitlines() if x])),
     "created_dirs": sorted(set(old_dirs + [x for x in os.environ.get("LOOK_MANIFEST_DIRS","").splitlines() if x])),

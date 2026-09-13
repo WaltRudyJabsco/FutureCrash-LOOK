@@ -1,3 +1,71 @@
+## 2.1.9 — Ollama keep-alive compatibility fix
+
+- Fixed interactive LO requests sending permanent residency as the string `"-1"`.
+- Ollama now receives numeric `keep_alive: -1`, which preserves permanent model residency without triggering HTTP 400 on stricter Ollama builds.
+- No other behavior changed.
+
+## 2.1.8 — Warm model residency
+
+- Normal interactive LO chat now requests Ollama `keep_alive=-1` so the selected primary model stays resident instead of paying repeated cold-load penalties.
+- `lk ai stats` now labels the last task as warm/cold using Ollama load duration.
+- Rolling stats show warm vs cold task counts.
+- `/api/ps` display now distinguishes GPU-resident model bytes from model size; it no longer mislabels model size as physical VRAM capacity.
+- No model choice, thinking policy, tool behavior, memory policy, or Future Crash behavior changes.
+
+## 2.1.7 — Input polish + AI performance telemetry
+
+- Filer footer now distinguishes Clipboard from Copy To and orders clipboard before destination mutations.
+- Shift-Tab marks exactly like Tab.
+- Left arrow navigates to parent; right arrow follows Enter/open semantics.
+- Added restrained activity indicators for first-model-token waits, blocking file mutations, commands, and global catalog scans.
+- Added `lk ai stats`: rolling wall time, inference rounds, tool calls, prompt eval, generation speed, load time, Ollama VRAM allocation/context, and local NVIDIA detail when applicable.
+- LO telemetry stores timing/count data only; no prompts or response content.
+- AI control surface now exposes thinking effort and thinking-display separately.
+- No Living Memory policy or Future Crash behavior changes.
+
+## 2.1.6 — Living AI liveness hardening
+
+- Broker singleton detection now trusts the Unix socket protocol, not PID existence alone.
+- Stale/reused PID files can no longer block Living AI startup.
+- Unexpected background-processing exceptions are contained and logged instead of killing the resident broker.
+- Background LO job exceptions are contained.
+- `lk memory` now self-heals when durable memory work exists but Living AI is stopped.
+- Memory policy and Future Crash behavior are unchanged.
+
+## 2.1.5 — Living AI version handshake
+
+- Living AI now reports the LOOK core version it imported at startup.
+- LOOK compares the resident broker core version with the installed LOOK version before waking background work.
+- A stale broker from a prior upgrade is gracefully stopped and replaced before queued memory/jobs are processed.
+- `lk ai status` shows the running core version and warns when a restart is pending.
+- No memory policy, Future Crash personality, or scheduler-priority changes.
+
+## 2.1.4 — Living Memory reinforcement correctness
+
+- Repeated semantically equivalent candidate evidence now increments USES and importance.
+- Strong overlap with an existing candidate can count as reinforcement even when the extractor returns NONE.
+- Post-hoc duplicate consolidation now accumulates evidence instead of discarding repeat mentions with max(uses).
+- Added persistent extraction and consolidation receipts to `lk memory`.
+- Broker, scheduler, Future Crash, and inference coordination are unchanged.
+
+## 2.1.3 — Living Memory observability + evidence fallback
+
+- Fixed a practical Living Memory failure mode where RECENT advanced and the durable queue drained, but candidate extraction could return `NONE` indefinitely.
+- Added a deterministic fallback for obvious user preferences, working conventions, explicit memory language, and ongoing project-state statements.
+- Model extraction remains the primary path; the fallback only catches clear evidence when the model is too conservative.
+- Added extraction counters and last-extraction receipts to `lk memory`.
+- `lk memory` now distinguishes `candidate:model`, `candidate:obvious`, `candidate:explicit`, and `none`.
+- Worker errors are surfaced directly in the memory status view.
+- Living AI scheduling, memory schema 2, Future Crash 1.1.8, and all 2.1.2 inference coordination remain unchanged.
+
+## 2.1.2 — Shared inference coordination
+
+- Living AI now exposes permit/lease coordination for independent AI clients.
+- Future Crash explicit Ask/Workstation requests register interactive inference leases.
+- Automatic Future Crash Oracle work yields to LO foreground work and queued Living AI maintenance.
+- Future Crash and LO remain separate personality, memory, permission, and tool domains.
+- Standalone Future Crash behavior is preserved when the broker is absent.
+
 ## 2.1.1 — Living AI release hardening
 
 - `lk ai status` now returns success for both running and stopped states; status is inspection, not a health assertion.

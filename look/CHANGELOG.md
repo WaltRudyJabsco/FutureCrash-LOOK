@@ -1,3 +1,54 @@
+## 4.1.9 — Keep-alive payload fix
+
+- Send numeric `keep_alive: -1` for interactive Ollama chat requests.
+- Fixes HTTP 400 introduced in 4.1.8 on Ollama servers that reject the string form.
+
+## 4.1.8 — Warm primary model
+
+- Interactive LO chat keeps the selected Ollama model resident indefinitely.
+- Performance stats classify warm/cold tasks.
+- Corrected VRAM/model-size labels.
+
+## 4.1.7 — Ergonomics and observability
+
+- Shift-Tab = Tab marking in filer.
+- ← parent and → enter/open navigation.
+- Clearer Clipboard / Copy To / Move To footer ordering.
+- Waiting spinners on genuinely blocking operations.
+- `lk ai stats` rolling performance diagnostics.
+- Thinking effort and thinking-display both visible in AI surface.
+
+## 4.1.6 — Broker liveness hardening
+
+- Socket health is authoritative for singleton detection.
+- Stale PID reuse no longer blocks broker startup.
+- Serve-loop exceptions are contained.
+- `lk memory` wakes durable queued work when the broker is absent.
+
+## 4.1.5 — Resident broker refresh
+
+- Added broker/core version handshake.
+- Automatically replaces stale Living AI processes after upgrades.
+- `lk ai status` exposes the runtime core version.
+
+## 4.1.4 — Candidate reinforcement
+
+- Equivalent memory evidence now reinforces active candidates.
+- Existing-candidate overlap can rescue an extractor NONE.
+- Added persistent consolidated-count diagnostics.
+
+## 4.1.3 — Memory evidence receipts
+
+- Living Memory no longer depends exclusively on one model extraction verdict.
+- Added deterministic obvious-evidence fallback for clear preferences/project state.
+- Added extraction diagnostics/counters to `lk memory`.
+
+## 4.1.2 — Multi-client inference coordination
+
+- Added per-process inference leases and background permit checks to Living AI.
+- `lk ai status` now reports coordinated client count/labels.
+- Existing LOOK foreground lease behavior remains compatible.
+
 ## 4.1.1 — Broker status semantics
 
 - `lk ai status` returns exit code 0 when it successfully reports a stopped broker.

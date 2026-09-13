@@ -41,6 +41,7 @@ import select
 import shlex
 import shutil
 import signal
+import socket
 import subprocess
 import sys
 import termios
@@ -71,7 +72,7 @@ WHITE = CSI + "38;5;255m"
 GRAY = CSI + "38;5;245m"
 DARK = CSI + "38;5;239m"
 
-VERSION = "1.1.7"
+VERSION = "1.1.8"
 GLYPHS = "0123456789ABCDEF"
 SPARKS = "▁▂▃▄▅▆▇█"
 
@@ -1871,6 +1872,82 @@ class ThreadStore:
             return f"{remaining // 60}m {remaining % 60:02d}s"
         return f"{remaining}s"
 
+# ---------- Shared inference coordination ----------
+
+class InferenceCoordinator:
+    """
+    Optional LOOK Living AI coordination.
+
+    Future Crash keeps its own personality, memory, tools, and Oracle client.
+    This object only negotiates access to shared inference capacity.
+    If Living AI is absent, Future Crash remains completely standalone.
+    """
+
+    def __init__(self):
+        self.socket_path=Path.home()/".local"/"share"/"look"/"ai.sock"
+        self.pid=os.getpid()
+        self.lease_path=Path.home()/".local"/"share"/"look"/"ai_leases"/f"{self.pid}.json"
+        self.active=False
+        self.label=""
+
+    def _request(self,payload,timeout=.18):
+        if not self.socket_path.exists():
+            return None
+        sock=socket.socket(socket.AF_UNIX,socket.SOCK_STREAM)
+        sock.settimeout(timeout)
+        try:
+            sock.connect(str(self.socket_path))
+            sock.sendall((json.dumps(payload)+"\n").encode())
+            data=b""
+            while not data.endswith(b"\n") and len(data)<65536:
+                chunk=sock.recv(4096)
+                if not chunk:
+                    break
+                data+=chunk
+            return json.loads(data.decode() or "{}")
+        except Exception:
+            return None
+        finally:
+            try: sock.close()
+            except Exception: pass
+
+    def permit(self,priority="background"):
+        reply=self._request({"command":"permit","priority":priority})
+        # No broker means standalone mode: never break Future Crash.
+        if reply is None:
+            return True
+        return bool(reply.get("ok") and reply.get("allowed"))
+
+    def lease(self,active,label="future-crash",priority="interactive"):
+        reply=self._request({
+            "command":"lease","active":bool(active),"pid":self.pid,
+            "label":label,"priority":priority,
+        })
+        if reply is None:
+            self.active=False if not active else self.active
+            return True
+        ok=bool(reply.get("ok"))
+        if ok:
+            self.active=bool(active)
+            self.label=label if active else ""
+        return ok
+
+    def begin(self,priority,label):
+        if priority not in {"interactive","continuation"} and not self.permit(priority):
+            return False
+        self.lease(True,label,priority)
+        return True
+
+    def end(self):
+        if self.active:
+            self.lease(False,self.label or "future-crash","interactive")
+        # If the broker died while we held a lease, remove only our own file.
+        try: self.lease_path.unlink()
+        except OSError: pass
+        self.active=False
+        self.label=""
+
+
 # ---------- Ollama ----------
 
 class Oracle(threading.Thread):
@@ -2052,6 +2129,7 @@ class FutureCrash:
         self.term = Terminal()
         self.telemetry = Telemetry()
         self.oracle = Oracle(args.ollama, args.model)
+        self.inference = InferenceCoordinator()
         self.config = ConfigStore()
         audio_pref = self.config.audio_enabled and not args.no_audio
         self.audio = AudioEngine(enabled=audio_pref)
@@ -2092,6 +2170,7 @@ class FutureCrash:
         self.next_ambient = now + self.rng.uniform(28, 58)
         self.next_fortune = now + self.rng.uniform(38, 85)
         self.next_incident = now + self.rng.uniform(32, 80)
+        self.next_memory_retry = 0.0
         self.incident = None
         self.incident_until = 0.0
         self.event = None
@@ -2131,13 +2210,33 @@ class FutureCrash:
             "fortune": "FORTUNE",
         }.get(kind, "WORKING")
 
-    def _ask_oracle(self, kind, prompt, history=None):
-        """Start one background Oracle operation and expose its persistent UI state."""
+    def _ask_oracle(self, kind, prompt, history=None, priority=None, lease_held=False):
+        """Start one Oracle operation, coordinating only shared inference capacity."""
+        if priority is None:
+            interactive = (
+                kind in {"ask","work"}
+                or kind.startswith("signalcompile:ask")
+                or kind.startswith("signalcompile:work")
+                or kind.startswith("signalrepair:ask")
+                or kind.startswith("signalrepair:work")
+            )
+            priority="interactive" if interactive else "background"
+
+        if not lease_held:
+            label="future-crash " + self._activity_label(kind).lower()
+            if not self.inference.begin(priority,label):
+                self.busy=False
+                self.activity_kind=""
+                self.activity_started=0.0
+                return False
+
         self.busy = True
         self.activity_kind = self._activity_label(kind)
         self.activity_started = time.time()
         self.last_frame = ""
         self.oracle.ask(kind, prompt, history)
+        return True
+
 
     def _clear_activity(self):
         self.busy = False
@@ -2319,8 +2418,10 @@ class FutureCrash:
         return False, "UNKNOWN THREAD OPERATION"
 
     def _start_due_thread(self, task):
-        """Run the exact action approved when the Thread was created."""
+        """Run the exact approved action only when shared background inference is idle."""
         if self.thread_running_id or self.busy:
+            return
+        if not self.inference.begin("background","future-crash thread"):
             return
         action = dict(task.get("action") or {})
         self.thread_running_id = task.get("id")
@@ -2349,9 +2450,9 @@ class FutureCrash:
             prompt += "\n\n" + signal_feedback
         self.busy = True
         if task.get("preset") == "dream" or _wants_signal(task.get("purpose", "")):
-            self._ask_oracle("signalcompile:thread:" + str(task.get("id")), _signal_compile_prompt(prompt))
+            self._ask_oracle("signalcompile:thread:" + str(task.get("id")), _signal_compile_prompt(prompt), priority="background", lease_held=True)
         else:
-            self._ask_oracle("thread:" + str(task.get("id")), prompt)
+            self._ask_oracle("thread:" + str(task.get("id")), prompt, priority="background", lease_held=True)
 
     def _queue_tool_request(self, request, origin, visible_text, history=None):
         self.pending_tool = request
@@ -2437,6 +2538,7 @@ class FutureCrash:
                 delay = max(0, (1 / self.args.fps) - (time.time() - started))
                 time.sleep(delay)
         finally:
+            self.inference.end()
             self.telemetry.stop.set()
             self.oracle.stop.set()
             self.term.leave()
@@ -2450,6 +2552,7 @@ class FutureCrash:
         try:
             while True:
                 kind, text, err = self.oracle.responses.get_nowait()
+                self.inference.end()
                 self._clear_activity()
                 if kind == "ambient":
                     if not err and text:
@@ -2516,7 +2619,7 @@ class FutureCrash:
                         if not drew:
                             task = self.threads.get(task_id)
                             purpose = task.get("purpose", "") if task else ""
-                            self._ask_oracle("signalrepair:thread:" + task_id, _signal_repair_prompt(purpose, text))
+                            self._ask_oracle("signalrepair:thread:" + task_id, _signal_repair_prompt(purpose, text), priority="continuation")
                             self.last_frame = ""
                             continue
                         self.thread_running_id = None
@@ -2567,7 +2670,7 @@ class FutureCrash:
                         if visual_thread and not drew:
                             self.busy = True
                             self.thread_running_id = task_id
-                            self._ask_oracle("signalrepair:thread:" + task_id, _signal_repair_prompt(task.get("purpose", ""), text))
+                            self._ask_oracle("signalrepair:thread:" + task_id, _signal_repair_prompt(task.get("purpose", ""), text), priority="continuation")
                             self.last_frame = ""
                             continue
                         compact = " ".join(text.split()).strip()
@@ -2628,9 +2731,10 @@ class FutureCrash:
                                 if should_fold and not self.memory.pending_consolidation:
                                     self.memory.pending_consolidation = True
                                     self.busy = True
-                                    self.work_notice = "MEMORY PRESSURE // consolidating eight recent slots…"
-                                    self.work_notice_until = time.time() + 30.0
-                                    self._ask_oracle("memory", self.memory.consolidation_prompt())
+                                    self.work_notice = "MEMORY PRESSURE // consolidation queued for idle inference"
+                                    self.work_notice_until = time.time() + 4.0
+                                    if not self._ask_oracle("memory", self.memory.consolidation_prompt(), priority="background"):
+                                        self.next_memory_retry = time.time() + 3.0
         except queue.Empty:
             pass
 
@@ -2644,6 +2748,15 @@ class FutureCrash:
                 self.audio.cue("recover")
                 self.was_panicking = False
             self.panic_phase = 0
+
+        # Future Crash's private memory remains separate from LOOK memory, but
+        # its compression now uses the same shared idle inference lane.
+        if self.memory.pending_consolidation and not self.busy and now >= self.next_memory_retry:
+            if self._ask_oracle("memory", self.memory.consolidation_prompt(), priority="background"):
+                self.work_notice = "MEMORY // consolidating in shared idle lane"
+                self.work_notice_until = now + 10.0
+            else:
+                self.next_memory_retry = now + 3.0
 
         # One Thread wake at a time. The scheduler never asks the model to
         # invent an action; it runs the exact action stored at approval time.
@@ -2665,7 +2778,8 @@ class FutureCrash:
             and now >= self.next_ambient
         ):
             self.busy = True
-            self._ask_oracle("ambient", "Produce one ambient system observation.")
+            if not self._ask_oracle("ambient", "Produce one ambient system observation.", priority="background"):
+                self.next_ambient = now + 2.0
 
         if self.mode == "ambient" and now >= self.next_fortune:
             seed = self.rng.choice(FORTUNES)
@@ -2673,7 +2787,7 @@ class FutureCrash:
             self.next_fortune = now + self.rng.uniform(38, 85)
             if self.online and not self.busy:
                 self.busy = True
-                self._ask_oracle("fortune", seed)
+                self._ask_oracle("fortune", seed, priority="background")
             else:
                 # Local seed remains a graceful fallback while Ollama is
                 # offline or occupied by more important work.
@@ -2724,7 +2838,7 @@ class FutureCrash:
                 self.audio.cue("fortune")
                 if self.online and not self.busy:
                     self.busy = True
-                    self._ask_oracle("fortune", seed)
+                    self._ask_oracle("fortune", seed, priority="interactive")
             elif key in ("m", "M"):
                 self.toggle_audio()
             elif key in ("?", "h", "H"):
@@ -2739,7 +2853,7 @@ class FutureCrash:
             elif key in ("r", "R") and self.online and not self.busy:
                 self.busy = True
                 self.observation = "Oracle is listening to the static…"
-                self._ask_oracle("ambient", "Produce one ambient system observation.")
+                self._ask_oracle("ambient", "Produce one ambient system observation.", priority="interactive")
             elif key in ("s", "S"):
                 self.signal.clear()
                 self.audio.cue("recover")

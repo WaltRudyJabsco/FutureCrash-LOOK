@@ -151,7 +151,7 @@ _lk() {
       return
       ;;
     ai)
-      (( CURRENT == 3 )) && _values 'AI action' status start stop wake
+      (( CURRENT == 3 )) && _values 'AI action' status stats start stop wake
       return
       ;;
     profile)

@@ -1,3 +1,11 @@
+## 1.1.8 — Polite Oracle
+
+- Future Crash now coordinates inference capacity with LOOK Living AI when available.
+- Ask/Workstation requests get interactive leases.
+- Ambient observations, automatic fortunes, scheduled Threads, and FC memory folding yield to queued/interactive LOOK work.
+- Personality, memory, host authority, and Signal behavior remain independent.
+- No LOOK dependency: direct standalone Ollama behavior remains available.
+
 ## 1.1.7 — Dedicated Signal compiler
 
 - Signal requests bypass Workstation reasoning and compile directly with `think=false`.
