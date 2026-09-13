@@ -17,7 +17,7 @@ try:
 except Exception:
     readline = None
 
-VERSION="4.1.9"
+VERSION="4.3.0"
 
 LOOK_WORDMARK = r"""       ██╗      ██╗  ██╗
        ██║      ██║ ██╔╝
@@ -37,6 +37,10 @@ MEMORY_FILE=STATE_DIR/"ollama_memory.json"
 CORE_FILE=STATE_DIR/"core.md"
 SKILLS_FILE=STATE_DIR/"skills.md"
 UNDO_FILE=STATE_DIR/"undo.json"
+UNDO_SKIPPED_FILE=STATE_DIR/"undo_skipped.json"
+ACCESS_FILE=STATE_DIR/"access.json"
+_SESSION_PATH_GRANTS=[]
+_ONCE_PATH_GRANTS=[]
 UNDO_TRASH=STATE_DIR/"undo_trash"
 UNDO_LIMIT=20
 MEMORY_QUEUE=STATE_DIR/"memory_queue"
@@ -63,12 +67,15 @@ PERSONALITIES_DIR=STATE_DIR/"personalities"
 OLLAMA_SHARE_PORT=11435
 OLLAMA_SHARE_PID=STATE_DIR/"ollama_share_proxy.pid"
 LOCAL_OLLAMA_URL="http://127.0.0.1:11434"
-RECENT_MEMORY_SLOTS=8
-MEMORY_CANDIDATE_LIMIT=20
+RECENT_MEMORY_SLOTS=4
+MEMORY_CANDIDATE_LIMIT=32
+MEMORY_DURABLE_LIMIT=240
+MEMORY_RETRIEVED_ATOMS=6
+MEMORY_DOMAINS=("personal","preferences","projects","style","general")
 LO_RECENT_EXCHANGES=12
 LO_RECENT_MAX_CHARS=18000
 LO_RECENT_CONTEXT_CHARS=7000
-MEMORY_SCHEMA_VERSION=2
+MEMORY_SCHEMA_VERSION=3
 SKILLS_SCHEMA_VERSION=1
 BUNDLED_SKILLS_VERSION=1
 
@@ -923,7 +930,7 @@ AI / OLLAMA
   lo search [ASK]      chat with Ollama web search
   lo @HOST [ASK]       use another Ollama host for this session
   lo --conservative      read/search only for this session
-  lo --workspace         bounded workspace tools (default)
+  lo --workspace         workspace tools + explicit path grants (default)
   lo --power             shell commands · confirm each
   lo --unsafe            unrestricted shell for this session
   lk o --no-start ...    never start a missing local server
@@ -948,19 +955,22 @@ AI / OLLAMA
   lk ollama access MODE set conservative/workspace/power/unsafe
 
 MEMORY + CRAFT
-  lk memory            inspect long-term summary + memory candidates
-                       memory is historical context, never pending work
-                       substantive preferences/favorites/project state are captured automatically
-  lk memory add TEXT   save a memory (default importance 60)
+  lk memory            inspect Living Memory: core summary, durable domains/atoms,
+                       recent conversation, candidates, compiler diagnostics
+                       candidates are cheap hypotheses; durable memory must earn promotion
+  lk memory add TEXT   add a candidate memory (default importance 60)
   lk memory add TEXT --importance N
-                       save with importance 1–100
+                       add with importance 1–100
   lk memory forget TEXT
-                       remove matching candidate memories
+                       remove matching candidate + durable atomic memories
   lk forget TEXT       short form of memory forget
+  lk memory compact    force domain/core summary recompilation now
+  lk memory prune      remove known reasoning/meta/environmental artifacts
   lk memory clear      clear this user's LO memory
   lk memory clear-summary
-                       clear only the long-term summary
-  lk memory prune      remove known reasoning/meta artifacts
+                       clear compiled summary text; durable atoms remain
+  lk memory clear-recent
+                       clear literal cross-session conversation continuity
   lk clear-memory      short form of memory clear
   lk skills            show LO's bundled + learned assistant craft
   lk skills version    show skills schema / bundled pack version
@@ -990,6 +1000,17 @@ MEDIA
   lk media prev        previous track, then show current state
   lk media stop        stop/pause, then show current state
   mm / mn / mp         fast aliases: toggle / next / previous
+
+ACCESS + PERMISSIONS
+  lk access            show persistent/session filesystem grants
+  lk access personal   permanently allow Desktop/Documents/Downloads read/write
+  lk access add PATH [read|write]
+                       permanently extend LO filesystem reach
+  lk access remove PATH
+                       revoke one persistent path grant
+  lk access clear      clear persistent + current-session grants
+                       outside-workspace tool calls can also grant once/session/always interactively
+  lk ollama access     separate capability profile: conservative/workspace/power/unsafe
 
 LO PERSONALITY + THINKING
   lk personality       show personality choices
@@ -1032,7 +1053,9 @@ FILE ACTIONS
   lrm [PATH]           LOOK-assisted remove (confirmed)
   lmk PATH             make directory path · undoable
   mkd DIR              make directory and enter it
-  lk undo              undo last LOOK local filesystem transaction
+  lk undo              undo newest safe LOOK filesystem transaction
+  lk undo list         inspect READY/BLOCKED transaction history
+  lk undo skip         abandon newest BLOCKED record; filesystem unchanged
 
 SHORTCUTS
   l / ls   smart view          ll       details
@@ -1045,20 +1068,21 @@ SHORTCUTS
   lo ASK   ask immediately     rs       reset ritual
   rb       reload zsh          webterm  terminal over Tailscale
   commands same as lk help     command ls = real Unix ls
+  terminal title shows owner: ● LOOK · ● LO · ● FUTURE CRASH · ◌ FUTURE CRASH SHELL
 
 LIVE FILTER / SELECTION
   Type       filter immediately
   j/k/↑/↓    move selection in browse/select; while typing a filter use J/K or ↑/↓
-  Tab        mark / unmark highlighted item
+  Tab/⇧Tab   mark / unmark highlighted item
   A          mark all matches / clear all marked matches
-  Enter      open file / enter folder
-  <          go up one filesystem directory (browse mode)
+  Enter / →  open file / enter folder
+  ← / <      go up one filesystem directory
   E          edit
   O          open with another application
-  C / M / R  copy / move / remove
+  B          copy file object(s) to desktop clipboard
+  C / M / R  Copy To / Move To / remove
   L          hand persistent working set to a new LO session
   X          clear persistent working set
-  B          copy actual file object(s) to desktop clipboard
   Y          copy absolute path(s) as text
   P          print absolute path + exit
   G          exit LOOK and make this the shell's directory
@@ -1236,12 +1260,16 @@ def doctor():
 
 
 def _empty_memory():
-    return {"schema_version": MEMORY_SCHEMA_VERSION, "summary": "", "memories": [], "maintenance_cycles": 0,
+    return {"schema_version": MEMORY_SCHEMA_VERSION,
+            "summary": "", "legacy_summary": "", "core_summary": "", "domain_summaries": {},
+            "durable": [], "memories": [], "maintenance_cycles": 0,
             "last_decay_at": time.time(), "last_evidence_at": 0, "last_maintenance_at": 0,
-            "last_consolidated_at": 0, "last_change": "",
+            "last_consolidated_at": 0, "last_compiled_at": 0, "last_change": "",
             "last_extraction_at": 0, "last_extraction": "never",
             "extractions_total": 0, "extractions_candidate": 0, "extractions_none": 0,
-            "consolidations_total": 0}
+            "consolidations_total": 0, "promotions_total": 0,
+            "compiler_base": "", "compiler_model": "",
+            "candidate_evictions": 0}
 
 
 DEFAULT_CORE = """# LO Core
@@ -1355,7 +1383,11 @@ def _migrate_old_memory(data):
     summary=str(data.get("long", "")).strip()[:3000]
     return {
         "schema_version": MEMORY_SCHEMA_VERSION,
-        "summary": summary,
+        "summary": "",
+        "legacy_summary": summary,
+        "core_summary": "",
+        "domain_summaries": {},
+        "durable": [],
         "memories": memories[-MEMORY_CANDIDATE_LIMIT:],
         "maintenance_cycles": 0,
     }
@@ -1366,6 +1398,7 @@ def _load_memory():
         return _empty_memory()
     try:
         data=json.loads(MEMORY_FILE.read_text(encoding="utf-8"))
+        source_schema=int(data.get("schema_version",0) or 0) if isinstance(data,dict) else 0
         data=_migrate_old_memory(data if isinstance(data, dict) else {})
         cleaned=[]
         for item in data.get("memories", []):
@@ -1383,8 +1416,36 @@ def _load_memory():
                 "last_reinforced": float(item.get("last_reinforced",item.get("created_at",now)) or now),
             })
         cleaned.sort(key=lambda x:x["importance"], reverse=True)
+        durable=[]
+        now=time.time()
+        for item in data.get("durable",[]):
+            if not isinstance(item,dict): continue
+            text=_sanitize_memory_text(item.get("text",""))
+            if not text: continue
+            domain=str(item.get("domain","general"))
+            if domain not in MEMORY_DOMAINS: domain="general"
+            durable.append({
+                "text":text[:700],"domain":domain,
+                "importance":max(1,min(100,int(item.get("importance",70)))),
+                "uses":max(1,int(item.get("uses",1))),
+                "created_at":float(item.get("created_at",now) or now),
+                "last_reinforced":float(item.get("last_reinforced",now) or now),
+            })
+        durable=durable[-MEMORY_DURABLE_LIMIT:]
+        domain_summaries=data.get("domain_summaries",{}) if isinstance(data.get("domain_summaries"),dict) else {}
+        domain_summaries={str(k):_sanitize_summary(v)[:1000] for k,v in domain_summaries.items() if str(k) in MEMORY_DOMAINS and _sanitize_summary(v)}
+        previous_summary=_sanitize_summary(data.get("summary",""))
+        legacy_summary=_sanitize_summary(data.get("legacy_summary",""))
+        if source_schema<MEMORY_SCHEMA_VERSION and previous_summary:
+            legacy_summary=previous_summary
+            previous_summary=""
+            domain_summaries={}
         result={"schema_version":MEMORY_SCHEMA_VERSION,
-                "summary":str(data.get("summary",""))[:3000],
+                "summary":previous_summary,
+                "legacy_summary":legacy_summary,
+                "core_summary":_sanitize_summary(data.get("core_summary",""))[:1200] if source_schema>=MEMORY_SCHEMA_VERSION else "",
+                "domain_summaries":domain_summaries,
+                "durable":durable,
                 "memories":cleaned[:MEMORY_CANDIDATE_LIMIT],
                 "maintenance_cycles":max(0,int(data.get("maintenance_cycles",0) or 0)),
                 "last_decay_at":float(data.get("last_decay_at",time.time()) or time.time()),
@@ -1399,7 +1460,12 @@ def _load_memory():
                 "extractions_total":max(0,int(data.get("extractions_total",0) or 0)),
                 "extractions_candidate":max(0,int(data.get("extractions_candidate",0) or 0)),
                 "extractions_none":max(0,int(data.get("extractions_none",0) or 0)),
-                "consolidations_total":max(0,int(data.get("consolidations_total",0) or 0))}
+                "consolidations_total":max(0,int(data.get("consolidations_total",0) or 0)),
+                "promotions_total":max(0,int(data.get("promotions_total",0) or 0)),
+                "candidate_evictions":max(0,int(data.get("candidate_evictions",0) or 0)),
+                "last_compiled_at":float(data.get("last_compiled_at",0) or 0),
+                "compiler_base":str(data.get("compiler_base",""))[:500],
+                "compiler_model":str(data.get("compiler_model",""))[:200]}
         result=_prune_contaminated_memory(result)
         _save_memory(result)
         return result
@@ -1483,13 +1549,33 @@ def _prune_contaminated_memory(memory):
     cleaned=[]
     for item in memory.get("memories",[]):
         text=_sanitize_memory_text(item.get("text",""))
-        if not text:
+        if not text or _looks_environmental_memory(text):
             continue
         item["text"]=text
         cleaned.append(item)
     cleaned.sort(key=lambda x:int(x.get("importance",0)),reverse=True)
     memory["memories"]=cleaned[:MEMORY_CANDIDATE_LIMIT]
+
+    durable=[]
+    for item in memory.get("durable",[]):
+        text=_sanitize_memory_text(item.get("text",""))
+        if not text or _looks_environmental_memory(text):
+            continue
+        row=dict(item); row["text"]=text
+        domain=str(row.get("domain","general"))
+        row["domain"]=domain if domain in MEMORY_DOMAINS else "general"
+        durable.append(row)
+    memory["durable"]=durable[-MEMORY_DURABLE_LIMIT:]
+
     memory["summary"]=_sanitize_summary(memory.get("summary",""))
+    memory["legacy_summary"]=_sanitize_summary(memory.get("legacy_summary",""))[:2200]
+    memory["core_summary"]=_sanitize_summary(memory.get("core_summary",""))[:1200]
+    summaries={}
+    for domain,text in (memory.get("domain_summaries",{}) or {}).items():
+        if domain in MEMORY_DOMAINS:
+            clean=_sanitize_summary(text)[:1000]
+            if clean: summaries[domain]=clean
+    memory["domain_summaries"]=summaries
     return memory
 
 def _load_recent_exchanges():
@@ -1610,40 +1696,240 @@ def _effective_skills_text():
     return text.strip()
 
 
-def _memory_context(memory):
-    parts=[]
-    summary=str(memory.get("summary","")).strip()
-    if summary:
-        parts.append("Long-term user summary:\n"+summary)
+def _looks_environmental_memory(text):
+    """Machine/runtime facts belong to deterministic state, not autobiographical memory."""
+    low=" ".join(str(text or "").split()).casefold()
+    patterns=(
+        r"\b(current|installed|running)\s+(look|future crash|ollama|version)\b",
+        r"\b(primary|current)\s+(host|gpu|machine|computer|directory|workspace)\b",
+        r"\b(rtx|3090|vram|gpu)\b.*\b(host|machine|running|installed|current)\b",
+        r"\bollama\s+(host|port|url|endpoint)\b",
+        r"\b(current working directory|cwd|port \d+)\b",
+    )
+    return any(re.search(p,low) for p in patterns)
 
-    # Keep prompt attention small. Qwen receives candidates, then decides relevance.
-    candidates=sorted(
-        memory.get("memories", []),
-        key=lambda x:int(x.get("importance",0)),
-        reverse=True
-    )[:RECENT_MEMORY_SLOTS]
+
+def _memory_domain(text):
+    low=" ".join(str(text or "").split()).casefold()
+    if _looks_environmental_memory(low):
+        return "environment"
+    if re.search(r"\b(project|novel|story|future crash|look shell|lo\b|we're building|we are building|current project)\b",low):
+        return "projects"
+    if re.search(r"\b(prefer|preference|filename|format|naming|lowercase|hyphen|workflow|always want|don't want|do not want)\b",low):
+        return "preferences"
+    if re.search(r"\b(concise|direct|confirmation|explain|response|tone|style|interaction|working style)\b",low):
+        return "style"
+    if re.search(r"\b(favorite|favourite|love|like|band|music|book|film|food|hobby|interest)\b",low):
+        return "personal"
+    return "general"
+
+
+def _memory_tokens(text):
+    raw=re.findall(r"[a-z0-9]+",str(text or "").casefold())
+    stop={"the","a","an","to","of","and","is","are","in","on","for","with","that","this","user","uses","use"}
+    out=set()
+    for word in raw:
+        if word in stop: continue
+        # Tiny deterministic normalization: enough for band/bands, file/files,
+        # preference/preferences without pretending to be a linguistic model.
+        if len(word)>4 and word.endswith("ies"):
+            word=word[:-3]+"y"
+        elif len(word)>4 and word.endswith("s") and not word.endswith("ss"):
+            word=word[:-1]
+        out.add(word)
+    return out
+
+
+def _memory_relevance(text,query):
+    q=_memory_tokens(query); t=_memory_tokens(text)
+    if not q or not t: return 0.0
+    return len(q&t)/max(1,min(len(q),len(t)))
+
+
+def _relevant_durable(memory,query,limit=MEMORY_RETRIEVED_ATOMS):
+    rows=[]
+    for item in memory.get("durable",[]):
+        score=_memory_relevance(item.get("text",""),query)
+        # Importance is only a tie-breaker; relevance decides retrieval.
+        if score>0:
+            rows.append((score,int(item.get("importance",0)),item))
+    rows.sort(key=lambda x:(x[0],x[1]),reverse=True)
+    return [x[2] for x in rows[:limit]]
+
+
+def _relevant_domains(memory,query,limit=2):
+    summaries=memory.get("domain_summaries",{}) or {}
+    scored=[]
+    for domain,text in summaries.items():
+        score=_memory_relevance(text,query)
+        # General is a fallback, not an automatic tax on every prompt.
+        if score>0:
+            scored.append((score,domain,text))
+    scored.sort(reverse=True)
+    if scored: return scored[:limit]
+    if "general" in summaries and query:
+        return [(0.01,"general",summaries["general"])]
+    return []
+
+
+def _durable_memory_match(memory,text):
+    key=_memory_similarity_key(text)
+    if not key: return None
+    best=None
+    for idx,item in enumerate(memory.get("durable",[])):
+        old=_memory_similarity_key(item.get("text",""))
+        if not old: continue
+        inter=key&old
+        overlap=len(inter)/max(1,min(len(key),len(old)))
+        if len(inter)>=2 and overlap>=0.65:
+            score=(overlap,len(inter))
+            if best is None or score>best[0]: best=(score,idx)
+    return best[1] if best else None
+
+
+def _add_durable(memory,item):
+    text=_sanitize_memory_text(item.get("text",""))
+    if not text or _looks_environmental_memory(text):
+        return memory,False
+    domain=_memory_domain(text)
+    if domain=="environment": return memory,False
+    idx=_durable_memory_match(memory,text)
+    now=time.time()
+    if idx is not None:
+        old=memory["durable"][idx]
+        old["importance"]=min(100,max(int(old.get("importance",60)),int(item.get("importance",60)))+4)
+        old["uses"]=int(old.get("uses",1))+int(item.get("uses",1))
+        old["last_reinforced"]=max(float(old.get("last_reinforced",0)),now)
+        return memory,False
+    memory.setdefault("durable",[]).append({
+        "text":text[:700],"domain":domain,
+        "importance":max(1,min(100,int(item.get("importance",70)))),
+        "uses":max(1,int(item.get("uses",1))),
+        "created_at":float(item.get("created_at",now) or now),
+        "last_reinforced":float(item.get("last_reinforced",now) or now),
+    })
+    memory["durable"]=memory["durable"][-MEMORY_DURABLE_LIMIT:]
+    memory["promotions_total"]=int(memory.get("promotions_total",0))+1
+    return memory,True
+
+
+def _compile_domain_summary(base,model,domain,items,old=""):
+    if not items: return ""
+    evidence="\n".join(f"- {x.get('text','')}" for x in items[-40:])
+    prompt=f"""Compress durable user memory for the {domain.upper()} domain.
+
+Preserve meaning while minimizing tokens.
+Never broaden scope: qualifiers such as "for LOOK test projects" must survive.
+Never invent causality, certainty, preferences, or identity.
+Merge redundancy aggressively. Prefer short canonical factual phrases.
+Exclude machine/runtime facts that can be inspected from the computer.
+Maximum 90 words. Return only the compact summary.
+
+OLD SUMMARY:
+{old or "(empty)"}
+
+DURABLE EVIDENCE:
+{evidence}"""
+    try:
+        raw=_local_chat_once(base,model,[
+            {"role":"system","content":"You are a loss-minimizing memory compressor. Preserve scope; minimize words."},
+            {"role":"user","content":prompt},
+        ],num_ctx=4096,num_predict=180,think=False,temperature=0.10)
+        clean=_sanitize_summary(raw)
+        return clean[:1000] if clean else old
+    except Exception:
+        return old
+
+
+def _compile_core_summary(base,model,domain_summaries,old=""):
+    material="\n".join(f"{k.upper()}: {v}" for k,v in domain_summaries.items() if v)
+    if not material: return ""
+    prompt=f"""Create a tiny routing summary of durable user memory.
+
+Its job is to help decide which detailed memory domain may matter, not to reproduce everything.
+Preserve scope and uncertainty. Maximum 70 words. Prefer terse phrases.
+Return only the summary.
+
+DOMAINS:
+{material}"""
+    try:
+        raw=_local_chat_once(base,model,[
+            {"role":"system","content":"Compress user-memory routing context aggressively without broadening claims."},
+            {"role":"user","content":prompt},
+        ],num_ctx=4096,num_predict=120,think=False,temperature=0.10)
+        clean=_sanitize_summary(raw)
+        return clean[:1200] if clean else old
+    except Exception:
+        return old
+
+
+def _compile_memory(base,model,memory,force=False):
+    """Background memory compiler: durable atoms -> domain summaries -> tiny core."""
+    now=time.time()
+    if not force and now-float(memory.get("last_compiled_at",0) or 0)<6*3600:
+        return memory,False
+    changed=False
+    summaries=dict(memory.get("domain_summaries",{}) or {})
+    for domain in MEMORY_DOMAINS:
+        items=[x for x in memory.get("durable",[]) if x.get("domain")==domain]
+        if not items: continue
+        old=summaries.get(domain,"")
+        new=_compile_domain_summary(base,model,domain,items,old)
+        if new and new!=old:
+            summaries[domain]=new; changed=True
+    core=_compile_core_summary(base,model,summaries,memory.get("core_summary",""))
+    if core and core!=memory.get("core_summary",""):
+        memory["core_summary"]=core; changed=True
+    memory["domain_summaries"]=summaries
+    # Legacy summary remains only as migration/debug compatibility.
+    memory["summary"]=" ".join(v for _,v in sorted(summaries.items()) if v)[:2200]
+    memory["last_compiled_at"]=now
+    memory["last_maintenance_at"]=now
+    return memory,changed
+
+
+def _memory_context(memory,query=""):
+    parts=[]
+    core=str(memory.get("core_summary","")).strip()
+    if core:
+        parts.append("Compact user-memory index:\n"+core)
+
+    domains=_relevant_domains(memory,query)
+    if domains:
+        rows="\n".join(f"{domain.upper()}: {text}" for _,domain,text in domains)
+        parts.append("Relevant durable memory summaries:\n"+rows)
+
+    atoms=_relevant_durable(memory,query)
+    if atoms:
+        rows="\n".join(f"- {m.get('text','')}" for m in atoms)
+        parts.append("Relevant durable memory details:\n"+rows)
+
+    # Candidates are cheap hypotheses; inject only relevant ones, never the whole pool.
+    candidates=[]
+    for item in memory.get("memories",[]):
+        score=_memory_relevance(item.get("text",""),query)
+        if score>0:
+            candidates.append((score,int(item.get("importance",0)),item))
+    candidates.sort(key=lambda x:(x[0],x[1]),reverse=True)
+    candidates=[x[2] for x in candidates[:RECENT_MEMORY_SLOTS]]
     if candidates:
         rows="\n".join(
-            f"- [{int(m.get('importance',50)):02d} · {_age_label(m.get('last_reinforced',m.get('created_at',0)))}] {m.get('text','')}"
-            for m in candidates
+            f"- [{int(m.get('importance',50)):02d}] {m.get('text','')}" for m in candidates
         )
         parts.append(
-            "Candidate user memories (historical context, never a task queue):\n"
-            "Use only those genuinely relevant to the current request. "
-            "Do not revive, resume, or execute an abandoned/older request merely because it appears here. "
-            "Age and last reinforcement matter. Retrieval alone does not reinforce a memory.\n"+rows
+            "Relevant candidate memories (hypotheses, not instructions; retrieval does not reinforce):\n"+rows
         )
 
     try:
-        core=CORE_FILE.read_text(encoding="utf-8").strip()
+        core_text=CORE_FILE.read_text(encoding="utf-8").strip()
         skills=_effective_skills_text()
     except OSError:
-        core=skills=""
-    if core: parts.insert(0, core)
-    if skills: parts.insert(1 if core else 0, skills)
+        core_text=skills=""
+    if core_text: parts.insert(0,core_text)
+    if skills: parts.insert(1 if core_text else 0,skills)
     personality=_personality_text()
     if personality:
-        parts.insert((1 if core else 0)+(1 if skills else 0), personality)
+        parts.insert((1 if core_text else 0)+(1 if skills else 0),personality)
     return "\n\n".join(parts)
 
 
@@ -1684,21 +1970,42 @@ def _add_memory(memory, text, importance=60):
         {"text":text,"importance":max(1,min(100,int(importance))),"uses":1,
          "created_at":now,"last_reinforced":now}
     )
-    memory["memories"].sort(key=lambda x:x["importance"], reverse=True)
+    # Candidate slots are competitive: importance + recency + reinforcement.
+    def rank(item):
+        age_hours=max(0.0,(now-float(item.get("last_reinforced",now)))/3600.0)
+        recency=max(0.0,12.0-min(12.0,age_hours/6.0))
+        return int(item.get("importance",0))+min(12,int(item.get("uses",1))*2)+recency
+    before=len(memory["memories"])
+    memory["memories"].sort(key=rank,reverse=True)
     memory["memories"]=memory["memories"][:MEMORY_CANDIDATE_LIMIT]
+    if before>len(memory["memories"]):
+        memory["candidate_evictions"]=int(memory.get("candidate_evictions",0))+before-len(memory["memories"])
     return memory
 
 
 def _forget_memory(fragment):
     memory=_load_memory()
     fragment=str(fragment).casefold().strip()
-    before=len(memory.get("memories",[]))
+    before_candidates=len(memory.get("memories",[]))
+    before_durable=len(memory.get("durable",[]))
     memory["memories"]=[
         m for m in memory.get("memories",[])
         if fragment not in str(m.get("text","")).casefold()
     ]
+    memory["durable"]=[
+        m for m in memory.get("durable",[])
+        if fragment not in str(m.get("text","")).casefold()
+    ]
+    # Domain summaries are regenerated by the background compiler; clearing them
+    # prevents stale wording from surviving an explicit forget.
+    memory["domain_summaries"]={}
+    memory["core_summary"]=""
+    memory["summary"]=""
+    if fragment and fragment in str(memory.get("legacy_summary","")).casefold():
+        memory["legacy_summary"]=""
+    memory["last_compiled_at"]=0
     _save_memory(memory)
-    return before-len(memory["memories"])
+    return (before_candidates-len(memory["memories"]))+(before_durable-len(memory["durable"]))
 
 
 def _memory_command(args):
@@ -1710,8 +2017,11 @@ def _memory_command(args):
         return 0
     if args and args[0]=="clear-summary":
         memory["summary"]=""
+        memory["core_summary"]=""
+        memory["domain_summaries"]={}
+        memory["last_compiled_at"]=0
         _save_memory(memory)
-        print("LO long-term summary cleared.")
+        print("LO compiled summaries cleared; durable atoms preserved.")
         return 0
     if args and args[0]=="clear-recent":
         try:
@@ -1721,10 +2031,18 @@ def _memory_command(args):
         print("LO recent conversation cleared.")
         return 0
     if args and args[0]=="prune":
-        before=len(memory.get("memories",[]))
+        before=len(memory.get("memories",[]))+len(memory.get("durable",[]))
         memory=_prune_contaminated_memory(memory)
         _save_memory(memory)
-        print(f"Pruned {before-len(memory.get('memories',[]))} contaminated memory item(s).")
+        after=len(memory.get("memories",[]))+len(memory.get("durable",[]))
+        print(f"Pruned {before-after} contaminated memory item(s).")
+        return 0
+    if args and args[0] in {"compact","compile"}:
+        base=str(memory.get("compiler_base","") or _ollama_base())
+        model=str(memory.get("compiler_model","") or _preferred_ollama_model())
+        memory,changed=_compile_memory(base,model,memory,force=True)
+        _save_memory(memory)
+        print(f"LO memory compiler · {'updated' if changed else 'already compact'}")
         return 0
     if args and args[0]=="forget":
         if len(args)<2:
@@ -1751,9 +2069,32 @@ def _memory_command(args):
     buf=io.StringIO()
     with contextlib.redirect_stdout(buf):
         _title("LO memory")
-        summary=str(memory.get("summary","")).strip()
-        print("  LONG-TERM")
-        print("  "+(summary or "No durable summary yet."))
+        core=str(memory.get("core_summary","")).strip()
+        print("  CORE SUMMARY")
+        print("  "+(core or "No compact durable memory yet."))
+        legacy=str(memory.get("legacy_summary","")).strip()
+        if legacy:
+            shown=legacy if len(legacy)<=118 else legacy[:115]+"…"
+            print(f"  {_c('LEGACY (inactive)','2')} {shown}")
+
+        summaries=memory.get("domain_summaries",{}) or {}
+        print("\n  DURABLE DOMAINS")
+        if summaries:
+            for domain in MEMORY_DOMAINS:
+                text=str(summaries.get(domain,"")).strip()
+                if text:
+                    shown=text if len(text)<=118 else text[:115]+"…"
+                    print(f"  {domain.upper():<12} {shown}")
+        else:
+            print("  No compiled domain summaries yet.")
+
+        durable=memory.get("durable",[]) or []
+        print(f"\n  DURABLE ATOMS · {len(durable)} stored")
+        for item in sorted(durable,key=lambda x:int(x.get("importance",0)),reverse=True)[:8]:
+            text=str(item.get("text",""))
+            shown=text if len(text)<=62 else text[:59]+"…"
+            print(f"  {str(item.get('domain','general')).upper():<11} {shown}")
+
         recent=_load_recent_exchanges()
         print("\n  RECENT CONVERSATION")
         if recent:
@@ -1765,7 +2106,7 @@ def _memory_command(args):
         print()
         print("  CANDIDATES                              IMPORTANCE / USES")
         items=sorted(memory.get("memories",[]),key=lambda x:int(x.get("importance",0)),reverse=True)
-        if not items: print("  No user memories yet.")
+        if not items: print("  No active candidate memories.")
         for item in items:
             text=str(item.get("text",""))
             shown=text if len(text)<=52 else text[:49]+"…"
@@ -1775,20 +2116,19 @@ def _memory_command(args):
         queue_n=len(_memory_job_files())
         broker=_ai_broker_request("status") or {}
         if queue_n and not broker.get("ok"):
-            # Durable work plus no coordinator is a recoverable condition, not
-            # merely a status line. Wake/start Living AI (or one-shot fallback).
             _start_memory_worker()
             time.sleep(.05)
             broker=_ai_broker_request("status") or {}
-        print(f"  {len(items)} candidates · prompt attention {RECENT_MEMORY_SLOTS} · schema {MEMORY_SCHEMA_VERSION}")
+        print(f"  {len(items)} candidates · durable {len(durable)} · prompt candidates {RECENT_MEMORY_SLOTS} · schema {MEMORY_SCHEMA_VERSION}")
         print(f"  living AI · {'running' if broker.get('ok') else 'stopped'} · memory queue {queue_n} · last maintenance {_age_label(memory.get('last_maintenance_at',0))}")
         total=int(memory.get("extractions_total",0)); kept=int(memory.get("extractions_candidate",0)); none=int(memory.get("extractions_none",0))
         consolidated=int(memory.get("consolidations_total",0))
-        print(f"  extraction · {memory.get('last_extraction','never')} {_age_label(memory.get('last_extraction_at',0))} · {kept}/{total} candidate · {none} none · {consolidated} consolidated")
+        print(f"  extraction · {memory.get('last_extraction','never')} {_age_label(memory.get('last_extraction_at',0))} · {kept}/{total} candidate · {none} none")
+        print(f"  compiler · promoted {int(memory.get('promotions_total',0))} · consolidated {consolidated} · evicted {int(memory.get('candidate_evictions',0))} · last {_age_label(memory.get('last_compiled_at',0))}")
         if memory.get("last_worker_error"):
             print(f"  worker error · {str(memory.get('last_worker_error'))[:120]}")
         print("  recent stores both sides of each exchange; display shows user side only")
-        print("  candidates decay by elapsed time; semantic reinforcement promotes durable patterns into LONG-TERM")
+        print("  candidates are cheap hypotheses; durable atoms earn promotion; compiler rewrites compact domain summaries")
     _page_text(buf.getvalue())
     return 0
 
@@ -2108,11 +2448,17 @@ def _obvious_memory_candidate(user_text):
         "our current ","i usually ","i always ","i don't want ","i do not want ",
         "i want to keep ","let's keep ","we should keep ",
     )
+    light_markers=(
+        "i like ","i tend to ","i use ","i'm using ","i am using ",
+        "i'm working on ","i am working on ","for this project ","for look ",
+    )
 
     if any(m in low for m in strong_markers):
-        importance=88 if not ("remember this" in low or "remember that" in low or "this is important" in low) else 96
+        importance=72 if not ("remember this" in low or "remember that" in low or "this is important" in low) else 96
     elif any(m in low for m in medium_markers):
-        importance=68
+        importance=48
+    elif any(m in low for m in light_markers):
+        importance=28
     else:
         return None
 
@@ -2125,9 +2471,10 @@ def _extract_memory_candidate(base, model, user_text, assistant_text):
     prompt=f"""Capture the compact meat of this exchange when it would help conversational
 continuity later.
 
-Store ONE candidate memory when the user expresses a substantive preference, favorite,
-habit, personal choice, project decision, active project state, unresolved task, recurring
-tool/workflow preference, or explicit request to remember something.
+Store ONE candidate memory when the user expresses a potentially reusable preference, favorite,
+habit, personal choice, project decision, active project state, recurring workflow preference,
+or explicit request to remember something. Candidates are cheap hypotheses: prefer capturing
+a plausible reusable fact at modest importance over returning NONE; decay and competition prune it later.
 
 Important guidance:
 - "I like...", "I love...", "one of my favorites...", "I prefer...", "I usually...",
@@ -2151,8 +2498,9 @@ NN|compact memory text
 NN is importance 1-100.
 
 Suggested importance:
-40-59  useful recent conversational continuity
-60-79  meaningful preference/project state
+20-39  plausible reusable fact worth testing through decay
+40-59  useful preference/project continuity
+60-79  meaningful recurring preference/project state
 80-94  strong favorite/preference or recurring workflow
 95-100 explicit "remember this"/"this is important" when genuinely durable
 
@@ -2531,24 +2879,29 @@ def _reinforcement_from_existing(user_text,memory):
 
 
 def _semantic_memory_match(base,model,text,memory):
-    """Resolve a candidate against active candidates AND long-term summary."""
+    """Resolve a candidate against active candidates and durable memory."""
     items=list(memory.get("memories",[]))[:MEMORY_CANDIDATE_LIMIT]
-    summary=str(memory.get("summary","")).strip()
-    if not items and not summary:
+    durable=list(memory.get("durable",[]))[-MEMORY_DURABLE_LIMIT:]
+    if not items and not durable:
         return "new",None
     rows="\n".join(f"{i+1}|{m.get('text','')}" for i,m in enumerate(items)) or "(none)"
-    prompt=f"""A new candidate memory may repeat an existing memory.
+    durable_rows="\n".join(f"- {m.get('text','')}" for m in durable[-40:]) or "(none)"
+    summaries="\n".join(f"{k.upper()}: {v}" for k,v in (memory.get("domain_summaries",{}) or {}).items()) or "(none)"
+    prompt=f"""A new candidate memory may repeat existing user memory.
 Return exactly one line:
 NEW
-SUMMARY
+DURABLE
 MATCH|N
 
-Use SUMMARY only when the durable summary already clearly contains the same meaning.
-Use MATCH only for semantic equivalence or direct reinforcement, not mere topic similarity.
-Prefer NEW when uncertain.
+Use DURABLE only when durable atoms/summaries already clearly contain the same meaning.
+Use MATCH only for semantic equivalence or direct reinforcement of an active candidate.
+Prefer NEW when uncertain. Topic similarity alone is not a match.
 
-LONG-TERM SUMMARY:
-{summary or '(empty)'}
+DURABLE DOMAIN SUMMARIES:
+{summaries}
+
+DURABLE ATOMS:
+{durable_rows}
 
 ACTIVE CANDIDATES:
 {rows}
@@ -2562,7 +2915,7 @@ NEW CANDIDATE:
             {"role":"user","content":prompt},
         ],num_ctx=4096,num_predict=32,think=False,temperature=0.05)
         final=_strip_reasoning_payload(raw).strip().upper()
-        if final=="SUMMARY": return "summary",None
+        if final=="DURABLE": return "summary",None
         if final=="NEW": return "new",None
         m=re.fullmatch(r"MATCH\|(\d+)",final)
         if m:
@@ -2587,29 +2940,32 @@ def _promotion_candidates(memory,durable_text=""):
         importance=int(item.get("importance",0))
         uses=int(item.get("uses",1))
         text=str(item.get("text",""))
-        if (durable_text and text.casefold()==durable_text.casefold()) or importance>=88 or (uses>=3 and importance>=62):
+        if (durable_text and text.casefold()==durable_text.casefold()) or importance>=95 or (uses>=3 and importance>=55):
             promoted.append(item)
     return promoted
 
 
 def _living_memory_maintain(base,model,memory,durable_text=""):
-    """Event-driven consolidation. One evidence change causes at most one rewrite."""
+    """Promote earned candidates to durable atoms, then compile compact summaries."""
     promoted=_promotion_candidates(memory,durable_text)
     if not promoted:
         memory["last_maintenance_at"]=time.time()
-        return memory,False
-    before=str(memory.get("summary","")).strip()
-    durable="\n".join(str(x.get("text","")) for x in promoted)
-    after=_rewrite_summary_maintenance(base,model,before,memory.get("memories",[]),durable)
-    changed=bool(after and after!=before)
-    if after:
-        memory["summary"]=after
-        # A successfully represented durable candidate leaves the active pool.
-        promoted_ids={id(x) for x in promoted}
-        memory["memories"]=[x for x in memory.get("memories",[]) if id(x) not in promoted_ids]
-        memory["last_consolidated_at"]=time.time()
+        # Periodic compiler can still shrink/rewrite existing durable memory.
+        memory,compiled=_compile_memory(base,model,memory,force=False)
+        return memory,compiled
+
+    promoted_ids={id(x) for x in promoted}
+    added=False
+    for item in promoted:
+        memory,did_add=_add_durable(memory,item)
+        added=added or did_add
+    memory["memories"]=[x for x in memory.get("memories",[]) if id(x) not in promoted_ids]
+    memory["last_consolidated_at"]=time.time()
+
+    # Promotion deserves an immediate domain/core recompile.
+    memory,compiled=_compile_memory(base,model,memory,force=True)
     memory["last_maintenance_at"]=time.time()
-    return memory,changed
+    return memory,bool(added or compiled)
 
 
 def _consolidate_memory_candidates(memory):
@@ -2684,6 +3040,8 @@ def _remember_exchange(base, model, memory, user_text, assistant_text, profile="
     now=time.time()
     memory=_decay_memories(memory,now)
     memory["last_evidence_at"]=now
+    memory["compiler_base"]=str(base)[:500]
+    memory["compiler_model"]=str(model)[:200]
 
     candidate=_extract_memory_candidate(base,model,user_text,assistant_text)
     source="model"
@@ -2700,6 +3058,10 @@ def _remember_exchange(base, model, memory, user_text, assistant_text, profile="
             importance,text,forced_idx=reinforcement
             candidate=(importance,text)
             source="reinforce"
+    if candidate and _looks_environmental_memory(candidate[1]):
+        candidate=None
+        forced_idx=None
+        source="environment"
 
     memory["last_extraction_at"]=now
     memory["extractions_total"]=int(memory.get("extractions_total",0))+1
@@ -2720,7 +3082,17 @@ def _remember_exchange(base, model, memory, user_text, assistant_text, profile="
             importance=max(importance,95)
             durable_text=text
 
-        if forced_idx is not None:
+        durable_idx=_durable_memory_match(memory,text)
+        if durable_idx is not None:
+            durable_item=memory["durable"][durable_idx]
+            durable_item["importance"]=min(100,max(int(durable_item.get("importance",60)),int(importance))+4)
+            durable_item["uses"]=int(durable_item.get("uses",1))+1
+            durable_item["last_reinforced"]=now
+            memory["last_change"]="durable-reinforced"
+            memory["last_compiled_at"]=0
+            evidence_changed=True
+            action,idx="summary",None
+        elif forced_idx is not None:
             action,idx="match",forced_idx
         else:
             deterministic_idx=_deterministic_memory_match(text,memory)
@@ -3032,19 +3404,133 @@ def _memory_worker():
 
 
 
-def _safe_workspace_path(workspace, raw_path="."):
-    """Resolve a path while keeping Ollama file tools inside the starting cwd."""
-    workspace = Path(workspace).resolve()
-    raw_path = raw_path or "."
-    candidate = Path(raw_path).expanduser()
-    if not candidate.is_absolute():
-        candidate = workspace / candidate
-    candidate = candidate.resolve()
+def _path_within(path, root):
     try:
-        candidate.relative_to(workspace)
+        Path(path).resolve().relative_to(Path(root).resolve())
+        return True
     except ValueError:
-        raise ValueError("path is outside the LOOK Ollama workspace")
-    return candidate
+        return False
+
+
+def _load_path_access():
+    try:
+        data=json.loads(ACCESS_FILE.read_text(encoding="utf-8"))
+        rules=data.get("rules",[]) if isinstance(data,dict) else []
+        return [r for r in rules if isinstance(r,dict) and r.get("path")]
+    except (OSError,ValueError,json.JSONDecodeError):
+        return []
+
+
+def _save_path_access(rules):
+    STATE_DIR.mkdir(parents=True,exist_ok=True)
+    _atomic_json(ACCESS_FILE,{"schema":1,"rules":rules})
+    try: os.chmod(ACCESS_FILE,0o600)
+    except OSError: pass
+
+
+def _grant_covers(rule, target, capability):
+    if capability not in set(rule.get("capabilities",[])):
+        return False
+    return _path_within(target,Path(rule["path"]).expanduser())
+
+
+def _path_access_allowed(workspace,target,capability):
+    target=Path(target).resolve()
+    if _path_within(target,workspace):
+        return True
+    for rule in _ONCE_PATH_GRANTS:
+        if _grant_covers(rule,target,capability):
+            return True
+    for rule in _SESSION_PATH_GRANTS:
+        if _grant_covers(rule,target,capability):
+            return True
+    return any(_grant_covers(rule,target,capability) for rule in _load_path_access())
+
+
+def _consume_once_grant(target,capability):
+    for i,rule in enumerate(list(_ONCE_PATH_GRANTS)):
+        if _grant_covers(rule,target,capability):
+            _ONCE_PATH_GRANTS.pop(i)
+            return
+
+
+def _permission_scope_path(target):
+    target=Path(target).resolve()
+    # Existing directories are natural grant roots. For files/new paths, grant
+    # their parent so "always allow Downloads" behaves as the user expects.
+    return target if target.exists() and target.is_dir() else target.parent
+
+
+def _prompt_path_access(workspace,target,capability):
+    """Ask locally; the model never decides or fabricates filesystem permission."""
+    if not (sys.stdin.isatty() and sys.stdout.isatty()):
+        return False
+    target=Path(target).resolve()
+    scope=_permission_scope_path(target)
+    print()
+    print(f"{_c('LO FILE ACCESS','1;36')}")
+    print(f"  wants {capability.upper():<6} {target}")
+    print(f"  workspace   {Path(workspace).resolve()}")
+    print(f"  grant root  {scope}")
+    print()
+    try:
+        answer=input("  [A] once · [S] session · [P] always · [H] personal folders · Enter/Esc cancel › ").strip().casefold()
+    except (EOFError,KeyboardInterrupt):
+        print("\n  · cancelled")
+        return False
+    caps=["read","write"] if capability=="write" else ["read"]
+    if answer in {"a","once"}:
+        _ONCE_PATH_GRANTS.append({"path":str(target),"capabilities":[capability]})
+    elif answer in {"s","session"}:
+        _SESSION_PATH_GRANTS.append({"path":str(scope),"capabilities":caps})
+    elif answer in {"p","permanent","always"}:
+        rules=_load_path_access()
+        canonical=str(scope)
+        existing=next((r for r in rules if str(Path(r["path"]).expanduser().resolve())==canonical),None)
+        if existing:
+            existing["capabilities"]=sorted(set(existing.get("capabilities",[]))|set(caps))
+        else:
+            rules.append({"path":canonical,"capabilities":caps,"created_at":time.time()})
+        _save_path_access(rules)
+    elif answer in {"h","home","personal"}:
+        rules=_load_path_access()
+        for p in (HOME/"Desktop",HOME/"Documents",HOME/"Downloads"):
+            if not p.exists(): continue
+            canonical=str(p.resolve())
+            existing=next((r for r in rules if str(Path(r["path"]).expanduser().resolve())==canonical),None)
+            if existing: existing["capabilities"]=sorted(set(existing.get("capabilities",[]))|{"read","write"})
+            else: rules.append({"path":canonical,"capabilities":["read","write"],"created_at":time.time()})
+        _save_path_access(rules)
+        # The current target may not be one of the personal roots.
+        if not _path_access_allowed(workspace,target,capability):
+            print("  · personal folders allowed, but this requested path is still outside them")
+            return False
+    else:
+        print("  · cancelled")
+        return False
+    print(f"  {_c('✓ access granted','32')} · {answer if answer else 'cancelled'}")
+    return True
+
+
+def _safe_workspace_path(workspace, raw_path=".", capability="read", prompt_access=True):
+    """Resolve a path inside workspace or an explicit user-approved extension."""
+    workspace=Path(workspace).resolve()
+    raw_path=raw_path or "."
+    candidate=Path(raw_path).expanduser()
+    if not candidate.is_absolute():
+        candidate=workspace/candidate
+    candidate=candidate.resolve()
+
+    if _path_access_allowed(workspace,candidate,capability):
+        return candidate
+    if prompt_access and _prompt_path_access(workspace,candidate,capability):
+        # Consume once only after authorization has been used for this operation.
+        allowed=_path_access_allowed(workspace,candidate,capability)
+        if allowed:
+            return candidate
+    raise ValueError(
+        f"path requires {capability} access outside the LOOK workspace: {candidate}"
+    )
 
 
 def _workspace_snapshot(workspace):
@@ -3064,7 +3550,7 @@ def _workspace_snapshot(workspace):
     more="\n…listing truncated" if len(entries) == 120 else ""
     return (
         f"Current workspace: {workspace}\n"
-        "Treat this as the user's current folder. File tools are restricted to this folder and its descendants.\n"
+        "Treat this as the user's current folder and default trusted workspace. File tools may also use explicit user-approved path grants outside it.\n"
         "Top-level contents:\n" + ("\n".join(shown) if shown else "(empty)") + more
     )
 
@@ -3184,15 +3670,21 @@ def _tool_search_files(workspace, query, path="."):
     return "\n".join(matches) if matches else "No matches."
 
 
+def _display_tool_path(workspace,path):
+    path=Path(path).resolve()
+    try: return str(path.relative_to(Path(workspace).resolve()))
+    except ValueError: return str(path)
+
+
 def _tool_write_file(workspace, path, content, overwrite=False):
-    target=_safe_workspace_path(workspace, path)
+    target=_safe_workspace_path(workspace, path, "write")
     if target.exists() and not overwrite:
         return f"Refusing to overwrite existing file: {path}. Set overwrite=true only when the user explicitly asked to replace it."
     if not target.parent.exists() or not target.parent.is_dir():
-        return f"Parent directory does not exist: {target.parent.relative_to(Path(workspace).resolve())}"
+        return f"Parent directory does not exist: {_display_tool_path(workspace,target.parent)}"
     try:
         target.write_text(content, encoding="utf-8")
-        return f"Wrote {len(content.encode('utf-8'))} bytes to {target.relative_to(Path(workspace).resolve())}"
+        return f"WRITE OK · {target.resolve()} · {len(content.encode('utf-8'))} bytes"
     except OSError as exc:
         return f"Write failed: {exc}"
 
@@ -3216,7 +3708,7 @@ def _tool_create_text_files(workspace, files):
         content=str(item.get("content",""))
         if not raw:
             return "Batch create refused: empty path."
-        target=_safe_workspace_path(workspace,raw)
+        target=_safe_workspace_path(workspace,raw,"write")
         key=str(target)
         if key in seen:
             return f"Batch create refused: duplicate path: {raw}"
@@ -3224,7 +3716,7 @@ def _tool_create_text_files(workspace, files):
         if target.exists():
             return f"Batch create refused: path already exists: {raw}"
         if not target.parent.exists() or not target.parent.is_dir():
-            return f"Batch create refused: parent directory does not exist: {target.parent.relative_to(root)}"
+            return f"Batch create refused: parent directory does not exist: {_display_tool_path(workspace,target.parent)}"
         size=len(content.encode("utf-8"))
         total_bytes+=size
         if total_bytes>2_000_000:
@@ -3241,9 +3733,10 @@ def _tool_create_text_files(workspace, files):
                 "sha256":_sha256_file(target),
             })
         _record_undo({"kind":"batch","items":created,"time":time.time()})
-        names=", ".join(Path(x["path"]).name for x in created[:6])
-        more=f" +{len(created)-6} more" if len(created)>6 else ""
-        return f"CREATE FILES OK · {len(created)} files · {names}{more} · undo available · lk undo"
+        shown=[str(Path(x["path"]).resolve()) for x in created[:6]]
+        more=f"\n  +{len(created)-6} more" if len(created)>6 else ""
+        paths="\n  ".join(shown)
+        return f"CREATE FILES OK · {len(created)} files\n  {paths}{more}\n  undo available · lk undo"
     except OSError as exc:
         for item in reversed(created):
             try:
@@ -3307,6 +3800,136 @@ def _record_undo(entry, batch_id=None):
                 elif p.exists(): p.unlink()
             except OSError:
                 pass
+
+
+def _undo_entry_label(entry):
+    kind=str(entry.get("kind") or "unknown")
+    if kind=="copy":
+        return f"copy → {entry.get('destination','?')}"
+    if kind=="move":
+        return f"move {entry.get('destination','?')} → {entry.get('source','?')}"
+    if kind=="remove":
+        return f"remove {entry.get('source','?')}"
+    if kind=="mkdir":
+        return f"mkdir {entry.get('path','?')}"
+    if kind=="touch":
+        return f"create {entry.get('path','?')}"
+    if kind=="batch":
+        return f"batch · {len(entry.get('items',[]) or [])} items"
+    return kind
+
+
+def _undo_item_status(entry):
+    """Classify whether an undo record is presently safe to execute."""
+    kind=entry.get("kind")
+    try:
+        if kind=="copy":
+            dst=Path(entry["destination"])
+            if not dst.exists(): return "BLOCKED","copied destination no longer exists"
+            expected=entry.get("sha256")
+            if expected and dst.is_file() and _sha256_file(dst)!=expected:
+                return "BLOCKED","copied file has changed"
+            return "READY","copied destination still matches"
+        if kind=="move":
+            src=Path(entry["source"]); dst=Path(entry["destination"])
+            if not dst.exists(): return "BLOCKED","moved path no longer exists"
+            if src.exists(): return "BLOCKED","original location is occupied"
+            return "READY","moved path can return to original location"
+        if kind=="remove":
+            original=Path(entry["source"]); trash=Path(entry["trash"])
+            if original.exists(): return "BLOCKED","original location is occupied"
+            if not trash.exists(): return "BLOCKED","recoverable item is no longer available"
+            return "READY","recoverable item is available"
+        if kind=="mkdir":
+            path=Path(entry["path"])
+            if not path.exists(): return "BLOCKED","directory no longer exists"
+            if not path.is_dir() or any(path.iterdir()): return "BLOCKED","directory is no longer empty"
+            return "READY","directory is empty"
+        if kind=="touch":
+            path=Path(entry["path"])
+            if not path.exists() or not path.is_file(): return "BLOCKED","created file no longer exists"
+            stat=path.stat()
+            if stat.st_size!=0: return "BLOCKED","created file now contains data"
+            expected=entry.get("mtime_ns")
+            if expected is not None and stat.st_mtime_ns!=expected: return "BLOCKED","created file has changed"
+            return "READY","created empty file is unchanged"
+        if kind=="create_text":
+            path=Path(entry["path"])
+            if not path.exists() or not path.is_file(): return "BLOCKED","created file no longer exists"
+            expected=entry.get("sha256")
+            if expected and _sha256_file(path)!=expected: return "BLOCKED","created file has changed"
+            return "READY","created text file still matches"
+        if kind=="batch":
+            items=entry.get("items",[]) or []
+            for item in reversed(items):
+                status,reason=_undo_item_status(item)
+                if status!="READY":
+                    return "BLOCKED",f"{Path(item.get('destination') or item.get('source') or item.get('path') or '?').name}: {reason}"
+            return "READY",f"{len(items)} items can be reversed"
+        return "BLOCKED","unknown undo record"
+    except (OSError,KeyError,ValueError) as exc:
+        return "BLOCKED",str(exc)
+
+
+def _load_skipped_undo():
+    try:
+        data=json.loads(UNDO_SKIPPED_FILE.read_text(encoding="utf-8"))
+        return data if isinstance(data,list) else []
+    except (OSError,ValueError,json.JSONDecodeError):
+        return []
+
+
+def _save_skipped_undo(entries):
+    STATE_DIR.mkdir(parents=True,exist_ok=True)
+    UNDO_SKIPPED_FILE.write_text(json.dumps(entries[-40:],indent=2),encoding="utf-8")
+    try: os.chmod(UNDO_SKIPPED_FILE,0o600)
+    except OSError: pass
+
+
+def _undo_list():
+    entries=_load_undo()
+    skipped=_load_skipped_undo()
+    _title("UNDO HISTORY","newest first")
+    if not entries:
+        print("  active       none")
+    else:
+        for n,entry in enumerate(reversed(entries),1):
+            status,reason=_undo_item_status(entry)
+            marker=_c("READY","32") if status=="READY" else _c("BLOCKED","33")
+            age=_age_label(entry.get("time",0))
+            print(f"  {n:>2}  {marker:<16} {_undo_entry_label(entry)}")
+            print(f"      {_c(reason,'2')} · {age}")
+    if skipped:
+        print(f"\n  {_c('SKIPPED','2')} · recent abandoned records")
+        for entry in reversed(skipped[-5:]):
+            print(f"      {_undo_entry_label(entry)} · {_age_label(entry.get('skipped_at',0))}")
+    print("\n  lk undo       reverse newest READY record")
+    print("  lk undo skip  abandon newest BLOCKED record only")
+    return 0
+
+
+def _undo_skip():
+    entries=_load_undo()
+    if not entries:
+        print("LOOK undo · nothing to skip")
+        return 1
+    entry=entries[-1]
+    status,reason=_undo_item_status(entry)
+    if status=="READY":
+        print(f"{_c('✗','31')} LOOK undo · skip refused · newest record is still READY")
+        print("  use `lk undo` to reverse it; skip is only for history that has diverged")
+        return 1
+    entries.pop()
+    _save_undo(entries)
+    archived=dict(entry)
+    archived["skipped_at"]=time.time()
+    archived["skip_reason"]=reason
+    skipped=_load_skipped_undo(); skipped.append(archived); _save_skipped_undo(skipped)
+    print(f"{_c('↷ SKIP','1;33')} · {entry.get('kind','unknown')}")
+    print(f"  {_undo_entry_label(entry)}")
+    print(f"  {reason}")
+    print("  no filesystem change was made; older undo history is now reachable")
+    return 0
 
 
 def _undo_last():
@@ -3623,6 +4246,11 @@ def _destination_plan(src, requested):
     return req,dst,directory_intent,needed_root
 
 
+def _final_destination(src, requested_destination):
+    """Resolve the actual child path produced by a copy/move destination."""
+    return _destination_plan(Path(src).expanduser().resolve(), requested_destination)[1]
+
+
 def _copy_variant(path):
     path=Path(path)
     if path.is_dir() or not path.suffix:
@@ -3792,28 +4420,70 @@ def _journal_touch(path, create_missing=False):
 
 
 def _tool_copy_path(workspace, source, destination):
-    src=_safe_workspace_path(workspace,source)
+    src=_safe_workspace_path(workspace,source,"read")
     raw=Path(destination).expanduser()
     requested=raw if raw.is_absolute() else Path(workspace).resolve()/raw
-    dst=_safe_workspace_path(workspace,str(requested))
+    dst=_safe_workspace_path(workspace,str(requested),"write")
     # Existing directory destination is allowed, but the resulting child must also remain inside workspace.
     final=_final_destination(src,dst)
-    _safe_workspace_path(workspace,str(final))
+    _safe_workspace_path(workspace,str(final),"write")
     return _journal_copy(src,dst)
 
 
 def _tool_move_path(workspace, source, destination):
-    src=_safe_workspace_path(workspace,source)
+    src=_safe_workspace_path(workspace,source,"read")
     raw=Path(destination).expanduser()
     requested=raw if raw.is_absolute() else Path(workspace).resolve()/raw
-    dst=_safe_workspace_path(workspace,str(requested))
+    dst=_safe_workspace_path(workspace,str(requested),"write")
     final=_final_destination(src,dst)
-    _safe_workspace_path(workspace,str(final))
+    _safe_workspace_path(workspace,str(final),"write")
     return _journal_move(src,dst)
 
 
-def _tool_remove_path(workspace, path, confirmed=False):
+def _reveal_host_path(path):
+    """Reveal a path in the host file manager without mutating it."""
+    target=Path(path).expanduser().resolve()
+    if not target.exists():
+        return f"Reveal failed: not found: {target}"
+    try:
+        system=platform.system()
+        if system=="Darwin":
+            subprocess.Popen(["open","-R",str(target)],stdout=subprocess.DEVNULL,stderr=subprocess.DEVNULL)
+        elif system=="Windows":
+            if target.is_dir():
+                subprocess.Popen(["explorer",str(target)],stdout=subprocess.DEVNULL,stderr=subprocess.DEVNULL)
+            else:
+                subprocess.Popen(["explorer",f"/select,{target}"],stdout=subprocess.DEVNULL,stderr=subprocess.DEVNULL)
+        else:
+            opener=shutil.which("xdg-open")
+            if not opener:
+                return "Reveal unavailable: xdg-open was not found."
+            # Freedesktop has no universal select-file verb; opening the parent
+            # is the portable Linux behavior.
+            shown=target if target.is_dir() else target.parent
+            subprocess.Popen([opener,str(shown)],stdout=subprocess.DEVNULL,stderr=subprocess.DEVNULL)
+        return f"REVEAL OK · {target}"
+    except OSError as exc:
+        return f"Reveal failed: {exc}"
+
+
+def _tool_reveal_path(workspace, path):
     target=_safe_workspace_path(workspace,path)
+    return _reveal_host_path(target)
+
+
+def reveal_command(args):
+    if not args:
+        print("usage: lk reveal PATH")
+        return 2
+    target=Path(" ".join(args)).expanduser()
+    result=_reveal_host_path(target)
+    print(_action_result(result))
+    return 0 if result.startswith("REVEAL OK") else 1
+
+
+def _tool_remove_path(workspace, path, confirmed=False):
+    target=_safe_workspace_path(workspace,path,"write")
     if not confirmed:
         return "Remove refused: confirmed=true is required, and may be used only when the user explicitly asked to remove this path."
     if target == Path(workspace).resolve():
@@ -3822,7 +4492,7 @@ def _tool_remove_path(workspace, path, confirmed=False):
 
 
 def _tool_make_directory(workspace, path):
-    target=_safe_workspace_path(workspace,path)
+    target=_safe_workspace_path(workspace,path,"write")
     return _journal_mkdir(target)
 
 
@@ -3921,20 +4591,103 @@ def _lo_prompt_needs_thinking(prompt):
 
 _LO_MUTATION_TOOLS={"write_file","create_text_files","copy_path","move_path","remove_path","make_directory"}
 
-def _lo_requires_filesystem_action(prompt):
-    """Conservative host-side detector for explicit local mutation requests."""
+def _named_home_destination(prompt):
+    """Resolve explicit common home-folder language to a canonical path."""
     text=" ".join(str(prompt or "").split()).casefold()
-    action=(
-        r"\b(create|make|write|save|copy|duplicate|move|rename|remove|delete|edit|replace)\b"
+    checks=(
+        ("downloads", HOME/"Downloads"),
+        ("desktop", HOME/"Desktop"),
+        ("documents", HOME/"Documents"),
     )
+    for word,path in checks:
+        patterns=(
+            f"~/{word}",
+            f"my {word} folder",
+            f"the {word} folder",
+            f"actual {word} folder",
+            f"top-level {word}",
+            f"top level {word}",
+        )
+        if any(p in text for p in patterns):
+            return path.resolve()
+    return None
+
+
+def _normalize_creation_destination(prompt,name,args):
+    """Make named common folders concrete before the filesystem boundary checks."""
+    dest=_named_home_destination(prompt)
+    if dest is None or name not in {"write_file","create_text_files"}:
+        return args
+    fixed=dict(args)
+    if name=="write_file":
+        raw=Path(str(fixed.get("path") or ""))
+        # Preserve only the requested filename; the spoken destination owns the directory.
+        if raw.name:
+            fixed["path"]=str(dest/raw.name)
+    else:
+        files=[]
+        for item in fixed.get("files",[]) or []:
+            row=dict(item)
+            raw=Path(str(row.get("path") or ""))
+            if raw.name:
+                row["path"]=str(dest/raw.name)
+            files.append(row)
+        fixed["files"]=files
+    return fixed
+
+
+def _mutation_tool_succeeded(name,result):
+    text=str(result or "")
+    if name=="write_file":
+        return text.startswith("WRITE OK")
+    prefixes={
+        "create_text_files":"CREATE FILES OK",
+        "copy_path":"COPY OK",
+        "move_path":"MOVE OK",
+        "remove_path":"REMOVE OK",
+        "make_directory":("MKDIR OK","Directory already exists:"),
+    }
+    expected=prefixes.get(name)
+    if isinstance(expected,tuple): return text.startswith(expected)
+    return bool(expected and text.startswith(expected))
+
+def _lo_requires_filesystem_action(prompt):
+    """Detect an actual request to mutate local files, not discussion of prior work."""
+    text=" ".join(str(prompt or "").split()).strip().casefold()
+    if not text:
+        return False
+
+    # Questions, retrospective discussion, acknowledgements, and feedback should
+    # never trigger the host's "a mutation must occur" guard.
+    retrospective=(
+        r"^(did|do|does|was|were|is|are|what|where|why|how|which|who|when)\b",
+        r"\b(you|we|it)\s+(did|made|created|wrote|saved|copied|moved|renamed|removed|deleted|edited|replaced)\b",
+        r"\b(good job|nice job|great job|thanks|thank you|interesting|correct|worked|successful)\b",
+        r"\b(i don't see|i do not see|where is|where did|what happened|didn't|did not)\b",
+    )
+    if any(re.search(pattern,text) for pattern in retrospective):
+        return False
+
+    # Explicit imperative/request forms. This deliberately favors precision;
+    # if the model chooses to mutate on a conversational request, tool receipts
+    # still govern truth even when this extra host guard is not engaged.
+    action=r"(create|make|write|save|copy|duplicate|move|rename|remove|delete|edit|replace)"
     object_hint=(
-        r"\b(file|files|folder|folders|directory|directories|path|paths|txt|md|json|csv|yaml|yml|py|js|html)\b"
+        r"(file|files|folder|folders|directory|directories|path|paths|txt|md|json|csv|yaml|yml|py|js|html)"
         r"|[./~][^\s]*"
     )
-    # Exclude obvious explanatory questions.
-    if re.search(r"\b(how (do|would|can)|what command|explain|show me how)\b",text):
-        return False
-    return bool(re.search(action,text) and re.search(object_hint,text))
+    request_forms=(
+        rf"^(please\s+)?{action}\b",
+        rf"^(can|could|would|will)\s+you\s+(please\s+)?{action}\b",
+        rf"^(i\s+want|i'd\s+like|i\s+need)\s+(you\s+to\s+)?{action}\b",
+        rf"\b(please|lets|let's)\s+{action}\b",
+    )
+    explicit_request=any(re.search(pattern,text) for pattern in request_forms)
+    # Also accept a base-form action followed by a concrete filesystem object,
+    # useful for casual prefixes/typos such as "quick test -- lets make a file".
+    casual_request=bool(re.search(rf"\b{action}\b.*{object_hint}",text))
+    return bool((explicit_request or casual_request) and re.search(object_hint,text))
+
 
 def _lo_runtime_policy(mode, prompt):
     """Thinking behavior is separate from token/tool budget selection."""
@@ -4180,7 +4933,7 @@ def _run_command_tool(workspace,args,profile):
 def _lo_tools(profile):
     tools=_filesystem_tools()
     if profile=="conservative":
-        tools=[t for t in tools if t.get("function",{}).get("name") in {"list_files","inspect_directory","read_file","search_files"}]
+        tools=[t for t in tools if t.get("function",{}).get("name") in {"list_files","inspect_directory","read_file","search_files","reveal_path"}]
     tools.extend(_information_tools())
     tools.extend(_system_inspection_tools())
     if profile in {"power","unsafe"}:
@@ -4397,7 +5150,7 @@ def _filesystem_tools():
         }},
         {"type":"function","function":{
             "name":"write_file",
-            "description":"Create or intentionally replace UTF-8 text content inside the current LOOK workspace. Never use write_file to copy, duplicate, clone, back up, move, or rename an existing path; use copy_path or move_path instead. Existing files are protected unless overwrite=true and replacement was explicitly requested.",
+            "description":"Create or intentionally replace UTF-8 text content inside the current LOOK workspace. Preserve any destination folder the user names: for example, 'make x.html in Downloads' requires path='Downloads/x.html', never bare 'x.html'. Never use write_file to copy, duplicate, clone, back up, move, or rename an existing path; use copy_path or move_path instead. Existing files are protected unless overwrite=true and replacement was explicitly requested.",
             "parameters":{"type":"object","properties":{
                 "path":{"type":"string"},
                 "content":{"type":"string"},
@@ -4406,7 +5159,7 @@ def _filesystem_tools():
         }},
         {"type":"function","function":{
             "name":"create_text_files",
-            "description":"Create several NEW UTF-8 text files inside the current LOOK workspace in one deterministic operation. Prefer this when the user asks for multiple new text files. Existing paths are never overwritten. Parent directories must already exist. Maximum 32 files.",
+            "description":"Create several NEW UTF-8 text files inside the current LOOK workspace in one deterministic operation. Preserve destination folders explicitly named by the user in every path. Prefer this when the user asks for multiple new text files. Existing paths are never overwritten. Parent directories must already exist. Maximum 32 files.",
             "parameters":{"type":"object","properties":{
                 "files":{"type":"array","maxItems":32,"items":{"type":"object","properties":{
                     "path":{"type":"string"},
@@ -4431,6 +5184,13 @@ def _filesystem_tools():
             },"required":["source","destination"]}
         }},
         {"type":"function","function":{
+            "name":"reveal_path",
+            "description":"Reveal an existing workspace file or folder in the host graphical file manager. Use when the user says show me the file, reveal it in Finder, open its folder, or asks where a created file is.",
+            "parameters":{"type":"object","properties":{
+                "path":{"type":"string","description":"Workspace-relative path to reveal"}
+            },"required":["path"]}
+        }},
+        {"type":"function","function":{
             "name":"remove_path",
             "description":"Remove an existing file or directory inside the LOOK workspace. Use only when the user explicitly asks to delete/remove it. Set confirmed=true only for that explicit user request.",
             "parameters":{"type":"object","properties":{
@@ -4448,7 +5208,77 @@ def _filesystem_tools():
     ]
 
 
-def _run_filesystem_tool(workspace, name, args):
+def _access_command(args):
+    """Inspect and manage persistent LO filesystem grants."""
+    if not args or args[0] in {"list","status"}:
+        rules=_load_path_access()
+        _title("LO FILE ACCESS","persistent grants")
+        print(f"  default      current LO workspace")
+        if not rules:
+            print("  always       none")
+        else:
+            print("  ALWAYS")
+            for rule in rules:
+                caps="/".join(rule.get("capabilities",[])) or "none"
+                print(f"    {rule['path']}  · {caps}")
+        if _SESSION_PATH_GRANTS:
+            print("  SESSION")
+            for rule in _SESSION_PATH_GRANTS:
+                print(f"    {rule['path']}  · {'/'.join(rule.get('capabilities',[]))}")
+        print("\n  lk access add PATH [read|write]")
+        print("  lk access remove PATH")
+        print("  lk access personal")
+        print("  lk access clear")
+        return 0
+
+    action=args[0]
+    if action=="personal":
+        rules=_load_path_access()
+        for p in (HOME/"Desktop",HOME/"Documents",HOME/"Downloads"):
+            if not p.exists(): continue
+            canonical=str(p.resolve())
+            existing=next((r for r in rules if str(Path(r["path"]).expanduser().resolve())==canonical),None)
+            if existing:
+                existing["capabilities"]=sorted(set(existing.get("capabilities",[]))|{"read","write"})
+            else:
+                rules.append({"path":canonical,"capabilities":["read","write"],"created_at":time.time()})
+        _save_path_access(rules)
+        print("LO access · Personal folders allowed · read/write")
+        return 0
+
+    if action=="add" and len(args)>=2:
+        path=Path(args[1]).expanduser().resolve()
+        capability=(args[2].casefold() if len(args)>=3 else "write")
+        if capability not in {"read","write"}:
+            print("usage: lk access add PATH [read|write]"); return 2
+        caps=["read","write"] if capability=="write" else ["read"]
+        rules=_load_path_access()
+        existing=next((r for r in rules if str(Path(r["path"]).expanduser().resolve())==str(path)),None)
+        if existing: existing["capabilities"]=sorted(set(existing.get("capabilities",[]))|set(caps))
+        else: rules.append({"path":str(path),"capabilities":caps,"created_at":time.time()})
+        _save_path_access(rules)
+        print(f"LO access · always · {path} · {'/'.join(caps)}")
+        return 0
+
+    if action=="remove" and len(args)>=2:
+        path=str(Path(args[1]).expanduser().resolve())
+        rules=_load_path_access()
+        kept=[r for r in rules if str(Path(r["path"]).expanduser().resolve())!=path]
+        _save_path_access(kept)
+        print(f"LO access · removed {len(rules)-len(kept)} grant(s) · {path}")
+        return 0
+
+    if action=="clear":
+        _save_path_access([])
+        _SESSION_PATH_GRANTS.clear(); _ONCE_PATH_GRANTS.clear()
+        print("LO access · persistent and session grants cleared")
+        return 0
+
+    print("usage: lk access [list|personal|add PATH [read|write]|remove PATH|clear]")
+    return 2
+
+
+def _run_filesystem_tool_impl(workspace, name, args):
     try:
         if name == "list_files":
             return _tool_list_files(workspace, args.get("path", "."), args.get("depth", 1))
@@ -4466,15 +5296,30 @@ def _run_filesystem_tool(workspace, name, args):
             return _tool_copy_path(workspace, args.get("source", ""), args.get("destination", ""))
         if name == "move_path":
             return _tool_move_path(workspace, args.get("source", ""), args.get("destination", ""))
+        if name == "reveal_path":
+            return _tool_reveal_path(workspace, args.get("path", ""))
         if name == "remove_path":
             return _tool_remove_path(workspace, args.get("path", ""), bool(args.get("confirmed", False)))
         if name == "make_directory":
             return _tool_make_directory(workspace, args.get("path", ""))
     except (OSError, ValueError) as exc:
         return f"File tool failed: {exc}"
+    except Exception as exc:
+        # Tool bugs should fail closed inside the tool boundary, not tear down
+        # the user's LO session. The exception type remains visible for diagnosis.
+        return f"File tool internal error: {type(exc).__name__}: {exc}"
     return f"Unknown file tool: {name}"
 
-LOOK_INFO_USER_AGENT="LOOK-Shell/4.1.9 (local text client)"
+LOOK_INFO_USER_AGENT="LOOK-Shell/4.3.0 (local text client)"
+
+def _run_filesystem_tool(workspace, name, args):
+    try:
+        return _run_filesystem_tool_impl(workspace,name,args)
+    finally:
+        # "Allow once" covers the complete tool transaction, including its
+        # internal source/destination/final-path checks, then disappears.
+        _ONCE_PATH_GRANTS.clear()
+
 
 def _http_json(url, timeout=12):
     import json, urllib.request
@@ -4991,10 +5836,17 @@ def ollama_chat(force_search=False, initial_prompt=None, allow_start=True, host_
             "and use bounded copy_path, move_path, remove_path, make_directory, and create_text_files tools inside the workspace. ""When the user asks for several new text files, prefer create_text_files so the whole request is one verified operation. "
             "When the user asks to copy, duplicate, clone, or back up an existing path, ALWAYS use copy_path; never reconstruct it with read_file + write_file. "
             "When the user asks to move or rename an existing path, use move_path. When explicitly asked to remove one, use remove_path. "
+            "DESTINATION CONTRACT: if the user names a destination folder, preserve that folder in the tool path. "
+            "For example, from workspace ~, 'make x.html in the Downloads folder' means Downloads/x.html, not ./x.html. "
+            "Do not silently substitute the current directory for a named destination. If the named destination resolves outside the current WORKSPACE boundary, call the correct file tool anyway: LOOK itself will request user permission and resume the exact operation if granted. Never substitute another destination to avoid a permission request. "
+            "If two different in-workspace directories genuinely match an ambiguous spoken destination, inspect/list them or ask which one rather than guessing. "
+            "Use reveal_path when the user asks to show/reveal a file in Finder or the host file manager. "
+            "TOOL RECEIPTS ARE GROUND TRUTH. After a successful filesystem tool call, report the exact canonical path from the receipt and never contradict it with memory, prior conversation, or an inferred current directory. "
+            "A failed tool receipt means the requested operation did not happen unless a later successful receipt proves otherwise. "
             "Use write_file only for intentional textual creation or editing. Only mutate files when the user explicitly asks. "
             "Do not claim to have read or changed a file unless the corresponding tool supplied or confirmed it. "
             "CRITICAL EXECUTION CONTRACT: when the user explicitly asks you to create, write, copy, move, rename, edit, or remove local files/folders, you must CALL the appropriate filesystem tool before reporting success. Planning or describing a tool call is not execution. Never say an operation succeeded unless a tool result confirms it. "
-            "Do not claim filesystem access outside the starting LOOK workspace. "
+            "Filesystem reach starts at the workspace and may be extended only by LOOK's explicit host-owned path grants. "
             "Use canonical information edges before generic search whenever they fit: weather=WEATHER, place_lookup=PLACE, wikipedia=WIKI, wikidata=DATA, papers=PAPERS, archive=ARCHIVE. You MUST call weather for current weather, temperature, rain, wind, or forecasts; never answer those from model memory. Use WIKI for readable stable background, DATA for structured entity facts, PAPERS for bibliographic/DOI questions, and ARCHIVE when the historical object or primary artifact matters. Canonical tool results include an epistemic receipt: edge, source, confidence, as_of when available, retrieved_at, and source_url. Preserve that provenance compactly in factual answers. DIRECT means the canonical source returned the fact; DERIVED means LOOK computed it from canonical data; SEARCHED means general web results were interpreted; MODEL means no external verification. Never invent numerical confidence percentages. If web_search is available, use it when current or externally verifiable information is needed and no canonical tool fits; "
             "when citing or recommending web material, always preserve the exact http/https URL supplied by the search result and emit a complete Markdown link in the form [descriptive label](https://actual-url). Never emit citation placeholders such as [source], [1], or a site name styled like a link without an actual URL. Never invent a URL from a site name."
         )},
@@ -5026,11 +5878,11 @@ def ollama_chat(force_search=False, initial_prompt=None, allow_start=True, host_
             "Mutation and shell execution tools are intentionally absent."
         ),
         "workspace": (
-            "ACCESS PROFILE: WORKSPACE. You may use LOOK's bounded filesystem tools inside the starting workspace. "
+            "ACCESS PROFILE: WORKSPACE. You may use LOOK's bounded filesystem tools in the starting workspace and in explicit host-approved path grants. "
             "Arbitrary shell execution is intentionally unavailable."
         ),
         "power": (
-            "ACCESS PROFILE: POWER. You may use bounded workspace tools and run_command for computer-level work. "
+            "ACCESS PROFILE: POWER. You may use bounded filesystem tools with explicit path grants and run_command for computer-level work. "
             "Every shell command requires user confirmation. Prefer inspection before mutation and briefly explain destructive/system-wide actions."
         ),
         "unsafe": (
@@ -5048,7 +5900,7 @@ def ollama_chat(force_search=False, initial_prompt=None, allow_start=True, host_
     }
     messages.append({"role":"system","content":thinking_notes[thinking_mode]})
 
-    memory_context = _memory_context(memory)
+    memory_context = _memory_context(memory,prompt)
     if memory_context:
         messages.append({"role": "system", "content": memory_context})
     recent_context=_recent_context()
@@ -5110,6 +5962,8 @@ def ollama_chat(force_search=False, initial_prompt=None, allow_start=True, host_
         # enforced by the host so prose can never masquerade as execution.
         mutation_required=(profile!="conservative" and _lo_requires_filesystem_action(prompt))
         mutation_attempted=False
+        mutation_succeeded=False
+        last_mutation_result=""
         mutation_repair_sent=False
         runtime=_lo_runtime_policy(thinking_mode, prompt)
         task_tier,budget=_lo_budget_for(prompt,thinking_mode,selected_paths)
@@ -5257,11 +6111,16 @@ def ollama_chat(force_search=False, initial_prompt=None, allow_start=True, host_
                                 tool_content = _search_text(search_result)
                             except Exception as exc:
                                 tool_content = f"Web search failed: {exc}"
-                    elif name in {"list_files", "inspect_directory", "read_file", "search_files", "write_file", "create_text_files", "copy_path", "move_path", "remove_path", "make_directory"}:
+                    elif name in {"list_files", "inspect_directory", "read_file", "search_files", "write_file", "create_text_files", "copy_path", "move_path", "remove_path", "make_directory", "reveal_path"}:
+                        if name in {"write_file","create_text_files"}:
+                            args=_normalize_creation_destination(prompt,name,args)
                         with _activity(name.replace("_"," ")):
                             tool_content = _run_filesystem_tool(workspace, name, args)
                         if name in _LO_MUTATION_TOOLS:
                             mutation_attempted=True
+                            last_mutation_result=str(tool_content)
+                            if _mutation_tool_succeeded(name,tool_content):
+                                mutation_succeeded=True
                             print(f"{_ansi_label('file ›', '32')} {tool_content}")
                     elif name in {"list_processes","listening_ports","system_snapshot"}:
                         print(f"{_ansi_label('system ›','36')} {name.replace('_',' ')}")
@@ -5286,7 +6145,12 @@ def ollama_chat(force_search=False, initial_prompt=None, allow_start=True, host_
 
             answer = message.get("content", "").strip()
 
-            if mutation_required and not mutation_attempted:
+            if mutation_required and mutation_attempted and not mutation_succeeded:
+                detail=(last_mutation_result or "filesystem mutation did not return a success receipt").strip()
+                answer=f"I did not complete the requested filesystem change. {detail}"
+                message={"role":"assistant","content":answer,"thinking":"","tool_calls":[]}
+
+            elif mutation_required and not mutation_attempted:
                 if not mutation_repair_sent:
                     mutation_repair_sent=True
                     messages.append({
@@ -6193,6 +7057,7 @@ def _settings_rows():
     base=_ollama_base()
     return [
         ("access", "AI", "Access profile", _load_lo_profile()),
+        ("fileaccess", "AI", "File grants", f"{len(_load_path_access())} always"),
         ("personality", "AI", "Personality", _load_personality()),
         ("thinking", "AI", "Thinking depth", _load_thinking()),
         ("thinkdisplay", "AI", "Think display", _load_think_display()),
@@ -6210,7 +7075,7 @@ def _settings_pick_access():
     current=_load_lo_profile()
     choices=[
         ("conservative","read/search only"),
-        ("workspace","bounded file tools"),
+        ("workspace","file tools + explicit path grants"),
         ("power","shell commands · confirm each"),
         ("unsafe","unrestricted shell · session gate"),
     ]
@@ -6351,6 +7216,8 @@ def settings():
         key=result.stdout.split("\t",1)[0].strip()
         if key=="access":
             _settings_pick_access()
+        elif key=="fileaccess":
+            _access_command([])
         elif key=="personality":
             _settings_pick_personality()
         elif key=="thinking":
@@ -7642,7 +8509,7 @@ START HERE
 
 FILES
   lk [THING]       detail  dirs  files  tree  recent  size  run
-  lmk  lcp  lmv  lscp  lrm  mkd  undo
+  lmk  lcp  lmv  lscp  lrm  mkd  undo  undo list  undo skip  reveal
 
 SYSTEM
   doctor  up  ports  port  processes  process  pid
@@ -7654,14 +8521,14 @@ NETWORK
 AI
   lo  lo search    ollama  ollama models  ollama test
   personality  thinking  think-display  ai stats  settings
-  memory  skills   profile  ai  feedback  sound
-  ollama access  ollama key
+  memory  memory compact  skills  profile  ai  feedback  sound
+  access  ollama access  ollama key
 
 MEDIA
   media  mm  mn  mp
 
 META
-  home  config  secrets  version  uninstall
+  home  config  secrets  access  reveal  version  uninstall
   help            help all        commands
 
   Direct commands remain first-class. Umbrella surfaces are optional.
@@ -7685,6 +8552,8 @@ def starter_help():
 
 DIRECT IS ALWAYS AVAILABLE
   lk doctor        lk disk          lk models
+  lk reveal PATH   show path in Finder/file manager
+  lk access        manage LO filesystem grants
   lk personality  lk thinking      lk tailscale
   lk <file>        lk port 3000     lk process NAME
   filer: mark paths, then L to hand them to LO as context
@@ -8266,9 +9135,17 @@ def main():
     if cmd=="models": return ollama_models(rest[0] if rest else None)
     if cmd=="benchmark": return ollama_test(all_models=("--all" in rest))
     if cmd=="web": return ollama_key(["status"] if not rest else rest)
+    if cmd=="reveal": return reveal_command(rest)
+    if cmd=="access": return _access_command(rest)
     if cmd in ("version","--version","-V"): print(f"LOOK {VERSION}"); return 0
     if cmd=="home": return home()
-    if cmd=="undo": return _undo_last()
+    if cmd=="undo":
+        if rest and rest[0] in {"list","history"}: return _undo_list()
+        if rest and rest[0]=="skip": return _undo_skip()
+        if rest:
+            print("usage: lk undo [list|skip]")
+            return 2
+        return _undo_last()
     if cmd=="_batch":
         if len(rest)<3: return 2
         kind=rest[0]
@@ -8310,7 +9187,7 @@ def main():
     if cmd=="uninstall": return uninstall()
     if cmd=="config":
         if rest and rest[0] in {"paths","raw"}:
-            print(f"LOOK {VERSION}\n  executable  {Path(__file__).resolve()}\n  renderer    {RENDERER}\n  zshrc       {HOME/'.zshrc'}\n  secrets     {HOME/'.zsh_secrets'}\n  memory      {MEMORY_FILE}\n  memory queue {MEMORY_QUEUE}\n  undo        {UNDO_FILE}\n  ollama model {_preferred_ollama_model()}\n  ollama models {OLLAMA_MODELS_FILE}")
+            print(f"LOOK {VERSION}\n  executable  {Path(__file__).resolve()}\n  renderer    {RENDERER}\n  zshrc       {HOME/'.zshrc'}\n  secrets     {HOME/'.zsh_secrets'}\n  memory      {MEMORY_FILE}\n  memory queue {MEMORY_QUEUE}\n  undo        {UNDO_FILE}\n  undo skipped {UNDO_SKIPPED_FILE}\n  ollama model {_preferred_ollama_model()}\n  ollama models {OLLAMA_MODELS_FILE}")
             return 0
         return _surface_config()
     if cmd=="secrets":

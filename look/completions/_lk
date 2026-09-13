@@ -140,7 +140,7 @@ _lk() {
       return
       ;;
     memory)
-      (( CURRENT == 3 )) && _values 'memory action' add forget clear clear-summary clear-recent prune
+      (( CURRENT == 3 )) && _values 'memory action' add forget compact compile clear clear-summary clear-recent prune
       return
       ;;
     skills)
@@ -200,6 +200,25 @@ _lk() {
       _message 'text'
       return
       ;;
+    access)
+      if (( CURRENT == 3 )); then
+        _values 'access action' list personal add remove clear
+      elif [[ "$words[3]" == (add|remove) && CURRENT == 4 ]]; then
+        _files
+      elif [[ "$words[3]" == add && CURRENT == 5 ]]; then
+        _values 'capability' read write
+      fi
+      return
+      ;;
+
+    undo)
+      (( CURRENT == 3 )) && _values 'undo action' list skip
+      ;;
+
+    reveal)
+      _arguments '*:path:_files'
+      ;;
+
     detail|dirs|files|tree|recent|size|run|git)
       _files
       return

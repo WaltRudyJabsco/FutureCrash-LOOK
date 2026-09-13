@@ -1,3 +1,48 @@
+## 4.3.0 — Living Memory compiler
+
+- Memory schema 3: candidates → durable atoms → domain summaries → compact core.
+- Relevant retrieval replaces dumping the entire memory pool into every prompt.
+- More permissive candidate admission plus competitive eviction.
+- Periodic idle compaction using Living AI.
+- Machine/runtime state excluded from user memory.
+- Schema-2 summaries preserved as inactive legacy text.
+- Help, commands, settings, and Zsh completions audited to current behavior.
+
+## 4.2.3 — Authoritative file receipts
+
+- Canonical absolute paths in create/write receipts.
+- Mutation receipts explicitly outrank conversational memory.
+- Retrospective/question/feedback turns no longer trip the filesystem-execution guard.
+- Future Crash child-shell aware shell title support.
+
+## 4.2.2 — Reload-safe shell functions
+
+- Clear stale LOOK aliases before defining `lo`, `fc`, `rst`, and related wrappers.
+- Fixes Zsh alias expansion parse errors on `rb` after upgrading from alias-based releases.
+
+## 4.2.1 — Permissioned filesystem reach
+
+- Added explicit outside-workspace path grants: once/session/always/personal.
+- Added `lk access` management surface.
+- Host, not the model, owns permission decisions.
+- External-path writes, reads, copies, moves, reveals and directory operations use the same boundary.
+- Noninteractive/background operations fail closed when a grant is absent.
+
+## 4.2.0 — Ownership + transaction history
+
+- Terminal owner titles for LOOK/LO and idle shell.
+- `lk undo list` and `lk undo skip`.
+- READY/BLOCKED undo classification.
+- Hard mutation-success receipts prevent hallucinated fallback success.
+- Canonical home-folder destination normalization for Downloads/Desktop/Documents.
+
+## 4.1.10 — Destination fidelity + reveal
+
+- Restored actual copy/move destination resolver.
+- Explicit named-folder destination contract.
+- Added cross-platform `reveal_path` and `lk reveal PATH`.
+- Filesystem tool failures no longer tear down LO.
+
 ## 4.1.9 — Keep-alive payload fix
 
 - Send numeric `keep_alive: -1` for interactive Ollama chat requests.

@@ -267,11 +267,48 @@ def process_skill():
         CURRENT='idle'
 
 
+def memory_compile_due():
+    """Use idle cycles for periodic memory compaction, never more than every six hours."""
+    try:
+        memory=core._load_memory()
+        if not memory.get("durable"):
+            return False
+        if not memory.get("compiler_base") or not memory.get("compiler_model"):
+            return False
+        return time.time()-float(memory.get("last_compiled_at",0) or 0) >= 6*3600
+    except Exception:
+        return False
+
+
+def process_memory_compile():
+    global CURRENT,BACKOFF_UNTIL
+    if not memory_compile_due():
+        return False
+    CURRENT='memory compile'
+    try:
+        memory=core._load_memory()
+        base=str(memory.get("compiler_base") or "")
+        model=str(memory.get("compiler_model") or "")
+        core._ollama_tags(base)
+        memory,changed=core._compile_memory(base,model,memory,force=True)
+        core._save_memory(memory)
+        if changed:
+            core._emit_event('memory', 'memory summaries compacted')
+        return True
+    except Exception as exc:
+        _log_error("memory compile",exc)
+        BACKOFF_UNTIL=time.time()+60.0
+        return False
+    finally:
+        CURRENT='idle'
+
+
 def next_background_work():
     # Explicit user background jobs outrank housekeeping.
     if process_lo_job(): return True
     if process_memory(): return True
     if process_skill(): return True
+    if process_memory_compile(): return True
     return False
 
 
@@ -353,7 +390,7 @@ def serve():
                 if foreground_busy(): continue
                 if time.time()<BACKOFF_UNTIL: continue
                 # Drain one unit at a time so foreground can win between calls.
-                if WAKE or any(counts()):
+                if WAKE or any(counts()) or memory_compile_due():
                     next_background_work()
                     WAKE=False
             except Exception as exc:

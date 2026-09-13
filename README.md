@@ -774,9 +774,9 @@ This release establishes the following baseline:
 
 | Layer | Version |
 | --- | ---: |
-| Future Crash + LOOK | **2.1.9** |
-| LOOK | **4.1.9** |
-| Future Crash | **1.1.8** |
+| Future Crash + LOOK | **2.3.0** |
+| LOOK | **4.3.0** |
+| Future Crash | **1.1.10** |
 
 Signal rendering is now compiled separately from conversation: explicit Signal requests use a focused no-thinking 1200-token render pass, while ordinary Workstation conversation retains its own reasoning budget.
 | Memory schema | **1** |
@@ -1050,3 +1050,27 @@ Repeated equivalent evidence now increments candidate USES and importance, and s
 ### Warm model residency
 
 Interactive LO keeps the selected Ollama model resident with `keep_alive=-1`, avoiding repeated cold-load penalties on dedicated local/remote AI hosts. `lk ai stats` marks tasks warm/cold and distinguishes GPU-resident model memory from model size.
+
+
+### Destination fidelity and reveal
+
+LO preserves explicitly named destination folders rather than silently substituting the current directory. `reveal_path` and `lk reveal PATH` open an existing path in the host file manager without adding another short command alias.
+
+
+### Undo journal
+
+`lk undo list` shows the current transaction stack with READY/BLOCKED state. `lk undo skip` explicitly abandons only the newest BLOCKED record; normal `lk undo` never skips history automatically.
+
+### Terminal owner
+
+LOOK, LO and Future Crash use the terminal/tab title as a lightweight ownership indicator while active.
+
+
+### LO filesystem access
+
+The starting folder is LO's default trusted workspace. Outside paths can be granted once, for the session, permanently, or through the Personal preset (`~/Desktop`, `~/Documents`, `~/Downloads`). `lk access` shows and manages persistent grants. Permission is enforced by LOOK itself rather than model judgment.
+
+
+### Living Memory compiler
+
+LOOK 4.3 uses a layered memory model: disposable candidates, durable atomic memories, compact semantic-domain summaries, and a tiny routing summary. Only relevant memory is retrieved into a normal LO prompt. The resident Living AI broker periodically compacts durable memory during idle time without broadening user claims.

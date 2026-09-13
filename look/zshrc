@@ -46,6 +46,21 @@ fi
 alias rb='exec zsh'
 alias c='clear'
 alias neo='neofetch'
+
+# Terminal ownership indicator. Uses standard OSC title escapes and stays out of
+# the prompt itself, so unsupported terminals simply ignore it.
+_look_owner_title() {
+  printf '\e]0;%s\a' "$1"
+}
+
+_look_shell_title() {
+  if [[ -n "${FUTURE_CRASH_SHELL:-}" ]]; then
+    _look_owner_title "◌ FUTURE CRASH · SHELL · ${PWD:t}"
+  else
+    _look_owner_title "LOOK · ${PWD:t}"
+  fi
+}
+
 # Small command glossary. Keep it short enough to actually be useful.
 commands() {
   print -P '%F{cyan}%BLOOK SHELL%b%f  %F{244}filesystem + navigation%f'
@@ -75,8 +90,11 @@ rs() {
 }
 
 
-# These two are intentionally yours. They make interactive navigation wonderful.
-alias cd='z'
+# Keep Unix cd deterministic. Zoxide stays available as `z` for fuzzy/history
+# navigation, but must never intercept a new exact path that is not in its DB.
+# `nocorrect` also prevents Zsh from suggesting an older similarly named folder
+# before entering a freshly downloaded/extracted directory.
+alias cd='nocorrect builtin cd'
 alias ..='cd ..'
 alias zz='z -'
 
@@ -94,8 +112,10 @@ _look() {
 
   local cd_request="$HOME/.local/share/look/cd_request"
   command rm -f -- "$cd_request"
+  _look_owner_title "● LOOK"
   "$LOOK" "$@"
   local rc=$?
+  _look_shell_title
 
   # Renderer subprocesses cannot change the parent shell directory. G writes
   # one deliberate handoff; the shell consumes it immediately and deletes it.
@@ -565,13 +585,25 @@ _look_lo_events_precmd() {
   fi
 }
 add-zsh-hook precmd _look_lo_events_precmd
+add-zsh-hook precmd _look_shell_title
 
-# LOOK unified command
+# LOOK unified command.
+# A shell being reloaded may already contain aliases from an older LOOK release.
+# Zsh expands aliases while sourcing, so clear all names that become functions
+# BEFORE their function definitions are parsed.
+unalias lk lo fc rst commands 2>/dev/null
+
 alias lk='nocorrect lk'
 commands() { "$HOME/.local/bin/lk" commands; }
 
 # LOOK Ollama — minimal on-demand chat; a resident model is reused when available.
-alias lo='noglob lk o'
+lo() {
+  _look_owner_title "● LO"
+  noglob "$HOME/.local/bin/lk" o "$@"
+  local rc=$?
+  _look_shell_title
+  return $rc
+}
 
 # Fast media transport
 alias mm='lk media toggle'
@@ -593,5 +625,12 @@ webterm() {
 
 
 # ── Future Crash ─────────────────────────────────────────────────────────────
-alias rst='future-crash'
-alias fc='future-crash'
+_future_crash_owned() {
+  _look_owner_title "● FUTURE CRASH"
+  command future-crash "$@"
+  local rc=$?
+  _look_shell_title
+  return $rc
+}
+rst() { _future_crash_owned "$@"; }
+fc()  { _future_crash_owned "$@"; }
