@@ -72,7 +72,7 @@ WHITE = CSI + "38;5;255m"
 GRAY = CSI + "38;5;245m"
 DARK = CSI + "38;5;239m"
 
-VERSION = "1.1.8"
+VERSION = "1.1.10"
 GLYPHS = "0123456789ABCDEF"
 SPARKS = "▁▂▃▄▅▆▇█"
 
@@ -2090,12 +2090,12 @@ class Terminal:
 
     def enter(self):
         tty.setcbreak(self.fd)
-        sys.stdout.write(ESC + "[?1049h" + ESC + "[?25l" + ESC + "[?7l" + ESC + "[2J")
+        sys.stdout.write(ESC + "]0;● FUTURE CRASH\a" + ESC + "[?1049h" + ESC + "[?25l" + ESC + "[?7l" + ESC + "[2J")
         sys.stdout.flush()
 
     def leave(self):
         termios.tcsetattr(self.fd, termios.TCSADRAIN, self.old)
-        sys.stdout.write(RESET + ESC + "[?7h" + ESC + "[?25h" + ESC + "[?1049l")
+        sys.stdout.write(RESET + ESC + "[?7h" + ESC + "[?25h" + ESC + "[?1049l" + ESC + "]0;LOOK · shell\a")
         sys.stdout.flush()
 
     def size(self):
@@ -2316,6 +2316,8 @@ class FutureCrash:
         self.audio.cue("shell_out")
         time.sleep(.06)
         self.term.leave()
+        sys.stdout.write(ESC + "]0;◌ FUTURE CRASH · SHELL\a")
+        sys.stdout.flush()
 
         try:
             sys.stdout.write(

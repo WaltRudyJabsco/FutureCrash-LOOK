@@ -1,3 +1,69 @@
+## 2.3.0 — Living Memory compiler
+
+- Living Memory schema 3 separates cheap candidates from durable atomic memory.
+- Durable memory is classified into compact semantic domains: PERSONAL, PREFERENCES, PROJECTS, STYLE, GENERAL.
+- Background compiler rewrites domain summaries and a tiny core routing summary, aggressively minimizing words while preserving scope and uncertainty.
+- Old schema-2 long-term summary text is preserved as LEGACY (inactive) evidence rather than automatically injected into prompts.
+- Candidate admission is more permissive; candidate slots are competitive by importance, reinforcement, and recency.
+- Machine/runtime facts are excluded from autobiographical memory.
+- Prompt retrieval is relevance-driven: compact core + relevant domain summaries + up to six relevant durable atoms + four relevant candidates.
+- Idle Living AI uses free cycles for memory recompilation at most once every six hours.
+- Added `lk memory compact` / `compile`.
+- `lk memory` now exposes core summary, domains, durable atoms, candidate ecology, promotions, evictions, and compiler timing.
+- Full help/commands/settings/completions audit for access grants, undo history, filer keys, terminal ownership, memory compiler, AI stats, and current profiles.
+- Future Crash remains 1.1.10.
+
+## 2.2.3 — Receipts are reality
+
+- File creation receipts now include canonical absolute paths, so the model no longer has to infer where a successful write occurred.
+- Single-file writes now return `WRITE OK · <absolute path>`.
+- LO treats filesystem receipts as ground truth and is explicitly forbidden from contradicting a successful receipt with stale conversation/memory.
+- Host mutation detection now distinguishes new execution requests from retrospective discussion, questions, acknowledgements, and feedback.
+- Fixes follow-up turns such as “you did make it in the correct ~/Downloads folder” being rewritten into “I did not execute a filesystem mutation tool.”
+- Future Crash child-shell mode now has its own terminal title: `◌ FUTURE CRASH · SHELL · <folder>`.
+- Returning from that child shell restores `● FUTURE CRASH`; ordinary shell remains `LOOK · <folder>`.
+
+## 2.2.2 — Zsh reload compatibility
+
+- Fixed `rb` / shell reload parse failure when aliases from an older LOOK session were still active.
+- The generated LOOK Zsh profile now unaliases `lk`, `lo`, `fc`, `rst`, and `commands` before parsing same-name function definitions.
+- This specifically fixes `defining function based on alias 'lk'` / `parse error near '()'` during Zsh initialization.
+- No runtime, permission, memory, AI, or filesystem behavior changed.
+
+## 2.2.1 — Permissioned filesystem reach
+
+- The LO workspace is now the default trust boundary, not a hard prison.
+- Outside-workspace file tools trigger a host-owned permission prompt instead of forcing the model to improvise.
+- Grants: Allow Once, Session, Always, or Personal folders.
+- `lk access` inspects persistent grants; `add`, `remove`, `clear`, and `personal` manage them.
+- Permanent grants are stored locally in LOOK state with mode 0600.
+- Write grants include read access; read-only grants remain available.
+- Allow Once lasts for exactly one complete filesystem tool transaction.
+- Background/non-interactive work fails closed instead of inventing permission.
+- Named destinations remain exact: denial never falls back to the current directory.
+- Future Crash remains 1.1.9.
+
+## 2.2.0 — Terminal ownership + undo journal
+
+- Terminal/tab titles now identify the active surface: `● LOOK`, `● LO`, and `● FUTURE CRASH`, returning to `LOOK · <folder>` at the shell.
+- Added `lk undo list` with READY/BLOCKED classification and reasons.
+- Added `lk undo skip`: explicitly abandon only the newest BLOCKED record, making older history reachable without touching the filesystem.
+- Ordinary `lk undo` remains strict and never auto-skips divergent history.
+- Fixed false-success mutation reporting: failed filesystem tools can no longer be followed by prose claiming a file was created/moved/copied.
+- Common named home folders (`Downloads`, `Desktop`, `Documents`) are normalized to their canonical `~/...` destinations for file creation; workspace boundaries still apply.
+- Includes 2.1.10 destination fidelity, reveal tool, deterministic `cd`/zoxide split, and 2.1.9 warm-model fixes.
+
+## 2.1.10 — File destination fidelity
+
+- Fixed `copy_path` / `move_path` crash caused by missing `_final_destination`.
+- Named destination folders are now an explicit LO execution contract: `in Downloads` must produce a path containing `Downloads`, never silently fall back to the current directory.
+- If a requested destination is outside the current WORKSPACE boundary, LO must report the boundary instead of claiming success elsewhere.
+- Added `reveal_path` tool for “show me this file” / Finder / host file-manager requests.
+- Added direct `lk reveal PATH`; no new short alias.
+- Filesystem-tool programming errors are contained inside the tool boundary instead of crashing the LO session.
+- Installer shell profile now keeps real `cd` deterministic; zoxide remains on `z`, fixing newly extracted directories that zoxide has never indexed.
+- No memory, broker, model, or performance-policy changes.
+
 ## 2.1.9 — Ollama keep-alive compatibility fix
 
 - Fixed interactive LO requests sending permanent residency as the string `"-1"`.
