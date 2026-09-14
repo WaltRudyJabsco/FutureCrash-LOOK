@@ -1,3 +1,22 @@
+## 2.6.3 — Comfy workflow self-healing
+
+- `lk comfy` and `lk generate` now share one validated workflow resolver.
+- Empty/stale workflow config self-heals to LOOK's installed `sdxl-api.json` starter when available.
+- Status reports semantic readiness (`SDXL starter · ready`) only after the JSON is actually readable.
+- Added `lk comfy repair` to validate/repair the workflow pointer without knowing a JSON path.
+- Managed Comfy install is now included in local model discovery/status.
+- Model inventory scans nested model-family folders at bounded depth.
+- Fixes the confusing state where `lk comfy` printed a workflow path while generation still said no workflow was configured.
+
+## 2.6.2 — Comfy discovery/config polish
+
+- Fix empty Comfy workflow configuration resolving to `.` and producing `Errno 21: Is a directory`.
+- Missing workflow now reports a clean, actionable configuration message.
+- Deepen old-model discovery inside recognized checkpoint / diffusion-model roots by up to three subdirectory levels.
+- This catches older collections organized by model family under Comfy/A1111 folders on mounted drives.
+- Working Linux generation path is otherwise unchanged.
+- Future Crash remains 1.1.10.
+
 ## 2.6.1 — Living Memory metabolism
 
 - Treat `sidebar`, `no need to remember this`, `just for now`, and equivalent language as conversation-local: RECENT retains it, candidate/durable extraction does not.
