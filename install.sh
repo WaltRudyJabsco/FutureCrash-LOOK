@@ -3,8 +3,8 @@ set -euo pipefail
 
 ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 
-PRODUCT_VERSION="2.7.0"
-LOOK_VERSION="4.7.0"
+PRODUCT_VERSION="2.7.1"
+LOOK_VERSION="4.7.1"
 FUTURE_CRASH_VERSION="1.1.10"
 
 DRY=0
@@ -394,9 +394,9 @@ old_dirs = old.get("created_dirs") if isinstance(old.get("created_dirs"), list) 
 
 manifest = {
     "product": "future-crash-look",
-    "release": os.environ.get("FCL_RELEASE_VERSION", "2.7.0"),
+    "release": os.environ.get("FCL_RELEASE_VERSION", "2.7.1"),
     "components": {
-        "look": os.environ.get("FCL_LOOK_VERSION", "4.7.0"),
+        "look": os.environ.get("FCL_LOOK_VERSION", "4.7.1"),
         "future_crash": os.environ.get("FCL_FUTURE_CRASH_VERSION", "1.1.10"),
     },
     "packages": sorted(set(old_packages + [x for x in os.environ.get("LOOK_MANIFEST_PACKAGES","").splitlines() if x])),

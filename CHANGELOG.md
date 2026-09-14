@@ -1,3 +1,14 @@
+## 2.7.1 — Stateful shell shortcuts
+
+- `lk shortcuts force` now truly reclaims the Zsh `fc` builtin for Future Crash by explicitly disabling that builtin and binding `fc → fcr`.
+- Default/polite installs continue to leave native `fc` untouched.
+- `lh` is now collision-aware rather than unconditionally installed; canonical `lk home` always works.
+- Zsh exports the actual live shortcut state into LOOK so UI can report reality rather than a hypothetical alias map.
+- `lk home` dynamically shows `l`/`lh`/`fc` only when they actually resolve to LOOK; otherwise it shows canonical `lk`, `lk home`, `lk o`, and `fcr` forms.
+- The shell command glossary is now state-aware and shows active optional aliases plus current shortcut policy.
+- Help text distinguishes permanent canonical/fast commands from optional convenience aliases.
+- Future Crash remains 1.1.10.
+
 ## 2.7.0 — LOOK services + tailnet sharing
 
 - Add a unified local service registry and `lk services`.
