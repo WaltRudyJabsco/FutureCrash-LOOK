@@ -1,3 +1,19 @@
+## 2.7.0 — LOOK services + tailnet sharing
+
+- Add a unified local service registry and `lk services`.
+- Add `lk share` as the simple "share whatever useful is running here" command.
+- `lk services status` shows local service state and Tailscale Serve state together.
+- `lk services share all` exposes only configured services that are actually running locally.
+- `lk services unshare all` removes LOOK-managed Tailscale Serve endpoints.
+- Ollama and ComfyUI now use separate deterministic Tailscale HTTPS ports, preventing one service from replacing the other.
+- Ollama tailnet HTTPS endpoint moves to dedicated port 11435; host discovery understands the new endpoint.
+- ComfyUI uses HTTPS port 8188.
+- Mercury Writer is a first-class optional service: LOOK attempts conservative process/port discovery and otherwise supports `lk services set mercury PORT`.
+- Generic web terminal slot is also available for explicit configuration.
+- Settings REMOTE surface now controls all tailnet services rather than Ollama alone.
+- Tailscale Serve is used only for tailnet-private sharing; LOOK does not enable Funnel.
+- Future Crash remains 1.1.10.
+
 ## 2.6.3 — Comfy workflow self-healing
 
 - `lk comfy` and `lk generate` now share one validated workflow resolver.
