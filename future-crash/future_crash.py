@@ -72,7 +72,7 @@ WHITE = CSI + "38;5;255m"
 GRAY = CSI + "38;5;245m"
 DARK = CSI + "38;5;239m"
 
-VERSION = "1.1.10"
+VERSION = "1.1.11"
 GLYPHS = "0123456789ABCDEF"
 SPARKS = "▁▂▃▄▅▆▇█"
 
@@ -3715,6 +3715,27 @@ class FutureCrash:
 
 # ---------- CLI ----------
 
+LOCAL_OLLAMA_URL = "http://127.0.0.1:11434"
+
+
+def _look_selected_ollama_host():
+    """Reuse LOOK's selected Ollama host without importing LOOK itself."""
+    path=Path.home()/".local"/"share"/"look"/"ollama_hosts.json"
+    try:
+        data=json.loads(path.read_text(encoding="utf-8"))
+        default=str(data.get("default") or "local")
+        if default=="local":
+            return LOCAL_OLLAMA_URL
+        hosts=data.get("hosts") or {}
+        item=hosts.get(default) if isinstance(hosts,dict) else None
+        url=str((item or {}).get("url") or "").strip()
+        if url:
+            return url.rstrip("/")
+    except (OSError,ValueError,TypeError,json.JSONDecodeError):
+        pass
+    return LOCAL_OLLAMA_URL
+
+
 def parse_args():
     p = argparse.ArgumentParser(
         description="Future Crash // Zero — local AI workstation / ambient terminal",
@@ -3722,7 +3743,7 @@ def parse_args():
     )
     p.add_argument("--version", action="version", version=f"Future Crash {VERSION}")
     p.add_argument("--model", default="qwen3:4b", help="Ollama model to use for ALL AI work")
-    p.add_argument("--ollama", default="http://127.0.0.1:11434", help="Ollama base URL")
+    p.add_argument("--ollama", default=None, help="Ollama base URL (default: LOOK selected host, then localhost)")
     p.add_argument("--fps", type=int, default=12, help="UI refresh rate (default: 12)")
     p.add_argument("--no-ai-ambient", action="store_true", help="disable ambient LLM observations")
     p.add_argument("--no-audio", action="store_true", help="disable synthesized terminal sounds for this launch (overrides saved audio preference)")
@@ -3733,6 +3754,8 @@ if __name__ == "__main__":
         print("Future Crash Zero currently targets macOS and Linux terminals.")
         raise SystemExit(1)
     args = parse_args()
+    if not args.ollama:
+        args.ollama=_look_selected_ollama_host()
     app = FutureCrash(args)
     try:
         app.start()

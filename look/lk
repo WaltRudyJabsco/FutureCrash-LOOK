@@ -17,7 +17,7 @@ try:
 except Exception:
     readline = None
 
-VERSION="4.7.4"
+VERSION="4.7.5"
 
 LOOK_WORDMARK = r"""       ██╗      ██╗  ██╗
        ██║      ██║ ██╔╝
@@ -6601,7 +6601,7 @@ def _run_filesystem_tool_impl(workspace, name, args):
         return f"File tool internal error: {type(exc).__name__}: {exc}"
     return f"Unknown file tool: {name}"
 
-LOOK_INFO_USER_AGENT="LOOK-Shell/4.7.4 (local text client)"
+LOOK_INFO_USER_AGENT="LOOK-Shell/4.7.5 (local text client)"
 
 def _run_filesystem_tool(workspace, name, args, profile="workspace"):
     global _FILESYSTEM_ACCESS_PROFILE

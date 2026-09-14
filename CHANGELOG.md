@@ -1,3 +1,11 @@
+## 2.7.5 — Future Crash inherits LOOK Ollama host
+
+- Future Crash now defaults to LOOK's currently selected Ollama host.
+- Explicit `--ollama URL` still wins.
+- If LOOK has no valid selected host, Future Crash falls back to `http://127.0.0.1:11434`.
+- Fixes client machines where LO worked against a shared 3090 while Future Crash telemetry showed `ORACLE LINK OFFLINE`.
+- Future Crash bumps to 1.1.11.
+
 ## 2.7.4 — Comfy client discovery
 
 - Fix client machines being encouraged to install ComfyUI locally when the intended GPU service lives on another LOOK machine.

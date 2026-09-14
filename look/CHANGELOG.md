@@ -1,3 +1,8 @@
+## 4.7.5 — Shared Ollama host truth
+
+- Future Crash consumes LOOK's selected Ollama host by default.
+- No separate stale localhost assumption on client machines.
+
 ## 4.7.4 — Remote Comfy self-healing
 
 - Discover shared Comfy services over Tailscale `:8188`.

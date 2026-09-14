@@ -1,3 +1,9 @@
+## 1.1.11 — LOOK host inheritance
+
+- Default Ollama URL now comes from LOOK's selected host.
+- Explicit `--ollama` remains an override.
+- Localhost remains the final fallback.
+
 ## 1.1.10 — Child shell ownership title
 
 - Escaping from Future Crash into its embedded interactive shell now marks the terminal as `◌ FUTURE CRASH · SHELL`.
