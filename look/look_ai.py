@@ -171,15 +171,28 @@ def counts():
 def status():
     jobs,memory,skills=counts()
     leases=_client_leases()
+    schedules=len([j for j in core._load_schedule() if j.get('enabled',True)])
     return {
         'ok':True,'state':'running','pid':os.getpid(),'foreground':foreground_busy(),
-        'jobs':jobs,'memory':memory,'skills':skills,'current':CURRENT,
+        'jobs':jobs,'memory':memory,'skills':skills,'schedules':schedules,'current':CURRENT,
         'clients':len(leases),
         'client_labels':[str(x.get('label','client')) for x in leases[:6]],
         'core_version':str(getattr(core,'VERSION','unknown')),
         'protocol_version':2,
         'uptime':time.time()-STARTED,
     }
+
+
+def process_schedule():
+    global CURRENT
+    CURRENT='schedule'
+    try:
+        return bool(core._schedule_dispatch_due())
+    except Exception as exc:
+        _log_error("schedule",exc)
+        return False
+    finally:
+        CURRENT='idle'
 
 
 def process_lo_job():
@@ -305,6 +318,7 @@ def process_memory_compile():
 
 def next_background_work():
     # Explicit user background jobs outrank housekeeping.
+    if process_schedule(): return True
     if process_lo_job(): return True
     if process_memory(): return True
     if process_skill(): return True
@@ -390,7 +404,8 @@ def serve():
                 if foreground_busy(): continue
                 if time.time()<BACKOFF_UNTIL: continue
                 # Drain one unit at a time so foreground can win between calls.
-                if WAKE or any(counts()) or memory_compile_due():
+                schedule_due=bool(core._schedule_due())
+                if WAKE or any(counts()) or schedule_due or memory_compile_due():
                     next_background_work()
                     WAKE=False
             except Exception as exc:

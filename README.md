@@ -1110,3 +1110,13 @@ lk settings shortcuts
 ```
 
 Direct commands remain available for scripting and muscle memory; the control room calls the same underlying functions rather than maintaining a second settings system.
+
+
+### Vision, generative media, scheduler
+
+Vision-capable Ollama models can receive explicit local image paths in normal LO chat, or through `lk vision`. Optional ComfyUI integration is configured through `lk comfy`; existing installs/model folders can be discovered and reused, while large image checkpoints are never downloaded automatically. Persistent delayed and recurring work is available through `lk schedule` and is dispatched by the resident Living AI service into the normal LO background-job queue.
+
+
+### GPU workstation bootstrap
+
+On Linux + NVIDIA systems, the installer offers managed ComfyUI setup. It discovers old Comfy/A1111 model libraries on the home directory and common mounted-drive roots before installing anything, can reuse those weights through Comfy's external model paths, and offers explicit verified starter downloads. `lk comfy bootstrap` reruns the setup later; `lk comfy start|stop|restart` manages the local service. SDXL is the ready-to-run workflow starter; FLUX.1 Schnell FP8 is available as an optional modern checkpoint.

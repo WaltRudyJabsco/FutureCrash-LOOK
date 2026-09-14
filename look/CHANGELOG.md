@@ -1,3 +1,41 @@
+## 4.6.1 — Memory lifecycle tuning
+
+- RECENT preserves sidebars; durable extraction does not.
+- Loosen candidate admission without loosening durable promotion.
+- Track memory metabolism: local suppression, merges, promotions, expirations, evictions.
+- Migrate and retire inactive legacy summary state.
+
+## 4.6.0 — Managed Comfy workstation
+
+- Add managed Comfy start/stop/restart lifecycle.
+- Add deep mounted-drive discovery/bootstrap helper.
+- Persist managed install metadata in Comfy config.
+- Auto-start local managed Comfy on image generation.
+- Add ready-to-run SDXL API workflow starter.
+- Add verified SDXL / FLUX Schnell FP8 starter downloads.
+- Reuse old Comfy/A1111 model libraries with external model paths rather than copying weights.
+
+## 4.5.2 — One meaningful UNSAFE confirmation
+
+- Move persistent UNSAFE consent to `lk ollama access unsafe` / LO access selection.
+- Saved UNSAFE sessions no longer nag on every `lo` invocation.
+- Explicit `--unsafe` remains a confirmed one-session override.
+
+## 4.5.1 — Unified UNSAFE capability
+
+- Thread active LO access profile through filesystem transactions.
+- `_safe_workspace_path` bypasses path grants only when the current transaction is UNSAFE.
+- WORKSPACE/POWER behavior is unchanged.
+- Fixes `~/Downloads` writes being denied even after entering UNSAFE mode.
+
+## 4.5.0 — Capability platform
+
+- Add Ollama image input and automatic image-path attachment for vision models.
+- Add optional ComfyUI discovery/config/generation bridge.
+- Add persistent delayed/recurring scheduler to Living AI.
+- Add LO tools for image generation and scheduling.
+- Add vision/media/scheduler surfaces to settings, doctor, help, and completion.
+
 ## 4.4.0 — Search-first settings control room
 
 - Rebuild `lk settings` around semantic search, descriptions, preview pane, and live current values.

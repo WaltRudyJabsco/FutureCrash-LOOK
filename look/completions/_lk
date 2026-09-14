@@ -61,6 +61,10 @@ _lk() {
     'settings:unified settings panel'
     'access:manage LO filesystem grants'
     'apps:manage desktop app preferences'
+    'vision:inspect an image with selected Ollama vision model'
+    'generate:generate an image through configured ComfyUI'
+    'comfy:discover/configure optional ComfyUI'
+    'schedule:manage persistent delayed and recurring LO jobs'
     'shortcuts:inspect or set polite shell shortcut policy'
     'open:open path in preferred/default desktop app'
     'preview:preview path outside terminal'
@@ -223,6 +227,28 @@ _lk() {
 
     open|preview|reveal)
       _arguments '*:path:_files'
+      ;;
+
+    vision)
+      _arguments '1:image:_files' '*:question'
+      ;;
+
+    generate)
+      _message 'image prompt'
+      ;;
+
+    comfy)
+      if (( CURRENT == 3 )); then
+        _values 'comfy action' status start stop restart discover bootstrap host workflow output preview
+      elif [[ "$words[3]" == (workflow|output) && CURRENT == 4 ]]; then
+        _files
+      fi
+      ;;
+
+    schedule)
+      if (( CURRENT == 3 )); then
+        _values 'schedule action' list in every daily pause resume remove run
+      fi
       ;;
 
     apps)

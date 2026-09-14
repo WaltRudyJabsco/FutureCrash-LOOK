@@ -17,7 +17,7 @@ try:
 except Exception:
     readline = None
 
-VERSION="4.4.0"
+VERSION="4.6.1"
 
 LOOK_WORDMARK = r"""       ██╗      ██╗  ██╗
        ██║      ██║ ██╔╝
@@ -41,8 +41,12 @@ UNDO_SKIPPED_FILE=STATE_DIR/"undo_skipped.json"
 ACCESS_FILE=STATE_DIR/"access.json"
 APPS_FILE=STATE_DIR/"apps.json"
 SHORTCUT_POLICY_FILE=STATE_DIR/"shortcut_policy"
+COMFY_CONFIG_FILE=STATE_DIR/"comfy.json"
+SCHEDULE_FILE=STATE_DIR/"schedule.json"
+SCHEDULE_HISTORY_FILE=STATE_DIR/"schedule_history.json"
 _SESSION_PATH_GRANTS=[]
 _ONCE_PATH_GRANTS=[]
+_FILESYSTEM_ACCESS_PROFILE="workspace"
 UNDO_TRASH=STATE_DIR/"undo_trash"
 UNDO_LIMIT=20
 MEMORY_QUEUE=STATE_DIR/"memory_queue"
@@ -232,6 +236,7 @@ def _ai_command(args):
         print(f"  jobs        {reply.get('jobs',0)}")
         print(f"  memory      {reply.get('memory',0)}")
         print(f"  skills      {reply.get('skills',0)}")
+        print(f"  schedules   {reply.get('schedules',0)}")
         print(f"  current     {reply.get('current') or 'idle'}")
         runtime=str(reply.get('core_version') or 'legacy')
         version_note="" if runtime==VERSION else f" · installed {VERSION} · restart pending"
@@ -1024,6 +1029,31 @@ LO PERSONALITY + THINKING
   lk think-display MODE compact · full · quiet
   lk settings [SEARCH] searchable control room for all settings
 
+VISION + GENERATIVE MEDIA
+  lk vision IMAGE [QUESTION]
+                       send a local image to the selected Ollama vision model
+  lo ... IMAGE.png    vision-capable models attach explicit image paths automatically
+  lk comfy            status for optional/managed ComfyUI
+  lk comfy start|stop|restart
+                       manage LOOK-installed ComfyUI process
+  lk comfy discover   scan home + mounted drives for old Comfy/A1111 model libraries
+  lk comfy bootstrap  rerun managed GPU install/model setup
+  lk comfy host URL   configure local/remote Comfy API endpoint
+  lk comfy workflow PATH
+                       configure an API-format workflow using __PROMPT__,
+                       __NEGATIVE__, and optional __SEED__ placeholders
+  lk generate PROMPT  queue generation, save output under ~/Pictures/LOOK,
+                       and preview the first result when configured
+
+SCHEDULER
+  lk schedule                 list persistent jobs
+  lk schedule in 30m PROMPT   run once later
+  lk schedule every 2h PROMPT recurring interval
+  lk schedule daily 08:00 PROMPT
+                              recurring local-clock job
+  lk schedule pause|resume|remove|run ID
+                              manage jobs; resident LOOK AI dispatches them
+
 DESKTOP BRIDGE
   lk open PATH          open local path in preferred/default graphical app
   lk preview PATH       Quick Look on macOS; default/preferred app elsewhere
@@ -1253,6 +1283,18 @@ def _doctor_body():
     print(f"  {'✓' if web_key else '·'} web search key")
     print(f"  {'✓' if memory_ok else '✗'} persistent memory")
 
+    print("\nAI CAPABILITIES · optional")
+    try:
+        caps=_ollama_capabilities(_ollama_base(),_preferred_ollama_model()) or []
+    except Exception:
+        caps=[]
+    print(f"  {'✓' if 'vision' in caps else '·'} vision input · {_preferred_ollama_model()}")
+    comfy_ok,_=_comfy_probe()
+    comfy_cfg=_load_comfy_config()
+    print(f"  {'✓' if comfy_ok else '·'} ComfyUI · {comfy_cfg['host']} · {'ready' if comfy_ok else 'offline'}")
+    print(f"  {'✓' if comfy_cfg.get('workflow') else '·'} image workflow · {comfy_cfg.get('workflow') or 'not configured'}")
+    print(f"  ✓ scheduler · {sum(1 for j in _load_schedule() if j.get('enabled',True))} active")
+
     print("\nDESKTOP BRIDGE · optional")
     system=platform.system()
     opener=(shutil.which("open") if system=="Darwin" else (shutil.which("xdg-open") if system!="Windows" else "startfile"))
@@ -1289,6 +1331,8 @@ def _empty_memory():
             "last_extraction_at": 0, "last_extraction": "never",
             "extractions_total": 0, "extractions_candidate": 0, "extractions_none": 0,
             "consolidations_total": 0, "promotions_total": 0,
+            "candidate_merges_total": 0, "candidate_local_suppressed": 0,
+            "candidate_expired_total": 0,
             "compiler_base": "", "compiler_model": "",
             "candidate_evictions": 0}
 
@@ -1483,10 +1527,29 @@ def _load_memory():
                 "extractions_none":max(0,int(data.get("extractions_none",0) or 0)),
                 "consolidations_total":max(0,int(data.get("consolidations_total",0) or 0)),
                 "promotions_total":max(0,int(data.get("promotions_total",0) or 0)),
+                "candidate_merges_total":max(0,int(data.get("candidate_merges_total",0) or 0)),
+                "candidate_local_suppressed":max(0,int(data.get("candidate_local_suppressed",0) or 0)),
+                "candidate_expired_total":max(0,int(data.get("candidate_expired_total",0) or 0)),
                 "candidate_evictions":max(0,int(data.get("candidate_evictions",0) or 0)),
                 "last_compiled_at":float(data.get("last_compiled_at",0) or 0),
                 "compiler_base":str(data.get("compiler_base",""))[:500],
                 "compiler_model":str(data.get("compiler_model",""))[:200]}
+        # Schema 3 has no permanent legacy tier. Fold an old compact summary into
+        # one scoped durable atom if it is not already represented, then retire it.
+        legacy=str(result.get("legacy_summary","")).strip()
+        if legacy and not _looks_environmental_memory(legacy):
+            if _durable_memory_match(result,legacy) is None:
+                result.setdefault("durable",[]).append({
+                    "text":legacy[:700],
+                    "domain":_memory_domain(legacy),
+                    "importance":72,
+                    "uses":1,
+                    "created_at":now,
+                    "last_reinforced":now,
+                })
+                result["durable"]=result["durable"][-MEMORY_DURABLE_LIMIT:]
+                result["last_compiled_at"]=0
+            result["legacy_summary"]=""
         result=_prune_contaminated_memory(result)
         _save_memory(result)
         return result
@@ -1965,11 +2028,16 @@ def _decay_memories(memory, now=None):
         memory.setdefault("last_decay_at",now)
         return memory
     kept=[]
+    expired=0
     for item in memory.get("memories",[]):
         importance=max(0,int(item.get("importance",50))-points)
         if importance>0:
             item["importance"]=importance
             kept.append(item)
+        else:
+            expired+=1
+    if expired:
+        memory["candidate_expired_total"]=int(memory.get("candidate_expired_total",0))+expired
     kept.sort(key=lambda x:int(x.get("importance",0)),reverse=True)
     memory["memories"]=kept[:MEMORY_CANDIDATE_LIMIT]
     memory["last_decay_at"]=now
@@ -2093,11 +2161,6 @@ def _memory_command(args):
         core=str(memory.get("core_summary","")).strip()
         print("  CORE SUMMARY")
         print("  "+(core or "No compact durable memory yet."))
-        legacy=str(memory.get("legacy_summary","")).strip()
-        if legacy:
-            shown=legacy if len(legacy)<=118 else legacy[:115]+"…"
-            print(f"  {_c('LEGACY (inactive)','2')} {shown}")
-
         summaries=memory.get("domain_summaries",{}) or {}
         print("\n  DURABLE DOMAINS")
         if summaries:
@@ -2144,8 +2207,9 @@ def _memory_command(args):
         print(f"  living AI · {'running' if broker.get('ok') else 'stopped'} · memory queue {queue_n} · last maintenance {_age_label(memory.get('last_maintenance_at',0))}")
         total=int(memory.get("extractions_total",0)); kept=int(memory.get("extractions_candidate",0)); none=int(memory.get("extractions_none",0))
         consolidated=int(memory.get("consolidations_total",0))
-        print(f"  extraction · {memory.get('last_extraction','never')} {_age_label(memory.get('last_extraction_at',0))} · {kept}/{total} candidate · {none} none")
-        print(f"  compiler · promoted {int(memory.get('promotions_total',0))} · consolidated {consolidated} · evicted {int(memory.get('candidate_evictions',0))} · last {_age_label(memory.get('last_compiled_at',0))}")
+        print(f"  extraction · {memory.get('last_extraction','never')} {_age_label(memory.get('last_extraction_at',0))} · {kept}/{total} candidate · {none} none · {int(memory.get('candidate_local_suppressed',0))} local")
+        print(f"  metabolism · merged {int(memory.get('candidate_merges_total',0))} · promoted {int(memory.get('promotions_total',0))} · expired {int(memory.get('candidate_expired_total',0))} · evicted {int(memory.get('candidate_evictions',0))}")
+        print(f"  compiler · consolidated {consolidated} · last {_age_label(memory.get('last_compiled_at',0))}")
         if memory.get("last_worker_error"):
             print(f"  worker error · {str(memory.get('last_worker_error'))[:120]}")
         print("  recent stores both sides of each exchange; display shows user side only")
@@ -2502,12 +2566,16 @@ Important guidance:
   "remember this", and "this is important" are normally memory-worthy.
 - Recent conversational continuity matters even when a fact may not be permanent.
   Decay will handle forgetting later.
+- "sidebar", "no need to remember this", "just for now", and similar language mean
+  conversation-local context: RECENT should retain the exchange, but return NONE here so it
+  does not enter candidate/durable memory unless the user separately marks it long-term.
 - User memory must be grounded in what the USER actually said or clearly confirmed.
   Never turn an assistant suggestion into a user preference merely because the assistant proposed it.
   A bare acknowledgement such as "nice", "thanks", or "okay" does not establish a new preference.
 - Return NONE for mechanical turns, acknowledgements, disposable commands, or content-free chatter.
 - When the exchange changes the state of an ongoing project, establishes a working convention,
-  or states a preference likely to affect later answers, prefer a candidate over NONE.
+  states a preference likely to affect later answers, or reveals a reusable choice/pattern,
+  prefer a modest candidate over NONE. Candidate memory is intentionally noisier than durable memory.
 - Do not store assistant technique here; reusable assistant craft belongs in skills.
 - Do not output analysis, reasoning, headings, or commentary.
 
@@ -2843,6 +2911,26 @@ def _learn_from_exchange(base, model, user_text, assistant_text, profile):
 
 
 
+def _conversation_local_memory_intent(user_text):
+    """Language that says: useful now, but do not promote into durable user memory."""
+    low=" ".join(str(user_text or "").split()).casefold()
+    phrases=(
+        "sidebar",
+        "no need to remember this",
+        "don't remember this",
+        "do not remember this",
+        "don't put this in memory",
+        "do not put this in memory",
+        "don't put this in long-term memory",
+        "do not put this in long-term memory",
+        "don't worry about remembering this",
+        "just for now",
+        "temporary question",
+        "temporary test",
+    )
+    return any(p in low for p in phrases)
+
+
 def _durable_memory_intent(user_text):
     low=" ".join(str(user_text or "").split()).casefold()
     phrases=(
@@ -3012,6 +3100,7 @@ def _consolidate_memory_candidates(memory):
                 old["uses"]=int(old.get("uses",1))+int(item.get("uses",1))
                 old["created_at"]=min(float(old.get("created_at",time.time())),float(item.get("created_at",time.time())))
                 old["last_reinforced"]=max(float(old.get("last_reinforced",0)),float(item.get("last_reinforced",0)),time.time())
+                memory["candidate_merges_total"]=int(memory.get("candidate_merges_total",0))+1
                 merged=True
                 break
         if not merged:
@@ -3064,16 +3153,17 @@ def _remember_exchange(base, model, memory, user_text, assistant_text, profile="
     memory["compiler_base"]=str(base)[:500]
     memory["compiler_model"]=str(model)[:200]
 
-    candidate=_extract_memory_candidate(base,model,user_text,assistant_text)
-    source="model"
+    local_only=_conversation_local_memory_intent(user_text)
+    candidate=None if local_only else _extract_memory_candidate(base,model,user_text,assistant_text)
+    source="local-only" if local_only else "model"
     forced_idx=None
-    if not candidate:
+    if not candidate and not local_only:
         candidate=_obvious_memory_candidate(user_text)
         source="obvious"
-    if not candidate:
+    if not candidate and not local_only:
         candidate=_explicit_memory_hint(user_text)
         source="explicit"
-    if not candidate:
+    if not candidate and not local_only:
         reinforcement=_reinforcement_from_existing(user_text,memory)
         if reinforcement:
             importance,text,forced_idx=reinforcement
@@ -3086,12 +3176,16 @@ def _remember_exchange(base, model, memory, user_text, assistant_text, profile="
 
     memory["last_extraction_at"]=now
     memory["extractions_total"]=int(memory.get("extractions_total",0))+1
+    if local_only:
+        memory["candidate_local_suppressed"]=int(memory.get("candidate_local_suppressed",0))+1
+        memory["last_extraction"]="local-only"
     if candidate:
         memory["extractions_candidate"]=int(memory.get("extractions_candidate",0))+1
         memory["last_extraction"]=f"candidate:{source}"
     else:
         memory["extractions_none"]=int(memory.get("extractions_none",0))+1
-        memory["last_extraction"]="none"
+        if not local_only:
+            memory["last_extraction"]="none"
 
     durable=_durable_memory_intent(user_text)
     durable_text=""
@@ -3534,13 +3628,19 @@ def _prompt_path_access(workspace,target,capability):
 
 
 def _safe_workspace_path(workspace, raw_path=".", capability="read", prompt_access=True):
-    """Resolve a path inside workspace or an explicit user-approved extension."""
+    """Resolve a path under the active LO filesystem capability profile."""
     workspace=Path(workspace).resolve()
     raw_path=raw_path or "."
     candidate=Path(raw_path).expanduser()
     if not candidate.is_absolute():
         candidate=workspace/candidate
     candidate=candidate.resolve()
+
+    # UNSAFE is intentionally unrestricted for this LO session. The user has
+    # already accepted the session-level warning; asking again for every path
+    # creates a contradictory second permission system.
+    if _FILESYSTEM_ACCESS_PROFILE=="unsafe":
+        return candidate
 
     if _path_access_allowed(workspace,candidate,capability):
         return candidate
@@ -4956,7 +5056,7 @@ def lo_access(args):
             ("conservative","read/search workspace + web; no writes"),
             ("workspace","bounded LOOK file tools inside starting workspace"),
             ("power","workspace tools + safe inspections; other shell commands ask natively"),
-            ("unsafe","shell commands without per-command confirmation"),
+            ("unsafe","unrestricted files + shell; persistent selection is pre-authorized"),
         ]
         for name,desc in rows:
             marker="✓" if name==current else " "
@@ -4968,6 +5068,19 @@ def lo_access(args):
         print(f"LOOK OLLAMA · unknown access profile: {profile}")
         print("  choose: conservative · workspace · power · unsafe")
         return 1
+    if profile=="unsafe" and current!="unsafe":
+        print(_c("LO UNSAFE · persistent access","31"))
+        print("  unrestricted filesystem paths and shell commands will be enabled")
+        print("  future LO sessions will start UNSAFE without asking again")
+        print("  commands run with your current user privileges and environment")
+        try:
+            answer=input("Set persistent unsafe mode? [y/N] ").strip().lower()
+        except (EOFError,KeyboardInterrupt):
+            print()
+            return 0
+        if answer not in {"y","yes"}:
+            print("· cancelled")
+            return 0
     _save_lo_profile(profile)
     print(f"✓ LO access · {profile}")
     return 0
@@ -5120,12 +5233,75 @@ def _run_command_tool(workspace,args,profile):
     except OSError as exc:
         return f"Command tool failed: {exc}"
 
+def _capability_tools():
+    return [
+        {"type":"function","function":{
+            "name":"generate_image",
+            "description":"Generate a local image through configured ComfyUI and save it to LOOK's image output folder. Use when the user explicitly asks to create/generate/render an image.",
+            "parameters":{"type":"object","properties":{
+                "prompt":{"type":"string"},
+                "negative":{"type":"string"},
+                "seed":{"type":"integer"}
+            },"required":["prompt"]}
+        }},
+        {"type":"function","function":{
+            "name":"schedule_prompt",
+            "description":"Schedule an LO background request for later or recurring execution. Use only when the user explicitly asks for future or recurring work.",
+            "parameters":{"type":"object","properties":{
+                "kind":{"type":"string","enum":["in","every","daily"]},
+                "spec":{"type":"string","description":"Duration like 30m/2h or daily time HH:MM"},
+                "prompt":{"type":"string"}
+            },"required":["kind","spec","prompt"]}
+        }},
+        {"type":"function","function":{
+            "name":"schedule_list",
+            "description":"List LOOK's persistent scheduled jobs. Read-only.",
+            "parameters":{"type":"object","properties":{}}
+        }},
+    ]
+
+
+def _run_capability_tool(name,args,workspace,profile):
+    if name=="generate_image":
+        ok,_=_comfy_probe()
+        if not ok:
+            return "Image generation unavailable: ComfyUI is not reachable. Run `lk comfy` or `lk comfy discover`."
+        success,result=_comfy_generate(
+            args.get("prompt",""),
+            args.get("negative",""),
+            args.get("seed"),
+            open_result=True,
+        )
+        return ("IMAGE OK · " if success else "IMAGE FAILED · ")+result
+    if name=="schedule_prompt":
+        try:
+            job=_schedule_add(
+                str(args.get("kind","")),
+                str(args.get("spec","")),
+                str(args.get("prompt","")),
+                workspace=workspace,
+                profile=profile,
+            )
+            return f"SCHEDULE OK · {job['id']} · {job['kind']} {job['spec']} · next {_when_label(job['next_run'])}"
+        except Exception as exc:
+            return f"SCHEDULE FAILED · {exc}"
+    if name=="schedule_list":
+        rows=_load_schedule()
+        if not rows: return "No scheduled jobs."
+        return "\n".join(
+            f"{j.get('id')} · {'on' if j.get('enabled',True) else 'off'} · {j.get('kind')} {j.get('spec')} · next {_when_label(j.get('next_run',0)) if j.get('next_run') else 'done'} · {j.get('prompt','')}"
+            for j in rows[:40]
+        )
+    return f"Unknown capability tool: {name}"
+
+
 def _lo_tools(profile):
     tools=_filesystem_tools()
     if profile=="conservative":
         tools=[t for t in tools if t.get("function",{}).get("name") in {"list_files","inspect_directory","read_file","search_files","reveal_path","open_path","preview_path"}]
     tools.extend(_information_tools())
     tools.extend(_system_inspection_tools())
+    tools.extend(_capability_tools())
     if profile in {"power","unsafe"}:
         tools.append(_command_tool())
     return tools
@@ -5391,6 +5567,303 @@ def _apps_command(args):
     return 0
 
 
+
+def _load_comfy_config():
+    data={
+        "host":"http://127.0.0.1:8188",
+        "workflow":"",
+        "output_dir":str(HOME/"Pictures"/"LOOK"),
+        "auto_preview":True,
+        "install_path":"",
+        "python":"",
+    }
+    try:
+        loaded=json.loads(COMFY_CONFIG_FILE.read_text(encoding="utf-8"))
+        if isinstance(loaded,dict):
+            data.update({k:v for k,v in loaded.items() if k in data})
+    except (OSError,ValueError,TypeError):
+        pass
+    return data
+
+
+def _save_comfy_config(data):
+    STATE_DIR.mkdir(parents=True,exist_ok=True)
+    _atomic_json(COMFY_CONFIG_FILE,data)
+    try: os.chmod(COMFY_CONFIG_FILE,0o600)
+    except OSError: pass
+
+
+def _comfy_probe(host=None,timeout=1.2):
+    import urllib.request
+    host=(host or _load_comfy_config()["host"]).rstrip("/")
+    try:
+        with urllib.request.urlopen(host+"/system_stats",timeout=timeout) as response:
+            data=json.load(response)
+        return True,data
+    except Exception:
+        return False,{}
+
+
+def _discover_comfy_paths():
+    roots=[
+        HOME/"ComfyUI",HOME/"comfyui",HOME/"Applications"/"ComfyUI",
+        HOME/"Documents"/"ComfyUI",HOME/"Downloads"/"ComfyUI",
+        Path("/opt/ComfyUI"),Path("/srv/ComfyUI"),
+    ]
+    found=[]
+    for root in roots:
+        if root.exists() and (root/"main.py").exists():
+            found.append(root.resolve())
+    # Locate likely legacy model folders without recursively walking all of HOME.
+    model_roots=[]
+    for root in found:
+        for rel in ("models/checkpoints","models/unet","models/diffusion_models"):
+            p=root/rel
+            if p.exists(): model_roots.append(p.resolve())
+    return found,model_roots
+
+
+def _comfy_model_inventory(model_roots,limit=40):
+    exts={".safetensors",".ckpt",".pt",".pth",".gguf"}
+    rows=[]
+    for root in model_roots:
+        try:
+            for path in root.iterdir():
+                if path.is_file() and path.suffix.casefold() in exts:
+                    rows.append((path.name,path.stat().st_size,path))
+        except OSError:
+            pass
+    rows.sort(key=lambda x:x[1],reverse=True)
+    return rows[:limit]
+
+
+def _comfy_replace_placeholders(obj,prompt,negative,seed):
+    if isinstance(obj,dict):
+        return {k:_comfy_replace_placeholders(v,prompt,negative,seed) for k,v in obj.items()}
+    if isinstance(obj,list):
+        return [_comfy_replace_placeholders(v,prompt,negative,seed) for v in obj]
+    if isinstance(obj,str):
+        if obj=="__PROMPT__": return prompt
+        if obj=="__NEGATIVE__": return negative
+        if obj=="__SEED__": return int(seed)
+        return obj.replace("__PROMPT__",prompt).replace("__NEGATIVE__",negative).replace("__SEED__",str(seed))
+    return obj
+
+
+def _comfy_generate(prompt,negative="",seed=None,open_result=True):
+    import urllib.request, urllib.parse, random
+    cfg=_load_comfy_config()
+    host=str(cfg["host"]).rstrip("/")
+    workflow_path=Path(str(cfg.get("workflow") or "")).expanduser()
+    if not workflow_path.exists():
+        return False,"No Comfy workflow configured. Run `lk comfy workflow PATH` with an API-format workflow JSON."
+    try:
+        workflow=json.loads(workflow_path.read_text(encoding="utf-8"))
+    except Exception as exc:
+        return False,f"Workflow could not be read: {exc}"
+    seed=int(seed if seed is not None else random.randrange(1,2**31-1))
+    workflow=_comfy_replace_placeholders(workflow,str(prompt),str(negative),seed)
+    payload=json.dumps({"prompt":workflow,"client_id":"look-shell"}).encode()
+    request=urllib.request.Request(host+"/prompt",data=payload,headers={"Content-Type":"application/json"},method="POST")
+    try:
+        with urllib.request.urlopen(request,timeout=15) as response:
+            queued=json.load(response)
+        prompt_id=queued.get("prompt_id")
+        if not prompt_id:
+            return False,f"Comfy did not return a prompt id: {queued}"
+        deadline=time.time()+600
+        history={}
+        while time.time()<deadline:
+            time.sleep(1.0)
+            try:
+                with urllib.request.urlopen(host+"/history/"+str(prompt_id),timeout=5) as response:
+                    history=json.load(response)
+            except Exception:
+                continue
+            item=history.get(str(prompt_id)) or history.get(prompt_id) or {}
+            outputs=item.get("outputs") or {}
+            images=[]
+            for node in outputs.values():
+                if isinstance(node,dict):
+                    images.extend(node.get("images") or [])
+            if images:
+                output_dir=Path(str(cfg.get("output_dir") or (HOME/"Pictures"/"LOOK"))).expanduser()
+                output_dir.mkdir(parents=True,exist_ok=True)
+                saved=[]
+                for idx,image in enumerate(images[:8]):
+                    filename=image.get("filename")
+                    if not filename: continue
+                    query=urllib.parse.urlencode({
+                        "filename":filename,
+                        "subfolder":image.get("subfolder",""),
+                        "type":image.get("type","output"),
+                    })
+                    dest=output_dir/f"{time.strftime('%Y%m%d-%H%M%S')}-{idx+1}-{Path(filename).name}"
+                    with urllib.request.urlopen(host+"/view?"+query,timeout=30) as response:
+                        dest.write_bytes(response.read())
+                    saved.append(dest)
+                if saved:
+                    if open_result and bool(cfg.get("auto_preview",True)):
+                        _preview_host_path(saved[0])
+                    return True,f"{len(saved)} image(s) · "+", ".join(str(p) for p in saved)
+            status=item.get("status") or {}
+            if status.get("completed") is True and not outputs:
+                return False,"Comfy completed without image output."
+        return False,"Comfy generation timed out after 10 minutes."
+    except Exception as exc:
+        return False,f"Comfy generation failed: {exc}"
+
+
+COMFY_PID_FILE=STATE_DIR/"comfy.pid"
+COMFY_LOG_FILE=STATE_DIR/"comfy.log"
+
+
+def _comfy_pid():
+    try:
+        pid=int(COMFY_PID_FILE.read_text(encoding="utf-8").strip())
+        os.kill(pid,0)
+        return pid
+    except Exception:
+        try: COMFY_PID_FILE.unlink()
+        except OSError: pass
+        return 0
+
+
+def _comfy_launcher():
+    launcher=HOME/".local"/"bin"/"look-comfy"
+    return launcher if launcher.exists() else None
+
+
+def _comfy_start():
+    ok,_=_comfy_probe(timeout=0.6)
+    if ok:
+        return True,"ComfyUI is already reachable."
+    launcher=_comfy_launcher()
+    if not launcher:
+        return False,"Managed Comfy launcher not found. Run the installer/bootstrap on the GPU host."
+    STATE_DIR.mkdir(parents=True,exist_ok=True)
+    log=open(COMFY_LOG_FILE,"ab",buffering=0)
+    try:
+        proc=subprocess.Popen(
+            [str(launcher)],
+            stdin=subprocess.DEVNULL,
+            stdout=log,
+            stderr=log,
+            start_new_session=True,
+        )
+    except OSError as exc:
+        log.close()
+        return False,f"Comfy start failed: {exc}"
+    COMFY_PID_FILE.write_text(str(proc.pid)+"\n",encoding="utf-8")
+    for _ in range(40):
+        time.sleep(0.25)
+        ok,_=_comfy_probe(timeout=0.5)
+        if ok:
+            return True,f"ComfyUI started · pid {proc.pid}"
+        if proc.poll() is not None:
+            return False,f"ComfyUI exited during startup · see {COMFY_LOG_FILE}"
+    return False,f"ComfyUI has not become ready yet · pid {proc.pid} · see {COMFY_LOG_FILE}"
+
+
+def _comfy_stop():
+    pid=_comfy_pid()
+    if not pid:
+        ok,_=_comfy_probe(timeout=0.5)
+        if ok:
+            return False,"ComfyUI is reachable but was not started by LOOK; refusing to kill an unknown process."
+        return True,"ComfyUI is not running."
+    try:
+        os.kill(pid,15)
+    except OSError as exc:
+        return False,f"Comfy stop failed: {exc}"
+    for _ in range(40):
+        time.sleep(0.1)
+        try: os.kill(pid,0)
+        except OSError:
+            try: COMFY_PID_FILE.unlink()
+            except OSError: pass
+            return True,"ComfyUI stopped."
+    return False,f"ComfyUI did not exit cleanly · pid {pid}"
+
+
+def comfy_command(args):
+    cfg=_load_comfy_config()
+    action=(args[0].casefold() if args else "status")
+    bootstrap=ROOT/"comfy_bootstrap.py"
+    if action=="bootstrap":
+        if not bootstrap.exists():
+            print("LOOK Comfy · bootstrap helper is not installed")
+            return 1
+        return subprocess.call([sys.executable,str(bootstrap),"--install"])
+    if action=="discover" and bootstrap.exists():
+        return subprocess.call([sys.executable,str(bootstrap),"--discover"])
+    if action=="start":
+        ok,msg=_comfy_start(); print(f"LOOK Comfy · {msg}"); return 0 if ok else 1
+    if action=="stop":
+        ok,msg=_comfy_stop(); print(f"LOOK Comfy · {msg}"); return 0 if ok else 1
+    if action=="restart":
+        _comfy_stop()
+        ok,msg=_comfy_start(); print(f"LOOK Comfy · {msg}"); return 0 if ok else 1
+    if action in {"status","list"}:
+        ok,stats=_comfy_probe(cfg["host"])
+        roots,model_roots=_discover_comfy_paths()
+        models=_comfy_model_inventory(model_roots)
+        _title("LOOK COMFY","generative media")
+        print(f"  host         {cfg['host']} · {'ready' if ok else 'offline'}")
+        print(f"  managed      {cfg.get('install_path') or 'not configured'}")
+        print(f"  process      {(_comfy_pid() or 'external/stopped')}")
+        print(f"  workflow     {cfg.get('workflow') or 'not configured'}")
+        print(f"  output       {cfg.get('output_dir')}")
+        print(f"  auto-preview {'on' if cfg.get('auto_preview',True) else 'off'}")
+        print(f"  installs     {len(roots)} found")
+        for root in roots[:4]: print(f"    {root}")
+        print(f"  model files  {len(models)} found in known Comfy model folders")
+        for name,size,path in models[:8]:
+            print(f"    {size/1024**3:5.1f} GB  {name}")
+        if not ok:
+            print("\n  Existing installs/models are preserved. LOOK never downloads a checkpoint automatically.")
+            print("  Configure another host with: lk comfy host http://HOST:8188")
+        return 0
+    if action=="host" and len(args)>=2:
+        cfg["host"]=args[1].rstrip("/")
+        _save_comfy_config(cfg); print(f"LOOK Comfy · host · {cfg['host']}"); return 0
+    if action=="workflow" and len(args)>=2:
+        path=Path(" ".join(args[1:])).expanduser().resolve()
+        if not path.exists(): print(f"LOOK Comfy · workflow not found: {path}"); return 1
+        cfg["workflow"]=str(path); _save_comfy_config(cfg); print(f"LOOK Comfy · workflow · {path}"); return 0
+    if action=="output" and len(args)>=2:
+        path=Path(" ".join(args[1:])).expanduser().resolve()
+        path.mkdir(parents=True,exist_ok=True)
+        cfg["output_dir"]=str(path); _save_comfy_config(cfg); print(f"LOOK Comfy · output · {path}"); return 0
+    if action=="preview" and len(args)>=2 and args[1].casefold() in {"on","off"}:
+        cfg["auto_preview"]=args[1].casefold()=="on"; _save_comfy_config(cfg)
+        print(f"LOOK Comfy · auto-preview · {'on' if cfg['auto_preview'] else 'off'}"); return 0
+    print("usage: lk comfy [status|start|stop|restart|discover|bootstrap|host URL|workflow PATH|output PATH|preview on|off]")
+    return 2
+
+
+def generate_command(args):
+    if not args:
+        print("usage: lk generate <prompt>")
+        return 2
+    prompt=" ".join(args).strip()
+    ok,_=_comfy_probe()
+    if not ok and str(_load_comfy_config().get("host","")).startswith(("http://127.0.0.1","http://localhost")):
+        started,_=_comfy_start()
+        if started:
+            ok,_=_comfy_probe()
+    if not ok:
+        print("LOOK IMAGE · ComfyUI is not reachable")
+        print("  run `lk comfy discover` to look for an older install/models")
+        print("  or configure a running server with `lk comfy host http://HOST:8188`")
+        return 1
+    print(f"{_ansi_label('image ›','35')} {prompt}")
+    with _activity("generating"):
+        success,result=_comfy_generate(prompt)
+    print(("image › " if success else "image error › ")+result)
+    return 0 if success else 1
+
+
 def _filesystem_tools():
     return [
         {"type":"function","function":{
@@ -5605,12 +6078,16 @@ def _run_filesystem_tool_impl(workspace, name, args):
         return f"File tool internal error: {type(exc).__name__}: {exc}"
     return f"Unknown file tool: {name}"
 
-LOOK_INFO_USER_AGENT="LOOK-Shell/4.4.0 (local text client)"
+LOOK_INFO_USER_AGENT="LOOK-Shell/4.6.1 (local text client)"
 
-def _run_filesystem_tool(workspace, name, args):
+def _run_filesystem_tool(workspace, name, args, profile="workspace"):
+    global _FILESYSTEM_ACCESS_PROFILE
+    previous_profile=_FILESYSTEM_ACCESS_PROFILE
+    _FILESYSTEM_ACCESS_PROFILE=str(profile or "workspace").casefold()
     try:
         return _run_filesystem_tool_impl(workspace,name,args)
     finally:
+        _FILESYSTEM_ACCESS_PROFILE=previous_profile
         # "Allow once" covers the complete tool transaction, including its
         # internal source/destination/final-path checks, then disappears.
         _ONCE_PATH_GRANTS.clear()
@@ -6068,7 +6545,7 @@ def _looks_like_tool_refusal(answer):
     return any(p in low for p in patterns)
 
 
-def ollama_chat(force_search=False, initial_prompt=None, allow_start=True, host_override=None, host_name=None, access_profile=None, selected_paths=None, workspace_override=None, one_shot=False):
+def ollama_chat(force_search=False, initial_prompt=None, allow_start=True, host_override=None, host_name=None, access_profile=None, selected_paths=None, workspace_override=None, one_shot=False, confirm_unsafe_override=False):
     """Minimal local chat; optional first prompt and web-search mode."""
     import json
     import urllib.request
@@ -6078,7 +6555,7 @@ def ollama_chat(force_search=False, initial_prompt=None, allow_start=True, host_
     if profile not in LO_PROFILES:
         print(f"LOOK OLLAMA · unknown access profile: {profile}")
         return 1
-    if profile=="unsafe" and not _confirm_unsafe_session():
+    if profile=="unsafe" and confirm_unsafe_override and not _confirm_unsafe_session():
         print("· cancelled")
         return 0
 
@@ -6111,6 +6588,7 @@ def ollama_chat(force_search=False, initial_prompt=None, allow_start=True, host_
     resident = model in running_names
     model_caps=_ollama_capabilities(base, model)
     supports_thinking=bool(model_caps and "thinking" in model_caps)
+    supports_vision=bool(model_caps and "vision" in model_caps)
     supports_tools=(model_caps is None or "tools" in model_caps)
 
     workspace = Path(workspace_override).expanduser().resolve() if workspace_override else Path.cwd().resolve()
@@ -6127,6 +6605,8 @@ def ollama_chat(force_search=False, initial_prompt=None, allow_start=True, host_
         print(f"context · {len(selected_paths)} selected path{'s' if len(selected_paths)!=1 else ''}")
     if not resident:
         print(f"model · idle · loads on first prompt")
+    if supports_vision:
+        print("vision · available · include an image path in your prompt")
     if not supports_tools:
         print("tools · unavailable for model · host edges remain available")
     print(f"web · {web_state} · Ctrl-D to exit · Ctrl-C cancels work\n")
@@ -6276,7 +6756,16 @@ def ollama_chat(force_search=False, initial_prompt=None, allow_start=True, host_
         memory=_load_memory()
         messages[memory_message_index]["content"]=_memory_context(memory,prompt)
         messages=_trim_lo_history(messages, base_message_count)
-        messages.append({"role": "user", "content": prompt})
+        user_message={"role":"user","content":prompt}
+        prompt_images=_extract_prompt_images(prompt,workspace) if supports_vision else []
+        if prompt_images:
+            encoded=_encode_ollama_images(prompt_images)
+            if encoded:
+                user_message["images"]=encoded
+                print(f"{_ansi_label('vision ›','35')} {len(encoded)} image{'s' if len(encoded)!=1 else ''} attached")
+        elif _extract_prompt_images(prompt,workspace) and not supports_vision:
+            print(f"{_ansi_label('vision ›','33')} selected model does not advertise vision")
+        messages.append(user_message)
 
         # Search mode is deliberately deterministic: search first, then answer.
         if force_search:
@@ -6466,7 +6955,7 @@ def ollama_chat(force_search=False, initial_prompt=None, allow_start=True, host_
                         if name in {"write_file","create_text_files"}:
                             args=_normalize_creation_destination(prompt,name,args)
                         with _activity(name.replace("_"," ")):
-                            tool_content = _run_filesystem_tool(workspace, name, args)
+                            tool_content = _run_filesystem_tool(workspace, name, args, profile)
                         if name in _LO_MUTATION_TOOLS:
                             mutation_attempted=True
                             last_mutation_result=str(tool_content)
@@ -6477,6 +6966,12 @@ def ollama_chat(force_search=False, initial_prompt=None, allow_start=True, host_
                         print(f"{_ansi_label('system ›','36')} {name.replace('_',' ')}")
                         with _activity("inspecting"):
                             tool_content=_run_system_inspection_tool(name,args)
+                    elif name in {"generate_image","schedule_prompt","schedule_list"}:
+                        label="image" if name=="generate_image" else "schedule"
+                        print(f"{_ansi_label(label+' ›','35')} {name.replace('_',' ')}")
+                        with _activity("generating" if name=="generate_image" else "scheduling"):
+                            tool_content=_run_capability_tool(name,args,workspace,profile)
+                        print(f"{_ansi_label('result ›','33')} {tool_content.splitlines()[0]}")
                     elif name=="run_command":
                         if profile not in {"power","unsafe"}:
                             tool_content="Command execution is unavailable in this access profile."
@@ -6993,6 +7488,90 @@ def _ollama_capabilities(base, model):
     if not isinstance(caps, list):
         return None
     return [str(cap).strip().lower() for cap in caps if str(cap).strip()]
+
+
+
+VISION_EXTENSIONS={".png",".jpg",".jpeg",".webp",".gif",".bmp"}
+
+
+def _resolve_image_path(token,workspace):
+    raw=str(token or "").strip().strip("'\\\"")
+    if not raw:
+        return None
+    path=Path(os.path.expandvars(raw)).expanduser()
+    if not path.is_absolute():
+        path=Path(workspace)/path
+    try:
+        path=path.resolve()
+    except OSError:
+        return None
+    if path.exists() and path.is_file() and path.suffix.casefold() in VISION_EXTENSIONS:
+        return path
+    return None
+
+
+def _extract_prompt_images(prompt,workspace):
+    '''Find explicit local image paths in natural-language prompts without guessing filenames.'''
+    text=str(prompt or "")
+    candidates=[]
+    quoted_re = re.compile(r"[\"']([^\"']+\.(?:png|jpe?g|webp|gif|bmp))[\"']", re.I)
+    plain_re = re.compile(r"(?:^|\s)(~?\.?/?[^\s\"'`]+\.(?:png|jpe?g|webp|gif|bmp))(?=\s|$|[,.!?])", re.I)
+    candidates.extend(m.group(1) for m in quoted_re.finditer(text))
+    candidates.extend(m.group(1) for m in plain_re.finditer(text))
+    out=[]
+    seen=set()
+    for candidate in candidates:
+        path=_resolve_image_path(candidate,workspace)
+        if path and str(path) not in seen:
+            seen.add(str(path))
+            out.append(path)
+    return out[:8]
+
+
+def _encode_ollama_images(paths):
+    import base64
+    encoded=[]
+    for path in paths:
+        try:
+            encoded.append(base64.b64encode(Path(path).read_bytes()).decode("ascii"))
+        except OSError:
+            continue
+    return encoded
+
+
+def vision_command(args):
+    '''Direct one-shot image understanding through the selected vision model.'''
+    if not args:
+        print("usage: lk vision IMAGE [QUESTION...]")
+        return 2
+    image=Path(args[0]).expanduser()
+    if not image.exists():
+        print(f"LOOK VISION · not found: {image}")
+        return 1
+    base=_ollama_base()
+    model=_preferred_ollama_model()
+    caps=_ollama_capabilities(base,model) or []
+    if "vision" not in caps:
+        print(f"LOOK VISION · {model} does not advertise vision")
+        print("  choose a vision-capable model with `lk ollama models`")
+        return 1
+    question=" ".join(args[1:]).strip() or "Describe this image carefully."
+    payload={
+        "model":model,
+        "messages":[{"role":"user","content":question,"images":_encode_ollama_images([image])}],
+        "stream":False,
+        "keep_alive":-1,
+    }
+    try:
+        with _activity("looking"):
+            response=_ollama_post(base,"/api/chat",payload,timeout=180)
+    except Exception as exc:
+        print(f"LOOK VISION · {exc}")
+        return 1
+    text=str((response.get("message") or {}).get("content","")).strip()
+    print(f"{_ansi_label('vision ›','35')} {image.resolve()}")
+    print(text or "(no response)")
+    return 0
 
 
 def _load_ollama_model_prefs():
@@ -7524,6 +8103,26 @@ def _settings_memory_state():
     return f"{durable} durable · {candidates} candidates"
 
 
+def _settings_vision_state():
+    try:
+        caps=_ollama_capabilities(_ollama_base(),_preferred_ollama_model()) or []
+        return "available" if "vision" in caps else "model lacks vision"
+    except Exception:
+        return "unknown"
+
+
+def _settings_comfy_state():
+    cfg=_load_comfy_config()
+    ok,_=_comfy_probe(cfg["host"])
+    return ("ready" if ok else "offline") + (" · workflow" if cfg.get("workflow") else " · no workflow")
+
+
+def _settings_schedule_state():
+    rows=_load_schedule()
+    enabled=sum(1 for j in rows if j.get("enabled",True))
+    return f"{enabled} active · {len(rows)} total"
+
+
 def _settings_rows():
     """Control-room registry: value + explanation + search vocabulary."""
     base=_ollama_base()
@@ -7555,6 +8154,9 @@ def _settings_rows():
         ("benchmark","AI","Model benchmark","run selected",
          "Test the selected model for warm latency, generation speed, tools, natural agent behavior, exactness, and LOOK runtime fit.",
          "benchmark model test speed tools agent exact fit ollama"),
+        ("vision","AI","Vision input",_settings_vision_state(),
+         "Use image paths as multimodal input when the selected Ollama model advertises vision.",
+         "vision image screenshot photo multimodal chart diagram inspect picture"),
 
         ("memory","MEMORY","Living Memory",_settings_memory_state(),
          "Inspect durable memory, candidates, compiler state, and recent cross-session continuity.",
@@ -7572,6 +8174,12 @@ def _settings_rows():
         ("apps","DESKTOP","Preferred apps",f"{len(_load_apps())} overrides",
          "Choose preferred apps for browser, editor, images, PDF, video, and audio. System defaults remain available.",
          "apps applications desktop open preview video vlc mpv pdf image editor browser audio"),
+        ("comfy","MEDIA","Image generation",_settings_comfy_state(),
+         "Configure optional ComfyUI generation, discover older installs/models, choose workflow/output folder, and auto-preview results.",
+         "comfy stable diffusion image generation render workflow checkpoint model media"),
+        ("schedule","AUTOMATION","Scheduler",_settings_schedule_state(),
+         "Persistent delayed and recurring LO jobs run through the resident LOOK service.",
+         "schedule scheduler cron recurring daily every reminder later background jobs automation"),
 
         ("share","REMOTE","Ollama tailnet share",_settings_share_state(),
          "Expose local Ollama through Tailscale for your other machines, or turn sharing off.",
@@ -7822,6 +8430,11 @@ def _settings_action(key):
     if key=="memorycompact": return _memory_command(["compact"])
     if key=="performance": return _ai_stats_command()
     if key=="benchmark": return ollama_test(False)
+    if key=="vision":
+        print("LOOK vision · include an image path in LO, or run `lk vision IMAGE [QUESTION]`")
+        return 0
+    if key=="comfy": return comfy_command([])
+    if key=="schedule": return schedule_command([])
     if key=="doctor": return doctor()
     if key=="version":
         _title("versions")
@@ -9188,7 +9801,7 @@ NETWORK
 AI
   lo  lo search    ollama  ollama models  ollama test
   personality  thinking  think-display  ai stats  settings [SEARCH]
-  memory  memory compact  skills  profile  ai  feedback  sound
+  memory  memory compact  skills  profile  ai  feedback  sound  vision  generate  comfy  schedule
   access  ollama access  ollama key
 
 MEDIA
@@ -9222,6 +9835,10 @@ DIRECT IS ALWAYS AVAILABLE
   lk reveal PATH   show path in Finder/file manager
   lk open PATH     open path in preferred/default desktop app
   lk preview PATH  preview path outside terminal
+  lk vision IMAGE [QUESTION]  inspect image with selected vision model
+  lk generate TEXT  generate image through optional ComfyUI
+  lk comfy          discover/configure local image-generation engine
+  lk schedule       delayed + recurring LO jobs
   lk apps          desktop-app preferences
   lk shortcuts     inspect/set polite shell shortcut policy
   lk access        manage LO filesystem grants
@@ -9625,6 +10242,191 @@ def _events_command(args):
             except OSError: pass
     return 0
 
+
+def _when_label(ts):
+    try: delta=float(ts)-time.time()
+    except Exception: return "unknown"
+    if delta<=0: return "due"
+    if delta<60: return f"in {int(delta)}s"
+    if delta<3600: return f"in {int(delta/60)}m"
+    if delta<86400: return f"in {int(delta/3600)}h"
+    return f"in {int(delta/86400)}d"
+
+
+def _load_schedule():
+    try:
+        data=json.loads(SCHEDULE_FILE.read_text(encoding="utf-8"))
+        if isinstance(data,list): return data
+    except (OSError,ValueError,TypeError):
+        pass
+    return []
+
+
+def _save_schedule(rows):
+    STATE_DIR.mkdir(parents=True,exist_ok=True)
+    _atomic_json(SCHEDULE_FILE,rows)
+    try: os.chmod(SCHEDULE_FILE,0o600)
+    except OSError: pass
+
+
+def _parse_duration(text):
+    m=re.fullmatch(r"\s*(\d+)\s*([smhdw])\s*",str(text or "").casefold())
+    if not m: return None
+    value=int(m.group(1)); unit=m.group(2)
+    return value*{"s":1,"m":60,"h":3600,"d":86400,"w":604800}[unit]
+
+
+def _next_daily(clock,after=None):
+    import datetime
+    after=datetime.datetime.fromtimestamp(after or time.time())
+    try:
+        hh,mm=(int(x) for x in clock.split(":",1))
+    except Exception:
+        return None
+    if not (0<=hh<=23 and 0<=mm<=59): return None
+    candidate=after.replace(hour=hh,minute=mm,second=0,microsecond=0)
+    if candidate.timestamp()<=after.timestamp():
+        candidate+=datetime.timedelta(days=1)
+    return candidate.timestamp()
+
+
+def _schedule_add(kind,spec,prompt,workspace=None,profile=None):
+    rows=_load_schedule()
+    now=time.time()
+    job={
+        "id":uuid.uuid4().hex[:8],
+        "enabled":True,
+        "kind":kind,
+        "spec":str(spec),
+        "prompt":str(prompt).strip(),
+        "workspace":str(Path(workspace or Path.cwd()).resolve()),
+        "profile":profile or _load_lo_profile(),
+        "created_at":now,
+        "last_run":0,
+        "next_run":0,
+    }
+    if kind=="in":
+        seconds=_parse_duration(spec)
+        if not seconds: raise ValueError("duration must look like 10m, 2h, 1d")
+        job["next_run"]=now+seconds
+    elif kind=="every":
+        seconds=_parse_duration(spec)
+        if not seconds: raise ValueError("interval must look like 10m, 2h, 1d")
+        job["interval_s"]=seconds
+        job["next_run"]=now+seconds
+    elif kind=="daily":
+        nxt=_next_daily(spec,now)
+        if not nxt: raise ValueError("daily time must be HH:MM")
+        job["next_run"]=nxt
+    else:
+        raise ValueError("unsupported schedule kind")
+    rows.append(job)
+    _save_schedule(rows)
+    _ai_broker_wake("schedule")
+    return job
+
+
+def _schedule_due(now=None):
+    now=now or time.time()
+    return [j for j in _load_schedule() if j.get("enabled",True) and float(j.get("next_run",0) or 0)<=now and float(j.get("next_run",0) or 0)>0]
+
+
+def _schedule_advance(job,now=None):
+    now=now or time.time()
+    kind=job.get("kind")
+    if kind=="in":
+        job["enabled"]=False
+        job["next_run"]=0
+    elif kind=="every":
+        interval=max(60,int(job.get("interval_s") or _parse_duration(job.get("spec")) or 3600))
+        nxt=float(job.get("next_run",now))
+        while nxt<=now: nxt+=interval
+        job["next_run"]=nxt
+    elif kind=="daily":
+        job["next_run"]=_next_daily(str(job.get("spec")),now) or 0
+    job["last_run"]=now
+    return job
+
+
+def _schedule_dispatch_due():
+    """Queue due schedules into the normal LO background-job machinery."""
+    rows=_load_schedule()
+    now=time.time()
+    changed=False
+    dispatched=0
+    for job in rows:
+        if not job.get("enabled",True): continue
+        next_run=float(job.get("next_run",0) or 0)
+        if not next_run or next_run>now: continue
+        # Queue directly without printing; broker owns this call.
+        LO_JOBS_DIR.mkdir(parents=True,exist_ok=True)
+        job_id=uuid.uuid4().hex[:10]
+        path=LO_JOBS_DIR/f"{job_id}.json"
+        payload={
+            "id":job_id,"status":"queued","prompt":job.get("prompt",""),
+            "workspace":job.get("workspace") or str(HOME),
+            "profile":job.get("profile") or "workspace",
+            "created_at":now,"started_at":None,"finished_at":None,
+            "scheduled_from":job.get("id"),
+        }
+        _atomic_json(path,payload)
+        _schedule_advance(job,now)
+        changed=True; dispatched+=1
+    if changed:
+        _save_schedule(rows)
+    return dispatched
+
+
+def schedule_command(args):
+    rows=_load_schedule()
+    if not args or args[0] in {"list","status"}:
+        _title("LOOK SCHEDULE","persistent jobs")
+        if not rows:
+            print("  no scheduled jobs")
+        for j in rows:
+            state="on" if j.get("enabled",True) else "off"
+            nxt=_when_label(j.get("next_run",0)) if j.get("next_run") else "done"
+            print(f"  {j.get('id')}  {state:<3}  {j.get('kind')} {j.get('spec'):<8}  next {nxt:<14}  {str(j.get('prompt',''))[:72]}")
+        print("\n  add: lk schedule in 30m PROMPT")
+        print("       lk schedule every 2h PROMPT")
+        print("       lk schedule daily 08:00 PROMPT")
+        print("  manage: lk schedule pause|resume|remove ID")
+        return 0
+    action=args[0].casefold()
+    if action in {"in","every","daily"}:
+        if len(args)<3:
+            print(f"usage: lk schedule {action} SPEC PROMPT"); return 2
+        try:
+            job=_schedule_add(action,args[1]," ".join(args[2:]))
+        except ValueError as exc:
+            print(f"LOOK schedule · {exc}"); return 2
+        print(f"LOOK schedule · {job['id']} · {action} {job['spec']} · next {_when_label(job['next_run'])}")
+        return 0
+    if action in {"pause","resume","remove","run"} and len(args)>=2:
+        target=args[1]
+        found=False
+        for j in list(rows):
+            if str(j.get("id"))!=target: continue
+            found=True
+            if action=="pause": j["enabled"]=False
+            elif action=="resume":
+                j["enabled"]=True
+                if not j.get("next_run"):
+                    if j.get("kind")=="every": j["next_run"]=time.time()+int(j.get("interval_s",3600))
+                    elif j.get("kind")=="daily": j["next_run"]=_next_daily(str(j.get("spec"))) or 0
+            elif action=="remove": rows.remove(j)
+            elif action=="run":
+                j["next_run"]=time.time()
+            break
+        if not found:
+            print(f"LOOK schedule · not found: {target}"); return 1
+        _save_schedule(rows); _ai_broker_wake("schedule")
+        print(f"LOOK schedule · {action} · {target}")
+        return 0
+    print("usage: lk schedule [list|in SPEC PROMPT|every SPEC PROMPT|daily HH:MM PROMPT|pause ID|resume ID|remove ID|run ID]")
+    return 2
+
+
 def _jobs_command(args):
     try:
         files=sorted(LO_JOBS_DIR.glob("*.json"))
@@ -9768,7 +10570,8 @@ def main():
         return ollama_chat(
             force_search=force_search, initial_prompt=initial_prompt,
             allow_start=allow_start, host_override=host_override, host_name=host_name,
-            access_profile=access_profile
+            access_profile=access_profile,
+            confirm_unsafe_override=(access_profile=="unsafe")
         )
     a=sys.argv[1:]
     if not a: return render([])
@@ -9809,6 +10612,10 @@ def main():
     if cmd=="reveal": return reveal_command(rest)
     if cmd=="open": return open_command(rest,False)
     if cmd=="preview": return open_command(rest,True)
+    if cmd=="vision": return vision_command(rest)
+    if cmd in {"generate","image"}: return generate_command(rest)
+    if cmd=="comfy": return comfy_command(rest)
+    if cmd in {"schedule","scheduler"}: return schedule_command(rest)
     if cmd=="apps": return _apps_command(rest)
     if cmd=="shortcuts": return _shortcuts_command(rest)
     if cmd=="access": return _access_command(rest)
