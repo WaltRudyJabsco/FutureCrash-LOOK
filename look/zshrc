@@ -68,14 +68,20 @@ commands() {
   print -P '%F{75}  lk%f       smart view          %F{75}lkl%f      details'
   print -P '%F{75}  lkd%f      directories         %F{75}lkf%f      files'
   print -P '%F{75}  lkt%f      tree                %F{75}lkr%f      recent'
-  print -P '%F{75}  lz%f       sizes               %F{75}zll WORD%f jump + look'
+  print -P '%F{75}  lkz%f      sizes               %F{75}zll WORD%f jump + look'
   print -P '%F{75}  cdl WORD%f jump + details      %F{75}fznv%f     fuzzy edit'
   print -P '%F{75}  f%f        find anywhere → LOOK'
-  print -P '%F{75}  lh%f       LOOK home           %F{75}lo%f       Ollama chat'
-  print -P '%F{75}  rst%f      Future Crash        %F{75}fcr%f      Future Crash'
-  print -P '%F{75}  lo ASK%f   ask immediately     %F{75}rs%f       reset ritual'
-  print -P '%F{75}  rb%f       reload zsh          %F{75}lmk%f      smart make · file or dir'
+
+  _look_shortcut_is_look l  && print -P '%F{75}  l%f        look around'
+  _look_shortcut_is_look lh && print -P '%F{75}  lh%f       LOOK home'
+  _look_shortcut_is_look lo && print -P '%F{75}  lo%f       ask LO'
+  _look_shortcut_is_look fc && print -P '%F{75}  fc%f       Future Crash'
+  print -P '%F{75}  lk home%f  LOOK home           %F{75}lk o%f     ask LO'
+  print -P '%F{75}  fcr%f      Future Crash        %F{75}rst%f      Future Crash'
+  print -P '%F{75}  rs%f       reset ritual        %F{75}rb%f       reload zsh'
+  print -P '%F{75}  lmk%f      smart make · file or dir'
   print ''
+  print -P "%F{244}shortcut policy: ${_LOOK_SHORTCUT_POLICY}%f"
   print -P '%F{244}Inside a long LOOK view: Space page · b back · ↑↓/jk row · g/G ends · q quit%f'
   print -P '%F{244}Real Unix ls is always available as: command ls%f'
 }
@@ -186,12 +192,12 @@ lkf() { _look_view files "$@"; }
 lkt() { _look_view tree "$@"; }
 lkr() { _look_view recent "$@"; }
 lkz() { _look_view size "$@"; }
-lh()  { _look home; }
 
 # Ultra-short muscle-memory layer. LOOK is deliberately a guest in the user's
 # shell: by default a pre-existing alias/function/builtin/executable wins.
-# `lk shortcuts force` opts into replacing aliases/functions only; LOOK never
-# shadows a builtin or executable such as /usr/bin/ld or an installed `lf`.
+# `lk shortcuts force` opts into replacing aliases/functions and a tiny explicit
+# allowlist of shell builtins whose replacement is intentional (currently `fc`).
+# Real executables remain protected.
 _LOOK_SHORTCUT_POLICY_FILE="$HOME/.local/share/look/shortcut_policy"
 _LOOK_SHORTCUT_POLICY="polite"
 [[ -r "$_LOOK_SHORTCUT_POLICY_FILE" ]] && _LOOK_SHORTCUT_POLICY="$(<"$_LOOK_SHORTCUT_POLICY_FILE")"
@@ -209,8 +215,12 @@ _look_short_install() {
   local name="$1" target="$2" kind
   kind="$(_look_short_name_kind "$name")"
   case "$kind" in
-    builtin|executable)
+    executable)
       return 1
+      ;;
+    builtin)
+      [[ "$_LOOK_SHORTCUT_POLICY" == "force" && "$name" == "fc" ]] || return 1
+      disable "$name" 2>/dev/null || return 1
       ;;
     alias|function)
       [[ "$_LOOK_SHORTCUT_POLICY" == "force" ]] || return 1
@@ -228,6 +238,8 @@ _look_short_install lf lkf
 _look_short_install lt lkt
 _look_short_install lr lkr
 _look_short_install lz lkz
+_look_short_install lh '_look home'
+_look_short_install fc fcr
 
 # Historical LOOK aliases are intentionally no longer installed: lsd collides
 # with the established lsd utility, and lc/lsf add little beyond lk*/lk commands.
@@ -620,11 +632,9 @@ add-zsh-hook precmd _look_shell_title
 # A shell being reloaded may already contain aliases from an older LOOK release.
 # Zsh expands aliases while sourcing, so clear all names that become functions
 # BEFORE their function definitions are parsed.
-unalias lk lo fc rst commands 2>/dev/null
-# `fc` is a real Zsh history builtin. Older LOOK releases temporarily shadowed
-# it as a Future Crash shortcut, which broke history/paste machinery that calls
-# commands such as `fc -p -a /dev/null 0 0`.
-unfunction fc 2>/dev/null
+unalias lk lo rst commands 2>/dev/null
+# `fc` remains Zsh's history builtin by default. The explicit `force` shortcut
+# policy may disable/reclaim it later as the Future Crash convenience command.
 
 alias lk='nocorrect lk'
 commands() { "$HOME/.local/bin/lk" commands; }
@@ -670,4 +680,40 @@ _future_crash_owned() {
 }
 rst() { _future_crash_owned "$@"; }
 fcr() { _future_crash_owned "$@"; }
+
+_look_shortcut_is_look() {
+  local name="$1"
+  case "$name" in
+    l|ll|ld|lf|lt|lr|lz|lh|fc)
+      (( $+functions[$name] )) || return 1
+      ;;
+    lo)
+      (( $+functions[lo] )) || return 1
+      ;;
+    lk)
+      (( $+aliases[lk] || $+commands[lk] )) || return 1
+      ;;
+    *)
+      return 1
+      ;;
+  esac
+  return 0
+}
+
+_look_export_shortcut_state() {
+  local names=(l ll ld lf lt lr lz lh lo lk fc)
+  local active=() missing=() name kind
+  for name in $names; do
+    if _look_shortcut_is_look "$name"; then
+      active+=("$name")
+    else
+      kind="$(_look_short_name_kind "$name")"
+      missing+=("${name}:${kind}")
+    fi
+  done
+  export LOOK_ACTIVE_SHORTCUTS="${(j:,:)active}"
+  export LOOK_INACTIVE_SHORTCUTS="${(j:,:)missing}"
+  export LOOK_SHORTCUT_POLICY="$_LOOK_SHORTCUT_POLICY"
+}
+_look_export_shortcut_state
 

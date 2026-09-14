@@ -1,3 +1,10 @@
+## 4.7.1 — Stateful shortcut UI
+
+- Force mode may intentionally reclaim Zsh builtin `fc`.
+- Make `lh` collision-aware.
+- Export live shortcut ownership from Zsh.
+- Make LOOK home/glossary reflect active aliases instead of advertising unavailable shortcuts.
+
 ## 4.7.0 — Unified services
 
 - Add persistent service registry.

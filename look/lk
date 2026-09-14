@@ -17,7 +17,7 @@ try:
 except Exception:
     readline = None
 
-VERSION="4.7.0"
+VERSION="4.7.1"
 
 LOOK_WORDMARK = r"""       ██╗      ██╗  ██╗
        ██║      ██║ ██╔╝
@@ -1386,12 +1386,14 @@ FILE ACTIONS
 SHORTCUTS
   CANONICAL  lk detail · lk dirs · lk files · lk tree · lk recent · lk size
   FAST       lkl · lkd · lkf · lkt · lkr · lkz   (LOOK namespace; always installed)
-  OPTIONAL   ll · ld · lf · lt · lr · lz          (only when collision policy allows)
-  l          smart view            zll WORD jump + look
+  OPTIONAL   l · ll · ld · lf · lt · lr · lz · lh · fc
+             installed only when collision policy allows; `force` may reclaim fc
+  lk         smart view            zll WORD jump + look
+  lk home    LOOK home             lk o     Ollama chat
+  f          find anywhere → LOOK  fcr      Future Crash
   cdl WORD   jump + details        fznv     fuzzy edit
-  f          find anywhere → LOOK  lh       LOOK home
-  lo         Ollama chat           rs       reset ritual
-  rb         reload zsh            webterm  terminal over Tailscale
+  rs         reset ritual          rb       reload zsh
+  webterm    terminal over Tailscale
   lk shortcuts                    inspect/set shortcut policy
   command ls                      always the real Unix ls
   terminal title shows owner: ● LOOK · ● LO · ● FUTURE CRASH · ◌ FUTURE CRASH SHELL
@@ -1433,6 +1435,16 @@ HELP PAGER
   q / Esc              quit
 """
     return _page_text(_help_color(body))
+
+
+def _shell_shortcut_state():
+    active={x for x in os.environ.get("LOOK_ACTIVE_SHORTCUTS","").split(",") if x}
+    inactive={}
+    for item in os.environ.get("LOOK_INACTIVE_SHORTCUTS","").split(","):
+        if ":" in item:
+            name,kind=item.split(":",1)
+            inactive[name]=kind
+    return active,inactive,os.environ.get("LOOK_SHORTCUT_POLICY","polite")
 
 
 def home():
@@ -1513,7 +1525,23 @@ def home():
             pass
 
     print(_c("What file do you want? What question do you have?", "2"))
-    print(f"{_c('l','36')} look around   {_c('lo','36')} ask   {_c('lk','36')} inspect   {_c('lh','36')} home")
+    active,inactive,policy=_shell_shortcut_state()
+    parts=[]
+    if "l" in active:
+        parts.append(f"{_c('l','36')} look around")
+    else:
+        parts.append(f"{_c('lk','36')} look around")
+    parts.append(f"{_c('lo' if 'lo' in active else 'lk o','36')} ask")
+    parts.append(f"{_c('lk','36')} inspect")
+    parts.append(f"{_c('lh' if 'lh' in active else 'lk home','36')} home")
+    if "fc" in active:
+        parts.append(f"{_c('fc','36')} Future Crash")
+    print("   ".join(parts))
+    if policy!="force" and inactive:
+        missing=[name for name in ("l","lh","fc") if name in inactive]
+        if missing:
+            owners=" · ".join(f"{name}:{inactive[name]}" for name in missing)
+            print(_c(f"shortcuts · {policy} · {owners}", "2"))
     return 0
 
 def _doctor_body():
@@ -6443,7 +6471,7 @@ def _run_filesystem_tool_impl(workspace, name, args):
         return f"File tool internal error: {type(exc).__name__}: {exc}"
     return f"Unknown file tool: {name}"
 
-LOOK_INFO_USER_AGENT="LOOK-Shell/4.7.0 (local text client)"
+LOOK_INFO_USER_AGENT="LOOK-Shell/4.7.1 (local text client)"
 
 def _run_filesystem_tool(workspace, name, args, profile="workspace"):
     global _FILESYSTEM_ACCESS_PROFILE
