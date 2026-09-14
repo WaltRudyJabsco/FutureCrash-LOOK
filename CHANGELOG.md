@@ -1,3 +1,24 @@
+## 2.7.9 — Zsh reload + paste safety
+
+- Fix fresh install/reload parse error: `defining function based on alias 'rb'`.
+- Clear LOOK-owned aliases/functions immediately after Oh My Zsh loads, before any LOOK function definitions are parsed.
+- Stop shadowing/disabling Zsh's real `fc` builtin, even in force-shortcut mode.
+- Root cause: Zsh/ZLE history and bracketed-paste machinery legitimately invokes `fc` with flags such as `-p -a /dev/null` and `-P`; our Future Crash shortcut was intercepting those internal calls.
+- Preserve the ergonomic typed `fc` shortcut safely: in force mode, the ZLE `accept-line` widget rewrites an interactive command line containing exactly `fc` to `fcr`.
+- Internal `fc ...` history/paste calls continue to resolve to Zsh's native builtin.
+- Future Crash remains 1.1.12.
+
+## 2.7.8 — Dead working-directory recovery
+
+- Fix LOOK commands crashing after an undo/move/remove operation invalidates the directory the shell is currently standing in.
+- Add a process-wide safe-CWD resolver: LOOK recovers to the nearest surviving ancestor, then home as a final fallback.
+- `lk home`, LO, profile export, scheduler/background jobs, disk inspection, and other current-directory consumers now share the safe resolver.
+- Add a Zsh `precmd` recovery hook so the parent shell repairs itself before the next prompt.
+- `rb` repairs the working directory before `exec zsh`, avoiding zoxide/Perl/File::Find initialization noise from a deleted CWD.
+- LOOK and LO entry points defensively repair the shell directory before launching.
+- Tested against a genuinely deleted current directory; `lk home` now returns normally.
+- Future Crash remains 1.1.12.
+
 ## 2.7.7 — Future Crash interactive-submit reliability
 
 - Fix A/Ask and X/Workstation Enter appearing to hang when Future Crash already has Oracle work in flight.

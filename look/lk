@@ -17,7 +17,7 @@ try:
 except Exception:
     readline = None
 
-VERSION="4.8.1"
+VERSION="4.8.3"
 
 LOOK_WORDMARK = r"""       ██╗      ██╗  ██╗
        ██║      ██║ ██╔╝
@@ -74,6 +74,32 @@ PERSONALITIES_DIR=STATE_DIR/"personalities"
 OLLAMA_SHARE_PORT=11435
 OLLAMA_SHARE_PID=STATE_DIR/"ollama_share_proxy.pid"
 LOCAL_OLLAMA_URL="http://127.0.0.1:11434"
+
+
+def _safe_cwd(repair=True):
+    """Return a live working directory even if the shell's current directory was deleted."""
+    try:
+        return Path.cwd()
+    except FileNotFoundError:
+        pass
+
+    raw=os.environ.get("PWD","").strip()
+    candidate=Path(raw).expanduser() if raw else HOME
+    # A deleted child can usually recover to its nearest surviving ancestor.
+    while not candidate.exists() and candidate != candidate.parent:
+        candidate=candidate.parent
+    if not candidate.is_dir():
+        candidate=HOME
+    if repair:
+        try:
+            os.chdir(candidate)
+        except OSError:
+            candidate=HOME
+            try: os.chdir(candidate)
+            except OSError: pass
+    return candidate.resolve() if candidate.exists() else HOME
+
+
 RECENT_MEMORY_SLOTS=4
 MEMORY_CANDIDATE_LIMIT=32
 MEMORY_DURABLE_LIMIT=240
@@ -1455,7 +1481,7 @@ def home():
     if tty_out:
         sys.stdout.write("\033[2J\033[H")
 
-    cwd=Path.cwd()
+    cwd=_safe_cwd()
     try:
         shown='~/' + str(cwd.relative_to(HOME)) if cwd != HOME else '~'
     except ValueError:
@@ -6601,7 +6627,7 @@ def _run_filesystem_tool_impl(workspace, name, args):
         return f"File tool internal error: {type(exc).__name__}: {exc}"
     return f"Unknown file tool: {name}"
 
-LOOK_INFO_USER_AGENT="LOOK-Shell/4.8.1 (local text client)"
+LOOK_INFO_USER_AGENT="LOOK-Shell/4.8.3 (local text client)"
 
 def _run_filesystem_tool(workspace, name, args, profile="workspace"):
     global _FILESYSTEM_ACCESS_PROFILE
@@ -7142,7 +7168,7 @@ def ollama_chat(force_search=False, initial_prompt=None, allow_start=True, host_
     supports_vision=bool(model_caps and "vision" in model_caps)
     supports_tools=(model_caps is None or "tools" in model_caps)
 
-    workspace = Path(workspace_override).expanduser().resolve() if workspace_override else Path.cwd().resolve()
+    workspace = Path(workspace_override).expanduser().resolve() if workspace_override else _safe_cwd().resolve()
     selected_paths=[Path(p).expanduser().resolve() for p in (selected_paths or [])]
 
     has_web = bool(os.environ.get("OLLAMA_API_KEY"))
@@ -9158,7 +9184,7 @@ def inspect_pid(pid):
 def inspect_disk():
     _title('disk')
     seen=set()
-    for label,path in [('cwd',Path.cwd()),('home',HOME)]:
+    for label,path in [('cwd',_safe_cwd()),('home',HOME)]:
         try:
             usage=shutil.disk_usage(path)
         except OSError:
@@ -10513,7 +10539,7 @@ def _profile_write_directory(destination):
 
 def _profile_export(output=None):
     stamp=time.strftime("%Y%m%d-%H%M%S")
-    out=Path(output).expanduser() if output else Path.cwd()/f"look-profile-{stamp}.zip"
+    out=Path(output).expanduser() if output else _safe_cwd()/f"look-profile-{stamp}.zip"
     if out.suffix.lower()!=".zip":
         out=out.with_suffix(".zip")
     out=out.resolve()
@@ -10737,7 +10763,7 @@ def _lo_context_handoff(paths):
     try:
         workspace=Path(os.path.commonpath([str(p) for p in anchors])).resolve()
     except ValueError:
-        workspace=Path.cwd().resolve()
+        workspace=_safe_cwd().resolve()
 
     # Keep the workspace a directory and ensure every selected path is reachable
     # by LOOK's bounded file tools. For a single selected directory, that directory
@@ -10852,7 +10878,7 @@ def _schedule_add(kind,spec,prompt,workspace=None,profile=None):
         "kind":kind,
         "spec":str(spec),
         "prompt":str(prompt).strip(),
-        "workspace":str(Path(workspace or Path.cwd()).resolve()),
+        "workspace":str(Path(workspace or _safe_cwd()).resolve()),
         "profile":profile or _load_lo_profile(),
         "created_at":now,
         "last_run":0,
@@ -11031,7 +11057,7 @@ def _run_lo_job(path):
     except (OSError,json.JSONDecodeError):
         return 1
     job["status"]="running"; job["started_at"]=time.time(); _atomic_json(path,job)
-    old_cwd=Path.cwd()
+    old_cwd=_safe_cwd()
     buf=io.StringIO()
     rc=1
     try:
@@ -11065,6 +11091,7 @@ def _run_lo_job(path):
 
 
 def main():
+    _safe_cwd(repair=True)
     if len(sys.argv)>=3 and sys.argv[1]=="_lo-job":
         return _run_lo_job(sys.argv[2])
     if len(sys.argv)>=2 and sys.argv[1]=="events":
@@ -11114,7 +11141,7 @@ def main():
                 continue
             break
         if args and args[0]=="bg":
-            return _queue_lo_background(" ".join(args[1:]),Path.cwd(),access_profile or _load_lo_profile())
+            return _queue_lo_background(" ".join(args[1:]),_safe_cwd(),access_profile or _load_lo_profile())
 
         force_search=bool(args and args[0] == "search")
         if force_search:

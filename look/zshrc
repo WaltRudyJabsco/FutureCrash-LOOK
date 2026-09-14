@@ -38,12 +38,35 @@ ENABLE_CORRECTION="true"
 plugins=(git zsh-syntax-highlighting zsh-autosuggestions web-search)
 source "$ZSH/oh-my-zsh.sh"
 
+# Reload/install safety: Zsh expands aliases while parsing function definitions.
+# Clear every LOOK-owned function name before any of those definitions appear.
+unalias rb commands lo rst fcr future-crash webterm 2>/dev/null
+unfunction rb commands lo rst fcr future-crash webterm 2>/dev/null
+
 # ── Navigation ────────────────────────────────────────────────────────────────
 if (( $+commands[zoxide] )); then
   eval "$(zoxide init zsh)"
 fi
 
-alias rb='exec zsh'
+# A filesystem action can legitimately remove the directory this shell is
+# standing in. Repair to the nearest surviving ancestor before the next command.
+_look_recover_cwd() {
+  local candidate="${PWD:-$HOME}"
+  if [[ -d "$candidate" ]]; then
+    return 0
+  fi
+  while [[ "$candidate" != "/" && ! -d "$candidate" ]]; do
+    candidate="${candidate:h}"
+  done
+  [[ -d "$candidate" ]] || candidate="$HOME"
+  builtin cd -- "$candidate" 2>/dev/null || builtin cd -- "$HOME" 2>/dev/null || return 1
+  print -P "%F{244}LOOK · working directory vanished · recovered to %f%F{cyan}${PWD/#$HOME/~}%f"
+}
+
+rb() {
+  _look_recover_cwd
+  exec zsh
+}
 alias c='clear'
 alias neo='neofetch'
 
@@ -110,6 +133,7 @@ alias zz='z -'
 LOOK="$HOME/.local/bin/lk"
 
 _look() {
+  _look_recover_cwd || return 1
   if [[ ! -x "$LOOK" ]]; then
     print -P "%F{red}LOOK helper missing:%f $LOOK"
     print "Install look.py into ~/.local/bin/look.py and chmod +x it."
@@ -195,9 +219,9 @@ lkz() { _look_view size "$@"; }
 
 # Ultra-short muscle-memory layer. LOOK is deliberately a guest in the user's
 # shell: by default a pre-existing alias/function/builtin/executable wins.
-# `lk shortcuts force` opts into replacing aliases/functions and a tiny explicit
-# allowlist of shell builtins whose replacement is intentional (currently `fc`).
-# Real executables remain protected.
+# `lk shortcuts force` may replace aliases/functions, but never shell builtins
+# or real executables. `fc` remains Zsh's history builtin because ZLE/paste
+# machinery legitimately calls it internally.
 _LOOK_SHORTCUT_POLICY_FILE="$HOME/.local/share/look/shortcut_policy"
 _LOOK_SHORTCUT_POLICY="polite"
 [[ -r "$_LOOK_SHORTCUT_POLICY_FILE" ]] && _LOOK_SHORTCUT_POLICY="$(<"$_LOOK_SHORTCUT_POLICY_FILE")"
@@ -219,8 +243,7 @@ _look_short_install() {
       return 1
       ;;
     builtin)
-      [[ "$_LOOK_SHORTCUT_POLICY" == "force" && "$name" == "fc" ]] || return 1
-      disable "$name" 2>/dev/null || return 1
+      return 1
       ;;
     alias|function)
       [[ "$_LOOK_SHORTCUT_POLICY" == "force" ]] || return 1
@@ -239,7 +262,23 @@ _look_short_install lt lkt
 _look_short_install lr lkr
 _look_short_install lz lkz
 _look_short_install lh '_look home'
-_look_short_install fc fcr
+
+# Personal `fc` convenience without shadowing Zsh's real `fc` builtin.
+# In force mode, only an interactive command line containing exactly `fc`
+# is rewritten to `fcr` at accept-line time. Internal `fc -p/-a/-P ...` calls
+# remain the native history builtin, which keeps bracketed paste healthy.
+if [[ "$_LOOK_SHORTCUT_POLICY" == "force" ]] && zle -la accept-line >/dev/null 2>&1; then
+  _look_accept_line() {
+    local trimmed="${BUFFER##[[:space:]]#}"
+    trimmed="${trimmed%%[[:space:]]#}"
+    if [[ "$trimmed" == "fc" ]]; then
+      BUFFER="${BUFFER/fc/fcr}"
+      CURSOR=${#BUFFER}
+    fi
+    zle .accept-line
+  }
+  zle -N accept-line _look_accept_line
+fi
 
 # Historical LOOK aliases are intentionally no longer installed: lsd collides
 # with the established lsd utility, and lc/lsf add little beyond lk*/lk commands.
@@ -619,6 +658,7 @@ _look_ai_boot
 
 # Surface completed background LO work at the next normal shell prompt.
 autoload -Uz add-zsh-hook
+add-zsh-hook precmd _look_recover_cwd
 _look_lo_events_precmd() {
   local event_dir="$HOME/.local/share/look/events"
   if [[ -d "$event_dir" ]] && [[ -n "$(command find "$event_dir" -type f -maxdepth 1 -name '*.json' -print -quit 2>/dev/null)" ]]; then
@@ -632,8 +672,8 @@ add-zsh-hook precmd _look_shell_title
 # A shell being reloaded may already contain aliases from an older LOOK release.
 # Zsh expands aliases while sourcing, so clear all names that become functions
 # BEFORE their function definitions are parsed.
-unalias lk lo rst fcr future-crash commands 2>/dev/null
-unfunction future-crash fcr rst 2>/dev/null
+unalias lk lo rst fcr future-crash commands rb 2>/dev/null
+unfunction future-crash fcr rst rb 2>/dev/null
 # `fc` remains Zsh's history builtin by default. The explicit `force` shortcut
 # policy may disable/reclaim it later as the Future Crash convenience command.
 
@@ -642,6 +682,7 @@ commands() { "$HOME/.local/bin/lk" commands; }
 
 # LOOK Ollama — minimal on-demand chat; a resident model is reused when available.
 lo() {
+  _look_recover_cwd || return 1
   _look_owner_title "● LO"
   noglob "$HOME/.local/bin/lk" o "$@"
   local rc=$?
@@ -697,8 +738,11 @@ fcr()          { _future_crash_owned "$@"; }
 _look_shortcut_is_look() {
   local name="$1"
   case "$name" in
-    l|ll|ld|lf|lt|lr|lz|lh|fc)
+    l|ll|ld|lf|lt|lr|lz|lh)
       (( $+functions[$name] )) || return 1
+      ;;
+    fc)
+      [[ "$_LOOK_SHORTCUT_POLICY" == "force" ]] || return 1
       ;;
     lo)
       (( $+functions[lo] )) || return 1

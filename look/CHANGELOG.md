@@ -1,3 +1,17 @@
+## 4.8.3 — Shell ownership fixes
+
+- Clear `rb` and other LOOK function names before function parsing.
+- Never shadow Zsh's `fc` builtin.
+- Implement force-mode `fc → fcr` as an interactive ZLE accept-line rewrite only.
+- Fix bracketed-paste/history leakage into Future Crash.
+
+## 4.8.2 — Dead-CWD recovery
+
+- Add safe current-directory resolution throughout LOOK.
+- Repair deleted shell CWDs at Zsh `precmd`.
+- Repair before `rb`, LOOK, and LO entry.
+- Prefer nearest surviving ancestor; fall back to home.
+
 ## 4.8.1 — Shared model truth
 
 - Future Crash now inherits LOOK's selected model by default, matching the shared Ollama host behavior.

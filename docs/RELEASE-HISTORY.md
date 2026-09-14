@@ -2888,3 +2888,50 @@ LO gets a visual-language pass without becoming a TUI application.
 The chat remains ordinary responsive terminal I/O, but now uses a compact header, typographic speaker blocks, subordinate thinking, and concise tool receipts. The implementation is ANSI/Unicode with a few small renderer primitives rather than a framework.
 
 Future Crash remains on its existing CRT presentation.
+
+
+---
+
+<!-- source: RELEASE-2.7.7.md -->
+
+# Future Crash + LOOK 2.7.7
+
+A surgical Future Crash input/inference fix.
+
+The Enter key mapping was correct. The failure was that `submit()` silently returned whenever Future Crash was already busy or considered Oracle offline.
+
+Now:
+
+```text
+busy background Oracle call
+→ operator presses Enter
+→ request is visibly queued
+→ current call finishes/times out
+→ operator request dispatches automatically
+```
+
+Offline submits keep the typed text instead of discarding intent.
+
+Future Crash also inherits LOOK's selected model, preventing a client from forcing a different model onto the shared 3090 and causing avoidable load/swap delays.
+
+
+---
+
+<!-- source: RELEASE-2.7.8.md -->
+
+# Future Crash + LOOK 2.7.8
+
+A surgical filesystem-navigation reliability fix.
+
+A shell can remain attached to a directory inode after that directory has been removed or moved by another process. Python's `Path.cwd()`, zoxide, Perl `File::Find`, and many other tools then fail even though the terminal itself still appears usable.
+
+LOOK now treats this as recoverable state:
+
+```text
+current directory vanished
+→ nearest surviving parent
+→ home if necessary
+→ continue normally
+```
+
+The parent Zsh also checks this before every prompt, so undo/remove/move operations cannot leave the interactive shell stranded in a dead directory.
