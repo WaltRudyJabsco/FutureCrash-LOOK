@@ -1,3 +1,100 @@
+## 2.4.0 — Settings control room
+
+- `lk settings` is now a search-first terminal control room rather than a flat settings picker.
+- Type ordinary concepts such as `memory`, `video`, `GPU`, `safe`, `sound`, `downloads`, or `shortcuts` to find the relevant control.
+- `lk settings SEARCH` opens with that search already applied.
+- Every setting carries plain-English explanatory text and search vocabulary; the highlighted row gets a wrapped preview pane before the user changes anything.
+- Added an at-a-glance status strip for selected model, access profile, Living Memory state, and shortcut policy.
+- Expanded the control room to 20 useful settings/actions across AI, MEMORY, FILES, DESKTOP, REMOTE, FEEL, PROFILE, and SYSTEM.
+- Added direct control-room access to model benchmark, AI/GPU performance telemetry, Living Memory inspection/compaction, Doctor, and versions.
+- File grants now have a small interactive submenu for personal folders, add/remove/list/clear.
+- Preferred desktop apps now have an interactive category picker and simple app-name/path entry.
+- Shortcut policy can now be changed directly inside settings.
+- Direct `lk ...` commands remain canonical and call the same underlying settings machinery.
+- Noninteractive `lk settings` still prints a complete readable settings report.
+
+## 2.3.9 — Model runtime-fit benchmark
+
+- `lk ollama test` now grades interactive runtime fit separately from model capability.
+- Adds EXCELLENT / GOOD / SLOW / POOR runtime labels using broad TTFT and generation-rate thresholds.
+- Pathological warm performance now produces an explicit note pointing to `lk ai stats` and `ollama ps`.
+- Benchmark ranking prefers models that are both capable and practically responsive.
+- Runtime classification deliberately does not claim GPU spill from timing alone.
+- Documentation/help reviewed after the 2.3.8 shell-namespace cleanup.
+
+## 2.3.8 — Polite shell namespace
+
+- LOOK now treats `lk` as the canonical namespace and adds collision-resistant fast commands:
+  `lkl` detail, `lkd` directories, `lkf` files, `lkt` tree, `lkr` recent, `lkz` size.
+- Canonical forms remain `lk detail`, `lk dirs`, `lk files`, `lk tree`, `lk recent`, and `lk size`.
+- LOOK no longer shadows the canonical Unix `ls` command.
+- Historical `lsd`, `lsf`, and `lc` convenience aliases are no longer installed.
+- Ultra-short `l`, `ll`, `ld`, `lf`, `lt`, `lr`, and `lz` are now opportunistic conveniences rather than assumed global vocabulary.
+- In default `polite` mode, an existing alias, function, builtin, or executable wins.
+- `lk shortcuts force` may replace existing aliases/functions after `rb`, but LOOK still refuses to shadow builtins or real executables such as `ld`, `ls`, or an installed `lf`.
+- `lk shortcuts` documents the canonical, fast, and optional layers and reports executable collisions visible to LOOK.
+- Existing `fc` protection remains unchanged: native Zsh owns `fc`; Future Crash uses `fcr`, `rst`, or `future-crash`.
+
+## 2.3.7 — Stop shadowing Zsh `fc`
+
+- Removed LOOK's dual-purpose `fc` wrapper entirely.
+- `fc` is now permanently left to native Zsh history/editor behavior.
+- Future Crash launchers are `fcr`, `rst`, and `future-crash`.
+- This avoids shell/plugin/history edge cases around `fc` and prevents pasted/history activity from ever reaching Future Crash through that name.
+
+## 2.3.6 — Dual-purpose `fc`
+
+- Restores the convenient `fc` Future Crash launcher without breaking Zsh history.
+- `fc` with no arguments launches Future Crash.
+- `fc` with any arguments delegates verbatim to Zsh's native `builtin fc`.
+- This preserves shell/plugin calls such as `fc -p -a /dev/null 0 0` while keeping the original shortcut UX.
+- `fcr`, `rst`, and `future-crash` remain valid launchers.
+
+## 2.3.5 — Restore Zsh `fc`
+
+- Fixed a shell-integration collision that could launch Future Crash unexpectedly during paste/history activity.
+- LOOK had defined `fc` as a Future Crash shortcut, but `fc` is a native Zsh history builtin used internally by shells/plugins.
+- Calls such as `fc -p -a /dev/null 0 0` were therefore being forwarded into `future_crash.py`, producing bogus argparse errors.
+- The installer/profile now explicitly removes any stale LOOK `fc` function and restores the native Zsh builtin.
+- The short Future Crash launcher is now `fcr`; `rst` and `future-crash` remain unchanged.
+- Future Crash's argument parser remains strict; the bug was in the caller, not the parser.
+
+## 2.3.4 — Selected-model benchmark fix
+
+- `lk ollama test` now benchmarks the model selected in LOOK, not whichever Ollama model happens to be resident.
+- Switching models in `lk ollama models` is now reflected immediately by the next single-model benchmark.
+- If the selected model is not installed on the active host, the benchmark reports that directly instead of silently testing another resident model.
+- `lk ollama test --all` behavior is unchanged.
+- Future Crash remains 1.1.10.
+
+## 2.3.3 — Agent cleanup + desktop bridge
+
+- Models that explicitly lack Ollama tool support no longer receive tool schemas, preventing `HTTP 400 Bad Request` on models such as DeepSeek-R1; LO remains usable for normal chat/thinking and host-side safe inspection repair.
+- After LOOK repairs a prose-only safe inspection, the next model turn is final-answer-only with tools disabled, preventing redundant `which ...` / repeated inspection loops.
+- Activity/result presentation is separated cleanly so spinners do not collide with `inspect ›` or result text.
+- Compact thinking redraw now uses the previous rolling-window height and actual terminal width, fixing duplicated/concatenated lines after the three-line window fills.
+- Added host-owned desktop bridge tools and commands: `open_path`, `preview_path`, `reveal_path`, `lk open`, `lk preview`, `lk reveal`.
+- Added `lk apps` preferred-app registry for browser/editor/image/pdf/video/audio. OS defaults remain the default; overrides are optional.
+- macOS preview uses Quick Look when available; Linux defaults to `xdg-open`; Windows uses the system association. Preferred apps such as VLC/mpv can override a category.
+- Desktop bridge respects LO read/path grants when invoked by the model.
+- `lk doctor`, help, settings, command index, and completions now describe desktop bridge availability/preferences.
+- No new mandatory GUI/media dependency is installed; system defaults are preferred and optional helpers are detected.
+- Future Crash remains 1.1.10; Living Memory remains schema 3.
+
+## 2.3.2 — Native command authority + model interaction repair
+
+- POWER command permission is now owned by LOOK's native terminal UI, never negotiated conversationally by the model.
+- Reusable command confirmation: `[y] once · [s] allow command this session · Enter/Esc cancel`.
+- Session grants authorize the exact normalized command only, never every invocation of an executable.
+- Known read-only inspections auto-run in POWER without confirmation: common `--version`/`--help`, Ollama list/ps/show/version, Git status/log/diff/show/branch/rev-parse/remote, nvidia-smi, and basic OS inspection commands.
+- Shell composition/redirection and mutating command forms remain outside the inspection allowlist.
+- Shell command subprocesses now use DEVNULL stdin, preventing child processes from competing with LO for the interactive terminal.
+- Added one-shot agent repair: when a capable model explains a known-safe inspection instead of calling the tool, LOOK may execute the inspection deterministically and feed the result back for a final answer.
+- Fixed compact thinking renderer emitting literal `\r` / `\033` text instead of actual terminal control sequences, exposed clearly by gpt-oss.
+- `lo` natural-language invocation now carries `nocorrect`, preventing Zsh from trying to change words such as `version` to a local `VERSION` filename.
+- `lk ollama test` now reports AGENT separately from TOOLS: schema/tool judgment and natural tool execution are distinct capabilities.
+- Future Crash remains 1.1.10; Living Memory schema remains 3.
+
 ## 2.3.1 — Query-aware memory startup fix
 
 - Fixed LO startup crash in 2.3.0: memory retrieval referenced `prompt` before the first prompt had been assigned.

@@ -3,8 +3,8 @@ set -euo pipefail
 
 ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 
-PRODUCT_VERSION="2.3.1"
-LOOK_VERSION="4.3.1"
+PRODUCT_VERSION="2.4.0"
+LOOK_VERSION="4.4.0"
 FUTURE_CRASH_VERSION="1.1.10"
 
 DRY=0
@@ -367,9 +367,9 @@ old_dirs = old.get("created_dirs") if isinstance(old.get("created_dirs"), list) 
 
 manifest = {
     "product": "future-crash-look",
-    "release": os.environ.get("FCL_RELEASE_VERSION", "2.3.1"),
+    "release": os.environ.get("FCL_RELEASE_VERSION", "2.4.0"),
     "components": {
-        "look": os.environ.get("FCL_LOOK_VERSION", "4.3.1"),
+        "look": os.environ.get("FCL_LOOK_VERSION", "4.4.0"),
         "future_crash": os.environ.get("FCL_FUTURE_CRASH_VERSION", "1.1.10"),
     },
     "packages": sorted(set(old_packages + [x for x in os.environ.get("LOOK_MANIFEST_PACKAGES","").splitlines() if x])),
@@ -441,10 +441,11 @@ PY
   echo "LOOK + FUTURE CRASH installed."
   echo "  future-crash  # launch the workstation"
   echo "  rst           # same launch, after exec zsh"
-  echo "  fc            # same launch, shorter"
+  echo "  fcr           # short Future Crash launcher"
   echo "  lk            # LOOK shell"
   echo "  lo            # LOOK Ollama"
   echo "  lk settings   # configure AI / hosts / access"
+  echo "  lk shortcuts  # inspect optional shell shortcut collisions/policy"
   echo
   echo "  1. exec zsh"
   echo "  2. lk doctor"
