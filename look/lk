@@ -17,7 +17,7 @@ try:
 except Exception:
     readline = None
 
-VERSION="4.7.5"
+VERSION="4.8.1"
 
 LOOK_WORDMARK = r"""       ██╗      ██╗  ██╗
        ██║      ██║ ██╔╝
@@ -6601,7 +6601,7 @@ def _run_filesystem_tool_impl(workspace, name, args):
         return f"File tool internal error: {type(exc).__name__}: {exc}"
     return f"Unknown file tool: {name}"
 
-LOOK_INFO_USER_AGENT="LOOK-Shell/4.7.5 (local text client)"
+LOOK_INFO_USER_AGENT="LOOK-Shell/4.8.1 (local text client)"
 
 def _run_filesystem_tool(workspace, name, args, profile="workspace"):
     global _FILESYSTEM_ACCESS_PROFILE
@@ -6979,6 +6979,34 @@ def _choose_ollama_model(running):
     return preferred, False
 
 
+def _lo_width():
+    return max(48,min(92,shutil.get_terminal_size((88,24)).columns))
+
+
+def _lo_rule():
+    return _c("─"*(_lo_width()-1),"2")
+
+
+def _lo_label(name, color="2"):
+    return _c(str(name).upper(),color)
+
+
+def _lo_receipt(kind, detail, ok=True, color="36"):
+    mark=_c("✓","32") if ok else _c("×","31")
+    width=_lo_width()
+    plain=f"{kind.upper():<8} {detail}"
+    gap=max(2,width-len(plain)-3)
+    print(f"{_lo_label(kind,color)}  {detail}{' '*gap}{mark}")
+
+
+def _lo_speaker(name, text=None, color="36"):
+    label=_lo_label(name,color)
+    if text is None:
+        return label
+    rendered=_ollama_markup(text) if name.lower()=="lo" else text
+    print(f"\n{label}\n{rendered}")
+
+
 class _RollingThinking:
     def __init__(self, mode):
         self.mode=mode
@@ -7000,14 +7028,14 @@ class _RollingThinking:
     def _show(self,chunk):
         if self.mode=="full":
             if not self.started:
-                print("\n"+_ansi_label("thinking ›","2"))
+                print("\n"+_lo_label("thinking","2"))
                 self.started=True
             print("  "+_c(chunk,"2"),flush=True)
             return
         previous_count=len(self.lines)
         self.lines=(self.lines+[chunk])[-3:]
         if not sys.stdout.isatty():
-            print("thinking › "+chunk,flush=True); return
+            print("THINKING  "+chunk,flush=True); return
         if self.started and previous_count:
             # Cursor sits immediately below the previous rolling window.
             sys.stdout.write(f"\033[{previous_count}A")
@@ -7017,7 +7045,7 @@ class _RollingThinking:
         width=max(30,shutil.get_terminal_size((100,24)).columns-13)
         for line in self.lines:
             clipped=line if len(line)<=width else line[:max(1,width-1)]+"…"
-            sys.stdout.write("\r\033[2K"+_ansi_label("thinking ›","2")+" "+_c(clipped,"2")+"\n")
+            sys.stdout.write("\r\033[2K"+_lo_label("thinking","2")+"  "+_c(clipped,"2")+"\n")
         sys.stdout.flush()
 
     def finish(self):
@@ -7121,18 +7149,19 @@ def ollama_chat(force_search=False, initial_prompt=None, allow_start=True, host_
     mode = "LOOK OLLAMA SEARCH" if force_search else "LOOK OLLAMA"
     web_state = "required" if force_search else ("available" if has_web else "off")
     shown_host=host_name or _ollama_host_name(base)
-    print(f"{mode} · {model} · {workspace}")
-    print(f"host · {shown_host} · {base}")
-    print(f"access · {profile.upper()} · personality · {_load_personality()} · thinking · {_load_thinking()}/{_load_think_display()}")
-    if selected_paths:
-        print(f"context · {len(selected_paths)} selected path{'s' if len(selected_paths)!=1 else ''}")
-    if not resident:
-        print(f"model · idle · loads on first prompt")
-    if supports_vision:
-        print("vision · available · include an image path in your prompt")
-    if not supports_tools:
-        print("tools · unavailable for model · host edges remain available")
-    print(f"web · {web_state} · Ctrl-D to exit · Ctrl-C cancels work\n")
+    state=_c("●","32")
+    title="LO SEARCH" if force_search else "LO"
+    print(f"{_c(title,'1;36')} · {model} · {shown_host} {state}   {_c(profile.upper(),'2')} · {_load_thinking()}/{_load_think_display()}")
+    print(_c(str(workspace),"2"))
+    extras=[]
+    if selected_paths: extras.append(f"context {len(selected_paths)}")
+    if not resident: extras.append("model loads on first prompt")
+    if supports_vision: extras.append("vision")
+    if not supports_tools: extras.append("no model tools")
+    extras.append(f"web {web_state}")
+    extras.append("Ctrl-D exit · Ctrl-C cancel")
+    print(_c(" · ".join(extras),"2"))
+    print(_lo_rule()+"\n")
 
     web_tool = {
         "type": "function",
@@ -7259,10 +7288,10 @@ def ollama_chat(force_search=False, initial_prompt=None, allow_start=True, host_
         if pending_prompt:
             prompt=pending_prompt
             pending_prompt=""
-            print(f"{_ansi_label('you ›', '36')} {prompt}")
+            _lo_speaker("you",prompt,"36")
         else:
             try:
-                prompt = input(_ansi_label("you ›", "36") + " ").strip()
+                prompt = input("\n"+_lo_label("you","36")+"\n"+_c("› ","36")).strip()
             except EOFError:
                 print()
                 return 0
@@ -7484,27 +7513,27 @@ def ollama_chat(force_search=False, initial_prompt=None, allow_start=True, host_
                             last_mutation_result=str(tool_content)
                             if _mutation_tool_succeeded(name,tool_content):
                                 mutation_succeeded=True
-                            print(f"{_ansi_label('file ›', '32')} {tool_content}")
+                            _lo_receipt("file",str(tool_content).splitlines()[0],ok=_mutation_tool_succeeded(name,tool_content),color="32")
                     elif name in {"list_processes","listening_ports","system_snapshot"}:
-                        print(f"{_ansi_label('system ›','36')} {name.replace('_',' ')}")
+                        print(f"{_lo_label('system','36')}  {name.replace('_',' ')}")
                         with _activity("inspecting"):
                             tool_content=_run_system_inspection_tool(name,args)
                     elif name in {"generate_image","schedule_prompt","schedule_list"}:
                         label="image" if name=="generate_image" else "schedule"
-                        print(f"{_ansi_label(label+' ›','35')} {name.replace('_',' ')}")
+                        print(f"{_lo_label(label,'35')}  {name.replace('_',' ')}")
                         with _activity("generating" if name=="generate_image" else "scheduling"):
                             tool_content=_run_capability_tool(name,args,workspace,profile)
-                        print(f"{_ansi_label('result ›','33')} {tool_content.splitlines()[0]}")
+                        _lo_receipt("result",tool_content.splitlines()[0],ok=True,color="33")
                     elif name=="run_command":
                         if profile not in {"power","unsafe"}:
                             tool_content="Command execution is unavailable in this access profile."
                         else:
                             command_text=str(args.get("command","")).strip()
                             is_inspection=_inspection_command(command_text)
-                            print(f"{_ansi_label('inspect ›' if is_inspection else 'command ›','36' if is_inspection else '33')} {command_text}")
+                            print(f"{_lo_label('inspect' if is_inspection else 'command','36' if is_inspection else '33')}  {command_text}")
                             with _activity("inspecting" if is_inspection else "running command"):
                                 tool_content=_run_command_tool(workspace,args,profile)
-                            print(f"{_ansi_label('result ›', '33')} {tool_content.splitlines()[0]}")
+                            _lo_receipt("result",tool_content.splitlines()[0],ok=True,color="33")
                     else:
                         tool_content = f"Unknown tool: {name}"
 
@@ -7568,9 +7597,9 @@ def ollama_chat(force_search=False, initial_prompt=None, allow_start=True, host_
             # Thinking was already presented live according to the selected display mode.
             final=_split_ollama_thinking(message)[1]
             if final:
-                print(_ansi_label("lo ›","35")+" "+_ollama_markup(final)+"\n")
+                print("\n"+_lo_label("lo","35")+"\n"+_ollama_markup(final)+"\n")
             else:
-                print(_ansi_label("lo ›","35")+" "+_c("(no final response)","2")+"\n")
+                print("\n"+_lo_label("lo","35")+"\n"+_c("(no final response)","2")+"\n")
             _record_ai_stats({
                 "time":time.time(),"model":model,"host":_ollama_host_name(base),
                 "wall_s":max(0.0,time.monotonic()-task_started),
@@ -7584,10 +7613,10 @@ def ollama_chat(force_search=False, initial_prompt=None, allow_start=True, host_
             feedback_queued=_queue_skill_feedback(base,model,prompt,profile)
             _save_recent_exchange(prompt, answer)
             if feedback_queued and sys.stdout.isatty():
-                print(_c("  · reflecting in background","2"))
+                print(_c("  reflecting · background","2"))
             if _queue_memory_exchange(base, model, prompt, answer, profile):
                 if sys.stdout.isatty():
-                    print(_c("  · remembering in background", "2"))
+                    print(_c("  memory · background", "2"))
             else:
                 # If queueing ever fails, preserve memory rather than silently dropping it.
                 with _activity("remembering"):

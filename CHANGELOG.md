@@ -1,3 +1,26 @@
+## 2.7.7 — Future Crash interactive-submit reliability
+
+- Fix A/Ask and X/Workstation Enter appearing to hang when Future Crash already has Oracle work in flight.
+- Interactive input is no longer silently discarded while `busy`; it is queued and visibly dispatched as soon as the current Oracle call releases.
+- Offline submits preserve the typed input and show an explicit Oracle-offline notice.
+- Background Oracle calls (ambient, fortune, memory, scheduled thread work) now have a bounded 18-second network timeout so they cannot monopolize the UI for two minutes.
+- Future Crash now inherits LOOK's selected model as well as LOOK's selected Ollama host.
+- This avoids needless shared-GPU model churn/loading when LO and Future Crash point at the same remote 3090.
+- Explicit `--model` and `--ollama` overrides still win.
+- Future Crash bumps to 1.1.12; LOOK to 4.8.1.
+
+## 2.7.6 — LO typography
+
+- Give LO chat a dedicated typographic presentation while preserving terminal-native interaction.
+- Compact the startup banner into an instrument-style header with model, host, connection, access, thinking, workspace, capabilities, and controls.
+- Present YOU and LO as clear conversational blocks instead of repeated inline `you ›` / `lo ›` prefixes.
+- Make thinking visually subordinate and keep compact thinking's in-place rolling behavior.
+- Present filesystem, command, image, schedule, and system activity as terse labeled receipts.
+- Quiet background memory/reflection notices.
+- Add tiny reusable LO rendering primitives for width, rules, labels, speakers, and receipts.
+- No TUI framework dependency; ANSI/Unicode only.
+- Future Crash remains visually and behaviorally unchanged at 1.1.11.
+
 ## 2.7.5 — Future Crash inherits LOOK Ollama host
 
 - Future Crash now defaults to LOOK's currently selected Ollama host.

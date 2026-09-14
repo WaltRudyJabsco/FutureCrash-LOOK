@@ -2863,3 +2863,28 @@ On a client:
 lk comfy discover
 lk comfy
 ```
+\n\n---\n\n<!-- source: RELEASE-2.7.5.md -->\n\n# Future Crash + LOOK 2.7.5
+
+Future Crash now shares LOOK's Ollama-host truth.
+
+Precedence:
+
+```text
+explicit `future-crash --ollama URL`
+→ LOOK selected Ollama host
+→ localhost:11434 fallback
+```
+
+This fixes `ORACLE LINK OFFLINE` on client machines where LO already talks successfully to the remote 3090.\n
+
+---
+
+<!-- source: RELEASE-2.7.6.md -->
+
+# Future Crash + LOOK 2.7.6
+
+LO gets a visual-language pass without becoming a TUI application.
+
+The chat remains ordinary responsive terminal I/O, but now uses a compact header, typographic speaker blocks, subordinate thinking, and concise tool receipts. The implementation is ANSI/Unicode with a few small renderer primitives rather than a framework.
+
+Future Crash remains on its existing CRT presentation.

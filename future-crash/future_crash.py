@@ -72,7 +72,7 @@ WHITE = CSI + "38;5;255m"
 GRAY = CSI + "38;5;245m"
 DARK = CSI + "38;5;239m"
 
-VERSION = "1.1.11"
+VERSION = "1.1.12"
 GLYPHS = "0123456789ABCDEF"
 SPARKS = "▁▂▃▄▅▆▇█"
 
@@ -2055,7 +2055,9 @@ class Oracle(threading.Thread):
                     data=data,
                     headers={"Content-Type": "application/json"},
                 )
-                with urllib.request.urlopen(req, timeout=120) as r:
+                background_kind=(kind in {"ambient","fortune","memory"} or kind.startswith("thread:"))
+                request_timeout=18 if background_kind else 75
+                with urllib.request.urlopen(req, timeout=request_timeout) as r:
                     response = json.loads(r.read().decode("utf-8", "replace"))
                 message = response.get("message", {})
                 if kind=="ambient":
@@ -2159,6 +2161,7 @@ class FutureCrash:
         self.answer = ""
         self.scroll = 0
         self.busy = False
+        self.deferred_submit = None
         self.activity_kind = ""
         self.activity_started = 0.0
         self.online = False
@@ -2742,6 +2745,18 @@ class FutureCrash:
 
     def update(self):
         now = time.time()
+
+        if self.deferred_submit and not self.busy and self.online:
+            mode,text=self.deferred_submit
+            self.deferred_submit=None
+            # If the operator has not navigated elsewhere, submit the preserved
+            # request through the normal path. This keeps one source of truth.
+            if self.mode in {"ask","work","answer"}:
+                self.mode=mode
+                self.input=text
+                self.cursor=len(text)
+                self.submit()
+                now=time.time()
         if now < self.panic_until:
             self.was_panicking = True
             self.panic_phase = (self.panic_phase + 1) % 12
@@ -3022,7 +3037,22 @@ class FutureCrash:
 
     def submit(self):
         text = self.input.strip()
-        if not text or self.busy or not self.online:
+        if not text:
+            return
+        if not self.online:
+            self.work_notice = "ORACLE OFFLINE // input preserved"
+            self.work_notice_until = time.time() + 3.0
+            self.last_frame = ""
+            return
+        if self.busy:
+            # Operator intent outranks ambient/memory work. Preserve the request
+            # and dispatch it as soon as the current Oracle call releases.
+            self.deferred_submit = (self.mode, text)
+            self.input = ""
+            self.cursor = 0
+            self.work_notice = "INTERACTIVE QUEUED // waiting for current Oracle call"
+            self.work_notice_until = time.time() + 6.0
+            self.last_frame = ""
             return
         self.input = ""
         self.cursor = 0
@@ -3337,8 +3367,12 @@ class FutureCrash:
             "",
             BOLD + CYAN + title + RESET,
             DIM + subtitle + RESET,
-            "",
         ]
+        if self.deferred_submit:
+            lines.append(AMBER + "INTERACTIVE QUEUED // current Oracle call will finish first" + RESET)
+        elif not self.online:
+            lines.append(RED + "ORACLE OFFLINE // input will not be discarded" + RESET)
+        lines.append("")
         prompt = "> " + self.input
         cursor_at = 2 + self.cursor
         shown = prompt
@@ -3463,7 +3497,10 @@ class FutureCrash:
             frame.append("")
         prompt = "> " + self.input + ("_" if not self.busy else "")
         frame.append(fit(prompt, w - 1))
-        frame.append(DIM + "[enter] send   [ctrl-t] threads   [ctrl-u] clear conversation   [ctrl-k] erase memory   [esc] return" + RESET)
+        if self.deferred_submit:
+            frame.append(AMBER + "INTERACTIVE QUEUED // current Oracle call will finish first" + RESET)
+        else:
+            frame.append(DIM + "[enter] send   [ctrl-t] threads   [ctrl-u] clear conversation   [ctrl-k] erase memory   [esc] return" + RESET)
         while len(frame) < h:
             frame.append("")
         return "\n".join(safe_row(row, w) for row in frame[:h])
@@ -3736,13 +3773,25 @@ def _look_selected_ollama_host():
     return LOCAL_OLLAMA_URL
 
 
+def _look_selected_model():
+    """Reuse LOOK's selected model so Future Crash does not churn the shared GPU."""
+    path=Path.home()/".local"/"share"/"look"/"ollama_model"
+    try:
+        model=path.read_text(encoding="utf-8").strip()
+        if model:
+            return model
+    except OSError:
+        pass
+    return "qwen3:8b"
+
+
 def parse_args():
     p = argparse.ArgumentParser(
         description="Future Crash // Zero — local AI workstation / ambient terminal",
         epilog="Ambient: esc shell · a ask · x workstation · t threads · m mute · ? help · q quit",
     )
     p.add_argument("--version", action="version", version=f"Future Crash {VERSION}")
-    p.add_argument("--model", default="qwen3:4b", help="Ollama model to use for ALL AI work")
+    p.add_argument("--model", default=None, help="Ollama model (default: LOOK selected model, then qwen3:8b)")
     p.add_argument("--ollama", default=None, help="Ollama base URL (default: LOOK selected host, then localhost)")
     p.add_argument("--fps", type=int, default=12, help="UI refresh rate (default: 12)")
     p.add_argument("--no-ai-ambient", action="store_true", help="disable ambient LLM observations")
@@ -3756,6 +3805,8 @@ if __name__ == "__main__":
     args = parse_args()
     if not args.ollama:
         args.ollama=_look_selected_ollama_host()
+    if not args.model:
+        args.model=_look_selected_model()
     app = FutureCrash(args)
     try:
         app.start()

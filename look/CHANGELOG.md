@@ -1,3 +1,17 @@
+## 4.8.1 — Shared model truth
+
+- Future Crash now inherits LOOK's selected model by default, matching the shared Ollama host behavior.
+- Reduces remote GPU model churn and contention.
+
+## 4.8.0 — LO typography system
+
+- Introduce lightweight LO typography primitives.
+- Compact chat header.
+- Block-style YOU/LO conversation.
+- Quieter rolling thinking.
+- Tool/result receipt presentation.
+- Preserve raw terminal responsiveness and fallback behavior.
+
 ## 4.7.5 — Shared Ollama host truth
 
 - Future Crash consumes LOOK's selected Ollama host by default.

@@ -1,3 +1,11 @@
+## 1.1.12 — Interactive submit queue
+
+- A/Ask and X/Workstation no longer silently ignore Enter while background Oracle work is active.
+- Queue operator submissions behind the current call and make that queue visible.
+- Preserve input when Oracle is offline.
+- Bound background Oracle HTTP calls to 18 seconds.
+- Inherit LOOK's selected model by default to avoid unnecessary shared-GPU model swapping.
+
 ## 1.1.11 — LOOK host inheritance
 
 - Default Ollama URL now comes from LOOK's selected host.
