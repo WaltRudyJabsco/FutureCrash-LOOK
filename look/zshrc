@@ -632,7 +632,8 @@ add-zsh-hook precmd _look_shell_title
 # A shell being reloaded may already contain aliases from an older LOOK release.
 # Zsh expands aliases while sourcing, so clear all names that become functions
 # BEFORE their function definitions are parsed.
-unalias lk lo rst commands 2>/dev/null
+unalias lk lo rst fcr future-crash commands 2>/dev/null
+unfunction future-crash fcr rst 2>/dev/null
 # `fc` remains Zsh's history builtin by default. The explicit `force` shortcut
 # policy may disable/reclaim it later as the Future Crash convenience command.
 
@@ -671,15 +672,27 @@ webterm() {
 
 
 # ── Future Crash ─────────────────────────────────────────────────────────────
+# All entry points mean the same thing:
+#   outside Future Crash → launch it
+#   inside Future Crash's escaped shell → return to the existing parent session
 _future_crash_owned() {
+  if [[ -n "${FUTURE_CRASH_SHELL:-}" ]]; then
+    # This shell was spawned by Future Crash. Exiting it is the cleanest possible
+    # "return" signal: the parent Future Crash resumes without recursion.
+    exit 0
+  fi
+
   _look_owner_title "● FUTURE CRASH"
   command future-crash "$@"
   local rc=$?
   _look_shell_title
   return $rc
 }
-rst() { _future_crash_owned "$@"; }
-fcr() { _future_crash_owned "$@"; }
+
+# Canonical and convenience spellings intentionally share one semantic action.
+future-crash() { _future_crash_owned "$@"; }
+rst()          { _future_crash_owned "$@"; }
+fcr()          { _future_crash_owned "$@"; }
 
 _look_shortcut_is_look() {
   local name="$1"

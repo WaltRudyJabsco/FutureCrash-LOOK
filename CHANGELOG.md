@@ -1,3 +1,20 @@
+## 2.7.3 — Documentation consolidation
+
+- Consolidated 83 historical `docs/RELEASE-*.md` files into one `docs/RELEASE-HISTORY.md`.
+- Kept the current release note as a standalone document.
+- Preserved architectural/how-to documentation as separate focused files.
+- Reduced repository Markdown file count from 106 to 24.
+- No runtime behavior changes.
+
+## 2.7.2 — Future Crash return semantics
+
+- `future-crash`, `rst`, `fcr`, and force-mode `fc` now share one semantic action.
+- From a normal shell they launch Future Crash.
+- From Future Crash's escaped child shell they cleanly exit that shell and return to the existing Future Crash parent session.
+- Removes the old "already inside Future Crash" dead-end behavior and avoids recursive Future Crash processes.
+- Makes `fc` an intentional return command, reducing accidental Ctrl-D exits.
+- Future Crash remains 1.1.10.
+
 ## 2.7.1 — Stateful shell shortcuts
 
 - `lk shortcuts force` now truly reclaims the Zsh `fc` builtin for Future Crash by explicitly disabling that builtin and binding `fc → fcr`.

@@ -1,3 +1,14 @@
+## 4.7.3 — Documentation cleanup
+
+- Collapse historical release-note sprawl into `docs/RELEASE-HISTORY.md`.
+- Keep current release documentation standalone.
+- No code-path changes.
+
+## 4.7.2 — Future Crash navigation
+
+- Unify `future-crash`, `rst`, `fcr`, and `fc`.
+- In a Future Crash child shell, all four return to the existing session rather than attempting recursion.
+
 ## 4.7.1 — Stateful shortcut UI
 
 - Force mode may intentionally reclaim Zsh builtin `fc`.
