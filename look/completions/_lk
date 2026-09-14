@@ -239,7 +239,7 @@ _lk() {
 
     comfy)
       if (( CURRENT == 3 )); then
-        _values 'comfy action' status start stop restart discover bootstrap host workflow output preview
+        _values 'comfy action' status repair start stop restart discover bootstrap host workflow output preview
       elif [[ "$words[3]" == (workflow|output) && CURRENT == 4 ]]; then
         _files
       fi

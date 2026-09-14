@@ -1,3 +1,16 @@
+## 4.6.3 — Workflow readiness
+
+- Unify Comfy status and generation workflow resolution.
+- Auto-repair to installed SDXL starter workflow.
+- Add `lk comfy repair`.
+- Include managed Comfy/model folders in status inventory.
+
+## 4.6.2 — Comfy edge polish
+
+- Cleanly reject an empty/non-file workflow path.
+- Recursively inspect nested legacy model folders at bounded depth.
+- Preserve working managed generation behavior.
+
 ## 4.6.1 — Memory lifecycle tuning
 
 - RECENT preserves sidebars; durable extraction does not.

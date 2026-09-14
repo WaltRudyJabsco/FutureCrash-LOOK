@@ -17,7 +17,7 @@ try:
 except Exception:
     readline = None
 
-VERSION="4.6.1"
+VERSION="4.6.3"
 
 LOOK_WORDMARK = r"""       ██╗      ██╗  ██╗
        ██║      ██║ ██╔╝
@@ -5605,11 +5605,15 @@ def _comfy_probe(host=None,timeout=1.2):
 
 
 def _discover_comfy_paths():
+    cfg=_load_comfy_config()
+    managed=Path(str(cfg.get("install_path") or "")).expanduser() if str(cfg.get("install_path") or "").strip() else None
     roots=[
         HOME/"ComfyUI",HOME/"comfyui",HOME/"Applications"/"ComfyUI",
         HOME/"Documents"/"ComfyUI",HOME/"Downloads"/"ComfyUI",
         Path("/opt/ComfyUI"),Path("/srv/ComfyUI"),
     ]
+    if managed:
+        roots.insert(0,managed)
     found=[]
     for root in roots:
         if root.exists() and (root/"main.py").exists():
@@ -5626,15 +5630,82 @@ def _discover_comfy_paths():
 def _comfy_model_inventory(model_roots,limit=40):
     exts={".safetensors",".ckpt",".pt",".pth",".gguf"}
     rows=[]
+    seen=set()
     for root in model_roots:
         try:
-            for path in root.iterdir():
-                if path.is_file() and path.suffix.casefold() in exts:
-                    rows.append((path.name,path.stat().st_size,path))
+            base_depth=len(root.parts)
+            for current,dirs,files in os.walk(root,followlinks=False):
+                path=Path(current)
+                depth=len(path.parts)-base_depth
+                if depth>=3:
+                    dirs[:]=[]
+                for name in files:
+                    fp=path/name
+                    if fp.suffix.casefold() in exts:
+                        rp=str(fp.resolve())
+                        if rp in seen: continue
+                        seen.add(rp)
+                        try:
+                            rows.append((fp.name,fp.stat().st_size,fp))
+                        except OSError:
+                            pass
         except OSError:
             pass
     rows.sort(key=lambda x:x[1],reverse=True)
     return rows[:limit]
+
+
+def _comfy_workflow_candidates():
+    """Canonical workflow fallbacks, ordered from installed state to package source."""
+    return [
+        STATE_DIR/"workflows"/"sdxl-api.json",
+        ROOT/"workflows"/"sdxl-api.json",
+    ]
+
+
+def _comfy_resolve_workflow(cfg=None,repair=True):
+    """Return (path, label, error). Self-heal missing/empty starter config when possible."""
+    cfg=dict(cfg or _load_comfy_config())
+    raw=str(cfg.get("workflow") or "").strip()
+    candidates=[]
+    if raw:
+        candidates.append(Path(raw).expanduser())
+    candidates.extend(_comfy_workflow_candidates())
+
+    seen=set()
+    for path in candidates:
+        try:
+            path=path.resolve()
+        except OSError:
+            continue
+        if str(path) in seen:
+            continue
+        seen.add(str(path))
+        if not path.exists() or not path.is_file():
+            continue
+        try:
+            data=json.loads(path.read_text(encoding="utf-8"))
+        except Exception:
+            continue
+        if not isinstance(data,dict) or not data:
+            continue
+
+        label="SDXL starter" if path.name=="sdxl-api.json" else path.name
+        if repair and str(path)!=raw:
+            cfg["workflow"]=str(path)
+            _save_comfy_config(cfg)
+        return path,label,""
+
+    if raw:
+        return None,"",f"Configured workflow is missing or unreadable: {raw}"
+    return None,"","No Comfy workflow configured and no packaged starter workflow was found."
+
+
+def _comfy_workflow_display(cfg=None):
+    path,label,error=_comfy_resolve_workflow(cfg,repair=True)
+    if path:
+        return f"{label} · ready",path
+    return f"not ready · {error}",None
 
 
 def _comfy_replace_placeholders(obj,prompt,negative,seed):
@@ -5654,9 +5725,9 @@ def _comfy_generate(prompt,negative="",seed=None,open_result=True):
     import urllib.request, urllib.parse, random
     cfg=_load_comfy_config()
     host=str(cfg["host"]).rstrip("/")
-    workflow_path=Path(str(cfg.get("workflow") or "")).expanduser()
-    if not workflow_path.exists():
-        return False,"No Comfy workflow configured. Run `lk comfy workflow PATH` with an API-format workflow JSON."
+    workflow_path,workflow_label,workflow_error=_comfy_resolve_workflow(cfg,repair=True)
+    if not workflow_path:
+        return False,workflow_error+" Run `lk comfy bootstrap` to restore the starter workflow."
     try:
         workflow=json.loads(workflow_path.read_text(encoding="utf-8"))
     except Exception as exc:
@@ -5797,6 +5868,15 @@ def comfy_command(args):
         return subprocess.call([sys.executable,str(bootstrap),"--install"])
     if action=="discover" and bootstrap.exists():
         return subprocess.call([sys.executable,str(bootstrap),"--discover"])
+    if action=="repair":
+        workflow_display,path=_comfy_workflow_display(cfg)
+        if path:
+            print(f"LOOK Comfy · workflow · {workflow_display}")
+            print(f"  {path}")
+            return 0
+        print(f"LOOK Comfy · workflow · {workflow_display}")
+        print("  run `lk comfy bootstrap` to restore managed starter files")
+        return 1
     if action=="start":
         ok,msg=_comfy_start(); print(f"LOOK Comfy · {msg}"); return 0 if ok else 1
     if action=="stop":
@@ -5812,7 +5892,10 @@ def comfy_command(args):
         print(f"  host         {cfg['host']} · {'ready' if ok else 'offline'}")
         print(f"  managed      {cfg.get('install_path') or 'not configured'}")
         print(f"  process      {(_comfy_pid() or 'external/stopped')}")
-        print(f"  workflow     {cfg.get('workflow') or 'not configured'}")
+        workflow_display,workflow_path=_comfy_workflow_display(cfg)
+        print(f"  workflow     {workflow_display}")
+        if workflow_path:
+            print(f"               {workflow_path}")
         print(f"  output       {cfg.get('output_dir')}")
         print(f"  auto-preview {'on' if cfg.get('auto_preview',True) else 'off'}")
         print(f"  installs     {len(roots)} found")
@@ -5838,7 +5921,7 @@ def comfy_command(args):
     if action=="preview" and len(args)>=2 and args[1].casefold() in {"on","off"}:
         cfg["auto_preview"]=args[1].casefold()=="on"; _save_comfy_config(cfg)
         print(f"LOOK Comfy · auto-preview · {'on' if cfg['auto_preview'] else 'off'}"); return 0
-    print("usage: lk comfy [status|start|stop|restart|discover|bootstrap|host URL|workflow PATH|output PATH|preview on|off]")
+    print("usage: lk comfy [status|repair|start|stop|restart|discover|bootstrap|host URL|workflow PATH|output PATH|preview on|off]")
     return 2
 
 
@@ -6078,7 +6161,7 @@ def _run_filesystem_tool_impl(workspace, name, args):
         return f"File tool internal error: {type(exc).__name__}: {exc}"
     return f"Unknown file tool: {name}"
 
-LOOK_INFO_USER_AGENT="LOOK-Shell/4.6.1 (local text client)"
+LOOK_INFO_USER_AGENT="LOOK-Shell/4.6.3 (local text client)"
 
 def _run_filesystem_tool(workspace, name, args, profile="workspace"):
     global _FILESYSTEM_ACCESS_PROFILE

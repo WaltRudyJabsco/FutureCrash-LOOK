@@ -127,14 +127,26 @@ def discover():
                     if p.exists(): model_dirs.add(p)
             # Cheap model discovery: only likely model directories.
             if name.casefold() in {"checkpoints","stable-diffusion","diffusion_models","unet"}:
-                for f in files:
-                    fp=path/f
-                    if fp.suffix.casefold() in MODEL_EXTS:
-                        try:
-                            model_files.append((fp.stat().st_size,fp))
-                        except OSError:
-                            pass
                 model_dirs.add(path)
+                # Old collections often organize checkpoints into subfolders by
+                # model family. Scan a small bounded depth below a recognized
+                # model root rather than assuming all weights sit at its top level.
+                root_depth=len(path.parts)
+                for current2,dirs2,files2 in os.walk(path,followlinks=False):
+                    p2=Path(current2)
+                    depth2=len(p2.parts)-root_depth
+                    dirs2[:]=[d for d in dirs2 if d not in SKIP_NAMES and not d.startswith(".Trash")]
+                    if depth2>=3:
+                        dirs2[:]=[]
+                    for f in files2:
+                        fp=p2/f
+                        if fp.suffix.casefold() in MODEL_EXTS:
+                            try:
+                                model_files.append((fp.stat().st_size,fp))
+                            except OSError:
+                                pass
+                # Avoid descending through the same recognized model tree again.
+                dirs[:]=[]
 
     installs=sorted(set(p.resolve() for p in installs))
     a1111=sorted(set(p.resolve() for p in a1111))
