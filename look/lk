@@ -17,7 +17,7 @@ try:
 except Exception:
     readline = None
 
-VERSION="4.6.3"
+VERSION="4.7.0"
 
 LOOK_WORDMARK = r"""       ██╗      ██╗  ██╗
        ██║      ██║ ██╔╝
@@ -44,6 +44,7 @@ SHORTCUT_POLICY_FILE=STATE_DIR/"shortcut_policy"
 COMFY_CONFIG_FILE=STATE_DIR/"comfy.json"
 SCHEDULE_FILE=STATE_DIR/"schedule.json"
 SCHEDULE_HISTORY_FILE=STATE_DIR/"schedule_history.json"
+SERVICES_FILE=STATE_DIR/"services.json"
 _SESSION_PATH_GRANTS=[]
 _ONCE_PATH_GRANTS=[]
 _FILESYSTEM_ACCESS_PROFILE="workspace"
@@ -524,7 +525,7 @@ def _tailscale_candidates():
             continue
         candidates=[]
         if dns:
-            candidates.append(("serve",f"https://{dns}"))
+            candidates.append(("serve",f"https://{dns}:{OLLAMA_SHARE_PORT}"))
         for ip in ips[:2]:
             candidates.append(("direct",f"http://{ip}:11434"))
         for transport,url in candidates:
@@ -747,6 +748,263 @@ def _stop_ollama_share_proxy():
     except OSError: pass
 
 
+def _load_services():
+    data={
+        "ollama":{"local_port":OLLAMA_SHARE_PORT,"target_port":11434,"https_port":OLLAMA_SHARE_PORT,"kind":"ollama","enabled":True},
+        "comfy":{"local_port":8188,"target_port":8188,"https_port":8188,"kind":"http","enabled":True},
+        "mercury":{"local_port":0,"target_port":0,"https_port":0,"kind":"http","enabled":False},
+        "webterm":{"local_port":0,"target_port":0,"https_port":0,"kind":"http","enabled":False},
+    }
+    try:
+        loaded=json.loads(SERVICES_FILE.read_text(encoding="utf-8"))
+        if isinstance(loaded,dict):
+            for name,item in loaded.items():
+                if isinstance(item,dict):
+                    base=data.setdefault(name,{})
+                    base.update(item)
+    except (OSError,ValueError,TypeError):
+        pass
+    return data
+
+
+def _save_services(data):
+    STATE_DIR.mkdir(parents=True,exist_ok=True)
+    _atomic_json(SERVICES_FILE,data)
+    try: os.chmod(SERVICES_FILE,0o600)
+    except OSError: pass
+
+
+def _discover_mercury_port():
+    """Best-effort discovery; never invent a Mercury port."""
+    try:
+        proc=subprocess.run(["ps","-ax","-o","command="],capture_output=True,text=True,timeout=2)
+        for line in proc.stdout.splitlines():
+            low=line.casefold()
+            if "mercury" not in low:
+                continue
+            for pattern in (
+                r"--port(?:=|\s+)(\d{2,5})",
+                r"\bport(?:=|\s+)(\d{2,5})",
+            ):
+                m=re.search(pattern,line,re.I)
+                if m:
+                    port=int(m.group(1))
+                    if 1<=port<=65535:
+                        return port
+    except Exception:
+        pass
+    # lsof can recover listening port from a Mercury-named process command.
+    lsof=shutil.which("lsof")
+    if lsof:
+        try:
+            proc=subprocess.run([lsof,"-nP","-iTCP","-sTCP:LISTEN"],capture_output=True,text=True,timeout=2)
+            mercury_pids=set()
+            ps=subprocess.run(["ps","-ax","-o","pid=,command="],capture_output=True,text=True,timeout=2)
+            for line in ps.stdout.splitlines():
+                if "mercury" in line.casefold():
+                    parts=line.strip().split(None,1)
+                    if parts: mercury_pids.add(parts[0])
+            for line in proc.stdout.splitlines()[1:]:
+                parts=line.split()
+                if len(parts)<9 or parts[1] not in mercury_pids:
+                    continue
+                m=re.search(r":(\d+)(?:\s+\(LISTEN\))?$",line)
+                if m:
+                    port=int(m.group(1))
+                    if 1<=port<=65535:
+                        return port
+        except Exception:
+            pass
+    return 0
+
+
+def _service_refresh_discovery(data=None):
+    data=data or _load_services()
+    mercury=data.setdefault("mercury",{})
+    if not int(mercury.get("target_port",0) or 0):
+        port=_discover_mercury_port()
+        if port:
+            mercury.update({"local_port":port,"target_port":port,"https_port":port,"kind":"http","enabled":True})
+            _save_services(data)
+    return data
+
+
+def _tailscale_dns_name():
+    tailscale=shutil.which("tailscale")
+    if not tailscale: return ""
+    try:
+        proc=subprocess.run([tailscale,"status","--json"],capture_output=True,text=True,timeout=3)
+        data=json.loads(proc.stdout or "{}")
+        dns=str(((data.get("Self") or {}).get("DNSName") or "")).rstrip(".")
+        return dns
+    except Exception:
+        return ""
+
+
+def _tailscale_serve_status_text():
+    tailscale=shutil.which("tailscale")
+    if not tailscale: return ""
+    try:
+        proc=subprocess.run([tailscale,"serve","status"],capture_output=True,text=True,timeout=3)
+        return (proc.stdout or "")+(proc.stderr or "")
+    except Exception:
+        return ""
+
+
+def _service_alive(name,item):
+    port=int(item.get("target_port",0) or 0)
+    if not port: return False
+    if name=="ollama":
+        return _probe_ollama(LOCAL_OLLAMA_URL,.4)
+    if name=="comfy":
+        ok,_=_comfy_probe("http://127.0.0.1:8188",timeout=.5)
+        return ok
+    import socket
+    try:
+        with socket.create_connection(("127.0.0.1",port),timeout=.35):
+            return True
+    except OSError:
+        return False
+
+
+def _service_share_one(name,item):
+    tailscale=shutil.which("tailscale")
+    if not tailscale:
+        return False,"Tailscale is not installed."
+    if name=="ollama":
+        rc=ollama_share([])
+        return rc==0,("shared" if rc==0 else "Ollama share failed")
+    target=int(item.get("target_port",0) or 0)
+    https_port=int(item.get("https_port",0) or target)
+    if not target:
+        return False,f"{name} has no configured local port"
+    if not _service_alive(name,item):
+        return False,f"{name} is not listening on localhost:{target}"
+    proc=subprocess.run(
+        [tailscale,"serve","--bg",f"--https={https_port}",f"localhost:{target}"],
+        capture_output=True,text=True
+    )
+    if proc.returncode==0:
+        return True,f"https {https_port} → localhost:{target}"
+    detail=(proc.stderr or proc.stdout or "").strip().splitlines()
+    return False,(detail[-1] if detail else "Tailscale Serve failed")
+
+
+def _service_unshare_one(name,item):
+    tailscale=shutil.which("tailscale")
+    if not tailscale:
+        return False,"Tailscale is not installed."
+    if name=="ollama":
+        rc=ollama_share(["off"])
+        return rc==0,("off" if rc==0 else "Ollama unshare failed")
+    port=int(item.get("https_port",0) or item.get("target_port",0) or 0)
+    if not port:
+        return False,f"{name} has no configured share port"
+    proc=subprocess.run([tailscale,"serve",f"--https={port}","off"],capture_output=True,text=True)
+    if proc.returncode==0:
+        return True,"off"
+    detail=(proc.stderr or proc.stdout or "").strip().splitlines()
+    return False,(detail[-1] if detail else "Tailscale Serve off failed")
+
+
+def services_command(args):
+    args=list(args or [])
+    data=_service_refresh_discovery()
+    action=(args[0].casefold() if args else "status")
+    dns=_tailscale_dns_name()
+    status_text=_tailscale_serve_status_text()
+
+    if action in {"status","list"}:
+        _title("LOOK SERVICES","local + tailnet")
+        print(f"  host         {dns or 'Tailscale unavailable/unresolved'}")
+        print()
+        print("  SERVICE       LOCAL       STATE      SHARE")
+        for name,item in data.items():
+            target=int(item.get("target_port",0) or 0)
+            https_port=int(item.get("https_port",0) or 0)
+            alive=_service_alive(name,item) if target else False
+            local=f":{target}" if target else "unconfigured"
+            shared=bool(https_port and (f":{https_port}" in status_text or f"{https_port}" in status_text))
+            share=(f"https://{dns}:{https_port}" if shared and dns else ("on" if shared else "off"))
+            print(f"  {name:<13} {local:<11} {'running' if alive else ('stopped' if target else '—'):<10} {share}")
+        print("\n  lk services share all")
+        print("  lk services share SERVICE")
+        print("  lk services unshare SERVICE|all")
+        print("  lk services set mercury PORT")
+        return 0
+
+    if action=="set" and len(args)>=3:
+        name=args[1].casefold()
+        try: port=int(args[2])
+        except ValueError:
+            print("LOOK services · port must be an integer"); return 2
+        if not (1<=port<=65535):
+            print("LOOK services · port must be 1..65535"); return 2
+        item=data.setdefault(name,{"kind":"http"})
+        item.update({"local_port":port,"target_port":port,"https_port":port,"enabled":True})
+        _save_services(data)
+        print(f"LOOK services · {name} · localhost:{port} · share port {port}")
+        return 0
+
+    if action=="discover":
+        before=int((data.get("mercury") or {}).get("target_port",0) or 0)
+        data=_service_refresh_discovery(data)
+        after=int((data.get("mercury") or {}).get("target_port",0) or 0)
+        if after:
+            print(f"LOOK services · Mercury Writer · localhost:{after}")
+        elif not before:
+            print("LOOK services · Mercury Writer not discovered; configure with `lk services set mercury PORT`")
+        return services_command(["status"])
+
+    if action in {"share","on"}:
+        names=args[1:] or ["all"]
+        if names==["all"]:
+            names=[
+                n for n,i in data.items()
+                if i.get("enabled") and int(i.get("target_port",0) or 0) and _service_alive(n,i)
+            ]
+        rc=0
+        _title("LOOK SHARE","tailnet only")
+        for name in names:
+            item=data.get(name)
+            if not item:
+                print(f"  ✗ {name:<12} unknown service"); rc=1; continue
+            ok,msg=_service_share_one(name,item)
+            port=int(item.get("https_port",0) or 0)
+            url=f"https://{dns}:{port}" if ok and dns and port else ""
+            print(f"  {'✓' if ok else '✗'} {name:<12} {msg}{' · '+url if url else ''}")
+            if not ok: rc=1
+        return rc
+
+    if action in {"unshare","off","stop"}:
+        names=args[1:] or ["all"]
+        if names==["all"]:
+            names=[n for n,i in data.items() if int(i.get("https_port",0) or 0)]
+        rc=0
+        for name in names:
+            item=data.get(name)
+            if not item: print(f"LOOK services · unknown: {name}"); rc=1; continue
+            ok,msg=_service_unshare_one(name,item)
+            print(f"  {'✓' if ok else '✗'} {name:<12} {msg}")
+            if not ok: rc=1
+        return rc
+
+    print("usage: lk services [status|discover|set NAME PORT|share SERVICE|all|unshare SERVICE|all]")
+    return 2
+
+
+def share_command(args):
+    """Friendly shortcut: bare `lk share` shares all configured/running LOOK services."""
+    args=list(args or [])
+    if not args:
+        return services_command(["share","all"])
+    if args[0].casefold() in {"status","list"}:
+        return services_command(["status"])
+    if args[0].casefold() in {"off","stop","unshare"}:
+        return services_command(["unshare",*(args[1:] or ["all"])])
+    return services_command(["share",*args])
+
+
 def ollama_share(args):
     args=list(args or [])
     tailscale=shutil.which("tailscale")
@@ -756,10 +1014,10 @@ def ollama_share(args):
     if args and args[0]=="status":
         rc=subprocess.call([tailscale,"serve","status"])
         state="ready" if _ollama_share_proxy_alive() else "off"
-        print(f"LOOK OLLAMA · host-rewrite proxy {state} · 127.0.0.1:{OLLAMA_SHARE_PORT}")
+        print(f"LOOK OLLAMA · host-rewrite proxy {state} · 127.0.0.1:{OLLAMA_SHARE_PORT} · HTTPS :{OLLAMA_SHARE_PORT}")
         return rc
     if args and args[0] in {"off","stop"}:
-        proc=subprocess.run([tailscale,"serve",str(OLLAMA_SHARE_PORT),"off"])
+        proc=subprocess.run([tailscale,"serve",f"--https={OLLAMA_SHARE_PORT}","off"])
         if proc.returncode==0:
             _stop_ollama_share_proxy()
             print("✓ Ollama tailnet share off")
@@ -776,16 +1034,21 @@ def ollama_share(args):
         print("LOOK OLLAMA · could not start localhost share proxy")
         return 1
     print("LOOK OLLAMA · sharing localhost:11434 inside your tailnet")
-    proc=subprocess.run([tailscale,"serve","--bg",str(OLLAMA_SHARE_PORT)])
+    proc=subprocess.run([
+        tailscale,"serve","--bg",f"--https={OLLAMA_SHARE_PORT}",f"localhost:{OLLAMA_SHARE_PORT}"
+    ])
     if proc.returncode==0:
+        dns=_tailscale_dns_name()
         print("✓ Ollama available to your Tailscale devices")
+        if dns:
+            print(f"  https://{dns}:{OLLAMA_SHARE_PORT}")
         print("  discover it elsewhere with: lk ollama host")
         return 0
 
     # Tailscale commonly reserves Serve configuration changes for root/operator.
     # Keep our localhost proxy alive so the one privileged Serve command can use it.
     print("LOOK OLLAMA · Tailscale Serve needs elevated permission")
-    print(f"  run: sudo tailscale serve --bg {OLLAMA_SHARE_PORT}")
+    print(f"  run: sudo tailscale serve --bg --https={OLLAMA_SHARE_PORT} localhost:{OLLAMA_SHARE_PORT}")
     print("  then: lk ollama share status")
     return proc.returncode
 
@@ -1029,10 +1292,29 @@ LO PERSONALITY + THINKING
   lk think-display MODE compact · full · quiet
   lk settings [SEARCH] searchable control room for all settings
 
+SERVICES + TAILNET SHARING
+  lk services                  local/running/share status
+  lk services discover         discover Mercury Writer when possible
+  lk services set mercury PORT configure Mercury Writer explicitly
+  lk services share all        expose configured running services to tailnet
+  lk services share comfy      share one service
+  lk services unshare all      remove LOOK service shares
+  lk share                     friendly alias for `lk services share all`
+  lk share status              service/share status
+  lk share off                 unshare all LOOK services
+
+  Default LOOK service ports stay separate:
+    Ollama   → LOOK proxy HTTPS 11435
+    ComfyUI  → HTTPS 8188
+    Mercury  → configured/discovered port
+  Tailscale Serve remains tailnet-only; LOOK does not use Funnel.
+
 VISION + GENERATIVE MEDIA
   lk vision IMAGE [QUESTION]
                        send a local image to the selected Ollama vision model
   lo ... IMAGE.png    vision-capable models attach explicit image paths automatically
+  lk share            share all configured/running LOOK services over Tailscale
+  lk services         inspect/configure/share local services
   lk comfy            status for optional/managed ComfyUI
   lk comfy start|stop|restart
                        manage LOOK-installed ComfyUI process
@@ -6161,7 +6443,7 @@ def _run_filesystem_tool_impl(workspace, name, args):
         return f"File tool internal error: {type(exc).__name__}: {exc}"
     return f"Unknown file tool: {name}"
 
-LOOK_INFO_USER_AGENT="LOOK-Shell/4.6.3 (local text client)"
+LOOK_INFO_USER_AGENT="LOOK-Shell/4.7.0 (local text client)"
 
 def _run_filesystem_tool(workspace, name, args, profile="workspace"):
     global _FILESYSTEM_ACCESS_PROFILE
@@ -8158,17 +8440,19 @@ def ollama_test(all_models=False):
 
 
 def _settings_share_state():
-    tailscale=shutil.which("tailscale")
-    if not tailscale:
+    if not shutil.which("tailscale"):
         return "unavailable"
-    try:
-        proc=subprocess.run([tailscale,"serve","status"],capture_output=True,text=True,timeout=2)
-        text=(proc.stdout or "")+(proc.stderr or "")
-        if proc.returncode==0 and ("11435" in text or "11434" in text):
-            return "on"
-    except (OSError,subprocess.SubprocessError):
-        pass
-    return "off"
+    data=_service_refresh_discovery()
+    status=_tailscale_serve_status_text()
+    active=0
+    configured=0
+    for item in data.values():
+        port=int(item.get("https_port",0) or 0)
+        if not port: continue
+        configured+=1
+        if str(port) in status:
+            active+=1
+    return f"{active}/{configured} shared" if configured else "none configured"
 
 
 def _settings_shortcut_policy():
@@ -8264,9 +8548,9 @@ def _settings_rows():
          "Persistent delayed and recurring LO jobs run through the resident LOOK service.",
          "schedule scheduler cron recurring daily every reminder later background jobs automation"),
 
-        ("share","REMOTE","Ollama tailnet share",_settings_share_state(),
-         "Expose local Ollama through Tailscale for your other machines, or turn sharing off.",
-         "remote tailscale share network ollama laptop tower"),
+        ("share","REMOTE","Tailnet services",_settings_share_state(),
+         "Share local LOOK services such as Ollama, ComfyUI, Mercury Writer, and web terminal through Tailscale Serve.",
+         "remote tailscale share services ollama comfy mercury writer webterm laptop tower"),
         ("sound","FEEL","Feedback sound","on" if _load_feedback()["sound"] else "off",
          "Turn LOOK's small completion/error sounds on or off.",
          "sound audio beep feedback quiet"),
@@ -8380,12 +8664,11 @@ def _settings_share_menu():
         return 1
     state=_settings_share_state()
     if not shutil.which("fzf") or not (sys.stdin.isatty() and sys.stdout.isatty()):
-        print(f"Ollama tailnet share: {state}")
-        return 0
+        return services_command(["status"])
     rows=[
-        ("status","show Tailscale Serve status"),
-        ("on","start/share local Ollama"),
-        ("off","stop Ollama tailnet share"),
+        ("status","show local + tailnet services"),
+        ("on","share all configured running services"),
+        ("off","unshare all LOOK services"),
     ]
     payload="\n".join(f"{key}\t{label}" for key,label in rows)+"\n"
     result=subprocess.run(
@@ -8397,10 +8680,10 @@ def _settings_share_menu():
         return 0
     action=result.stdout.split("\t",1)[0].strip()
     if action=="status":
-        return ollama_share(["status"])
+        return services_command(["status"])
     if action=="off":
-        return ollama_share(["off"])
-    return ollama_share([])
+        return services_command(["unshare","all"])
+    return services_command(["share","all"])
 
 
 def _settings_apps_menu():
@@ -10695,6 +10978,8 @@ def main():
     if cmd=="reveal": return reveal_command(rest)
     if cmd=="open": return open_command(rest,False)
     if cmd=="preview": return open_command(rest,True)
+    if cmd=="share": return share_command(rest)
+    if cmd=="services": return services_command(rest)
     if cmd=="vision": return vision_command(rest)
     if cmd in {"generate","image"}: return generate_command(rest)
     if cmd=="comfy": return comfy_command(rest)

@@ -61,6 +61,8 @@ _lk() {
     'settings:unified settings panel'
     'access:manage LO filesystem grants'
     'apps:manage desktop app preferences'
+    'services:inspect/configure/share local LOOK services'
+    'share:share configured LOOK services over Tailscale'
     'vision:inspect an image with selected Ollama vision model'
     'generate:generate an image through configured ComfyUI'
     'comfy:discover/configure optional ComfyUI'
@@ -227,6 +229,20 @@ _lk() {
 
     open|preview|reveal)
       _arguments '*:path:_files'
+      ;;
+
+    services)
+      if (( CURRENT == 3 )); then
+        _values 'services action' status discover set share unshare
+      elif (( CURRENT == 4 )) && [[ "$words[3]" == (share|unshare) ]]; then
+        _values 'service' all ollama comfy mercury webterm
+      fi
+      ;;
+
+    share)
+      if (( CURRENT == 3 )); then
+        _values 'share target' status off ollama comfy mercury webterm
+      fi
       ;;
 
     vision)

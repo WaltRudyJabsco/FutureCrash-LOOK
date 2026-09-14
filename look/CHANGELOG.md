@@ -1,3 +1,12 @@
+## 4.7.0 — Unified services
+
+- Add persistent service registry.
+- Add `lk services` and `lk share`.
+- Give Ollama and Comfy separate stable HTTPS Serve ports.
+- Add Mercury Writer discovery/configuration.
+- Share-all only exposes running local services.
+- Generalize settings share UI from Ollama-only to LOOK services.
+
 ## 4.6.3 — Workflow readiness
 
 - Unify Comfy status and generation workflow resolution.

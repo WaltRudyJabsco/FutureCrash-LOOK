@@ -1120,3 +1120,8 @@ Vision-capable Ollama models can receive explicit local image paths in normal LO
 ### GPU workstation bootstrap
 
 On Linux + NVIDIA systems, the installer offers managed ComfyUI setup. It discovers old Comfy/A1111 model libraries on the home directory and common mounted-drive roots before installing anything, can reuse those weights through Comfy's external model paths, and offers explicit verified starter downloads. `lk comfy bootstrap` reruns the setup later; `lk comfy start|stop|restart` manages the local service. SDXL is the ready-to-run workflow starter; FLUX.1 Schnell FP8 is available as an optional modern checkpoint.
+
+
+### Services and tailnet sharing
+
+`lk services` is the unified view of local LOOK services and their private Tailscale Serve endpoints. `lk share` exposes every configured service currently running on the machine; Ollama and Comfy use separate dedicated HTTPS ports so they can coexist. Mercury Writer can be discovered when its running process exposes a port or configured explicitly with `lk services set mercury PORT`.
