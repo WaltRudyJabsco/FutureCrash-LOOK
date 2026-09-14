@@ -65,14 +65,14 @@ _look_shell_title() {
 commands() {
   print -P '%F{cyan}%BLOOK SHELL%b%f  %F{244}filesystem + navigation%f'
   print ''
-  print -P '%F{75}  l / ls%f   smart view          %F{75}ll%f       details'
-  print -P '%F{75}  ld%f       directories         %F{75}lf%f       files'
-  print -P '%F{75}  lt%f       tree                %F{75}lr%f       recent'
+  print -P '%F{75}  lk%f       smart view          %F{75}lkl%f      details'
+  print -P '%F{75}  lkd%f      directories         %F{75}lkf%f      files'
+  print -P '%F{75}  lkt%f      tree                %F{75}lkr%f      recent'
   print -P '%F{75}  lz%f       sizes               %F{75}zll WORD%f jump + look'
   print -P '%F{75}  cdl WORD%f jump + details      %F{75}fznv%f     fuzzy edit'
   print -P '%F{75}  f%f        find anywhere → LOOK'
   print -P '%F{75}  lh%f       LOOK home           %F{75}lo%f       Ollama chat'
-  print -P '%F{75}  rst%f      Future Crash        %F{75}fc%f       Future Crash'
+  print -P '%F{75}  rst%f      Future Crash        %F{75}fcr%f      Future Crash'
   print -P '%F{75}  lo ASK%f   ask immediately     %F{75}rs%f       reset ritual'
   print -P '%F{75}  rb%f       reload zsh          %F{75}lmk%f      smart make · file or dir'
   print ''
@@ -130,12 +130,9 @@ _look() {
   return $rc
 }
 
-# Oh My Zsh may own some of these names; clear them before function parsing.
-# (This line must stay before the function definitions.)
-unalias ls l ll ld lf lt lr lz lsd lsf lc 2>/dev/null
-
-# Human-facing filesystem vocabulary.
-l() {
+# Human-facing smart-view implementation. Public short names are installed
+# later through the collision-aware shortcut layer.
+_look_smart() {
   if (( $# == 0 )); then
     _look . --mode smart --interactive
     return
@@ -182,38 +179,70 @@ _look_view() {
   fi
 }
 
-ll()  { _look_view detail "$@"; }
-ld()  { _look_view dirs "$@"; }
-lf()  { _look_view files "$@"; }
-lt()  { _look_view tree "$@"; }
-lr()  { _look_view recent "$@"; }
-lz()  { _look_view size "$@"; }
+# Collision-resistant LOOK namespace. These are ours and are always installed.
+lkl() { _look_view detail "$@"; }
+lkd() { _look_view dirs "$@"; }
+lkf() { _look_view files "$@"; }
+lkt() { _look_view tree "$@"; }
+lkr() { _look_view recent "$@"; }
+lkz() { _look_view size "$@"; }
 lh()  { _look home; }
 
-# Keep your old names too: muscle memory is an API.
-lsd() { ld "$@"; }
-lsf() { lf "$@"; }
-lc()  { ll "$@"; }
+# Ultra-short muscle-memory layer. LOOK is deliberately a guest in the user's
+# shell: by default a pre-existing alias/function/builtin/executable wins.
+# `lk shortcuts force` opts into replacing aliases/functions only; LOOK never
+# shadows a builtin or executable such as /usr/bin/ld or an installed `lf`.
+_LOOK_SHORTCUT_POLICY_FILE="$HOME/.local/share/look/shortcut_policy"
+_LOOK_SHORTCUT_POLICY="polite"
+[[ -r "$_LOOK_SHORTCUT_POLICY_FILE" ]] && _LOOK_SHORTCUT_POLICY="$(<"$_LOOK_SHORTCUT_POLICY_FILE")"
 
-# Your original idea survives: normal interactive `ls` means smart LOOK.
-# `command ls` always reaches the real Unix command when you need it.
-ls() {
-  if (( $# == 0 )); then
-    lk
-  else
-    command ls "$@"
-  fi
+_look_short_name_kind() {
+  local name="$1"
+  (( $+builtins[$name] )) && { print builtin; return; }
+  (( $+commands[$name] )) && { print executable; return; }
+  (( $+aliases[$name] )) && { print alias; return; }
+  (( $+functions[$name] )) && { print function; return; }
+  print free
 }
+
+_look_short_install() {
+  local name="$1" target="$2" kind
+  kind="$(_look_short_name_kind "$name")"
+  case "$kind" in
+    builtin|executable)
+      return 1
+      ;;
+    alias|function)
+      [[ "$_LOOK_SHORTCUT_POLICY" == "force" ]] || return 1
+      unalias "$name" 2>/dev/null
+      unfunction "$name" 2>/dev/null
+      ;;
+  esac
+  eval "${name}() { ${target} \"\$@\"; }"
+}
+
+_look_short_install l _look_smart
+_look_short_install ll lkl
+_look_short_install ld lkd
+_look_short_install lf lkf
+_look_short_install lt lkt
+_look_short_install lr lkr
+_look_short_install lz lkz
+
+# Historical LOOK aliases are intentionally no longer installed: lsd collides
+# with the established lsd utility, and lc/lsf add little beyond lk*/lk commands.
+
+# `ls` is canonical Unix territory; LOOK never shadows it. Use `lk`, `lkl`, or optional `l`.
 
 # Zoxide jump + immediate orientation. These are worth keeping exactly.
 zll() {
   z "$@" || return
-  l
+  _look_smart
 }
 
 cdl() {
   z "$@" || return
-  ll
+  lkl
 }
 
 # Neovim's most famous usability bug is not knowing how to leave it.
@@ -592,6 +621,10 @@ add-zsh-hook precmd _look_shell_title
 # Zsh expands aliases while sourcing, so clear all names that become functions
 # BEFORE their function definitions are parsed.
 unalias lk lo fc rst commands 2>/dev/null
+# `fc` is a real Zsh history builtin. Older LOOK releases temporarily shadowed
+# it as a Future Crash shortcut, which broke history/paste machinery that calls
+# commands such as `fc -p -a /dev/null 0 0`.
+unfunction fc 2>/dev/null
 
 alias lk='nocorrect lk'
 commands() { "$HOME/.local/bin/lk" commands; }
@@ -604,6 +637,9 @@ lo() {
   _look_shell_title
   return $rc
 }
+# Natural-language arguments must never be subjected to Zsh spelling correction.
+# Alias recursion is suppressed by Zsh, so the inner `lo` resolves to the function.
+alias lo='nocorrect lo'
 
 # Fast media transport
 alias mm='lk media toggle'
@@ -633,4 +669,5 @@ _future_crash_owned() {
   return $rc
 }
 rst() { _future_crash_owned "$@"; }
-fc()  { _future_crash_owned "$@"; }
+fcr() { _future_crash_owned "$@"; }
+

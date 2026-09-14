@@ -59,6 +59,12 @@ _lk() {
     'thinking:LO thinking depth'
     'think-display:LO thinking presentation'
     'settings:unified settings panel'
+    'access:manage LO filesystem grants'
+    'apps:manage desktop app preferences'
+    'shortcuts:inspect or set polite shell shortcut policy'
+    'open:open path in preferred/default desktop app'
+    'preview:preview path outside terminal'
+    'reveal:show path in Finder/file manager'
     'home:LOOK home'
     'doctor:diagnose environment'
     'config:installed paths/state'
@@ -215,8 +221,20 @@ _lk() {
       (( CURRENT == 3 )) && _values 'undo action' list skip
       ;;
 
-    reveal)
+    open|preview|reveal)
       _arguments '*:path:_files'
+      ;;
+
+    apps)
+      if (( CURRENT == 3 )); then
+        _values 'app category' browser editor image pdf video audio
+      elif (( CURRENT == 4 )); then
+        _message 'application name or system'
+      fi
+      ;;
+
+    shortcuts)
+      (( CURRENT == 3 )) && _values 'shortcut policy' polite force reset
       ;;
 
     detail|dirs|files|tree|recent|size|run|git)

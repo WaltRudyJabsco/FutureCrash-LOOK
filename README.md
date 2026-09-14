@@ -97,7 +97,7 @@ lk clean     conservative maintenance
 lk config    LOOK and LO behavior
 
 lo           talk to LO
-fc           Future Crash
+fcr          Future Crash
 ```
 
 These are keyboard-driven control surfaces over the existing commands, not replacements. Experienced users can still go directly to `lk doctor`, `lk models`, `lk thinking deep`, `lk tailscale`, and the rest.
@@ -179,7 +179,7 @@ future-crash
 or the shorter aliases:
 
 ```sh
-fc
+fcr
 rst
 ```
 
@@ -673,7 +673,7 @@ You do not need to memorize this. Start with `future-crash`, `lk`, and `lo`.
 
 | Command | Purpose |
 | --- | --- |
-| `future-crash` / `fc` / `rst` | Launch Future Crash |
+| `future-crash` / `fcr` / `rst` | Launch Future Crash |
 | `lk` | LOOK command center |
 | `lo` | Direct AI conversation |
 | `l` | LOOK around / navigate |
@@ -683,7 +683,7 @@ You do not need to memorize this. Start with `future-crash`, `lk`, and `lo`.
 | `lmk` | Smart make: file or directory |
 | `lk machine` | Machine/system view |
 | `lk doctor` | Diagnose the environment |
-| `lk settings` | Unified settings |
+| `lk settings [SEARCH]` | Search-first settings control room |
 | `lk ollama models` | Inspect/select models |
 | `lk ollama host` | Inspect/select hosts |
 | `lk ollama key` | Configure web-search key |
@@ -774,8 +774,8 @@ This release establishes the following baseline:
 
 | Layer | Version |
 | --- | ---: |
-| Future Crash + LOOK | **2.3.1** |
-| LOOK | **4.3.1** |
+| Future Crash + LOOK | **2.3.4** |
+| LOOK | **4.3.4** |
 | Future Crash | **1.1.10** |
 
 Signal rendering is now compiled separately from conversation: explicit Signal requests use a focused no-thinking 1200-token render pass, while ordinary Workstation conversation retains its own reasoning budget.
@@ -1074,3 +1074,39 @@ The starting folder is LO's default trusted workspace. Outside paths can be gran
 ### Living Memory compiler
 
 LOOK 4.3 uses a layered memory model: disposable candidates, durable atomic memories, compact semantic-domain summaries, and a tiny routing summary. Only relevant memory is retrieved into a normal LO prompt. The resident Living AI broker periodically compacts durable memory during idle time without broadening user claims.
+
+
+### POWER command authority
+
+POWER mode distinguishes known read-only inspections from potentially mutating shell work. Safe inspections can run directly; other commands use LOOK's native once/session confirmation UI. Models never negotiate shell authorization conversationally. `lk ollama test` reports natural AGENT execution separately from controlled tool judgment.
+
+
+### Desktop bridge
+
+LOOK can hand artifacts out of the terminal without teaching the model platform-specific application commands. `lk open`, `lk preview`, and `lk reveal` use OS defaults or optional category preferences managed by `lk apps`. LO exposes the same actions as host-owned read-only tools subject to normal path grants.
+
+
+### Shell namespace
+
+LOOK's canonical namespace is `lk`. The fast collision-resistant view commands are `lkl`, `lkd`, `lkf`, `lkt`, `lkr`, and `lkz`. Ultra-short aliases such as `ll`, `lr`, and `lz` are installed only when their names are available under the current shortcut policy. `lk shortcuts` shows or changes that policy. LOOK never deliberately shadows a builtin or an executable on PATH.
+
+
+### Model runtime fit
+
+`lk ollama test` reports capability and interactive runtime separately. `FIT` is based on broad warm TTFT/generation-rate thresholds (EXCELLENT, GOOD, SLOW, POOR). A POOR result is a prompt to inspect `lk ai stats` and `ollama ps`; timing alone is not treated as proof of GPU spill.
+
+
+### Settings control room
+
+`lk settings` is the human-facing configuration surface. It is searchable: begin typing any concept such as `memory`, `video`, `GPU`, `safe`, `sound`, or `downloads`, and the list narrows to the relevant control. The right-hand preview explains what the highlighted setting does before you change it.
+
+You can also enter with a search already applied:
+
+```text
+lk settings memory
+lk settings video
+lk settings gpu
+lk settings shortcuts
+```
+
+Direct commands remain available for scripting and muscle memory; the control room calls the same underlying functions rather than maintaining a second settings system.

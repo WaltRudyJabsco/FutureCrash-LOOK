@@ -17,7 +17,7 @@ try:
 except Exception:
     readline = None
 
-VERSION="4.3.1"
+VERSION="4.4.0"
 
 LOOK_WORDMARK = r"""       ██╗      ██╗  ██╗
        ██║      ██║ ██╔╝
@@ -39,6 +39,8 @@ SKILLS_FILE=STATE_DIR/"skills.md"
 UNDO_FILE=STATE_DIR/"undo.json"
 UNDO_SKIPPED_FILE=STATE_DIR/"undo_skipped.json"
 ACCESS_FILE=STATE_DIR/"access.json"
+APPS_FILE=STATE_DIR/"apps.json"
+SHORTCUT_POLICY_FILE=STATE_DIR/"shortcut_policy"
 _SESSION_PATH_GRANTS=[]
 _ONCE_PATH_GRANTS=[]
 UNDO_TRASH=STATE_DIR/"undo_trash"
@@ -861,7 +863,7 @@ def _help_color(body):
         return body
     reset="\033[0m"; bold="\033[1m"; cyan="\033[36m"; magenta="\033[35m"
     section_names={"LOOK","INSPECT","SYSTEM","FILE CARD","FILE ACTIONS","SHORTCUTS","LIVE FILTER / SELECTION","HELP PAGER"}
-    shortcut_tokens=("l / ls","ll","ld","lf","lt","lr","lz","zll WORD","cdl WORD",
+    shortcut_tokens=("lk","lkl","lkd","lkf","lkt","lkr","lkz","zll WORD","cdl WORD",
                      "fznv","f","rs","rb","lh","lo","lo ASK")
     out=[]
     in_shortcuts=False
@@ -931,12 +933,13 @@ AI / OLLAMA
   lo @HOST [ASK]       use another Ollama host for this session
   lo --conservative      read/search only for this session
   lo --workspace         workspace tools + explicit path grants (default)
-  lo --power             shell commands · confirm each
+  lo --power             shell tools · known read-only inspections auto-run;
+                         other commands use native once/session confirmation
   lo --unsafe            unrestricted shell for this session
   lk o --no-start ...    never start a missing local server
   lk ollama            Ollama + selected-host status
   lk ollama models     model panel · Enter select · X enable/disable
-  lk ollama test       benchmark current model
+  lk ollama test       benchmark LOOK-selected model
   lk ollama test --all compare enabled installed models
   lk ollama host       list saved + reachable Ollama hosts
   lk ollama host NAME  make NAME the persistent default
@@ -1019,12 +1022,23 @@ LO PERSONALITY + THINKING
   lk thinking MODE     light · adaptive · deep
   lk think-display     show thinking presentation
   lk think-display MODE compact · full · quiet
-  lk settings          configure all of these interactively
+  lk settings [SEARCH] searchable control room for all settings
+
+DESKTOP BRIDGE
+  lk open PATH          open local path in preferred/default graphical app
+  lk preview PATH       Quick Look on macOS; default/preferred app elsewhere
+  lk reveal PATH        reveal path in Finder/file manager
+  lk apps               show preferred apps by category
+  lk apps video vlc     set preferred video app
+  lk apps pdf system    return PDF handling to OS default
+  categories            browser · editor · image · pdf · video · audio
+                        LO uses open_path / preview_path / reveal_path rather than
+                        inventing platform-specific app commands
 
 SYSTEM
   lk home              friendly LOOK home screen
   lk doctor            check the environment
-  lk settings          unified interactive settings panel
+  lk settings [SEARCH] searchable settings control room
   lk profile           portable LOOK identity status
   lk profile backup [DEST] [--keep N]
                        create/remember rotating profile backups
@@ -1058,16 +1072,16 @@ FILE ACTIONS
   lk undo skip         abandon newest BLOCKED record; filesystem unchanged
 
 SHORTCUTS
-  l / ls   smart view          ll       details
-  ld       directories         lf       files
-  lt       tree                lr       recent
-  lz       sizes               zll WORD jump + look
-  cdl WORD jump + details      fznv     fuzzy edit
-  f        find anywhere → LOOK
-  lh       LOOK home           lo       Ollama chat
-  lo ASK   ask immediately     rs       reset ritual
-  rb       reload zsh          webterm  terminal over Tailscale
-  commands same as lk help     command ls = real Unix ls
+  CANONICAL  lk detail · lk dirs · lk files · lk tree · lk recent · lk size
+  FAST       lkl · lkd · lkf · lkt · lkr · lkz   (LOOK namespace; always installed)
+  OPTIONAL   ll · ld · lf · lt · lr · lz          (only when collision policy allows)
+  l          smart view            zll WORD jump + look
+  cdl WORD   jump + details        fznv     fuzzy edit
+  f          find anywhere → LOOK  lh       LOOK home
+  lo         Ollama chat           rs       reset ritual
+  rb         reload zsh            webterm  terminal over Tailscale
+  lk shortcuts                    inspect/set shortcut policy
+  command ls                      always the real Unix ls
   terminal title shows owner: ● LOOK · ● LO · ● FUTURE CRASH · ◌ FUTURE CRASH SHELL
 
 LIVE FILTER / SELECTION
@@ -1239,11 +1253,18 @@ def _doctor_body():
     print(f"  {'✓' if web_key else '·'} web search key")
     print(f"  {'✓' if memory_ok else '✗'} persistent memory")
 
-    print("\nPREVIEW · optional")
+    print("\nDESKTOP BRIDGE · optional")
+    system=platform.system()
+    opener=(shutil.which("open") if system=="Darwin" else (shutil.which("xdg-open") if system!="Windows" else "startfile"))
+    quicklook=bool(system=="Darwin" and shutil.which("qlmanage"))
     image_preview=bool(shutil.which("chafa"))
-    pdf_preview=image_preview and bool(shutil.which("pdftoppm") or (platform.system()=="Darwin" and shutil.which("qlmanage")))
-    print(f"  {'✓' if image_preview else '·'} image preview" + ("" if image_preview else " · install chafa to enable"))
-    print(f"  {'✓' if pdf_preview else '·'} PDF image preview" + ("" if pdf_preview else " · needs image preview + PDF rasterizer"))
+    pdf_preview=image_preview and bool(shutil.which("pdftoppm") or quicklook)
+    print(f"  {'✓' if opener else '·'} system opener" + (f" · {opener}" if opener else " · unavailable"))
+    print(f"  {'✓' if quicklook else '·'} Quick Look" + ("" if system=="Darwin" else " · macOS only"))
+    print(f"  {'✓' if image_preview else '·'} terminal image preview" + ("" if image_preview else " · chafa optional"))
+    print(f"  {'✓' if pdf_preview else '·'} PDF preview helper" + ("" if pdf_preview else " · pdftoppm/Quick Look optional"))
+    for app in ("vlc","mpv"):
+        if shutil.which(app): print(f"  ✓ media helper · {app}")
 
     good=all(ok for _,ok in checks+files) and memory_ok
     print("\n"+("Everything looks good." if good else "LOOK found something worth checking."))
@@ -4440,6 +4461,93 @@ def _tool_move_path(workspace, source, destination):
     return _journal_move(src,dst)
 
 
+DESKTOP_APP_CATEGORIES=("browser","editor","image","pdf","video","audio")
+
+
+def _load_apps():
+    try:
+        data=json.loads(APPS_FILE.read_text(encoding="utf-8"))
+        if not isinstance(data,dict): return {}
+        return {k:str(v) for k,v in data.items() if k in DESKTOP_APP_CATEGORIES and str(v).strip()}
+    except (OSError,ValueError,json.JSONDecodeError):
+        return {}
+
+
+def _save_apps(apps):
+    STATE_DIR.mkdir(parents=True,exist_ok=True)
+    _atomic_json(APPS_FILE,{k:v for k,v in apps.items() if k in DESKTOP_APP_CATEGORIES and v})
+    try: os.chmod(APPS_FILE,0o600)
+    except OSError: pass
+
+
+def _path_app_category(path):
+    import mimetypes
+    path=Path(path)
+    suffix=path.suffix.casefold()
+    mime,_=mimetypes.guess_type(str(path))
+    if suffix in {".html",".htm",".xhtml"}: return "browser"
+    if suffix==".pdf": return "pdf"
+    if mime:
+        if mime.startswith("image/"): return "image"
+        if mime.startswith("video/"): return "video"
+        if mime.startswith("audio/"): return "audio"
+        if mime.startswith("text/"): return "editor"
+    if suffix in {".md",".txt",".json",".yaml",".yml",".toml",".py",".js",".ts",".css",".csv",".xml",".ini",".conf",".zsh",".sh"}:
+        return "editor"
+    return ""
+
+
+def _desktop_launch(target, category="", preview=False):
+    """Open/preview a local path outside the terminal using OS defaults or preferences."""
+    target=Path(target).expanduser().resolve()
+    if not target.exists():
+        return f"{'Preview' if preview else 'Open'} failed: not found: {target}"
+    category=category or _path_app_category(target)
+    apps=_load_apps()
+    preferred=apps.get(category,"system")
+    system=platform.system()
+    try:
+        if preview and system=="Darwin" and shutil.which("qlmanage"):
+            subprocess.Popen(["qlmanage","-p",str(target)],stdout=subprocess.DEVNULL,stderr=subprocess.DEVNULL)
+            return f"PREVIEW OK · {target} · Quick Look"
+        if system=="Darwin":
+            cmd=["open"]
+            if preferred and preferred!="system":
+                cmd.extend(["-a",preferred])
+            cmd.append(str(target))
+        elif system=="Windows":
+            if preferred and preferred!="system":
+                cmd=[preferred,str(target)]
+            else:
+                os.startfile(str(target))  # type: ignore[attr-defined]
+                return f"{'PREVIEW' if preview else 'OPEN'} OK · {target} · system"
+        else:
+            if preferred and preferred!="system":
+                binary=shutil.which(preferred) or (preferred if Path(preferred).exists() else None)
+                if not binary:
+                    return f"Open failed: preferred {category or 'app'} is unavailable: {preferred}"
+                cmd=[binary,str(target)]
+            else:
+                opener=shutil.which("xdg-open")
+                if not opener:
+                    return "Open unavailable: xdg-open was not found."
+                cmd=[opener,str(target)]
+        subprocess.Popen(cmd,stdin=subprocess.DEVNULL,stdout=subprocess.DEVNULL,stderr=subprocess.DEVNULL)
+        action="PREVIEW" if preview else "OPEN"
+        app=preferred if preferred!="system" else "system"
+        return f"{action} OK · {target} · {category or 'file'} · {app}"
+    except OSError as exc:
+        return f"{'Preview' if preview else 'Open'} failed: {exc}"
+
+
+def _open_host_path(path):
+    return _desktop_launch(path,preview=False)
+
+
+def _preview_host_path(path):
+    return _desktop_launch(path,preview=True)
+
+
 def _reveal_host_path(path):
     """Reveal a path in the host file manager without mutating it."""
     target=Path(path).expanduser().resolve()
@@ -4472,6 +4580,27 @@ def _tool_reveal_path(workspace, path):
     return _reveal_host_path(target)
 
 
+def _tool_open_path(workspace,path):
+    target=_safe_workspace_path(workspace,path,"read")
+    return _open_host_path(target)
+
+
+def _tool_preview_path(workspace,path):
+    target=_safe_workspace_path(workspace,path,"read")
+    return _preview_host_path(target)
+
+
+def open_command(args,preview=False):
+    if not args:
+        print(f"usage: lk {'preview' if preview else 'open'} PATH")
+        return 2
+    target=Path(" ".join(args)).expanduser()
+    result=_preview_host_path(target) if preview else _open_host_path(target)
+    print(_action_result(result))
+    ok=result.startswith("PREVIEW OK" if preview else "OPEN OK")
+    return 0 if ok else 1
+
+
 def reveal_command(args):
     if not args:
         print("usage: lk reveal PATH")
@@ -4498,6 +4627,7 @@ def _tool_make_directory(workspace, path):
 
 
 LO_PROFILES=("conservative","workspace","power","unsafe")
+_SESSION_COMMAND_GRANTS=set()
 
 
 LO_PERSONALITIES=("lo","robot","max","philosopher")
@@ -4825,7 +4955,7 @@ def lo_access(args):
         rows=[
             ("conservative","read/search workspace + web; no writes"),
             ("workspace","bounded LOOK file tools inside starting workspace"),
-            ("power","workspace tools + shell commands; confirm each command"),
+            ("power","workspace tools + safe inspections; other shell commands ask natively"),
             ("unsafe","shell commands without per-command confirmation"),
         ]
         for name,desc in rows:
@@ -4842,15 +4972,73 @@ def lo_access(args):
     print(f"✓ LO access · {profile}")
     return 0
 
-def _confirm_command(command):
-    print()
-    print(_ansi_label("command ›","33"),command)
+def _command_words(command):
     try:
-        answer=input("Allow command? [y/N] ").strip().lower()
+        import shlex
+        return shlex.split(str(command or ""),posix=True)
+    except ValueError:
+        return []
+
+
+def _inspection_command(command):
+    """Known non-mutating shell inspections that POWER may run without prompting."""
+    words=_command_words(command)
+    if not words:
+        return False
+    # Shell composition/redirection changes semantics; require confirmation.
+    if re.search(r"[;&|><`$()]",str(command)):
+        return False
+    exe=Path(words[0]).name
+
+    universal={"--version","-V","--help","-h"}
+    if len(words)==2 and words[1] in universal and exe not in {"rm","mv","cp","dd","kill","pkill"}:
+        return True
+
+    if exe in {"pwd","whoami","uname","hostname","which","whereis","type","id","uptime"}:
+        return True
+    if exe=="ollama" and len(words)>=2 and words[1] in {"list","ps","show","--version","-v","version"}:
+        return True
+    if exe=="git" and len(words)>=2 and words[1] in {"status","branch","log","diff","show","rev-parse","remote"}:
+        # Explicitly reject flags commonly used to mutate despite the subcommand.
+        return not any(w in {"--delete","-D","-d","--force","-f","--set-upstream-to"} for w in words[2:])
+    if exe=="nvidia-smi":
+        return True
+    if exe in {"ls","stat","file","du","df","ps","lsof","env","printenv"}:
+        return True
+    return False
+
+
+def _command_grant_key(command):
+    # Session permission is intentionally exact-command, not executable-wide.
+    return " ".join(str(command or "").split()).strip()
+
+
+def _native_confirm(kind,detail,allow_session=False):
+    """Reusable terminal-owned confirmation; never delegated to the model."""
+    print()
+    print(_ansi_label(f"{kind} ›","33"),detail)
+    prompt="[y] once"
+    if allow_session:
+        prompt+=" · [s] allow command this session"
+    prompt+=" · Enter/Esc cancel › "
+    try:
+        answer=input(prompt).strip().casefold()
     except (EOFError,KeyboardInterrupt):
         print()
-        return False
-    return answer in {"y","yes"}
+        return "cancel"
+    if answer in {"y","yes","once"}:
+        return "once"
+    if allow_session and answer in {"s","session"}:
+        return "session"
+    return "cancel"
+
+
+def _confirm_command(command):
+    choice=_native_confirm("command",command,allow_session=True)
+    if choice=="session":
+        _SESSION_COMMAND_GRANTS.add(_command_grant_key(command))
+    return choice!="cancel"
+
 
 def _confirm_unsafe_session():
     print(_c("LO UNSAFE","31"))
@@ -4870,7 +5058,7 @@ def _command_tool():
         "description":(
             "Run a shell command on the computer running LOOK. Use this in power/unsafe sessions for executing, "
             "testing, installing, inspecting, building, cleaning, or administering beyond LOOK's bounded file tools. "
-            "Prefer inspection before destructive or system-wide mutation."
+            "Prefer inspection before destructive or system-wide mutation. Do not ask the user to type yes/confirm in chat; LOOK itself owns any required native confirmation prompt."
         ),
         "parameters":{"type":"object","properties":{
             "command":{"type":"string","description":"Shell command to execute with zsh -lc"},
@@ -4900,9 +5088,11 @@ def _run_command_tool(workspace,args,profile):
     except (TypeError,ValueError):
         timeout=120
 
-    if profile=="power" and not _confirm_command(command):
-        return "Command denied by user."
-
+    if profile=="power":
+        grant_key=_command_grant_key(command)
+        trusted=_inspection_command(command) or grant_key in _SESSION_COMMAND_GRANTS
+        if not trusted and not _confirm_command(command):
+            return "Command denied by user."
     shell=shutil.which("zsh")
     if not shell:
         return "Command tool failed: zsh is not available on PATH"
@@ -4911,7 +5101,7 @@ def _run_command_tool(workspace,args,profile):
         proc=subprocess.run(
             [shell,"-lc",command],
             cwd=str(cwd),
-            stdin=None,
+            stdin=subprocess.DEVNULL,
             stdout=subprocess.PIPE,
             stderr=subprocess.STDOUT,
             text=True,
@@ -4933,7 +5123,7 @@ def _run_command_tool(workspace,args,profile):
 def _lo_tools(profile):
     tools=_filesystem_tools()
     if profile=="conservative":
-        tools=[t for t in tools if t.get("function",{}).get("name") in {"list_files","inspect_directory","read_file","search_files","reveal_path"}]
+        tools=[t for t in tools if t.get("function",{}).get("name") in {"list_files","inspect_directory","read_file","search_files","reveal_path","open_path","preview_path"}]
     tools.extend(_information_tools())
     tools.extend(_system_inspection_tools())
     if profile in {"power","unsafe"}:
@@ -5114,6 +5304,93 @@ def _tool_inspect_directory(workspace, raw_path=".", recursive=False, max_entrie
     return json.dumps(payload,ensure_ascii=False)
 
 
+def _shortcut_collision_kind(name):
+    """Best-effort current shell/system collision classification."""
+    # Python cannot see parent-shell aliases/functions; the managed zsh layer
+    # performs the authoritative runtime check. Here we report builtins/files.
+    if name in {"fc","cd","pwd","echo","read","type"}:
+        return "builtin"
+    resolved=shutil.which(name)
+    return f"executable · {resolved}" if resolved else "free/alias/function unknown until rb"
+
+
+def _shortcuts_command(args):
+    policy="polite"
+    try:
+        raw=SHORTCUT_POLICY_FILE.read_text(encoding="utf-8").strip().casefold()
+        if raw in {"polite","force"}: policy=raw
+    except OSError:
+        pass
+
+    if args and args[0] in {"polite","force"}:
+        policy=args[0]
+        STATE_DIR.mkdir(parents=True,exist_ok=True)
+        SHORTCUT_POLICY_FILE.write_text(policy+"\n",encoding="utf-8")
+        try: os.chmod(SHORTCUT_POLICY_FILE,0o600)
+        except OSError: pass
+        print(f"LOOK shortcuts · {policy} · run rb to apply")
+        if policy=="force":
+            print("  force may replace existing aliases/functions; builtins and executables still win")
+        return 0
+
+    if args and args[0] in {"reset","default"}:
+        try: SHORTCUT_POLICY_FILE.unlink()
+        except OSError: pass
+        print("LOOK shortcuts · polite · run rb to apply")
+        return 0
+
+    _title("LOOK SHORTCUTS",f"policy · {policy}")
+    print("  CANONICAL")
+    print("    lk detail   lk dirs   lk files   lk tree   lk recent   lk size")
+    print("  FAST LOOK NAMESPACE · always installed")
+    print("    lkl         lkd       lkf        lkt       lkr         lkz")
+    print("  ULTRA-SHORT · opportunistic")
+    mapping=[("ll","lkl"),("ld","lkd"),("lf","lkf"),("lt","lkt"),("lr","lkr"),("lz","lkz")]
+    for name,target in mapping:
+        print(f"    {name:<4} → {target:<4} · {_shortcut_collision_kind(name)}")
+    print("\n  polite  existing aliases/functions/builtins/executables win")
+    print("  force   replace aliases/functions; builtins/executables still win")
+    print("\n  lk shortcuts polite")
+    print("  lk shortcuts force")
+    print("  rb                         apply shell changes")
+    return 0
+
+
+def _apps_command(args):
+    apps=_load_apps()
+    if not args or args[0] in {"list","status"}:
+        _title("LOOK APPS","desktop bridge")
+        system=platform.system()
+        print(f"  platform     {system}")
+        print(f"  system open  {'open' if system=='Darwin' else ('startfile' if system=='Windows' else (shutil.which('xdg-open') or 'unavailable'))}")
+        for category in DESKTOP_APP_CATEGORIES:
+            value=apps.get(category,"system")
+            state=value
+            if value!="system" and system!="Darwin" and not (shutil.which(value) or Path(value).exists()):
+                state=f"{value} · unavailable"
+            print(f"  {category:<11} {state}")
+        print("\n  lk apps CATEGORY APP      set preferred app")
+        print("  lk apps CATEGORY system   return category to OS default")
+        print("  lk open PATH              open in preferred/default app")
+        print("  lk preview PATH           Quick Look on macOS; preferred/default app elsewhere")
+        print("  lk reveal PATH            show in Finder/file manager")
+        return 0
+    category=args[0].casefold()
+    if category not in DESKTOP_APP_CATEGORIES or len(args)<2:
+        print("usage: lk apps <browser|editor|image|pdf|video|audio> <APP|system>")
+        return 2
+    value=" ".join(args[1:]).strip()
+    if value.casefold() in {"default","system","auto"}:
+        apps.pop(category,None)
+        _save_apps(apps)
+        print(f"LOOK apps · {category} · system")
+        return 0
+    apps[category]=value
+    _save_apps(apps)
+    print(f"LOOK apps · {category} · {value}")
+    return 0
+
+
 def _filesystem_tools():
     return [
         {"type":"function","function":{
@@ -5188,6 +5465,20 @@ def _filesystem_tools():
             "description":"Reveal an existing workspace file or folder in the host graphical file manager. Use when the user says show me the file, reveal it in Finder, open its folder, or asks where a created file is.",
             "parameters":{"type":"object","properties":{
                 "path":{"type":"string","description":"Workspace-relative path to reveal"}
+            },"required":["path"]}
+        }},
+        {"type":"function","function":{
+            "name":"open_path",
+            "description":"Open an existing local file or folder in the user's preferred/default graphical application. Use when the user asks to open, launch, play, view, or show a local artifact outside the terminal.",
+            "parameters":{"type":"object","properties":{
+                "path":{"type":"string","description":"Local path to open"}
+            },"required":["path"]}
+        }},
+        {"type":"function","function":{
+            "name":"preview_path",
+            "description":"Preview an existing local file outside the terminal. On macOS this prefers Quick Look; elsewhere it opens with the preferred/default graphical app. Use for quick previews of PDFs, images, media, and documents.",
+            "parameters":{"type":"object","properties":{
+                "path":{"type":"string","description":"Local path to preview"}
             },"required":["path"]}
         }},
         {"type":"function","function":{
@@ -5298,6 +5589,10 @@ def _run_filesystem_tool_impl(workspace, name, args):
             return _tool_move_path(workspace, args.get("source", ""), args.get("destination", ""))
         if name == "reveal_path":
             return _tool_reveal_path(workspace, args.get("path", ""))
+        if name == "open_path":
+            return _tool_open_path(workspace,args.get("path",""))
+        if name == "preview_path":
+            return _tool_preview_path(workspace,args.get("path",""))
         if name == "remove_path":
             return _tool_remove_path(workspace, args.get("path", ""), bool(args.get("confirmed", False)))
         if name == "make_directory":
@@ -5310,7 +5605,7 @@ def _run_filesystem_tool_impl(workspace, name, args):
         return f"File tool internal error: {type(exc).__name__}: {exc}"
     return f"Unknown file tool: {name}"
 
-LOOK_INFO_USER_AGENT="LOOK-Shell/4.3.1 (local text client)"
+LOOK_INFO_USER_AGENT="LOOK-Shell/4.4.0 (local text client)"
 
 def _run_filesystem_tool(workspace, name, args):
     try:
@@ -5705,20 +6000,24 @@ class _RollingThinking:
     def _show(self,chunk):
         if self.mode=="full":
             if not self.started:
-                print("\\n"+_ansi_label("thinking ›","2"))
+                print("\n"+_ansi_label("thinking ›","2"))
                 self.started=True
             print("  "+_c(chunk,"2"),flush=True)
             return
+        previous_count=len(self.lines)
         self.lines=(self.lines+[chunk])[-3:]
         if not sys.stdout.isatty():
             print("thinking › "+chunk,flush=True); return
-        if self.started:
-            sys.stdout.write(f"\\033[{len(self.lines)-1 if len(self.lines)>1 else 1}A")
+        if self.started and previous_count:
+            # Cursor sits immediately below the previous rolling window.
+            sys.stdout.write(f"\033[{previous_count}A")
         else:
             print()
             self.started=True
+        width=max(30,shutil.get_terminal_size((100,24)).columns-13)
         for line in self.lines:
-            sys.stdout.write("\\r\\033[2K"+_ansi_label("thinking ›","2")+" "+_c(line[:150],"2")+"\\n")
+            clipped=line if len(line)<=width else line[:max(1,width-1)]+"…"
+            sys.stdout.write("\r\033[2K"+_ansi_label("thinking ›","2")+" "+_c(clipped,"2")+"\n")
         sys.stdout.flush()
 
     def finish(self):
@@ -5738,6 +6037,36 @@ def _ollama_stream_chat(base,payload_obj):
         for raw in response:
             if not raw.strip(): continue
             yield json.loads(raw)
+
+def _answer_inspection_command(answer):
+    """Recover a known-safe inspection command mentioned by a prose-only model answer."""
+    text=str(answer or "")
+    candidates=[]
+    candidates.extend(re.findall(r"`([^`\n]{2,180})`",text))
+    # Also catch common bare observational commands in prose.
+    for pat in (
+        r"\b(ollama\s+--version)\b",
+        r"\b(git\s+--version)\b",
+        r"\b(python3?\s+--version)\b",
+        r"\b(nvidia-smi)\b",
+    ):
+        candidates.extend(re.findall(pat,text,re.I))
+    for candidate in candidates:
+        command=" ".join(str(candidate).split()).strip()
+        if _inspection_command(command):
+            return command
+    return ""
+
+
+def _looks_like_tool_refusal(answer):
+    low=" ".join(str(answer or "").split()).casefold()
+    patterns=(
+        "i can't run","i cannot run","i don’t have permission","i don't have permission",
+        "current toolset does not provide","run it in your terminal","run the command",
+        "please run","you can run","execute it yourself","i can't check","i cannot check",
+    )
+    return any(p in low for p in patterns)
+
 
 def ollama_chat(force_search=False, initial_prompt=None, allow_start=True, host_override=None, host_name=None, access_profile=None, selected_paths=None, workspace_override=None, one_shot=False):
     """Minimal local chat; optional first prompt and web-search mode."""
@@ -5782,6 +6111,7 @@ def ollama_chat(force_search=False, initial_prompt=None, allow_start=True, host_
     resident = model in running_names
     model_caps=_ollama_capabilities(base, model)
     supports_thinking=bool(model_caps and "thinking" in model_caps)
+    supports_tools=(model_caps is None or "tools" in model_caps)
 
     workspace = Path(workspace_override).expanduser().resolve() if workspace_override else Path.cwd().resolve()
     selected_paths=[Path(p).expanduser().resolve() for p in (selected_paths or [])]
@@ -5797,6 +6127,8 @@ def ollama_chat(force_search=False, initial_prompt=None, allow_start=True, host_
         print(f"context · {len(selected_paths)} selected path{'s' if len(selected_paths)!=1 else ''}")
     if not resident:
         print(f"model · idle · loads on first prompt")
+    if not supports_tools:
+        print("tools · unavailable for model · host edges remain available")
     print(f"web · {web_state} · Ctrl-D to exit · Ctrl-C cancels work\n")
 
     web_tool = {
@@ -5840,7 +6172,8 @@ def ollama_chat(force_search=False, initial_prompt=None, allow_start=True, host_
             "For example, from workspace ~, 'make x.html in the Downloads folder' means Downloads/x.html, not ./x.html. "
             "Do not silently substitute the current directory for a named destination. If the named destination resolves outside the current WORKSPACE boundary, call the correct file tool anyway: LOOK itself will request user permission and resume the exact operation if granted. Never substitute another destination to avoid a permission request. "
             "If two different in-workspace directories genuinely match an ambiguous spoken destination, inspect/list them or ask which one rather than guessing. "
-            "Use reveal_path when the user asks to show/reveal a file in Finder or the host file manager. "
+            "Use reveal_path when the user asks to locate/reveal a file in Finder or the host file manager. "
+            "Use open_path when the user wants a local artifact opened/launched/played in a graphical app. Use preview_path for a quick external preview. "
             "TOOL RECEIPTS ARE GROUND TRUTH. After a successful filesystem tool call, report the exact canonical path from the receipt and never contradict it with memory, prior conversation, or an inferred current directory. "
             "A failed tool receipt means the requested operation did not happen unless a later successful receipt proves otherwise. "
             "Use write_file only for intentional textual creation or editing. Only mutate files when the user explicitly asks. "
@@ -5883,7 +6216,8 @@ def ollama_chat(force_search=False, initial_prompt=None, allow_start=True, host_
         ),
         "power": (
             "ACCESS PROFILE: POWER. You may use bounded filesystem tools with explicit path grants and run_command for computer-level work. "
-            "Every shell command requires user confirmation. Prefer inspection before mutation and briefly explain destructive/system-wide actions."
+            "Known read-only inspection commands may execute automatically; other commands receive a native LOOK confirmation outside the conversation. "
+            "Never ask the user to reply yes/confirm in chat. If inspection can answer the question, call run_command directly. Prefer inspection before mutation."
         ),
         "unsafe": (
             "ACCESS PROFILE: UNSAFE. The user explicitly enabled unrestricted shell command execution for this session. "
@@ -5899,6 +6233,12 @@ def ollama_chat(force_search=False, initial_prompt=None, allow_start=True, host_
         "deep":"THINKING DEPTH: DEEP. Deliberate carefully on substantive work without repetitive self-commentary.",
     }
     messages.append({"role":"system","content":thinking_notes[thinking_mode]})
+    if not supports_tools:
+        messages.append({"role":"system","content":(
+            "MODEL CAPABILITY: this selected model does not support Ollama tool schemas. "
+            "Answer normally. In POWER/UNSAFE, if a simple host inspection would answer the question, "
+            "you may state the exact inspection command; LOOK can perform known read-only inspections host-side."
+        )})
 
     # Keep one stable system-message slot for user memory. Its contents are
     # refreshed against the *current* user prompt immediately before each
@@ -5972,6 +6312,8 @@ def ollama_chat(force_search=False, initial_prompt=None, allow_start=True, host_
         mutation_succeeded=False
         last_mutation_result=""
         mutation_repair_sent=False
+        tool_refusal_repair_sent=False
+        host_repair_final=False
         runtime=_lo_runtime_policy(thinking_mode, prompt)
         task_tier,budget=_lo_budget_for(prompt,thinking_mode,selected_paths)
         task_started=time.monotonic()
@@ -6000,10 +6342,12 @@ def ollama_chat(force_search=False, initial_prompt=None, allow_start=True, host_
             }
             if supports_thinking:
                 payload_obj["think"]=runtime["think"]
-            tools = _lo_tools(profile)
-            if has_web and not force_search:
-                tools.append(web_tool)
-            payload_obj["tools"] = tools
+            tools=[]
+            if supports_tools and not host_repair_final:
+                tools = _lo_tools(profile)
+                if has_web and not force_search:
+                    tools.append(web_tool)
+                payload_obj["tools"] = tools
 
             try:
                 aggregate={"role":"assistant","content":"","thinking":"","tool_calls":[]}
@@ -6118,7 +6462,7 @@ def ollama_chat(force_search=False, initial_prompt=None, allow_start=True, host_
                                 tool_content = _search_text(search_result)
                             except Exception as exc:
                                 tool_content = f"Web search failed: {exc}"
-                    elif name in {"list_files", "inspect_directory", "read_file", "search_files", "write_file", "create_text_files", "copy_path", "move_path", "remove_path", "make_directory", "reveal_path"}:
+                    elif name in {"list_files", "inspect_directory", "read_file", "search_files", "write_file", "create_text_files", "copy_path", "move_path", "remove_path", "make_directory", "reveal_path", "open_path", "preview_path"}:
                         if name in {"write_file","create_text_files"}:
                             args=_normalize_creation_destination(prompt,name,args)
                         with _activity(name.replace("_"," ")):
@@ -6137,9 +6481,12 @@ def ollama_chat(force_search=False, initial_prompt=None, allow_start=True, host_
                         if profile not in {"power","unsafe"}:
                             tool_content="Command execution is unavailable in this access profile."
                         else:
-                            with _activity("running command"):
+                            command_text=str(args.get("command","")).strip()
+                            is_inspection=_inspection_command(command_text)
+                            print(f"{_ansi_label('inspect ›' if is_inspection else 'command ›','36' if is_inspection else '33')} {command_text}")
+                            with _activity("inspecting" if is_inspection else "running command"):
                                 tool_content=_run_command_tool(workspace,args,profile)
-                            print(f"{_ansi_label('command ›', '33')} {tool_content.splitlines()[0]}")
+                            print(f"{_ansi_label('result ›', '33')} {tool_content.splitlines()[0]}")
                     else:
                         tool_content = f"Unknown tool: {name}"
 
@@ -6151,6 +6498,31 @@ def ollama_chat(force_search=False, initial_prompt=None, allow_start=True, host_
                 continue
 
             answer = message.get("content", "").strip()
+
+            # Some otherwise capable models reason correctly about a shell
+            # inspection but emit prose instead of crossing into a tool call.
+            # In POWER/UNSAFE, recover only known read-only inspections. LOOK
+            # executes the safe command deterministically, feeds the receipt
+            # back, and gives the model one final chance to answer.
+            if profile in {"power","unsafe"} and not tool_refusal_repair_sent:
+                repair_command=_answer_inspection_command(answer)
+                if repair_command and _looks_like_tool_refusal(answer):
+                    tool_refusal_repair_sent=True
+                    print(f"{_ansi_label('repair ›','33')} {repair_command}")
+                    with _activity("inspecting"):
+                        repair_result=_run_command_tool(workspace,{"command":repair_command,"timeout":30},profile)
+                    print(f"{_ansi_label('result ›','33')} {repair_result.splitlines()[0]}")
+                    host_repair_final=True
+                    messages.append({
+                        "role":"system",
+                        "content":(
+                            "HOST INSPECTION COMPLETE. LOOK has already completed the inspection. "
+                            f"Command: `{repair_command}`\nResult:\n{repair_result}\n"
+                            "FINAL-ANSWER-ONLY TURN: answer the user's original question directly from this result. "
+                            "Do not inspect again, do not propose another command, and do not ask the user to run anything."
+                        )
+                    })
+                    continue
 
             if mutation_required and mutation_attempted and not mutation_succeeded:
                 detail=(last_mutation_result or "filesystem mutation did not return a success receipt").strip()
@@ -6935,9 +7307,55 @@ def _benchmark_one_model(base, model):
             tool_errors.append(f"{label}: {exc}")
 
     results["tools"]=sum(checks)
+
+    # Separate from schema judgment: can the model cross from natural reasoning
+    # into a real tool call without being explicitly told which tool to invoke?
+    run_tool=_benchmark_tool(
+        "run_command",
+        "Run a shell command on the computer when inspection requires it.",
+        {"command":{"type":"string"}},["command"]
+    )
+    try:
+        response=_benchmark_chat(
+            base,model,
+            "What version of Ollama is installed on this computer? Determine it directly rather than telling me how to check.",
+            [run_tool]
+        )
+        name,args=_tool_call(response)
+        command=" ".join(str(args.get("command","")).split())
+        results["agent"]=bool(name=="run_command" and command=="ollama --version")
+    except Exception as exc:
+        results["agent"]=False
+        tool_errors.append(f"agent: {exc}")
+
     if tool_errors:
         results["tool_error"]="; ".join(tool_errors)
     return results
+
+
+def _benchmark_runtime_fit(row):
+    """Classify interactive usability without pretending speed proves GPU spill."""
+    if row.get("fatal_error") or row.get("speed_error") or "ttft" not in row:
+        return "ERROR"
+    ttft=float(row.get("ttft") or 0)
+    rate=float(row.get("rate") or 0)
+    # Deliberately broad thresholds: this is a UX warning, not a hardware diagnosis.
+    if ttft >= 20.0 or (rate and rate < 20.0):
+        return "POOR"
+    if ttft >= 8.0 or (rate and rate < 35.0):
+        return "SLOW"
+    if ttft <= 2.0 and rate >= 50.0:
+        return "EXCELLENT"
+    return "GOOD"
+
+
+def _benchmark_runtime_note(row):
+    fit=_benchmark_runtime_fit(row)
+    if fit=="POOR":
+        return "capability may be excellent; runtime is pathological · inspect `lk ai stats` / `ollama ps`"
+    if fit=="SLOW":
+        return "usable but slow for interactive LOOK"
+    return ""
 
 
 def ollama_test(all_models=False):
@@ -6957,8 +7375,26 @@ def ollama_test(all_models=False):
         models=[(m.get("name") or m.get("model") or "").strip() for m in installed]
         models=[m for m in models if m and m not in disabled]
     else:
-        model,_=_choose_ollama_model(running)
-        models=[model]
+        # `lk ollama test` means the model selected in LOOK, not whichever
+        # model happens to be resident in Ollama right now.
+        preferred=_preferred_ollama_model()
+        try:
+            installed=_ollama_tags(base)
+        except Exception as exc:
+            print(f"LOOK OLLAMA · {exc}")
+            return 1
+        installed_names=[
+            (m.get("name") or m.get("model") or "").strip()
+            for m in installed
+        ]
+        installed_names=[m for m in installed_names if m]
+        if preferred in installed_names:
+            models=[preferred]
+        else:
+            print(f"LOOK OLLAMA · selected model is not installed on this host: {preferred}")
+            if installed_names:
+                print("  choose an installed model with `lk ollama models`")
+            return 1
 
     if not models:
         if all_models and disabled:
@@ -6968,7 +7404,7 @@ def ollama_test(all_models=False):
         return 1
 
     print("LOOK MODEL TEST")
-    print("  warm-model TTFT · generation rate · exact response · LOOK tool judgment")
+    print("  warm-model TTFT · generation rate · runtime fit · exact response · tool judgment · natural agent execution")
     if all_models and disabled:
         print(f"  enabled models only · {len(disabled)} disabled")
     print()
@@ -6988,17 +7424,17 @@ def ollama_test(all_models=False):
                 pass
 
     print()
-    print(f"{'MODEL':<28} {'TTFT':>7} {'TOK/S':>8} {'TOOLS':>9} {'EXACT':>7}  CAPABILITIES")
-    print("-"*86)
+    print(f"{'MODEL':<28} {'TTFT':>7} {'TOK/S':>8} {'FIT':>10} {'TOOLS':>9} {'AGENT':>7} {'EXACT':>7}  CAPABILITIES")
+    print("-"*106)
     for row in rows:
         model=row["model"]
         if row.get("fatal_error"):
-            print(f"{model:<28} {'—':>7} {'—':>8} {'error':>9} {'—':>7}  fatal")
+            print(f"{model:<28} {'—':>7} {'—':>8} {'ERROR':>10} {'error':>9} {'—':>7} {'—':>7}  fatal")
             print(f"  error · {row['fatal_error']}")
             continue
         if row.get("speed_error"):
             caps=_model_capability_label(row.get("caps"))
-            print(f"{model:<28} {'error':>7} {'—':>8} {'—':>9} {'—':>7}  {caps}")
+            print(f"{model:<28} {'error':>7} {'—':>8} {'ERROR':>10} {'—':>9} {'—':>7} {'—':>7}  {caps}")
             print(f"  speed error · {row['speed_error']}")
             continue
 
@@ -7008,25 +7444,38 @@ def ollama_test(all_models=False):
         else:
             tools_text=f"{tools}/3"
         caps=_model_capability_label(row.get("caps"))
+        agent_text="yes" if row.get("agent") else "no"
+        fit=_benchmark_runtime_fit(row)
         print(
             f"{model:<28} "
             f"{row['ttft']:>6.2f}s "
             f"{row['rate']:>8.1f} "
+            f"{fit:>10} "
             f"{tools_text:>9} "
+            f"{agent_text:>7} "
             f"{('yes' if row['exact'] else 'no'):>7}  "
             f"{caps}"
         )
+        note=_benchmark_runtime_note(row)
+        if note:
+            print(f"  runtime note · {note}")
         if row.get("tool_error"):
             print(f"  tool note · {row['tool_error']}")
 
     good=[r for r in rows if "ttft" in r]
     tool_good=[r for r in good if isinstance(r.get("tools"),int)]
     if tool_good:
-        winner=max(tool_good, key=lambda r:(r["tools"], bool(r["exact"]), -r["ttft"], r["rate"]))
+        fit_rank={"ERROR":0,"POOR":1,"SLOW":2,"GOOD":3,"EXCELLENT":4}
+        winner=max(tool_good, key=lambda r:(fit_rank.get(_benchmark_runtime_fit(r),0),bool(r.get("agent")),r["tools"],bool(r["exact"]),-r["ttft"],r["rate"]))
+        runtime_fit=_benchmark_runtime_fit(winner)
         print(
-            f"\n  LOOK fit   {winner['model']} · tools {winner['tools']}/3 · "
+            f"\n  LOOK fit   {runtime_fit} · {winner['model']} · tools {winner['tools']}/3 · "
+            f"agent {'yes' if winner.get('agent') else 'no'} · "
             f"{winner['ttft']:.2f}s TTFT · {winner['rate']:.1f} tok/s"
         )
+        note=_benchmark_runtime_note(winner)
+        if note:
+            print(f"             {note}")
     elif good:
         winner=max(good,key=lambda r:(bool(r["exact"]),-r["ttft"],r["rate"]))
         print(
@@ -7060,21 +7509,89 @@ def _settings_share_state():
     return "off"
 
 
+def _settings_shortcut_policy():
+    try:
+        value=SHORTCUT_POLICY_FILE.read_text(encoding="utf-8").strip().casefold()
+        return value if value in {"polite","force"} else "polite"
+    except OSError:
+        return "polite"
+
+
+def _settings_memory_state():
+    memory=_load_memory()
+    durable=len(memory.get("durable",[]) or [])
+    candidates=len(memory.get("memories",[]) or [])
+    return f"{durable} durable · {candidates} candidates"
+
+
 def _settings_rows():
+    """Control-room registry: value + explanation + search vocabulary."""
     base=_ollama_base()
     return [
-        ("access", "AI", "Access profile", _load_lo_profile()),
-        ("fileaccess", "AI", "File grants", f"{len(_load_path_access())} always"),
-        ("personality", "AI", "Personality", _load_personality()),
-        ("thinking", "AI", "Thinking depth", _load_thinking()),
-        ("thinkdisplay", "AI", "Think display", _load_think_display()),
-        ("host", "AI", "Ollama host", _ollama_host_name(base)),
-        ("model", "AI", "Preferred model", _preferred_ollama_model()),
-        ("key", "AI", "Web search key", "configured" if os.environ.get("OLLAMA_API_KEY") else "not configured"),
-        ("share", "REMOTE", "Ollama tailnet share", _settings_share_state()),
-        ("sound", "EXPR", "Feedback sound", "on" if _load_feedback()["sound"] else "off"),
-        ("motion", "EXPR", "Feedback motion", _load_feedback()["motion"]),
-        ("profile", "PROFILE", "Portable profile", "configured" if _load_profile_config().get("backup_root") else "no backup"),
+        ("model","AI","Preferred model",_preferred_ollama_model(),
+         "Choose the local model LO uses. Model capability and speed can differ dramatically.",
+         "model ollama llm qwen gemma deepseek local ai gpu"),
+        ("host","AI","Ollama host",_ollama_host_name(base),
+         "Choose which local or tailnet Ollama server supplies LO.",
+         "host server ollama remote local tailscale 3090"),
+        ("access","AI","Access profile",_load_lo_profile(),
+         "Controls how much of the computer LO may use: conservative, workspace, power, or unsafe.",
+         "access permission permissions safe power shell command tools security"),
+        ("thinking","AI","Thinking depth",_load_thinking(),
+         "Controls reasoning effort: light for speed, adaptive for normal work, deep for harder problems.",
+         "thinking reasoning intelligence speed deep adaptive light"),
+        ("thinkdisplay","AI","Think display",_load_think_display(),
+         "Controls how model thinking activity appears: compact, full, or quiet.",
+         "thinking display compact full quiet animation reasoning visible"),
+        ("personality","AI","Personality",_load_personality(),
+         "Changes LO's conversational voice without changing its tools or permissions.",
+         "personality voice tone lo robot max philosopher"),
+        ("key","AI","Web search key","configured" if os.environ.get("OLLAMA_API_KEY") else "not configured",
+         "Configure the Ollama web-search key used for current external information.",
+         "web internet search key secret ollama"),
+        ("performance","AI","Performance & GPU","inspect",
+         "Open rolling LO telemetry: TTFT, tokens/sec, residency, context, model load, and GPU information.",
+         "performance gpu vram speed latency ttft tokens benchmark stats slow"),
+        ("benchmark","AI","Model benchmark","run selected",
+         "Test the selected model for warm latency, generation speed, tools, natural agent behavior, exactness, and LOOK runtime fit.",
+         "benchmark model test speed tools agent exact fit ollama"),
+
+        ("memory","MEMORY","Living Memory",_settings_memory_state(),
+         "Inspect durable memory, candidates, compiler state, and recent cross-session continuity.",
+         "memory remember durable candidates recent compiler long term personal preferences"),
+        ("memorycompact","MEMORY","Compact memory","run now",
+         "Ask the Living Memory compiler to rewrite durable summaries as compactly as possible.",
+         "memory compact prune summarize compiler optimize tokens"),
+
+        ("fileaccess","FILES","File grants",f"{len(_load_path_access())} always",
+         "Review folders LO may read or write outside the current workspace.",
+         "files folders path access grants permission downloads desktop documents"),
+        ("shortcuts","FILES","Shell shortcuts",_settings_shortcut_policy(),
+         "Control optional ultra-short aliases. The permanent lk* namespace is always available.",
+         "shortcut aliases shell keyboard lkl lkd lkf lkt lkr lkz ll ld lf"),
+        ("apps","DESKTOP","Preferred apps",f"{len(_load_apps())} overrides",
+         "Choose preferred apps for browser, editor, images, PDF, video, and audio. System defaults remain available.",
+         "apps applications desktop open preview video vlc mpv pdf image editor browser audio"),
+
+        ("share","REMOTE","Ollama tailnet share",_settings_share_state(),
+         "Expose local Ollama through Tailscale for your other machines, or turn sharing off.",
+         "remote tailscale share network ollama laptop tower"),
+        ("sound","FEEL","Feedback sound","on" if _load_feedback()["sound"] else "off",
+         "Turn LOOK's small completion/error sounds on or off.",
+         "sound audio beep feedback quiet"),
+        ("motion","FEEL","Feedback motion",_load_feedback()["motion"],
+         "Controls subtle terminal motion cues for accepted/completed work.",
+         "motion animation feedback visual subtle normal off"),
+        ("profile","PROFILE","Portable profile","configured" if _load_profile_config().get("backup_root") else "no backup",
+         "Inspect portable LOOK profile and backup configuration.",
+         "profile backup portable sync identity"),
+
+        ("doctor","SYSTEM","Doctor","run diagnostics",
+         "Check LOOK's shell integration, optional helpers, Ollama, desktop bridge, and installation health.",
+         "doctor diagnose diagnostics health broken install dependencies"),
+        ("version","SYSTEM","Versions",f"LOOK {VERSION}",
+         "Show installed Future Crash + LOOK component versions.",
+         "version release future crash look update"),
     ]
 
 
@@ -7083,7 +7600,7 @@ def _settings_pick_access():
     choices=[
         ("conservative","read/search only"),
         ("workspace","file tools + explicit path grants"),
-        ("power","shell commands · confirm each"),
+        ("power","safe inspections auto-run · other shell commands ask"),
         ("unsafe","unrestricted shell · session gate"),
     ]
     if not shutil.which("fzf") or not (sys.stdin.isatty() and sys.stdout.isatty()):
@@ -7195,56 +7712,199 @@ def _settings_share_menu():
     return ollama_share([])
 
 
-def settings():
-    """Unified UI over LOOK's existing persistent settings and actions."""
+def _settings_apps_menu():
+    apps=_load_apps()
+    if not shutil.which("fzf") or not (sys.stdin.isatty() and sys.stdout.isatty()):
+        return _apps_command([])
+    payload="\n".join(
+        f"{category}\t{category:<10} {apps.get(category,'system')}"
+        for category in DESKTOP_APP_CATEGORIES
+    )+"\n"
+    result=subprocess.run(
+        ["fzf","--prompt","preferred app › ","--header","Choose a file type · Esc back",
+         "--height","~45%","--reverse","--no-multi","--delimiter","\t","--with-nth","2..",
+         "--border=rounded"],
+        input=payload,text=True,capture_output=True
+    )
+    if result.returncode!=0 or not result.stdout.strip():
+        return 0
+    category=result.stdout.split("\t",1)[0].strip()
+    current=apps.get(category,"system")
+    try:
+        value=input(f"{category} app [{current}] · type app name/path or 'system' › ").strip()
+    except (EOFError,KeyboardInterrupt):
+        print()
+        return 0
+    if not value:
+        return 0
+    return _apps_command([category,value])
+
+
+def _settings_file_access_menu():
+    rules=_load_path_access()
+    if not shutil.which("fzf") or not (sys.stdin.isatty() and sys.stdout.isatty()):
+        return _access_command([])
+    options=[
+        ("personal","Allow Desktop/Documents/Downloads read + write"),
+        ("add","Add another folder grant"),
+        ("remove","Remove a persistent folder grant"),
+        ("list","Inspect current grants"),
+        ("clear","Clear persistent + session grants"),
+    ]
+    payload="\n".join(f"{key}\t{label}" for key,label in options)+"\n"
+    result=subprocess.run(
+        ["fzf","--prompt","file access › ","--header",f"{len(rules)} persistent grant(s) · Enter choose · Esc back",
+         "--height","~45%","--reverse","--no-multi","--delimiter","\t","--with-nth","2..",
+         "--border=rounded"],
+        input=payload,text=True,capture_output=True
+    )
+    if result.returncode!=0 or not result.stdout.strip():
+        return 0
+    action=result.stdout.split("\t",1)[0].strip()
+    if action in {"personal","list","clear"}:
+        if action=="clear" and not _confirm("Clear all LO file grants? [y/N] "):
+            return 0
+        return _access_command([action] if action!="list" else [])
+    if action=="remove":
+        rules=_load_path_access()
+        if not rules:
+            print("LO access · no persistent grants")
+            return 0
+        choices="\n".join(f"{r['path']}\t{r['path']} · {'/'.join(r.get('capabilities',[]))}" for r in rules)+"\n"
+        picked=subprocess.run(
+            ["fzf","--prompt","remove grant › ","--header","Enter remove · Esc back",
+             "--height","~45%","--reverse","--no-multi","--delimiter","\t","--with-nth","2..",
+             "--border=rounded"],
+            input=choices,text=True,capture_output=True
+        )
+        if picked.returncode!=0 or not picked.stdout.strip(): return 0
+        return _access_command(["remove",picked.stdout.split("\t",1)[0].strip()])
+    if action=="add":
+        try:
+            path=input("folder path › ").strip()
+        except (EOFError,KeyboardInterrupt):
+            print(); return 0
+        if not path: return 0
+        cap=_settings_pick_choice("capability","write",[
+            ("read","read only"),("write","read + write"),
+        ],lambda args: args[0] if args else "write")
+        # _settings_pick_choice normally returns a callback's result; this lambda
+        # intentionally returns the selected string.
+        if cap not in {"read","write"}: cap="write"
+        return _access_command(["add",path,cap])
+    return 0
+
+
+def _settings_pick_shortcuts():
+    return _settings_pick_choice("shortcut policy",_settings_shortcut_policy(),[
+        ("polite","existing shell names win · recommended"),
+        ("force","replace aliases/functions only · binaries/builtins still win"),
+    ],lambda args:_shortcuts_command(args if args else []))
+
+
+def _settings_action(key):
+    """Execute one control-room row using the same underlying public machinery."""
+    if key=="access": return _settings_pick_access()
+    if key=="fileaccess": return _settings_file_access_menu()
+    if key=="apps": return _settings_apps_menu()
+    if key=="shortcuts": return _settings_pick_shortcuts()
+    if key=="personality": return _settings_pick_personality()
+    if key=="thinking": return _settings_pick_thinking()
+    if key=="thinkdisplay": return _settings_pick_think_display()
+    if key=="host": return _settings_pick_host()
+    if key=="model": return ollama_models()
+    if key=="key": return ollama_key([])
+    if key=="share": return _settings_share_menu()
+    if key=="sound": return _settings_pick_sound()
+    if key=="motion": return _settings_pick_motion()
+    if key=="profile": return _profile_status()
+    if key=="memory": return _memory_command([])
+    if key=="memorycompact": return _memory_command(["compact"])
+    if key=="performance": return _ai_stats_command()
+    if key=="benchmark": return ollama_test(False)
+    if key=="doctor": return doctor()
+    if key=="version":
+        _title("versions")
+        try:
+            print(f"  release       {(ROOT.parent/'VERSION').read_text(encoding='utf-8').strip()}")
+        except OSError:
+            pass
+        print(f"  LOOK          {VERSION}")
+        try:
+            print(f"  Future Crash  {(ROOT.parent/'future-crash'/'VERSION').read_text(encoding='utf-8').strip()}")
+        except OSError:
+            pass
+        return 0
+    return 0
+
+
+def _settings_status_strip(rows):
+    """Tiny at-a-glance line: enough orientation without becoming a dashboard."""
+    values={key:value for key,_,_,value,_,_ in rows}
+    return (
+        f"model {values.get('model','?')}  ·  "
+        f"access {values.get('access','?')}  ·  "
+        f"memory {values.get('memory','?')}  ·  "
+        f"shortcuts {values.get('shortcuts','?')}"
+    )
+
+
+def settings(initial_query=""):
+    """Search-first control room over LOOK's existing settings and actions."""
+    rows=_settings_rows()
     if not (sys.stdin.isatty() and sys.stdout.isatty() and shutil.which("fzf")):
-        _title("settings")
-        for _,section,label,value in _settings_rows():
-            print(f"  {section:<7} {label:<22} {value}")
-        print("\n  interactive settings require fzf + a TTY")
+        _title("settings","control room")
+        last_section=None
+        for _,section,label,value,description,_ in rows:
+            if section!=last_section:
+                print(f"\n  {section}")
+                last_section=section
+            print(f"  {label:<24} {value}")
+            print(f"    {_c(description,'2')}")
+        print("\n  interactive search requires fzf + a TTY")
         return 0
 
+    # The search box is the navigation model: users can type concepts rather
+    # than remember taxonomy or command spellings. Hidden keywords make natural
+    # searches such as "GPU", "video", "safe", or "downloads" land correctly.
+    query=str(initial_query or "").strip()
     while True:
         rows=_settings_rows()
+        strip=_settings_status_strip(rows)
         payload="\n".join(
-            f"{key}\t{section:<7} {label:<23} {_c(value,'33') if value in {'off','not configured','unavailable'} else value}"
-            for key,section,label,value in rows
+            f"{key}\t{section:<8}\t{label}\t{value}\t{description}\t{keywords}"
+            for key,section,label,value,description,keywords in rows
         )+"\n"
-        result=subprocess.run(
-            ["fzf",
-             "--prompt","settings › ",
-             "--header","Enter change/open · Esc/q leave · existing commands still work",
-             "--height","~65%","--reverse","--no-multi",
-             "--delimiter","\t","--with-nth","2..","--ansi"],
-            input=payload,text=True,capture_output=True
+
+        preview=(
+            r"""printf '\033[1;36m%s\033[0m  \033[2m%s\033[0m\n\n%s\n\n\033[2mCurrent\033[0m  %s\n' """
+            r"""{3} {2} {5} {4}"""
         )
+        fzf_args=[
+            "fzf",
+            "--prompt","⌕ settings › ",
+            "--header",f"LOOK CONTROL ROOM  ·  {strip}\nType to search anything · Enter open/change · Ctrl-U clear · Esc leave",
+            "--height","~82%","--reverse","--no-multi",
+            "--border=rounded","--info=inline-right",
+            "--pointer=▶","--marker=◆",
+            "--delimiter","\t",
+            "--nth","2,3,4,5,6",
+            "--with-nth","2,3,4",
+            "--preview",preview,
+            "--preview-window","right,44%,wrap,border-left",
+        ]
+        if query:
+            fzf_args.extend(["--query",query])
+            query=""
+        result=subprocess.run(fzf_args,input=payload,text=True,capture_output=True)
         if result.returncode!=0 or not result.stdout.strip():
             return 0
         key=result.stdout.split("\t",1)[0].strip()
-        if key=="access":
-            _settings_pick_access()
-        elif key=="fileaccess":
-            _access_command([])
-        elif key=="personality":
-            _settings_pick_personality()
-        elif key=="thinking":
-            _settings_pick_thinking()
-        elif key=="thinkdisplay":
-            _settings_pick_think_display()
-        elif key=="host":
-            _settings_pick_host()
-        elif key=="model":
-            ollama_models()
-        elif key=="key":
-            ollama_key([])
-        elif key=="share":
-            _settings_share_menu()
-        elif key=="sound":
-            _settings_pick_sound()
-        elif key=="motion":
-            _settings_pick_motion()
-        elif key=="profile":
-            _profile_status()
+
+        # Leave a clean frame for sub-surfaces, then return to a freshly
+        # regenerated control room so changed values are visible immediately.
+        print()
+        _settings_action(key)
         print()
 
 
@@ -8527,7 +9187,7 @@ NETWORK
 
 AI
   lo  lo search    ollama  ollama models  ollama test
-  personality  thinking  think-display  ai stats  settings
+  personality  thinking  think-display  ai stats  settings [SEARCH]
   memory  memory compact  skills  profile  ai  feedback  sound
   access  ollama access  ollama key
 
@@ -8535,7 +9195,7 @@ MEDIA
   media  mm  mn  mp
 
 META
-  home  config  secrets  access  reveal  version  uninstall
+  home  config  secrets  access  apps  open  preview  reveal  version  uninstall
   help            help all        commands
 
   Direct commands remain first-class. Umbrella surfaces are optional.
@@ -8555,11 +9215,15 @@ def starter_help():
   lk feedback      motion/sound expression
 
   lo               talk to LO
-  fc               Future Crash
+  fcr              Future Crash
 
 DIRECT IS ALWAYS AVAILABLE
   lk doctor        lk disk          lk models
   lk reveal PATH   show path in Finder/file manager
+  lk open PATH     open path in preferred/default desktop app
+  lk preview PATH  preview path outside terminal
+  lk apps          desktop-app preferences
+  lk shortcuts     inspect/set polite shell shortcut policy
   lk access        manage LO filesystem grants
   lk personality  lk thinking      lk tailscale
   lk <file>        lk port 3000     lk process NAME
@@ -9143,6 +9807,10 @@ def main():
     if cmd=="benchmark": return ollama_test(all_models=("--all" in rest))
     if cmd=="web": return ollama_key(["status"] if not rest else rest)
     if cmd=="reveal": return reveal_command(rest)
+    if cmd=="open": return open_command(rest,False)
+    if cmd=="preview": return open_command(rest,True)
+    if cmd=="apps": return _apps_command(rest)
+    if cmd=="shortcuts": return _shortcuts_command(rest)
     if cmd=="access": return _access_command(rest)
     if cmd in ("version","--version","-V"): print(f"LOOK {VERSION}"); return 0
     if cmd=="home": return home()
@@ -9190,7 +9858,7 @@ def main():
         print(_action_result(result))
         return 0 if result.startswith("FILE OK") else 1
     if cmd=="doctor": return doctor()
-    if cmd=="settings": return settings()
+    if cmd=="settings": return settings(" ".join(rest))
     if cmd=="uninstall": return uninstall()
     if cmd=="config":
         if rest and rest[0] in {"paths","raw"}:
