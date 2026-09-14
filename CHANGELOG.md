@@ -1,3 +1,15 @@
+## 2.7.4 — Comfy client discovery
+
+- Fix client machines being encouraged to install ComfyUI locally when the intended GPU service lives on another LOOK machine.
+- `lk comfy discover` now checks the configured host first, then probes online Tailscale peers on the dedicated Comfy HTTPS port `:8188`.
+- A reachable remote Comfy service is saved automatically as the client's default host.
+- If several services are available, a peer named like the 3090 workstation is preferred; otherwise LOOK chooses the first stable discovered service and reports it.
+- Non-GPU clients no longer fall through to the local Comfy bootstrap/install path.
+- Local Comfy bootstrap/discovery remains available on Linux NVIDIA workstations.
+- `lk generate` and LO's `generate_image` tool perform the same remote self-heal before reporting Comfy unavailable.
+- Failure guidance now tells clients to share Comfy from the GPU host rather than install redundant local models.
+- Future Crash remains 1.1.10.
+
 ## 2.7.3 — Documentation consolidation
 
 - Consolidated 83 historical `docs/RELEASE-*.md` files into one `docs/RELEASE-HISTORY.md`.

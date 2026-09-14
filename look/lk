@@ -17,7 +17,7 @@ try:
 except Exception:
     readline = None
 
-VERSION="4.7.3"
+VERSION="4.7.4"
 
 LOOK_WORDMARK = r"""       ██╗      ██╗  ██╗
        ██║      ██║ ██╔╝
@@ -5575,7 +5575,11 @@ def _run_capability_tool(name,args,workspace,profile):
     if name=="generate_image":
         ok,_=_comfy_probe()
         if not ok:
-            return "Image generation unavailable: ComfyUI is not reachable. Run `lk comfy` or `lk comfy discover`."
+            host,_=_comfy_adopt_remote(quiet=True)
+            if host:
+                ok,_=_comfy_probe(host,timeout=.8)
+        if not ok:
+            return "Image generation unavailable: no reachable ComfyUI service. Run `lk comfy discover`; install Comfy only on the GPU host."
         success,result=_comfy_generate(
             args.get("prompt",""),
             args.get("negative",""),
@@ -5914,6 +5918,125 @@ def _comfy_probe(host=None,timeout=1.2):
         return False,{}
 
 
+def _tailscale_comfy_candidates():
+    """Return online tailnet peers at LOOK's dedicated Comfy HTTPS port."""
+    exe=shutil.which("tailscale")
+    if not exe:
+        return []
+    try:
+        proc=subprocess.run([exe,"status","--json"],capture_output=True,text=True,timeout=3)
+        if proc.returncode!=0:
+            return []
+        status=json.loads(proc.stdout or "{}")
+    except (OSError,subprocess.SubprocessError,ValueError,TypeError):
+        return []
+
+    peers=status.get("Peer") or {}
+    nodes=list(peers.values()) if isinstance(peers,dict) else list(peers) if isinstance(peers,list) else []
+    out=[]; seen=set()
+    for node in nodes:
+        if not isinstance(node,dict) or node.get("Online") is False:
+            continue
+        hostname=str(node.get("HostName") or "").strip()
+        dns=str(node.get("DNSName") or "").strip().rstrip(".")
+        ips=node.get("TailscaleIPs") or []
+        name=hostname or (dns.split(".")[0] if dns else "")
+        candidates=[]
+        if dns:
+            candidates.append(("serve",f"https://{dns}:8188"))
+        for ip in ips[:2]:
+            candidates.append(("direct",f"http://{ip}:8188"))
+        for transport,url in candidates:
+            key=(name,url)
+            if name and key not in seen:
+                seen.add(key)
+                out.append({"name":name,"url":url,"transport":transport})
+    return out
+
+
+def _discover_comfy_hosts():
+    """Probe tailnet peers concurrently and return reachable Comfy services."""
+    import concurrent.futures
+    candidates=_tailscale_comfy_candidates()
+    if not candidates:
+        return []
+    found=[]
+    with concurrent.futures.ThreadPoolExecutor(max_workers=min(12,len(candidates))) as pool:
+        futures={pool.submit(_comfy_probe,item["url"],.7):item for item in candidates}
+        for future,item in futures.items():
+            try:
+                ok,_=future.result()
+                if ok:
+                    found.append(item)
+            except Exception:
+                pass
+    best={}
+    for item in found:
+        old=best.get(item["name"])
+        if old is None or (item["transport"]=="serve" and old["transport"]!="serve"):
+            best[item["name"]]=item
+    return sorted(best.values(),key=lambda x:x["name"].casefold())
+
+
+def _comfy_is_gpu_host():
+    """Local managed install is sensible only on a Linux NVIDIA workstation."""
+    return platform.system()=="Linux" and bool(shutil.which("nvidia-smi"))
+
+
+def _comfy_adopt_remote(quiet=False):
+    """Self-heal an offline client by finding a reachable tailnet Comfy service."""
+    cfg=_load_comfy_config()
+    ok,_=_comfy_probe(cfg.get("host"),timeout=.6)
+    if ok:
+        return cfg.get("host"),"configured"
+
+    found=_discover_comfy_hosts()
+    if not found:
+        return None,"none"
+
+    # One service is unambiguous. If there are several, prefer a peer named 3090,
+    # otherwise choose the first stable sort and make that visible to the user.
+    choice=next((x for x in found if "3090" in x["name"].casefold()),found[0])
+    cfg["host"]=choice["url"].rstrip("/")
+    # A client is not a managed Comfy host merely because it can use one.
+    cfg["install_path"]=""
+    cfg["python"]=""
+    _save_comfy_config(cfg)
+    if not quiet:
+        print(f"✓ Comfy host · {choice['name']} · {cfg['host']}")
+    return cfg["host"],choice["name"]
+
+
+def comfy_discover_command():
+    """Discover in the right order: configured remote → tailnet → local GPU assets."""
+    cfg=_load_comfy_config()
+    ok,_=_comfy_probe(cfg.get("host"),timeout=.7)
+    if ok:
+        print(f"LOOK Comfy · ready · {cfg['host']}")
+        return 0
+
+    print("LOOK Comfy · searching tailnet...")
+    host,name=_comfy_adopt_remote(quiet=True)
+    if host:
+        print(f"✓ remote Comfy · {name} · {host}")
+        print("  saved as this client's default Comfy host")
+        return 0
+
+    if _comfy_is_gpu_host():
+        bootstrap=ROOT/"comfy_bootstrap.py"
+        if bootstrap.exists():
+            print("LOOK Comfy · no remote service found · this machine has an NVIDIA GPU")
+            return subprocess.call([sys.executable,str(bootstrap),"--discover"])
+        print("LOOK Comfy · NVIDIA GPU found, but bootstrap helper is unavailable")
+        return 1
+
+    print("LOOK Comfy · no reachable tailnet service found")
+    print("  This machine does not need a local Comfy install.")
+    print("  On the GPU host run: lk share")
+    print("  Then retry here:      lk comfy discover")
+    return 1
+
+
 def _discover_comfy_paths():
     cfg=_load_comfy_config()
     managed=Path(str(cfg.get("install_path") or "")).expanduser() if str(cfg.get("install_path") or "").strip() else None
@@ -6176,8 +6299,8 @@ def comfy_command(args):
             print("LOOK Comfy · bootstrap helper is not installed")
             return 1
         return subprocess.call([sys.executable,str(bootstrap),"--install"])
-    if action=="discover" and bootstrap.exists():
-        return subprocess.call([sys.executable,str(bootstrap),"--discover"])
+    if action=="discover":
+        return comfy_discover_command()
     if action=="repair":
         workflow_display,path=_comfy_workflow_display(cfg)
         if path:
@@ -6241,14 +6364,21 @@ def generate_command(args):
         return 2
     prompt=" ".join(args).strip()
     ok,_=_comfy_probe()
-    if not ok and str(_load_comfy_config().get("host","")).startswith(("http://127.0.0.1","http://localhost")):
+    if not ok:
+        # Clients should discover a tailnet GPU host before ever considering a
+        # redundant local Comfy install.
+        host,_=_comfy_adopt_remote(quiet=True)
+        if host:
+            ok,_=_comfy_probe(host,timeout=.8)
+    if not ok and _comfy_is_gpu_host() and str(_load_comfy_config().get("host","")).startswith(("http://127.0.0.1","http://localhost")):
         started,_=_comfy_start()
         if started:
             ok,_=_comfy_probe()
     if not ok:
         print("LOOK IMAGE · ComfyUI is not reachable")
-        print("  run `lk comfy discover` to look for an older install/models")
-        print("  or configure a running server with `lk comfy host http://HOST:8188`")
+        print("  run `lk comfy discover` to find a shared GPU host")
+        if _comfy_is_gpu_host():
+            print("  or run `lk comfy bootstrap` on this NVIDIA workstation")
         return 1
     print(f"{_ansi_label('image ›','35')} {prompt}")
     with _activity("generating"):
@@ -6471,7 +6601,7 @@ def _run_filesystem_tool_impl(workspace, name, args):
         return f"File tool internal error: {type(exc).__name__}: {exc}"
     return f"Unknown file tool: {name}"
 
-LOOK_INFO_USER_AGENT="LOOK-Shell/4.7.3 (local text client)"
+LOOK_INFO_USER_AGENT="LOOK-Shell/4.7.4 (local text client)"
 
 def _run_filesystem_tool(workspace, name, args, profile="workspace"):
     global _FILESYSTEM_ACCESS_PROFILE

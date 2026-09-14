@@ -1,3 +1,10 @@
+## 4.7.4 — Remote Comfy self-healing
+
+- Discover shared Comfy services over Tailscale `:8188`.
+- Auto-adopt reachable remote Comfy on clients.
+- Prefer remote discovery before local start/install.
+- Never recommend local Comfy bootstrap on a non-Linux/NVIDIA client.
+
 ## 4.7.3 — Documentation cleanup
 
 - Collapse historical release-note sprawl into `docs/RELEASE-HISTORY.md`.
