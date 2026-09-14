@@ -1,3 +1,65 @@
+## 2.6.1 — Living Memory metabolism
+
+- Treat `sidebar`, `no need to remember this`, `just for now`, and equivalent language as conversation-local: RECENT retains it, candidate/durable extraction does not.
+- Candidate extraction is intentionally a little more permissive for reusable choices, patterns, project decisions, and working conventions; candidates remain cheap hypotheses.
+- Add visible lifecycle telemetry for local-only suppression, semantic merges, promotion, expiration, eviction, and compilation.
+- Retire the permanent legacy-memory display. Existing schema-2 compact legacy content is migrated once into the current durable atom/domain system when useful, then the legacy field is cleared.
+- Preserve semantic candidate merge counts and decay expiration counts across sessions.
+- Future Crash remains 1.1.10.
+
+## 2.6.0 — GPU workstation bootstrap
+
+- Linux + NVIDIA installs now offer a first-class ComfyUI workstation setup during `install.sh`.
+- Discovery happens before installation and scans HOME plus common mounted-drive roots (`/mnt`, `/media/$USER`, `/run/media/$USER`) at bounded depth.
+- Detects old ComfyUI installs, A1111/Forge roots, checkpoint/diffusion directories, and large model files.
+- Managed ComfyUI installs into `~/.local/share/look/services/comfyui/` with its own virtual environment.
+- NVIDIA dependencies follow ComfyUI's current manual-install path; Comfy requirements and built-in Manager requirements are installed into the isolated environment.
+- Managed launcher `~/.local/bin/look-comfy` binds Comfy to localhost and enables Manager.
+- Existing model libraries can be reused through generated `extra_model_paths.yaml`; large files are not copied.
+- Loose checkpoint/diffusion directories on mounted drives are reused only when their directory type is unambiguous.
+- Starter model menu: reuse existing only; SDXL 1.0 base (~6.9 GB); FLUX.1 Schnell FP8 (~17.2 GB); both; or skip.
+- Large model downloads are explicit, resumable, and SHA-256 verified.
+- SDXL starter installs a packaged API-format workflow and configures LOOK so `lk generate ...` works immediately after Comfy starts.
+- FLUX.1 Schnell FP8 is available as a modern optional checkpoint without pretending the SDXL workflow applies to it.
+- `lk comfy start|stop|restart|discover|bootstrap` manages or revisits the setup.
+- `lk generate` auto-starts a managed local Comfy service when possible.
+- Installer retains the bootstrap helper and starter workflow so setup can be rerun later.
+- Future Crash remains 1.1.10.
+
+## 2.5.2 — Persistent UNSAFE consent
+
+- Persistent `unsafe` access now asks once when the user selects that profile.
+- Subsequent LO launches honor the saved UNSAFE profile without repeating the launch confirmation.
+- Explicit ad-hoc `lo --unsafe` escalation still asks for session confirmation.
+- UNSAFE continues to cover both filesystem tools and shell commands from 2.5.1.
+
+## 2.5.1 — UNSAFE filesystem authority
+
+- Fixed contradictory permission behavior in LO UNSAFE sessions.
+- UNSAFE now applies to LOOK filesystem tools as well as shell commands.
+- Once the user accepts the UNSAFE session warning, filesystem reads/writes/moves outside the starting workspace no longer trigger per-path access prompts.
+- WORKSPACE and POWER retain the existing path-grant boundary and native access UI.
+- Filesystem profile state is transaction-scoped and restored after every tool call, preventing privilege leakage between sessions/operations.
+
+## 2.5.0 — Vision, generative media, and scheduler
+
+- Native vision input for Ollama models that advertise `vision`.
+- `lk vision IMAGE [QUESTION]` performs a direct one-shot image analysis.
+- LO automatically attaches explicit local image paths in normal chat when the selected model supports vision.
+- Added optional ComfyUI integration for local image generation; Comfy is discovered/configured but is never a mandatory dependency.
+- `lk comfy discover` searches standard locations for older ComfyUI installs and checkpoint/model folders.
+- `lk comfy host`, `workflow`, `output`, and `preview` configure the media edge.
+- `lk generate PROMPT` submits a configured API-format Comfy workflow, saves outputs under `~/Pictures/LOOK` by default, and previews the first result.
+- Workflow JSON supports `__PROMPT__`, `__NEGATIVE__`, and `__SEED__` placeholders.
+- LO gets a host-owned `generate_image` tool; models do not invent Comfy commands.
+- Added persistent LOOK scheduler owned by the resident Living AI service.
+- `lk schedule in 30m`, `every 2h`, and `daily 08:00` create delayed/recurring LO background jobs.
+- LO gets `schedule_prompt` and `schedule_list` tools.
+- Scheduler dispatches into the existing LO job queue, preserving access profile/workspace receipts and foreground priority.
+- Settings control room now exposes Vision, Image generation, and Scheduler.
+- Doctor reports vision capability, Comfy availability/workflow state, and active schedules.
+- Installer does not auto-download large image checkpoints; discovery/setup stays explicit.
+
 ## 2.4.0 — Settings control room
 
 - `lk settings` is now a search-first terminal control room rather than a flat settings picker.

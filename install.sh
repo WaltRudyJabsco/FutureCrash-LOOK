@@ -3,8 +3,8 @@ set -euo pipefail
 
 ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 
-PRODUCT_VERSION="2.4.0"
-LOOK_VERSION="4.4.0"
+PRODUCT_VERSION="2.6.1"
+LOOK_VERSION="4.6.1"
 FUTURE_CRASH_VERSION="1.1.10"
 
 DRY=0
@@ -25,7 +25,7 @@ Usage:
 
   --dry-run          show what the installer would do
   --yes              accept optional component prompts
-  --no-optional      install without optional Remote + AI components
+  --no-optional      install without optional Remote + AI/media components
   --force-downgrade  deliberately install over a newer unified release
   --uninstall        remove Future Crash + LOOK owned files
 EOF
@@ -199,6 +199,30 @@ else
   fi
 fi
 
+# On a Linux NVIDIA workstation, LOOK can own a clean isolated ComfyUI service.
+# Discovery runs before install so old model libraries on mounted drives can be reused.
+echo
+echo "LOOK GENERATIVE MEDIA"
+if [[ "$(uname -s)" == "Linux" ]] && have nvidia-smi; then
+  gpu_line="$(nvidia-smi --query-gpu=name,memory.total --format=csv,noheader,nounits 2>/dev/null | head -n1 || true)"
+  echo "  ✓ NVIDIA GPU${gpu_line:+ · $gpu_line}"
+  echo "  ComfyUI enables local image generation; old model folders can be reused without copying."
+  if ask "  Set up local ComfyUI image generation on this GPU?" Y; then
+    comfy_args=(--install)
+    ((ASSUME_YES)) && comfy_args+=(--yes)
+    if ((DRY)); then
+      echo "  → python3 $ROOT/look/comfy_bootstrap.py ${comfy_args[*]}"
+    else
+      python3 "$ROOT/look/comfy_bootstrap.py" "${comfy_args[@]}"
+    fi
+  else
+    echo "  · skipped ComfyUI setup"
+  fi
+else
+  echo "  · no Linux NVIDIA GPU detected on this machine"
+  echo "  A client can still use ComfyUI hosted on another LOOK machine."
+fi
+
 ZDIR="${ZSH:-$HOME/.oh-my-zsh}"
 if [[ ! -d "$ZDIR" ]]; then
   run git clone --depth=1 https://github.com/ohmyzsh/ohmyzsh.git "$ZDIR"
@@ -251,7 +275,10 @@ fi
 run cp "$ROOT/look/lk" "$HOME/.local/share/look/lk"
 run cp "$ROOT/look/look_renderer.py" "$HOME/.local/share/look/look_renderer.py"
 run cp "$ROOT/look/look_ai.py" "$HOME/.local/share/look/look_ai.py"
-run chmod +x "$HOME/.local/share/look/look_ai.py"
+run cp "$ROOT/look/comfy_bootstrap.py" "$HOME/.local/share/look/comfy_bootstrap.py"
+run chmod +x "$HOME/.local/share/look/look_ai.py" "$HOME/.local/share/look/comfy_bootstrap.py"
+run mkdir -p "$HOME/.local/share/look/workflows"
+run cp "$ROOT/look/workflows/sdxl-api.json" "$HOME/.local/share/look/workflows/sdxl-api.json"
 run chmod +x "$HOME/.local/share/look/lk"
 if ((!DRY)); then
   ln -sfn "$HOME/.local/share/look/lk" "$HOME/.local/bin/lk"
@@ -367,9 +394,9 @@ old_dirs = old.get("created_dirs") if isinstance(old.get("created_dirs"), list) 
 
 manifest = {
     "product": "future-crash-look",
-    "release": os.environ.get("FCL_RELEASE_VERSION", "2.4.0"),
+    "release": os.environ.get("FCL_RELEASE_VERSION", "2.6.1"),
     "components": {
-        "look": os.environ.get("FCL_LOOK_VERSION", "4.4.0"),
+        "look": os.environ.get("FCL_LOOK_VERSION", "4.6.1"),
         "future_crash": os.environ.get("FCL_FUTURE_CRASH_VERSION", "1.1.10"),
     },
     "packages": sorted(set(old_packages + [x for x in os.environ.get("LOOK_MANIFEST_PACKAGES","").splitlines() if x])),
@@ -445,6 +472,8 @@ PY
   echo "  lk            # LOOK shell"
   echo "  lo            # LOOK Ollama"
   echo "  lk settings   # configure AI / hosts / access"
+  echo "  lk comfy discover   # optional: find an older ComfyUI install/models"
+  echo "  lk schedule         # persistent delayed/recurring LO jobs"
   echo "  lk shortcuts  # inspect optional shell shortcut collisions/policy"
   echo
   echo "  1. exec zsh"
