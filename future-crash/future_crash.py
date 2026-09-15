@@ -72,7 +72,7 @@ WHITE = CSI + "38;5;255m"
 GRAY = CSI + "38;5;245m"
 DARK = CSI + "38;5;239m"
 
-VERSION = "1.1.12"
+VERSION = "1.1.14"
 GLYPHS = "0123456789ABCDEF"
 SPARKS = "▁▂▃▄▅▆▇█"
 
@@ -2195,6 +2195,10 @@ class FutureCrash:
         self.work_notice_until = 0.0
         self.rain = [self.rng.randint(0, 30) for _ in range(80)]
 
+    def _model_label(self):
+        source="shared" if getattr(self.args,"follow_look_model",False) else "override"
+        return f"{self.oracle.model} · {source}"
+
     def _activity_label(self, kind):
         """Human-scale label for the one Oracle job currently in flight."""
         kind = str(kind or "")
@@ -2215,6 +2219,11 @@ class FutureCrash:
 
     def _ask_oracle(self, kind, prompt, history=None, priority=None, lease_held=False):
         """Start one Oracle operation, coordinating only shared inference capacity."""
+        if getattr(self.args,"follow_look_model",False):
+            selected=_look_active_model()
+            if selected and selected != self.oracle.model:
+                self.oracle.model=selected
+                self.last_frame=""
         if priority is None:
             interactive = (
                 kind in {"ask","work"}
@@ -3129,6 +3138,11 @@ class FutureCrash:
         return out
 
     def render(self):
+        if getattr(self.args,"follow_look_model",False):
+            active=_look_active_model()
+            if active and active != self.oracle.model:
+                self.oracle.model=active
+                self.last_frame=""
         physical_w, h = self.term.size()
         # Never paint the terminal's final physical column. Many terminals
         # auto-wrap when that column is touched, which creates phantom duplicate
@@ -3156,18 +3170,22 @@ class FutureCrash:
         return self._decorate_activity(frame, w)
 
     def render_ambient(self, w, h):
+        if getattr(self.args,"follow_look_model",False):
+            selected=_look_active_model()
+            if selected and selected != self.oracle.model:
+                self.oracle.model=selected
         s = self.telemetry.snapshot()
         clock = time.strftime("%H:%M:%S")
         date = time.strftime("%Y-%m-%d")
-        model = self.args.model
+        model = self.oracle.model
         status = GREEN + "READY" + RESET if self.online else RED + "OFFLINE" + RESET
 
         # The clock is intentionally the first thing in the upper-left.
         # Future Crash is an ambient machine before it is an assistant.
         left_header = BOLD + CYAN + clock + RESET + DIM + "  " + date + RESET
         center_header = BOLD + GREEN + "  FUTURE CRASH" + RESET + GREEN2 + f" // ZERO {VERSION}" + RESET
-        right_header = DIM + model + RESET
-        occupied = len(clock) + 2 + len(date) + 2 + len(f"FUTURE CRASH // ZERO {VERSION}") + len(model)
+        right_header = DIM + self._model_label() + RESET
+        occupied = len(clock) + 2 + len(date) + 2 + len(f"FUTURE CRASH // ZERO {VERSION}") + len(self._model_label())
         header = left_header + center_header + (" " * max(1, w - occupied)) + right_header
 
         left_w = max(33, int(w * .42))
@@ -3365,7 +3383,7 @@ class FutureCrash:
         usable = max(30, w - 8)
         lines = [
             "",
-            BOLD + CYAN + title + RESET,
+            BOLD + CYAN + title + RESET + "   " + DIM + self._model_label() + RESET,
             DIM + subtitle + RESET,
         ]
         if self.deferred_submit:
@@ -3406,7 +3424,7 @@ class FutureCrash:
         shown = lines[self.scroll:self.scroll + visible]
 
         frame = [
-            BOLD + GREEN + "FUTURE CRASH // ORACLE" + RESET + "   " + DIM + self.args.model + RESET,
+            BOLD + GREEN + "FUTURE CRASH // ORACLE" + RESET + "   " + DIM + self.oracle.model + RESET,
             DIM + "AUTHORITY " + RESET + GREEN2 + self.host.status() + RESET +
             DIM + "   FILES " + RESET + GREEN2 + "AVAILABLE / ASK" + RESET +
             DIM + "   WEB " + RESET + (GREEN2 if self.host.web_ready else AMBER) + self.host.web_status + RESET +
@@ -3442,7 +3460,7 @@ class FutureCrash:
         title = BOLD + AMBER + "FUTURE CRASH // WORKSTATION" + RESET
         status = AMBER + "THINKING" + RESET if self.busy else GREEN + "READY" + RESET
         frame = [
-            title + "   " + DIM + self.args.model + RESET + "   " + status,
+            title + "   " + DIM + self._model_label() + RESET + "   " + status,
             DIM + "persistent conversation // permissioned host operations" + RESET,
             DIM + "MEMORY " + RESET + GREEN2 + self.memory.status() + RESET +
             DIM + "   AUTHORITY " + RESET + GREEN2 + self.host.status() + RESET +
@@ -3773,8 +3791,8 @@ def _look_selected_ollama_host():
     return LOCAL_OLLAMA_URL
 
 
-def _look_selected_model():
-    """Reuse LOOK's selected model so Future Crash does not churn the shared GPU."""
+def _look_active_model():
+    """Read LOOK's shared active model. This is the default for every FC inference."""
     path=Path.home()/".local"/"share"/"look"/"ollama_model"
     try:
         model=path.read_text(encoding="utf-8").strip()
@@ -3805,8 +3823,9 @@ if __name__ == "__main__":
     args = parse_args()
     if not args.ollama:
         args.ollama=_look_selected_ollama_host()
+    args.follow_look_model = not bool(args.model)
     if not args.model:
-        args.model=_look_selected_model()
+        args.model=_look_active_model()
     app = FutureCrash(args)
     try:
         app.start()

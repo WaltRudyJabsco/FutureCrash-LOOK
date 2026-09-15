@@ -1,3 +1,14 @@
+## 1.1.14 — Shared model contract
+
+- Follow LOOK active model live on every frame and inference.
+- Ask, Workstation, and Ambient identify `shared` vs explicit `override`.
+- `--model` remains the deliberate per-session escape hatch.
+
+## 1.1.13 — Live LOOK model selection
+
+- Follow LOOK's currently selected model live unless `--model` was explicitly supplied.
+- Ambient telemetry and Workstation views display the current Oracle model, not the startup argument snapshot.
+
 ## 1.1.12 — Interactive submit queue
 
 - A/Ask and X/Workstation no longer silently ignore Enter while background Oracle work is active.

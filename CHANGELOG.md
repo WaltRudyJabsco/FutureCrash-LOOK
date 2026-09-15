@@ -1,3 +1,94 @@
+## 2.8.7 — One active model
+
+- Establish one shared active Ollama model as the default for LOOK, LO, Future Crash Oracle, Ask, Workstation, and background AI work.
+- Rename the internal `preferred` concept to `active`: selecting a model means this is the model the environment should actually call.
+- Loaded Ollama models are telemetry only and can no longer silently override the active model.
+- LO now refuses with a clear message if the active model is unavailable on the selected host instead of silently choosing an arbitrary loaded/installed model.
+- Future Crash rereads the shared active model before every frame and every inference unless launched with explicit `--model`.
+- Future Crash Ambient, Ask, and Workstation headers now label the model as `shared` or `override`.
+- Background memory/skill workers fall back to the shared active model rather than a hard-coded qwen3:8b default.
+- Model selection still unloads other loaded models and preloads the chosen model, preserving the single-model 3090 performance path.
+- LOOK 4.11.0; Future Crash 1.1.14.
+
+## 2.8.6 — Progressive global search hotfix
+
+- Fix `ff` / `fznv` blocking on a full home-directory scan before accepting input.
+- Global LOOK FIND now opens immediately and discovers files progressively in a daemon thread.
+- Seed the catalog with the search root's immediate children before recursive discovery.
+- Stream `fd` output line-by-line when available; fall back to progressive `os.walk`.
+- Every filter/action refresh reads the growing live catalog.
+- Show a quiet `scanning…` indicator in the LOOK FIND header while discovery continues.
+- Preserve the unified LOOK renderer/actions, including `G` go-to-shell behavior.
+- Future Crash remains 1.1.13.
+
+## 2.8.5 — Unified LOOK navigation
+
+- Consolidate navigation around LOOK rather than adding more shell verbs.
+- `cd` stays native Zsh and `z` stays native zoxide.
+- `l` remains the smart front door: exact live filesystem first, unique live child fuzzy match second, zoxide history/frecency third, global LOOK search as the final fallback.
+- Ambiguous live child matches now open LOOK already filtered to the typed query instead of choosing arbitrarily.
+- `l <Tab>` merges native live-directory completion with zoxide history candidates; live filesystem truth is no longer replaced by stale history.
+- `ff [QUERY]` now opens LOOK's own global FIND renderer instead of a separate fzf UI.
+- `fznv [QUERY]` uses the same LOOK FIND UI and opens the chosen file in Neovim.
+- Global LOOK FIND supports seeded queries and the same selection/actions vocabulary as normal LOOK.
+- `G` from global search now truly exits to the selected directory (or selected file's parent) through the existing shell handoff.
+- Remove the now-unused legacy fzf picker implementation from LOOK's shell layer.
+- Clean stale command/help references left over from older `f`/`fc` ownership.
+- Future Crash remains 1.1.13.
+
+## 2.8.4 — Navigation + model-state coherence
+
+- Restore native Zsh `cd` completely; LOOK no longer wraps or replaces shell directory navigation.
+- Keep `l` as the smart/fuzzy navigation front door: explicit existing paths win, otherwise zoxide resolves history/frecency.
+- `l <Tab>` now reuses the exact completion function registered for `z`, so LOOK navigation and zoxide completion stay in sync instead of maintaining parallel candidate logic.
+- Remove the experimental shell `g` / `go` commands. Uppercase `G` inside LOOK remains the single "go there" bridge back to the shell.
+- Model panel terminology is now `TEST / LOAD / SELECT` rather than ambiguous enabled/resident/preferred language.
+- Model rows are width-aware and capability labels are compacted to reduce overflow.
+- `X` toggles test inclusion and immediately reloads persisted state before redraw.
+- Stale test-exclusion entries for models no longer installed are pruned automatically.
+- Future Crash now follows LOOK model selection live unless launched with an explicit `--model` override; ambient telemetry and Workstation display use the current Oracle model rather than frozen startup arguments.
+- Future Crash bumps to 1.1.13; LOOK to 4.9.4.
+
+## 2.8.3 — Navigation semantics
+
+- Restore smart `cd`: existing filesystem paths and native forms always win; otherwise zoxide history/frecency is used as a fallback.
+- Restore explicit Zsh directory completion for the smart `cd` function.
+- Add one semantic GO action through collision-aware `g` / `go`: directories become cwd; files move to their parent and reopen LOOK with that file selected.
+- Unify LOOK's uppercase `G`: in filter/select mode it goes to the selected item; in ordinary browse mode it exits LOOK into the directory currently being browsed.
+- Lowercase `g` remains "top of view"; uppercase `G` is now consistently "go."
+- `l -` remains previous-directory + LOOK.
+- Future Crash remains 1.1.12.
+
+## 2.8.2 — Command ownership cleanup
+
+- Fix `f` Future Crash shortcut being overwritten later in shell startup by LOOK's legacy fuzzy-finder `f()` function.
+- Rename LOOK fuzzy find to `ff`.
+- In force shortcut mode, `f` now reliably resolves to Future Crash.
+- Restore Zsh's native `fc` builtin explicitly during startup/migration: remove old LOOK aliases/functions named `fc` and re-enable the builtin.
+- `fc` is permanently reserved for Zsh history; LOOK no longer attempts to repurpose it.
+- Retire only legacy LOOK-owned `f` fuzzy functions when migrating an already-running shell; unrelated user `f` functions remain protected under polite mode.
+- Future Crash remains 1.1.12.
+
+## 2.8.1 — rb hotfix
+
+- Fix LOOK deleting its own `rb()` function later in `look.zsh` after defining it successfully near the top.
+- Keep early reload-safety cleanup intact so stale aliases are still removed before function parsing.
+- `rb` again resolves to LOOK's shell function after install/reload.
+- No other runtime behavior changes.
+- Future Crash remains 1.1.12.
+
+## 2.8.0 — Shell grammar + deterministic tools
+
+- Add personal `f` → Future Crash through the existing polite/force collision policy. `fc` is permanently native Zsh.
+- Add `l -` previous-directory toggle followed by LOOK orientation.
+- Formalize `lmk` options: `-d/--dir`, `-f/--file`, `-p/--parents`, and `--`; reject unknown flags instead of treating them as paths.
+- Add `lk match GLOB [v|t|n] [--all]`: deliberate wildcard matching ranked by natural version, modification time, or name.
+- Version ranking handles multi-part numeric filenames naturally (`2.10.0` > `2.8.0`).
+- Add a deterministic translation edge for a configured LibreTranslate-compatible service: `lk translate TO TEXT` or `lk translate FROM TO TEXT`.
+- Translation does not silently fall back to model guessing; it identifies/configures its provider explicitly.
+- Portable-user-memory / device-state separation and home-node sync remain architecture work, not silently introduced in this release.
+- Future Crash remains 1.1.12.
+
 ## 2.7.9 — Zsh reload + paste safety
 
 - Fix fresh install/reload parse error: `defining function based on alias 'rb'`.

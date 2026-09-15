@@ -231,7 +231,7 @@ def process_memory():
         memory=core._load_memory()
         core._remember_exchange(
             base,
-            job.get('model',os.environ.get('LOOK_OLLAMA_MODEL','qwen3:8b')),
+            job.get('model') or core._active_ollama_model(),
             memory,str(job.get('user','')),str(job.get('assistant','')),
             str(job.get('profile','workspace')),
         )
@@ -257,7 +257,7 @@ def process_skill():
         job=json.loads(path.read_text(encoding='utf-8'))
         action,skill=core._reflect_on_feedback(
             job.get('base','http://127.0.0.1:11434'),
-            job.get('model',os.environ.get('LOOK_OLLAMA_MODEL','qwen3:8b')),job,
+            job.get('model') or core._active_ollama_model(),job,
         )
         changed=False
         if action=='new' and skill:

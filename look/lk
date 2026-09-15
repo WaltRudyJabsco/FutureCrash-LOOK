@@ -1,6 +1,7 @@
 #!/usr/bin/env python3
 import os, platform, re, select, shutil, subprocess, sys, termios, tty, threading, time, hashlib, json, uuid, signal, tempfile, wave, math, struct, zipfile, socket
 import http.client
+import urllib.request, urllib.parse, urllib.error
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from contextlib import contextmanager
 from pathlib import Path
@@ -17,7 +18,7 @@ try:
 except Exception:
     readline = None
 
-VERSION="4.8.3"
+VERSION="4.11.0"
 
 LOOK_WORDMARK = r"""       ██╗      ██╗  ██╗
        ██║      ██║ ██╔╝
@@ -1199,6 +1200,7 @@ LOOK
   lk [THING]           inspect a path, command, port, or process
   lk [PATH]            smart filesystem view
   lk FILE              interactive file card + paged preview
+  lk match GLOB [v|t|n] deliberate wildcard match · rank version/time/name
   lk detail [PATH]     detailed view
   lk dirs [PATH]       directories
   lk files [PATH]      files
@@ -1248,6 +1250,7 @@ AI / OLLAMA
   lk ollama share off  stop the tailnet Ollama share
   lk ollama key        securely save the Ollama web-search key
   lk ollama key status report key configuration; never reveal it
+  lk translate TO TEXT deterministic translation via configured LibreTranslate-compatible service
   lk ollama access      show persistent LO capability profile
   lk ollama access MODE set conservative/workspace/power/unsafe
 
@@ -1403,7 +1406,7 @@ FILE ACTIONS
   lmv [PATH]           LOOK-assisted move
   lscp [PATH]          LOOK-assisted scp
   lrm [PATH]           LOOK-assisted remove (confirmed)
-  lmk PATH             make directory path · undoable
+  lmk [-d|-f] [-p] [--] PATH  make directory/file; -p parents; unknown flags rejected
   mkd DIR              make directory and enter it
   lk undo              undo newest safe LOOK filesystem transaction
   lk undo list         inspect READY/BLOCKED transaction history
@@ -1412,12 +1415,13 @@ FILE ACTIONS
 SHORTCUTS
   CANONICAL  lk detail · lk dirs · lk files · lk tree · lk recent · lk size
   FAST       lkl · lkd · lkf · lkt · lkr · lkz   (LOOK namespace; always installed)
-  OPTIONAL   l · ll · ld · lf · lt · lr · lz · lh · fc
-             installed only when collision policy allows; `force` may reclaim fc
+  OPTIONAL   l · ll · ld · lf · lt · lr · lz · lh · f
+             installed only when collision policy allows; `f` → Future Crash
+             `fc` always remains Zsh's native history builtin
   lk         smart view            zll WORD jump + look
   lk home    LOOK home             lk o     Ollama chat
-  f          find anywhere → LOOK  fcr      Future Crash
-  cdl WORD   jump + details        fznv     fuzzy edit
+  ff [WORD]  global LOOK search   fcr      Future Crash
+  cdl WORD   jump + details        fznv     LOOK find + edit
   rs         reset ritual          rb       reload zsh
   webterm    terminal over Tailscale
   lk shortcuts                    inspect/set shortcut policy
@@ -1613,7 +1617,7 @@ def _doctor_body():
             print(f"  ✓ model loaded · {names}")
         else:
             preferred = os.environ.get("LOOK_OLLAMA_MODEL", "qwen3:8b").strip() or "qwen3:8b"
-            print(f"  · no model loaded · lo uses {preferred} on demand")
+            print(f"  · no model loaded · lo uses {active} on demand")
     else:
         print("  · model status unavailable")
     print(f"  {'✓' if web_key else '·'} web search key")
@@ -1621,10 +1625,10 @@ def _doctor_body():
 
     print("\nAI CAPABILITIES · optional")
     try:
-        caps=_ollama_capabilities(_ollama_base(),_preferred_ollama_model()) or []
+        caps=_ollama_capabilities(_ollama_base(),_active_ollama_model()) or []
     except Exception:
         caps=[]
-    print(f"  {'✓' if 'vision' in caps else '·'} vision input · {_preferred_ollama_model()}")
+    print(f"  {'✓' if 'vision' in caps else '·'} vision input · {_active_ollama_model()}")
     comfy_ok,_=_comfy_probe()
     comfy_cfg=_load_comfy_config()
     print(f"  {'✓' if comfy_ok else '·'} ComfyUI · {comfy_cfg['host']} · {'ready' if comfy_ok else 'offline'}")
@@ -2464,7 +2468,7 @@ def _memory_command(args):
         return 0
     if args and args[0] in {"compact","compile"}:
         base=str(memory.get("compiler_base","") or _ollama_base())
-        model=str(memory.get("compiler_model","") or _preferred_ollama_model())
+        model=str(memory.get("compiler_model","") or _active_ollama_model())
         memory,changed=_compile_memory(base,model,memory,force=True)
         _save_memory(memory)
         print(f"LO memory compiler · {'updated' if changed else 'already compact'}")
@@ -2793,7 +2797,7 @@ def _ai_stats_command():
     except Exception:
         pass
     print(f"  host         {_ollama_host_name(base)}")
-    print(f"  model        {_preferred_ollama_model()}")
+    print(f"  model        {_active_ollama_model()}")
     if loaded:
         current=loaded[0]
         size_vram=int(current.get("size_vram") or 0); size=int(current.get("size") or 0)
@@ -3718,7 +3722,7 @@ def _skill_feedback_worker():
                 job=json.loads(path.read_text(encoding="utf-8"))
                 action,skill=_reflect_on_feedback(
                     job.get("base","http://127.0.0.1:11434"),
-                    job.get("model",os.environ.get("LOOK_OLLAMA_MODEL","qwen3:8b")),
+                    job.get("model") or _active_ollama_model(),
                     job,
                 )
                 changed=False
@@ -3831,7 +3835,7 @@ def _memory_worker():
                 memory=_load_memory()
                 _remember_exchange(
                     base,
-                    job.get("model",os.environ.get("LOOK_OLLAMA_MODEL","qwen3:8b")),
+                    job.get("model") or _active_ollama_model(),
                     memory,
                     str(job.get("user","")),
                     str(job.get("assistant","")),
@@ -4961,7 +4965,7 @@ def _desktop_launch(target, category="", preview=False):
             if preferred and preferred!="system":
                 binary=shutil.which(preferred) or (preferred if Path(preferred).exists() else None)
                 if not binary:
-                    return f"Open failed: preferred {category or 'app'} is unavailable: {preferred}"
+                    return f"Open failed: preferred {category or 'app'} is unavailable: {active}"
                 cmd=[binary,str(target)]
             else:
                 opener=shutil.which("xdg-open")
@@ -5820,6 +5824,100 @@ def _tool_inspect_directory(workspace, raw_path=".", recursive=False, max_entrie
     return json.dumps(payload,ensure_ascii=False)
 
 
+def _natural_version_key(name):
+    """Natural/version-aware filename ordering without pretending every digit is SemVer."""
+    parts=re.split(r"(\d+)",str(name).casefold())
+    return tuple((1,int(p)) if p.isdigit() else (0,p) for p in parts)
+
+
+def _match_command(args):
+    """Resolve a glob deliberately, then rank it by version, time, or name."""
+    if not args:
+        print("usage: lk match PATTERN [v|t|n] [--all]")
+        return 2
+    pattern=args[0]
+    rank="v"
+    show_all=False
+    for arg in args[1:]:
+        if arg in {"v","version"}: rank="v"
+        elif arg in {"t","time","newest"}: rank="t"
+        elif arg in {"n","name"}: rank="n"
+        elif arg=="--all": show_all=True
+        elif arg.startswith("-"):
+            print(f"LOOK match · unknown option: {arg}"); return 2
+        else:
+            print(f"LOOK match · unexpected argument: {arg}"); return 2
+    pattern=str(Path(pattern).expanduser())
+    import glob
+    rows=[Path(x) for x in glob.glob(pattern,recursive=True)]
+    if not rows:
+        print(f"LOOK match · no matches: {args[0]}")
+        return 1
+    if rank=="t":
+        rows.sort(key=lambda x:(x.stat().st_mtime_ns,_natural_version_key(x.name)),reverse=True)
+    elif rank=="n":
+        rows.sort(key=lambda x:x.name.casefold())
+    else:
+        rows.sort(key=lambda x:_natural_version_key(x.name),reverse=True)
+    if show_all:
+        for x in rows: print(x)
+    else:
+        print(rows[0])
+    return 0
+
+
+def _translate_command(args):
+    """Authoritative translation edge: LibreTranslate-compatible API, local-first."""
+    if not args or args[0] in {"status","--status"}:
+        endpoint=os.environ.get("LOOK_TRANSLATE_URL","").strip()
+        _title("translate","deterministic language tool")
+        print(f"  provider     {'LibreTranslate-compatible' if endpoint else 'not configured'}")
+        print(f"  endpoint     {endpoint or 'set LOOK_TRANSLATE_URL or: lk translate host URL'}")
+        print("  privacy      text is sent only to the configured translation endpoint")
+        print("  usage        lk translate TO TEXT")
+        print("               lk translate FROM TO TEXT")
+        return 0
+    if args[0]=="host":
+        if len(args)!=2:
+            print("usage: lk translate host URL"); return 2
+        url=args[1].rstrip("/")
+        cfg=CONFIG_DIR/"translate_url"
+        cfg.parent.mkdir(parents=True,exist_ok=True); cfg.write_text(url+"\n",encoding="utf-8")
+        print(f"LOOK translate · host · {url}")
+        return 0
+
+    endpoint=os.environ.get("LOOK_TRANSLATE_URL","").strip()
+    cfg=CONFIG_DIR/"translate_url"
+    if not endpoint:
+        try: endpoint=cfg.read_text(encoding="utf-8").strip()
+        except OSError: pass
+    if not endpoint:
+        print("LOOK translate · no provider configured")
+        print("  configure a local/self-hosted LibreTranslate-compatible endpoint:")
+        print("  lk translate host http://HOST:5000")
+        return 1
+
+    if len(args)>=3 and len(args[0])<=8 and len(args[1])<=8:
+        source,target,text=args[0],args[1]," ".join(args[2:])
+    elif len(args)>=2:
+        source,target,text="auto",args[0]," ".join(args[1:])
+    else:
+        print("usage: lk translate TO TEXT | lk translate FROM TO TEXT"); return 2
+    payload=json.dumps({"q":text,"source":source,"target":target,"format":"text"}).encode()
+    req=urllib.request.Request(endpoint.rstrip("/")+"/translate",data=payload,headers={"Content-Type":"application/json","User-Agent":LOOK_INFO_USER_AGENT})
+    try:
+        with urllib.request.urlopen(req,timeout=15) as resp:
+            data=json.loads(resp.read().decode("utf-8","replace"))
+        translated=str(data.get("translatedText") or "").strip()
+        if not translated: raise ValueError("provider returned no translatedText")
+        print(translated)
+        print(_c(f"  source · configured translation provider · {source} → {target}","2"))
+        return 0
+    except (OSError,ValueError,urllib.error.URLError) as exc:
+        print(f"LOOK translate · provider error · {exc}")
+        return 1
+
+
 def _shortcut_collision_kind(name):
     """Best-effort current shell/system collision classification."""
     # Python cannot see parent-shell aliases/functions; the managed zsh layer
@@ -5861,7 +5959,7 @@ def _shortcuts_command(args):
     print("  FAST LOOK NAMESPACE · always installed")
     print("    lkl         lkd       lkf        lkt       lkr         lkz")
     print("  ULTRA-SHORT · opportunistic")
-    mapping=[("ll","lkl"),("ld","lkd"),("lf","lkf"),("lt","lkt"),("lr","lkr"),("lz","lkz")]
+    mapping=[("ll","lkl"),("ld","lkd"),("lf","lkf"),("lt","lkt"),("lr","lkr"),("lz","lkz"),("f","fcr")]
     for name,target in mapping:
         print(f"    {name:<4} → {target:<4} · {_shortcut_collision_kind(name)}")
     print("\n  polite  existing aliases/functions/builtins/executables win")
@@ -6627,7 +6725,7 @@ def _run_filesystem_tool_impl(workspace, name, args):
         return f"File tool internal error: {type(exc).__name__}: {exc}"
     return f"Unknown file tool: {name}"
 
-LOOK_INFO_USER_AGENT="LOOK-Shell/4.8.3 (local text client)"
+LOOK_INFO_USER_AGENT="LOOK-Shell/4.11.0 (local text client)"
 
 def _run_filesystem_tool(workspace, name, args, profile="workspace"):
     global _FILESYSTEM_ACCESS_PROFILE
@@ -6967,8 +7065,8 @@ def _ensure_ollama_server(base, allow_start=True):
     return None
 
 
-def _preferred_ollama_model():
-    """Environment wins; otherwise remember the last model selected through LOOK."""
+def _active_ollama_model():
+    """One shared LOOK model. Environment is an explicit process override."""
     env=os.environ.get("LOOK_OLLAMA_MODEL","").strip()
     if env:
         return env
@@ -6981,7 +7079,7 @@ def _preferred_ollama_model():
     return "qwen3:8b"
 
 
-def _save_preferred_ollama_model(model):
+def _save_active_ollama_model(model):
     try:
         STATE_DIR.mkdir(parents=True, exist_ok=True)
         tmp=OLLAMA_MODEL_FILE.with_suffix(".tmp")
@@ -6994,15 +7092,10 @@ def _save_preferred_ollama_model(model):
 
 
 def _choose_ollama_model(running):
-    """Keep the selected/resident model when available; otherwise load the preferred model on demand."""
-    preferred=_preferred_ollama_model()
+    """Return the shared active model; loaded state is telemetry, never selection."""
+    active=_active_ollama_model()
     names=[(m.get("name") or m.get("model") or "").strip() for m in (running or [])]
-    names=[name for name in names if name]
-    if preferred in names:
-        return preferred, True
-    if names:
-        return names[0], True
-    return preferred, False
+    return active, active in names
 
 
 def _lo_width():
@@ -7143,7 +7236,7 @@ def ollama_chat(force_search=False, initial_prompt=None, allow_start=True, host_
 
     # Model preference is global, but availability belongs to the selected host.
     # Never send a model name to a remote Ollama that does not actually have it.
-    preferred = _preferred_ollama_model()
+    active = _active_ollama_model()
     running_names = [(m.get("name") or m.get("model") or "").strip() for m in (running or [])]
     running_names = [name for name in running_names if name]
     try:
@@ -7153,12 +7246,12 @@ def ollama_chat(force_search=False, initial_prompt=None, allow_start=True, host_
     installed_names = [(m.get("name") or m.get("model") or "").strip() for m in installed]
     installed_names = [name for name in installed_names if name]
 
-    if preferred in installed_names:
-        model = preferred
-    elif running_names:
-        model = running_names[0]
+    if active in installed_names:
+        model = active
     elif installed_names:
-        model = installed_names[0]
+        print(f"LOOK OLLAMA · active model is not installed on this host: {active}")
+        print("  choose an installed model with `lk models`")
+        return 1
     else:
         print(f"LOOK OLLAMA · {shown_host if 'shown_host' in locals() else _ollama_host_name(base)} is reachable, but has no models installed")
         return 1
@@ -8127,7 +8220,7 @@ def vision_command(args):
         print(f"LOOK VISION · not found: {image}")
         return 1
     base=_ollama_base()
-    model=_preferred_ollama_model()
+    model=_active_ollama_model()
     caps=_ollama_capabilities(base,model) or []
     if "vision" not in caps:
         print(f"LOOK VISION · {model} does not advertise vision")
@@ -8186,7 +8279,7 @@ def _ollama_set_model(base, model):
 
     # An empty generation request loads the model without asking it to answer.
     _ollama_post(base, "/api/generate", {"model":model, "prompt":"", "keep_alive":"10m"}, timeout=180)
-    _save_preferred_ollama_model(model)
+    _save_active_ollama_model(model)
     return model
 
 
@@ -8197,28 +8290,34 @@ def _model_capability_label(caps):
     return " · ".join(useful) if useful else "text"
 
 
-def _ollama_model_rows(base, names, resident, disabled):
+def _ollama_model_rows(base, names, loaded, disabled):
     rows=[]
-    preferred_name=_preferred_ollama_model()
+    selected_name=_active_ollama_model()
+    width=max(64,shutil.get_terminal_size((100,24)).columns)
+    # Leave enough room for TEST/LOAD/SEL glyphs and a useful capability tail.
+    name_width=max(18,min(30,width-42))
     for name in names:
         caps=_ollama_capabilities(base,name)
-        enabled=name not in disabled
-        state=_c("✓","32") if enabled else _c("×","2")
-        live=_c("●","32") if name in resident else " "
-        preferred=_c("★","33") if name == preferred_name else " "
-        padded=f"{name:<28}"
-        shown_name=_c(padded,"1") if name == preferred_name else padded
+        test_on=name not in disabled
+        test_mark=_c("✓","32") if test_on else _c("×","2")
+        load_mark=_c("●","32") if name in loaded else " "
+        select_mark=_c("★","33") if name == selected_name else " "
+        raw_name=name if len(name)<=name_width else name[:max(1,name_width-1)]+"…"
+        padded=f"{raw_name:<{name_width}}"
+        shown_name=_c(padded,"1") if name == selected_name else padded
         raw_label=_model_capability_label(caps)
         if raw_label=="capabilities ?":
-            label=_c(raw_label,"2")
+            label=_c("?","2")
         else:
+            short={"completion":"text","embedding":"embed"}
             parts=[]
             for cap in raw_label.split(" · "):
+                shown=short.get(cap,cap)
                 code={"tools":"36","thinking":"35","vision":"33"}.get(cap,"2")
-                parts.append(_c(cap,code))
+                parts.append(_c(shown,code))
             label=" · ".join(parts)
-        # Raw name stays in field one; display decoration never affects parsing.
-        display=f"{state} {live}{preferred}  {shown_name} {label}"
+        # Columns: TEST LOAD SEL MODEL CAPABILITIES.
+        display=f"{test_mark:^4} {load_mark:^4} {select_mark:^3} {shown_name} {label}"
         rows.append((name,display,caps))
     return rows
 
@@ -8239,9 +8338,14 @@ def ollama_models(select_model=None):
 
     names=[(m.get("name") or m.get("model") or "").strip() for m in installed]
     names=[n for n in names if n]
-    resident={(m.get("name") or m.get("model") or "").strip() for m in running}
-    resident.discard("")
+    loaded={(m.get("name") or m.get("model") or "").strip() for m in running}
+    loaded.discard("")
     disabled=_load_ollama_model_prefs()
+    valid=set(names)
+    pruned=disabled-valid
+    if pruned:
+        disabled &= valid
+        _save_ollama_model_prefs(disabled)
 
     if not names:
         print("LOOK OLLAMA · no installed models")
@@ -8255,15 +8359,16 @@ def ollama_models(select_model=None):
     elif sys.stdin.isatty() and sys.stdout.isatty() and shutil.which("fzf"):
         chosen=None
         while chosen is None:
-            rows=_ollama_model_rows(base,names,resident,disabled)
+            rows=_ollama_model_rows(base,names,loaded,disabled)
             payload="\n".join(f"{name}\t{display}" for name,display,_ in rows)+"\n"
             result=subprocess.run(
                 [
                     "fzf",
                     "--prompt","model › ",
-                    "--header","Enter select · X enable/disable for LOOK test --all · ✓ enabled · × disabled · ● resident · ★ preferred",
-                    "--height","~60%",
+                    "--header","TEST LOAD SEL  MODEL  CAPABILITIES\nEnter select · X test on/off · ● loaded · ★ selected",
+                    "--height","~70%",
                     "--reverse",
+                    "--info","inline",
                     "--no-multi",
                     "--delimiter","\t",
                     "--with-nth","2..",
@@ -8286,12 +8391,14 @@ def ollama_models(select_model=None):
                 else:
                     disabled.add(model)
                 _save_ollama_model_prefs(disabled)
+                # Re-read persisted state so redraw reflects disk truth, not only RAM.
+                disabled=_load_ollama_model_prefs()
                 continue
             chosen=model
     else:
-        rows=_ollama_model_rows(base,names,resident,disabled)
+        rows=_ollama_model_rows(base,names,loaded,disabled)
         _title("ollama models")
-        print(f"  {_c('✓','32')} enabled · {_c('×','2')} disabled · {_c('●','32')} resident · {_c('★','33')} preferred")
+        print(f"  TEST {_c('✓','32')}/{_c('×','2')} · LOAD {_c('●','32')} · SELECT {_c('★','33')}")
         for _,display,_ in rows:
             print(f"  {display}")
         return 0
@@ -8306,7 +8413,7 @@ def ollama_models(select_model=None):
     caps=_ollama_capabilities(base,chosen)
     suffix=f" · {_model_capability_label(caps)}"
     if chosen in disabled:
-        suffix+=" · disabled from test --all"
+        suffix+=" · test off"
     print(f"LOOK OLLAMA · {_c(chosen,'1;32')} selected{suffix}")
     return 0
 
@@ -8534,7 +8641,7 @@ def ollama_test(all_models=False):
     else:
         # `lk ollama test` means the model selected in LOOK, not whichever
         # model happens to be resident in Ollama right now.
-        preferred=_preferred_ollama_model()
+        active=_active_ollama_model()
         try:
             installed=_ollama_tags(base)
         except Exception as exc:
@@ -8545,10 +8652,10 @@ def ollama_test(all_models=False):
             for m in installed
         ]
         installed_names=[m for m in installed_names if m]
-        if preferred in installed_names:
-            models=[preferred]
+        if active in installed_names:
+            models=[active]
         else:
-            print(f"LOOK OLLAMA · selected model is not installed on this host: {preferred}")
+            print(f"LOOK OLLAMA · active model is not installed on this host: {active}")
             if installed_names:
                 print("  choose an installed model with `lk ollama models`")
             return 1
@@ -8642,10 +8749,10 @@ def ollama_test(all_models=False):
 
     # Restore the user's preferred model after a sweep.
     if all_models:
-        preferred=_preferred_ollama_model()
+        active=_active_ollama_model()
         try:
             _ollama_set_model(base, preferred)
-            print(f"  restored   {preferred}")
+            print(f"  restored   {active}")
         except Exception:
             pass
     return 0
@@ -8685,7 +8792,7 @@ def _settings_memory_state():
 
 def _settings_vision_state():
     try:
-        caps=_ollama_capabilities(_ollama_base(),_preferred_ollama_model()) or []
+        caps=_ollama_capabilities(_ollama_base(),_active_ollama_model()) or []
         return "available" if "vision" in caps else "model lacks vision"
     except Exception:
         return "unknown"
@@ -8707,7 +8814,7 @@ def _settings_rows():
     """Control-room registry: value + explanation + search vocabulary."""
     base=_ollama_base()
     return [
-        ("model","AI","Preferred model",_preferred_ollama_model(),
+        ("model","AI","Preferred model",_active_ollama_model(),
          "Choose the local model LO uses. Model capability and speed can differ dramatically.",
          "model ollama llm qwen gemma deepseek local ai gpu"),
         ("host","AI","Ollama host",_ollama_host_name(base),
@@ -9111,7 +9218,7 @@ def inspect_ollama():
     try:
         with urllib.request.urlopen(base+'/api/ps',timeout=.8) as r: models=json.load(r).get('models',[])
         print(f"  server    {_c('ready','32')}")
-        print(f"  preferred {_preferred_ollama_model()}")
+        print(f"  preferred {_active_ollama_model()}")
         if models:
             names=[m.get('name') or m.get('model') or '?' for m in models[:6]]
             print(f"  resident  {', '.join(names)}")
@@ -10184,7 +10291,7 @@ def _surface_ai():
         _surface_header("local ai","control surface")
         print(f"  server       {_ollama_host_name(base)}")
         print(f"  ollama       {_c('● ready','32') if ready else _c('○ offline','33')}")
-        print(f"  model        {_preferred_ollama_model()}")
+        print(f"  model        {_active_ollama_model()}")
         print(f"  resident     {resident}")
         print(f"  thinking     {_load_thinking()}")
         print(f"  display      {_load_think_display()}")
@@ -10368,7 +10475,7 @@ START HERE
 
 FILES
   lk [THING]       detail  dirs  files  tree  recent  size  run
-  lmk  lcp  lmv  lscp  lrm  mkd  undo  undo list  undo skip  reveal
+  lmk  lcp  lmv  lscp  lrm  mkd  match  undo  undo list  undo skip  reveal
 
 SYSTEM
   doctor  up  ports  port  processes  process  pid
@@ -10380,7 +10487,7 @@ NETWORK
 AI
   lo  lo search    ollama  ollama models  ollama test
   personality  thinking  think-display  ai stats  settings [SEARCH]
-  memory  memory compact  skills  profile  ai  feedback  sound  vision  generate  comfy  schedule
+  memory  memory compact  skills  profile  ai  feedback  sound  vision  generate  comfy  schedule  translate
   access  ollama access  ollama key
 
 MEDIA
@@ -11200,6 +11307,8 @@ def main():
     if cmd in {"schedule","scheduler"}: return schedule_command(rest)
     if cmd=="apps": return _apps_command(rest)
     if cmd=="shortcuts": return _shortcuts_command(rest)
+    if cmd=="match": return _match_command(rest)
+    if cmd in {"translate","translation"}: return _translate_command(rest)
     if cmd=="access": return _access_command(rest)
     if cmd in ("version","--version","-V"): print(f"LOOK {VERSION}"); return 0
     if cmd=="home": return home()
@@ -11251,7 +11360,7 @@ def main():
     if cmd=="uninstall": return uninstall()
     if cmd=="config":
         if rest and rest[0] in {"paths","raw"}:
-            print(f"LOOK {VERSION}\n  executable  {Path(__file__).resolve()}\n  renderer    {RENDERER}\n  zshrc       {HOME/'.zshrc'}\n  secrets     {HOME/'.zsh_secrets'}\n  memory      {MEMORY_FILE}\n  memory queue {MEMORY_QUEUE}\n  undo        {UNDO_FILE}\n  undo skipped {UNDO_SKIPPED_FILE}\n  ollama model {_preferred_ollama_model()}\n  ollama models {OLLAMA_MODELS_FILE}")
+            print(f"LOOK {VERSION}\n  executable  {Path(__file__).resolve()}\n  renderer    {RENDERER}\n  zshrc       {HOME/'.zshrc'}\n  secrets     {HOME/'.zsh_secrets'}\n  memory      {MEMORY_FILE}\n  memory queue {MEMORY_QUEUE}\n  undo        {UNDO_FILE}\n  undo skipped {UNDO_SKIPPED_FILE}\n  active model {_active_ollama_model()}\n  ollama models {OLLAMA_MODELS_FILE}")
             return 0
         return _surface_config()
     if cmd=="secrets":

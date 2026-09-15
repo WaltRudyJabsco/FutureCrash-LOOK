@@ -2935,3 +2935,217 @@ current directory vanished
 ```
 
 The parent Zsh also checks this before every prompt, so undo/remove/move operations cannot leave the interactive shell stranded in a dead directory.
+
+
+---
+
+<!-- source: RELEASE-2.7.9.md -->
+
+# Future Crash + LOOK 2.7.9
+
+Two related Zsh integration fixes.
+
+## Reload/install parse safety
+
+LOOK now clears names such as `rb` before defining functions. This prevents an older alias from being expanded while Zsh parses a new `rb()` definition.
+
+## Safe `fc`
+
+Zsh's `fc` is not merely a user-facing history command. ZLE/bracketed-paste code may call it internally with flags such as:
+
+```text
+fc -p -a /dev/null 0 0
+fc -P
+```
+
+Shadowing that builtin with Future Crash caused pasted shell commands to be misrouted into `future_crash.py`.
+
+LOOK no longer disables or replaces the builtin. In force-shortcut mode, only a user-entered interactive line consisting exactly of `fc` is rewritten to `fcr` by ZLE before execution.
+
+So:
+
+```text
+typed `fc`      → Future Crash
+internal `fc …` → native Zsh history builtin
+```
+
+
+---
+
+<!-- source: RELEASE-2.8.0.md -->
+
+# Future Crash + LOOK 2.8.0
+
+This pass makes LOOK's shell language more predictable and adds two deterministic utility edges.
+
+## Shell grammar
+
+`f` is the optional personal Future Crash shortcut. `fc` remains Zsh's native history builtin permanently.
+
+`l -` follows the familiar `cd -` convention and immediately opens LOOK in the destination.
+
+`lmk` now owns a small explicit option grammar. Unknown flags fail safely. `--` ends option parsing so filenames beginning with a dash remain possible.
+
+## Pattern selection
+
+`lk match 'future-crash-*' v` returns the highest natural/version-like match.
+Use `t` for modification time, `n` for name, and `--all` to list the ranked set.
+
+Quote wildcard patterns when you want LOOK—not the shell—to perform matching.
+
+## Translation
+
+`lk translate` is a deterministic edge for a configured LibreTranslate-compatible API. It deliberately does not pretend an LLM answer is an authoritative translation result.
+
+Configure a local/self-hosted service with:
+
+    lk translate host http://HOST:5000
+
+Then:
+
+    lk translate es "Good morning"
+    lk translate en fr "Where is the station?"
+
+The provider remains optional; LOOK works normally without it.
+
+
+---
+
+<!-- source: RELEASE-2.8.1.md -->
+
+# Future Crash + LOOK 2.8.1
+
+Hotfix for the `rb` reload command.
+
+LOOK correctly removed a pre-existing `rb` alias before defining its own `rb()` function, but a duplicate cleanup block later in the file also removed the freshly defined function.
+
+The late cleanup no longer includes `rb`.
+
+
+---
+
+<!-- source: RELEASE-2.8.2.md -->
+
+# Future Crash + LOOK 2.8.2
+
+Command ownership cleanup.
+
+```text
+f    Future Crash (optional force-mode shortcut)
+ff   LOOK fuzzy finder
+fcr  canonical Future Crash convenience
+fc   native Zsh history builtin, always
+```
+
+Earlier releases installed the new `f` shortcut and later redefined `f()` as the old fuzzy finder. That startup-order conflict is removed.
+
+LOOK also actively restores native `fc` when sourcing, cleaning up older force-mode installations that may have shadowed or disabled the Zsh builtin.
+
+
+---
+
+<!-- source: RELEASE-2.8.3.md -->
+
+# Future Crash + LOOK 2.8.3
+
+Navigation cleanup.
+
+```text
+cd PATH   native filesystem first; zoxide fallback when no path exists
+z WORD    explicitly history/frecency-oriented
+l WORD    navigate + LOOK
+l -       previous directory + LOOK
+g THING   go to thing
+go THING  same semantic action
+G         GO from inside LOOK
+g         top of LOOK view
+```
+
+For a directory, GO makes it the shell working directory. For a file, GO moves the shell to the file's parent and reopens LOOK with the file selected.
+
+
+---
+
+<!-- source: RELEASE-2.8.4.md -->
+
+# Future Crash + LOOK 2.8.4
+
+A coherence pass rather than another navigation abstraction.
+
+## Navigation
+
+- `cd` is native Zsh again.
+- `z` remains zoxide.
+- `l` is the smart/fuzzy LOOK navigation front door.
+- `l <Tab>` uses the same completion engine registered for `z`.
+- `G` inside LOOK means "go there" and is the only LOOK-to-shell navigation bridge.
+- Experimental shell `g` / `go` commands are removed.
+
+## Models
+
+The model panel now describes three independent facts:
+
+```text
+TEST   included in `lk ollama test --all`
+LOAD   currently loaded by Ollama
+SELECT current LOOK choice
+```
+
+Future Crash follows the current LOOK selection live unless an explicit model override was supplied at launch.
+
+
+---
+
+<!-- source: RELEASE-2.8.5.md -->
+
+# Future Crash + LOOK 2.8.5
+
+Navigation is now one LOOK language over several mature backends.
+
+```text
+cd        native Zsh
+z         native zoxide
+l         smart LOOK navigation
+ff        global LOOK search
+G         go to selected thing
+```
+
+`l` resolves in this order:
+
+1. exact live filesystem path
+2. unique fuzzy match among live child directories
+3. zoxide history/frecency
+4. global LOOK FIND
+
+Completion follows the same principle: live directory candidates plus zoxide memory.
+
+`ff` and `fznv` no longer expose a separate fzf UI. They use LOOK's own filter/select/preview/actions surface, including uppercase `G` to put the shell at the selected location.
+
+
+---
+
+<!-- source: RELEASE-2.8.6.md -->
+
+# Future Crash + LOOK 2.8.6
+
+Hotfix for global LOOK FIND startup latency.
+
+Previous behavior:
+
+```text
+ff
+→ scan entire home tree
+→ spinner
+→ finally enter LOOK FIND
+```
+
+2.8.6:
+
+```text
+ff
+→ enter LOOK FIND immediately
+→ start filtering immediately
+→ catalog continues filling in background
+```
+
+The same progressive behavior applies to `fznv`.

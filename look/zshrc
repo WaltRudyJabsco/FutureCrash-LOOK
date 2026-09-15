@@ -38,6 +38,12 @@ ENABLE_CORRECTION="true"
 plugins=(git zsh-syntax-highlighting zsh-autosuggestions web-search)
 source "$ZSH/oh-my-zsh.sh"
 
+# Migration safety: older LOOK force-mode releases could shadow/disable Zsh's
+# native `fc`. From 2.8.x onward `fc` belongs permanently to Zsh.
+unalias fc 2>/dev/null
+unfunction fc 2>/dev/null
+enable fc 2>/dev/null
+
 # Reload/install safety: Zsh expands aliases while parsing function definitions.
 # Clear every LOOK-owned function name before any of those definitions appear.
 unalias rb commands lo rst fcr future-crash webterm 2>/dev/null
@@ -92,13 +98,13 @@ commands() {
   print -P '%F{75}  lkd%f      directories         %F{75}lkf%f      files'
   print -P '%F{75}  lkt%f      tree                %F{75}lkr%f      recent'
   print -P '%F{75}  lkz%f      sizes               %F{75}zll WORD%f jump + look'
-  print -P '%F{75}  cdl WORD%f jump + details      %F{75}fznv%f     fuzzy edit'
-  print -P '%F{75}  f%f        find anywhere → LOOK'
+  print -P '%F{75}  cdl WORD%f jump + details      %F{75}fznv%f     LOOK find + edit'
+  print -P '%F{75}  ff [WORD]%f global LOOK search'
 
   _look_shortcut_is_look l  && print -P '%F{75}  l%f        look around'
   _look_shortcut_is_look lh && print -P '%F{75}  lh%f       LOOK home'
   _look_shortcut_is_look lo && print -P '%F{75}  lo%f       ask LO'
-  _look_shortcut_is_look fc && print -P '%F{75}  fc%f       Future Crash'
+  _look_shortcut_is_look f  && print -P '%F{75}  f%f        Future Crash'
   print -P '%F{75}  lk home%f  LOOK home           %F{75}lk o%f     ask LO'
   print -P '%F{75}  fcr%f      Future Crash        %F{75}rst%f      Future Crash'
   print -P '%F{75}  rs%f       reset ritual        %F{75}rb%f       reload zsh'
@@ -119,11 +125,10 @@ rs() {
 }
 
 
-# Keep Unix cd deterministic. Zoxide stays available as `z` for fuzzy/history
-# navigation, but must never intercept a new exact path that is not in its DB.
-# `nocorrect` also prevents Zsh from suggesting an older similarly named folder
-# before entering a freshly downloaded/extracted directory.
-alias cd='nocorrect builtin cd'
+# `cd` remains native Zsh. LOOK does not wrap shell navigation or completion.
+# `l` is the smart/fuzzy navigation front door; `z` remains directly available.
+unalias cd 2>/dev/null
+unfunction cd 2>/dev/null
 alias ..='cd ..'
 alias zz='z -'
 
@@ -163,27 +168,57 @@ _look() {
 # Human-facing smart-view implementation. Public short names are installed
 # later through the collision-aware shortcut layer.
 _look_smart() {
+  if (( $# == 1 )) && [[ "$1" == "-" ]]; then
+    builtin cd - || return
+    _look . --mode smart --interactive
+    return
+  fi
   if (( $# == 0 )); then
     _look . --mode smart --interactive
     return
   fi
 
-  # `l WORD` means navigate there, then LOOK. Explicit directories win;
-  # otherwise let zoxide resolve previously visited shorthand.
+  # 1. Exact live filesystem always wins.
   if (( $# == 1 )) && [[ -d "$1" ]]; then
     builtin cd -- "$1" || return
     _look . --mode smart --interactive
     return
   fi
 
-  local target
-  target="$(zoxide query -- "$@" 2>/dev/null)" || {
-    print -P "%F{red}LOOK:%f no directory match for $*"
-    return 1
-  }
-  builtin cd -- "$target" || return
-  _look . --mode smart --interactive
+  # 2. A unique live child-directory fuzzy match outranks historical memory.
+  if (( $# == 1 )); then
+    local needle="${1:l}"
+    local -a live_matches
+    local d base
+    for d in ./*(/N); do
+      base="${d:t}"
+      [[ "${base:l}" == *"$needle"* ]] && live_matches+=("$d")
+    done
+    if (( ${#live_matches[@]} == 1 )); then
+      builtin cd -- "${live_matches[1]}" || return
+      _look . --mode smart --interactive
+      return
+    elif (( ${#live_matches[@]} > 1 )); then
+      # Ambiguous live reality belongs in LOOK's own filter UI.
+      _look . --mode smart --interactive --query "$1"
+      return
+    fi
+  fi
+
+  # 3. Zoxide supplies remembered/frecency navigation.
+  if (( $+commands[zoxide] )); then
+    local target
+    target="$(zoxide query -- "$@" 2>/dev/null)" && [[ -d "$target" ]] && {
+      builtin cd -- "$target" || return
+      _look . --mode smart --interactive
+      return
+    }
+  fi
+
+  # 4. Last resort: search globally in LOOK's own visual language.
+  _look "$HOME" --global-find --query "$*"
 }
+
 # Specialized LOOK views use the same directory language as `l`:
 # explicit path first, otherwise resolve shorthand through zoxide.
 _look_view() {
@@ -235,6 +270,13 @@ _look_short_name_kind() {
   print free
 }
 
+# If this shell was sourced from a pre-2.8.2 LOOK, retire LOOK's old `f`
+# fuzzy-finder function before applying the current shortcut policy. Do not
+# touch unrelated user-defined `f` functions.
+if (( $+functions[f] )) && [[ "${functions[f]}" == *"_look_global_pick"* ]]; then
+  unfunction f 2>/dev/null
+fi
+
 _look_short_install() {
   local name="$1" target="$2" kind
   kind="$(_look_short_name_kind "$name")"
@@ -262,23 +304,9 @@ _look_short_install lt lkt
 _look_short_install lr lkr
 _look_short_install lz lkz
 _look_short_install lh '_look home'
+_look_short_install f fcr
 
-# Personal `fc` convenience without shadowing Zsh's real `fc` builtin.
-# In force mode, only an interactive command line containing exactly `fc`
-# is rewritten to `fcr` at accept-line time. Internal `fc -p/-a/-P ...` calls
-# remain the native history builtin, which keeps bracketed paste healthy.
-if [[ "$_LOOK_SHORTCUT_POLICY" == "force" ]] && zle -la accept-line >/dev/null 2>&1; then
-  _look_accept_line() {
-    local trimmed="${BUFFER##[[:space:]]#}"
-    trimmed="${trimmed%%[[:space:]]#}"
-    if [[ "$trimmed" == "fc" ]]; then
-      BUFFER="${BUFFER/fc/fcr}"
-      CURSOR=${#BUFFER}
-    fi
-    zle .accept-line
-  }
-  zle -N accept-line _look_accept_line
-fi
+# `fc` is permanently reserved for Zsh's native history builtin.
 
 # Historical LOOK aliases are intentionally no longer installed: lsd collides
 # with the established lsd utility, and lc/lsf add little beyond lk*/lk commands.
@@ -310,67 +338,25 @@ _look_nvim_intro() {
   : >| "$flag"
 }
 
-# ── Fuzzy files ──────────────────────────────────────────────────────────────
-displayFZFFiles() {
-  fzf --preview 'bat --theme=gruvbox-dark --color=always --style=header,grid --line-range :400 -- {}'
-}
-
-# Shared streaming global finder.
-# fd/find begins producing paths immediately; fzf is interactive before the
-# catalog is complete, so typing never waits on a full-home scan.
-_look_global_pick() {
-  local prompt="${1:-FIND › }"
-
-  if (( $+commands[fd] )); then
-    fd --hidden --follow --absolute-path \
-      --exclude .git --exclude node_modules --exclude .Trash \
-      --exclude Library/Caches --exclude .cache \
-      . "$HOME" 2>/dev/null |
-    fzf \
-      --prompt="$prompt" \
-      --height=100% \
-      --layout=reverse \
-      --info=inline \
-      --border=none \
-      --pointer='▸' \
-      --marker='✓' \
-      --color='fg:#d7dde5,bg:#0f141a,hl:#67d6ee,fg+:#081218,bg+:#48bcd6,hl+:#081218,prompt:#67d6ee,pointer:#67d6ee,marker:#8bd691,spinner:#67d6ee,info:#808b9a'
-    return ${pipestatus[2]}
-  fi
-
-  command find "$HOME" \
-    \( -path "$HOME/.git" -o -path '*/.git' -o -path '*/node_modules' \
-       -o -path "$HOME/.Trash" -o -path "$HOME/Library/Caches" -o -path "$HOME/.cache" \) -prune -o \
-    -mindepth 1 -print 2>/dev/null |
-  fzf \
-    --prompt="$prompt" \
-    --height=100% \
-    --layout=reverse \
-    --info=inline \
-    --border=none \
-    --pointer='▸' \
-    --marker='✓' \
-    --color='fg:#d7dde5,bg:#0f141a,hl:#67d6ee,fg+:#081218,bg+:#48bcd6,hl+:#081218,prompt:#67d6ee,pointer:#67d6ee,marker:#8bd691,spinner:#67d6ee,info:#808b9a'
-  return ${pipestatus[2]}
-}
-
+# ── Global LOOK search ───────────────────────────────────────────────────────
 fznv() {
   (( $+commands[nvim] )) || return 127
-  local selection
-  selection=$(_look_global_pick 'FIND+NVIM › ') || return
-  [[ -n "$selection" ]] || return
-  _look_nvim_intro
-  nvim -- "$selection"
+  if (( $# )); then
+    _look "$HOME" --global-find --nvim-result --query "$*"
+  else
+    _look "$HOME" --global-find --nvim-result
+  fi
 }
 
-# Global retrieval stays streaming, then hands the exact result to LOOK.
-f() {
-  local selection
-  selection=$(_look_global_pick 'FIND › ') || return
-  [[ -n "$selection" ]] || return
 
-  # LOOK owns the post-selection action language and preview.
-  _look "${selection:h}" --mode smart --interactive --select "$selection"
+# Global LOOK search. fd/find remain implementation details; the user stays in
+# LOOK's normal filter/select/action language.
+ff() {
+  if (( $# )); then
+    _look "$HOME" --global-find --query "$*"
+  else
+    _look "$HOME" --global-find
+  fi
 }
 
 
@@ -507,75 +493,76 @@ lscp() {
 }
 
 lmk() {
-  local force="" dest answer result parent
+  local force="" dest answer result parent parents=0
+  local -a operands
+  local parsing=1 arg
 
-  if [[ "$1" == "-d" || "$1" == "--dir" ]]; then
-    force="dir"; shift
-  elif [[ "$1" == "-f" || "$1" == "--file" ]]; then
-    force="file"; shift
+  while (( $# )); do
+    arg="$1"; shift
+    if (( parsing )); then
+      case "$arg" in
+        --) parsing=0; continue ;;
+        -d|--dir) force="dir"; continue ;;
+        -f|--file) force="file"; continue ;;
+        -p|--parents) parents=1; continue ;;
+        -*) print "LOOK make · unknown option: $arg"; print "usage: lmk [-d|--dir|-f|--file] [-p|--parents] [--] PATH"; return 2 ;;
+      esac
+    fi
+    operands+=("$arg")
+  done
+  if (( ${#operands[@]} > 1 )); then
+    print "LOOK make · one path at a time; quote paths containing spaces"; return 2
   fi
-
-  dest="$*"
+  dest="${operands[1]:-}"
   if [[ -z "$dest" ]]; then
     _look_prompt "make › " || { print -P "%F{242}· cancelled%f"; return 1; }
     dest="$REPLY"
   fi
   [[ -n "$dest" ]] || return
 
-  # Existing paths are not an intent question; report the filesystem fact first.
   if [[ -e "$dest" ]]; then
-    if [[ -d "$dest" ]]; then
-      print "LOOK make · already exists as a directory: $dest"
-    else
-      print "LOOK make · already exists as a file: $dest"
-    fi
+    if [[ -d "$dest" ]]; then print "LOOK make · already exists as a directory: $dest"
+    else print "LOOK make · already exists as a file: $dest"; fi
     return 1
   fi
 
-  # A trailing slash is native Unix directory intent.
   if [[ "$force" == "dir" || "$dest" == */ ]]; then
     dest="${dest%/}"
     [[ -n "$dest" ]] || { print "LOOK make · invalid directory"; return 2; }
-    lk _mkdir "$dest" || return
-    [[ -d "$dest" ]] || { print "LOOK make · directory was not created: $dest"; return 1; }
+    if (( parents )); then
+      command mkdir -p -- "$dest" || return
+      print "LOOK make · directory path created: $dest"
+    else lk _mkdir "$dest" || return; fi
     builtin cd -- "$dest"
     return
   fi
 
   if [[ "$force" != "file" ]]; then
     local leaf="${dest:t}"
-    # Dotfiles and names with a suffix are strong file intent.
     if [[ "$leaf" != .* && "$leaf" != *.* ]]; then
       print -P "%F{cyan}LOOK make%f · %B$dest%b is ambiguous"
-      _look_choice "[d] directory + enter · [f] file · Esc cancel › " || {
-        print -P "%F{242}· cancelled%f"; return 1
-      }
+      _look_choice "[d] directory + enter · [f] file · Esc cancel › " || { print -P "%F{242}· cancelled%f"; return 1; }
       answer="$REPLY"
       case "$answer" in
         d|dir|directory)
-          lk _mkdir "$dest" || return
-          [[ -d "$dest" ]] || { print "LOOK make · directory was not created: $dest"; return 1; }
-          builtin cd -- "$dest"
-          return
-          ;;
+          if (( parents )); then command mkdir -p -- "$dest" || return; print "LOOK make · directory path created: $dest"
+          else lk _mkdir "$dest" || return; fi
+          builtin cd -- "$dest"; return ;;
         f|file) ;;
         *) print -P "%F{242}· cancelled%f"; return 1 ;;
       esac
     fi
   fi
 
-  # File intent. If parents are missing, ask before creating them.
-  result="$(lk _touch "$dest")"
+  if (( parents )); then result="$(lk _touch --parents "$dest")"
+  else result="$(lk _touch "$dest")"; fi
   if [[ "$result" == CREATE_DIR_REQUIRED* ]]; then
     parent="${dest:h}"
     print -P "%F{cyan}LOOK make%f · parent directory does not exist: %B$parent%b"
     _look_choice "create parent path? [y/n] › " || { print -P "%F{242}· cancelled%f"; return 1; }
     answer="$REPLY"
-    if [[ "$answer" == y ]]; then
-      result="$(lk _touch --parents "$dest")"
-    else
-      print -P "%F{242}· cancelled%f"; return 1
-    fi
+    if [[ "$answer" == y ]]; then result="$(lk _touch --parents "$dest")"
+    else print -P "%F{242}· cancelled%f"; return 1; fi
   fi
   print -r -- "$result"
 }
@@ -636,6 +623,20 @@ compdef _lk lk
 setopt COMPLETE_ALIASES
 compdef _lo lo
 compdef _lmk lmk mkd
+# LOOK navigation completion merges live filesystem truth with zoxide memory.
+# Native directories come first; remembered locations are additive, never a
+# replacement for what actually exists now.
+_look_l_complete() {
+  _directories
+
+  (( $+commands[zoxide] )) || return
+  local query="${words[CURRENT]}"
+  local -a remembered
+  remembered=("${(@f)$(zoxide query -l -- "$query" 2>/dev/null)}")
+  (( ${#remembered[@]} )) || return
+  compadd -Q -J 'history' -a remembered
+}
+compdef _look_l_complete l
 
 # File-action helpers intentionally accept several path operands. Let Zsh do
 # ordinary filesystem completion for every position; lcp/lmv interpret the
@@ -673,7 +674,7 @@ add-zsh-hook precmd _look_shell_title
 # Zsh expands aliases while sourcing, so clear all names that become functions
 # BEFORE their function definitions are parsed.
 unalias lk lo rst fcr future-crash commands rb 2>/dev/null
-unfunction future-crash fcr rst rb 2>/dev/null
+unfunction future-crash fcr rst 2>/dev/null
 # `fc` remains Zsh's history builtin by default. The explicit `force` shortcut
 # policy may disable/reclaim it later as the Future Crash convenience command.
 
@@ -738,11 +739,8 @@ fcr()          { _future_crash_owned "$@"; }
 _look_shortcut_is_look() {
   local name="$1"
   case "$name" in
-    l|ll|ld|lf|lt|lr|lz|lh)
+    l|ll|ld|lf|lt|lr|lz|lh|f)
       (( $+functions[$name] )) || return 1
-      ;;
-    fc)
-      [[ "$_LOOK_SHORTCUT_POLICY" == "force" ]] || return 1
       ;;
     lo)
       (( $+functions[lo] )) || return 1
@@ -758,7 +756,7 @@ _look_shortcut_is_look() {
 }
 
 _look_export_shortcut_state() {
-  local names=(l ll ld lf lt lr lz lh lo lk fc)
+  local names=(l ll ld lf lt lr lz lh f lo lk)
   local active=() missing=() name kind
   for name in $names; do
     if _look_shortcut_is_look "$name"; then

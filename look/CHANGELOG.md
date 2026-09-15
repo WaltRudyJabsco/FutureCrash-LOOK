@@ -1,3 +1,63 @@
+## 4.11.0 — Active model contract
+
+- One active model is canonical across LOOK/LO.
+- Loaded state is telemetry, never selection.
+- Remove silent fallback to arbitrary loaded models.
+- Background workers inherit the active model.
+
+## 4.10.1 — Progressive LOOK FIND
+
+- `ff` / `fznv` become interactive immediately.
+- Populate global catalog in a background thread.
+- Stream fd/find results progressively instead of precomputing the entire catalog.
+- Show scanning state without blocking interaction.
+
+## 4.10.0 — Unified navigation
+
+- `l`: live filesystem → local fuzzy → zoxide history → global LOOK fallback.
+- `l <Tab>` merges live directory completion with zoxide memory.
+- `ff` and `fznv` use LOOK FIND rather than an external fzf surface.
+- Seed LOOK FIND directly from shell query text.
+- `G` works from global results exactly as it does from local LOOK results.
+- Remove unused legacy fuzzy-picker shell implementation.
+
+## 4.9.4 — Navigation + model state
+
+- Native `cd` restored.
+- `l` remains smart/fuzzy and borrows zoxide's registered completion directly.
+- Remove shell `g` / `go`; retain uppercase `G` inside LOOK.
+- Rename model states to TEST / LOAD / SELECT.
+- Compact model panel and make test toggles persist/redraw from disk truth.
+
+## 4.9.3 — Navigation semantics
+
+- Filesystem-first smart `cd` with zoxide fallback.
+- Native directory completion restored for `cd`.
+- Add `g` / `go` semantic navigation.
+- Make uppercase `G` consistently mean GO inside LOOK.
+- Lowercase `g` remains top-of-view.
+
+## 4.9.2 — Command ownership cleanup
+
+- `f` reliably means Future Crash in force mode.
+- Fuzzy finder moves from `f` to `ff`.
+- Restore native Zsh `fc` during migration from older LOOK releases.
+- Eliminate startup-order overwrite between shortcut layer and fuzzy finder.
+
+## 4.9.1 — rb hotfix
+
+- Remove `rb` from the duplicate late `unfunction` cleanup.
+- Preserve early alias/function cleanup before parsing.
+- Restore `rb` after fresh install and reload.
+
+## 4.9.0 — Shell grammar + deterministic edges
+
+- Optional `f` Future Crash shortcut; native `fc` forever.
+- `l -` toggles to previous directory.
+- Safe explicit `lmk` option grammar and `--` literal-path escape.
+- `lk match` glob resolver with version/time/name ranking.
+- Configurable LibreTranslate-compatible translation edge.
+
 ## 4.8.3 — Shell ownership fixes
 
 - Clear `rb` and other LOOK function names before function parsing.

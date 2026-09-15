@@ -809,12 +809,12 @@ def action_footer(parts:list[str],width:int)->list[str]:
     return lines
 
 
-def pager(rows:list[str],height:int,width:int,rebuild=None,candidates=None,on_browse=None,on_back=None,on_parent=None,on_go=None,on_activate=None,force_interactive=False,initial_select:Path|None=None,marked_set:set[Path]|None=None)->None:
+def pager(rows:list[str],height:int,width:int,rebuild=None,candidates=None,on_browse=None,on_back=None,on_parent=None,on_go=None,on_activate=None,force_interactive=False,initial_select:Path|None=None,initial_query:str='',marked_set:set[Path]|None=None,current_dir:Path|None=None)->None:
     # Interactive state machine: browse -> filter -> select.
     usable=max(3,height-5)
     if (len(rows)<=height-1 and not force_interactive) or not (sys.stdin.isatty() and sys.stdout.isatty()):
         print('\n'.join(rows)); return
-    top=0; query=''; filtering=False; selecting=False; selected=0
+    top=0; query=initial_query or ''; filtering=bool(query); selecting=False; selected=0
     current=rows
     matches:list[Path]=[]
     notice=''
@@ -837,6 +837,9 @@ def pager(rows:list[str],height:int,width:int,rebuild=None,candidates=None,on_br
         matches=candidates(query) if candidates else []
         selected=min(selected,max(0,len(matches)-1))
         top=0
+
+    if query and rebuild and candidates:
+        refresh_filter()
 
     def selected_path()->Path|None:
         return matches[selected] if matches and 0<=selected<len(matches) else None
@@ -972,7 +975,7 @@ def pager(rows:list[str],height:int,width:int,rebuild=None,candidates=None,on_br
                 back_hint='Esc back' if on_back else 'Esc exit'
                 status=f'  {FAINT}{last}/{len(current)}{RESET}'
                 action_parts=['Enter/→ filter','Space/PgDn next','b/PgUp back',
-                              'g/G ends','←/< parent',back_hint,'q quit']
+                              'g top','G go','←/< parent',back_hint,'q quit']
             if notice:
                 status=f'{status}  {YELLOW}{notice}{RESET}'
                 notice=''
@@ -1174,52 +1177,92 @@ def pager(rows:list[str],height:int,width:int,rebuild=None,candidates=None,on_br
             elif key in {'j','\x1b[B'}: top=min(max(0,len(current)-usable),top+1)
             elif key in {'k','\x1b[A'}: top=max(0,top-1)
             elif key=='g': top=0
-            elif key=='G': top=max(0,len(current)-usable)
+            elif key=='G' and on_go and current_dir is not None:
+                on_go(current_dir); return
             elif key in {'<','\x1b[D'} and on_parent:
                 on_parent()
                 return
     finally:
         sys.stdout.write(SHOW+RESET+'\n'); sys.stdout.flush()
 
-def _global_catalog(root:Path)->list[Path]:
-    """Fast home-scoped catalog; fd when available, find as portable fallback."""
+def _global_catalog_stream(root:Path, catalog:list[Path], done:threading.Event)->None:
+    """Populate catalog progressively; caller may read it while discovery runs."""
     root=root.expanduser().resolve()
-    out=[]
-    if shutil.which("fd"):
-        try:
-            proc=subprocess.run(
+    seen:set[str]=set()
+
+    def add(path:Path)->None:
+        key=str(path)
+        if key not in seen:
+            seen.add(key)
+            catalog.append(path)
+
+    # Seed immediate, useful reality before any recursive scan.
+    try:
+        for p in root.iterdir():
+            add(p)
+    except OSError:
+        pass
+
+    try:
+        if shutil.which("fd"):
+            proc=subprocess.Popen(
                 ["fd","--hidden","--follow","--absolute-path",
                  "--exclude",".git","--exclude","node_modules","--exclude",".Trash",
                  "--exclude","Library/Caches","--exclude",".cache",".",str(root)],
-                capture_output=True,text=True,timeout=12
+                stdout=subprocess.PIPE,stderr=subprocess.DEVNULL,text=True,
+                bufsize=1
             )
-            if proc.returncode==0:
-                out=[Path(line) for line in proc.stdout.splitlines() if line.strip()]
-        except (OSError,subprocess.SubprocessError):
-            out=[]
-    if not out:
-        try:
+            if proc.stdout is not None:
+                for line in proc.stdout:
+                    value=line.strip()
+                    if value:
+                        add(Path(value))
+                    if len(catalog)>=20000:
+                        proc.terminate()
+                        break
+            try: proc.wait(timeout=1)
+            except subprocess.TimeoutExpired:
+                proc.kill()
+        else:
             for base,dirs,files in os.walk(root):
                 dirs[:]=[d for d in dirs if d not in {".git","node_modules",".Trash",".cache"}]
                 b=Path(base)
-                out.extend(b/d for d in dirs)
-                out.extend(b/f for f in files)
-                if len(out)>=20000:
-                    break
-        except OSError:
-            pass
-    return out[:20000]
+                for d in dirs:
+                    add(b/d)
+                    if len(catalog)>=20000: break
+                if len(catalog)>=20000: break
+                for f in files:
+                    add(b/f)
+                    if len(catalog)>=20000: break
+                if len(catalog)>=20000: break
+    except (OSError,subprocess.SubprocessError):
+        pass
+    finally:
+        done.set()
+
+
+def _start_global_catalog(root:Path)->tuple[list[Path],threading.Event]:
+    """Return immediately with a live catalog that fills in the background."""
+    catalog:list[Path]=[]
+    done=threading.Event()
+    threading.Thread(
+        target=_global_catalog_stream,args=(root,catalog,done),
+        name="look-global-catalog",daemon=True
+    ).start()
+    return catalog,done
 
 def _catalog_matches(paths:list[Path],query:str)->list[Path]:
+    snapshot=paths[:]
     if not query:
-        return paths[:]
-    return [p for p in paths if query_matches(p.name,query)]
+        return snapshot
+    return [p for p in snapshot if query_matches(p.name,query)]
 
-def _catalog_view(paths:list[Path],root:Path,width:int,query:str='',highlight_path:Path|None=None,marked:set[Path]|None=None)->list[str]:
+def _catalog_view(paths:list[Path],root:Path,width:int,query:str='',highlight_path:Path|None=None,marked:set[Path]|None=None,scanning:bool=False)->list[str]:
     matches=_catalog_matches(paths,query)
     shown=matches[:800]
+    scan_note=' · scanning…' if scanning else ''
     header=(f'{BOLD}{CYAN}LOOK FIND{RESET}  {WHITE}{root}{RESET}'
-            f'  {FAINT}{len(matches)} matches{RESET}')
+            f'  {FAINT}{len(matches)} matches{scan_note}{RESET}')
     rows=[header,FAINT+('─'*min(width,max(24,len(strip_ansi(header)))))+RESET]
     for p in shown:
         try:
@@ -1253,6 +1296,7 @@ def main():
     ap.add_argument('--interactive',action='store_true')
     ap.add_argument('--select',default=None,help=argparse.SUPPRESS)
     ap.add_argument('--global-find',action='store_true',help=argparse.SUPPRESS)
+    ap.add_argument('--query',default='',help=argparse.SUPPRESS)
     ap.add_argument('--nvim-result',action='store_true',help=argparse.SUPPRESS)
     ap.add_argument('-h','--help',action='help')
     args=ap.parse_args()
@@ -1261,23 +1305,33 @@ def main():
 
     if args.global_find:
         root=target.expanduser().resolve()
-        with activity('scanning files'):
-            catalog=_global_catalog(root)
+        catalog,scan_done=_start_global_catalog(root)
         selected_result:Path|None=None
+        go_result:Path|None=None
         def choose_global(path:Path)->None:
             nonlocal selected_result
             selected_result=path
+        def go_global(path:Path)->None:
+            nonlocal go_result
+            go_result=path.resolve()
         pager(
-            _catalog_view(catalog,root,shutil.get_terminal_size((100,30)).columns),
+            _catalog_view(catalog,root,shutil.get_terminal_size((100,30)).columns,scanning=not scan_done.is_set()),
             shutil.get_terminal_size((100,30)).lines,
             shutil.get_terminal_size((100,30)).columns,
-            rebuild=lambda q,h=None,w=None,m=None: _catalog_view(catalog,root,w or 100,q,h,m),
+            rebuild=lambda q,h=None,w=None,m=None: _catalog_view(catalog,root,w or 100,q,h,m,scanning=not scan_done.is_set()),
             candidates=lambda q: _catalog_matches(catalog,q),
             on_browse=choose_global,
-            on_go=choose_global,
+            on_go=go_global,
             on_activate=choose_global,
             force_interactive=True,
+            initial_query=args.query,
         )
+        if go_result is not None:
+            target_dir=go_result if go_result.is_dir() else go_result.parent
+            request=Path.home()/'.local'/'share'/'look'/'cd_request'
+            request.parent.mkdir(parents=True,exist_ok=True)
+            request.write_text(str(target_dir),encoding='utf-8')
+            return 0
         if selected_result is not None:
             if args.nvim_result and not selected_result.is_dir():
                 editor=shutil.which("nvim")
@@ -1325,7 +1379,9 @@ def main():
               on_go=choose_go,
               force_interactive=(args.interactive or browsed_once),
               initial_select=initial_select if not browsed_once else None,
-              marked_set=working_set)
+              initial_query=args.query if not browsed_once else '',
+              marked_set=working_set,
+              current_dir=target)
         if go_to is not None:
             request=Path.home()/'.local'/'share'/'look'/'cd_request'
             request.parent.mkdir(parents=True,exist_ok=True)
