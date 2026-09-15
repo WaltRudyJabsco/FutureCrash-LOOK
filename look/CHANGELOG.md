@@ -1,3 +1,7 @@
+## 4.11.1 — Doctor hotfix
+
+- Fix undefined `active` variable in the no-model-loaded doctor branch.
+
 ## 4.11.0 — Active model contract
 
 - One active model is canonical across LOOK/LO.

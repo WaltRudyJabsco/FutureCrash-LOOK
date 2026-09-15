@@ -1,3 +1,9 @@
+## 2.8.8 — Doctor hotfix
+
+- Fix `lk doctor` NameError when Ollama is reachable but no model is currently loaded.
+- Doctor now reads the canonical shared active model before reporting the on-demand model.
+- No model-routing or navigation behavior changed.
+
 ## 2.8.7 — One active model
 
 - Establish one shared active Ollama model as the default for LOOK, LO, Future Crash Oracle, Ask, Workstation, and background AI work.
