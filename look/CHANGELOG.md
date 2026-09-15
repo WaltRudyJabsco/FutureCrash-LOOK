@@ -1,3 +1,12 @@
+## 4.12.0 — Living Memory recall + scope
+
+- Candidate extraction is deliberately higher recall.
+- Metabolism/promotion carry more of the precision burden.
+- Sidebar/temporary language is RECENT-only.
+- Durable promotion requires stronger repeated evidence.
+- Domain/core compilation has deterministic fallbacks.
+- Memory reports extraction reasons and starvation.
+
 ## 4.11.1 — Doctor hotfix
 
 - Fix undefined `active` variable in the no-model-loaded doctor branch.

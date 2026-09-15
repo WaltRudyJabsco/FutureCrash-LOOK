@@ -1,3 +1,13 @@
+## 2.8.9 — Living Memory flow correction
+
+- Extraction now favors recall while metabolism supplies precision.
+- Add high-recall candidacy for user-authored project decisions, architecture, workflows, and preferences.
+- Sidebar/temporary material is RECENT-only; old transient contamination is pruned automatically.
+- Tighten automatic durable promotion to require repeated evidence.
+- Add deterministic domain/core compiler fallbacks.
+- Add extraction-reason diagnostics and candidate-starvation health warning.
+- LOOK 4.12.0.
+
 ## 2.8.8 — Doctor hotfix
 
 - Fix `lk doctor` NameError when Ollama is reachable but no model is currently loaded.

@@ -18,7 +18,7 @@ try:
 except Exception:
     readline = None
 
-VERSION="4.11.1"
+VERSION="4.12.0"
 
 LOOK_WORDMARK = r"""       ██╗      ██╗  ██╗
        ██║      ██║ ██╔╝
@@ -1668,7 +1668,7 @@ def _empty_memory():
             "durable": [], "memories": [], "maintenance_cycles": 0,
             "last_decay_at": time.time(), "last_evidence_at": 0, "last_maintenance_at": 0,
             "last_consolidated_at": 0, "last_compiled_at": 0, "last_change": "",
-            "last_extraction_at": 0, "last_extraction": "never",
+            "last_extraction_at": 0, "last_extraction": "never", "last_extraction_reason": "",
             "extractions_total": 0, "extractions_candidate": 0, "extractions_none": 0,
             "consolidations_total": 0, "promotions_total": 0,
             "candidate_merges_total": 0, "candidate_local_suppressed": 0,
@@ -1862,6 +1862,7 @@ def _load_memory():
                 "last_worker_error":str(data.get("last_worker_error", ""))[:500],
                 "last_extraction_at":float(data.get("last_extraction_at",0) or 0),
                 "last_extraction":str(data.get("last_extraction","never"))[:120],
+                "last_extraction_reason":str(data.get("last_extraction_reason",""))[:180],
                 "extractions_total":max(0,int(data.get("extractions_total",0) or 0)),
                 "extractions_candidate":max(0,int(data.get("extractions_candidate",0) or 0)),
                 "extractions_none":max(0,int(data.get("extractions_none",0) or 0)),
@@ -1969,11 +1970,20 @@ def _sanitize_summary(text):
         return ""
     return clean[:2200]
 
+def _looks_transient_memory(text):
+    """Explicit sidebar/temporary material belongs in RECENT, never durable memory."""
+    low=" ".join(str(text or "").split()).casefold()
+    return any(m in low for m in (
+        "sidebar","no need to remember this","don't remember this","do not remember this",
+        "don't put this in memory","do not put this in memory","just for now",
+        "temporary question","temporary test",
+    ))
+
 def _prune_contaminated_memory(memory):
     cleaned=[]
     for item in memory.get("memories",[]):
         text=_sanitize_memory_text(item.get("text",""))
-        if not text or _looks_environmental_memory(text):
+        if not text or _looks_environmental_memory(text) or _looks_transient_memory(text):
             continue
         item["text"]=text
         cleaned.append(item)
@@ -1983,7 +1993,7 @@ def _prune_contaminated_memory(memory):
     durable=[]
     for item in memory.get("durable",[]):
         text=_sanitize_memory_text(item.get("text",""))
-        if not text or _looks_environmental_memory(text):
+        if not text or _looks_environmental_memory(text) or _looks_transient_memory(text):
             continue
         row=dict(item); row["text"]=text
         domain=str(row.get("domain","general"))
@@ -2213,7 +2223,7 @@ def _durable_memory_match(memory,text):
 
 def _add_durable(memory,item):
     text=_sanitize_memory_text(item.get("text",""))
-    if not text or _looks_environmental_memory(text):
+    if not text or _looks_environmental_memory(text) or _looks_transient_memory(text):
         return memory,False
     domain=_memory_domain(text)
     if domain=="environment": return memory,False
@@ -2287,6 +2297,16 @@ DOMAINS:
         return old
 
 
+def _fallback_domain_summary(items):
+    texts=[]
+    for item in sorted(items,key=lambda x:(int(x.get("uses",1)),int(x.get("importance",0))),reverse=True):
+        text=" ".join(str(item.get("text","")).split()).strip()
+        if text and text not in texts: texts.append(text)
+    return "; ".join(texts[:4])[:700]
+
+def _fallback_core_summary(summaries):
+    return " | ".join(f"{k}: {v}" for k,v in summaries.items() if v)[:700]
+
 def _compile_memory(base,model,memory,force=False):
     """Background memory compiler: durable atoms -> domain summaries -> tiny core."""
     now=time.time()
@@ -2298,10 +2318,10 @@ def _compile_memory(base,model,memory,force=False):
         items=[x for x in memory.get("durable",[]) if x.get("domain")==domain]
         if not items: continue
         old=summaries.get(domain,"")
-        new=_compile_domain_summary(base,model,domain,items,old)
+        new=_compile_domain_summary(base,model,domain,items,old) or _fallback_domain_summary(items)
         if new and new!=old:
             summaries[domain]=new; changed=True
-    core=_compile_core_summary(base,model,summaries,memory.get("core_summary",""))
+    core=_compile_core_summary(base,model,summaries,memory.get("core_summary","")) or _fallback_core_summary(summaries)
     if core and core!=memory.get("core_summary",""):
         memory["core_summary"]=core; changed=True
     memory["domain_summaries"]=summaries
@@ -2548,6 +2568,10 @@ def _memory_command(args):
         total=int(memory.get("extractions_total",0)); kept=int(memory.get("extractions_candidate",0)); none=int(memory.get("extractions_none",0))
         consolidated=int(memory.get("consolidations_total",0))
         print(f"  extraction · {memory.get('last_extraction','never')} {_age_label(memory.get('last_extraction_at',0))} · {kept}/{total} candidate · {none} none · {int(memory.get('candidate_local_suppressed',0))} local")
+        reason=str(memory.get("last_extraction_reason","")).strip()
+        if reason: print(f"             · {reason[:108]}")
+        if total>=12 and kept/max(1,total)<0.12:
+            print(f"  MEMORY HEALTH · candidate starvation · {kept/max(1,total):.0%} retained")
         print(f"  metabolism · merged {int(memory.get('candidate_merges_total',0))} · promoted {int(memory.get('promotions_total',0))} · expired {int(memory.get('candidate_expired_total',0))} · evicted {int(memory.get('candidate_evictions',0))}")
         print(f"  compiler · consolidated {consolidated} · last {_age_label(memory.get('last_compiled_at',0))}")
         if memory.get("last_worker_error"):
@@ -2891,6 +2915,31 @@ def _obvious_memory_candidate(user_text):
     compact=text[:420].rstrip()
     return importance,compact
 
+
+def _high_recall_memory_candidate(user_text):
+    """Cheap first-gate recall; metabolism supplies precision later."""
+    text=" ".join(str(user_text or "").split()).strip()
+    if len(text)<24 or _conversation_local_memory_intent(text):
+        return None
+    low=text.casefold()
+    if len(text)<180 and any(m in low for m in (
+        "run this","what command","command to ","traceback","download","unzip ",
+        "git pull","git push","cd ","ls ",
+    )):
+        return None
+    markers=(
+        "we want ","we need ","we should ","we decided ","we're building ","we are building ",
+        "the architecture","should be the default","the idea is ","the point is ","our memory",
+        "our system","for look","future crash","mercury writer","local-first","tailscale","3090",
+        "i prefer ","i usually ","i always ","i don't want ","i do not want ",
+        "i like ","i love ","my favorite ","my favourite ",
+    )
+    hits=sum(1 for m in markers if m in low)
+    if not hits: return None
+    importance=34 if hits==1 else 46 if hits==2 else 58
+    if any(m in low for m in ("i prefer ","i always ","we decided ","should be the default","local-first")):
+        importance=max(importance,52)
+    return importance,text[:520].rstrip()
 
 def _extract_memory_candidate(base, model, user_text, assistant_text):
     prompt=f"""Capture the compact meat of this exchange when it would help conversational
@@ -3389,7 +3438,7 @@ def _promotion_candidates(memory,durable_text=""):
         importance=int(item.get("importance",0))
         uses=int(item.get("uses",1))
         text=str(item.get("text",""))
-        if (durable_text and text.casefold()==durable_text.casefold()) or importance>=95 or (uses>=3 and importance>=55):
+        if (durable_text and text.casefold()==durable_text.casefold()) or (importance>=95 and uses>=2) or (uses>=4 and importance>=65):
             promoted.append(item)
     return promoted
 
@@ -3488,6 +3537,7 @@ EXPLICIT DURABLE MEMORY:
 def _remember_exchange(base, model, memory, user_text, assistant_text, profile="workspace"):
     """Living Memory: evidence-driven extraction, semantic reinforcement, consolidation."""
     now=time.time()
+    memory=_prune_contaminated_memory(memory)
     memory=_decay_memories(memory,now)
     memory["last_evidence_at"]=now
     memory["compiler_base"]=str(base)[:500]
@@ -3497,6 +3547,9 @@ def _remember_exchange(base, model, memory, user_text, assistant_text, profile="
     candidate=None if local_only else _extract_memory_candidate(base,model,user_text,assistant_text)
     source="local-only" if local_only else "model"
     forced_idx=None
+    if not candidate and not local_only:
+        candidate=_high_recall_memory_candidate(user_text)
+        source="high-recall"
     if not candidate and not local_only:
         candidate=_obvious_memory_candidate(user_text)
         source="obvious"
@@ -3519,13 +3572,16 @@ def _remember_exchange(base, model, memory, user_text, assistant_text, profile="
     if local_only:
         memory["candidate_local_suppressed"]=int(memory.get("candidate_local_suppressed",0))+1
         memory["last_extraction"]="local-only"
+        memory["last_extraction_reason"]="explicit transient/sidebar scope; RECENT only"
     if candidate:
         memory["extractions_candidate"]=int(memory.get("extractions_candidate",0))+1
         memory["last_extraction"]=f"candidate:{source}"
+        memory["last_extraction_reason"]="reusable user-authored preference/project/workflow signal"
     else:
         memory["extractions_none"]=int(memory.get("extractions_none",0))+1
         if not local_only:
             memory["last_extraction"]="none"
+            memory["last_extraction_reason"]="no reusable user-authored signal survived extraction"
 
     durable=_durable_memory_intent(user_text)
     durable_text=""
@@ -6725,7 +6781,7 @@ def _run_filesystem_tool_impl(workspace, name, args):
         return f"File tool internal error: {type(exc).__name__}: {exc}"
     return f"Unknown file tool: {name}"
 
-LOOK_INFO_USER_AGENT="LOOK-Shell/4.11.1 (local text client)"
+LOOK_INFO_USER_AGENT="LOOK-Shell/4.12.0 (local text client)"
 
 def _run_filesystem_tool(workspace, name, args, profile="workspace"):
     global _FILESYSTEM_ACCESS_PROFILE

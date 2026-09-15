@@ -3169,3 +3169,12 @@ OVERRIDE   explicit process-specific --model
 `lk models` selection sets ACTIVE and preloads it. LO, Oracle, Ask, Workstation, and background AI use ACTIVE by default. A loaded model never silently becomes active.
 
 Future Crash shows `model · shared` normally and `model · override` only when deliberately launched with `--model`.
+
+
+---
+
+<!-- source: RELEASE-2.8.8.md -->
+
+# Future Crash + LOOK 2.8.8
+
+Hotfix: `lk doctor` no longer crashes when Ollama is reachable with no model currently loaded. No runtime model-selection behavior changed.
