@@ -18,7 +18,7 @@ try:
 except Exception:
     readline = None
 
-VERSION="4.12.0"
+VERSION="4.20.3"
 
 LOOK_WORDMARK = r"""       ██╗      ██╗  ██╗
        ██║      ██║ ██╔╝
@@ -1653,6 +1653,92 @@ def _doctor_body():
     return 0 if good else 1
 
 
+def _default_ai_pool():
+    return {
+        "schema_version":1,
+        "roles":{
+            "primary":{"host":"auto","model":""},
+            "fast":{"host":"auto","model":""},
+            "background":{"host":"local","model":""},
+            "fallback":{"host":"local","model":""},
+        }
+    }
+
+def _load_ai_pool():
+    path=STATE_DIR/"ai_pool.json"
+    try:
+        data=json.loads(path.read_text(encoding="utf-8")) if path.exists() else _default_ai_pool()
+    except (OSError,ValueError,TypeError):
+        data=_default_ai_pool()
+    if not isinstance(data,dict): data=_default_ai_pool()
+    data.setdefault("roles",{})
+    for role,cfg in _default_ai_pool()["roles"].items():
+        data["roles"].setdefault(role,dict(cfg))
+    return data
+
+def _save_ai_pool(data):
+    _atomic_json(STATE_DIR/"ai_pool.json",data)
+
+def ai_pool(args=None):
+    """Inspect/configure model roles across Ollama hosts without changing legacy primary behavior."""
+    args=list(args or [])
+    data=_load_ai_pool()
+    if not args or args[0] in {"status","list"}:
+        print("AI POOL")
+        print("  role         host          model")
+        for role in ("primary","fast","background","fallback"):
+            cfg=data["roles"].get(role,{})
+            model=cfg.get("model") or ("active: "+_active_ollama_model() if role=="primary" else "not assigned")
+            print(f"  {role:<12} {cfg.get('host','auto'):<13} {model}")
+        print("\n  configure: lk ai-pool set ROLE HOST MODEL")
+        print("  roles: primary · fast · background · fallback")
+        return 0
+    if len(args)>=4 and args[0]=="set":
+        role=args[1].casefold()
+        if role not in {"primary","fast","background","fallback"}:
+            print("unknown role"); return 2
+        data["roles"][role]={"host":args[2],"model":" ".join(args[3:])}
+        _save_ai_pool(data)
+        print(f"AI POOL · {role} → {args[2]} / {' '.join(args[3:])}")
+        return 0
+    print("usage: lk ai-pool [status | set ROLE HOST MODEL]")
+    return 2
+
+def _architecture_audit():
+    """Small executable contract report for LO's critical routing edges."""
+    print("LO ARCHITECTURE AUDIT")
+    print("  discovery    search_files → adaptive locator")
+    print("  scope        personal by default · cwd-independent")
+    print("  shell search blocked at tool-loop + command-runner boundaries")
+    print("  access       profile passed explicitly into filesystem dispatcher")
+    print("  action       open_path/play → configured player")
+    print("  verification host-visible success requires positive tool receipt · final render gate")
+    print("  truth         OPEN OK = dispatched · runtime/playback state requires observation")
+    print("  receipts     tool duration + result")
+    print("  cancel       Ctrl-C on synchronous busy cycles")
+    # Formatter must remain presentation-only; no locator state may leak here.
+    rendered=_ollama_markup("LO **ready**")
+    print(f"  formatter    {'PASS' if 'ready' in rendered else 'FAIL'}")
+    return 0
+
+def _locator_test():
+    """Direct acceptance test: bypass the model and exercise access + locator exactly."""
+    global _FILESYSTEM_ACCESS_PROFILE
+    old=_FILESYSTEM_ACCESS_PROFILE
+    _FILESYSTEM_ACCESS_PROFILE="power"
+    print("LOCATOR TEST · POWER")
+    print(f"  workspace · {Path.cwd()}")
+    print(f"  home read · {'ALLOW' if _path_access_allowed(Path.cwd(),HOME,'read') else 'DENY'}")
+    started=time.monotonic()
+    try:
+        result=_tool_search_files(Path.cwd(),"kung fu master",".")
+        print(result)
+        elapsed=time.monotonic()-started
+        print(f"  result    · {'PASS' if elapsed < 4.0 else 'SLOW'} · {elapsed:.2f}s")
+        return 0 if elapsed < 4.0 else 1
+    finally:
+        _FILESYSTEM_ACCESS_PROFILE=old
+
 def doctor():
     import io, contextlib
     buf=io.StringIO()
@@ -2747,7 +2833,7 @@ def _activity(label):
         i = 0
         while not stop.is_set():
             frame=_c(frames[i % len(frames)], "36")
-            sys.stdout.write(f"\r\033[2K{frame} {_c(label,'2')}")
+            sys.stdout.write(f"\r\033[2K{frame} {_c(label,'2')} {_c('· Ctrl-C cancel','2')}")
             sys.stdout.flush()
             i += 1
             stop.wait(0.12)
@@ -2772,7 +2858,7 @@ class _ActivityHandle:
         def animate():
             i=0
             while not self.stop.is_set():
-                sys.stdout.write(f"\r\033[2K{_c(frames[i%4],'36')} {_c(self.label,'2')}")
+                sys.stdout.write(f"\r\033[2K{_c(frames[i%4],'36')} {_c(self.label,'2')} {_c('· Ctrl-C cancel','2')}")
                 sys.stdout.flush(); i+=1; self.stop.wait(.12)
         self.worker=threading.Thread(target=animate,daemon=True); self.worker.start()
         return self
@@ -3945,16 +4031,29 @@ def _grant_covers(rule, target, capability):
     return _path_within(target,Path(rule["path"]).expanduser())
 
 
-def _path_access_allowed(workspace,target,capability):
+def _ordinary_user_roots():
+    """Broad user-owned places LO may perceive without treating cwd as a sandbox."""
+    roots=[HOME]
+    if sys.platform=="darwin": roots.append(Path("/Volumes"))
+    else: roots.extend((Path("/mnt"),Path("/media")))
+    return [p.resolve() for p in roots if p.exists()]
+
+def _ordinary_user_path(target):
     target=Path(target).resolve()
-    if _path_within(target,workspace):
-        return True
+    return any(_path_within(target,root) for root in _ordinary_user_roots())
+
+def _path_access_allowed(workspace,target,capability):
+    """Workspace supplies context. Profile supplies authority."""
+    target=Path(target).resolve()
+    profile=str(_FILESYSTEM_ACCESS_PROFILE or "workspace").casefold()
+    if capability=="read" and _ordinary_user_path(target): return True
+    if capability=="write" and profile=="workspace" and _ordinary_user_path(target): return True
+    if profile=="power": return True
+    if _path_within(target,workspace): return True
     for rule in _ONCE_PATH_GRANTS:
-        if _grant_covers(rule,target,capability):
-            return True
+        if _grant_covers(rule,target,capability): return True
     for rule in _SESSION_PATH_GRANTS:
-        if _grant_covers(rule,target,capability):
-            return True
+        if _grant_covers(rule,target,capability): return True
     return any(_grant_covers(rule,target,capability) for rule in _load_path_access())
 
 
@@ -4035,7 +4134,9 @@ def _safe_workspace_path(workspace, raw_path=".", capability="read", prompt_acce
     # UNSAFE is intentionally unrestricted for this LO session. The user has
     # already accepted the session-level warning; asking again for every path
     # creates a contradictory second permission system.
-    if _FILESYSTEM_ACCESS_PROFILE=="unsafe":
+    if _FILESYSTEM_ACCESS_PROFILE in {"power","unsafe"}:
+        return candidate
+    if capability=="read" and _ordinary_user_path(candidate):
         return candidate
 
     if _path_access_allowed(workspace,candidate,capability):
@@ -4067,40 +4168,28 @@ def _workspace_snapshot(workspace):
     more="\n…listing truncated" if len(entries) == 120 else ""
     return (
         f"Current workspace: {workspace}\n"
-        "Treat this as the user's current folder and default trusted workspace. File tools may also use explicit user-approved path grants outside it.\n"
+        "Treat this as the user's CURRENT CONTEXT, not a filesystem sandbox. Prefer it for project-relative requests; ordinary personal-file discovery may search broadly according to the active access profile.\n"
+        + _agent_tool_contract() +
         "Top-level contents:\n" + ("\n".join(shown) if shown else "(empty)") + more
     )
 
 
-def _tool_list_files(workspace, path=".", depth=1):
-    target=_safe_workspace_path(workspace, path)
-    if not target.exists():
-        return f"Not found: {path}"
-    if not target.is_dir():
-        return f"Not a directory: {path}"
-    depth=max(1, min(int(depth or 1), 3))
+def _tool_list_files(workspace, path="."):
+    """Bounded one-directory inspection. Discovery belongs to search_files."""
+    target=_safe_workspace_path(workspace,path,"read")
+    if not target.exists(): return f"Not found: {path}"
+    if not target.is_dir(): return f"Not a directory: {path}"
+    try:
+        children=sorted(target.iterdir(),key=lambda p:(not p.is_dir(),p.name.casefold()))
+    except (OSError,PermissionError) as exc:
+        return f"Directory unreadable: {exc}"
     lines=[]
-    def walk(folder, level):
-        if level > depth or len(lines) >= 250:
-            return
-        try:
-            children=sorted(folder.iterdir(), key=lambda p: (not p.is_dir(), p.name.lower()))
-        except (OSError, PermissionError):
-            return
-        for child in children:
-            if len(lines) >= 250:
-                return
-            rel=child.relative_to(workspace)
-            try:
-                is_dir=child.is_dir()
-            except OSError:
-                is_dir=False
-            lines.append(str(rel) + ("/" if is_dir else ""))
-            if is_dir:
-                walk(child, level+1)
-    walk(target, 1)
-    return "\n".join(lines) if lines else "(empty or unreadable)"
-
+    for child in children[:120]:
+        try: suffix="/" if child.is_dir() else ""
+        except OSError: suffix=""
+        lines.append(child.name+suffix)
+    if len(children)>120: lines.append(f"… {len(children)-120} more; use search_files to find something")
+    return "\n".join(lines) if lines else "(empty)"
 
 def _tool_read_file(workspace, path):
     target=_safe_workspace_path(workspace, path)
@@ -4142,50 +4231,132 @@ def _tool_read_file(workspace, path):
         return f"Read failed: {exc}"
 
 
-def _tool_search_files(workspace, query, path="."):
-    target=_safe_workspace_path(workspace, path)
-    if not target.exists() or not target.is_dir():
-        return f"Not a directory: {path}"
-    needle=(query or "").lower()
-    if not needle:
-        return "Search query is empty."
-    matches=[]
-    scanned=0
-    for root, dirs, files in os.walk(target):
-        rootp=Path(root)
-        try:
-            rel_depth=len(rootp.relative_to(target).parts)
-        except ValueError:
-            continue
-        dirs[:] = [d for d in dirs if not d.startswith('.') and rel_depth < 4]
-        for name in dirs + files:
-            rel=(rootp / name).relative_to(workspace)
-            if needle in name.lower():
-                matches.append(str(rel) + ("/" if name in dirs else ""))
-                if len(matches) >= 100:
-                    return "\n".join(matches)
-        for name in files:
-            if scanned >= 500 or len(matches) >= 100:
-                break
-            scanned += 1
-            filep=rootp / name
-            try:
-                if filep.stat().st_size > 300_000:
-                    continue
-                data=filep.read_bytes()
-                if b"\x00" in data[:4096]:
-                    continue
-                text=data.decode("utf-8", errors="ignore")
-            except OSError:
-                continue
-            if needle in text.lower():
-                rel=filep.relative_to(workspace)
-                if str(rel) not in matches:
-                    matches.append(str(rel))
-        if scanned >= 500 or len(matches) >= 100:
-            break
-    return "\n".join(matches) if matches else "No matches."
+def _search_tokens(text):
+    text=str(text or "").casefold().replace("_"," ").replace("-"," ")
+    return [t for t in re.findall(r"\w+",text,flags=re.UNICODE) if len(t)>1]
 
+def _locator_event(stage, detail="", started=None):
+    elapsed=f"{int((time.monotonic()-started)*1000):>4} ms" if started is not None else ""
+    msg=f"  locator · {stage:<12} {elapsed}"
+    if detail: msg+=f" · {detail}"
+    print(_c(msg,"2"),flush=True)
+
+def _score_locate_candidate(p,strong,workspace):
+    hay_tokens=set(_search_tokens(str(p)))
+    matched=[t for t in strong if t in hay_tokens or any(t in h or h in t for h in hay_tokens if len(h)>2)]
+    if not matched: return None
+    score=(len(matched)/max(1,len(strong)))*100+len(matched)*8
+    if p.suffix.casefold() in {".mp4",".mkv",".mov",".avi",".m4v",".webm",".mp3",".m4a",".flac",".wav",".ogg"}: score+=8
+    if all(t in hay_tokens for t in matched): score+=4
+    try: modified=p.stat().st_mtime
+    except OSError: modified=0
+    return score,modified,p
+
+def _scan_locate_root(root,strong,workspace,max_depth=2,max_entries=12000,deadline=None):
+    rows=[]; seen=0; root=Path(root)
+    if not root.exists() or not root.is_dir(): return rows
+    skip={"Library","node_modules","__pycache__",".git","Caches","cache",".Trash"}
+    for current,dirs,files in os.walk(root):
+        if deadline and time.monotonic()>=deadline: break
+        cp=Path(current)
+        try: depth=len(cp.relative_to(root).parts)
+        except ValueError: continue
+        dirs[:]=[d for d in dirs if not d.startswith(".") and d not in skip and depth<max_depth]
+        for name in dirs+files:
+            seen+=1
+            if seen>max_entries: return rows
+            scored=_score_locate_candidate(cp/name,strong,workspace)
+            if scored: rows.append(scored)
+    return rows
+
+def _indexed_locate(query,strong,workspace,deadline):
+    rows=[]
+    if sys.platform=="darwin" and shutil.which("mdfind"):
+        terms=[t for t in strong if len(t)>=2]
+        expr=" && ".join([f"kMDItemFSName == '*{t.replace(chr(39), '')}*'cd" for t in terms[:4]])
+        if not expr: return rows
+        try:
+            proc=subprocess.run(["mdfind",expr],capture_output=True,text=True,timeout=max(.25,deadline-time.monotonic()))
+            paths=proc.stdout.splitlines()[:200]
+        except (subprocess.TimeoutExpired,OSError): paths=[]
+        for raw in paths:
+            p=Path(raw)
+            if _ordinary_user_path(p):
+                scored=_score_locate_candidate(p,strong,workspace)
+                if scored: rows.append(scored)
+        return rows
+    locator=shutil.which("plocate") or shutil.which("locate")
+    if locator:
+        seed=max(strong,key=len) if strong else str(query)
+        try:
+            proc=subprocess.run([locator,"-i","--",seed],capture_output=True,text=True,timeout=max(.25,deadline-time.monotonic()))
+            paths=proc.stdout.splitlines()[:200]
+        except (subprocess.TimeoutExpired,OSError): paths=[]
+        for raw in paths:
+            p=Path(raw)
+            if _ordinary_user_path(p):
+                scored=_score_locate_candidate(p,strong,workspace)
+                if scored: rows.append(scored)
+    return rows
+
+def _tool_search_files(workspace,query,path="."):
+    """Adaptive locator: nearby first, indexed broad discovery, bounded fallback."""
+    qtokens=_search_tokens(query)
+    if not qtokens: return "Search query is empty."
+    weak={"find","file","files","movie","video","audio","open","play","please","the","a","an","my","can","you"}
+    strong=[t for t in qtokens if t not in weak] or qtokens
+    started=time.monotonic(); deadline=started+3.0; rows=[]; seen=set()
+    def add(items):
+        for row in items:
+            key=str(row[2])
+            if key not in seen: seen.add(key); rows.append(row)
+    explicit=str(path or ".") not in {".","~",str(HOME)}
+    if explicit:
+        target=_safe_workspace_path(workspace,path,"read")
+        _locator_event("explicit",str(target),started)
+        add(_scan_locate_root(target,strong,workspace,4,20000,deadline))
+    else:
+        _locator_event("context",str(workspace),started)
+        add(_scan_locate_root(workspace,strong,workspace,2,5000,started+.45))
+        if not rows or max(r[0] for r in rows)<120:
+            _locator_event("likely dirs","Movies · Downloads · Desktop · Documents",started)
+            for likely in (HOME/"Movies",HOME/"Downloads",HOME/"Desktop",HOME/"Documents"):
+                if time.monotonic()>=started+1.0: break
+                add(_scan_locate_root(likely,strong,workspace,2,4000,started+1.0))
+        if not rows or max(r[0] for r in rows)<120:
+            backend="Spotlight" if sys.platform=="darwin" else ("plocate/locate" if (shutil.which("plocate") or shutil.which("locate")) else "unavailable")
+            _locator_event("OS index",backend,started)
+            add(_indexed_locate(query,strong,workspace,deadline))
+        if not rows and time.monotonic()<deadline:
+            _locator_event("fallback","shallow home only",started)
+            add(_scan_locate_root(HOME,strong,workspace,1,6000,deadline))
+    _locator_event("done",f"{len(rows)} candidate(s)",started)
+    if not rows: return f"No matches. · locator {int((time.monotonic()-started)*1000)} ms"
+    rows.sort(key=lambda x:(x[0],x[1]),reverse=True)
+    out=[]
+    for score,_,p in rows[:20]:
+        try: display=str(p.relative_to(workspace))
+        except ValueError: display=str(p)
+        out.append(f"{score:05.1f} · {display}{'/' if p.is_dir() else ''}")
+    top=rows[0][0]; confidence="STRONG" if top>=120 else "PLAUSIBLE" if top>=60 else "WEAK"
+    return f"MATCHES · {confidence} · locator {int((time.monotonic()-started)*1000)} ms\n" + "\n".join(out)
+
+def _tool_search_content(workspace, query, path="."):
+    """Explicit text-content search delegated to ripgrep; binary files stay binary."""
+    target=_safe_workspace_path(workspace,path)
+    if not target.exists() or not target.is_dir(): return f"Not a directory: {path}"
+    needle=str(query or "").strip()
+    if not needle: return "Search query is empty."
+    rg=shutil.which("rg")
+    if not rg: return "Content search requires ripgrep (rg)."
+    proc=subprocess.run(
+        [rg,"--line-number","--no-heading","--color","never","--smart-case",
+         "--max-filesize","2M","--glob","!.*",needle,str(target)],
+        capture_output=True,text=True,timeout=12
+    )
+    if proc.returncode not in (0,1): return f"Content search failed: {proc.stderr.strip()[:300]}"
+    rows=proc.stdout.splitlines()[:100]
+    return "\\n".join(rows) if rows else "No matches."
 
 def _display_tool_path(workspace,path):
     path=Path(path).resolve()
@@ -5076,8 +5247,26 @@ def _tool_reveal_path(workspace, path):
     return _reveal_host_path(target)
 
 
-def _tool_open_path(workspace,path):
+def _preferred_media_player():
+    # Explicit user config wins. VLC is the friendly media default when installed.
+    configured=str(os.environ.get("LOOK_MEDIA_PLAYER","")).strip()
+    if configured: return configured
+    if sys.platform=="darwin" and Path("/Applications/VLC.app").exists(): return "VLC"
+    if shutil.which("vlc"): return "vlc"
+    return ""
+
+def _tool_open_path(workspace,path, intent="open"):
     target=_safe_workspace_path(workspace,path,"read")
+    intent=str(intent or "open").casefold()
+    media_ext={".mp4",".mkv",".mov",".avi",".m4v",".webm",".mp3",".m4a",".flac",".wav",".ogg"}
+    if intent=="play" or target.suffix.casefold() in media_ext:
+        player=_preferred_media_player()
+        if player:
+            if sys.platform=="darwin":
+                subprocess.Popen(["open","-a",player,str(target)],stdout=subprocess.DEVNULL,stderr=subprocess.DEVNULL)
+            else:
+                subprocess.Popen([player,str(target)],stdout=subprocess.DEVNULL,stderr=subprocess.DEVNULL)
+            return f"OPEN OK · {target} · {player}"
     return _open_host_path(target)
 
 
@@ -5277,10 +5466,63 @@ def _mutation_tool_succeeded(name,result):
     if isinstance(expected,tuple): return text.startswith(expected)
     return bool(expected and text.startswith(expected))
 
+def _lo_action_continuation(prompt,last_action):
+    """Short confirmations/retries inherit the prior actionable referent."""
+    if not last_action: return False
+    low=" ".join(str(prompt or "").casefold().split())
+    if not low: return False
+    patterns=(
+        r"^(yes|yes!|yep|yeah|sure|okay|ok)(\b|[!.])",
+        r"^(try|do|play|open)\s+(it\s+|that\s+)?again\b",
+        r"^(try again|do it|that one|the same one|go ahead|please do)\b",
+    )
+    return any(re.search(p,low) for p in patterns)
+
+def _lo_requires_external_action(prompt):
+    """Requests whose success changes visible host state and therefore require a receipt."""
+    text=" ".join(str(prompt or "").split()).strip().casefold()
+    if not text: return False
+    if re.search(r"^(what|why|how|did|does|is|was|were|where)\b",text): return False
+    return bool(re.search(r"\b(open|play|launch|preview|reveal|show)\b",text))
+
+def _external_action_succeeded(name,result):
+    text=str(result or "")
+    return (
+        (name=="open_path" and text.startswith("OPEN OK")) or
+        (name=="preview_path" and text.startswith("PREVIEW OK")) or
+        (name=="reveal_path" and text.startswith("REVEAL OK"))
+    )
+
+def _answer_claims_external_success(answer):
+    low=" ".join(str(answer or "").casefold().split())
+    return bool(re.search(r"\b(now playing|is playing|opened|launched|playing in|opened in|enjoy the show)\b",low))
+
+def _answer_claims_unobserved_runtime_state(answer):
+    """Claims stronger than an OPEN OK receipt: these require process/player observation."""
+    low=" ".join(str(answer or "").casefold().split())
+    return bool(re.search(
+        r"\b(still running|still playing|currently running|currently playing|"
+        r"is running|remains running|continues? playing|playback (?:is )?(?:active|running))\b",low
+    ))
+
+def _truthful_dispatch_summary(answer):
+    """Downgrade launch/playback prose to exactly what OPEN OK establishes."""
+    text=str(answer or "").strip()
+    # Keep useful target wording where possible, but never assert playback/process state.
+    text=re.sub(r"\bis now playing in VLC\b","was sent to VLC",text,flags=re.I)
+    text=re.sub(r"\bis playing in VLC\b","was sent to VLC",text,flags=re.I)
+    text=re.sub(r"\bnow playing\b","sent to the configured player",text,flags=re.I)
+    text=re.sub(r"\bopened in VLC\b","was sent to VLC",text,flags=re.I)
+    text=re.sub(r"\b(still running|still playing|currently running|currently playing|is running)\b",
+                "was dispatched successfully",text,flags=re.I)
+    return text
+
 def _lo_requires_filesystem_action(prompt):
     """Detect an actual request to mutate local files, not discussion of prior work."""
     text=" ".join(str(prompt or "").split()).strip().casefold()
     if not text:
+        return False
+    if re.search(r"\b(find|search|locate|show|reveal|open|play|preview|inspect|read)\b",text) and not re.search(r"\b(create|make|write|save|copy|duplicate|move|rename|remove|delete|edit|replace)\b",text):
         return False
 
     # Questions, retrospective discussion, acknowledgements, and feedback should
@@ -5449,10 +5691,10 @@ def lo_access(args):
     if not args or args[0] in {"status","list"}:
         _title("lo access")
         rows=[
-            ("conservative","read/search workspace + web; no writes"),
-            ("workspace","bounded LOOK file tools inside starting workspace"),
-            ("power","workspace tools + safe inspections; other shell commands ask natively"),
-            ("unsafe","unrestricted files + shell; persistent selection is pre-authorized"),
+            ("conservative","broad user-file read/search/open; no file writes"),
+            ("workspace","broad personal files + journaled LOOK file actions; no shell"),
+            ("power","current-user filesystem + shell; risky commands confirm"),
+            ("unsafe","current-user/OS-permitted filesystem + unrestricted shell"),
         ]
         for name,desc in rows:
             marker="✓" if name==current else " "
@@ -5565,14 +5807,14 @@ def _command_tool():
     return {"type":"function","function":{
         "name":"run_command",
         "description":(
-            "Run a shell command on the computer running LOOK. Use this in power/unsafe sessions for executing, "
+            "Run a shell command on the computer running LOOK. FALLBACK only when no purpose-built LOOK tool can perform the task. Never use mdfind/find/rg to replace search_files/search_content. Use this in power/unsafe sessions for executing, "
             "testing, installing, inspecting, building, cleaning, or administering beyond LOOK's bounded file tools. "
             "Prefer inspection before destructive or system-wide mutation. Do not ask the user to type yes/confirm in chat; LOOK itself owns any required native confirmation prompt."
         ),
         "parameters":{"type":"object","properties":{
             "command":{"type":"string","description":"Shell command to execute with zsh -lc"},
             "cwd":{"type":"string","description":"Working directory; default is the LO starting workspace"},
-            "timeout":{"type":"integer","description":"Timeout seconds, 1-600; default 120"}
+            "timeout":{"type":"integer","description":"Timeout seconds, 1-60; default 20. Long-running work should use a purpose-built task."}
         },"required":["command"]}
     }}
 
@@ -5580,6 +5822,13 @@ def _run_command_tool(workspace,args,profile):
     command=str(args.get("command","")).strip()
     if not command:
         return "Command tool failed: empty command"
+
+    # Purpose-built locator owns filesystem discovery. Refuse expensive shell
+    # fallbacks so the model cannot regress to find/mdfind/fd after a miss.
+    first=re.split(r"\s+",command,maxsplit=1)[0]
+    base=Path(first).name.casefold()
+    if base in {"find","mdfind","fd","fdfind","locate","plocate"}:
+        return "Command denied · filesystem discovery must use search_files; do not fall back to shell search"
 
     cwd_raw=str(args.get("cwd","") or "").strip()
     cwd=Path(cwd_raw).expanduser() if cwd_raw else workspace
@@ -5593,9 +5842,9 @@ def _run_command_tool(workspace,args,profile):
         return f"Command tool failed: cwd is not a directory: {cwd}"
 
     try:
-        timeout=max(1,min(600,int(args.get("timeout",120) or 120)))
+        timeout=max(1,min(60,int(args.get("timeout",20) or 20)))
     except (TypeError,ValueError):
-        timeout=120
+        timeout=20
 
     if profile=="power":
         grant_key=_command_grant_key(command)
@@ -5619,6 +5868,8 @@ def _run_command_tool(workspace,args,profile):
         output=(proc.stdout or "").strip()
         if len(output)>16000:
             output="[output truncated to final 16000 characters]\n"+output[-16000:]
+        if proc.returncode==0 and not output:
+            return "exit 0 · NO TASK PROGRESS · command produced no output; continue with another strategy"
         return f"exit {proc.returncode}" + (f"\n{output}" if output else "")
     except subprocess.TimeoutExpired as exc:
         partial=exc.stdout or ""
@@ -5698,7 +5949,7 @@ def _run_capability_tool(name,args,workspace,profile):
 def _lo_tools(profile):
     tools=_filesystem_tools()
     if profile=="conservative":
-        tools=[t for t in tools if t.get("function",{}).get("name") in {"list_files","inspect_directory","read_file","search_files","reveal_path","open_path","preview_path"}]
+        tools=[t for t in tools if t.get("function",{}).get("name") in {"list_files","inspect_directory","read_file","search_files","search_content","reveal_path","open_path","preview_path"}]
     tools.extend(_information_tools())
     tools.extend(_system_inspection_tools())
     tools.extend(_capability_tools())
@@ -6567,14 +6818,25 @@ def generate_command(args):
     return 0 if success else 1
 
 
+def _agent_tool_contract():
+    return """LO TOOL CONTRACT
+- Conversation is part of the control loop: prefer a quick useful question over a long blind operation.
+- FIND / SEARCH / LOCATE intent -> search_files. Never crawl with list_files and never substitute shell find/mdfind/fd.
+- list_files inspects one already-known directory only.
+- search_files returns evidence. Evaluate filenames semantically against the user's wording.
+- Strong unique evidence may proceed. Plausible-but-not-exact evidence: ask "Did you mean …?" and checkpoint rather than spinning.
+- Tool success is not task success. Empty/no-match output means continue, change strategy, or ask the user. Host-visible action success is receipt-gated: never claim opened/playing/launched unless open_path/preview_path/reveal_path returned its OK receipt. OPEN OK proves dispatch only; it does not prove the app is still running or media is currently playing.
+- OPEN / PLAY preserves the returned path as structured data and uses open_path; do not shell-quote it.
+- User answers to clarification are task state, not durable preference unless they explicitly state a lasting preference.
+"""
+
 def _filesystem_tools():
     return [
         {"type":"function","function":{
             "name":"list_files",
-            "description":"List files and folders inside the current LOOK workspace. Use this to inspect folder contents or hierarchy.",
+            "description":"Inspect ONE known directory only, bounded to 120 entries. NEVER use this to find/search/locate a file. For discovery always use search_files.",
             "parameters":{"type":"object","properties":{
-                "path":{"type":"string","description":"Workspace-relative directory, default ."},
-                "depth":{"type":"integer","description":"Recursive depth 1-3, default 1"}
+                "path":{"type":"string","description":"Known directory to inspect; defaults to current context"}
             }}
         }},
         {"type":"function","function":{
@@ -6595,10 +6857,19 @@ def _filesystem_tools():
         }},
         {"type":"function","function":{
             "name":"search_files",
-            "description":"Search filenames and bounded text content recursively inside the current LOOK workspace.",
+             "description":"PRIMARY tool for finding local files/directories by name or path. Adaptive locator: current context first, likely personal folders second, then the OS file index. Fast and bounded; never recursively crawls the whole home directory or reads file contents.",
             "parameters":{"type":"object","properties":{
                 "query":{"type":"string"},
-                "path":{"type":"string","description":"Workspace-relative directory, default ."}
+                "scope":{"type":"string","enum":["personal","directory"],"description":"Default personal: cwd-independent adaptive discovery across the user's files. Use directory only when the user explicitly names a directory."},
+                "path":{"type":"string","description":"Only for scope=directory; explicit directory to search."}
+            },"required":["query"]}
+        }},
+        {"type":"function","function":{
+            "name":"search_content",
+            "description":"Search the textual CONTENT of files explicitly. Uses ripgrep, skips binary files, limits file size, and returns matching lines. Do not use this to find a file by its name or path; use search_files for that.",
+            "parameters":{"type":"object","properties":{
+                "query":{"type":"string"},
+                "path":{"type":"string","description":"Directory to search; defaults to current workspace"}
             },"required":["query"]}
         }},
         {"type":"function","function":{
@@ -6647,7 +6918,8 @@ def _filesystem_tools():
             "name":"open_path",
             "description":"Open an existing local file or folder in the user's preferred/default graphical application. Use when the user asks to open, launch, play, view, or show a local artifact outside the terminal.",
             "parameters":{"type":"object","properties":{
-                "path":{"type":"string","description":"Local path to open"}
+                "path":{"type":"string","description":"Local path to open"},
+                "intent":{"type":"string","enum":["open","play"],"description":"Use play for requested audio/video playback."}
             },"required":["path"]}
         }},
         {"type":"function","function":{
@@ -6745,16 +7017,24 @@ def _access_command(args):
     return 2
 
 
-def _run_filesystem_tool_impl(workspace, name, args):
+def _run_filesystem_tool_impl(workspace, name, args, profile="workspace"):
     try:
         if name == "list_files":
-            return _tool_list_files(workspace, args.get("path", "."), args.get("depth", 1))
+            return _tool_list_files(workspace,args.get("path","."))
         if name == "inspect_directory":
             return _tool_inspect_directory(workspace, args.get("path", "."), bool(args.get("recursive", False)), args.get("max_entries", 200000))
         if name == "read_file":
             return _tool_read_file(workspace, args.get("path", ""))
         if name == "search_files":
-            return _tool_search_files(workspace, args.get("query", ""), args.get("path", "."))
+            # Discovery is cwd-independent by default. "personal" means LOOK's
+            # adaptive locator: context ring + likely folders + OS index.
+            scope=str(args.get("scope","personal") or "personal").casefold()
+            requested=args.get("path",".")
+            if scope=="personal":
+                requested="."
+            return _tool_search_files(workspace,args.get("query",""),requested)
+        if name == "search_content":
+            return _tool_search_content(workspace, args.get("query", ""), args.get("path", "."))
         if name == "write_file":
             return _tool_write_file(workspace, args.get("path", ""), args.get("content", ""), bool(args.get("overwrite", False)))
         if name == "create_text_files":
@@ -6766,7 +7046,7 @@ def _run_filesystem_tool_impl(workspace, name, args):
         if name == "reveal_path":
             return _tool_reveal_path(workspace, args.get("path", ""))
         if name == "open_path":
-            return _tool_open_path(workspace,args.get("path",""))
+            return _tool_open_path(workspace,args.get("path",""),args.get("intent","open"))
         if name == "preview_path":
             return _tool_preview_path(workspace,args.get("path",""))
         if name == "remove_path":
@@ -6781,14 +7061,14 @@ def _run_filesystem_tool_impl(workspace, name, args):
         return f"File tool internal error: {type(exc).__name__}: {exc}"
     return f"Unknown file tool: {name}"
 
-LOOK_INFO_USER_AGENT="LOOK-Shell/4.12.0 (local text client)"
+LOOK_INFO_USER_AGENT="LOOK-Shell/4.20.3 (local text client)"
 
 def _run_filesystem_tool(workspace, name, args, profile="workspace"):
     global _FILESYSTEM_ACCESS_PROFILE
     previous_profile=_FILESYSTEM_ACCESS_PROFILE
     _FILESYSTEM_ACCESS_PROFILE=str(profile or "workspace").casefold()
     try:
-        return _run_filesystem_tool_impl(workspace,name,args)
+        return _run_filesystem_tool_impl(workspace,name,args,str(profile or 'workspace').casefold())
     finally:
         _FILESYSTEM_ACCESS_PROFILE=previous_profile
         # "Allow once" covers the complete tool transaction, including its
@@ -7166,6 +7446,64 @@ def _lo_label(name, color="2"):
     return _c(str(name).upper(),color)
 
 
+def _receipt_log_path():
+    path=HOME/".local"/"share"/"look"/"receipts"
+    path.mkdir(parents=True,exist_ok=True)
+    return path/"current.jsonl"
+
+def _audit_receipt(actor,action,detail="",ok=True,**fields):
+    """Bounded append-only action journal; never stores conversation/file contents."""
+    path=_receipt_log_path()
+    try:
+        if path.exists() and path.stat().st_size>2_000_000:
+            archive=path.with_name(f"receipts-{time.strftime('%Y%m%d-%H%M%S')}.jsonl")
+            path.replace(archive)
+            old=sorted(path.parent.glob("receipts-*.jsonl"),key=lambda p:p.stat().st_mtime,reverse=True)
+            for stale in old[5:]:
+                try: stale.unlink()
+                except OSError: pass
+        row={"ts":time.strftime("%Y-%m-%dT%H:%M:%S%z"),"actor":actor,"action":action,
+             "detail":str(detail)[:500],"result":"ok" if ok else "failed"}
+        for k,v in fields.items():
+            if v not in (None,""): row[k]=str(v)[:500]
+        with path.open("a",encoding="utf-8") as f:
+            f.write(json.dumps(row,ensure_ascii=False,separators=(",",":"))+"\\n")
+    except OSError:
+        pass
+
+def receipts(limit=30):
+    """Human-readable tail of LOOK's bounded forensic action journal."""
+    path=_receipt_log_path()
+    try:
+        n=max(1,min(200,int(limit)))
+    except (TypeError,ValueError):
+        n=30
+    if not path.exists():
+        print("LOOK RECEIPTS\n  no receipts yet")
+        return 0
+    try:
+        raw=path.read_text(encoding="utf-8",errors="replace").splitlines()[-n:]
+    except OSError as exc:
+        print(f"LOOK receipts unavailable: {exc}")
+        return 1
+    print(f"LOOK RECEIPTS · last {len(raw)}")
+    print("─"*min(88,_lo_width()-1))
+    for line in raw:
+        try:
+            row=json.loads(line)
+        except ValueError:
+            continue
+        ts=str(row.get("ts",""))
+        if "T" in ts: ts=ts.split("T",1)[1][:8]
+        mark="✓" if row.get("result")=="ok" else "×"
+        action=str(row.get("action",""))[:22]
+        duration=row.get("duration_ms","")
+        dur=f"{duration} ms" if duration!="" else ""
+        detail=str(row.get("detail","")).replace("\n"," ")[:100]
+        print(f"{ts:<9} {mark} {action:<22} {dur:>8}  {detail}")
+    print(f"\n  log · {path}")
+    return 0
+
 def _lo_receipt(kind, detail, ok=True, color="36"):
     mark=_c("✓","32") if ok else _c("×","31")
     width=_lo_width()
@@ -7271,6 +7609,20 @@ def _looks_like_tool_refusal(answer):
     return any(p in low for p in patterns)
 
 
+def _lo_repeat_intent(text):
+    low=" ".join(str(text or "").casefold().split())
+    if not low: return False
+    exact={"again","again again","again again :)","do it again","play it again","play again",
+           "open it again","open that again","show it again","that again","one more time"}
+    return low in exact or bool(re.fullmatch(r"(please\s+)?(play|open|show|do)?\s*(it|that)?\s*again[!. :)]*",low))
+
+def _lo_action_from_tool(name,args,result):
+    """Compact ephemeral referent after a successful actionable tool."""
+    if name not in {"open_path","preview_path","reveal_path"}: return None
+    if not str(result).startswith(("OPEN OK","PREVIEW OK","REVEAL OK")): return None
+    path=str(args.get("path","")).strip()
+    return {"tool":name,"args":dict(args),"path":path} if path else None
+
 def ollama_chat(force_search=False, initial_prompt=None, allow_start=True, host_override=None, host_name=None, access_profile=None, selected_paths=None, workspace_override=None, one_shot=False, confirm_unsafe_override=False):
     """Minimal local chat; optional first prompt and web-search mode."""
     import json
@@ -7327,6 +7679,10 @@ def ollama_chat(force_search=False, initial_prompt=None, allow_start=True, host_
     state=_c("●","32")
     title="LO SEARCH" if force_search else "LO"
     print(f"{_c(title,'1;36')} · {model} · {shown_host} {state}   {_c(profile.upper(),'2')} · {_load_thinking()}/{_load_think_display()}")
+    pool=_load_ai_pool()
+    fast_cfg=pool.get("roles",{}).get("fast",{})
+    if fast_cfg.get("model"):
+        print(_c(f"AI pool · primary {shown_host}/{model} · fast {fast_cfg.get('host','auto')}/{fast_cfg.get('model')}","2"))
     print(_c(str(workspace),"2"))
     extras=[]
     if selected_paths: extras.append(f"context {len(selected_paths)}")
@@ -7459,6 +7815,8 @@ def ollama_chat(force_search=False, initial_prompt=None, allow_start=True, host_
 
     base_message_count=len(messages)
     pending_prompt = (initial_prompt or "").strip()
+    last_action=None
+    last_candidates=""
     while True:
         if pending_prompt:
             prompt=pending_prompt
@@ -7477,6 +7835,18 @@ def ollama_chat(force_search=False, initial_prompt=None, allow_start=True, host_
         if not prompt:
             continue
 
+        # Repeat is a deterministic UI primitive, not a fresh reasoning task.
+        if (_lo_repeat_intent(prompt) or _lo_action_continuation(prompt,last_action)) and last_action:
+            started=time.monotonic()
+            with _activity(last_action["tool"].replace("_"," ")):
+                repeat_result=_run_filesystem_tool(workspace,last_action["tool"],last_action["args"],profile)
+            ok=str(repeat_result).startswith(("OPEN OK","PREVIEW OK","REVEAL OK"))
+            _audit_receipt("lo","repeat_action",str(repeat_result).splitlines()[0],ok=ok,
+                           duration_ms=int((time.monotonic()-started)*1000))
+            shown=Path(last_action["path"]).name
+            print("\n"+_lo_label("lo","35")+"\n"+_ollama_markup(f"Done again — {shown}" if ok else str(repeat_result))+"\n")
+            continue
+
         _ai_foreground(True,"lo")
         # Memory can change asynchronously between turns. Reload cheaply from
         # disk, then retrieve only what is relevant to this exact prompt.
@@ -7492,6 +7862,12 @@ def ollama_chat(force_search=False, initial_prompt=None, allow_start=True, host_
                 print(f"{_ansi_label('vision ›','35')} {len(encoded)} image{'s' if len(encoded)!=1 else ''} attached")
         elif _extract_prompt_images(prompt,workspace) and not supports_vision:
             print(f"{_ansi_label('vision ›','33')} selected model does not advertise vision")
+        if last_action:
+            messages.append({"role":"system","content":(
+                "EPHEMERAL CURRENT REFERENT (session only): last successful actionable item: "
+                f"{last_action['path']} via {last_action['tool']}. Resolve it/that/the same one against this "
+                "referent when context fits. Do not search merely to rediscover this exact item."
+            )})
         messages.append(user_message)
 
         # Search mode is deliberately deterministic: search first, then answer.
@@ -7524,6 +7900,11 @@ def ollama_chat(force_search=False, initial_prompt=None, allow_start=True, host_
         # Normal mode exposes tools to the model, but explicit mutations are also
         # enforced by the host so prose can never masquerade as execution.
         mutation_required=(profile!="conservative" and _lo_requires_filesystem_action(prompt))
+        external_action_required=(profile!="conservative" and _lo_requires_external_action(prompt))
+        external_action_attempted=False
+        external_action_succeeded=False
+        last_external_result=""
+        action_repair_sent=False
         mutation_attempted=False
         mutation_succeeded=False
         last_mutation_result=""
@@ -7540,6 +7921,8 @@ def ollama_chat(force_search=False, initial_prompt=None, allow_start=True, host_
         task_eval_tokens=0
         task_eval_s=0.0
         task_load_s=0.0
+        task_trace=[]
+        repeated_tool_calls={}
 
         for _ in range(budget["tool_rounds"]):
             payload_obj = {
@@ -7623,6 +8006,15 @@ def ollama_chat(force_search=False, initial_prompt=None, allow_start=True, host_
                             args=json.loads(args)
                         except Exception:
                             args={}
+                    signature=name+":"+json.dumps(args,sort_keys=True,default=str)
+                    repeated_tool_calls[signature]=repeated_tool_calls.get(signature,0)+1
+                    if repeated_tool_calls[signature]>=3:
+                        tool_content="STOP · repeated identical tool call detected; choose a different step or finish the task."
+                        _audit_receipt("lo","loop_guard",name,ok=False)
+                        messages.append({"role":"tool","content":tool_content})
+                        continue
+                    task_trace.append({"tool":name,"args":args})
+                    task_trace=task_trace[-12:]
 
                     if name == "weather":
                         location=args.get("location","")
@@ -7678,11 +8070,28 @@ def ollama_chat(force_search=False, initial_prompt=None, allow_start=True, host_
                                 tool_content = _search_text(search_result)
                             except Exception as exc:
                                 tool_content = f"Web search failed: {exc}"
-                    elif name in {"list_files", "inspect_directory", "read_file", "search_files", "write_file", "create_text_files", "copy_path", "move_path", "remove_path", "make_directory", "reveal_path", "open_path", "preview_path"}:
+                    elif name in {"list_files", "inspect_directory", "read_file", "search_files", "search_content", "write_file", "create_text_files", "copy_path", "move_path", "remove_path", "make_directory", "reveal_path", "open_path", "preview_path"}:
                         if name in {"write_file","create_text_files"}:
                             args=_normalize_creation_destination(prompt,name,args)
+                        started=time.monotonic()
                         with _activity(name.replace("_"," ")):
                             tool_content = _run_filesystem_tool(workspace, name, args, profile)
+                        ok=not str(tool_content).startswith(("File tool failed:","File tool internal error:","Not a directory:","No matches.","Content search failed:"))
+                        audit_fields={"duration_ms":int((time.monotonic()-started)*1000)}
+                        if "path" in args: audit_fields["path"]=args.get("path")
+                        if name in {"copy_path","move_path"}:
+                            audit_fields["source"]=args.get("source"); audit_fields["destination"]=args.get("destination")
+                        _audit_receipt("lo",name,str(tool_content).splitlines()[0],ok=ok,**audit_fields)
+                        if name=="search_files" and ok:
+                            last_candidates=str(tool_content)[:12000]
+                        if name in {"open_path","preview_path","reveal_path"}:
+                            external_action_attempted=True
+                            last_external_result=str(tool_content)
+                            if _external_action_succeeded(name,tool_content):
+                                external_action_succeeded=True
+                        action_state=_lo_action_from_tool(name,args,tool_content)
+                        if action_state:
+                            last_action=action_state
                         if name in _LO_MUTATION_TOOLS:
                             mutation_attempted=True
                             last_mutation_result=str(tool_content)
@@ -7704,6 +8113,12 @@ def ollama_chat(force_search=False, initial_prompt=None, allow_start=True, host_
                             tool_content="Command execution is unavailable in this access profile."
                         else:
                             command_text=str(args.get("command","")).strip()
+                            raw_search=bool(re.search(r"(^|[;&|]\s*)(mdfind|find|fd|fdfind|locate|plocate|rg)\b",command_text,re.I))
+                            if raw_search:
+                                tool_content="USE SPECIALIZED TOOL · local discovery belongs to search_files (name/path) or search_content (text). Raw shell search was not run."
+                                _audit_receipt("lo","specialized_tool_guard",command_text[:180],ok=False)
+                                messages.append({"role":"tool","tool_name":name,"content":tool_content})
+                                continue
                             is_inspection=_inspection_command(command_text)
                             print(f"{_lo_label('inspect' if is_inspection else 'command','36' if is_inspection else '33')}  {command_text}")
                             with _activity("inspecting" if is_inspection else "running command"):
@@ -7728,6 +8143,8 @@ def ollama_chat(force_search=False, initial_prompt=None, allow_start=True, host_
             # back, and gives the model one final chance to answer.
             if profile in {"power","unsafe"} and not tool_refusal_repair_sent:
                 repair_command=_answer_inspection_command(answer)
+                if repair_command and re.search(r"(^|[;&|]\s*)(mdfind|find|fd|fdfind|locate|plocate|rg)\b",repair_command,re.I):
+                    repair_command=None
                 if repair_command and _looks_like_tool_refusal(answer):
                     tool_refusal_repair_sent=True
                     print(f"{_ansi_label('repair ›','33')} {repair_command}")
@@ -7746,7 +8163,44 @@ def ollama_chat(force_search=False, initial_prompt=None, allow_start=True, host_
                     })
                     continue
 
-            if mutation_required and mutation_attempted and not mutation_succeeded:
+            # A model may describe an intended action, but only a positive host
+            # receipt permits a success claim. Give it one repair turn to cross
+            # the tool boundary; otherwise report the truth.
+            if external_action_required and not external_action_succeeded:
+                if not action_repair_sent:
+                    action_repair_sent=True
+                    messages.append({"role":"system","content":(
+                        "VERIFIED-ACTION REQUIRED. The user asked for a host-visible action. "
+                        "You do not yet have a successful OPEN/PREVIEW/REVEAL receipt. "
+                        "If the exact target is known from conversation or search evidence, call the appropriate tool now. "
+                        "Do not say it opened/played/launched until the tool returns success."
+                    )})
+                    continue
+                detail=(last_external_result or "no host action receipt was produced").strip()
+                answer=f"I did not verify that the requested action completed. {detail}"
+                message={"role":"assistant","content":answer,"thinking":"","tool_calls":[]}
+
+            elif (not external_action_required) and _answer_claims_external_success(answer) and not external_action_succeeded:
+                # Final renderer invariant: success prose cannot cross this point
+                # without a receipt. If a verified session referent exists, LOOK
+                # performs that exact action itself; otherwise suppress the claim.
+                if last_action:
+                    started=time.monotonic()
+                    with _activity(last_action["tool"].replace("_"," ")):
+                        host_result=_run_filesystem_tool(workspace,last_action["tool"],last_action["args"],profile)
+                    host_ok=_external_action_succeeded(last_action["tool"],host_result)
+                    _audit_receipt("lo","verified_action_replay",str(host_result).splitlines()[0],
+                                   ok=host_ok,duration_ms=int((time.monotonic()-started)*1000))
+                    if host_ok:
+                        external_action_succeeded=True
+                    else:
+                        answer=f"I did not verify that the requested action completed. {host_result}"
+                        message={"role":"assistant","content":answer,"thinking":"","tool_calls":[]}
+                else:
+                    answer="I don't have a successful host-action receipt for that, so I can't claim it opened or played."
+                    message={"role":"assistant","content":answer,"thinking":"","tool_calls":[]}
+
+            elif mutation_required and mutation_attempted and not mutation_succeeded:
                 detail=(last_mutation_result or "filesystem mutation did not return a success receipt").strip()
                 answer=f"I did not complete the requested filesystem change. {detail}"
                 message={"role":"assistant","content":answer,"thinking":"","tool_calls":[]}
@@ -7767,6 +8221,22 @@ def ollama_chat(force_search=False, initial_prompt=None, allow_start=True, host_
                 # Second prose-only completion is not allowed to become a false receipt.
                 answer="I did not execute a filesystem mutation tool, so I have not changed any files."
                 message={"role":"assistant","content":answer,"thinking":"","tool_calls":[]}
+
+            # LAST GATE: no host-success prose may reach rendering without a
+            # successful receipt in this turn. This intentionally duplicates the
+            # earlier policy guard so future control-flow edits cannot bypass it.
+            candidate_final=_split_ollama_thinking(message)[1]
+            if _answer_claims_external_success(candidate_final) and not external_action_succeeded:
+                candidate_final="I don't have a successful host-action receipt, so I can't claim that it opened or played."
+                message={"role":"assistant","content":candidate_final,"thinking":"","tool_calls":[]}
+            elif external_action_succeeded and (
+                _answer_claims_external_success(candidate_final) or
+                _answer_claims_unobserved_runtime_state(candidate_final)
+            ):
+                # OPEN OK proves dispatch, not foreground focus, process lifetime,
+                # player state, or active playback.
+                candidate_final=_truthful_dispatch_summary(candidate_final)
+                message={"role":"assistant","content":candidate_final,"thinking":"","tool_calls":[]}
 
             messages.append(message)
             # Thinking was already presented live according to the selected display mode.
@@ -11412,6 +11882,11 @@ def main():
         print(_action_result(result))
         return 0 if result.startswith("FILE OK") else 1
     if cmd=="doctor": return doctor()
+    if cmd=="locator-test": return _locator_test()
+    if cmd=="architecture-audit": return _architecture_audit()
+    if cmd in {"receipts","receipt"}:
+        return receipts(rest[0] if rest else 30)
+    if cmd in {"ai-pool","aipool"}: return ai_pool(rest)
     if cmd=="settings": return settings(" ".join(rest))
     if cmd=="uninstall": return uninstall()
     if cmd=="config":

@@ -1,3 +1,122 @@
+## 2.10.3 — Observable truth + receipts
+
+- `OPEN OK` now means exactly “dispatched successfully,” not “still running” or “currently playing.”
+- Final rendering downgrades unsupported playback/process claims to receipt-supported language.
+- Adds `lk receipts [N]` to inspect the bounded forensic action journal.
+- Architecture audit documents dispatch-vs-runtime truth boundary.
+- LOOK 4.20.3.
+
+## 2.10.2 — Verified-action final gate
+
+- Fix conversational continuations (`yes`, `try again`, `go ahead`) bypassing external-action intent detection.
+- Known verified referents replay deterministically for confirmations/retries.
+- Adds an unconditional final-render invariant: success prose cannot leave LO without a positive host receipt in the current turn.
+- If prose claims success and a verified referent exists, LOOK performs the exact known action itself before rendering.
+- LOOK 4.20.2.
+
+## 2.10.1 — Verified actions
+
+- Host-visible success claims are now receipt-gated.
+- Open/play/preview/reveal requests get one deterministic repair turn if the model answers in prose without executing the tool.
+- LO cannot claim “playing/opened/launched” without a successful host tool receipt.
+- Successful external actions feed the existing session referent/repeat register.
+- Fix Python 3.14 `re.split` maxsplit deprecation warning.
+- LOOK 4.20.1.
+
+## 2.10.0 — Conversational task continuity
+
+- Adds an ephemeral session referent/action register.
+- `again`, `play it again`, `that again`, and similar repeats replay the exact successful action without another model turn or filesystem search.
+- Successful open/play/preview/reveal actions become the current referent for ordinary `it`/`that` follow-ups.
+- Fuzzy discovery guidance favors one semantically broadened locator request over repeated search spray.
+- LOOK 4.20.0.
+
+## 2.9.9 — Post-success formatter hotfix
+
+- Remove leaked locator confidence code from `_ollama_markup`.
+- Preserve locator confidence reporting inside `search_files`.
+- Architecture audit now exercises the terminal formatter.
+- LOOK 4.19.2.
+
+## 2.9.8 — Runtime hotfix
+
+- Fix AI-pool loader calling nonexistent `_read_json`.
+- Fix locator token regex that reduced normal queries to zero tokens.
+- LOOK 4.19.1.
+
+## 2.9.7 — Execution architecture audit
+
+- Audited actual LO call graph instead of intended behavior.
+- `search_files` now defaults to cwd-independent `personal` scope.
+- Filesystem dispatcher receives access profile explicitly; discovery routing no longer depends on a mutable profile global.
+- Fixed malformed raw-shell-search guard that allowed `find`/`mdfind` proposals through.
+- Inspection-repair path can no longer reintroduce filesystem shell searches.
+- Adds `lk architecture-audit`.
+- LOOK 4.19.0.
+
+## 2.9.6 — Busy-cycle escape + locator enforcement
+
+- Power/unsafe broad discovery can no longer fall into the legacy home-folder grant prompt.
+- Shell `find`, `mdfind`, `fd`, `locate`, and `plocate` are denied as agent fallbacks; `search_files` is the sole discovery edge.
+- Agent shell commands default to 20 seconds and are capped at 60 seconds.
+- Busy indicators explicitly advertise `Ctrl-C cancel`.
+- Adds `lk locator-test`, a model-free acceptance test for POWER access and locator latency.
+- LOOK 4.18.0.
+
+## 2.9.5 — Observable tasks + AI pool foundation
+
+- Locator now streams stage telemetry: context, likely folders, OS index, fallback, candidate count, elapsed time.
+- Adds durable `lk ai-pool` configuration for primary, fast, background, and fallback model roles across hosts.
+- Existing model selection remains the primary execution path; pool roles are additive and safe to configure before routing is enabled.
+- Chat header shows configured fast-role routing.
+- LOOK 4.17.0.
+
+## 2.9.4 — Adaptive locator
+
+- Search rings: context → likely folders → OS index → shallow fallback.
+- macOS uses Spotlight; Linux uses plocate/locate when available.
+- Three-second locator budget; no recursive home crawl.
+- LOOK 4.16.0.
+
+## 2.9.3 — Interactive agent contract
+
+- `list_files` is now strictly one known directory, non-recursive, bounded to 120 entries.
+- Find/search/locate is explicitly routed conceptually to `search_files`; shell/list crawling is forbidden by the agent contract.
+- Ordinary user-root reads bypass path-grant prompts in normal profiles.
+- Search results report STRONG / PLAUSIBLE / WEAK evidence for semantic evaluation.
+- LO is instructed to ask a quick clarification on plausible mismatches rather than spin or blindly act.
+- Tool success and task success are explicitly separate.
+- Structured returned paths flow directly into open/play.
+- LOOK 4.15.0.
+
+## 2.9.2 — Workspace is context, not a sandbox
+
+- Access profiles govern authority rather than using cwd as a sandbox.
+- Conservative broadly reads/searches/opens ordinary user files but exposes no mutation tools.
+- Workspace broadly uses personal files through journaled LOOK tools without shell access.
+- Power has current-user filesystem authority plus shell; risky commands still confirm.
+- Unscoped file discovery begins at home in every profile.
+- Find/search/open/play/read intent is explicitly non-mutating.
+- LOOK 4.14.0.
+
+## 2.9.1 — Specialized tools first
+
+- Ranked progressive filename/path matching tolerates mistaken or extra query words.
+- In UNSAFE sessions, an unscoped file search begins at the user's home rather than the current repository.
+- Raw shell `mdfind`/`find`/`fd`/`rg` discovery is rejected in favor of LOOK's structured search tools.
+- A shell command that exits 0 with no output is explicitly marked `NO TASK PROGRESS`.
+- Structured paths continue directly into `open_path`, avoiding shell quoting problems with spaces, brackets, parentheses, and Unicode.
+- LOOK 4.13.1.
+
+## 2.9.0 — LO acts, records, and keeps moving
+
+- Fix LO file discovery: `search_files` is path/name-only and never reads arbitrary binary file contents.
+- Add explicit bounded `search_content` via ripgrep for textual content searches.
+- Add media-aware `open_path` intent; requested playback prefers configured `LOOK_MEDIA_PLAYER`, then VLC when available.
+- Add compact append-only LO action receipts under `~/.local/share/look/receipts`, rotated at 2 MB with five archives retained.
+- Add repeated-identical-tool-call loop protection and the first bounded task-trace seam for future checkpoint/continuation work.
+- LOOK 4.13.0.
+
 ## 2.8.9 — Living Memory flow correction
 
 - Extraction now favors recall while metabolism supplies precision.

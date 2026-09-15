@@ -3178,3 +3178,92 @@ Future Crash shows `model · shared` normally and `model · override` only when 
 # Future Crash + LOOK 2.8.8
 
 Hotfix: `lk doctor` no longer crashes when Ollama is reachable with no model currently loaded. No runtime model-selection behavior changed.
+
+
+---
+
+# Future Crash + LOOK 2.8.9
+
+Living Memory now follows:
+
+RECENT → CANDIDATES → METABOLISM → DURABLE → DOMAINS → CORE
+
+The governing policy is: **extraction optimizes recall; metabolism optimizes precision.**
+
+Explicit sidebar/temporary material remains available through RECENT but is barred from durable memory.
+
+
+---
+
+# Future Crash + LOOK 2.9.0
+
+This release makes LO file actions safer and more inspectable.
+
+`search_files` now means path/name discovery only. `search_content` is a separate text-only operation delegated to ripgrep. Requested media playback can use VLC, and every LO filesystem action writes a compact bounded audit receipt.
+
+The agent loop also gains a repeated-call guard and bounded task trace, establishing the internal seam for a later continuation/checkpoint engine without coupling that work to the terminal UI.
+
+
+---
+
+# Future Crash + LOOK 2.9.1
+
+LO now treats local file discovery as a structured capability even in UNSAFE mode. Filename search progressively ranks partial matches, so a request for "kung-fu champ movie" can surface `Kung-Fu Master ...mp4` instead of failing because one remembered word was wrong.
+
+Raw shell discovery is a fallback no longer: `mdfind`, `find`, `fd`, and `rg` issued through `run_command` are redirected to LOOK's structured search tools. This preserves paths as data all the way into playback and prevents shell quoting from becoming part of the agent's job.
+
+
+---
+
+# Future Crash + LOOK 2.9.2
+
+**Workspace is context, not a sandbox.**
+
+- Conservative: broad user-file perception; no file mutations.
+- Workspace: broad personal-file perception and journaled LOOK actions; no shell.
+- Power: current-user filesystem authority plus confirmed shell.
+- Unsafe: unrestricted shell/filesystem within OS privileges.
+
+The current directory remains strong project context. Unscoped file discovery starts at home. Find/search/open/play/read requests are explicitly non-mutating.
+
+
+---
+
+# Future Crash + LOOK 2.9.3
+
+## Interactive agent contract
+
+LO's chat model negotiates intent and ambiguity; LOOK's tools remain bounded and deterministic.
+
+`list_files` inspects one known directory. `search_files` performs discovery. Search results are evidence rather than decisions: strong unique evidence can proceed, while plausible semantic mismatches should produce a quick clarification such as “Did you mean Kung-Fu Master…?” rather than a long spinner.
+
+Tool success is distinct from task success. Returned paths remain structured data through open/play, avoiding shell quoting entirely.
+
+
+---
+
+# Future Crash + LOOK 2.9.4
+
+Broad discovery now uses an adaptive locator: current context, common personal folders, the OS index, then a shallow bounded fallback. Interactive search no longer recursively walks the user's home directory.
+
+
+---
+
+# Future Crash + LOOK 2.9.5
+
+## See the task; prepare the AI pool
+
+The locator now emits live stage telemetry instead of hiding behind a spinner. This is intentionally diagnostic: a slow request will reveal whether time is being spent in context scanning, likely folders, the OS index, or fallback.
+
+`lk ai-pool` introduces durable role configuration across Ollama hosts: primary, fast, background, and fallback. This release does not silently reroute established chat behavior; it establishes the configuration seam first so multi-host routing can be added against observable task behavior rather than guessed at.
+
+
+---
+
+# Future Crash + LOOK 2.9.6
+
+This release closes the busy-cycle escape hatch. Filesystem discovery has one edge: LOOK's bounded locator. POWER/UNSAFE broad searches do not invoke workspace grants, and the model cannot silently regress to shell `find`/`mdfind` after a locator miss.
+
+`lk locator-test` exercises the POWER access decision and locator directly without involving an LLM. This separates agent reasoning problems from filesystem/tool problems.
+
+Interactive shell work now has a short default time budget, and busy indicators explicitly show Ctrl-C cancellation.

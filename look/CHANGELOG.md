@@ -1,3 +1,99 @@
+## 4.20.3 — Do not promote receipts into stronger facts
+
+- Dispatch receipts no longer authorize unobserved runtime/playback claims.
+- Human-readable rolling receipt viewer exposed through `lk receipts`.
+- Truth vocabulary is capability-scoped.
+
+## 4.20.2 — Close the receipt bypass
+
+- Continuation language inherits the prior actionable referent.
+- Host can deterministically replay known actions rather than asking the model to rediscover mechanics.
+- Final renderer independently enforces receipt-gated success.
+
+## 4.20.1 — Receipt-gated host actions
+
+- Intention is not execution; execution is not success without a receipt.
+- External-action guard mirrors the existing mutation-verification design.
+- One repair turn lets capable models cross the tool boundary after premature prose.
+- Python 3.14 warning cleanup.
+
+## 4.20.0 — Referents and repeat actions
+
+- Session-only current-action state, deliberately separate from durable memory.
+- Deterministic repeat-action fast path.
+- Current referent supplied to the model for conversational pronouns.
+- Semantic discovery guidance discourages repeated locator calls.
+
+## 4.19.2 — Formatter isolation
+
+- Terminal markup is presentation-only again.
+- Locator state no longer leaks into final-response rendering.
+- Adds formatter regression check to architecture audit.
+
+## 4.19.1 — Runtime hotfix
+
+- AI pool uses the existing atomic JSON infrastructure.
+- `_search_tokens` now correctly tokenizes Unicode word characters.
+
+## 4.19.0 — Collapse discovery routing
+
+- Personal discovery is a stable semantic scope, not a cwd-relative path.
+- Explicit profile propagation into filesystem dispatch.
+- Correct shell-search guard regex at both command paths.
+- Architecture audit command documents executable routing contract.
+
+## 4.18.0 — Escape the busy cycle
+
+- Canonical locator enforced at the dispatcher and command boundary.
+- POWER home search no longer asks for workspace grants.
+- Expensive shell-search regression blocked.
+- Shorter shell budgets and visible Ctrl-C cancellation.
+- Direct `lk locator-test` diagnostic.
+
+## 4.17.0 — Observable locator and AI pool
+
+- Flush locator stage events while a tool is running.
+- Durable host/model role map: primary, fast, background, fallback.
+- No change to proven primary-model execution semantics yet.
+
+## 4.16.0 — Adaptive locator
+
+- Nearby discovery stays local; broad discovery uses the OS index.
+- Global home recursion removed from interactive search.
+- Locator reports elapsed milliseconds.
+
+## 4.15.0 — Interactive agent contract
+
+- Bounded one-directory listing.
+- Search is discovery; listing is inspection.
+- Semantic candidate evaluation and clarification are part of the agent loop.
+- Ordinary personal-file reads do not prompt for workspace grants.
+- Tool completion is not treated as task completion.
+
+## 4.14.0 — Authority profiles
+
+- Workspace is context, not permission boundary.
+- Broad user-file perception is normal.
+- Workspace allows journaled personal-file actions without shell.
+- Power paths are no longer trapped in cwd.
+- Find/open/play requests cannot trigger mutation completion enforcement.
+
+## 4.13.1 — Progressive discovery
+
+- Fuzzy ranked path search.
+- Specialized search tools outrank shell search in power/unsafe.
+- Empty successful shell results are not mistaken for task completion.
+- Unsafe unscoped discovery searches the user's home.
+
+## 4.13.0 — File search, playback, receipts, task seam
+
+- Filename/path search no longer opens file contents.
+- Explicit content search uses `rg`, skips binary data and caps file size.
+- Media playback can prefer VLC or `LOOK_MEDIA_PLAYER`.
+- LO actions write bounded JSONL audit receipts.
+- Agent loop detects three identical repeated tool calls and stops the loop.
+- Adds bounded per-task trace state as the seam for continuation checkpoints.
+
 ## 4.12.0 — Living Memory recall + scope
 
 - Candidate extraction is deliberately higher recall.
