@@ -1,3 +1,50 @@
+## 3.1.0 — Structured tool truth
+
+- Adds internal `ToolResult`: ok, status, message, data.
+- The transaction layer no longer guesses success from arbitrary English.
+- Legacy filesystem runners are normalized through one explicit family adapter.
+- Move/copy/remove/write/mkdir/open/preview success contracts are explicit.
+- Failed/refused mutations are journaled as failures even when their human message changes.
+- Repeat/replay preserve the underlying tool's truth contract.
+- LOOK 4.31.0.
+
+## 3.0.1 — Transaction truth hotfix
+
+- `lk tooling-audit` uses canonical `_load_lo_profile()`.
+- Successful filesystem mutations render from their authoritative receipt.
+- Open/play verification can no longer overwrite successful mutation truth.
+- LOOK 4.30.1.
+
+## 3.0.0 — LO tool harness
+
+- Fixes receipt JSONL root cause and repairs recoverable 4.20–4.22 journals.
+- Central tool transaction: execute → classify → journal → return.
+- Filesystem, URL, inspection, capability, command, repeat and replay edges share the harness.
+- Declarative model-independent tool/profile policy.
+- `lk tooling-audit` exposes the contract.
+- Bounded journal remains 2 MB current + five archives.
+- LOOK 4.30.0.
+
+## 2.12.0 — Typed resources + graded receipts
+
+- Web candidates now carry deterministic resource types, including YouTube video/channel/playlist/search.
+- Play/watch intent requires a playable YouTube video candidate; channels and profile pages are rejected rather than launched.
+- `open_url` accepts explicit open/play/watch intent and enforces YouTube media typing.
+- Local media launch receipts are now `DISPATCH OK`: launcher handoff is not promoted into playback truth.
+- LO rendering says the launcher was handed the resource, not that VLC is definitely playing it.
+- LOOK 4.22.0.
+
+## 2.11.0 — Resource routing and action harness
+
+- Unifies LO's resource geography: unqualified requests stay local; explicit online/site intent routes outward.
+- Adds verified `open_url` browser action for exact http/https resources.
+- Web discovery can now cross the missing search-result → browser-action edge.
+- URL launch is receipt-gated exactly like local host actions.
+- Session referents/repeat actions support both local paths and web URLs.
+- Receipt viewer counts only valid action records.
+- Architecture audit now reports resource routing and both action edges.
+- LOOK 4.21.0.
+
 ## 2.10.3 — Observable truth + receipts
 
 - `OPEN OK` now means exactly “dispatched successfully,” not “still running” or “currently playing.”

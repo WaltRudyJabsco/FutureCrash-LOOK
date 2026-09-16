@@ -18,7 +18,7 @@ try:
 except Exception:
     readline = None
 
-VERSION="4.31.0"
+VERSION="4.30.0"
 
 LOOK_WORDMARK = r"""       ██╗      ██╗  ██╗
        ██║      ██║ ██╔╝
@@ -5490,19 +5490,6 @@ def _mutation_tool_succeeded(name,result):
     if isinstance(expected,tuple): return text.startswith(expected)
     return bool(expected and text.startswith(expected))
 
-def _mutation_truth_summary(result):
-    """Render exactly the successful filesystem state established by its receipt."""
-    first=str(result or "").strip().splitlines()[0] if str(result or "").strip() else ""
-    clean=re.sub(r"\s*·\s*undo available\s*·\s*lk undo\s*$","",first,flags=re.I)
-    labels={
-        "MOVE OK":"Moved","COPY OK":"Copied","REMOVE OK":"Removed",
-        "WRITE OK":"Wrote","CREATE FILES OK":"Created","MKDIR OK":"Created directory",
-    }
-    for prefix,verb in labels.items():
-        if clean.startswith(prefix):
-            return verb+" "+clean[len(prefix):].lstrip(" ·")
-    return clean or "Filesystem change completed."
-
 def _lo_explicit_web_scope(prompt):
     low=" ".join(str(prompt or "").casefold().split())
     return bool(re.search(r"\b(online|on the web|web|youtube(?:\.com)?|vimeo(?:\.com)?|website|site|url|browser)\b",low))
@@ -7153,7 +7140,7 @@ def _run_filesystem_tool_impl(workspace, name, args, profile="workspace"):
         return f"File tool internal error: {type(exc).__name__}: {exc}"
     return f"Unknown file tool: {name}"
 
-LOOK_INFO_USER_AGENT="LOOK-Shell/4.31.0 (local text client)"
+LOOK_INFO_USER_AGENT="LOOK-Shell/4.30.0 (local text client)"
 
 def _run_filesystem_tool(workspace, name, args, profile="workspace"):
     global _FILESYSTEM_ACCESS_PROFILE
@@ -7616,78 +7603,33 @@ def _audit_receipt(actor,action,detail="",ok=True,**fields):
             f.write(json.dumps(row,ensure_ascii=False,separators=(",",":"))+"\n")
     except OSError: pass
 
-class _ToolResult:
-    __slots__=("ok","status","message","data")
-    def __init__(self,ok,status,message,data=None):
-        self.ok=bool(ok); self.status=str(status); self.message=str(message); self.data=data or {}
+_TOOL_FAILURE_PREFIXES=("File tool failed:","File tool internal error:","Not a directory:","No matches.",
+ "Content search failed:","DISPATCH FAILED","URL OPEN FAILED","URL OPEN REFUSED","Command denied",
+ "Command tool failed:","Unknown file tool:","Unknown capability tool:","Tool internal error:")
 
-def _filesystem_result(name,message):
-    """Translate legacy filesystem runner output into typed truth at one adapter boundary."""
-    text=str(message or "")
-    success_prefix={
-        "write_file":("WRITE OK",),
-        "create_text_files":("CREATE FILES OK","FILES OK"),
-        "copy_path":("COPY OK",),
-        "move_path":("MOVE OK",),
-        "remove_path":("REMOVE OK",),
-        "make_directory":("MKDIR OK","Directory already exists:"),
-        "reveal_path":("REVEAL OK",),
-        "open_path":("OPEN OK","DISPATCH OK"),
-        "preview_path":("PREVIEW OK",),
-    }
-    observation={"list_files","inspect_directory","read_file","search_files","search_content"}
-    if name in observation:
-        bad=text.startswith(("File tool failed:","File tool internal error:","Not a directory:",
-                             "Content search failed:","Unknown file tool:","Search query is empty."))
-        return _ToolResult(not bad,"ok" if not bad else "failed",text)
-    prefixes=success_prefix.get(name,())
-    ok=bool(prefixes and text.startswith(prefixes))
-    return _ToolResult(ok,"ok" if ok else "failed",text)
-
-def _url_result(message):
-    text=str(message or ""); ok=text.startswith("URL OPEN OK")
-    return _ToolResult(ok,"dispatched" if ok else "failed",text)
-
-def _command_result(message):
-    text=str(message or "")
-    m=re.match(r"exit\s+(-?\d+)",text)
-    ok=bool(m and int(m.group(1))==0)
-    return _ToolResult(ok,"ok" if ok else "failed",text)
-
-def _default_result(message):
-    text=str(message or "")
-    bad=text.startswith(("Tool internal error:","Unknown capability tool:"))
-    return _ToolResult(not bad,"ok" if not bad else "failed",text)
-
-def _normalize_tool_result(name,result):
-    """Typed truth is chosen by tool family, never inferred from arbitrary English."""
-    if isinstance(result,_ToolResult): return result
-    if name in {"list_files","inspect_directory","read_file","search_files","search_content",
-                "write_file","create_text_files","copy_path","move_path","remove_path",
-                "make_directory","reveal_path","open_path","preview_path"}:
-        return _filesystem_result(name,result)
-    if name=="open_url": return _url_result(result)
-    if name=="run_command": return _command_result(result)
-    return _default_result(result)
+def _tool_result_ok(name,result):
+    text=str(result or "").strip()
+    if not text or text.startswith(_TOOL_FAILURE_PREFIXES): return False
+    if name=="run_command":
+        m=re.match(r"exit\s+(-?\d+)",text)
+        return bool(m and int(m.group(1))==0)
+    return True
 
 def _tool_receipt_fields(name,args):
     return {k:args.get(k) for k in ("path","source","destination","url","query","cwd","intent")
             if k in args and args.get(k) not in (None,"")}
 
-def _tool_transaction(name,args,runner,*,actor="lo",truth_name=None):
+def _tool_transaction(name,args,runner,*,actor="lo"):
     """One edge for timing, execution, classification, journaling, and return."""
     started=time.monotonic()
     try:
-        raw=runner()
-        typed=_normalize_tool_result(truth_name or name,raw)
+        result=runner(); ok=_tool_result_ok(name,result)
     except Exception as exc:
-        typed=_ToolResult(False,"internal_error",f"Tool internal error: {type(exc).__name__}: {exc}")
+        result=f"Tool internal error: {type(exc).__name__}: {exc}"; ok=False
     fields=_tool_receipt_fields(name,args)
     fields["duration_ms"]=int((time.monotonic()-started)*1000)
-    fields["status"]=typed.status
-    _audit_receipt(actor,name,typed.message.splitlines()[0] if typed.message else "no result",
-                   ok=typed.ok,**fields)
-    return typed.message,typed.ok,fields["duration_ms"]
+    _audit_receipt(actor,name,str(result).splitlines()[0] if str(result) else "no result",ok=ok,**fields)
+    return result,ok,fields["duration_ms"]
 
 def receipts(limit=30):
     """Human-readable tail of LOOK's bounded forensic action journal."""
@@ -8065,8 +8007,7 @@ def ollama_chat(force_search=False, initial_prompt=None, allow_start=True, host_
                     "repeat_action",last_action["args"],
                     lambda: (_tool_open_url(last_action["args"].get("url",""),last_action["args"].get("intent","open"))
                              if last_action["tool"]=="open_url"
-                             else _run_filesystem_tool(workspace,last_action["tool"],last_action["args"],profile)),
-                    truth_name=last_action["tool"])
+                             else _run_filesystem_tool(workspace,last_action["tool"],last_action["args"],profile)))
             shown=Path(last_action["path"]).name
             print("\n"+_lo_label("lo","35")+"\n"+_ollama_markup(f"Done again — {shown}" if ok else str(repeat_result))+"\n")
             continue
@@ -8410,11 +8351,7 @@ def ollama_chat(force_search=False, initial_prompt=None, allow_start=True, host_
             # A model may describe an intended action, but only a positive host
             # receipt permits a success claim. Give it one repair turn to cross
             # the tool boundary; otherwise report the truth.
-            if mutation_required and mutation_succeeded:
-                answer=_mutation_truth_summary(last_mutation_result)
-                message={"role":"assistant","content":answer,"thinking":"","tool_calls":[]}
-
-            elif external_action_required and not external_action_succeeded:
+            if external_action_required and not external_action_succeeded:
                 if not action_repair_sent:
                     action_repair_sent=True
                     messages.append({"role":"system","content":(
@@ -8438,8 +8375,7 @@ def ollama_chat(force_search=False, initial_prompt=None, allow_start=True, host_
                             "verified_action_replay",last_action["args"],
                             lambda: (_tool_open_url(last_action["args"].get("url",""),last_action["args"].get("intent","open"))
                                      if last_action["tool"]=="open_url"
-                                     else _run_filesystem_tool(workspace,last_action["tool"],last_action["args"],profile)),
-                            truth_name=last_action["tool"])
+                                     else _run_filesystem_tool(workspace,last_action["tool"],last_action["args"],profile)))
                     host_ok=_tx_ok and _external_action_succeeded(last_action["tool"],host_result)
                     if host_ok:
                         external_action_succeeded=True
@@ -8476,10 +8412,7 @@ def ollama_chat(force_search=False, initial_prompt=None, allow_start=True, host_
             # successful receipt in this turn. This intentionally duplicates the
             # earlier policy guard so future control-flow edits cannot bypass it.
             candidate_final=_split_ollama_thinking(message)[1]
-            if mutation_required and mutation_succeeded:
-                candidate_final=_mutation_truth_summary(last_mutation_result)
-                message={"role":"assistant","content":candidate_final,"thinking":"","tool_calls":[]}
-            elif _answer_claims_external_success(candidate_final) and not external_action_succeeded:
+            if _answer_claims_external_success(candidate_final) and not external_action_succeeded:
                 candidate_final="I don't have a successful host-action receipt, so I can't claim that it opened or played."
                 message={"role":"assistant","content":candidate_final,"thinking":"","tool_calls":[]}
             elif external_action_succeeded and (

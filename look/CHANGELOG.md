@@ -1,3 +1,35 @@
+## 4.31.0 — Structured tool truth
+
+- `_ToolResult` separates machine truth from presentation text.
+- `_normalize_tool_result()` dispatches to explicit tool-family contracts.
+- Generic transaction journaling consumes typed `ok/status`, not English heuristics.
+
+## 4.30.1 — Generic mutation truth
+
+- Mutation receipts are first-class final-response truth.
+- Fixes tooling-audit profile resolver.
+
+## 4.30.0 — Generic agent/tool boundary
+
+- `_tool_transaction()` owns timing, execution, classification and forensic journaling.
+- Repairs malformed legacy receipt separators automatically.
+- `_TOOL_POLICY` makes capability access declarative.
+- New tools can plug into the common harness instead of bespoke receipt plumbing.
+
+## 4.22.0 — Typed candidates and epistemic receipts
+
+- Resource type becomes deterministic edge metadata before model ranking.
+- YouTube play/watch selects videos, not merely relevant pages.
+- Action receipts express the strongest observed state and no stronger.
+- Local media uses DISPATCH OK; playback remains unobserved.
+
+## 4.21.0 — One resource/action harness
+
+- Local path and public URL actions share the same intent → discovery → candidate → action → receipt discipline.
+- Explicit web scope never falls back to local discovery; local scope never silently escalates to web.
+- `open_url` opens exact search-returned URLs and produces a forensic receipt.
+- Repeat/referent state can carry URLs as well as paths.
+
 ## 4.20.3 — Do not promote receipts into stronger facts
 
 - Dispatch receipts no longer authorize unobserved runtime/playback claims.
