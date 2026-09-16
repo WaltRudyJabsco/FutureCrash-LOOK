@@ -679,7 +679,16 @@ unfunction future-crash fcr rst 2>/dev/null
 # policy may disable/reclaim it later as the Future Crash convenience command.
 
 alias lk='nocorrect lk'
-commands() { "$HOME/.local/bin/lk" commands; }
+commands() {
+  local request="$HOME/.local/share/look/command_request"
+  command rm -f -- "$request"
+  "$HOME/.local/bin/lk" commands
+  if [[ -r "$request" ]]; then
+    local picked="$(<"$request")"
+    command rm -f -- "$request"
+    [[ -n "$picked" ]] && print -z -- "$picked"
+  fi
+}
 
 # LOOK Ollama — minimal on-demand chat; a resident model is reused when available.
 lo() {

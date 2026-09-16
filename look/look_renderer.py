@@ -895,6 +895,28 @@ def pager(rows:list[str],height:int,width:int,rebuild=None,candidates=None,on_br
             dest=dest.strip()
             if cancelled or not dest:
                 notice='cancelled'; return
+            # A multi-item destination must be a directory. Resolve this before
+            # entering the batch subprocess so a missing path can never hide a
+            # creation prompt behind the activity spinner.
+            expanded=Path(os.path.expanduser(dest)).resolve()
+            if len(paths)>1 and not expanded.exists():
+                sys.stdout.write(SHOW+RESET+'\n'); sys.stdout.flush()
+                try:
+                    answer,cancelled=prompt_line(
+                        f"{expanded} does not exist\nM create directory and continue · Esc/Enter cancel › "
+                    )
+                except KeyboardInterrupt:
+                    answer=''; cancelled=True
+                sys.stdout.write(HIDE); sys.stdout.flush()
+                if cancelled or answer.strip().lower()!='m':
+                    notice='cancelled'; return
+                try:
+                    expanded.mkdir(parents=True,exist_ok=False)
+                except OSError as exc:
+                    notice=f'create failed · {exc}'; return
+                dest=str(expanded)
+            elif len(paths)>1 and not expanded.is_dir():
+                notice='destination is not a directory'; return
             with activity(f"{'copying' if kind=='copy' else 'moving'} {len(paths)} item{'s' if len(paths)!=1 else ''}"):
                 proc=subprocess.run([sys.executable,str(lk),'_batch',kind,dest,*map(str,paths)])
         elif kind=='remove':

@@ -1,3 +1,11 @@
+## 3.2.0 — LOOK grammar audit
+
+- Makes bare `lk` and explicit view modes consistently interactive.
+- Adds a canonical command registry and searchable `commands` palette.
+- Enter/Right in `commands` sends a command template back to the shell prompt.
+- Preflights missing multi-item Move/Copy destinations before batch execution; no hidden prompt/spinner hang.
+- Preserves short aliases as ergonomic entry points over shared LOOK modes.
+
 ## 3.1.0 — Structured tool truth
 
 - Adds internal `ToolResult`: ok, status, message, data.

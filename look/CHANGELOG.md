@@ -1,3 +1,10 @@
+## 4.32.0 — Grammar audit + command palette
+
+- `lk` now always enters interactive LOOK on a TTY, independent of directory size.
+- `lk recent/detail/dirs/files/tree/size` use the same interactive contract as their short aliases.
+- `lk commands` is now searchable/selectable and can compose into the parent Zsh prompt.
+- Multi-item Move/Copy validates or creates a missing destination before spawning `_batch`.
+
 ## 4.31.0 — Structured tool truth
 
 - `_ToolResult` separates machine truth from presentation text.

@@ -18,7 +18,7 @@ try:
 except Exception:
     readline = None
 
-VERSION="4.31.0"
+VERSION="4.32.0"
 
 LOOK_WORDMARK = r"""       ██╗      ██╗  ██╗
        ██║      ██║ ██╔╝
@@ -8721,6 +8721,8 @@ def _read_tty_key(fd, timeout=None):
     return {
         b"\x1b[A":"up",
         b"\x1b[B":"down",
+        b"\x1b[C":"right",
+        b"\x1b[D":"left",
         b"\x1b[5~":"pageup",
         b"\x1b[6~":"pagedown",
     }.get(bytes(seq),"esc")
@@ -11244,41 +11246,196 @@ def _surface_config():
                 print(f"  {p} · {'present' if p.exists() else 'not present'} · contents hidden")
             _surface_run(show_secrets)
 
+# Canonical human-facing command grammar. Aliases are entry points, not separate implementations.
+# Keep internal worker commands out of this registry.
+_COMMANDS = [
+    # Files / navigation
+    ("lk", "", "files", "Open interactive LOOK in the current directory"),
+    ("l", "[PATH|WORD]", "files", "Smart jump + interactive LOOK"),
+    ("ll", "[PATH|WORD]", "files", "LOOK detail view", "lk detail"),
+    ("ld", "[PATH|WORD]", "files", "LOOK directories", "lk dirs"),
+    ("lf", "[PATH|WORD]", "files", "LOOK files", "lk files"),
+    ("lt", "[PATH|WORD]", "files", "LOOK tree", "lk tree"),
+    ("lr", "[PATH|WORD]", "files", "LOOK recent", "lk recent"),
+    ("lz", "[PATH|WORD]", "files", "LOOK sizes", "lk size"),
+    ("zll", "<WORD>", "files", "Zoxide jump + LOOK"),
+    ("cdl", "<WORD>", "files", "Zoxide jump + detail LOOK"),
+    ("ff", "[WORD]", "files", "Global LOOK search"),
+    ("fznv", "[WORD]", "files", "Global LOOK search + Neovim"),
+    ("lk detail", "[PATH]", "files", "Interactive detail view"),
+    ("lk dirs", "[PATH]", "files", "Interactive directories view"),
+    ("lk files", "[PATH]", "files", "Interactive files view"),
+    ("lk tree", "[PATH]", "files", "Interactive tree view"),
+    ("lk recent", "[PATH]", "files", "Interactive recent view"),
+    ("lk size", "[PATH]", "files", "Interactive size view"),
+    ("lmv", "<SRC...> <DEST>", "files", "Move path(s)"),
+    ("lcp", "<SRC...> <DEST>", "files", "Copy path(s)"),
+    ("lscp", "<SRC...> <DEST>", "files", "Copy path(s), preserving source"),
+    ("lmk", "<PATH>", "files", "Smart make file or directory"),
+    ("mkd", "<PATH>", "files", "Make directory"),
+    ("lrm", "<PATH...>", "files", "Remove through LOOK"),
+    ("lk match", "<TEXT>", "files", "Match/find filesystem content"),
+    ("lk open", "<PATH>", "files", "Open in desktop application"),
+    ("lk preview", "<PATH>", "files", "Preview outside terminal"),
+    ("lk reveal", "<PATH>", "files", "Reveal in Finder/file manager"),
+    ("lk undo", "", "files", "Undo newest ready filesystem action"),
+    ("lk undo list", "", "files", "Inspect undo history"),
+    ("lk undo skip", "", "files", "Abandon newest blocked undo record"),
+    ("lk receipts", "[N]", "files", "Inspect transaction receipts"),
+    # System
+    ("lk system", "", "system", "System control surface"),
+    ("lk doctor", "", "system", "Run LOOK diagnostics"),
+    ("lk machine", "", "system", "Machine summary", "lk box"),
+    ("lk disk", "", "system", "Disk/storage inspection"),
+    ("lk gpu", "", "system", "GPU inspection"),
+    ("lk up", "", "system", "Listening services/ports", "lk ports"),
+    ("lk port", "<NUMBER>", "system", "Inspect a port"),
+    ("lk processes", "", "system", "Process list", "lk procs"),
+    ("lk process", "<NAME>", "system", "Inspect process", "lk proc"),
+    ("lk pid", "<NUMBER>", "system", "Inspect PID"),
+    ("lk git", "[PATH]", "system", "Git repository inspection"),
+    ("lk run", "[PATH]", "system", "Inspect runnable project", "lk project"),
+    ("lk env", "", "system", "Environment inspection"),
+    ("lk path", "", "system", "PATH inspection"),
+    ("lk why", "<COMMAND>", "system", "Explain command resolution"),
+    # Network
+    ("lk net", "", "network", "Network control surface"),
+    ("lk network", "", "network", "Network inspection"),
+    ("lk tailscale", "", "network", "Tailscale inspection"),
+    ("lk share", "[...]", "network", "Sharing controls"),
+    ("lk services", "", "network", "Service inspection"),
+    # AI / LO
+    ("lo", "[PROMPT]", "ai", "Talk to LO"),
+    ("lo", "search [PROMPT]", "ai", "LO with explicit web search"),
+    ("lk ai", "", "ai", "AI control surface"),
+    ("lk models", "[MODEL]", "ai", "Model chooser"),
+    ("lk benchmark", "[--all]", "ai", "Benchmark model(s)"),
+    ("lk ollama", "", "ai", "Ollama inspection"),
+    ("lk ollama models", "[MODEL]", "ai", "Ollama model chooser"),
+    ("lk ollama test", "[--all]", "ai", "Ollama benchmark"),
+    ("lk ollama host", "[...]", "ai", "Inference hosts"),
+    ("lk ollama share", "[...]", "ai", "Tailnet Ollama sharing"),
+    ("lk ollama access", "[...]", "ai", "LO access profile"),
+    ("lk ollama key", "[...]", "ai", "Web-search key/status"),
+    ("lk ai-pool", "[...]", "ai", "Inference pool"),
+    ("lk access", "[...]", "ai", "Filesystem grants/access"),
+    ("lk personality", "[...]", "ai", "LO personality"),
+    ("lk thinking", "[...]", "ai", "LO thinking mode"),
+    ("lk think-display", "[...]", "ai", "Thinking display"),
+    ("lk memory", "[...]", "ai", "LO memory"),
+    ("lk skills", "[...]", "ai", "LO learned skills"),
+    ("lk profile", "[...]", "ai", "Portable LOOK/LO profile"),
+    ("lk feedback", "[...]", "ai", "LO feedback/expression"),
+    ("lk sound", "[...]", "ai", "Sound feedback"),
+    ("lk vision", "<IMAGE> [QUESTION]", "ai", "Inspect image with vision model"),
+    ("lk generate", "<PROMPT>", "ai", "Generate image through ComfyUI", "lk image"),
+    ("lk comfy", "[...]", "ai", "ComfyUI discovery/configuration"),
+    ("lk schedule", "[...]", "ai", "Delayed/recurring LO jobs", "lk scheduler"),
+    ("lk translate", "[...]", "ai", "Translation helper"),
+    ("lk clean", "", "system", "Conservative maintenance surface"),
+    ("lk web", "[...]", "ai", "Web-search key/status"),
+    ("lk budget", "[...]", "ai", "LO context/token budget"),
+    ("lk media", "[...]", "media", "Media controls", "lk music"),
+    ("mm", "", "media", "Toggle media playback", "lk media toggle"),
+    ("mn", "", "media", "Next media item", "lk media next"),
+    ("mp", "", "media", "Previous media item", "lk media prev"),
+    ("lk jobs", "", "ai", "Inspect background LO jobs"),
+    ("lk events", "[...]", "ai", "Inspect LO event stream"),
+    ("lk games", "", "meta", "Game availability"),
+    ("lk ttt", "", "meta", "Tic-Tac-Toe easter egg"),
+    ("lk gtnw", "", "meta", "Global Thermonuclear War easter egg"),
+    # Config/meta
+    ("lk settings", "[SEARCH]", "config", "Unified settings"),
+    ("lk config", "", "config", "Configuration surface"),
+    ("lk config paths", "", "config", "Show configuration paths", "lk config raw"),
+    ("lk apps", "[...]", "config", "Desktop app preferences"),
+    ("lk shortcuts", "[...]", "config", "Shell shortcut policy"),
+    ("lk secrets", "", "config", "Inspect secret-file status"),
+    ("lk home", "", "config", "LOOK home"),
+    ("lk help", "", "meta", "Starter help"),
+    ("lk help all", "", "meta", "Complete glossary"),
+    ("lk commands", "", "meta", "Interactive command palette"),
+    ("lk architecture-audit", "", "dev", "Architecture self-audit"),
+    ("lk tooling-audit", "", "dev", "Tool harness self-audit"),
+    ("lk command-audit", "", "dev", "Canonical command grammar audit"),
+    ("lk locator-test", "", "dev", "Locator self-test"),
+    ("lk version", "", "meta", "Print LOOK version"),
+    ("lk uninstall", "", "meta", "Uninstall LOOK"),
+]
+
+def _command_rows():
+    rows=[]
+    for item in _COMMANDS:
+        command,args,category,description,*alias=item
+        template=(command+(" "+args if args else "")).strip()
+        extra=(" · "+alias[0]) if alias else ""
+        rows.append((template,category,description+extra))
+    return rows
+
+def _write_command_request(command):
+    """Return a safe editable command stem; placeholders stay documentation, not shell syntax."""
+    STATE_DIR.mkdir(parents=True,exist_ok=True)
+    path=STATE_DIR/"command_request"
+    stem=re.sub(r"\s+(?:\[[^]]*\]|<[^>]*>)(?:\s+.*)?$","",command).rstrip()
+    if stem != command.rstrip(): stem += " "
+    path.write_text(stem+"\n")
+
 def commands_screen():
-    """Terse scan of LOOK vocabulary; unlike help, this is an index rather than a manual."""
-    body=f"""LOOK {VERSION} · commands
+    """Searchable command palette. Enter/Right sends the template back to the parent shell."""
+    rows=_command_rows()
+    if not (sys.stdin.isatty() and sys.stdout.isatty()):
+        for template,category,description in rows:
+            print(f"{template:<34} {category:<8} {description}")
+        return 0
+    fd=sys.stdin.fileno(); old=termios.tcgetattr(fd)
+    query=""; idx=0
+    try:
+        tty.setcbreak(fd)
+        while True:
+            terms=query.casefold().split()
+            visible=[r for r in rows if all(t in " ".join(r).casefold() for t in terms)]
+            idx=min(idx,max(0,len(visible)-1))
+            term=shutil.get_terminal_size((100,30)); usable=max(4,term.lines-5)
+            top=max(0,min(max(0,len(visible)-usable),idx-usable+1))
+            os.system("clear")
+            print(f"LOOK COMMANDS · {len(visible)} of {len(rows)}")
+            print("─"*min(term.columns,100))
+            for n,(template,category,description) in enumerate(visible[top:top+usable],start=top):
+                mark=_c("›","1;36") if n==idx else " "
+                print(f"{mark} {template:<34} {_c(category,'2'):<18} {description}")
+            print(f"\n{_c('FILTER','1;36')} {query}█  {_c('type search · ↑↓ choose · Enter/→ send to shell · Esc clear/back · q quit','2')}",end="",flush=True)
+            key=_read_tty_key(fd)
+            if key in {"q","Q","\x03"}: break
+            if key=="esc":
+                if query: query=""; idx=0; continue
+                break
+            if key in {"up","k"} and visible: idx=max(0,idx-1); continue
+            if key in {"down","j"} and visible: idx=min(len(visible)-1,idx+1); continue
+            if key=="pageup" and visible: idx=max(0,idx-usable); continue
+            if key=="pagedown" and visible: idx=min(len(visible)-1,idx+usable); continue
+            if key in {"\r","\n","right"} and visible:
+                _write_command_request(visible[idx][0]); break
+            if key in {"\x7f","\b"}:
+                if query: query=query[:-1]; idx=0
+                continue
+            if len(key)==1 and key.isprintable(): query+=key; idx=0
+    finally:
+        termios.tcsetattr(fd,termios.TCSADRAIN,old); print()
+    return 0
 
-START HERE
-  lk system        lk ai            lk net
-  lk clean         lk config        lk help
-
-FILES
-  lk [THING]       detail  dirs  files  tree  recent  size  run
-  lmk  lcp  lmv  lscp  lrm  mkd  match  undo  undo list  undo skip  reveal
-
-SYSTEM
-  doctor  up  ports  port  processes  process  pid
-  machine  gpu  disk  env  path  why  git
-
-NETWORK
-  net  tailscale   ollama host   ollama share
-
-AI
-  lo  lo search    ollama  ollama models  ollama test
-  personality  thinking  think-display  ai stats  settings [SEARCH]
-  memory  memory compact  skills  profile  ai  feedback  sound  vision  generate  comfy  schedule  translate
-  access  ollama access  ollama key
-
-MEDIA
-  media  mm  mn  mp
-
-META
-  home  config  secrets  access  apps  open  preview  reveal  version  uninstall
-  help            help all        commands
-
-  Direct commands remain first-class. Umbrella surfaces are optional.
-"""
-    return _page_text(body)
+def _command_audit():
+    rows=_command_rows()
+    categories={}
+    for _,category,_ in rows: categories[category]=categories.get(category,0)+1
+    templates=[r[0] for r in rows]
+    duplicates=sorted({x for x in templates if templates.count(x)>1})
+    print(f"LOOK COMMAND AUDIT · {len(rows)} registered forms")
+    print("  registry      canonical _COMMANDS")
+    print("  categories    "+" · ".join(f"{k} {v}" for k,v in sorted(categories.items())))
+    print(f"  duplicates    {len(duplicates)}"+(" · "+", ".join(duplicates) if duplicates else ""))
+    print("  palette       lk commands · searchable · Enter/→ composes to shell")
+    print("  aliases       ergonomic entry points; shared implementations remain canonical")
+    return 1 if duplicates else 0
 
 def starter_help():
     body=f"""LOOK {VERSION} · starter toolkit
@@ -12040,7 +12197,7 @@ def main():
             confirm_unsafe_override=(access_profile=="unsafe")
         )
     a=sys.argv[1:]
-    if not a: return render([])
+    if not a: return render(["--interactive"])
     cmd=a[0]; rest=a[1:]
     if cmd=="_remember-worker": return _memory_worker()
     if cmd=="_skill-feedback-worker": return _skill_feedback_worker()
@@ -12138,6 +12295,7 @@ def main():
     if cmd=="locator-test": return _locator_test()
     if cmd=="architecture-audit": return _architecture_audit()
     if cmd=="tooling-audit": return _tooling_audit()
+    if cmd=="command-audit": return _command_audit()
     if cmd in {"receipts","receipt"}:
         return receipts(rest[0] if rest else 30)
     if cmd in {"ai-pool","aipool"}: return ai_pool(rest)
@@ -12154,7 +12312,7 @@ def main():
         mode=oct(p.stat().st_mode & 0o777)
         print(f"LOOK secrets: {p} exists · permissions {mode} · contents hidden")
         return 0 if mode=="0o600" else 1
-    if cmd in modes: return render(["--mode", modes[cmd], *rest])
+    if cmd in modes: return render(["--mode", modes[cmd], "--interactive", *rest])
     if cmd in {"run","project"}: return inspect_project(rest[0] if rest else '.')
     if cmd in {"up","ports","services"}: return inspect_up()
     if cmd=="port":
