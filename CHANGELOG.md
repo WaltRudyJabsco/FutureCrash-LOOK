@@ -1,3 +1,9 @@
+## 3.3.9 — Shared Inference Observability
+
+- Shared endpoint/model discovery and truthful LO JSONL inference events.
+- Model residency and Ollama timing telemetry.
+- Fixed document re-anchor unbound-state crash.
+
 ## 3.3.4 — Resource attention lifecycle
 
 - Keeps image ResourceRefs available across the LO session without resending pixel payloads on ordinary follow-up turns.

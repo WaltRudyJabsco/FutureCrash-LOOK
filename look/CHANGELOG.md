@@ -1,3 +1,8 @@
+## 4.33.9
+
+- Shared inference discovery + JSONL observability.
+- Fixed document continuation re-anchor state crash.
+
 ## 4.33.4 — Resource attention lifecycle
 
 - ResourceRef handles persist while expensive image payloads become attention-sensitive.

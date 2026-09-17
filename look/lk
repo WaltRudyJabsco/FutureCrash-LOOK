@@ -18,7 +18,7 @@ try:
 except Exception:
     readline = None
 
-VERSION="4.33.8"
+VERSION="4.33.9"
 
 LOOK_WORDMARK = r"""       ██╗      ██╗  ██╗
        ██║      ██║ ██╔╝
@@ -75,6 +75,47 @@ PERSONALITIES_DIR=STATE_DIR/"personalities"
 OLLAMA_SHARE_PORT=11435
 OLLAMA_SHARE_PID=STATE_DIR/"ollama_share_proxy.pid"
 LOCAL_OLLAMA_URL="http://127.0.0.1:11434"
+
+
+class _InferenceEvents:
+    """Truthful JSONL observability for inference clients.
+
+    Events describe only state LOOK can directly observe.  The human terminal
+    renderer remains independent; machine clients get a stable stdout stream.
+    """
+    def __init__(self, stream=None, request_id=None):
+        self.stream=stream or sys.stdout
+        self.request_id=request_id or uuid.uuid4().hex[:12]
+        self.started=time.monotonic()
+        self.seq=0
+
+    def emit(self,event,**fields):
+        self.seq+=1
+        row={
+            "event":str(event),
+            "request_id":self.request_id,
+            "seq":self.seq,
+            "elapsed_ms":int((time.monotonic()-self.started)*1000),
+        }
+        for key,value in fields.items():
+            if value is not None:
+                row[key]=value
+        self.stream.write(json.dumps(row,ensure_ascii=False,separators=(",",":"))+"\n")
+        self.stream.flush()
+
+
+def _inference_config(base=None):
+    base=_ollama_base(base)
+    return {
+        "endpoint":base,
+        "model":_active_ollama_model(),
+        "source":"environment" if os.environ.get("OLLAMA_HOST","").strip() else "saved/discovery",
+        "host":_ollama_host_name(base),
+    }
+
+
+def _print_json(value):
+    print(json.dumps(value,ensure_ascii=False,separators=(",",":")))
 
 
 def _safe_cwd(repair=True):
@@ -1237,6 +1278,14 @@ AI / OLLAMA
   lk ollama models     model panel · Enter select · X enable/disable
   lk ollama test       benchmark LOOK-selected model
   lk ollama test --all compare enabled installed models
+  lk ollama endpoint [--json]
+                       resolved shared Ollama endpoint + model
+  lk model current [--json]
+                       shared current model for all inference clients
+  lk inference [--json]
+                       endpoint/model reachability + residency
+  lo --events-json PROMPT
+                       one-shot machine-readable inference event stream
   lk ollama host       list saved + reachable Ollama hosts
   lk ollama host NAME  make NAME the persistent default
   lk ollama host local return to localhost
@@ -2831,7 +2880,7 @@ def _local_chat_once(base, model, messages, *, num_ctx=4096, num_predict=128, th
         base + "/api/chat", data=payload,
         headers={"Content-Type": "application/json"}, method="POST"
     )
-    with urllib.request.urlopen(request) as response:
+    with urllib.request.urlopen(request, timeout=180) as response:
         result=json.load(response)
     return result.get("message", {}).get("content", "").strip()
 
@@ -8063,7 +8112,7 @@ def _ollama_http_error(exc):
     return f"{label} · {detail}" if detail else label
 
 
-def _ollama_stream_chat(base,payload_obj):
+def _ollama_stream_chat(base,payload_obj, events=None):
     """Yield Ollama chat events; vision gets a narrow compatibility retry on HTTP 400."""
     import json, urllib.request, urllib.error
     original=dict(payload_obj); original["stream"]=True
@@ -8120,10 +8169,8 @@ def _ollama_stream_chat(base,payload_obj):
                     headers={"Content-Type":"application/json"},method="POST"
                 )
                 try:
-                    with urllib.request.urlopen(request2) as response:
-                        if turn_document_reanchors >= 1:
-                            raise RuntimeError("document continuation did not converge")
-                        turn_document_reanchors += 1
+                    with urllib.request.urlopen(request2, timeout=180) as response:
+                        if events: events.emit("inference_retry", reason="document_reanchor")
                         print(f"{_ansi_label('document ›','33')} model continuation re-anchored")
                         for raw in response:
                             if raw.strip(): yield json.loads(raw)
@@ -8179,12 +8226,16 @@ def _lo_action_from_tool(name,args,result):
     path=str(args.get("path") or args.get("url") or "").strip()
     return {"tool":name,"args":dict(args),"path":path} if path else None
 
-def ollama_chat(force_search=False, initial_prompt=None, allow_start=True, host_override=None, host_name=None, access_profile=None, selected_paths=None, workspace_override=None, one_shot=False, confirm_unsafe_override=False):
+def ollama_chat(force_search=False, initial_prompt=None, allow_start=True, host_override=None, host_name=None, access_profile=None, selected_paths=None, workspace_override=None, one_shot=False, confirm_unsafe_override=False, events=None):
     """Minimal local chat; optional first prompt and web-search mode."""
     import json
     import urllib.request
 
     base = _ollama_base(host_override)
+    if events:
+        events.emit("request_start")
+        events.emit("endpoint_resolved", endpoint=base, host=host_name or _ollama_host_name(base),
+                    source="override" if host_override else ("environment" if os.environ.get("OLLAMA_HOST","").strip() else "saved/discovery"))
     profile=(access_profile or _load_lo_profile()).lower()
     if profile not in LO_PROFILES:
         print(f"LOOK OLLAMA · unknown access profile: {profile}")
@@ -8195,6 +8246,9 @@ def ollama_chat(force_search=False, initial_prompt=None, allow_start=True, host_
 
     running = _ensure_ollama_server(base, allow_start=(allow_start and _is_local_ollama(base)))
     if running is None:
+        if events:
+            events.emit("error", stage="endpoint", error="server unavailable")
+            events.emit("request_done", status="error")
         print("LOOK OLLAMA · server unavailable")
         return 1
 
@@ -8220,6 +8274,9 @@ def ollama_chat(force_search=False, initial_prompt=None, allow_start=True, host_
         print(f"LOOK OLLAMA · {shown_host if 'shown_host' in locals() else _ollama_host_name(base)} is reachable, but has no models installed")
         return 1
     resident = model in running_names
+    if events:
+        events.emit("model_selected", model=model)
+        events.emit("model_resident", model=model, resident=resident, running_models=running_names)
     model_caps=_ollama_capabilities(base, model)
     supports_thinking=bool(model_caps and "thinking" in model_caps)
     supports_vision=bool(model_caps and "vision" in model_caps)
@@ -8603,14 +8660,21 @@ def ollama_chat(force_search=False, initial_prompt=None, allow_start=True, host_
                 first_event=True
                 final_event={}
                 task_rounds+=1
+                if events: events.emit("inference_start", round=task_rounds)
+                progress_tokens=0
                 try:
-                    for event in _ollama_stream_chat(base,payload_obj):
+                    for event in _ollama_stream_chat(base,payload_obj,events=events):
                         fragment=event.get("message",{}) or {}
                         thought=str(fragment.get("thinking") or "")
                         content=str(fragment.get("content") or "")
                         calls=fragment.get("tool_calls") or []
-                        if first_event and (thought or content or calls or event.get("done")):
+                        if first_event and (thought or content or calls):
                             waiting.finish(); first_event=False
+                            if events: events.emit("first_token", round=task_rounds)
+                        if events and (thought or content):
+                            progress_tokens += 1
+                            if progress_tokens % 16 == 0:
+                                events.emit("token_progress", chunks=progress_tokens, round=task_rounds)
                         if thought:
                             aggregate["thinking"]+=thought
                             roller.feed(thought)
@@ -8628,6 +8692,12 @@ def ollama_chat(force_search=False, initial_prompt=None, allow_start=True, host_
                 task_eval_tokens+=int(final_event.get("eval_count") or 0)
                 task_eval_s+=float(final_event.get("eval_duration") or 0)/1e9
                 task_load_s+=float(final_event.get("load_duration") or 0)/1e9
+                if events:
+                    events.emit("inference_done", round=task_rounds,
+                                prompt_tokens=int(final_event.get("prompt_eval_count") or 0),
+                                output_tokens=int(final_event.get("eval_count") or 0),
+                                load_ms=int(float(final_event.get("load_duration") or 0)/1e6),
+                                eval_ms=int(float(final_event.get("eval_duration") or 0)/1e6))
                 result={"message":aggregate}
                 if turn_image_paths:
                     observed_image_paths.update(str(p) for p in turn_image_paths)
@@ -8641,8 +8711,12 @@ def ollama_chat(force_search=False, initial_prompt=None, allow_start=True, host_
                 break
             except Exception as exc:
                 _ai_foreground(False,"lo")
+                if events:
+                    events.emit("error", stage="inference", error=str(exc), error_type=type(exc).__name__)
+                    events.emit("request_done", status="error")
                 print(f"LOOK OLLAMA · {exc}")
                 messages.pop()
+                if one_shot: return 1
                 break
 
             message = result.get("message", {})
@@ -8668,6 +8742,8 @@ def ollama_chat(force_search=False, initial_prompt=None, allow_start=True, host_
                         continue
                     task_trace.append({"tool":name,"args":args})
                     task_trace=task_trace[-12:]
+                    tool_event_started=time.monotonic()
+                    if events: events.emit("tool_start", tool=name)
 
                     if name == "weather":
                         location=args.get("location","")
@@ -8775,6 +8851,7 @@ def ollama_chat(force_search=False, initial_prompt=None, allow_start=True, host_
                             if raw_search:
                                 tool_content="USE SPECIALIZED TOOL · local discovery belongs to search_files (name/path) or search_content (text). Raw shell search was not run."
                                 _audit_receipt("lo","specialized_tool_guard",command_text[:180],ok=False)
+                                if events: events.emit("tool_done", tool=name, elapsed_tool_ms=int((time.monotonic()-tool_event_started)*1000), status="blocked")
                                 messages.append({"role":"tool","tool_name":name,"content":tool_content})
                                 continue
                             is_inspection=_inspection_command(command_text)
@@ -8786,6 +8863,8 @@ def ollama_chat(force_search=False, initial_prompt=None, allow_start=True, host_
                     else:
                         tool_content = f"Unknown tool: {name}"
 
+                    if events:
+                        events.emit("tool_done", tool=name, elapsed_tool_ms=int((time.monotonic()-tool_event_started)*1000))
                     messages.append({
                         "role": "tool",
                         "tool_name": name,
@@ -8913,6 +8992,11 @@ def ollama_chat(force_search=False, initial_prompt=None, allow_start=True, host_
                 print("\n"+_lo_label("lo","35")+"\n"+_ollama_markup(final)+"\n")
             else:
                 print("\n"+_lo_label("lo","35")+"\n"+_c("(no final response)","2")+"\n")
+            if events:
+                events.emit("response", text=final)
+                events.emit("request_done", status="ok", rounds=task_rounds, tool_calls=task_tool_calls,
+                            prompt_tokens=task_prompt_tokens, output_tokens=task_eval_tokens,
+                            load_ms=int(task_load_s*1000))
             _record_ai_stats({
                 "time":time.time(),"model":model,"host":_ollama_host_name(base),
                 "wall_s":max(0.0,time.monotonic()-task_started),
@@ -12567,7 +12651,7 @@ def main():
         or (
             sys.argv[1] == "ollama"
             and len(sys.argv) >= 3
-            and sys.argv[2] not in {"models","test","key","host","hosts","share","access"}
+            and sys.argv[2] not in {"models","test","key","host","hosts","share","access","endpoint"}
         )
     ):
         args=sys.argv[2:]
@@ -12575,6 +12659,10 @@ def main():
         host_override=None
         host_name=None
         access_profile=None
+        events_json=False
+        if "--events-json" in args:
+            args.remove("--events-json")
+            events_json=True
         profile_flags={
             "--conservative":"conservative",
             "--workspace":"workspace",
@@ -12606,6 +12694,17 @@ def main():
             args=args[1:]
         initial_prompt,cli_refs=_split_cli_resources(args,_safe_cwd())
         initial_prompt=initial_prompt or ("Work with these explicitly supplied resources." if cli_refs else None)
+        if events_json:
+            import contextlib
+            sink=_InferenceEvents(stream=sys.stdout)
+            # Machine stdout is JSONL only; preserve legacy human diagnostics on stderr.
+            with contextlib.redirect_stdout(sys.stderr):
+                return ollama_chat(
+                    force_search=force_search, initial_prompt=initial_prompt,
+                    allow_start=allow_start, host_override=host_override, host_name=host_name,
+                    access_profile=access_profile, selected_paths=[r.path for r in cli_refs],
+                    confirm_unsafe_override=(access_profile=="unsafe"), events=sink, one_shot=True
+                )
         return ollama_chat(
             force_search=force_search, initial_prompt=initial_prompt,
             allow_start=allow_start, host_override=host_override, host_name=host_name,
@@ -12749,7 +12848,31 @@ def main():
     if cmd=="net": return _surface_net()
     if cmd=="network": return inspect_network()
     if cmd=="tailscale": return inspect_tailscale()
+    if cmd=="model" and rest and rest[0]=="current":
+        payload={"model":_active_ollama_model()}
+        if "--json" in rest: _print_json(payload)
+        else: print(payload["model"])
+        return 0
+    if cmd=="inference":
+        payload=_inference_config()
+        try:
+            running=_ollama_ps(payload["endpoint"],timeout=1.0)
+            names=[(m.get("name") or m.get("model") or "").strip() for m in running]
+            payload["reachable"]=True
+            payload["resident"]=payload["model"] in names
+            payload["running_models"]=[x for x in names if x]
+        except Exception as exc:
+            payload["reachable"]=False; payload["resident"]=False; payload["error"]=str(exc)
+        if "--json" in rest: _print_json(payload)
+        else:
+            for k,v in payload.items(): print(f"{k:<15} {v}")
+        return 0
     if cmd=="ollama":
+        if rest and rest[0]=="endpoint":
+            payload=_inference_config()
+            if "--json" in rest: _print_json(payload)
+            else: print(payload["endpoint"])
+            return 0
         if rest and rest[0]=="key":
             return ollama_key(rest[1:])
         if rest and rest[0] in {"host","hosts"}:
