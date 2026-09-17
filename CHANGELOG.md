@@ -1,3 +1,41 @@
+## 3.3.4 — Resource attention lifecycle
+
+- Keeps image ResourceRefs available across the LO session without resending pixel payloads on ordinary follow-up turns.
+- Rehydrates vision only for newly supplied images or language that requires fresh visual evidence.
+- Explicit image comparisons can revive recent image handles without keeping their payloads hot.
+- Removes image payloads after the first successful model observation so tool rounds do not resend them.
+
+## 3.3.3 — Vision transport hardening
+
+- Preserves Ollama HTTP error bodies instead of hiding the useful server diagnostic.
+- Retries image turns without tools, then without thinking controls, only when Ollama returns HTTP 400.
+- Keeps ResourceRef and context-governor behavior unchanged.
+
+## 3.3.2 — Vision resources + context governor
+
+- Image ResourceRefs now attach to vision-capable Ollama models, including Finder/desktop drops and LOOK selections.
+- Resource context stays cheap: multi-file/large-document sets no longer eager-preview into the prompt.
+- `read_file` supports bounded offset slices for progressive evidence gathering.
+- Per-turn context governor tells LO its context/output ceiling and directs multi-document work through compact evidence cycles.
+- Non-vision models report image resources without pretending to inspect them.
+
+## 3.3.1 — Resource binding fix
+
+- Makes explicit paths/LOOK selections an authoritative active resource slot.
+- Binds this/these/the selected files to active resources before history/workspace/search.
+- Injects bounded previews for small UTF-8 text resources.
+- Fresh explicit resources supersede stale file referents.
+- Keeps directories lazy: inspect them with tools rather than flooding context.
+
+## 3.3.0 — Resource Context
+
+- Adds first-class LO file/folder resource context.
+- Terminal/Finder drag-and-drop paths become explicit LO attachments.
+- LOOK marked selections and terminal drops now share the same internal resource semantics.
+- Explicit resources outrank conversational referents and search candidates.
+- Directories are passed as bounded resources, never recursively injected into model context.
+- LOOK 4.33.0.
+
 ## 3.2.0 — LOOK grammar audit
 
 - Makes bare `lk` and explicit view modes consistently interactive.

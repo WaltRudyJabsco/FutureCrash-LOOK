@@ -18,7 +18,7 @@ try:
 except Exception:
     readline = None
 
-VERSION="4.32.0"
+VERSION="4.33.8"
 
 LOOK_WORDMARK = r"""       ██╗      ██╗  ██╗
        ██║      ██║ ██╔╝
@@ -4211,16 +4211,42 @@ def _tool_list_files(workspace, path="."):
     if len(children)>120: lines.append(f"… {len(children)-120} more; use search_files to find something")
     return "\n".join(lines) if lines else "(empty)"
 
-def _tool_read_file(workspace, path):
+def _tool_read_file(workspace, path, offset=0, max_chars=12000):
     target=_safe_workspace_path(workspace, path)
     if not target.exists():
         return f"Not found: {path}"
     if not target.is_file():
         return f"Not a file: {path}"
 
+    suffix=target.suffix.lower()
+
+    # Common document containers are typed resources, not invitations for the
+    # model to improvise shell/Python extraction. Decode them deterministically
+    # at the filesystem edge and return only bounded readable evidence.
+    if suffix==".docx":
+        try:
+            import xml.etree.ElementTree as ET
+            with zipfile.ZipFile(target) as archive:
+                xml=archive.read("word/document.xml")
+            root=ET.fromstring(xml)
+            ns="{http://schemas.openxmlformats.org/wordprocessingml/2006/main}"
+            paragraphs=[]
+            for para in root.iter(ns+"p"):
+                parts=[node.text or "" for node in para.iter(ns+"t")]
+                if parts: paragraphs.append("".join(parts))
+            text="\n".join(paragraphs).strip()
+            if not text:
+                return "DOCX contains no extractable text."
+            offset=max(0,int(offset or 0)); limit=max(1000,min(int(max_chars or 12000),16000))
+            chunk=text[offset:offset+limit]
+            more=offset+len(chunk)<len(text)
+            return f"READ RANGE · DOCX · chars {offset}-{offset+len(chunk)} of {len(text)}" + (" · more available" if more else " · end") + "\n" + chunk
+        except (OSError,KeyError,zipfile.BadZipFile,ET.ParseError) as exc:
+            return f"DOCX text extraction failed: {exc}"
+
     # PDF is a container format, not text. Extract deterministically at the
     # edge and give the model only readable text.
-    if target.suffix.lower()==".pdf":
+    if suffix==".pdf":
         pdftotext=shutil.which("pdftotext")
         if not pdftotext:
             return "PDF text extraction unavailable; install pdftotext (Poppler)."
@@ -4235,7 +4261,10 @@ def _tool_read_file(workspace, path):
             text=result.stdout.strip()
             if not text:
                 return "PDF contains no extractable text; it may be scanned/image-only."
-            return text[:16000] + ("\n…truncated" if len(text) > 16000 else "")
+            offset=max(0,int(offset or 0)); limit=max(1000,min(int(max_chars or 12000),16000))
+            chunk=text[offset:offset+limit]
+            more=offset+len(chunk)<len(text)
+            return f"READ RANGE · chars {offset}-{offset+len(chunk)} of {len(text)}"+ (" · more available" if more else " · end") + "\n" + chunk
         except (OSError,subprocess.SubprocessError) as exc:
             return f"PDF text extraction failed: {exc}"
 
@@ -4246,7 +4275,10 @@ def _tool_read_file(workspace, path):
         if b"\x00" in data[:4096]:
             return "Binary file; text extraction unavailable for this format."
         text=data.decode("utf-8", errors="replace")
-        return text[:16000] + ("\n…truncated" if len(text) > 16000 else "")
+        offset=max(0,int(offset or 0)); limit=max(1000,min(int(max_chars or 12000),16000))
+        chunk=text[offset:offset+limit]
+        more=offset+len(chunk)<len(text)
+        return f"READ RANGE · chars {offset}-{offset+len(chunk)} of {len(text)}"+ (" · more available" if more else " · end") + "\n" + chunk
     except OSError as exc:
         return f"Read failed: {exc}"
 
@@ -5364,6 +5396,222 @@ LO_DEEP_TOOL_ROUNDS=12
 LO_HISTORY_MAX_MESSAGES=28
 LO_HISTORY_MAX_CHARS=28000
 
+class _ResourceRef:
+    __slots__=("path","kind","name","provenance","last_referenced_turn")
+    def __init__(self,path,provenance="explicit",last_referenced_turn=0):
+        p=Path(path).expanduser().resolve()
+        self.path=p
+        self.kind="directory" if p.is_dir() else "file"
+        self.name=p.name or str(p)
+        self.provenance=provenance
+        self.last_referenced_turn=int(last_referenced_turn or 0)
+
+    def line(self,index=None):
+        lead=f"[{index}] " if index is not None else ""
+        suffix="/" if self.kind=="directory" else ""
+        try: size=f" · {self.path.stat().st_size} B" if self.kind=="file" else ""
+        except OSError: size=""
+        return f"{lead}{self.name}{suffix} · {self.kind}{size} · {self.path} · {self.provenance}"
+
+def _resource_refs(paths,provenance="explicit"):
+    out=[]; seen=set()
+    for raw in paths or []:
+        try: p=Path(raw).expanduser().resolve()
+        except (OSError,RuntimeError): continue
+        if p.exists() and str(p) not in seen:
+            seen.add(str(p)); out.append(_ResourceRef(p,provenance))
+    return out
+
+def _extract_prompt_resources(text,cwd=None):
+    """Recognize shell/Finder-style path text without treating ordinary prose as paths."""
+    import shlex
+    base=Path(cwd or _safe_cwd()).resolve()
+    try: tokens=shlex.split(str(text or ""),posix=True)
+    except ValueError: tokens=str(text or "").split()
+    resources=[]; keep=[]
+    for token in tokens:
+        # Only path-shaped tokens qualify. Bare words remain language even if a same-named file exists.
+        shaped=(token.startswith(("/","~/","./","../")) or "/" in token)
+        if not shaped:
+            keep.append(token); continue
+        p=Path(token).expanduser()
+        if not p.is_absolute(): p=base/p
+        try: p=p.resolve()
+        except (OSError,RuntimeError):
+            keep.append(token); continue
+        if p.exists(): resources.append(p)
+        else: keep.append(token)
+    return " ".join(keep).strip(),_resource_refs(resources,"dropped/path")
+
+def _split_cli_resources(args,cwd=None):
+    """Preserve argv boundaries: Finder drops with escaped spaces arrive as one argv item."""
+    base=Path(cwd or _safe_cwd()).resolve(); text=[]; paths=[]
+    for token in args:
+        p=Path(token).expanduser()
+        candidate=p if p.is_absolute() else base/p
+        try: candidate=candidate.resolve()
+        except (OSError,RuntimeError): candidate=None
+        if candidate is not None and candidate.exists(): paths.append(candidate)
+        else: text.append(token)
+    return " ".join(text).strip(),_resource_refs(paths,"cli/drop")
+
+def _resource_context_message(refs):
+    if not refs: return ""
+    return ("EXPLICIT RESOURCE CONTEXT\n"
+            "These resources were explicitly supplied or selected by the operator. They are stronger referents than search candidates. "
+            "Use them directly when the request says this/these/the file/the folder; do not rediscover them by filename. "
+            "Do not assume file contents and do not mutate without an explicit request.\n"+
+            "\n".join(r.line(i+1) for i,r in enumerate(refs[:200])))
+
+def _resource_preview(refs, max_total=6000, max_file=6000):
+    """Cheap eager preview only for a single small text resource.
+
+    Resource context is a handle set, not a prompt dump. Multi-file comparisons and
+    large documents stay lazy and are inspected through bounded read_file slices.
+    """
+    refs=list(refs or [])
+    if len(refs)!=1 or refs[0].kind!="file": return ""
+    ref=refs[0]
+    try:
+        size=ref.path.stat().st_size
+        if size>96*1024: return ""
+        raw=ref.path.read_bytes()[:max_file+1]
+        if b"\x00" in raw[:4096]: return ""
+        text=raw[:max_total].decode("utf-8",errors="replace")
+    except (OSError,UnicodeError):
+        return ""
+    return f"RESOURCE [1] CONTENT PREVIEW · {ref.name}\n{text}" if text else ""
+
+def _active_resource_message(refs):
+    """Single authoritative model-facing slot for the user's current explicit resources."""
+    if not refs: return "ACTIVE RESOURCE CONTEXT: none explicitly selected."
+    manifest=_resource_context_message(refs)
+    preview=_resource_preview(refs)
+    rule=(
+        "\nBINDING CONTRACT: These are the ACTIVE explicit resources for the current request. "
+        "Pronouns such as this, this file, these, these files, them, and the selected files bind here BEFORE "
+        "workspace listings, conversation history, memory, or search. If the requested operation needs file "
+        "contents and a preview is present, use it. Otherwise call read_file/inspect_directory on the exact path. "
+        "Never substitute a different same-named or previously discussed file."
+    )
+    return manifest+rule+("\n\n"+preview if preview else "")
+
+def _resource_image_paths(refs, limit=8):
+    image_ext={".png",".jpg",".jpeg",".webp",".gif",".bmp"}
+    out=[]
+    for ref in refs or []:
+        if ref.kind=="file" and ref.path.suffix.casefold() in image_ext:
+            out.append(ref.path)
+        if len(out)>=limit: break
+    return out
+
+def _resource_visual_intent(prompt):
+    """Cheap attention gate: decide whether an observed image needs pixels again."""
+    text=" ".join(str(prompt or "").casefold().split())
+    visual_terms=(
+        "image", "picture", "photo", "screenshot", "comic", "panel", "diagram",
+        "look at", "look closer", "see", "shown", "visible", "written", "text",
+        "sign", "tattoo", "color", "colour", "wearing", "background", "foreground",
+        "face", "hair", "chest", "shirt", "jacket", "object",
+    )
+    comparison_terms=(
+        "compare", "difference", "different", "first one", "second one",
+        "previous one", "other one", "both", "these two", "those two",
+    )
+    return (any(term in text for term in visual_terms),
+            any(term in text for term in comparison_terms))
+
+def _merge_resource_refs(existing, incoming, limit=200):
+    """Retain cheap handles across a session while keeping newest resources last."""
+    by_path={str(r.path):r for r in (existing or [])}
+    order=[str(r.path) for r in (existing or [])]
+    for ref in incoming or []:
+        key=str(ref.path)
+        if key in by_path:
+            order.remove(key)
+        by_path[key]=ref; order.append(key)
+    return [by_path[k] for k in order[-limit:]]
+
+def _resource_governor_message(refs,budget):
+    if not refs: return ""
+    return (
+        "RESOURCE CONTEXT GOVERNOR: ResourceRef entries are cheap handles, not permission to load whole files into context. "
+        f"This turn has a {int(budget['context']):,}-token context ceiling and {int(budget['output']):,}-token output ceiling. "
+        "For several or large documents, inspect metadata/structure first, then read bounded slices only as needed. "
+        "Keep compact working conclusions between reads; do not paste or retain entire documents in the conversation. "
+        "For comparisons, gather evidence per resource and synthesize from those notes. If one inference cycle is insufficient, "
+        "continue through tool rounds yourself rather than asking the operator to type next."
+    )
+
+def _resource_bound_prompt(prompt, refs):
+    if not refs: return prompt
+    ids=", ".join(f"[{i}] {r.name}" for i,r in enumerate(refs,1))
+    return f"{prompt}\n\nACTIVE EXPLICIT REFERENTS: {ids}"
+
+def _resource_referent_intent(prompt):
+    """Resolve cheap discourse references before asking the model to rediscover them."""
+    low=" ".join(str(prompt or "").casefold().split())
+    pronoun=bool(re.search(r"\b(it|this|that|this file|that file|these|them|those)\b",low))
+    browser=bool(re.search(r"\b(open|launch|show)\b.*\b(browser|web browser)\b",low))
+    return pronoun,browser
+
+def _promote_resource(refs, archive, turn_id):
+    """Newest explicitly supplied/discussed resources win pronoun resolution."""
+    for ref in refs or []:
+        ref.last_referenced_turn=turn_id
+    return _merge_resource_refs(archive,refs)
+
+def _latest_resource(refs, archive):
+    candidates=list(refs or []) or list(archive or [])
+    if not candidates: return None
+    return max(candidates,key=lambda r:(int(getattr(r,"last_referenced_turn",0)), candidates.index(r)))
+
+def _resource_constraints(prompt):
+    low=" ".join(str(prompt or "").casefold().split())
+    aliases={
+        "html":(".html",".htm",".xhtml"), "pdf":(".pdf",),
+        "docx":(".docx",), "word":(".docx",".doc"),
+        "markdown":(".md",".markdown"), "md":(".md",".markdown"),
+        "text":(".txt",), "rtf":(".rtf",),
+        "image":(".png",".jpg",".jpeg",".webp",".gif"),
+        "picture":(".png",".jpg",".jpeg",".webp",".gif"),
+        "photo":(".png",".jpg",".jpeg",".webp",".gif"),
+        "video":(".mp4",".mov",".mkv",".webm",".avi"),
+        "movie":(".mp4",".mov",".mkv",".webm",".avi"),
+    }
+    out=[]
+    for word,exts in aliases.items():
+        if re.search(rf"\b{re.escape(word)}\b",low): out.extend(exts)
+    return tuple(dict.fromkeys(out))
+
+def _resolve_known_resource(prompt, refs, archive):
+    pool=_merge_resource_refs(list(refs or []),list(archive or []))
+    if not pool: return None
+    suffixes=_resource_constraints(prompt)
+    if suffixes:
+        compatible=[r for r in pool if r.kind=="file" and r.path.suffix.casefold() in suffixes]
+        if compatible:
+            return max(compatible,key=lambda r:int(getattr(r,"last_referenced_turn",0)))
+        return None
+    pronoun,_=_resource_referent_intent(prompt)
+    if pronoun:
+        return max(pool,key=lambda r:int(getattr(r,"last_referenced_turn",0)))
+    return None
+
+def _browser_open_resource(ref, workspace, profile):
+    """Typed host action for 'open it in the browser'; never fall through to run_command."""
+    if not ref or ref.kind!="file":
+        return None
+    suffix=ref.path.suffix.casefold()
+    browserable={".html",".htm",".xhtml",".svg",".pdf",".txt",".md",".markdown"}
+    if suffix not in browserable:
+        return None
+    # open_path already owns host dispatch/receipts and is safer than model-authored shell.
+    return _tool_transaction(
+        "open_path",{"path":str(ref.path),"intent":"browser"},
+        lambda: _run_filesystem_tool(workspace,"open_path",{"path":str(ref.path),"intent":"browser"},profile),
+        truth_name="open_path")
+
 def _lo_task_tier(prompt, selected_paths=None):
     """Cheap deterministic budget selection: fast, standard, or deep."""
     text=" ".join(str(prompt or "").split()).casefold()
@@ -5863,6 +6111,8 @@ def _command_tool():
 
 def _run_command_tool(workspace,args,profile):
     command=str(args.get("command","")).strip()
+    if _looks_like_shell_file_discovery(command):
+        return "Command blocked: use search_files for filesystem discovery.", False
     if not command:
         return "Command tool failed: empty command"
 
@@ -6892,6 +7142,7 @@ def _agent_tool_contract():
 - Strong unique evidence may proceed. Plausible-but-not-exact evidence: ask "Did you mean …?" and checkpoint rather than spinning.
 - Tool success is not task success. Empty/no-match output means continue, change strategy, or ask the user. Host-visible action success is receipt-gated: never claim opened/playing/launched unless open_path/preview_path/reveal_path returned its OK receipt. DISPATCH OK proves launcher handoff only; it does not prove the app is still running or media is currently playing. URL OPEN OK likewise proves browser dispatch only, not page load or playback.
 - OPEN / PLAY preserves the returned path as structured data and uses open_path; do not shell-quote it.
+- DOCUMENTS: PDF and DOCX are first-class readable resources through read_file. Never improvise shell/Python/zip extraction for them.
 - User answers to clarification are task state, not durable preference unless they explicitly state a lasting preference.
 """
 
@@ -6915,9 +7166,11 @@ def _filesystem_tools():
         }},
         {"type":"function","function":{
             "name":"read_file",
-            "description":"Read readable contents inside the current LOOK workspace. Text files are read directly; PDFs are converted to text with pdftotext when available. Reads are bounded.",
+            "description":"Read a bounded slice of readable contents. Text files are read directly; PDF and DOCX documents are converted to text deterministically when available. Never use run_command merely to extract a supported document. For large/multiple resources, advance offset across slices and retain compact conclusions rather than loading whole files.",
             "parameters":{"type":"object","properties":{
-                "path":{"type":"string"}
+                "path":{"type":"string"},
+                "offset":{"type":"integer","minimum":0,"description":"Character offset, default 0"},
+                "max_chars":{"type":"integer","minimum":1000,"maximum":16000,"description":"Maximum characters returned, default 12000"}
             },"required":["path"]}
         }},
         {"type":"function","function":{
@@ -7116,7 +7369,7 @@ def _run_filesystem_tool_impl(workspace, name, args, profile="workspace"):
         if name == "inspect_directory":
             return _tool_inspect_directory(workspace, args.get("path", "."), bool(args.get("recursive", False)), args.get("max_entries", 200000))
         if name == "read_file":
-            return _tool_read_file(workspace, args.get("path", ""))
+            return _tool_read_file(workspace, args.get("path", ""), args.get("offset",0), args.get("max_chars",12000))
         if name == "search_files":
             # Discovery is cwd-independent by default. "personal" means LOOK's
             # adaptive locator: context ring + likely folders + OS index.
@@ -7789,18 +8042,98 @@ class _RollingThinking:
         if tail and self.mode!="quiet": self._show(tail)
         if self.started: print()
 
+def _ollama_payload_has_images(payload_obj):
+    return any(bool(message.get("images")) for message in payload_obj.get("messages",[]) if isinstance(message,dict))
+
+
+def _ollama_http_error(exc):
+    """Preserve Ollama's JSON error body; urllib's default string throws away the useful part."""
+    detail=""
+    try:
+        raw=exc.read().decode("utf-8","replace").strip()
+        if raw:
+            try:
+                parsed=json.loads(raw)
+                detail=str(parsed.get("error") or raw)
+            except Exception:
+                detail=raw
+    except Exception:
+        pass
+    label=f"HTTP {getattr(exc,'code','?')} {getattr(exc,'reason','Bad Request')}"
+    return f"{label} · {detail}" if detail else label
+
+
 def _ollama_stream_chat(base,payload_obj):
-    """Yield Ollama streaming message fragments as decoded JSON objects."""
-    import json, urllib.request
-    payload_obj=dict(payload_obj); payload_obj["stream"]=True
-    request=urllib.request.Request(
-        base+"/api/chat",data=json.dumps(payload_obj).encode(),
-        headers={"Content-Type":"application/json"},method="POST"
-    )
-    with urllib.request.urlopen(request) as response:
-        for raw in response:
-            if not raw.strip(): continue
-            yield json.loads(raw)
+    """Yield Ollama chat events; vision gets a narrow compatibility retry on HTTP 400."""
+    import json, urllib.request, urllib.error
+    original=dict(payload_obj); original["stream"]=True
+    attempts=[original]
+    if _ollama_payload_has_images(original):
+        # Some Ollama/model combinations advertise vision+tools but reject the combined
+        # request. Preserve the image conversation and defer tools for this inference.
+        without_tools=dict(original); without_tools.pop("tools",None)
+        attempts.append(without_tools)
+        # Older multimodal runners can also reject thinking controls on image turns.
+        without_think=dict(without_tools); without_think.pop("think",None)
+        attempts.append(without_think)
+    last_error=None
+    for index,current in enumerate(attempts):
+        request=urllib.request.Request(
+            base+"/api/chat",data=json.dumps(current).encode(),
+            headers={"Content-Type":"application/json"},method="POST"
+        )
+        try:
+            with urllib.request.urlopen(request) as response:
+                if index:
+                    note="tools deferred" if index==1 else "tools/thinking deferred"
+                    print(f"{_ansi_label('vision ›','33')} compatibility retry · {note}")
+                for raw in response:
+                    if not raw.strip(): continue
+                    yield json.loads(raw)
+                return
+        except urllib.error.HTTPError as exc:
+            last_error=_ollama_http_error(exc)
+            # Some model runners lose the user-query anchor after a tool result
+            # (notably on long extracted document evidence). Re-anchor once,
+            # preserving the tool result and original conversation instead of
+            # failing an otherwise successful document read.
+            if (getattr(exc,"code",None)==500 and "no user query found in messages" in last_error.casefold()
+                    and not current.get("_look_reanchored")):
+                retry=dict(current)
+                retry.pop("_look_reanchored",None)
+                prior_messages=list(current.get("messages",[]))
+                latest_user=""
+                for _m in reversed(prior_messages):
+                    if _m.get("role")=="user" and str(_m.get("content","")).strip():
+                        latest_user=str(_m.get("content","")).strip()
+                        break
+                anchor=("CURRENT USER TASK: "+latest_user+"\n"
+                        if latest_user else "CURRENT USER TASK: answer the current resource request.\n")
+                retry["messages"]=prior_messages+[{
+                    "role":"user",
+                    "content":anchor+"Use only the tool/resource evidence from this current task. "
+                              "Do not resume or import subjects from historical conversation context. "
+                              "If required resource evidence is unavailable, say so instead of guessing."
+                }]
+                request2=urllib.request.Request(
+                    base+"/api/chat",data=json.dumps(retry).encode(),
+                    headers={"Content-Type":"application/json"},method="POST"
+                )
+                try:
+                    with urllib.request.urlopen(request2) as response:
+                        if turn_document_reanchors >= 1:
+                            raise RuntimeError("document continuation did not converge")
+                        turn_document_reanchors += 1
+                        print(f"{_ansi_label('document ›','33')} model continuation re-anchored")
+                        for raw in response:
+                            if raw.strip(): yield json.loads(raw)
+                        return
+                except urllib.error.HTTPError as exc2:
+                    raise RuntimeError(_ollama_http_error(exc2)) from None
+            if getattr(exc,"code",None)!=400 or index==len(attempts)-1:
+                raise RuntimeError(last_error) from None
+            continue
+    raise RuntimeError(last_error or "Ollama vision request failed")
 
 def _answer_inspection_command(answer):
     """Recover a known-safe inspection command mentioned by a prose-only model answer."""
@@ -7894,6 +8227,11 @@ def ollama_chat(force_search=False, initial_prompt=None, allow_start=True, host_
 
     workspace = Path(workspace_override).expanduser().resolve() if workspace_override else _safe_cwd().resolve()
     selected_paths=[Path(p).expanduser().resolve() for p in (selected_paths or [])]
+    resource_refs=_resource_refs(selected_paths,"LOOK selection")
+    # Resource handles persist cheaply across the session; raw image payloads do not.
+    resource_archive=list(resource_refs)
+    observed_image_paths=set()
+    fresh_image_paths={str(p) for p in _resource_image_paths(resource_refs)}
 
     has_web = bool(os.environ.get("OLLAMA_API_KEY"))
     mode = "LOOK OLLAMA SEARCH" if force_search else "LOOK OLLAMA"
@@ -7960,7 +8298,7 @@ def ollama_chat(force_search=False, initial_prompt=None, allow_start=True, host_
             "If two different in-workspace directories genuinely match an ambiguous spoken destination, inspect/list them or ask which one rather than guessing. "
             "Use reveal_path when the user asks to locate/reveal a file in Finder or the host file manager. "
             "Use open_path when the user wants a local artifact opened/launched/played in a graphical app. Use preview_path for a quick external preview. "
-            "TOOL RECEIPTS ARE GROUND TRUTH. After a successful filesystem tool call, report the exact canonical path from the receipt and never contradict it with memory, prior conversation, or an inferred current directory. "
+            "RESOURCE PRECEDENCE: explicit dropped/typed paths and LOOK-selected resources outrank conversational referents, which outrank search candidates. If explicit resources already identify the objects, do not search for them again. TOOL RECEIPTS ARE GROUND TRUTH. After a successful filesystem tool call, report the exact canonical path from the receipt and never contradict it with memory, prior conversation, or an inferred current directory. "
             "A failed tool receipt means the requested operation did not happen unless a later successful receipt proves otherwise. "
             "Use write_file only for intentional textual creation or editing. Only mutate files when the user explicitly asks. "
             "Do not claim to have read or changed a file unless the corresponding tool supplied or confirmed it. "
@@ -7970,26 +8308,10 @@ def ollama_chat(force_search=False, initial_prompt=None, allow_start=True, host_
             "when citing or recommending web material, always preserve the exact http/https URL supplied by the search result and emit a complete Markdown link in the form [descriptive label](https://actual-url). Never emit citation placeholders such as [source], [1], or a site name styled like a link without an actual URL. Never invent a URL from a site name."
         )},
     ]
-    if selected_paths:
-        rows=[]
-        for p in selected_paths[:200]:
-            try:
-                rel=p.relative_to(workspace)
-                shown=str(rel) if str(rel)!="." else p.name
-            except ValueError:
-                shown=str(p)
-            suffix="/" if p.is_dir() else ""
-            rows.append(f"- {shown}{suffix}")
-        messages.append({
-            "role":"system",
-            "content":(
-                "SELECTED PATH CONTEXT\n"
-                "The operator explicitly handed these paths to this LO session as the current working set. "
-                "Treat them as relevant context, but do not assume their contents: use read_file/list_files/search_files as needed. "
-                "Do not modify them unless the operator explicitly asks.\n"
-                + "\n".join(rows)
-            )
-        })
+    # One stable authoritative slot. It is refreshed when the operator explicitly
+    # supplies new paths, so stale file referents cannot outrank a fresh drop/selection.
+    resource_message_index=len(messages)
+    messages.append({"role":"system","content":_active_resource_message(resource_refs)})
 
     capability_notes={
         "conservative": (
@@ -8032,14 +8354,15 @@ def ollama_chat(force_search=False, initial_prompt=None, allow_start=True, host_
     # memory snapshots in chat history.
     memory_message_index=len(messages)
     messages.append({"role":"system","content":""})
+    recent_context_index=len(messages)
     recent_context=_recent_context()
-    if recent_context:
-        messages.append({"role":"system","content":recent_context})
+    messages.append({"role":"system","content":recent_context})
 
     base_message_count=len(messages)
     pending_prompt = (initial_prompt or "").strip()
     last_action=None
     last_candidates=""
+    turn_id=0
     while True:
         if pending_prompt:
             prompt=pending_prompt
@@ -8057,6 +8380,51 @@ def ollama_chat(force_search=False, initial_prompt=None, allow_start=True, host_
 
         if not prompt:
             continue
+
+        # Hard turn boundary: handles/conversation persist; retry/evidence authority does not.
+        turn_id += 1
+        turn_document_reanchors = 0
+        turn_tool_retry = False
+        turn_evidence = []
+        turn_proposed_action = None
+
+        # Terminal drag/drop becomes first-class resource context. Finder and most Linux
+        # terminals paste escaped/quoted paths into the input line; normalize them here.
+        clean_prompt,dropped_refs=_extract_prompt_resources(prompt,workspace)
+        if dropped_refs:
+            # A fresh explicit drop/path is stronger than stale conversational resources.
+            # Multiple paths supplied in this turn remain one active resource set.
+            resource_refs=_resource_refs([r.path for r in dropped_refs],"explicit")
+            resource_archive=_promote_resource(resource_refs,resource_archive,turn_id)
+            # Explicit resources define the current task. Cross-session prose is historical
+            # and must not contaminate resource evidence (e.g. an old vision description).
+            messages[recent_context_index]["content"]=""
+            fresh_image_paths.update(str(p) for p in _resource_image_paths(resource_refs))
+            selected_paths=[r.path for r in resource_refs]
+            names=" · ".join(r.name+("/" if r.kind=="directory" else "") for r in resource_refs[:6])
+            extra=f" · +{len(resource_refs)-6}" if len(resource_refs)>6 else ""
+            print(_c(f"  context +{len(resource_refs)} · {names}{extra}","2"))
+            messages[resource_message_index]["content"]=_active_resource_message(resource_refs)
+            prompt=clean_prompt or "Work with these explicitly supplied resources."
+
+        # Pronoun + explicit browser action is deterministic discourse state, not an LLM search task.
+        _has_pronoun,_browser_intent=_resource_referent_intent(prompt)
+        if _has_pronoun and _browser_intent:
+            # "that HTML file" beats pure recency; known compatible resources beat search.
+            referent=_resolve_known_resource(prompt,resource_refs,resource_archive)
+            if referent:
+                result=_browser_open_resource(referent,workspace,profile)
+                if result is not None:
+                    tool_content,ok,_elapsed=result
+                    if ok:
+                        referent.last_referenced_turn=turn_id
+                        resource_refs=[referent]
+                        resource_archive=_promote_resource(resource_refs,resource_archive,turn_id)
+                        last_action={"tool":"open_path","args":{"path":str(referent.path),"intent":"browser"},"path":str(referent.path)}
+                        print("\n"+_lo_label("lo","35")+"\n"+_ollama_markup(f"Sent {referent.name} to the browser.")+"\n")
+                    else:
+                        print("\\n"+_lo_label("lo","35")+"\\n"+_ollama_markup(str(tool_content))+"\\n")
+                    continue
 
         # Repeat is a deterministic UI primitive, not a fresh reasoning task.
         if (_lo_repeat_intent(prompt) or _lo_action_continuation(prompt,last_action)) and last_action:
@@ -8076,16 +8444,46 @@ def ollama_chat(force_search=False, initial_prompt=None, allow_start=True, host_
         # disk, then retrieve only what is relevant to this exact prompt.
         memory=_load_memory()
         messages[memory_message_index]["content"]=_memory_context(memory,prompt)
+        messages=[m for i,m in enumerate(messages) if i < base_message_count or not (m.get("role")=="system" and str(m.get("content","")).startswith("RESOURCE CONTEXT GOVERNOR:"))]
         messages=_trim_lo_history(messages, base_message_count)
-        user_message={"role":"user","content":prompt}
-        prompt_images=_extract_prompt_images(prompt,workspace) if supports_vision else []
-        if prompt_images:
-            encoded=_encode_ollama_images(prompt_images)
+        # Resource context is governed before inference: handles stay cheap; evidence is sliced.
+        _resource_tier,_resource_budget=_lo_budget_for(prompt,thinking_mode,selected_paths)
+        messages[resource_message_index]["content"]=_active_resource_message(resource_refs)
+        governor=_resource_governor_message(resource_refs,_resource_budget)
+        if governor:
+            messages.append({"role":"system","content":governor})
+        # Bind active explicit resources in the latest user turn as well as the system slot.
+        # Small local models respond much more reliably when referents are adjacent to intent.
+        user_message={"role":"user","content":_resource_bound_prompt(prompt,resource_refs)}
+        # Images may have been stripped from prompt text into ResourceRef before this point.
+        # Vision therefore consumes the authoritative resource set first, plus any residual path text.
+        # ResourceRef persistence is cheap; vision payload persistence is not. Attach
+        # new images once, then rehydrate pixels only when the language asks for
+        # visual evidence again. Comparisons may revive recent archived images.
+        active_images=_resource_image_paths(resource_refs)
+        visual_needed,visual_compare=_resource_visual_intent(prompt)
+        image_paths=[]
+        for p in active_images:
+            if str(p) in fresh_image_paths or str(p) not in observed_image_paths:
+                image_paths.append(p)
+        if not image_paths and visual_needed:
+            candidates=_resource_image_paths(resource_archive) if visual_compare else active_images
+            if not candidates and resource_archive:
+                candidates=_resource_image_paths(resource_archive)[-1:]
+            image_paths=list(candidates[-8:] if visual_compare else candidates[:1])
+        for p in _extract_prompt_images(prompt,workspace):
+            if p not in image_paths and len(image_paths)<8: image_paths.append(p)
+        turn_image_paths=list(image_paths)
+        if image_paths and supports_vision:
+            encoded=_encode_ollama_images(image_paths)
             if encoded:
                 user_message["images"]=encoded
-                print(f"{_ansi_label('vision ›','35')} {len(encoded)} image{'s' if len(encoded)!=1 else ''} attached")
-        elif _extract_prompt_images(prompt,workspace) and not supports_vision:
-            print(f"{_ansi_label('vision ›','33')} selected model does not advertise vision")
+                label="rechecking" if all(str(p) in observed_image_paths for p in image_paths) else "attached"
+                names=" · ".join(Path(p).name for p in image_paths[:2])
+                detail=f" · {names}" if label=="rechecking" else ""
+                print(f"{_ansi_label('vision ›','35')} {len(encoded)} image{'s' if len(encoded)!=1 else ''} {label}{detail}")
+        elif image_paths and not supports_vision:
+            print(f"{_ansi_label('vision ›','33')} {len(image_paths)} image resource{'s' if len(image_paths)!=1 else ''} · selected model does not advertise vision")
         if _lo_explicit_web_scope(prompt):
             messages.append({"role":"system","content":(
                 "RESOURCE SCOPE: the operator explicitly requested an online/web resource. "
@@ -8100,7 +8498,19 @@ def ollama_chat(force_search=False, initial_prompt=None, allow_start=True, host_
                 "RESOURCE SCOPE: unqualified open/play/find requests default to the operator's local world. "
                 "Do not silently escalate a local miss to the public web; ask or wait for explicit online intent."
             )})
-        if last_action:
+        latest_ref=_latest_resource(resource_refs,resource_archive)
+        if latest_ref:
+            messages.append({"role":"system","content":(
+                "EPHEMERAL CURRENT REFERENT (session only): the most recently supplied/discussed resource is "
+                f"{latest_ref.path}. Resolve ordinary it/this/that against KNOWN SESSION RESOURCES first. "
+                "Honor explicit type constraints such as 'that HTML file' before pure recency. A compatible known resource "
+                "outranks filesystem search. Search only when no known resource satisfies the request. "
+                "BOUNDED INITIATIVE: prefer cheap deterministic attempts. Filesystem discovery MUST use search_files; never use run_command with ls/find/fd/locate/mdfind/tree to discover files. If uncertainty is not decreasing, candidates are broad, "
+                "or another speculative step is unlikely to help, ask the user for one small useful clue instead of grinding. "
+                "Fail quickly and truthfully rather than making the user wait for uncertain work. "
+                "This is discourse state, not durable memory."
+            )})
+        elif last_action:
             messages.append({"role":"system","content":(
                 "EPHEMERAL CURRENT REFERENT (session only): last successful actionable item: "
                 f"{last_action['path']} via {last_action['tool']}. Resolve it/that/the same one against this "
@@ -8219,6 +8629,11 @@ def ollama_chat(force_search=False, initial_prompt=None, allow_start=True, host_
                 task_eval_s+=float(final_event.get("eval_duration") or 0)/1e9
                 task_load_s+=float(final_event.get("load_duration") or 0)/1e9
                 result={"message":aggregate}
+                if turn_image_paths:
+                    observed_image_paths.update(str(p) for p in turn_image_paths)
+                    fresh_image_paths.difference_update(str(p) for p in turn_image_paths)
+                    # Do not resend megabytes of image data on later tool rounds or turns.
+                    user_message.pop("images",None)
             except KeyboardInterrupt:
                 _ai_foreground(False,"lo")
                 print("\n· cancelled\n")
@@ -12189,11 +12604,12 @@ def main():
         force_search=bool(args and args[0] == "search")
         if force_search:
             args=args[1:]
-        initial_prompt=" ".join(args).strip() or None
+        initial_prompt,cli_refs=_split_cli_resources(args,_safe_cwd())
+        initial_prompt=initial_prompt or ("Work with these explicitly supplied resources." if cli_refs else None)
         return ollama_chat(
             force_search=force_search, initial_prompt=initial_prompt,
             allow_start=allow_start, host_override=host_override, host_name=host_name,
-            access_profile=access_profile,
+            access_profile=access_profile, selected_paths=[r.path for r in cli_refs],
             confirm_unsafe_override=(access_profile=="unsafe")
         )
     a=sys.argv[1:]

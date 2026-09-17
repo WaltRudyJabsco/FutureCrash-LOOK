@@ -1,3 +1,35 @@
+## 4.33.4 — Resource attention lifecycle
+
+- ResourceRef handles persist while expensive image payloads become attention-sensitive.
+- New images attach once; ordinary conversational follow-ups stay text-only.
+- Visual follow-ups recheck the relevant image, and comparison language can revive recent images from the session resource archive.
+- Successful vision observation strips image payloads before later tool rounds, avoiding repeated multimodal retries and context cost.
+
+## 4.33.3 — Vision transport hardening
+
+- Preserves Ollama HTTP error bodies instead of hiding the useful server diagnostic.
+- Retries image turns without tools, then without thinking controls, only when Ollama returns HTTP 400.
+- Keeps ResourceRef and context-governor behavior unchanged.
+
+## 4.33.2 — Vision resources + context governor
+
+- Image ResourceRefs now attach to vision-capable Ollama models, including Finder/desktop drops and LOOK selections.
+- Resource context stays cheap: multi-file/large-document sets no longer eager-preview into the prompt.
+- `read_file` supports bounded offset slices for progressive evidence gathering.
+- Per-turn context governor tells LO its context/output ceiling and directs multi-document work through compact evidence cycles.
+- Non-vision models report image resources without pretending to inspect them.
+
+## 4.33.1 — Resource binding fix
+
+- Active ResourceRef manifest is now refreshed in one stable model-facing slot.
+- Explicit resource IDs are adjacent to the user intent on every turn.
+- Small text resources receive bounded content previews; directories stay lazy.
+
+## 4.33.0 — Resource Context
+
+- Adds ResourceRef normalization for LOOK selections, CLI paths, and terminal drag/drop input.
+- LO uses explicit resources directly instead of rediscovering them by filename.
+
 ## 4.32.0 — Grammar audit + command palette
 
 - `lk` now always enters interactive LOOK on a TTY, independent of directory size.
