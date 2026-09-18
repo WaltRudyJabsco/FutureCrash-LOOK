@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 """
-3090 Home Server Controller v0.5.0
+Local Labs Host Controller v0.5.1
 
 Milestone 2 — observe + operate known services:
   server status
@@ -16,6 +16,7 @@ from __future__ import annotations
 
 import json
 import os
+import platform
 import re
 import signal
 import time
@@ -29,7 +30,7 @@ from pathlib import Path
 from typing import Optional
 
 
-VERSION = "0.5.0"
+VERSION = "0.5.1"
 HOME = Path.home()
 
 
@@ -130,42 +131,61 @@ def read_text(path: str) -> str:
 
 
 def system_info() -> dict:
-    os_release = {}
-    for line in read_text("/etc/os-release").splitlines():
-        if "=" in line:
-            k, v = line.split("=", 1)
-            os_release[k] = v.strip('"')
+    system=platform.system()
+    _, uptime_raw = run("uptime")
+    uptime=uptime_raw.strip()
 
-    _, uptime = run("uptime", "-p")
-    _, mem = run("free", "-b")
-    total = used = available = 0
-    for line in mem.splitlines():
-        if line.startswith("Mem:"):
-            parts = line.split()
-            total, used, available = int(parts[1]), int(parts[2]), int(parts[6])
-
-    _, root_df = run("df", "-B1", "--output=size,used,avail,pcent", "/")
-    disk = {}
-    lines = root_df.splitlines()
-    if len(lines) >= 2:
-        p = lines[-1].split()
-        if len(p) >= 4:
-            disk = {"total": int(p[0]), "used": int(p[1]), "available": int(p[2]), "percent": p[3]}
-
-    _, cpu = run("lscpu")
-    cpu_model = next((x.split(":",1)[1].strip() for x in cpu.splitlines() if x.startswith("Model name:")), "unknown")
-    cores = next((x.split(":",1)[1].strip() for x in cpu.splitlines() if x.startswith("CPU(s):")), "?")
-
-    return {
-        "hostname": socket.gethostname(),
-        "os": os_release.get("PRETTY_NAME", "Linux"),
-        "kernel": os.uname().release,
-        "uptime": uptime.removeprefix("up "),
-        "cpu": cpu_model,
-        "logical_cpus": cores,
-        "memory": {"total": total, "used": used, "available": available},
-        "disk_root": disk,
-    }
+    total=used=available=0
+    if system=="Darwin":
+        _, memsize=run("sysctl","-n","hw.memsize")
+        try: total=int(memsize)
+        except ValueError: total=0
+        # vm_stat is page based; this is intentionally an approximate operator view.
+        _, vm=run("vm_stat")
+        page=4096
+        m=re.search(r"page size of (\d+) bytes",vm)
+        if m: page=int(m.group(1))
+        vals={}
+        for line in vm.splitlines():
+            m=re.match(r"([^:]+):\s+(\d+)",line)
+            if m: vals[m.group(1)]=int(m.group(2))*page
+        available=vals.get("Pages free",0)+vals.get("Pages inactive",0)+vals.get("Pages speculative",0)
+        used=max(0,total-available)
+        _, cpu_model=run("sysctl","-n","machdep.cpu.brand_string")
+        if not cpu_model: _, cpu_model=run("sysctl","-n","hw.model")
+        _, cores=run("sysctl","-n","hw.logicalcpu")
+        _, os_name=run("sw_vers","-productName")
+        _, os_ver=run("sw_vers","-productVersion")
+        os_pretty=f"{os_name} {os_ver}".strip()
+        _, root_df=run("df","-k","/")
+        disk={}
+        lines=root_df.splitlines()
+        if len(lines)>=2:
+            q=lines[-1].split()
+            if len(q)>=5:
+                disk={"total":int(q[1])*1024,"used":int(q[2])*1024,"available":int(q[3])*1024,"percent":q[4]}
+    else:
+        os_release={}
+        for line in read_text("/etc/os-release").splitlines():
+            if "=" in line:
+                k,v=line.split("=",1); os_release[k]=v.strip('"')
+        os_pretty=os_release.get("PRETTY_NAME",system or "Unix")
+        _, mem=run("free","-b")
+        for line in mem.splitlines():
+            if line.startswith("Mem:"):
+                q=line.split(); total,used,available=int(q[1]),int(q[2]),int(q[6])
+        _, root_df=run("df","-B1","--output=size,used,avail,pcent","/")
+        disk={}
+        lines=root_df.splitlines()
+        if len(lines)>=2:
+            q=lines[-1].split()
+            if len(q)>=4: disk={"total":int(q[0]),"used":int(q[1]),"available":int(q[2]),"percent":q[3]}
+        _, cpu=run("lscpu")
+        cpu_model=next((x.split(":",1)[1].strip() for x in cpu.splitlines() if x.startswith("Model name:")),platform.processor() or "unknown")
+        cores=next((x.split(":",1)[1].strip() for x in cpu.splitlines() if x.startswith("CPU(s):")),str(os.cpu_count() or "?"))
+    return {"hostname":socket.gethostname(),"os":os_pretty,"kernel":platform.release(),
+            "uptime":uptime,"cpu":cpu_model.strip(),"logical_cpus":str(cores).strip(),
+            "memory":{"total":total,"used":used,"available":available},"disk_root":disk}
 
 
 def gpu_info() -> dict:
@@ -185,6 +205,8 @@ def gpu_info() -> dict:
 
 
 def systemd_state(unit: str, user: bool = False) -> dict:
+    if platform.system()!="Linux" or not shutil.which("systemctl"):
+        return {"exists":False,"active":False,"state":"unsupported","substate":"","enabled":False,"main_pid":"0","since":"","unit_path":"","exec_status":""}
     prefix = ("systemctl", "--user") if user else ("systemctl",)
     rc, active = run(*prefix, "is-active", unit)
     _, enabled = run(*prefix, "is-enabled", unit)
@@ -223,20 +245,11 @@ def process_matches(patterns: tuple[str, ...]) -> list[str]:
 
 
 def port_listening(port: int) -> bool:
-    _, out = run("ss", "-H", "-lnt")
-    for line in out.splitlines():
-        parts = line.split()
-        if len(parts) < 4:
-            continue
-        local = parts[3]
-        # IPv4 examples: 127.0.0.1:8188, 0.0.0.0:8188
-        # IPv6 examples: [::1]:8188, [::]:8188
-        if not local.endswith(f":{port}"):
-            continue
-        host = local[:-(len(str(port)) + 1)].strip("[]")
-        if host in ("127.0.0.1", "0.0.0.0", "::1", "::", "*"):
+    try:
+        with socket.create_connection(("127.0.0.1",port),timeout=.25):
             return True
-    return False
+    except OSError:
+        return False
 
 
 def http_health(port: int, path: str) -> tuple[bool, str]:
@@ -250,10 +263,11 @@ def http_health(port: int, path: str) -> tuple[bool, str]:
 
 
 def tailscale_info() -> dict:
-    if not shutil.which("tailscale"):
+    tailscale=shutil.which("tailscale")
+    if not tailscale:
         return {"installed": False}
 
-    rc, status = run("/usr/bin/tailscale", "status")
+    rc, status = run(tailscale, "status")
     warning = ""
     clean = []
     for line in status.splitlines():
@@ -262,9 +276,9 @@ def tailscale_info() -> dict:
         else:
             clean.append(line)
 
-    _, ips = run("/usr/bin/tailscale", "ip")
+    _, ips = run(tailscale, "ip")
     ip_lines = [x for x in ips.splitlines() if not x.startswith("Warning:")]
-    _, serve = run("/usr/bin/tailscale", "serve", "status")
+    _, serve = run(tailscale, "serve", "status")
     serve_clean = "\n".join(x for x in serve.splitlines() if not x.startswith("Warning:"))
 
     name = ""
@@ -359,7 +373,10 @@ def ollama_details() -> dict:
     _, version = run(exe, "--version")
     _, models = run(exe, "list")
     _, loaded = run(exe, "ps")
-    return {"cli": exe, "version": version, "models": models, "loaded": loaded}
+    proxy_ok, proxy_detail=http_health(11435,"/api/version") if port_listening(11435) else (False,"not listening")
+    return {"cli": exe, "version": version, "models": models, "loaded": loaded,
+            "local_api": http_health(11434,"/api/version")[0] if port_listening(11434) else False,
+            "share_proxy": {"port":11435,"healthy":proxy_ok,"detail":proxy_detail}}
 
 
 def warnings(snapshot: dict) -> list[str]:
@@ -369,9 +386,10 @@ def warnings(snapshot: dict) -> list[str]:
         out.append("Tailscale client/daemon build mismatch")
 
     # Known duplicate discovered by the first forensic audit.
-    rc, state = run("systemctl", "--user", "is-enabled", "sh.brew.ollama.service")
-    if rc == 0 or state == "enabled":
-        out.append("duplicate Homebrew Ollama user service is enabled")
+    if platform.system()=="Linux" and shutil.which("systemctl"):
+        rc, state = run("systemctl", "--user", "is-enabled", "sh.brew.ollama.service")
+        if rc == 0 or state == "enabled":
+            out.append("duplicate Homebrew Ollama user service is enabled")
 
     by_id = {s["id"]: s for s in snapshot["services"]}
     for sid in ("comfy", "mercury"):
@@ -384,6 +402,10 @@ def warnings(snapshot: dict) -> list[str]:
     for svc in by_id.values():
         if svc.get("tailnet_url") and not svc.get("healthy"):
             out.append(f"{svc['name']} is published through Tailscale but its local backend is down")
+    od=snapshot.get("ollama",{})
+    proxy=od.get("share_proxy",{})
+    if tailnet_route_for(11435,ts.get("serve","")) and not proxy.get("healthy"):
+        out.append("Ollama HTTPS :11435 is published through Tailscale but the LOOK host-rewrite proxy is down")
     return out
 
 
@@ -440,7 +462,7 @@ def status(snap: dict, only: Optional[str] = None) -> None:
         return
 
     si, gpu, ts = snap["system"], snap["gpu"], snap["tailscale"]
-    print(f"{ts.get('name') or si['hostname']}  ·  3090 Home Server")
+    print(f"{ts.get('name') or si['hostname']}  ·  Local Labs Host")
     print("─" * 52)
     print("SYSTEM")
     print(f"  OS          {si['os']}")
@@ -500,6 +522,11 @@ def discover(snap: dict, json_mode: bool = False) -> None:
     print(f"    CLI       {od.get('cli', 'not found')}")
     if od.get("version"):
         print(f"    {od['version']}")
+    proxy=od.get("share_proxy",{})
+    print(f"    API       127.0.0.1:11434 {'healthy' if od.get('local_api') else 'DOWN'}")
+    print(f"    Proxy     127.0.0.1:11435 {'healthy' if proxy.get('healthy') else 'DOWN'}")
+    route=tailnet_route_for(11435,snap["tailscale"].get("serve",""))
+    print(f"    Tailnet   {route or 'not exposed'}")
     if od.get("loaded"):
         print("    Loaded:")
         for line in od["loaded"].splitlines():
@@ -1463,7 +1490,7 @@ def doctor() -> None:
     except Exception as e:
         check("SearXNG search", False, str(e))
 
-    rc, serve = run("/usr/bin/tailscale", "serve", "status")
+    rc, serve = run(tailscale, "serve", "status")
     check("Serve configuration", rc == 0, "readable" if rc == 0 else "unavailable")
 
     print("────────────────────────────────────────────────")

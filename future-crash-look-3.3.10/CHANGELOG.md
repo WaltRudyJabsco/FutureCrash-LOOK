@@ -1183,3 +1183,7 @@ Future Crash remains 1.1.7.
 - Signal playback remains host-timed and continues independently of the Workstation conversation.
 - Added a subtle continuous CRT scan glow over active Signal content.
 - Visual-request detection now recognizes Signal/animation/sprite/EQ/dashboard language and explicitly requires emitted Signal code rather than prose-only discussion.
+
+## 3.3.11
+- Make the Ollama 11435 host-rewrite proxy boot/login persistent using native systemd or launchd supervision.
+- Reconcile existing Tailscale Ollama shares during install without hard-coding Linux.

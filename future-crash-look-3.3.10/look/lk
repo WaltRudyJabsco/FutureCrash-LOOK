@@ -18,7 +18,7 @@ try:
 except Exception:
     readline = None
 
-VERSION="4.33.10"
+VERSION="4.33.11"
 
 LOOK_WORDMARK = r"""       ██╗      ██╗  ██╗
        ██║      ██║ ██╔╝
@@ -74,6 +74,7 @@ LO_THINK_DISPLAY_FILE=STATE_DIR/"lo_think_display"
 PERSONALITIES_DIR=STATE_DIR/"personalities"
 OLLAMA_SHARE_PORT=11435
 OLLAMA_SHARE_PID=STATE_DIR/"ollama_share_proxy.pid"
+OLLAMA_SHARE_SERVICE="look-ollama-proxy"
 LOCAL_OLLAMA_URL="http://127.0.0.1:11434"
 OLLAMA_CHAT_TIMEOUT=180
 
@@ -764,6 +765,10 @@ def _ollama_share_proxy():
         do_HEAD=_forward
 
     STATE_DIR.mkdir(parents=True,exist_ok=True)
+    # The proxy records its own PID so health checks work identically whether
+    # it was launched directly, by systemd, or by launchd.
+    OLLAMA_SHARE_PID.write_text(str(os.getpid())+"\n")
+    os.chmod(OLLAMA_SHARE_PID,0o600)
     server=ThreadingHTTPServer(("127.0.0.1",OLLAMA_SHARE_PORT),Handler)
     try:
         server.serve_forever(poll_interval=.25)
@@ -771,6 +776,11 @@ def _ollama_share_proxy():
         pass
     finally:
         server.server_close()
+        try:
+            if OLLAMA_SHARE_PID.read_text().strip()==str(os.getpid()):
+                OLLAMA_SHARE_PID.unlink()
+        except OSError:
+            pass
     return 0
 
 
@@ -783,6 +793,82 @@ def _ollama_share_proxy_alive():
         try: OLLAMA_SHARE_PID.unlink()
         except OSError: pass
         return None
+
+
+def _ollama_proxy_service_paths():
+    """Return the native per-user service definition path for this host."""
+    system=platform.system()
+    if system=="Linux" and shutil.which("systemctl"):
+        return "systemd", HOME/".config"/"systemd"/"user"/f"{OLLAMA_SHARE_SERVICE}.service"
+    if system=="Darwin" and shutil.which("launchctl"):
+        return "launchd", HOME/"Library"/"LaunchAgents"/f"com.look.{OLLAMA_SHARE_SERVICE}.plist"
+    return "process", None
+
+
+def _install_ollama_proxy_service():
+    """Install/enable the existing proxy using the host OS service manager.
+
+    LOOK owns the proxy logic; systemd/launchd only own restart-at-login/boot.
+    Unknown Unix hosts fall back to the existing detached-process behavior.
+    """
+    manager,path=_ollama_proxy_service_paths()
+    if manager=="process":
+        return False
+    path.parent.mkdir(parents=True,exist_ok=True)
+    python=str(Path(sys.executable).resolve())
+    lk=str(Path(__file__).resolve())
+    if manager=="systemd":
+        body=f"""[Unit]\nDescription=LOOK Ollama host-rewrite proxy\nAfter=network-online.target\n\n[Service]\nType=simple\nExecStart={python} {lk} _ollama-share-proxy\nRestart=on-failure\nRestartSec=2\n\n[Install]\nWantedBy=default.target\n"""
+        if not path.exists() or path.read_text()!=body:
+            path.write_text(body)
+        subprocess.run(["systemctl","--user","daemon-reload"],check=False,stdout=subprocess.DEVNULL,stderr=subprocess.DEVNULL)
+        rc=subprocess.run(["systemctl","--user","enable","--now",path.name],check=False).returncode
+        return rc==0
+    label=f"com.look.{OLLAMA_SHARE_SERVICE}"
+    import plistlib
+    payload={"Label":label,"ProgramArguments":[python,lk,"_ollama-share-proxy"],
+             "RunAtLoad":True,"KeepAlive":{"SuccessfulExit":False},
+             "ProcessType":"Background"}
+    data=plistlib.dumps(payload,fmt=plistlib.FMT_XML)
+    if not path.exists() or path.read_bytes()!=data:
+        path.write_bytes(data)
+    domain=f"gui/{os.getuid()}"
+    subprocess.run(["launchctl","bootout",domain,str(path)],check=False,stdout=subprocess.DEVNULL,stderr=subprocess.DEVNULL)
+    rc=subprocess.run(["launchctl","bootstrap",domain,str(path)],check=False).returncode
+    if rc==0:
+        subprocess.run(["launchctl","enable",f"{domain}/{label}"],check=False,stdout=subprocess.DEVNULL,stderr=subprocess.DEVNULL)
+        subprocess.run(["launchctl","kickstart","-k",f"{domain}/{label}"],check=False,stdout=subprocess.DEVNULL,stderr=subprocess.DEVNULL)
+    return rc==0
+
+
+def _disable_ollama_proxy_service():
+    manager,path=_ollama_proxy_service_paths()
+    if manager=="systemd" and path and path.exists():
+        subprocess.run(["systemctl","--user","disable","--now",path.name],check=False,stdout=subprocess.DEVNULL,stderr=subprocess.DEVNULL)
+        return True
+    if manager=="launchd" and path and path.exists():
+        domain=f"gui/{os.getuid()}"
+        label=f"com.look.{OLLAMA_SHARE_SERVICE}"
+        subprocess.run(["launchctl","bootout",domain,str(path)],check=False,stdout=subprocess.DEVNULL,stderr=subprocess.DEVNULL)
+        subprocess.run(["launchctl","disable",f"{domain}/{label}"],check=False,stdout=subprocess.DEVNULL,stderr=subprocess.DEVNULL)
+        return True
+    return False
+
+
+def _ollama_proxy_service_state():
+    manager,path=_ollama_proxy_service_paths()
+    if manager=="systemd" and path:
+        enabled=subprocess.run(["systemctl","--user","is-enabled",path.name],capture_output=True,text=True).returncode==0
+        active=subprocess.run(["systemctl","--user","is-active",path.name],capture_output=True,text=True).returncode==0
+        return manager,enabled,active
+    if manager=="launchd" and path:
+        label=f"com.look.{OLLAMA_SHARE_SERVICE}"
+        domain=f"gui/{os.getuid()}"
+        active=subprocess.run(["launchctl","print",f"{domain}/{label}"],capture_output=True).returncode==0
+        disabled=subprocess.run(["launchctl","print-disabled",domain],capture_output=True,text=True)
+        enabled=not (disabled.returncode==0 and f'"{label}" => true' in disabled.stdout)
+        return manager,enabled,active
+    return manager,False,bool(_ollama_share_proxy_alive())
 
 
 def _start_ollama_share_proxy():
@@ -1082,12 +1168,15 @@ def ollama_share(args):
         return 1
     if args and args[0]=="status":
         rc=subprocess.call([tailscale,"serve","status"])
-        state="ready" if _ollama_share_proxy_alive() else "off"
-        print(f"LOOK OLLAMA · host-rewrite proxy {state} · 127.0.0.1:{OLLAMA_SHARE_PORT} · HTTPS :{OLLAMA_SHARE_PORT}")
+        state="ready" if _probe_ollama(f"http://127.0.0.1:{OLLAMA_SHARE_PORT}",.3) else "off"
+        manager,enabled,active=_ollama_proxy_service_state()
+        persistence=(f"{manager} enabled" if enabled else (f"{manager} active" if active else f"{manager} not enabled"))
+        print(f"LOOK OLLAMA · host-rewrite proxy {state} · {persistence} · 127.0.0.1:{OLLAMA_SHARE_PORT} · HTTPS :{OLLAMA_SHARE_PORT}")
         return rc
     if args and args[0] in {"off","stop"}:
         proc=subprocess.run([tailscale,"serve",f"--https={OLLAMA_SHARE_PORT}","off"])
         if proc.returncode==0:
+            _disable_ollama_proxy_service()
             _stop_ollama_share_proxy()
             print("✓ Ollama tailnet share off")
         else:
@@ -1099,7 +1188,13 @@ def ollama_share(args):
         if _ensure_ollama_server(LOCAL_OLLAMA_URL,allow_start=True) is None:
             print("LOOK OLLAMA · local server unavailable")
             return 1
-    if not _start_ollama_share_proxy():
+    manager,_=_ollama_proxy_service_paths()
+    persistent=_install_ollama_proxy_service() if manager!="process" else False
+    if persistent:
+        deadline=time.monotonic()+3.0
+        while time.monotonic()<deadline and not _probe_ollama(f"http://127.0.0.1:{OLLAMA_SHARE_PORT}",.2):
+            time.sleep(.05)
+    if not _probe_ollama(f"http://127.0.0.1:{OLLAMA_SHARE_PORT}",.3) and not _start_ollama_share_proxy():
         print("LOOK OLLAMA · could not start localhost share proxy")
         return 1
     print("LOOK OLLAMA · sharing localhost:11434 inside your tailnet")

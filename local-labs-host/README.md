@@ -1,4 +1,4 @@
-# 3090 Home Server Controller v0.5.0
+# Local Labs Host Controller v0.5.1
 
 A normal Linux control layer for the 3090 host. systemd, Tailscale and the underlying services remain authoritative.
 
@@ -40,3 +40,10 @@ A healthy published Signal should show both a live local endpoint and a tailnet 
 ## Safety boundary
 
 The controller does not become a second supervisor. It observes and invokes systemd/Tailscale explicitly. The browser console does not expose arbitrary shell, reboot, or shutdown.
+
+
+## 0.5.1 — host portability + Ollama share health
+
+The controller now treats the machine as a **Local Labs Host**, not as permanently synonymous with one RTX 3090 Linux box. Discovery uses portable socket/HTTP checks where possible, macOS system/memory/disk discovery is supported, and Linux systemd lifecycle remains an OS-specific adapter rather than part of the service model. A future Apple Silicon host can therefore implement lifecycle with launchd without changing the public `server` vocabulary.
+
+Ollama reporting now separates the three remote-inference layers: local API `11434`, LOOK host-rewrite proxy `11435`, and the Tailscale publication. A published `:11435` route with a dead localhost proxy is reported explicitly.

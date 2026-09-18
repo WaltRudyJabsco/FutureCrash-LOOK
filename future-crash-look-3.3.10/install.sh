@@ -3,8 +3,8 @@ set -euo pipefail
 
 ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 
-PRODUCT_VERSION="3.3.10"
-LOOK_VERSION="4.33.10"
+PRODUCT_VERSION="3.3.11"
+LOOK_VERSION="4.33.11"
 FUTURE_CRASH_VERSION="1.1.14"
 
 DRY=0
@@ -284,6 +284,12 @@ if ((!DRY)); then
   ln -sfn "$HOME/.local/share/look/lk" "$HOME/.local/bin/lk"
   # Start the newly installed broker now. The shell hook remains a fallback.
   "$HOME/.local/share/look/lk" ai start >/dev/null 2>&1 || true
+  # Reconcile an already-configured Ollama tailnet share into the native user
+  # service manager. This is topology discovery, not a Linux assumption: LOOK
+  # chooses systemd on Linux, launchd on macOS, and process fallback elsewhere.
+  if command -v tailscale >/dev/null 2>&1 && tailscale serve status 2>/dev/null | grep -q ':11435'; then
+    "$HOME/.local/share/look/lk" ollama share >/dev/null 2>&1 || true
+  fi
 fi
 
 LOOK_ZSH_DIR="$HOME/.config/look"
