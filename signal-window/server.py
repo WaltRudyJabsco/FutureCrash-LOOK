@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Signal Window 0.6.1 — a tiny visual/text body for LO."""
+"""Signal Window 0.7.0 — a tiny visual/text body for LO."""
 from __future__ import annotations
 
 import argparse
@@ -115,10 +115,10 @@ def _extract_visual_json(raw):
 def signal_interpret(base, model, user_text, answer):
     prompt = f"""You are the visual reflex of Signal Window.
 USER:
-{user_text[:5000]}
+{user_text[:2400]}
 
 ASSISTANT:
-{answer[:7000]}
+{answer[:3200]}
 
 {SURFACE_CONTRACT}
 """
@@ -128,8 +128,9 @@ ASSISTANT:
     ]
     last_error=""
     for attempt in range(2):
-        body=json.dumps({"model":model,"messages":messages,"stream":False,
-                         "options":{"temperature":0.30 if attempt == 0 else 0.05}}).encode()
+        body=json.dumps({"model":model,"messages":messages,"stream":False,"think":False,
+                         "options":{"temperature":0.30 if attempt == 0 else 0.05,
+                                    "num_predict":360}}).encode()
         req=urllib.request.Request(base.rstrip("/")+"/api/chat",data=body,
                                    headers={"Content-Type":"application/json"})
         try:
@@ -521,15 +522,17 @@ class App(BaseHTTPRequestHandler):
                     text=ollama_chat(direct_base,direct_model,full)
                     lo_events=[]
 
-            node_progress(lease_id,"visual","rendering Signal scene")
+            node_progress(lease_id,"visual","composing Signal scene")
             # Visuals are deliberately out-of-band: LO never sees the framebuffer protocol.
             resolved_base,resolved_model,resolution=look_inference_config(
                 self.ollama if getattr(self,"ollama_explicit",False) else None,
                 self.model if getattr(self,"model_explicit",False) else None)
+            node_progress(lease_id,"visual","visual model responding")
             visual=signal_interpret(
                 resolved_base,resolved_model,
                 prompt or "Work with the dropped resources.", text,
             )
+            node_progress(lease_id,"render","applying Signal primitives")
             node_release(lease_id,"ok","complete"); lease_id=None
             return self.json(200,{
                 "text":text,
@@ -572,7 +575,7 @@ def main():
         state=f"LO {a.profile} · "+(App.lo_cmd if App.lo_cmd else "NOT FOUND")
     else:
         p=probe_ollama(App.backend); state=("connected" if p.get("ok") else "unreachable: "+p.get("error","unknown"))
-    print(f"Signal Window 0.6.1 · http://{a.host}:{a.port} · {state} · gallery {App.gallery_dir if App.gallery_enabled else 'off'}")
+    print(f"Signal Window 0.7.0 · http://{a.host}:{a.port} · {state} · gallery {App.gallery_dir if App.gallery_enabled else 'off'}")
     ThreadingHTTPServer((a.host,a.port),App).serve_forever()
 
 if __name__=="__main__": main()

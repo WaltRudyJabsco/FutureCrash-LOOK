@@ -1,13 +1,13 @@
 #!/usr/bin/env bash
 set -euo pipefail
 ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
-echo "Future Crash + LOOK 4.1.1 · Fabric Pulse"
+echo "Future Crash + LOOK 4.2.0 · Fabric Control"
 echo "────────────────────────────────────────"
 
 # Refuse a mixed bundle before mutating the machine. A unified release must move
 # LOOK and the node together.
 EXPECTED_RELEASE="$(tr -d '[:space:]' < "$ROOT/VERSION")"
-[[ "$EXPECTED_RELEASE" == "4.1.1" ]] || { echo "BUNDLE ERROR: expected release 4.1.1, found $EXPECTED_RELEASE"; exit 4; }
+[[ "$EXPECTED_RELEASE" == "4.2.0" ]] || { echo "BUNDLE ERROR: expected release 4.2.0, found $EXPECTED_RELEASE"; exit 4; }
 grep -q 'def _fabric_command' "$ROOT/look/lk" || { echo "BUNDLE ERROR: LOOK source has no Fabric command"; exit 4; }
 grep -q 'choices=.*serve.*fabric' "$ROOT/core/node.py" || { echo "BUNDLE ERROR: node source has no Fabric CLI"; exit 4; }
 
@@ -22,7 +22,7 @@ done
 ((UNINSTALL)) && exit 0
 if ((DRY_RUN)); then
   echo
-  echo "[dry-run] would install/restart Unified Node 4.1.1 and Signal Window 0.6.1"
+  echo "[dry-run] would install/restart Unified Node 4.2.0 and Signal Window 0.7.0"
   echo "[dry-run] would reconcile Tailscale :7332 publication and verify Fabric CLI wiring"
   exit 0
 fi

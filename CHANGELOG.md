@@ -1204,3 +1204,7 @@ Future Crash remains 1.1.7.
 ## 3.3.11
 - Make the Ollama 11435 host-rewrite proxy boot/login persistent using native systemd or launchd supervision.
 - Reconcile existing Tailscale Ollama shares during install without hard-coding Linux.
+
+## 4.2.0 — Fabric Control
+
+See `docs/RELEASE-4.2.0.md`.

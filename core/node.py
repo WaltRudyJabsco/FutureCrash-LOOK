@@ -7,6 +7,7 @@ asynchronous; a one-second fabric pulse reconciles presence, leases and stale wo
 from __future__ import annotations
 
 import argparse
+import sys
 import json
 import os
 import platform
@@ -23,7 +24,7 @@ from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
 from urllib.parse import urlparse
 
-VERSION = "4.1.1"
+VERSION = "4.2.0"
 DEFAULT_HOST = "127.0.0.1"
 DEFAULT_PORT = 7332
 PULSE_SECONDS = 1.0
@@ -424,11 +425,14 @@ def qualify_model(name: str, automatic=False):
     content = ""
     eval_count = None
     eval_duration = None
+    done_seen = False
+    thinking = ""
     try:
         payload = {
             "model": name,
             "messages": [{"role": "user", "content": "Reply with exactly: READY"}],
             "stream": True,
+            "think": False,
             "keep_alive": -1,
             "options": {"temperature": 0, "num_predict": 8},
         }
@@ -442,11 +446,15 @@ def qualify_model(name: str, automatic=False):
                 if not raw.strip():
                     continue
                 obj = json.loads(raw)
-                piece = str((obj.get("message") or {}).get("content") or "")
-                if piece and first is None:
+                msg = obj.get("message") or {}
+                piece = str(msg.get("content") or "")
+                thought = str(msg.get("thinking") or "")
+                if (piece or thought) and first is None:
                     first = now()
                 content += piece
+                thinking += thought
                 if obj.get("done"):
+                    done_seen = True
                     eval_count = obj.get("eval_count")
                     eval_duration = obj.get("eval_duration")
                 SUP.progress(rid, "qualifying", "model produced progress")
@@ -454,8 +462,13 @@ def qualify_model(name: str, automatic=False):
         tok_s = None
         if eval_count and eval_duration:
             tok_s = round(float(eval_count) / (float(eval_duration) / 1e9), 2)
+        instruction_ok = content.strip().upper().startswith("READY")
+        # Qualification answers two questions separately: did inference operate, and
+        # did this tiny instruction-following probe comply? Thinking-only models no
+        # longer get mislabeled as operational failures.
         result = {
-            "ok": content.strip().upper().startswith("READY"),
+            "ok": bool(done_seen and (eval_count or content or thinking)),
+            "instruction_ok": instruction_ok,
             "tested_at": ended,
             "automatic": bool(automatic),
             "warm": bool(m.get("resident")),
@@ -463,6 +476,7 @@ def qualify_model(name: str, automatic=False):
             "total_ms": int((ended - started) * 1000),
             "generation_tok_s": tok_s,
             "response": content.strip()[:80],
+            "thinking_response": thinking.strip()[:80],
         }
         MODELS.record_qualification(name, result)
         SUP.release(rid, "ok" if result["ok"] else "failed", "qualification complete")
@@ -510,8 +524,81 @@ def pulse_loop():
         time.sleep(max(.05, delay))
 
 
+MANAGED_SERVICES = {
+    "node": {"linux": "future-crash-look-node.service", "darwin": "com.futurecrash.look.node"},
+    "signal": {"linux": "signal-window.service", "darwin": "com.futurecrash.signal-window"},
+    "ollama": {"linux": "ollama.service", "darwin": None},
+    "comfy": {"linux": "server-comfy.service", "darwin": None},
+    "mercury": {"linux": "server-mercury.service", "darwin": None},
+}
+
+def service_status(name: str):
+    """Inspect only named services. Fabric is deliberately not a remote shell."""
+    spec = MANAGED_SERVICES.get(name)
+    if not spec:
+        return {"ok": False, "error": "unknown managed service", "service": name}
+    system = platform.system().lower()
+    unit = spec.get(system)
+    if not unit:
+        # Ollama on macOS is often app-managed; report reachability without pretending
+        # launchd owns it.
+        if name == "ollama":
+            return {"ok": True, "service": name, "managed": False,
+                    "state": "running" if probe("127.0.0.1",11434) else "stopped"}
+        return {"ok": True, "service": name, "managed": False, "state": "unmanaged"}
+    if system == "linux":
+        p = run("systemctl", "--user", "is-active", unit, timeout=2)
+        # Ollama is commonly a system unit, unlike our user services.
+        if name == "ollama" and (not p or p.returncode):
+            p = run("systemctl", "is-active", unit, timeout=2)
+        state = (p.stdout.strip() if p and p.stdout.strip() else "inactive")
+        return {"ok": True, "service": name, "managed": True, "unit": unit, "state": state}
+    if system == "darwin":
+        p = run("launchctl", "print", f"gui/{os.getuid()}/{unit}", timeout=2)
+        return {"ok": True, "service": name, "managed": True, "unit": unit,
+                "state": "running" if p and p.returncode == 0 else "stopped"}
+    return {"ok": True, "service": name, "managed": False, "state": "unmanaged"}
+
+
+def service_action(name: str, action: str, confirmed=False):
+    if action not in {"start", "stop", "restart"}:
+        return {"ok": False, "error": "unsupported service action"}
+    if not confirmed:
+        return {"ok": False, "confirmation_required": True,
+                "message": f"{action} {name} requires explicit confirmation"}
+    st = service_status(name)
+    if not st.get("ok") or not st.get("managed"):
+        return {**st, "ok": False, "error": st.get("error") or "service is not Fabric-managed on this platform"}
+    system = platform.system().lower(); unit = st["unit"]
+    if name == "node" and action in {"stop", "restart"}:
+        return {"ok": False, "error": "self stop/restart is intentionally deferred; use the platform service manager locally"}
+    if system == "linux":
+        argv = ["systemctl", "--user", action, unit]
+        p = run(*argv, timeout=12)
+        if name == "ollama" and (not p or p.returncode):
+            # Do not sudo or elevate remotely. A system-owned Ollama remains observable.
+            return {"ok": False, "service": name, "error": "Ollama is system-managed; Fabric will not elevate privileges"}
+    elif system == "darwin":
+        domain=f"gui/{os.getuid()}/{unit}"
+        verb={"start":"kickstart","restart":"kickstart","stop":"kill"}[action]
+        argv=["launchctl",verb]
+        if action == "restart": argv.append("-k")
+        if action == "stop": argv.append("TERM")
+        argv.append(domain)
+        p=run(*argv,timeout=12)
+    else:
+        return {"ok": False, "error": "unsupported platform"}
+    if not p or p.returncode:
+        return {"ok": False, "service": name, "error": (p.stderr.strip() if p else "command failed")}
+    return {"ok": True, "service": name, "action": action, "state": service_status(name).get("state")}
+
+
+def managed_services():
+    return {name: service_status(name) for name in MANAGED_SERVICES}
+
+
 class API(BaseHTTPRequestHandler):
-    server_version = "FCLNode/4.1.1"
+    server_version = "FCLNode/4.2.0"
 
     def log_message(self, *a):
         pass
@@ -547,6 +634,8 @@ class API(BaseHTTPRequestHandler):
             return self.sendj(200, capabilities())
         if path == "/v1/models":
             return self.sendj(200, {"models": MODELS.discover()})
+        if path == "/v1/services":
+            return self.sendj(200, {"services": managed_services()})
         if path == "/v1/nodes":
             return self.sendj(200, {"self": node_info(), "peers": PEERS.public()})
         return self.sendj(404, {"error": "not found"})
@@ -573,6 +662,12 @@ class API(BaseHTTPRequestHandler):
             if not name:
                 return self.sendj(400, {"error": "model required"})
             return self.sendj(200, qualify_model(name, automatic=False))
+        if path == "/v1/services/action":
+            name = str(d.get("service") or "")
+            action = str(d.get("action") or "")
+            result = service_action(name, action, bool(d.get("confirm")))
+            code = 200 if result.get("ok") else (409 if result.get("confirmation_required") else 400)
+            return self.sendj(code, result)
         return self.sendj(404, {"error": "not found"})
 
 
@@ -624,52 +719,121 @@ def print_fabric_snapshot(snapshot):
             ppulse = (node.get("pulse") or {}).get("number", "?")
             print(f"peer    {peer.get('name','peer'):<18} {state:<14} pulse {ppulse}")
         else:
-            state = "online" if peer.get("online") else "offline"
-            print(f"peer    {peer.get('name','peer'):<18} {state:<14} no node advertisement")
+            # The normal Fabric view is about Future Crash nodes, not every phone on
+            # the tailnet. Raw `nodes` JSON still exposes discovery diagnostics.
+            continue
+
+
+def _remote_url(snapshot, target, path):
+    local=(snapshot.get("self") or {}).get("name")
+    if target in {None, "", "local", local}:
+        return _daemon_url(DEFAULT_HOST, DEFAULT_PORT, path)
+    needle=str(target).lower()
+    for peer in snapshot.get("peers") or []:
+        names={str(peer.get("name") or "").lower(), str((peer.get("node") or {}).get("identity",{}).get("name") or "").lower()}
+        if needle in names and peer.get("node") and peer.get("dns"):
+            return f"https://{peer['dns']}:7332{path}"
+    raise RuntimeError(f"Fabric node not found or not advertising: {target}")
+
+
+def _target_get(host, port, target, path):
+    snap=_daemon_get(host,port,"/v1/nodes")
+    local=(snap.get("self") or {}).get("name")
+    if target in {None,"","local",local}:
+        return _daemon_get(host,port,path)
+    url=_remote_url(snap,target,path)
+    return http_json(url,timeout=4.0)
+
+
+def _target_post(host, port, target, path, payload, timeout=45.0):
+    snap=_daemon_get(host,port,"/v1/nodes")
+    local=(snap.get("self") or {}).get("name")
+    if target in {None,"","local",local}:
+        return http_json(_daemon_url(host,port,path),payload,timeout=timeout)
+    url=_remote_url(snap,target,path)
+    return http_json(url,payload,timeout=timeout)
+
+
+def _print_models(data, target="local"):
+    print(f"FABRIC MODELS · {target}")
+    print("─"*76)
+    print(f"{'MODEL':<28} {'PARAM':>8}  V  T  R  {'STATE':<10} {'TOK/S':>7}")
+    for m in data.get("models") or []:
+        f=m.get("features") or {}; q=m.get("qualification") or {}
+        state="resident" if m.get("resident") else "available"
+        rate=q.get("generation_tok_s")
+        print(f"{str(m.get('name') or '?'):<28.28} {str(m.get('parameter_size') or '?'):>8}  "
+              f"{'✓' if f.get('vision') else '·'}  {'✓' if f.get('tools') else '·'}  {'✓' if f.get('thinking') else '·'}  "
+              f"{state:<10} {str(rate if rate is not None else '—'):>7}")
+
+
+def _watch(host,port,interval=1.0):
+    try:
+        while True:
+            snap=_daemon_get(host,port,"/v1/nodes")
+            print("\033[2J\033[H",end="")
+            print_fabric_snapshot(snap)
+            print("\nLIVE ACTIVITY")
+            print("─"*72)
+            rows=[("local",snap.get("self") or {})]
+            rows += [(p.get("name","peer"),p.get("node") or {}) for p in snap.get("peers") or [] if p.get("node")]
+            any_work=False
+            for name,node in rows:
+                sup=node.get("supervisor") or {}; active=sup.get("active")
+                if active:
+                    any_work=True
+                    print(f"{name:<20} {active.get('priority','?'):<11} {active.get('phase','?'):<12} "
+                          f"{active.get('owner','?'):<14} {active.get('state','?'):<8} idle {active.get('idle_ms',0)/1000:5.1f}s")
+            if not any_work: print("all nodes idle")
+            print("\nCtrl-C to leave Fabric watch",flush=True)
+            time.sleep(interval)
+    except KeyboardInterrupt:
+        print()
+        return 0
 
 
 def main():
-    ap = argparse.ArgumentParser(description="Future Crash + LOOK unified node")
-    ap.add_argument("command", nargs="?", default="serve",
-                    choices=["serve", "status", "nodes", "activity", "pulse", "fabric", "models", "qualify"])
-    ap.add_argument("target", nargs="?", help="model name for qualify")
-    ap.add_argument("--host", default=DEFAULT_HOST)
-    ap.add_argument("--port", type=int, default=DEFAULT_PORT)
-    ap.add_argument("--version", action="version", version=f"Future Crash + LOOK node {VERSION}")
-    a = ap.parse_args()
-
+    ap=argparse.ArgumentParser(description="Future Crash + LOOK unified node")
+    ap.add_argument("command",nargs="?",default="serve",
+        choices=["serve","status","nodes","activity","pulse","fabric","watch","models","qualify","services","service"])
+    ap.add_argument("args",nargs="*")
+    ap.add_argument("--node",dest="node",default=None,help="target Fabric node name")
+    ap.add_argument("--json",action="store_true",help="raw JSON where a human view exists")
+    ap.add_argument("--yes",action="store_true",help="confirm a mutating managed-service action")
+    ap.add_argument("--host",default=DEFAULT_HOST); ap.add_argument("--port",type=int,default=DEFAULT_PORT)
+    ap.add_argument("--version",action="version",version=f"Future Crash + LOOK node {VERSION}")
+    a=ap.parse_args()
     if a.command != "serve":
         try:
-            if a.command == "status":
-                print(json.dumps(_daemon_get(a.host, a.port, "/v1/node"), indent=2)); return 0
-            if a.command == "nodes":
-                print(json.dumps(_daemon_get(a.host, a.port, "/v1/nodes"), indent=2)); return 0
-            if a.command == "activity":
-                print(json.dumps(_daemon_get(a.host, a.port, "/v1/activity"), indent=2)); return 0
-            if a.command == "pulse":
-                print(json.dumps(_daemon_get(a.host, a.port, "/v1/pulse"), indent=2)); return 0
-            if a.command == "models":
-                print(json.dumps(_daemon_get(a.host, a.port, "/v1/models"), indent=2)); return 0
-            if a.command == "qualify":
-                if not a.target:
-                    ap.error("qualify requires a model name")
-                print(json.dumps(_daemon_post(a.host, a.port, "/v1/models/qualify", {"model": a.target}), indent=2)); return 0
-            if a.command == "fabric":
-                print_fabric_snapshot(_daemon_get(a.host, a.port, "/v1/nodes")); return 0
-        except RuntimeError as exc:
-            print(f"FCL NODE · {exc}", file=sys.stderr)
-            return 1
-
-    threading.Thread(target=pulse_loop, name="fabric-pulse", daemon=True).start()
-    threading.Thread(target=background_qualifier, name="model-qualifier", daemon=True).start()
-    srv = ThreadingHTTPServer((a.host, a.port), API)
-    print(f"Future Crash + LOOK node {VERSION} · http://{a.host}:{a.port} · pulse {PULSE_SECONDS:g}s", flush=True)
-    try:
-        srv.serve_forever(poll_interval=.2)
-    except KeyboardInterrupt:
-        pass
-    finally:
-        srv.server_close()
+            if a.command=="watch": return _watch(a.host,a.port)
+            if a.command=="fabric": print_fabric_snapshot(_daemon_get(a.host,a.port,"/v1/nodes")); return 0
+            if a.command=="nodes": print(json.dumps(_daemon_get(a.host,a.port,"/v1/nodes"),indent=2)); return 0
+            path={"status":"/v1/node","activity":"/v1/activity","pulse":"/v1/pulse","models":"/v1/models","services":"/v1/services"}.get(a.command)
+            if path:
+                data=_target_get(a.host,a.port,a.node,path)
+                if a.command=="models" and not a.json: _print_models(data,a.node or "local")
+                else: print(json.dumps(data,indent=2))
+                return 0
+            if a.command=="qualify":
+                if not a.args: ap.error("qualify requires MODEL")
+                print(json.dumps(_target_post(a.host,a.port,a.node,"/v1/models/qualify",{"model":a.args[0]},timeout=45),indent=2)); return 0
+            if a.command=="service":
+                if len(a.args)<2: ap.error("service requires SERVICE ACTION")
+                service,action=a.args[:2]
+                if not a.yes:
+                    target=a.node or "local"
+                    answer=input(f"{action} {service} on {target}? [y/N] ").strip().lower()
+                    if answer not in {"y","yes"}: print("cancelled"); return 1
+                print(json.dumps(_target_post(a.host,a.port,a.node,"/v1/services/action",{"service":service,"action":action,"confirm":True}),indent=2)); return 0
+        except (RuntimeError, urllib.error.URLError, urllib.error.HTTPError) as exc:
+            print(f"FCL NODE · {exc}",file=sys.stderr); return 1
+    threading.Thread(target=pulse_loop,name="fabric-pulse",daemon=True).start()
+    threading.Thread(target=background_qualifier,name="model-qualifier",daemon=True).start()
+    srv=ThreadingHTTPServer((a.host,a.port),API)
+    print(f"Future Crash + LOOK node {VERSION} · http://{a.host}:{a.port} · pulse {PULSE_SECONDS:g}s",flush=True)
+    try: srv.serve_forever(poll_interval=.2)
+    except KeyboardInterrupt: pass
+    finally: srv.server_close()
     return 0
 
 

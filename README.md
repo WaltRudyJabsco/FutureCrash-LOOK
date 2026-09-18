@@ -1,8 +1,18 @@
-# FUTURE CRASH + LOOK 4.1.1 — FABRIC TRUTH
+# FUTURE CRASH + LOOK 4.2.0 — FABRIC CONTROL
 
 **One install. Every machine is a node. LOOK, LO, Future Crash and Signal are interfaces onto the same small local-first system.**
 
 See `docs/UNIFIED-NODE-4.0.md`.
+
+4.2 adds a capability-scoped control plane and live Fabric monitor. From any node you can inspect another node, qualify one of its models, inspect managed services, or explicitly confirm a bounded service action. `lk fabric watch` provides the live operating view. Fabric does not expose arbitrary remote shell execution.
+
+```text
+lk fabric watch
+lk fabric models 3090
+lk fabric qualify 3090 qwen3.8:27b
+lk fabric services 3090
+lk fabric service 3090 signal restart
+```
 
 ---
 
