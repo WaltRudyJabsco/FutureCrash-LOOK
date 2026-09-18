@@ -42,6 +42,8 @@ _lk() {
     'disk:disk usage'
     'net:network addresses'
     'tailscale:tailnet status'
+    'fabric:distributed supervisor fabric'
+    'nodes:fabric peer nodes'
     'env:environment'
     'path:PATH diagnostics'
     'why:explain command resolution'
@@ -88,6 +90,10 @@ _lk() {
   fi
 
   case "$words[2]" in
+    fabric)
+      (( CURRENT == 3 )) && _values 'fabric action' status nodes activity pulse models qualify
+      return
+      ;;
     ollama)
       local -a sub
       sub=(

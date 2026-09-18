@@ -1,4 +1,4 @@
-# FUTURE CRASH + LOOK 4.0 — UNIFIED NODE
+# FUTURE CRASH + LOOK 4.1.1 — FABRIC TRUTH
 
 **One install. Every machine is a node. LOOK, LO, Future Crash and Signal are interfaces onto the same small local-first system.**
 
@@ -1133,3 +1133,7 @@ On Linux + NVIDIA systems, the installer offers managed ComfyUI setup. It discov
 ### Services and tailnet sharing
 
 `lk services` is the unified view of local LOOK services and their private Tailscale Serve endpoints. `lk share` exposes every configured service currently running on the machine; Ollama and Comfy use separate dedicated HTTPS ports so they can coexist. Mercury Writer can be discovered when its running process exposes a port or configured explicitly with `lk services set mercury PORT`.
+
+## 4.1 Fabric Pulse / 4.1.1 Fabric Truth
+
+Every installed machine is now a peer in the Future Crash compute fabric. `lk fabric` shows the local supervisor, peers and warm models; `lk fabric models` shows model capability advertisements; `lk fabric pulse` exposes the shared reconciliation beat. Immediate work remains asynchronous—the pulse exists to refresh truth and recover from stale state, not to slow the network into lockstep.

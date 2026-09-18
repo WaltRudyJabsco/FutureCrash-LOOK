@@ -18,7 +18,7 @@ try:
 except Exception:
     readline = None
 
-VERSION="4.33.11"
+VERSION="4.33.12"
 
 LOOK_WORDMARK = r"""       ██╗      ██╗  ██╗
        ██║      ██║ ██╔╝
@@ -5361,12 +5361,30 @@ def _path_app_category(path):
     return ""
 
 
+_GENERATED_PREVIEW_PATH = None
+_GENERATED_PREVIEW_AT = 0.0
+_GENERATED_PREVIEW_DEDUPE_SECONDS = 8.0
+
+def _mark_generated_preview(path):
+    """Remember the automatic generation preview so an agent retry cannot open it twice."""
+    global _GENERATED_PREVIEW_PATH, _GENERATED_PREVIEW_AT
+    try:
+        _GENERATED_PREVIEW_PATH = str(Path(path).expanduser().resolve())
+        _GENERATED_PREVIEW_AT = time.monotonic()
+    except Exception:
+        _GENERATED_PREVIEW_PATH = None
+        _GENERATED_PREVIEW_AT = 0.0
+
 def _desktop_launch(target, category="", preview=False):
     """Open/preview a local path outside the terminal using OS defaults or preferences."""
     target=Path(target).expanduser().resolve()
     if not target.exists():
         return f"{'Preview' if preview else 'Open'} failed: not found: {target}"
     category=category or _path_app_category(target)
+    if (category == "image" and _GENERATED_PREVIEW_PATH == str(target)
+            and time.monotonic() - _GENERATED_PREVIEW_AT < _GENERATED_PREVIEW_DEDUPE_SECONDS):
+        action="PREVIEW" if preview else "OPEN"
+        return f"{action} OK · {target} · image · generated image already auto-previewed"
     apps=_load_apps()
     preferred=apps.get(category,"system")
     system=platform.system()
@@ -6322,7 +6340,7 @@ def _capability_tools():
     return [
         {"type":"function","function":{
             "name":"generate_image",
-            "description":"Generate a local image through configured ComfyUI and save it to LOOK's image output folder. Use when the user explicitly asks to create/generate/render an image.",
+            "description":"Generate a local image through configured ComfyUI and save it to LOOK's image output folder. This tool already owns the configured automatic preview; do not follow it with open_path/preview_path unless the user separately asks. Use when the user explicitly asks to create/generate/render an image.",
             "parameters":{"type":"object","properties":{
                 "prompt":{"type":"string"},
                 "negative":{"type":"string"},
@@ -7099,7 +7117,9 @@ def _comfy_generate(prompt,negative="",seed=None,open_result=True):
                     saved.append(dest)
                 if saved:
                     if open_result and bool(cfg.get("auto_preview",True)):
-                        _preview_host_path(saved[0])
+                        preview_receipt=_preview_host_path(saved[0])
+                        if str(preview_receipt).startswith("PREVIEW OK"):
+                            _mark_generated_preview(saved[0])
                     return True,f"{len(saved)} image(s) · "+", ".join(str(p) for p in saved)
             status=item.get("status") or {}
             if status.get("completed") is True and not outputs:
@@ -7287,6 +7307,7 @@ def _agent_tool_contract():
 - Strong unique evidence may proceed. Plausible-but-not-exact evidence: ask "Did you mean …?" and checkpoint rather than spinning.
 - Tool success is not task success. Empty/no-match output means continue, change strategy, or ask the user. Host-visible action success is receipt-gated: never claim opened/playing/launched unless open_path/preview_path/reveal_path returned its OK receipt. DISPATCH OK proves launcher handoff only; it does not prove the app is still running or media is currently playing. URL OPEN OK likewise proves browser dispatch only, not page load or playback.
 - OPEN / PLAY preserves the returned path as structured data and uses open_path; do not shell-quote it.
+- GENERATED IMAGES: generate_image owns its configured auto-preview. After IMAGE OK, do not call open_path or preview_path for the same generated output unless the user explicitly asks to open/preview it again.
 - DOCUMENTS: PDF and DOCX are first-class readable resources through read_file. Never improvise shell/Python/zip extraction for them.
 - User answers to clarification are task state, not durable preference unless they explicitly state a lasting preference.
 """
@@ -12735,6 +12756,26 @@ def _run_lo_job(path):
     return 0 if job["status"]=="done" else 1
 
 
+def _fabric_command(args):
+    """Thin LOOK view over the shared node; the node remains the source of truth."""
+    exe=shutil.which("fcl-node") or str(HOME/".local/bin/fcl-node")
+    if not Path(exe).exists():
+        print("LOOK FABRIC · unified node is not installed")
+        return 1
+    sub=(args[0] if args else "fabric")
+    aliases={"status":"fabric","list":"nodes","node":"status","model":"models"}
+    sub=aliases.get(sub,sub)
+    if sub not in {"fabric","nodes","activity","pulse","models","status","qualify"}:
+        print("usage: lk fabric [status|nodes|activity|pulse|models|qualify MODEL]")
+        return 2
+    argv=[exe,sub]
+    if sub=="qualify":
+        if len(args)<2:
+            print("usage: lk fabric qualify MODEL")
+            return 2
+        argv.append(args[1])
+    return subprocess.call(argv)
+
 def main():
     _safe_cwd(repair=True)
     if len(sys.argv)>=3 and sys.argv[1]=="_lo-job":
@@ -12909,6 +12950,7 @@ def main():
         result=_journal_touch(rest[0],create_missing=create_missing)
         print(_action_result(result))
         return 0 if result.startswith("FILE OK") else 1
+    if cmd in {"fabric","nodes"}: return _fabric_command((["nodes"] if cmd=="nodes" else rest))
     if cmd=="doctor": return doctor()
     if cmd=="locator-test": return _locator_test()
     if cmd=="architecture-audit": return _architecture_audit()

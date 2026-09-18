@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Signal Window 0.5.2 — a tiny visual/text body for LO."""
+"""Signal Window 0.6.1 — a tiny visual/text body for LO."""
 from __future__ import annotations
 
 import argparse
@@ -402,6 +402,41 @@ def materialize_files(files, root):
         notes.append(f"{name} ({f.get('size',len(content))} bytes)")
     return paths,notes
 
+NODE_URL = os.getenv("FCL_NODE_URL", "http://127.0.0.1:7332").rstrip("/")
+
+def _node_call(path, payload=None, timeout=.6):
+    """Best-effort edge: Signal keeps working even when the node is absent."""
+    try:
+        data=None if payload is None else json.dumps(payload).encode()
+        req=urllib.request.Request(NODE_URL+path,data=data,
+            headers={"Content-Type":"application/json"} if data else {})
+        with urllib.request.urlopen(req,timeout=timeout) as r:
+            return json.loads(r.read() or b"{}")
+    except Exception:
+        return None
+
+def node_activity():
+    return _node_call("/v1/activity")
+
+def node_acquire(owner, priority="interactive", phase="received", detail="Signal request"):
+    return _node_call("/v1/lease/acquire",{
+        "owner":owner,"priority":priority,"phase":phase,"detail":detail
+    })
+
+def node_progress(lease_id, phase, detail=""):
+    if not lease_id:
+        return None
+    return _node_call("/v1/lease/progress",{
+        "id":lease_id,"phase":phase,"detail":detail
+    })
+
+def node_release(lease_id, status="ok", detail=""):
+    if not lease_id:
+        return None
+    return _node_call("/v1/lease/release",{
+        "id":lease_id,"status":status,"detail":detail
+    })
+
 class App(BaseHTTPRequestHandler):
     mode="lo"; lo_cmd=""; backend="http://127.0.0.1:11434"; model="qwen3:8b"; profile="workspace"
     gallery_dir=Path.home()/".local/share/signal-window/gallery"
@@ -472,15 +507,17 @@ class App(BaseHTTPRequestHandler):
                 if paths:
                     file_note="\n\nDROPPED RESOURCES:\n"+"\n".join(f"- {p}" for p in paths)
                 full=(prompt or "Work with the dropped resources.")+file_note
-                node_progress(lease_id,"planning","LO request")
+                node_progress(lease_id,"planning","assembling LO request")
                 if self.mode=="lo":
                     if not self.lo_cmd:
                         raise RuntimeError("LO not found; install LOOK/LO or start with --mode ollama")
+                    node_progress(lease_id,"inference","LO working")
                     text,lo_events=lo_chat(self.lo_cmd,self.profile,full,td,timeout=self.lo_timeout)
                 else:
                     direct_base,direct_model,_=look_inference_config(
                         self.ollama if getattr(self,"ollama_explicit",False) else None,
                         self.model if getattr(self,"model_explicit",False) else None)
+                    node_progress(lease_id,"inference","Ollama working")
                     text=ollama_chat(direct_base,direct_model,full)
                     lo_events=[]
 
@@ -535,7 +572,7 @@ def main():
         state=f"LO {a.profile} · "+(App.lo_cmd if App.lo_cmd else "NOT FOUND")
     else:
         p=probe_ollama(App.backend); state=("connected" if p.get("ok") else "unreachable: "+p.get("error","unknown"))
-    print(f"Signal Window 0.5.2 · http://{a.host}:{a.port} · {state} · gallery {App.gallery_dir if App.gallery_enabled else 'off'}")
+    print(f"Signal Window 0.6.1 · http://{a.host}:{a.port} · {state} · gallery {App.gallery_dir if App.gallery_enabled else 'off'}")
     ThreadingHTTPServer((a.host,a.port),App).serve_forever()
 
 if __name__=="__main__": main()

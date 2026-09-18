@@ -1,4 +1,4 @@
-# Signal Window 0.5.2
+# Signal Window 0.6.1
 
 Small browser body for LO/LOOK with a persistent 256×256 graphics surface.
 
