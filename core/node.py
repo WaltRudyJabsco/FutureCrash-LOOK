@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Future Crash + LOOK Unified Node 4.1.
+"""Future Crash + LOOK Unified Node 4.3.
 
 A small distributed supervisor for trusted personal machines. Immediate events stay
 asynchronous; a one-second fabric pulse reconciles presence, leases and stale work.
@@ -22,9 +22,14 @@ import uuid
 from dataclasses import asdict, dataclass, field
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
-from urllib.parse import urlparse
 
-VERSION = "4.2.0"
+try:
+    from .fabric_packet import ArtifactStore, FabricStore, normalize_packet, packet_summary, new_id
+except ImportError:
+    from fabric_packet import ArtifactStore, FabricStore, normalize_packet, packet_summary, new_id
+from urllib.parse import urlparse, parse_qs
+
+VERSION = "4.3.0"
 DEFAULT_HOST = "127.0.0.1"
 DEFAULT_PORT = 7332
 PULSE_SECONDS = 1.0
@@ -40,6 +45,10 @@ PRIORITY = {"interactive": 0, "followup": 1, "background": 2}
 STATE = Path.home() / ".local/share/future-crash-look"
 STATE.mkdir(parents=True, exist_ok=True)
 MODEL_STATE = STATE / "model_profiles.json"
+FABRIC_DB = STATE / "fabric.sqlite3"
+ARTIFACT_ROOT = STATE / "artifacts"
+FABRIC_STORE = FabricStore(FABRIC_DB)
+ARTIFACTS = ArtifactStore(ARTIFACT_ROOT)
 
 
 def now() -> float:
@@ -404,7 +413,7 @@ def node_info():
             "inference": ad["inference"], "supervisor": ad["supervisor"]}
 
 
-def qualify_model(name: str, automatic=False):
+def qualify_model(name: str, automatic=False, external_lease_id=None):
     """Tiny operational qualification. It tests only a resident model automatically.
 
     Active qualification streams a very short deterministic response so preemption can
@@ -416,10 +425,15 @@ def qualify_model(name: str, automatic=False):
         return {"ok": False, "error": "model not installed"}
     if automatic and not m.get("resident"):
         return {"ok": False, "skipped": "automatic qualification never cold-loads a model"}
-    lease, busy = SUP.acquire(f"qualify:{name}", "background", "qualifying", "tiny model self-test")
-    if not lease:
-        return {"ok": False, "skipped": "supervisor busy", "busy": busy}
-    rid = lease["id"]
+    owns_lease = external_lease_id is None
+    if owns_lease:
+        lease, busy = SUP.acquire(f"qualify:{name}", "background", "qualifying", "tiny model self-test")
+        if not lease:
+            return {"ok": False, "skipped": "supervisor busy", "busy": busy}
+        rid = lease["id"]
+    else:
+        rid = str(external_lease_id)
+        SUP.progress(rid, "qualifying", f"qualifying {name}")
     started = now()
     first = None
     content = ""
@@ -479,13 +493,15 @@ def qualify_model(name: str, automatic=False):
             "thinking_response": thinking.strip()[:80],
         }
         MODELS.record_qualification(name, result)
-        SUP.release(rid, "ok" if result["ok"] else "failed", "qualification complete")
+        if owns_lease:
+            SUP.release(rid, "ok" if result["ok"] else "failed", "qualification complete")
         return result
     except InterruptedError as e:
-        # The logical lease was already archived by preemption.
+        # The logical lease may already have been archived by preemption.
         return {"ok": False, "preempted": True, "error": str(e)}
     except Exception as e:
-        SUP.release(rid, "error", str(e))
+        if owns_lease:
+            SUP.release(rid, "error", str(e))
         result = {"ok": False, "tested_at": now(), "error": str(e)}
         MODELS.record_qualification(name, result)
         return result
@@ -593,12 +609,218 @@ def service_action(name: str, action: str, confirmed=False):
     return {"ok": True, "service": name, "action": action, "state": service_status(name).get("state")}
 
 
+
 def managed_services():
     return {name: service_status(name) for name in MANAGED_SERVICES}
 
 
+# ----- Fabric Work Packet execution -------------------------------------------------
+# The packet is immutable. Queue/attempt/lease state is deliberately kept in the
+# durable ledger and supervisor rather than written back into the packet.
+JOB_WAKE = threading.Event()
+MUTATING_OPERATIONS = {"service.start", "service.stop", "service.restart"}
+OBSERVE_OPERATIONS = {
+    "fabric.echo", "node.inspect", "node.rediscover", "model.list", "model.qualify",
+    "service.list", "service.status",
+} | MUTATING_OPERATIONS
+
+
+def _requirements_ok(packet):
+    req = (packet.get("capabilities") or {}).get("requires") or []
+    if isinstance(req, dict):
+        req = [k for k, v in req.items() if v]
+    available = capabilities()
+    models = MODELS.discover()
+    model_features = {k: any((m.get("features") or {}).get(k) for m in models)
+                      for k in ("text", "vision", "tools", "thinking", "embedding")}
+    missing = []
+    for item in req:
+        name = str(item)
+        if name in available and available.get(name):
+            continue
+        if name in model_features and model_features.get(name):
+            continue
+        missing.append(name)
+    return (not missing), missing
+
+
+def _job_authorized(packet, operation):
+    authority = packet.get("authority") or {}
+    grants = set(str(x) for x in (authority.get("grants") or []))
+    confirmed = set(str(x) for x in (authority.get("confirmed_operations") or []))
+    if operation in MUTATING_OPERATIONS:
+        if operation not in confirmed:
+            return False, f"{operation} requires explicit confirmation"
+        if "service.control" not in grants and operation not in grants:
+            return False, f"authority does not grant {operation}"
+    elif operation == "model.qualify":
+        if "model.qualify" not in grants and "model.infer" not in grants:
+            return False, "authority does not grant model qualification"
+    elif operation not in OBSERVE_OPERATIONS:
+        return False, f"unsupported Fabric operation: {operation}"
+    return True, ""
+
+
+def _dependencies_ready(packet):
+    deps = (packet.get("relationships") or {}).get("dependencies") or []
+    for dep in deps:
+        dep_id = dep.get("id") if isinstance(dep, dict) else dep
+        if not dep_id:
+            continue
+        job = FABRIC_STORE.get_job(str(dep_id))
+        if not job or job.get("status") != "ok":
+            return False
+    return True
+
+
+def _result_packet(task, data, *, worker, attempt):
+    relationships = task.get("relationships") or {}
+    root = relationships.get("root") or task.get("id")
+    result = {
+        "fabric": "fwp/1",
+        "id": new_id("result"),
+        "kind": "result",
+        "created": now(),
+        "origin": worker,
+        "relationships": {
+            "parent": task.get("id"),
+            "root": root,
+            "caused_by": task.get("id"),
+            "dependencies": [],
+        },
+        "work": {
+            "operation": (task.get("work") or {}).get("operation"),
+            "objective": (task.get("work") or {}).get("objective"),
+            "output": data,
+        },
+        "capabilities": {},
+        "context": {},
+        "execution": {"priority": (task.get("execution") or {}).get("priority", "interactive"), "cancellable": False},
+        "authority": {"principal": "fabric", "grants": [], "confirmed_operations": []},
+        "delivery": {"reply_to": (task.get("delivery") or {}).get("reply_to")},
+        "provenance": {"node": worker, "software": f"future-crash-look/{VERSION}", "attempt": attempt},
+        "extensions": {},
+    }
+    return normalize_packet(result, origin=worker)
+
+
+def _acceptance_ok(packet, data):
+    accept = (packet.get("work") or {}).get("acceptance") or {}
+    required = accept.get("must_include") or []
+    if not isinstance(data, dict):
+        return (not required), ([] if not required else list(required))
+    missing = [str(k) for k in required if str(k) not in data]
+    return not missing, missing
+
+
+def execute_packet(packet, job_id, attempt, worker, lease_id):
+    operation = str((packet.get("work") or {}).get("operation") or "")
+    inp = (packet.get("work") or {}).get("input") or {}
+    if not isinstance(inp, dict):
+        inp = {"value": inp}
+    requirements_ok, missing = _requirements_ok(packet)
+    if not requirements_ok:
+        raise RuntimeError("missing required capabilities: " + ", ".join(missing))
+    ok, reason = _job_authorized(packet, operation)
+    if not ok:
+        raise PermissionError(reason)
+    if FABRIC_STORE.cancelled(job_id):
+        raise InterruptedError("cancelled before execution")
+
+    FABRIC_STORE.event(job_id, "progress", "dispatch", operation, node=worker)
+    if operation == "fabric.echo":
+        data = {"ok": True, "echo": inp, "node": worker}
+    elif operation == "node.inspect":
+        data = node_info()
+    elif operation == "node.rediscover":
+        MODELS.discover(force=True)
+        PEERS.refresh()
+        data = {"ok": True, "node": node_info()}
+    elif operation == "model.list":
+        data = {"models": MODELS.discover(force=True)}
+    elif operation == "model.qualify":
+        model = str(inp.get("model") or "")
+        if not model:
+            raise ValueError("model.qualify requires work.input.model")
+        data = qualify_model(model, automatic=False, external_lease_id=lease_id)
+        if not data.get("ok"):
+            raise RuntimeError(data.get("error") or data.get("skipped") or "qualification failed")
+    elif operation == "service.list":
+        data = {"services": managed_services()}
+    elif operation == "service.status":
+        service = str(inp.get("service") or "")
+        data = service_status(service)
+    elif operation in MUTATING_OPERATIONS:
+        service = str(inp.get("service") or "")
+        action = operation.split(".", 1)[1]
+        data = service_action(service, action, confirmed=True)
+        if not data.get("ok"):
+            raise RuntimeError(data.get("error") or "service action failed")
+    else:
+        raise ValueError(f"unsupported operation: {operation}")
+
+    accepted, missing = _acceptance_ok(packet, data)
+    if not accepted:
+        raise ValueError("acceptance contract missing: " + ", ".join(missing))
+    return data
+
+
+def job_worker_loop():
+    """Small deterministic worker. Distribution chooses a node before submission."""
+    worker = identity()["name"]
+    while True:
+        JOB_WAKE.wait(timeout=.5)
+        JOB_WAKE.clear()
+        queued = [j for j in reversed(FABRIC_STORE.jobs(128)) if j.get("status") == "queued"]
+        if not queued:
+            continue
+        # Human work first. FIFO within priority keeps behavior boring and inspectable.
+        queued.sort(key=lambda j: (PRIORITY.get((j.get("packet") or {}).get("priority"), 9), j.get("accepted") or 0))
+        for job in queued:
+            packet = FABRIC_STORE.get_packet(job["id"])
+            if not packet or not _dependencies_ready(packet):
+                continue
+            if FABRIC_STORE.cancelled(job["id"]):
+                FABRIC_STORE.finish(job["id"], "cancelled", error="cancelled while queued", node=worker)
+                continue
+            priority = (packet.get("execution") or {}).get("priority", "interactive")
+            operation = (packet.get("work") or {}).get("operation", "task")
+            lease, busy = SUP.acquire(f"job:{job['id']}", priority, "dispatch", str(operation), worker=worker)
+            if not lease:
+                # Let the pulse/next wake try again; never spin against active human work.
+                JOB_WAKE.set()
+                break
+            lease_id = lease["id"]
+            attempt = FABRIC_STORE.start(job["id"], worker)
+            SUP.progress(lease_id, "working", str(operation))
+            FABRIC_STORE.event(job["id"], "progress", "working", str(operation), node=worker)
+            try:
+                budget = (packet.get("execution") or {}).get("budget") or {}
+                wall_ms = int(budget.get("wall_ms") or 0)
+                deadline = (packet.get("execution") or {}).get("deadline")
+                if deadline and now() > float(deadline):
+                    raise TimeoutError("job deadline already passed")
+                started = now()
+                data = execute_packet(packet, job["id"], attempt, worker, lease_id)
+                if wall_ms and (now() - started) * 1000 > wall_ms:
+                    raise TimeoutError("job exceeded wall_ms budget")
+                result = _result_packet(packet, data, worker=worker, attempt=attempt)
+                FABRIC_STORE.finish(job["id"], "ok", result=result, node=worker)
+                SUP.release(lease_id, "ok", "packet complete")
+            except InterruptedError as exc:
+                FABRIC_STORE.finish(job["id"], "cancelled", error=str(exc), node=worker)
+                SUP.release(lease_id, "cancelled", str(exc))
+            except PermissionError as exc:
+                FABRIC_STORE.finish(job["id"], "denied", error=str(exc), node=worker)
+                SUP.release(lease_id, "denied", str(exc))
+            except Exception as exc:
+                FABRIC_STORE.finish(job["id"], "failed", error=str(exc), node=worker)
+                SUP.release(lease_id, "failed", str(exc))
+            break
+
+
 class API(BaseHTTPRequestHandler):
-    server_version = "FCLNode/4.2.0"
+    server_version = "FCLNode/4.3.0"
 
     def log_message(self, *a):
         pass
@@ -638,6 +860,33 @@ class API(BaseHTTPRequestHandler):
             return self.sendj(200, {"services": managed_services()})
         if path == "/v1/nodes":
             return self.sendj(200, {"self": node_info(), "peers": PEERS.public()})
+        if path == "/v1/jobs":
+            return self.sendj(200, {"jobs": FABRIC_STORE.jobs()})
+        if path.startswith("/v1/jobs/"):
+            pid = path.split("/", 3)[3]
+            job = FABRIC_STORE.get_job(pid)
+            if not job:
+                return self.sendj(404, {"error": "job not found"})
+            job["packet_full"] = FABRIC_STORE.get_packet(pid)
+            return self.sendj(200, job)
+        if path == "/v1/events":
+            q = parse_qs(urlparse(self.path).query)
+            try: since = int((q.get("since") or [0])[0])
+            except Exception: since = 0
+            return self.sendj(200, {"events": FABRIC_STORE.events(since=since)})
+        if path.startswith("/v1/artifacts/"):
+            digest = path.split("/", 3)[3]
+            try:
+                meta, data = ARTIFACTS.get(digest)
+            except Exception:
+                return self.sendj(404, {"error": "artifact not found"})
+            self.send_response(200)
+            self.send_header("Content-Type", meta.get("media_type") or "application/octet-stream")
+            self.send_header("Content-Length", str(len(data)))
+            self.send_header("X-Fabric-Digest", digest)
+            self.end_headers()
+            self.wfile.write(data)
+            return
         return self.sendj(404, {"error": "not found"})
 
     def do_POST(self):
@@ -649,13 +898,23 @@ class API(BaseHTTPRequestHandler):
                                       str(d.get("phase") or "accepted"),
                                       str(d.get("detail") or ""),
                                       str(d.get("worker") or "local"))
+            if lease:
+                FABRIC_STORE.event(lease["id"], "lease", lease.get("phase"), lease.get("detail"),
+                                   node=identity()["name"], data={"owner": lease.get("owner"), "priority": lease.get("priority")})
             return self.sendj(200 if lease else 409, {"lease": lease, "busy": busy})
         if path == "/v1/lease/progress":
-            ok = SUP.progress(str(d.get("id") or ""), d.get("phase"), d.get("detail"))
+            rid = str(d.get("id") or "")
+            ok = SUP.progress(rid, d.get("phase"), d.get("detail"))
+            if ok:
+                FABRIC_STORE.event(rid, "progress", d.get("phase"), d.get("detail"), node=identity()["name"])
             return self.sendj(200 if ok else 404, {"ok": ok})
         if path == "/v1/lease/release":
-            ok = SUP.release(str(d.get("id") or ""), str(d.get("status") or "ok"),
-                             str(d.get("detail") or ""))
+            rid = str(d.get("id") or "")
+            status = str(d.get("status") or "ok")
+            detail = str(d.get("detail") or "")
+            ok = SUP.release(rid, status, detail)
+            if ok:
+                FABRIC_STORE.event(rid, "release", status, detail, node=identity()["name"])
             return self.sendj(200 if ok else 404, {"ok": ok})
         if path == "/v1/models/qualify":
             name = str(d.get("model") or "")
@@ -668,6 +927,49 @@ class API(BaseHTTPRequestHandler):
             result = service_action(name, action, bool(d.get("confirm")))
             code = 200 if result.get("ok") else (409 if result.get("confirmation_required") else 400)
             return self.sendj(code, result)
+        if path == "/v1/jobs":
+            raw = d.get("packet") if isinstance(d.get("packet"), dict) else d
+            try:
+                packet = normalize_packet(raw, origin=identity()["name"])
+                target = str((packet.get("delivery") or {}).get("target") or "")
+                local = identity()["name"]
+                if target and target not in {"local", local}:
+                    snap = {"self": node_info(), "peers": PEERS.public()}
+                    url = _remote_url(snap, target, "/v1/jobs")
+                    result = http_json(url, {"packet": packet}, timeout=5.0)
+                    result["forwarded_by"] = local
+                    return self.sendj(202, result)
+                job, created = FABRIC_STORE.submit(packet, node=local)
+                if created:
+                    JOB_WAKE.set()
+                return self.sendj(202 if created else 200, {"ok": True, "created": created, "job": job})
+            except ValueError as exc:
+                return self.sendj(400, {"ok": False, "error": str(exc)})
+            except Exception as exc:
+                return self.sendj(502, {"ok": False, "error": str(exc)})
+        if path.startswith("/v1/jobs/") and path.endswith("/control"):
+            pid = path.split("/")[3]
+            op = str(d.get("operation") or "")
+            if op != "cancel":
+                return self.sendj(400, {"error": "only cancel control is implemented in fwp/1"})
+            ok = FABRIC_STORE.request_cancel(pid, node=identity()["name"], reason=str(d.get("reason") or "user"))
+            active = SUP.status().get("active")
+            if ok and active and active.get("owner") == f"job:{pid}":
+                # The executor checks the durable flag; the supervisor flag makes
+                # cooperative operations such as qualification notice immediately.
+                with SUP.lock:
+                    if SUP.active and SUP.active.id == active.get("id"):
+                        SUP.active.cancel_requested = True
+            JOB_WAKE.set()
+            return self.sendj(200 if ok else 404, {"ok": ok})
+        if path == "/v1/artifacts":
+            try:
+                encoded = str(d.get("base64") or "")
+                meta = ARTIFACTS.put_base64(encoded, media_type=str(d.get("media_type") or "application/octet-stream"),
+                                            name=(str(d.get("name")) if d.get("name") else None))
+                return self.sendj(201, {"ok": True, "artifact": meta})
+            except Exception as exc:
+                return self.sendj(400, {"ok": False, "error": str(exc)})
         return self.sendj(404, {"error": "not found"})
 
 
@@ -768,9 +1070,26 @@ def _print_models(data, target="local"):
 
 
 def _watch(host,port,interval=1.0):
+    cursors = {}
+    live_events = []
     try:
         while True:
             snap=_daemon_get(host,port,"/v1/nodes")
+            sources=[("local",_daemon_url(host,port,""))]
+            for peer in snap.get("peers") or []:
+                if peer.get("node") and peer.get("dns"):
+                    sources.append((peer.get("name") or "peer",f"https://{peer['dns']}:7332"))
+            for name,base in sources:
+                try:
+                    data=http_json(f"{base}/v1/events?since={cursors.get(name,0)}",timeout=.8)
+                    events=data.get("events") or []
+                    if events:
+                        cursors[name]=max(int(e.get("seq") or 0) for e in events)
+                        for e in events:
+                            e=dict(e); e["source"]=name; live_events.append(e)
+                except Exception:
+                    pass
+            live_events=sorted(live_events,key=lambda e:float(e.get("ts") or 0))[-14:]
             print("\033[2J\033[H",end="")
             print_fabric_snapshot(snap)
             print("\nLIVE ACTIVITY")
@@ -785,6 +1104,17 @@ def _watch(host,port,interval=1.0):
                     print(f"{name:<20} {active.get('priority','?'):<11} {active.get('phase','?'):<12} "
                           f"{active.get('owner','?'):<14} {active.get('state','?'):<8} idle {active.get('idle_ms',0)/1000:5.1f}s")
             if not any_work: print("all nodes idle")
+            print("\nEVENT TAPE")
+            print("─"*72)
+            if not live_events:
+                print("waiting for Fabric events…")
+            for e in live_events[-10:]:
+                stamp=time.strftime("%H:%M:%S",time.localtime(float(e.get("ts") or now())))
+                src=str(e.get("source") or e.get("node") or "?")[:18]
+                typ=str(e.get("type") or "event")[:10]
+                phase=str(e.get("phase") or "")[:14]
+                detail=str(e.get("detail") or "")[:34]
+                print(f"{stamp} {src:<18} {typ:<10} {phase:<14} {detail}")
             print("\nCtrl-C to leave Fabric watch",flush=True)
             time.sleep(interval)
     except KeyboardInterrupt:
@@ -792,10 +1122,63 @@ def _watch(host,port,interval=1.0):
         return 0
 
 
+def _coerce_cli_value(value):
+    try:
+        return json.loads(value)
+    except Exception:
+        return value
+
+
+def _submit_cli_packet(host, port, target, args, confirmed=False):
+    if not args:
+        raise RuntimeError("submit requires OPERATION")
+    operation = args[0]
+    inp = {}
+    objective = ""
+    for token in args[1:]:
+        if "=" in token:
+            k, v = token.split("=", 1)
+            inp[k] = _coerce_cli_value(v)
+        elif not objective:
+            objective = token
+        else:
+            objective += " " + token
+    local = (_daemon_get(host, port, "/v1/node") or {}).get("name") or "local"
+    grants = ["observe", "model.infer", "model.qualify"]
+    confirmed_ops = []
+    if operation.startswith("service."):
+        grants.append("service.control")
+        if confirmed:
+            confirmed_ops.append(operation)
+    packet = {
+        "fabric": "fwp/1",
+        "kind": "task",
+        "origin": local,
+        "work": {"operation": operation, "objective": objective or operation, "input": inp},
+        "execution": {"priority": "interactive", "cancellable": True,
+                      "budget": {"wall_ms": 60000, "child_jobs": 0, "depth": 0}},
+        "authority": {"principal": "user", "grants": grants, "confirmed_operations": confirmed_ops},
+        "delivery": {"target": target or "local"},
+        "relationships": {}, "capabilities": {}, "context": {}, "provenance": {}, "extensions": {},
+    }
+    return http_json(_daemon_url(host, port, "/v1/jobs"), {"packet": packet}, timeout=6.0)
+
+
+def _print_jobs(data, target="local"):
+    print(f"FABRIC JOBS · {target}")
+    print("─" * 86)
+    print(f"{'ID':<36} {'STATUS':<10} {'OPERATION':<20} {'WORKER':<18}")
+    for j in data.get("jobs") or []:
+        p = j.get("packet") or {}
+        print(f"{str(j.get('id') or '?'):<36.36} {str(j.get('status') or '?'):<10.10} "
+              f"{str(p.get('operation') or '?'):<20.20} {str(j.get('worker') or '—'):<18.18}")
+
+
 def main():
     ap=argparse.ArgumentParser(description="Future Crash + LOOK unified node")
     ap.add_argument("command",nargs="?",default="serve",
-        choices=["serve","status","nodes","activity","pulse","fabric","watch","models","qualify","services","service"])
+        choices=["serve","status","nodes","activity","pulse","fabric","watch","models","qualify","services","service",
+                 "jobs","job","submit","packet","cancel","events"])
     ap.add_argument("args",nargs="*")
     ap.add_argument("--node",dest="node",default=None,help="target Fabric node name")
     ap.add_argument("--json",action="store_true",help="raw JSON where a human view exists")
@@ -814,6 +1197,35 @@ def main():
                 if a.command=="models" and not a.json: _print_models(data,a.node or "local")
                 else: print(json.dumps(data,indent=2))
                 return 0
+            if a.command=="jobs":
+                data=_target_get(a.host,a.port,a.node,"/v1/jobs")
+                if a.json: print(json.dumps(data,indent=2))
+                else: _print_jobs(data,a.node or "local")
+                return 0
+            if a.command=="job":
+                if not a.args: ap.error("job requires ID")
+                print(json.dumps(_target_get(a.host,a.port,a.node,f"/v1/jobs/{a.args[0]}"),indent=2)); return 0
+            if a.command=="events":
+                print(json.dumps(_target_get(a.host,a.port,a.node,"/v1/events"),indent=2)); return 0
+            if a.command=="submit":
+                if not a.args: ap.error("submit requires OPERATION")
+                confirmed = bool(a.yes)
+                if a.args[0].startswith("service.") and not confirmed:
+                    target=a.node or "local"
+                    answer=input(f"Submit {a.args[0]} on {target}? [y/N] ").strip().lower()
+                    if answer not in {"y","yes"}: print("cancelled"); return 1
+                    confirmed = True
+                print(json.dumps(_submit_cli_packet(a.host,a.port,a.node,a.args,confirmed=confirmed),indent=2)); return 0
+            if a.command=="packet":
+                if not a.args: ap.error("packet requires FILE or -")
+                raw = json.loads(sys.stdin.read() if a.args[0] == "-" else Path(a.args[0]).read_text())
+                packet = raw.get("packet") if isinstance(raw,dict) and isinstance(raw.get("packet"),dict) else raw
+                if a.node:
+                    packet = dict(packet); delivery=dict(packet.get("delivery") or {}); delivery["target"]=a.node; packet["delivery"]=delivery
+                print(json.dumps(http_json(_daemon_url(a.host,a.port,"/v1/jobs"),{"packet":packet},timeout=6.0),indent=2)); return 0
+            if a.command=="cancel":
+                if not a.args: ap.error("cancel requires JOB_ID")
+                print(json.dumps(_target_post(a.host,a.port,a.node,f"/v1/jobs/{a.args[0]}/control",{"operation":"cancel","reason":"user"}),indent=2)); return 0
             if a.command=="qualify":
                 if not a.args: ap.error("qualify requires MODEL")
                 print(json.dumps(_target_post(a.host,a.port,a.node,"/v1/models/qualify",{"model":a.args[0]},timeout=45),indent=2)); return 0
@@ -829,6 +1241,8 @@ def main():
             print(f"FCL NODE · {exc}",file=sys.stderr); return 1
     threading.Thread(target=pulse_loop,name="fabric-pulse",daemon=True).start()
     threading.Thread(target=background_qualifier,name="model-qualifier",daemon=True).start()
+    threading.Thread(target=job_worker_loop,name="fabric-jobs",daemon=True).start()
+    JOB_WAKE.set()
     srv=ThreadingHTTPServer((a.host,a.port),API)
     print(f"Future Crash + LOOK node {VERSION} · http://{a.host}:{a.port} · pulse {PULSE_SECONDS:g}s",flush=True)
     try: srv.serve_forever(poll_interval=.2)

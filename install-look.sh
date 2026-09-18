@@ -3,8 +3,8 @@ set -euo pipefail
 
 ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 
-PRODUCT_VERSION="4.1.1"
-LOOK_VERSION="4.33.12"
+PRODUCT_VERSION="4.3.0"
+LOOK_VERSION="4.35.0"
 FUTURE_CRASH_VERSION="1.1.14"
 
 DRY=0

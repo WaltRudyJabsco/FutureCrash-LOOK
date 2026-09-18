@@ -1,13 +1,13 @@
 #!/usr/bin/env bash
 set -euo pipefail
 ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
-echo "Future Crash + LOOK 4.2.0 · Fabric Control"
+echo "Future Crash + LOOK 4.3.0 · Fabric Packets"
 echo "────────────────────────────────────────"
 
 # Refuse a mixed bundle before mutating the machine. A unified release must move
 # LOOK and the node together.
 EXPECTED_RELEASE="$(tr -d '[:space:]' < "$ROOT/VERSION")"
-[[ "$EXPECTED_RELEASE" == "4.2.0" ]] || { echo "BUNDLE ERROR: expected release 4.2.0, found $EXPECTED_RELEASE"; exit 4; }
+[[ "$EXPECTED_RELEASE" == "4.3.0" ]] || { echo "BUNDLE ERROR: expected release 4.3.0, found $EXPECTED_RELEASE"; exit 4; }
 grep -q 'def _fabric_command' "$ROOT/look/lk" || { echo "BUNDLE ERROR: LOOK source has no Fabric command"; exit 4; }
 grep -q 'choices=.*serve.*fabric' "$ROOT/core/node.py" || { echo "BUNDLE ERROR: node source has no Fabric CLI"; exit 4; }
 
@@ -22,13 +22,14 @@ done
 ((UNINSTALL)) && exit 0
 if ((DRY_RUN)); then
   echo
-  echo "[dry-run] would install/restart Unified Node 4.2.0 and Signal Window 0.7.0"
+  echo "[dry-run] would install/restart Unified Node 4.3.0 and Signal Window 0.7.0"
   echo "[dry-run] would reconcile Tailscale :7332 publication and verify Fabric CLI wiring"
   exit 0
 fi
 
 mkdir -p "$HOME/.local/share/future-crash-look/core" "$HOME/.local/bin"
 install -m 0755 "$ROOT/core/node.py" "$HOME/.local/share/future-crash-look/core/node.py"
+install -m 0644 "$ROOT/core/fabric_packet.py" "$HOME/.local/share/future-crash-look/core/fabric_packet.py"
 install -m 0755 "$ROOT/core/fcl-node" "$HOME/.local/bin/fcl-node"
 install -m 0644 "$ROOT/VERSION" "$HOME/.local/share/future-crash-look/RELEASE"
 
@@ -91,6 +92,10 @@ if ! cmp -s "$ROOT/core/node.py" "$HOME/.local/share/future-crash-look/core/node
   echo "INSTALL ERROR: installed node does not match this checkout" >&2
   exit 5
 fi
+if ! cmp -s "$ROOT/core/fabric_packet.py" "$HOME/.local/share/future-crash-look/core/fabric_packet.py"; then
+  echo "INSTALL ERROR: installed Fabric packet core does not match this checkout" >&2
+  exit 5
+fi
 if ! "$HOME/.local/bin/lk" fabric pulse >/dev/null 2>&1; then
   echo "INSTALL ERROR: LOOK Fabric command did not reach the resident node" >&2
   echo "  inspect: $HOME/.local/bin/fcl-node activity" >&2
@@ -104,3 +109,4 @@ echo "  fcl-node models     # model capability advertisements"
 echo "  fcl-node pulse      # shared heartbeat"
 echo "  fcl-node activity   # supervisor truth"
 echo "  fcl-node nodes      # peers + node advertisements"
+echo "  fcl-node jobs       # durable Fabric work ledger"

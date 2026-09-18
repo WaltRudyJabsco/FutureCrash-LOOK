@@ -1,3 +1,12 @@
+## 4.3.0 — Fabric Packets
+
+- Immutable `fwp/1` work contracts with relationships, requirements/preferences, context manifests, budgets, authority, delivery and provenance.
+- Durable SQLite job ledger with attempts, results, cancellation, idempotency and event history.
+- Content-addressed artifact store and packet DAG dependency gating.
+- Remote packet submission and new LOOK commands: `jobs`, `job`, `events`, `submit`, `packet`, `cancel`.
+- `lk fabric watch` now merges real event tapes from live nodes; Signal lease events appear there too.
+- Installer version constants fixed and packet core installed/verified atomically with the node.
+
 # 4.1.1 — Fabric Truth
 
 A reliability pass over Fabric Pulse.

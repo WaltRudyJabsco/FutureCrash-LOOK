@@ -18,7 +18,7 @@ try:
 except Exception:
     readline = None
 
-VERSION="4.33.12"
+VERSION="4.35.0"
 
 LOOK_WORDMARK = r"""       ██╗      ██╗  ██╗
        ██║      ██║ ██╔╝
@@ -12765,15 +12765,35 @@ def _fabric_command(args):
     sub=(args[0] if args else "fabric")
     aliases={"list":"nodes","node":"status","model":"models"}
     sub=aliases.get(sub,sub)
-    if sub not in {"fabric","watch","nodes","activity","pulse","models","status","qualify","services","service"}:
-        print("usage: lk fabric [watch|nodes|status [NODE]|activity [NODE]|pulse [NODE]|models [NODE] [--json]|qualify [NODE] MODEL|services [NODE]|service [NODE] SERVICE start|stop|restart]")
+    if sub not in {"fabric","watch","nodes","activity","pulse","models","status","qualify","services","service","jobs","job","submit","packet","cancel","events"}:
+        print("usage: lk fabric [watch|nodes|status [NODE]|activity [NODE]|pulse [NODE]|models [NODE] [--json]|jobs [NODE]|job [NODE] ID|events [NODE]|submit [NODE] OP [key=value ...]|packet [NODE] FILE|cancel [NODE] ID|qualify [NODE] MODEL|services [NODE]|service [NODE] SERVICE start|stop|restart]")
         return 2
     argv=[exe,sub]
     rest=list(args[1:])
-    if sub in {"status","activity","pulse","models","services"}:
+    if sub in {"status","activity","pulse","models","services","jobs","events"}:
         if rest and not rest[0].startswith("-"):
             argv += ["--node",rest.pop(0)]
         argv += rest
+    elif sub in {"job","cancel"}:
+        if not rest:
+            print(f"usage: lk fabric {sub} [NODE] ID"); return 2
+        if len(rest)>=2:
+            argv += ["--node",rest.pop(0)]
+        argv += rest[:1]
+    elif sub=="submit":
+        if not rest:
+            print("usage: lk fabric submit [NODE] OP [key=value ...]"); return 2
+        # A dotted operation is unmistakably an operation. Otherwise the first token
+        # is a node and the second is the operation.
+        if len(rest)>=2 and "." not in rest[0]:
+            argv += ["--node",rest.pop(0)]
+        argv += rest
+    elif sub=="packet":
+        if not rest:
+            print("usage: lk fabric packet [NODE] FILE"); return 2
+        if len(rest)>=2:
+            argv += ["--node",rest.pop(0)]
+        argv += rest[:1]
     elif sub=="qualify":
         if not rest:
             print("usage: lk fabric qualify [NODE] MODEL"); return 2
