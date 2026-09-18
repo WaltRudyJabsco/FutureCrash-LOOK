@@ -1,4 +1,14 @@
-## 4.3.0 — Fabric Packets
+# 4.4.0 — Fabric Integration
+
+- Adds `model.infer` as a first-class Fabric Work Packet operation.
+- Adds `core/fabric_client.py`: application-side capability routing, packet submission, and result waiting.
+- Signal visual composition now requests low-latency Fabric inference and falls back to its configured Ollama endpoint if Fabric is unavailable.
+- Future Crash Oracle, ambient observations, fortunes, memory compression, Threads, work, and Signal compilation now use Fabric inference when possible, with direct Ollama fallback. Background Oracle work is submitted as background priority.
+- Inference workers are selected from live advertisements using hard capability/model eligibility first, then busy state, residency, and latency preference. This is intentionally a small deterministic scheduler, not an AI scheduler.
+- Existing LO remains on its streaming Ollama transport in this release: replacing it with the current non-streaming packet inference would regress first-token streaming, cancellation, and tool-loop behavior. The Fabric event/supervisor substrate remains available around LO and is the target for a later streaming packet transport.
+- Signal Window 0.8.0; LOOK 4.36.0; Unified Node 4.4.0.
+
+## 4.4.0 — Fabric Packets
 
 - Immutable `fwp/1` work contracts with relationships, requirements/preferences, context manifests, budgets, authority, delivery and provenance.
 - Durable SQLite job ledger with attempts, results, cancellation, idempotency and event history.

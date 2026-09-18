@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Signal Window 0.7.0 — a tiny visual/text body for LO."""
+"""Signal Window 0.8.0 — a tiny visual/text body for LO."""
 from __future__ import annotations
 
 import argparse
@@ -112,6 +112,19 @@ def _extract_visual_json(raw):
             pass
     return None
 
+
+def _fabric_infer(messages, *, model=None, latency=True, options=None, timeout=90, owner="signal"):
+    try:
+        import sys
+        core = Path.home()/".local/share/future-crash-look/core"
+        if str(core) not in sys.path: sys.path.insert(0,str(core))
+        from fabric_client import infer
+        return infer(messages, model=model, requires=["text"], latency=latency,
+                     priority="interactive", think=False, options=options or {},
+                     timeout=timeout, owner=owner)
+    except Exception:
+        return None
+
 def signal_interpret(base, model, user_text, answer):
     prompt = f"""You are the visual reflex of Signal Window.
 USER:
@@ -128,14 +141,16 @@ ASSISTANT:
     ]
     last_error=""
     for attempt in range(2):
-        body=json.dumps({"model":model,"messages":messages,"stream":False,"think":False,
-                         "options":{"temperature":0.30 if attempt == 0 else 0.05,
-                                    "num_predict":360}}).encode()
-        req=urllib.request.Request(base.rstrip("/")+"/api/chat",data=body,
-                                   headers={"Content-Type":"application/json"})
+        options={"temperature":0.30 if attempt == 0 else 0.05,"num_predict":360}
         try:
-            with urllib.request.urlopen(req,timeout=90) as r:
-                raw=json.loads(r.read()).get("message",{}).get("content","").strip()
+            fabric = _fabric_infer(messages, model=None, latency=True, options=options, timeout=90, owner="signal.visual")
+            if fabric:
+                raw=str((fabric.get("message") or {}).get("content") or "").strip()
+            else:
+                body=json.dumps({"model":model,"messages":messages,"stream":False,"think":False,"options":options}).encode()
+                req=urllib.request.Request(base.rstrip("/")+"/api/chat",data=body,headers={"Content-Type":"application/json"})
+                with urllib.request.urlopen(req,timeout=90) as r:
+                    raw=json.loads(r.read()).get("message",{}).get("content","").strip()
             obj=_extract_visual_json(raw)
             if obj is not None:
                 return {"kind":"draw" if obj else "nochange","signal":obj or None,"attempts":attempt+1}
@@ -575,7 +590,7 @@ def main():
         state=f"LO {a.profile} · "+(App.lo_cmd if App.lo_cmd else "NOT FOUND")
     else:
         p=probe_ollama(App.backend); state=("connected" if p.get("ok") else "unreachable: "+p.get("error","unknown"))
-    print(f"Signal Window 0.7.0 · http://{a.host}:{a.port} · {state} · gallery {App.gallery_dir if App.gallery_enabled else 'off'}")
+    print(f"Signal Window 0.8.0 · http://{a.host}:{a.port} · {state} · gallery {App.gallery_dir if App.gallery_enabled else 'off'}")
     ThreadingHTTPServer((a.host,a.port),App).serve_forever()
 
 if __name__=="__main__": main()

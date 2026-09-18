@@ -2049,16 +2049,26 @@ class Oracle(threading.Thread):
                         "num_predict": 1600 if kind == "work" else (1200 if (kind.startswith("signalcompile:") or kind.startswith("signalrepair:")) else (400 if kind == "ask" else (300 if kind.startswith("thread:") else (96 if kind=="fortune" else 64)))),
                     },
                 }
-                data = json.dumps(payload).encode()
-                req = urllib.request.Request(
-                    self.url + "/api/chat",
-                    data=data,
-                    headers={"Content-Type": "application/json"},
-                )
                 background_kind=(kind in {"ambient","fortune","memory"} or kind.startswith("thread:"))
                 request_timeout=18 if background_kind else 75
-                with urllib.request.urlopen(req, timeout=request_timeout) as r:
-                    response = json.loads(r.read().decode("utf-8", "replace"))
+                response = None
+                try:
+                    import sys
+                    core = Path.home()/".local/share/future-crash-look/core"
+                    if str(core) not in sys.path: sys.path.insert(0,str(core))
+                    from fabric_client import infer as fabric_infer
+                    fout=fabric_infer(messages, model=self.model, requires=["text"],
+                                      latency=background_kind,
+                                      priority="background" if background_kind else "interactive",
+                                      think=bool(payload.get("think")), options=payload.get("options") or {},
+                                      timeout=request_timeout, owner="future-crash."+kind.split(":",1)[0])
+                    response={"message":fout.get("message") or {}}
+                except Exception:
+                    data = json.dumps(payload).encode()
+                    req = urllib.request.Request(self.url + "/api/chat", data=data,
+                                                 headers={"Content-Type": "application/json"})
+                    with urllib.request.urlopen(req, timeout=request_timeout) as r:
+                        response = json.loads(r.read().decode("utf-8", "replace"))
                 message = response.get("message", {})
                 if kind=="ambient":
                     text=_artifact_text(message,kind,random.choice(OBSERVATIONS),preserve_signal=True)

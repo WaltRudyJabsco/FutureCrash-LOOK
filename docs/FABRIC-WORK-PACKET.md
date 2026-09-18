@@ -191,3 +191,9 @@ front-end for simple jobs.
 The goal is a small, durable substrate. Routing intelligence, task decomposition, learned
 performance selection, and richer context resolution can grow on top without changing the
 packet's basic meaning.
+
+## Application integration (4.4)
+
+`model.infer` is the first general cognitive execution operation. Applications submit normal FWP tasks rather than addressing Ollama directly. The application-side Fabric client chooses an eligible live node from advertisements, preserving the packet contract and authority model. Direct engine access remains a fallback edge, not the semantic interface.
+
+The current inference packet is deliberately non-streaming. LO keeps its mature streaming/tool-loop transport until Fabric has a streaming result/event contract that preserves first-token latency, cancellation, and tool-call semantics.

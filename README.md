@@ -1,4 +1,4 @@
-# Future Crash + LOOK 4.3.0 — Fabric Packets
+# Future Crash + LOOK 4.4.0 — Fabric Packets
 
 The Fabric now has a durable work protocol: immutable `fwp/1` packets, a local job ledger, attempts/results/events, capability and authority contracts, content-addressed artifacts, remote packet forwarding, cancellation, and a live multi-node event tape. See `docs/FABRIC-WORK-PACKET.md`.
 

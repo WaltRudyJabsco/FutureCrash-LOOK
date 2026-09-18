@@ -29,7 +29,7 @@ except ImportError:
     from fabric_packet import ArtifactStore, FabricStore, normalize_packet, packet_summary, new_id
 from urllib.parse import urlparse, parse_qs
 
-VERSION = "4.3.0"
+VERSION = "4.4.0"
 DEFAULT_HOST = "127.0.0.1"
 DEFAULT_PORT = 7332
 PULSE_SECONDS = 1.0
@@ -620,7 +620,7 @@ def managed_services():
 JOB_WAKE = threading.Event()
 MUTATING_OPERATIONS = {"service.start", "service.stop", "service.restart"}
 OBSERVE_OPERATIONS = {
-    "fabric.echo", "node.inspect", "node.rediscover", "model.list", "model.qualify",
+    "fabric.echo", "node.inspect", "node.rediscover", "model.list", "model.qualify", "model.infer",
     "service.list", "service.status",
 } | MUTATING_OPERATIONS
 
@@ -656,6 +656,9 @@ def _job_authorized(packet, operation):
     elif operation == "model.qualify":
         if "model.qualify" not in grants and "model.infer" not in grants:
             return False, "authority does not grant model qualification"
+    elif operation == "model.infer":
+        if "model.infer" not in grants:
+            return False, "authority does not grant model inference"
     elif operation not in OBSERVE_OPERATIONS:
         return False, f"unsupported Fabric operation: {operation}"
     return True, ""
@@ -745,6 +748,46 @@ def execute_packet(packet, job_id, attempt, worker, lease_id):
         data = qualify_model(model, automatic=False, external_lease_id=lease_id)
         if not data.get("ok"):
             raise RuntimeError(data.get("error") or data.get("skipped") or "qualification failed")
+    elif operation == "model.infer":
+        model = str(inp.get("model") or "")
+        models = MODELS.discover(force=True)
+        if not model:
+            eligible = [m for m in models if (m.get("features") or {}).get("text")]
+            resident = [m for m in eligible if m.get("resident")]
+            pool = resident or eligible
+            if not pool:
+                raise RuntimeError("no text model available")
+            # Low-latency work prefers the smallest suitable model; otherwise prefer
+            # the largest resident model. This is intentionally simple until real
+            # qualification evidence is dense enough to drive routing.
+            latency = str(((packet.get("capabilities") or {}).get("prefers") or {}).get("latency") or "")
+            pool.sort(key=lambda m: int(m.get("size") or 0), reverse=(latency not in {"low","very-low"}))
+            model = str(pool[0].get("name") or "")
+        messages = inp.get("messages")
+        if not isinstance(messages, list):
+            messages = [{"role":"user","content":str(inp.get("prompt") or "")}]
+        payload = {
+            "model": model, "messages": messages, "stream": False,
+            "keep_alive": inp.get("keep_alive", -1),
+            "think": bool(inp.get("think", False)),
+            "options": inp.get("options") if isinstance(inp.get("options"), dict) else {},
+        }
+        if isinstance(inp.get("tools"), list):
+            payload["tools"] = inp["tools"]
+        SUP.progress(lease_id, "inference", f"{model} responding")
+        FABRIC_STORE.event(job_id, "progress", "inference", f"{model} responding", node=worker)
+        req = urllib.request.Request("http://127.0.0.1:11434/api/chat",
+                                     data=json.dumps(payload).encode(),
+                                     headers={"Content-Type":"application/json"})
+        timeout = max(5.0, min(300.0, float(inp.get("timeout") or 90)))
+        with urllib.request.urlopen(req, timeout=timeout) as r:
+            response = json.loads(r.read().decode("utf-8", "replace"))
+        data = {"ok": True, "model": model, "message": response.get("message") or {},
+                "done_reason": response.get("done_reason"),
+                "prompt_eval_count": response.get("prompt_eval_count"),
+                "eval_count": response.get("eval_count"),
+                "eval_duration": response.get("eval_duration"),
+                "total_duration": response.get("total_duration")}
     elif operation == "service.list":
         data = {"services": managed_services()}
     elif operation == "service.status":
@@ -820,7 +863,7 @@ def job_worker_loop():
 
 
 class API(BaseHTTPRequestHandler):
-    server_version = "FCLNode/4.3.0"
+    server_version = "FCLNode/4.4.0"
 
     def log_message(self, *a):
         pass
