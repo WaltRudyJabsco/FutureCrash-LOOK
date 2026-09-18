@@ -416,7 +416,7 @@ class App(BaseHTTPRequestHandler):
         if self.path=="/api/status":
             lo_ok=bool(self.lo_cmd)
             return self.json(200,{"mode":self.mode,"lo":lo_ok,"lo_cmd":self.lo_cmd,"profile":self.profile,
-                "backend":self.backend,"model":self.model,"busy":type(self).request_lock.locked(),
+                "backend":self.backend,"model":self.model,"busy":type(self).request_lock.locked(),"node_activity":node_activity(),
                 "lo_timeout":self.lo_timeout,"gallery":str(self.gallery_dir) if self.gallery_enabled else None,
                 **(probe_ollama(self.backend) if self.mode=="ollama" else {"ok":lo_ok})})
         path="index.html" if self.path in ("/","") else self.path.lstrip("/")
@@ -450,7 +450,14 @@ class App(BaseHTTPRequestHandler):
         if self.path!="/api/chat":
             return self.json(404,{"error":"not found"})
         if not type(self).request_lock.acquire(blocking=False):
-            return self.json(409,{"error":"Signal is already handling a request"})
+            return self.json(409,{"error":"Signal is already handling a request","activity":node_activity()})
+        lease_id=None
+        lease_reply=node_acquire("signal")
+        if lease_reply and not lease_reply.get("lease"):
+            type(self).request_lock.release()
+            return self.json(409,{"error":"Local Labs is busy","activity":lease_reply.get("busy") or node_activity()})
+        if lease_reply and lease_reply.get("lease"):
+            lease_id=lease_reply["lease"].get("id")
         try:
             n=int(self.headers.get("Content-Length","0"))
             d=json.loads(self.rfile.read(n) or b"{}")
@@ -465,6 +472,7 @@ class App(BaseHTTPRequestHandler):
                 if paths:
                     file_note="\n\nDROPPED RESOURCES:\n"+"\n".join(f"- {p}" for p in paths)
                 full=(prompt or "Work with the dropped resources.")+file_note
+                node_progress(lease_id,"planning","LO request")
                 if self.mode=="lo":
                     if not self.lo_cmd:
                         raise RuntimeError("LO not found; install LOOK/LO or start with --mode ollama")
@@ -476,6 +484,7 @@ class App(BaseHTTPRequestHandler):
                     text=ollama_chat(direct_base,direct_model,full)
                     lo_events=[]
 
+            node_progress(lease_id,"visual","rendering Signal scene")
             # Visuals are deliberately out-of-band: LO never sees the framebuffer protocol.
             resolved_base,resolved_model,resolution=look_inference_config(
                 self.ollama if getattr(self,"ollama_explicit",False) else None,
@@ -484,6 +493,7 @@ class App(BaseHTTPRequestHandler):
                 resolved_base,resolved_model,
                 prompt or "Work with the dropped resources.", text,
             )
+            node_release(lease_id,"ok","complete"); lease_id=None
             return self.json(200,{
                 "text":text,
                 "signal":visual.get("signal"),
@@ -498,6 +508,7 @@ class App(BaseHTTPRequestHandler):
         except Exception as exc:
             return self.json(502,{"error":str(exc)})
         finally:
+            if lease_id: node_release(lease_id,"error","request ended")
             type(self).request_lock.release()
 
 def main():

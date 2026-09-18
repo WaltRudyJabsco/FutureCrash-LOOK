@@ -1,3 +1,11 @@
+# FUTURE CRASH + LOOK 4.0 — UNIFIED NODE
+
+**One install. Every machine is a node. LOOK, LO, Future Crash and Signal are interfaces onto the same small local-first system.**
+
+See `docs/UNIFIED-NODE-4.0.md`.
+
+---
+
 # FUTURE CRASH + LOOK
 
 **A local-first AI terminal environment for macOS and Linux.**
