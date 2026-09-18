@@ -278,7 +278,7 @@ def tailscale_info() -> dict:
 
     _, ips = run(tailscale, "ip")
     ip_lines = [x for x in ips.splitlines() if not x.startswith("Warning:")]
-    _, serve = run(tailscale, "serve", "status")
+    _, serve = run("/usr/bin/tailscale", "serve", "status")
     serve_clean = "\n".join(x for x in serve.splitlines() if not x.startswith("Warning:"))
 
     name = ""
@@ -1490,7 +1490,7 @@ def doctor() -> None:
     except Exception as e:
         check("SearXNG search", False, str(e))
 
-    rc, serve = run(tailscale, "serve", "status")
+    rc, serve = run("/usr/bin/tailscale", "serve", "status")
     check("Serve configuration", rc == 0, "readable" if rc == 0 else "unavailable")
 
     print("────────────────────────────────────────────────")
@@ -1500,7 +1500,7 @@ def doctor() -> None:
     print("All core checks passed.")
 
 def usage() -> None:
-    print("""3090 Home Server Controller
+    print("""Local Labs Host Controller
 
 Usage:
   server
