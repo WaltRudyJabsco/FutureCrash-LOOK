@@ -29,7 +29,7 @@ except ImportError:
     from fabric_packet import ArtifactStore, FabricStore, normalize_packet, packet_summary, new_id
 from urllib.parse import urlparse, parse_qs
 
-VERSION = "4.6.3"
+VERSION = "4.6.4"
 DEFAULT_HOST = "127.0.0.1"
 DEFAULT_PORT = 7332
 PULSE_SECONDS = 1.0
@@ -323,6 +323,16 @@ class ModelRegistry:
             self.cached, self.cached_at = out, now()
             return out
 
+    def snapshot(self):
+        """Return the last complete model snapshot without waiting on discovery.
+
+        Discovery can query Ollama once per installed model.  Fabric routing and
+        /v1/nodes are latency-sensitive, so they must never block behind that
+        refresh lock.  The registry replaces ``cached`` atomically after a full
+        refresh; readers can safely use the previous complete snapshot.
+        """
+        return list(self.cached)
+
     def record_qualification(self, name, result):
         with self.lock:
             self.profiles.setdefault(name, {})["qualification"] = result
@@ -398,7 +408,9 @@ def _node_preferred_model(models):
 
 def advertisement():
     ident = identity()
-    models = MODELS.discover()
+    # Advertisement is on the routing hot path.  Use the last completed model
+    # snapshot; pulse_loop owns refresh work in the background.
+    models = MODELS.snapshot()
     db = FABRIC_STORE.health()
     worker_age = max(0.0, now() - float(WORKER_HEALTH.get("last_loop") or 0))
     worker_ok = bool(WORKER_HEALTH.get("alive")) and worker_age < 3.0
@@ -983,7 +995,7 @@ def _stream_model_infer(handler, raw):
 
 
 class API(BaseHTTPRequestHandler):
-    server_version = "FCLNode/4.6.3"
+    server_version = "FCLNode/4.6.4"
 
     def log_message(self, *a):
         pass

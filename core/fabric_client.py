@@ -16,7 +16,7 @@ def _json(url, payload=None, timeout=5.0):
         return json.loads(r.read().decode("utf-8","replace"))
 
 def _nodes(base):
-    return _json(base.rstrip('/')+"/v1/nodes", timeout=2.0)
+    return _json(base.rstrip('/')+"/v1/nodes", timeout=4.0)
 
 def _candidates(snapshot):
     rows=[]
@@ -158,7 +158,14 @@ def stream_infer(payload, *, requires=None, priority="interactive", timeout=180,
 
     last_error=None
     for attempt_no in range(max_attempts):
-        target,dns,chosen=select(prefer_route=(attempt_no==0))
+        try:
+            target,dns,chosen=select(prefer_route=(attempt_no==0))
+        except (urllib.error.URLError, TimeoutError, socket.timeout) as exc:
+            # Route discovery is control-plane work.  A transient slow /v1/nodes
+            # response should not leak a raw urllib timeout into LO.
+            last_error=exc
+            time.sleep(.15)
+            continue
         if isinstance(route,dict):
             route.update({"target":target,"dns":dns,"model":chosen})
         inp={"model":chosen,"messages":payload.get("messages") or [],"timeout":timeout,

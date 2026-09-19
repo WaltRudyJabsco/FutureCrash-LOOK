@@ -1,3 +1,7 @@
+## 4.38.4
+
+- Fabric LO now tolerates transient control-plane route discovery timeouts instead of exposing raw urllib timeout errors.
+
 ## 4.37.1 — Machine-local model scope
 
 - Local model selection is pinned to localhost and is no longer affected by the legacy Ollama host override.

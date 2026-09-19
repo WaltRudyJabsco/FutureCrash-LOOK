@@ -1,6 +1,6 @@
-# Future Crash + LOOK 4.6.3
+# Future Crash + LOOK 4.6.4
 
-**Fabric contention hotfix.** Signal no longer reserves the inference lane around LO, visual expression runs opportunistically in the background, selected non-streaming work is transported to its real worker, and LO can fail over before first token when a selected worker races busy.
+**Fabric routing hotfix.** The node control plane now stays responsive while Ollama model discovery refreshes in the background, preventing intermittent Signal-spawned LO route-selection timeouts. Signal contention and worker failover fixes from 4.6.3 remain intact.
 
 # Future Crash + LOOK 4.5.0 — Fabric Packets
 
