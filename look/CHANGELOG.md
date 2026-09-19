@@ -1,3 +1,8 @@
+## 4.39.3 — Fabric HTTP diagnostics
+
+- `lk fabric http` now passes through to the Unified Node HTTP pressure view.
+- Ships with Future Crash + LOOK 4.7.3 ingress-process isolation.
+
 ## 4.39.2 — Provenance receipts + lean Fabric routing
 
 - Emit deterministic source receipts from the information edge that actually ran instead of relying on model prose to preserve provenance.

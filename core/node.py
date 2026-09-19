@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Future Crash + LOOK Unified Node 4.3.
+"""Future Crash + LOOK Unified Node 4.7.3.
 
 A small distributed supervisor for trusted personal machines. Immediate events stay
 asynchronous; a one-second fabric pulse reconciles presence, leases and stale work.
@@ -8,6 +8,8 @@ from __future__ import annotations
 
 import argparse
 import sys
+import faulthandler
+import signal
 import json
 import os
 import platform
@@ -30,10 +32,10 @@ except ImportError:
     from fabric_packet import ArtifactStore, FabricStore, normalize_packet, packet_summary, new_id
 from urllib.parse import urlparse, parse_qs
 
-VERSION = "4.7.2"
+VERSION = "4.7.3"
 DEFAULT_HOST = "127.0.0.1"
 DEFAULT_PORT = 7332
-DEFAULT_INGRESS_PORT = 7333
+DEFAULT_INGRESS_PORT = 0
 PULSE_SECONDS = 1.0
 PEER_REFRESH_SECONDS = 30.0
 PEER_NODE_REFRESH_SECONDS = 20.0
@@ -1174,7 +1176,13 @@ class FabricHTTPServer(ThreadingHTTPServer):
         # ingress is deliberately tighter; local UI/control traffic keeps its own lane.
         self.max_active_requests = 32 if self.plane == "ingress" else 64
         self._request_slots = threading.BoundedSemaphore(self.max_active_requests)
+        self.loop_heartbeat = time.monotonic()
         super().__init__(server_address, RequestHandlerClass)
+
+    def service_actions(self):
+        # serve_forever calls this once per poll. A stale value means the accept
+        # loop itself stopped advancing, which request-level health cannot see.
+        self.loop_heartbeat = time.monotonic()
 
     def process_request(self, request, client_address):
         self.metrics.accepted_connection()
@@ -1208,8 +1216,26 @@ class FabricHTTPServer(ThreadingHTTPServer):
         return super().handle_error(request, client_address)
 
 
+def _local_accept_watchdog(server):
+    """Fail the daemon if localhost stops accepting while the process is alive.
+
+    systemd/launchd can recover a crashed process; they cannot recover a Python
+    process that still owns its socket but whose accept loop is wedged. Dump all
+    Python thread stacks first so every recovery leaves evidence.
+    """
+    stale_seconds = 8.0
+    while True:
+        time.sleep(1.0)
+        age = time.monotonic() - float(getattr(server, "loop_heartbeat", 0.0))
+        if age > stale_seconds:
+            print(f"FCL NODE · local accept loop stalled for {age:.1f}s; terminating for service-manager recovery",
+                  file=sys.stderr, flush=True)
+            faulthandler.dump_traceback(file=sys.stderr, all_threads=True)
+            os._exit(70)
+
+
 class API(BaseHTTPRequestHandler):
-    server_version = "FCLNode/4.7.2"
+    server_version = "FCLNode/4.7.3"
 
     def setup(self):
         self._metric_request_id = None
@@ -1265,8 +1291,14 @@ class API(BaseHTTPRequestHandler):
                                "errors": WORKER_HEALTH.get("errors", 0)},
             })
         if path == "/v1/http":
+            ingress_guard = {"ok": False, "error": "ingress guard unavailable"}
+            try:
+                ingress_guard = http_json("http://127.0.0.1:7333/_fcl/metrics", timeout=.35)
+            except Exception as exc:
+                ingress_guard = {"ok": False, "error": str(exc)}
             return self.sendj(200, {"listeners": {name: meter.public() for name, meter in HTTP_METRICS.items()},
-                                    "local_port": DEFAULT_PORT, "ingress_port": DEFAULT_INGRESS_PORT})
+                                    "local_port": DEFAULT_PORT, "ingress_port": 7333,
+                                    "ingress_guard": ingress_guard})
         if path in ("/node", "/v1/node", "/v1/status"):
             return self.sendj(200, node_info())
         if path == "/v1/advertisement":
@@ -1632,7 +1664,7 @@ def main():
     ap.add_argument("--yes",action="store_true",help="confirm a mutating managed-service action")
     ap.add_argument("--host",default=DEFAULT_HOST); ap.add_argument("--port",type=int,default=DEFAULT_PORT)
     ap.add_argument("--ingress-port",type=int,default=DEFAULT_INGRESS_PORT,
-                    help="localhost backend reserved for Tailscale ingress; 0 disables")
+                    help="legacy in-process ingress listener; 0 disables (default; use fcl-ingress)")
     ap.add_argument("--version",action="version",version=f"Future Crash + LOOK node {VERSION}")
     a=ap.parse_args()
     if a.command != "serve":
@@ -1688,11 +1720,15 @@ def main():
                 print(json.dumps(_target_post(a.host,a.port,a.node,"/v1/services/action",{"service":service,"action":action,"confirm":True}),indent=2)); return 0
         except (RuntimeError, urllib.error.URLError, urllib.error.HTTPError) as exc:
             print(f"FCL NODE · {exc}",file=sys.stderr); return 1
+    faulthandler.enable(all_threads=True)
+    if hasattr(signal, "SIGUSR1"):
+        faulthandler.register(signal.SIGUSR1, file=sys.stderr, all_threads=True)
     threading.Thread(target=pulse_loop,name="fabric-pulse",daemon=True).start()
     threading.Thread(target=background_qualifier,name="model-qualifier",daemon=True).start()
     threading.Thread(target=job_worker_loop,name="fabric-jobs",daemon=True).start()
     JOB_WAKE.set()
     srv=FabricHTTPServer((a.host,a.port),API,plane="local")
+    threading.Thread(target=_local_accept_watchdog,args=(srv,),name="fabric-http-watchdog",daemon=True).start()
     ingress=None
     ingress_thread=None
     if a.ingress_port and int(a.ingress_port) != int(a.port):

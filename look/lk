@@ -19,7 +19,7 @@ try:
 except Exception:
     readline = None
 
-VERSION="4.39.2"
+VERSION="4.39.3"
 
 LOOK_WORDMARK = r"""       ██╗      ██╗  ██╗
        ██║      ██║ ██╔╝
@@ -13051,12 +13051,12 @@ def _fabric_command(args):
     sub=(args[0] if args else "fabric")
     aliases={"list":"nodes","node":"status","model":"models"}
     sub=aliases.get(sub,sub)
-    if sub not in {"fabric","watch","nodes","activity","pulse","models","status","qualify","services","service","jobs","job","submit","packet","cancel","events"}:
-        print("usage: lk fabric [watch|nodes|status [NODE]|activity [NODE]|pulse [NODE]|models [NODE] [--json]|jobs [NODE]|job [NODE] ID|events [NODE]|submit [NODE] OP [key=value ...]|packet [NODE] FILE|cancel [NODE] ID|qualify [NODE] MODEL|services [NODE]|service [NODE] SERVICE start|stop|restart]")
+    if sub not in {"fabric","watch","nodes","activity","pulse","models","status","qualify","services","service","jobs","job","submit","packet","cancel","events","http"}:
+        print("usage: lk fabric [watch|nodes|status [NODE]|activity [NODE]|pulse [NODE]|models [NODE] [--json]|http [NODE]|jobs [NODE]|job [NODE] ID|events [NODE]|submit [NODE] OP [key=value ...]|packet [NODE] FILE|cancel [NODE] ID|qualify [NODE] MODEL|services [NODE]|service [NODE] SERVICE start|stop|restart]")
         return 2
     argv=[exe,sub]
     rest=list(args[1:])
-    if sub in {"status","activity","pulse","models","services","jobs","events"}:
+    if sub in {"status","activity","pulse","models","services","jobs","events","http"}:
         if rest and not rest[0].startswith("-"):
             argv += ["--node",rest.pop(0)]
         argv += rest

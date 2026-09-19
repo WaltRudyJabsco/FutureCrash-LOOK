@@ -1,3 +1,12 @@
+# 4.7.3 — Fabric Ingress Guard
+
+- Moves Tailscale-facing :7333 ingress into a separate `fcl-ingress` process. The 4.7.2 split used two sockets in one Python process, so a process-wide stall could still strand both accept queues.
+- Bounds remote ingress concurrency before requests reach the localhost node and gives incomplete request headers a short timeout.
+- Adds accept-loop watchdogs that dump Python thread stacks and exit nonzero when the local node or ingress accept loop stops advancing, allowing systemd/launchd to recover with evidence.
+- Adds `SIGUSR1` thread-stack diagnostics to the node and ingress processes.
+- Wires `lk fabric http` to the existing Fabric HTTP telemetry command.
+- Unified Node 4.7.3; LOOK 4.39.3; Signal Window remains 1.0.0.
+
 # 4.7.2 — Fabric Control-Plane Isolation
 
 - Splits the node into two localhost listeners: local apps stay on `127.0.0.1:7332`, while Tailscale Serve proxies public `:7332` into isolated backend `127.0.0.1:7333`. Remote proxy pressure can no longer consume the local LO/Signal accept queue.

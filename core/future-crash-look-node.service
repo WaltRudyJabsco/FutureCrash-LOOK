@@ -4,7 +4,7 @@ After=network-online.target
 
 [Service]
 Type=simple
-ExecStart=%h/.local/bin/fcl-node serve
+ExecStart=%h/.local/bin/fcl-node serve --ingress-port 0
 Restart=on-failure
 RestartSec=1
 

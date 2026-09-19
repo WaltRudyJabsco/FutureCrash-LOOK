@@ -1,6 +1,6 @@
 import unittest
 from unittest.mock import patch
-from core import node
+from core import node, ingress
 
 
 class ControlPlaneTests(unittest.TestCase):
@@ -9,10 +9,12 @@ class ControlPlaneTests(unittest.TestCase):
         self.assertTrue(node.FabricHTTPServer.daemon_threads)
 
 
-    def test_local_and_tailscale_ingress_use_distinct_backends(self):
+    def test_local_node_and_tailscale_ingress_are_distinct_processes(self):
         self.assertEqual(node.DEFAULT_PORT, 7332)
-        self.assertEqual(node.DEFAULT_INGRESS_PORT, 7333)
-        self.assertNotEqual(node.DEFAULT_PORT, node.DEFAULT_INGRESS_PORT)
+        self.assertEqual(node.DEFAULT_INGRESS_PORT, 0)
+        self.assertEqual(ingress.DEFAULT_PORT, 7333)
+        self.assertEqual(ingress.DEFAULT_BACKEND_PORT, 7332)
+        self.assertLessEqual(ingress.MAX_ACTIVE_REQUESTS, 16)
 
     def test_http_pressure_meter_tracks_and_releases_requests(self):
         meter = node.HTTPMetrics("test")

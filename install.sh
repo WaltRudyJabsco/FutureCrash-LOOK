@@ -1,13 +1,13 @@
 #!/usr/bin/env bash
 set -euo pipefail
 ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
-echo "Future Crash + LOOK 4.7.2 · Fabric Control-Plane Isolation"
+echo "Future Crash + LOOK 4.7.3 · Fabric Ingress Guard"
 echo "────────────────────────────────────────"
 
 # Refuse a mixed bundle before mutating the machine. A unified release must move
 # LOOK and the node together.
 EXPECTED_RELEASE="$(tr -d '[:space:]' < "$ROOT/VERSION")"
-[[ "$EXPECTED_RELEASE" == "4.7.2" ]] || { echo "BUNDLE ERROR: expected release 4.7.2, found $EXPECTED_RELEASE"; exit 4; }
+[[ "$EXPECTED_RELEASE" == "4.7.3" ]] || { echo "BUNDLE ERROR: expected release 4.7.3, found $EXPECTED_RELEASE"; exit 4; }
 grep -q 'def _fabric_command' "$ROOT/look/lk" || { echo "BUNDLE ERROR: LOOK source has no Fabric command"; exit 4; }
 grep -q 'choices=.*serve.*fabric' "$ROOT/core/node.py" || { echo "BUNDLE ERROR: node source has no Fabric CLI"; exit 4; }
 
@@ -22,8 +22,8 @@ done
 ((UNINSTALL)) && exit 0
 if ((DRY_RUN)); then
   echo
-  echo "[dry-run] would install/restart Unified Node 4.7.2 and Signal Window 1.0.0"
-  echo "[dry-run] would reconcile Tailscale :7332 → isolated ingress :7333 and verify Fabric CLI wiring"
+  echo "[dry-run] would install/restart Unified Node 4.7.3, isolated ingress guard, and Signal Window 1.0.0"
+  echo "[dry-run] would reconcile Tailscale :7332 → separate fcl-ingress :7333 and verify Fabric CLI wiring"
   exit 0
 fi
 
@@ -32,6 +32,8 @@ install -m 0755 "$ROOT/core/node.py" "$HOME/.local/share/future-crash-look/core/
 install -m 0644 "$ROOT/core/fabric_packet.py" "$HOME/.local/share/future-crash-look/core/fabric_packet.py"
 install -m 0644 "$ROOT/core/fabric_client.py" "$HOME/.local/share/future-crash-look/core/fabric_client.py"
 install -m 0755 "$ROOT/core/fcl-node" "$HOME/.local/bin/fcl-node"
+install -m 0755 "$ROOT/core/ingress.py" "$HOME/.local/share/future-crash-look/core/ingress.py"
+install -m 0755 "$ROOT/core/fcl-ingress" "$HOME/.local/bin/fcl-ingress"
 install -m 0644 "$ROOT/VERSION" "$HOME/.local/share/future-crash-look/RELEASE"
 
 # Signal is an interface over the same node. Its installer owns platform service edges.
@@ -43,28 +45,32 @@ OS="$(uname -s)"
 if [[ "$OS" == "Linux" ]] && command -v systemctl >/dev/null 2>&1; then
   mkdir -p "$HOME/.config/systemd/user"
   install -m 0644 "$ROOT/core/future-crash-look-node.service" "$HOME/.config/systemd/user/future-crash-look-node.service"
+  install -m 0644 "$ROOT/core/future-crash-look-ingress.service" "$HOME/.config/systemd/user/future-crash-look-ingress.service"
   systemctl --user daemon-reload
-  systemctl --user enable future-crash-look-node.service >/dev/null 2>&1 || true
+  systemctl --user enable future-crash-look-node.service future-crash-look-ingress.service >/dev/null 2>&1 || true
   systemctl --user restart future-crash-look-node.service || systemctl --user start future-crash-look-node.service || true
+  systemctl --user restart future-crash-look-ingress.service || systemctl --user start future-crash-look-ingress.service || true
 elif [[ "$OS" == "Darwin" ]] && command -v launchctl >/dev/null 2>&1; then
   mkdir -p "$HOME/Library/LaunchAgents"
   sed "s|__HOME__|$HOME|g" "$ROOT/core/com.futurecrash.look.node.plist" > "$HOME/Library/LaunchAgents/com.futurecrash.look.node.plist"
+  sed "s|__HOME__|$HOME|g" "$ROOT/core/com.futurecrash.look.ingress.plist" > "$HOME/Library/LaunchAgents/com.futurecrash.look.ingress.plist"
+  launchctl bootout "gui/$(id -u)/com.futurecrash.look.ingress" >/dev/null 2>&1 || true
   launchctl bootout "gui/$(id -u)/com.futurecrash.look.node" >/dev/null 2>&1 || true
   launchctl bootstrap "gui/$(id -u)" "$HOME/Library/LaunchAgents/com.futurecrash.look.node.plist" || true
+  launchctl bootstrap "gui/$(id -u)" "$HOME/Library/LaunchAgents/com.futurecrash.look.ingress.plist" || true
 else
   echo "Node installed; start with: fcl-node serve"
 fi
 
-# Keep local control traffic and Tailscale ingress on separate kernel accept queues.
-# Public Fabric remains https://<node>:7332; Tailscale proxies that to localhost:7333.
-# Reconcile the backend every install instead of merely checking that :7332 exists,
-# because an older :7332 -> :7332 route recreates the saturation bug.
+# Keep Tailscale ingress in a different PROCESS, not merely a second socket in the
+# node process. fcl-ingress bounds remote concurrency before relaying to localhost.
+# Public Fabric remains https://<node>:7332; Tailscale targets localhost:7333.
 if command -v tailscale >/dev/null 2>&1; then
   TAILSCALE_BACKEND="http://127.0.0.1:7333"
   if tailscale serve --bg --https=7332 "$TAILSCALE_BACKEND" >/dev/null 2>&1; then
-    echo "  Tailscale node API: :7332 → isolated ingress :7333"
+    echo "  Tailscale node API: :7332 → guarded ingress process :7333"
   elif command -v sudo >/dev/null 2>&1 && sudo -n true >/dev/null 2>&1 && sudo -n tailscale serve --bg --https=7332 "$TAILSCALE_BACKEND" >/dev/null 2>&1; then
-    echo "  Tailscale node API: :7332 → isolated ingress :7333"
+    echo "  Tailscale node API: :7332 → guarded ingress process :7333"
   else
     echo "  Tailscale node API: backend could not be reconciled automatically"
     echo "    run once: sudo tailscale serve --bg --https=7332 http://127.0.0.1:7333"
@@ -83,12 +89,13 @@ if (( ! NODE_READY )); then
   exit 5
 fi
 if ! python3 - <<'PY_CHECK' >/dev/null 2>&1
-import socket
-with socket.create_connection(("127.0.0.1",7333),1.0):
-    pass
+import json, urllib.request
+with urllib.request.urlopen("http://127.0.0.1:7333/_fcl/metrics", timeout=1.0) as response:
+    data = json.loads(response.read() or b"{}")
+    assert data.get("ok") is True
 PY_CHECK
 then
-  echo "INSTALL ERROR: isolated Fabric ingress did not become ready on localhost :7333" >&2
+  echo "INSTALL ERROR: Fabric ingress guard did not become ready on localhost :7333" >&2
   exit 5
 fi
 
@@ -103,6 +110,10 @@ if ! cmp -s "$ROOT/look/lk" "$HOME/.local/share/look/lk"; then
 fi
 if ! cmp -s "$ROOT/core/node.py" "$HOME/.local/share/future-crash-look/core/node.py"; then
   echo "INSTALL ERROR: installed node does not match this checkout" >&2
+  exit 5
+fi
+if ! cmp -s "$ROOT/core/ingress.py" "$HOME/.local/share/future-crash-look/core/ingress.py"; then
+  echo "INSTALL ERROR: installed ingress guard does not match this checkout" >&2
   exit 5
 fi
 if ! cmp -s "$ROOT/core/fabric_client.py" "$HOME/.local/share/future-crash-look/core/fabric_client.py"; then
@@ -124,6 +135,6 @@ echo "  fcl-node fabric     # human view of the compute fabric"
 echo "  fcl-node models     # model capability advertisements"
 echo "  fcl-node pulse      # shared heartbeat"
 echo "  fcl-node activity   # supervisor truth"
-echo "  fcl-node http       # local/ingress HTTP pressure"
+echo "  fcl-node http       # local + guarded-ingress HTTP pressure"
 echo "  fcl-node nodes      # peers + node advertisements"
 echo "  fcl-node jobs       # durable Fabric work ledger"
