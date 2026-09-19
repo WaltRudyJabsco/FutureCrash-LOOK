@@ -1,5 +1,10 @@
 # Changelog
 
+## 4.43.2
+- WEATHER location resolution now happens deterministically before model inference.
+- Reuses the most recent explicit weather location from ephemeral interface history and supports operator-owned default location via `LOOK_WEATHER_LOCATION` / `LO_WEATHER_LOCATION`.
+- Canonicalizes US state abbreviations for geocoding and distinguishes missing-location questions from provider failures.
+
 ## 4.43.1
 - WEATHER preflight retries one transient read failure before giving up, while preserving fail-closed receipts and no blind retries for mutations.
 - Dashboard Fabric light hotkeys use the daemon control plane, matching the CLI broadcast path.

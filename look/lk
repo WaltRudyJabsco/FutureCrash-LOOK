@@ -5982,12 +5982,40 @@ def _lo_requires_weather(prompt):
         text,
     ))
 
-def _lo_weather_location(prompt):
-    """Extract an explicit place for the deterministic WEATHER fast path.
+_US_STATE_ABBREVIATIONS={
+    "AL":"Alabama","AK":"Alaska","AZ":"Arizona","AR":"Arkansas","CA":"California",
+    "CO":"Colorado","CT":"Connecticut","DE":"Delaware","FL":"Florida","GA":"Georgia",
+    "HI":"Hawaii","ID":"Idaho","IL":"Illinois","IN":"Indiana","IA":"Iowa",
+    "KS":"Kansas","KY":"Kentucky","LA":"Louisiana","ME":"Maine","MD":"Maryland",
+    "MA":"Massachusetts","MI":"Michigan","MN":"Minnesota","MS":"Mississippi","MO":"Missouri",
+    "MT":"Montana","NE":"Nebraska","NV":"Nevada","NH":"New Hampshire","NJ":"New Jersey",
+    "NM":"New Mexico","NY":"New York","NC":"North Carolina","ND":"North Dakota","OH":"Ohio",
+    "OK":"Oklahoma","OR":"Oregon","PA":"Pennsylvania","RI":"Rhode Island","SC":"South Carolina",
+    "SD":"South Dakota","TN":"Tennessee","TX":"Texas","UT":"Utah","VT":"Vermont",
+    "VA":"Virginia","WA":"Washington","WV":"West Virginia","WI":"Wisconsin","WY":"Wyoming",
+    "DC":"District of Columbia",
+}
 
-    Deliberately conservative: if the user did not name a place, LO leaves the
-    turn to normal tool planning rather than guessing a location.
+def _normalize_weather_location(location):
+    """Canonicalize human shorthand before sending it to geocoding.
+
+    Open-Meteo geocoding is much happier with ``Portland, Oregon`` than the
+    speech-shaped ``portland or``.  Only unambiguous US state suffixes are
+    expanded; everything else is preserved rather than guessed.
     """
+    place=" ".join(str(location or "").strip().split()).strip(" \t,.;:?!")
+    if not place:
+        return ""
+    match=re.match(r"^(.+?)(?:,|\s)\s*([A-Za-z]{2})$",place)
+    if match:
+        state=_US_STATE_ABBREVIATIONS.get(match.group(2).upper())
+        if state:
+            city=match.group(1).strip(" \t,")
+            return f"{city}, {state}"
+    return place
+
+def _lo_weather_location(prompt):
+    """Extract and canonicalize an explicit place for deterministic WEATHER."""
     text=" ".join(str(prompt or "").strip().split())
     if not text or not _lo_requires_weather(text):
         return None
@@ -6001,9 +6029,25 @@ def _lo_weather_location(prompt):
             continue
         place=match.group(1).strip(" \t,.;:?!")
         place=re.sub(r"\s+(?:today|tonight|tomorrow|this morning|this afternoon|this evening)$","",place,flags=re.I).strip()
+        place=_normalize_weather_location(place)
         if 1 <= len(place) <= 96:
             return place
     return None
+
+def _lo_weather_history_location(history):
+    """Recover the most recent explicit weather place from ephemeral chat history."""
+    for prior in reversed(list(history or [])[-12:]):
+        if not isinstance(prior,dict) or str(prior.get("role") or "").lower()!="user":
+            continue
+        place=_lo_weather_location(prior.get("content",""))
+        if place:
+            return place
+    return None
+
+def _lo_weather_default_location():
+    """Optional operator-owned default; never infer geographic location from the model."""
+    configured=os.environ.get("LOOK_WEATHER_LOCATION") or os.environ.get("LO_WEATHER_LOCATION") or ""
+    return _normalize_weather_location(configured) or None
 
 def _lo_weather_only_query(prompt):
     """True when WEATHER grounding is the only operational edge this turn needs."""
@@ -7672,7 +7716,7 @@ def _run_filesystem_tool_impl(workspace, name, args, profile="workspace"):
         return f"File tool internal error: {type(exc).__name__}: {exc}"
     return f"Unknown file tool: {name}"
 
-LOOK_INFO_USER_AGENT="LOOK-Shell/4.43.1 (local text client)"
+LOOK_INFO_USER_AGENT="LOOK-Shell/4.43.2 (local text client)"
 
 def _run_filesystem_tool(workspace, name, args, profile="workspace"):
     global _FILESYSTEM_ACCESS_PROFILE
@@ -9023,11 +9067,39 @@ def ollama_chat(force_search=False, initial_prompt=None, allow_start=True, host_
         tool_refusal_repair_sent=False
         host_repair_final=False
 
-        # Deterministic live edges should not spend an LLM round deciding to call
-        # the obvious tool.  When a weather question names its location, obtain
-        # the canonical receipt first and let the model do only the human-facing
-        # phrasing. Ambiguous-location weather still uses normal model planning.
-        weather_location=_lo_weather_location(prompt) if weather_required else None
+        # Resolve WEATHER location before inference. Explicit wording wins, then
+        # ephemeral conversation history, then an operator-owned default. The
+        # host never asks the language model to invent the user's location.
+        weather_location=None
+        weather_location_source=None
+        if weather_required:
+            weather_location=_lo_weather_location(prompt)
+            weather_location_source="explicit" if weather_location else None
+            if not weather_location:
+                weather_location=_lo_weather_history_location(conversation_history)
+                weather_location_source="session" if weather_location else None
+            if not weather_location:
+                weather_location=_lo_weather_default_location()
+                weather_location_source="configured" if weather_location else None
+            if weather_location and events:
+                events.emit("weather_location", location=weather_location, source=weather_location_source)
+
+        # An unresolved location is not a provider failure. Ask one small useful
+        # question instead of running a doomed model/tool round and later claiming
+        # that WEATHER itself failed.
+        if weather_required and not weather_location:
+            answer="Which location should I use for the weather?"
+            print("\n"+_lo_label("lo","35")+"\n"+_ollama_markup(answer)+"\n")
+            if events:
+                events.emit("weather_location_required")
+                events.emit("response", text=answer)
+                events.emit("request_done", status="needs_input", rounds=0, tool_calls=0,
+                            prompt_tokens=0, output_tokens=0, load_ms=0)
+            _ai_foreground(False,"lo")
+            if one_shot:
+                return 0
+            continue
+
         if weather_location:
             tool_started=time.monotonic()
             if events: events.emit("tool_start", tool="weather", mode="preflight")

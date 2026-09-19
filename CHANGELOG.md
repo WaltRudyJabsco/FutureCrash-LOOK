@@ -1,5 +1,11 @@
 # Changelog
 
+## 5.1.2 — Weather Edge
+- WEATHER resolves location deterministically before inference: explicit place → recent explicit weather place in the browser/session → optional `LOOK_WEATHER_LOCATION` / `LO_WEATHER_LOCATION`.
+- US state shorthand is canonicalized before Open-Meteo geocoding (`portland or` → `portland, Oregon`).
+- Missing location is reported as a location question, not mislabeled as a failed WEATHER receipt.
+- Existing fail-closed live receipts and bounded transient retry remain intact.
+
 ## 5.1.1 — Fabric Show Reliability
 - Dashboard `b` and `l` now call the node daemon control plane instead of creating a dashboard-local show, so the same canonical broadcast reaches peer dashboards and attached Signal browsers.
 - WEATHER preflight gets one bounded retry for transient failures because the edge is read-only and idempotent; mutation tools remain non-retrying by default.
