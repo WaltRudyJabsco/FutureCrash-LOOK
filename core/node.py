@@ -11,6 +11,7 @@ import sys
 import json
 import os
 import platform
+import random
 import shutil
 import socket
 import subprocess
@@ -29,11 +30,15 @@ except ImportError:
     from fabric_packet import ArtifactStore, FabricStore, normalize_packet, packet_summary, new_id
 from urllib.parse import urlparse, parse_qs
 
-VERSION = "4.6.6"
+VERSION = "4.6.7"
 DEFAULT_HOST = "127.0.0.1"
 DEFAULT_PORT = 7332
 PULSE_SECONDS = 1.0
-PEER_REFRESH_SECONDS = 5.0
+PEER_REFRESH_SECONDS = 30.0
+PEER_NODE_REFRESH_SECONDS = 20.0
+PEER_UNKNOWN_BACKOFF_SECONDS = 180.0
+PEER_FAILURE_BACKOFF_MAX_SECONDS = 300.0
+WATCH_PEER_REFRESH_SECONDS = 3.0
 MODEL_REFRESH_SECONDS = 15.0
 QUALIFY_RECHECK_SECONDS = 24 * 60 * 60
 QUALIFY_IDLE_SECONDS = 20.0
@@ -52,6 +57,8 @@ ARTIFACTS = ArtifactStore(ARTIFACT_ROOT)
 WORKER_HEALTH = {"alive": False, "last_loop": 0.0, "last_error": None, "errors": 0}
 IDENTITY_LOCK = threading.RLock()
 IDENTITY_CACHE = {"name": socket.gethostname(), "hostname": socket.gethostname(), "tailscale": {}}
+ADVERTISEMENT_LOCK = threading.RLock()
+ADVERTISEMENT_CACHE = {}
 
 
 
@@ -95,7 +102,7 @@ def binary(name: str) -> str | None:
 def http_json(url: str, data=None, timeout: float = 2.0):
     body = None if data is None else json.dumps(data).encode()
     req = urllib.request.Request(url, data=body,
-        headers={"Content-Type": "application/json"} if body else {})
+        headers={"Content-Type": "application/json", "Connection": "close", "User-Agent": f"FCLNode/{VERSION}"} if body else {"Connection": "close", "User-Agent": f"FCLNode/{VERSION}"})
     with urllib.request.urlopen(req, timeout=timeout) as r:
         return json.loads(r.read() or b"{}")
 
@@ -389,31 +396,53 @@ def peer_rows():
 
 
 class PeerRegistry:
+    """Slow, bounded peer discovery. The pulse is not a network poll."""
     def __init__(self):
         self.lock = threading.RLock()
         self.rows = []
         self.last_refresh = 0.0
+        self.state = {}
 
     def refresh(self):
         rows = peer_rows()
+        t = now()
         enriched = []
         for p in rows:
+            key = p.get("dns") or p.get("name")
+            prior = dict(self.state.get(key) or {})
             q = dict(p)
-            q["node"] = None
-            if p["online"] and p["dns"]:
+            q["node"] = prior.get("node")
+            q["node_seen_at"] = prior.get("node_seen_at")
+            q["node_error"] = prior.get("error")
+            next_due = float(prior.get("next_due") or 0)
+            if p["online"] and p["dns"] and t >= next_due:
                 try:
-                    # Published node APIs use Tailscale HTTPS. Failure simply means the
-                    # peer is not yet a Future Crash node or has no :7332 publication.
-                    q["node"] = http_json(f"https://{p['dns']}:7332/v1/advertisement", timeout=.7)
-                except Exception:
-                    pass
+                    ad = http_json(f"https://{p['dns']}:7332/v1/advertisement", timeout=.7)
+                    q["node"] = ad
+                    q["node_seen_at"] = t
+                    q["node_error"] = None
+                    prior.update(node=ad, node_seen_at=t, error=None, failures=0,
+                                 next_due=t + PEER_NODE_REFRESH_SECONDS + random.uniform(0, 3.0))
+                except Exception as exc:
+                    failures = int(prior.get("failures") or 0) + 1
+                    known = bool(prior.get("node"))
+                    base = PEER_NODE_REFRESH_SECONDS if known else PEER_UNKNOWN_BACKOFF_SECONDS
+                    backoff = min(PEER_FAILURE_BACKOFF_MAX_SECONDS, base * (2 ** min(failures - 1, 3)))
+                    prior.update(error=str(exc), failures=failures,
+                                 next_due=t + backoff + random.uniform(0, 5.0))
+                    q["node_error"] = str(exc)
+            elif not p["online"]:
+                prior["next_due"] = t + PEER_UNKNOWN_BACKOFF_SECONDS
+            self.state[key] = prior
             enriched.append(q)
+        live_keys = {p.get("dns") or p.get("name") for p in rows}
+        self.state = {k:v for k,v in self.state.items() if k in live_keys}
         with self.lock:
-            self.rows, self.last_refresh = enriched, now()
+            self.rows, self.last_refresh = enriched, t
 
     def public(self):
         with self.lock:
-            return list(self.rows)
+            return [dict(r) for r in self.rows]
 
 
 PEERS = PeerRegistry()
@@ -429,15 +458,10 @@ def _node_preferred_model(models):
     return preferred if preferred in names else None
 
 
-def advertisement():
+def _build_advertisement():
+    """Build the complete routing advertisement off the HTTP request path."""
     ident = identity()
-    # Advertisement is on the routing hot path.  Use the last completed model
-    # snapshot; pulse_loop owns refresh work in the background.
     models = MODELS.snapshot()
-    # Routing must never synchronously touch SQLite.  A deep database check can
-    # wait behind SQLite's busy timeout; /v1/nodes is the control plane and must
-    # stay cheap.  The worker heartbeat is our hot-path evidence that the ledger
-    # was usable on its most recent loop.  /health still performs the deep check.
     worker_age = max(0.0, now() - float(WORKER_HEALTH.get("last_loop") or 0))
     worker_ok = bool(WORKER_HEALTH.get("alive")) and worker_age < 3.0
     database_ok = worker_ok and not bool(WORKER_HEALTH.get("last_error"))
@@ -455,11 +479,27 @@ def advertisement():
             "available": bool(models),
             "models": models,
             "resident": [m["name"] for m in models if m.get("resident")],
-            # Machine-local preference is node state, not a network-global model setting.
             "preferred_model": _node_preferred_model(models),
         },
         "supervisor": SUP.status(),
     }
+
+def refresh_advertisement():
+    ad = _build_advertisement()
+    with ADVERTISEMENT_LOCK:
+        ADVERTISEMENT_CACHE.clear()
+        ADVERTISEMENT_CACHE.update(ad)
+    return ad
+
+def advertisement():
+    """Return an atomic, already-built control-plane snapshot."""
+    with ADVERTISEMENT_LOCK:
+        if ADVERTISEMENT_CACHE:
+            ad = dict(ADVERTISEMENT_CACHE)
+            ad["pulse"] = {"epoch": "unix-1s-v1", "number": pulse_number(),
+                           "period_ms": int(PULSE_SECONDS*1000)}
+            return ad
+    return refresh_advertisement()
 
 
 def node_info():
@@ -585,18 +625,21 @@ def background_qualifier():
 
 
 def pulse_loop():
+    # Pulse is a local reconciliation clock, not a network poll. Network identity
+    # and peer advertisements refresh on a slower cadence with jitter/backoff.
     last_peer = 0.0
-    # Warm the cached network identity here rather than in an HTTP request.
     refresh_identity()
+    MODELS.discover()
+    refresh_advertisement()
     while True:
         SUP.reconcile()
         MODELS.discover()
+        refresh_advertisement()
         if now() - last_peer >= PEER_REFRESH_SECONDS:
             refresh_identity()
+            refresh_advertisement()
             PEERS.refresh()
-            last_peer = now()
-        # Align approximately to the next shared wall-clock beat without making work
-        # wait for it. Events and jobs remain immediate.
+            last_peer = now() + random.uniform(0, 4.0)
         delay = PULSE_SECONDS - (now() % PULSE_SECONDS)
         time.sleep(max(.05, delay))
 
@@ -1049,8 +1092,17 @@ def _stream_model_infer(handler, raw):
         raise
 
 
+class FabricHTTPServer(ThreadingHTTPServer):
+    # Defense in depth: transient Tailscale bursts must not fill the default
+    # five-slot kernel backlog. Request threads do not block service shutdown.
+    request_queue_size = 128
+    daemon_threads = True
+    block_on_close = False
+    allow_reuse_address = True
+
+
 class API(BaseHTTPRequestHandler):
-    server_version = "FCLNode/4.6.6"
+    server_version = "FCLNode/4.6.7"
 
     def log_message(self, *a):
         pass
@@ -1060,6 +1112,7 @@ class API(BaseHTTPRequestHandler):
         self.send_response(code)
         self.send_header("Content-Type", "application/json")
         self.send_header("Content-Length", str(len(b)))
+        self.send_header("Connection", "close")
         self.end_headers()
         self.wfile.write(b)
 
@@ -1320,6 +1373,7 @@ def _print_models(data, target="local"):
 
 def _watch(host,port,interval=1.0):
     cursors = {}
+    next_peer_poll = {}
     live_events = []
     try:
         while True:
@@ -1328,7 +1382,13 @@ def _watch(host,port,interval=1.0):
             for peer in snap.get("peers") or []:
                 if peer.get("node") and peer.get("dns"):
                     sources.append((peer.get("name") or "peer",f"https://{peer['dns']}:7332"))
+            tnow = now()
             for name,base in sources:
+                remote = base.startswith("https://")
+                if remote and tnow < float(next_peer_poll.get(name) or 0):
+                    continue
+                if remote:
+                    next_peer_poll[name] = tnow + WATCH_PEER_REFRESH_SECONDS
                 try:
                     data=http_json(f"{base}/v1/events?since={cursors.get(name,0)}",timeout=.8)
                     events=data.get("events") or []
@@ -1337,7 +1397,8 @@ def _watch(host,port,interval=1.0):
                         for e in events:
                             e=dict(e); e["source"]=name; live_events.append(e)
                 except Exception:
-                    pass
+                    if remote:
+                        next_peer_poll[name] = tnow + max(5.0, WATCH_PEER_REFRESH_SECONDS * 2)
             live_events=sorted(live_events,key=lambda e:float(e.get("ts") or 0))[-14:]
             print("\033[2J\033[H",end="")
             print_fabric_snapshot(snap)
@@ -1492,7 +1553,7 @@ def main():
     threading.Thread(target=background_qualifier,name="model-qualifier",daemon=True).start()
     threading.Thread(target=job_worker_loop,name="fabric-jobs",daemon=True).start()
     JOB_WAKE.set()
-    srv=ThreadingHTTPServer((a.host,a.port),API)
+    srv=FabricHTTPServer((a.host,a.port),API)
     print(f"Future Crash + LOOK node {VERSION} · http://{a.host}:{a.port} · pulse {PULSE_SECONDS:g}s",flush=True)
     try: srv.serve_forever(poll_interval=.2)
     except KeyboardInterrupt: pass

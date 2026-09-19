@@ -1,6 +1,6 @@
-# Future Crash + LOOK 4.6.6
+# Future Crash + LOOK 4.6.7
 
-**Fabric routing hotfix.** The node control plane now stays responsive while Ollama model discovery refreshes in the background, preventing intermittent Signal-spawned LO route-selection timeouts. Signal contention and worker failover fixes from 4.6.3 remain intact.
+**Fabric control-plane pressure fix.** Peer discovery is now slow, cached, jittered and backed off; routing endpoints are in-memory snapshots; and transient Tailscale Serve bursts no longer depend on the default five-connection listen backlog. The Fabric pulse remains a local reconciliation clock rather than a network polling loop.
 
 # Future Crash + LOOK 4.5.0 — Fabric Packets
 

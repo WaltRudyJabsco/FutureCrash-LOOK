@@ -1,3 +1,12 @@
+# 4.6.7 — Fabric Control-Plane Pressure Fix
+
+- Stops treating the one-second Fabric pulse as a reason to poll peers. Peer advertisements now refresh on a slow cadence with per-peer jitter and exponential backoff.
+- Caches the complete local routing advertisement in memory. `/v1/advertisement` and `/v1/nodes` now serve snapshots rather than probing services or rebuilding routing state on demand.
+- Adds explicit `Connection: close` to tiny control-plane HTTP requests/responses so abandoned proxy connections do not accumulate behind Tailscale Serve.
+- Hardens the node HTTP listener with a 128-connection backlog and daemon request threads as defense in depth against transient proxy bursts.
+- Throttles remote event polling in `lk fabric watch` while keeping the local display refresh responsive.
+- Preserves deep `/health` diagnostics separately from cheap routing state.
+
 # 4.6.6 — Fabric Control-Plane Hotfix
 
 - Keeps `/v1/nodes` off slow Tailscale subprocess and SQLite health-check paths.
