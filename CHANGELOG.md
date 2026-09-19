@@ -1,3 +1,10 @@
+## 4.9.0 — Reflex Conductor
+
+- Added a zero-I/O deterministic conductor that classifies turns as reflex, balanced, or deep before placement.
+- Fabric routing now combines hard capability filtering with residency, live load, measured qualification TTFT/tok-s, locality, model size, and work class.
+- LO emits truthful `conductor` events and keeps the chosen worker/model sticky for the rest of the turn.
+- Reflex work favors small warm models; deep/code/vision work favors capable larger models without adding an extra LLM round-trip.
+
 # 4.8.0 — Fabric Dashboard
 
 - Adds `lk dash`, a terminal-native Fabric operational cockpit built entirely over the existing node APIs.

@@ -7,6 +7,11 @@ result waiting. It deliberately contains no application semantics.
 from __future__ import annotations
 import json, time, urllib.request, urllib.error, uuid
 
+try:
+    from conductor import classify as _classify_work, last_user_text as _last_user_text
+except ImportError:
+    from .conductor import classify as _classify_work, last_user_text as _last_user_text
+
 DEFAULT_NODE = "http://127.0.0.1:7332"
 
 def _json(url, payload=None, timeout=5.0):
@@ -38,7 +43,17 @@ def _find_target(snapshot, target):
     return None,{}
 
 
-def _choose_from_snapshot(snapshot, *, model=None, requires=None, latency=False, exclude=None):
+def _model_expected_ms(model, tier="balanced"):
+    q=(model.get("qualification") or {})
+    ttft=float(q.get("ttft_ms") or 900.0)
+    tok=float(q.get("generation_tok_s") or 0.0)
+    # Qualification evidence is intentionally modest.  It nudges placement but
+    # never overrides hard capability requirements or availability.
+    expected_tokens={"reflex":32.0,"balanced":120.0,"deep":320.0}.get(tier,120.0)
+    generation=(expected_tokens/tok*1000.0) if tok>0 else 1200.0
+    return ttft+generation
+
+def _choose_from_snapshot(snapshot, *, model=None, requires=None, latency=False, exclude=None, tier="balanced"):
     scored=[]
     requires=set(requires or ["text"])
     excluded=set(exclude or [])
@@ -59,12 +74,26 @@ def _choose_from_snapshot(snapshot, *, model=None, requires=None, latency=False,
             eligible.append(m)
         if not eligible: continue
         active=(ad.get("supervisor") or {}).get("active")
-        resident=any(m.get("resident") for m in eligible)
-        smallest=min(int(m.get("size") or 10**18) for m in eligible)
-        # Availability dominates. Warmth dominates transfer/load cost. For reflex work,
-        # smaller models break ties; otherwise locality is a mild preference.
-        score=(0 if not active else 1000) + (0 if resident else 100) + (smallest/1e9 if latency else 0) + (0 if dns is None else 1)
-        scored.append((score,name,dns,eligible))
+        preferred=inf.get("preferred_model")
+        for m in eligible:
+            resident=bool(m.get("resident"))
+            size=float(m.get("size") or 10**12)
+            expected=_model_expected_ms(m,tier)
+            busy_penalty=100000.0 if active else 0.0
+            cold_penalty=5000.0 if not resident else 0.0
+            network_penalty=120.0 if dns is not None else 0.0
+            preferred_bonus=-150.0 if m.get("name")==preferred else 0.0
+            # Reflex work strongly rewards small/warm/fast. Deep work rewards model
+            # capacity after capability filtering. Balanced work lets measurements,
+            # warmth and the user's preferred model dominate.
+            if tier=="reflex":
+                policy=(size/1e9)*35.0
+            elif tier=="deep":
+                policy=-(size/1e9)*35.0
+            else:
+                policy=(size/1e9)*3.0
+            score=busy_penalty+cold_penalty+network_penalty+expected+preferred_bonus+policy
+            scored.append((score,name,dns,[m]))
     if not scored: raise RuntimeError("Fabric has no worker satisfying this inference request")
     scored.sort(key=lambda x:x[0])
     return scored[0]
@@ -73,7 +102,7 @@ def _choose_from_snapshot(snapshot, *, model=None, requires=None, latency=False,
 def choose_node(base=DEFAULT_NODE, *, model=None, requires=None, latency=False, exclude=None):
     """Choose a worker from one atomic routing snapshot."""
     return _choose_from_snapshot(_nodes(base), model=model, requires=requires,
-                                 latency=latency, exclude=exclude)
+                                 latency=latency, exclude=exclude, tier=("reflex" if latency else "balanced"))
 
 
 def _ad_for_target(base, target, snapshot=None):
@@ -84,7 +113,8 @@ def _ad_for_target(base, target, snapshot=None):
 def infer(messages, *, model=None, requires=None, latency=False, priority="interactive",
           think=False, options=None, timeout=90, base=DEFAULT_NODE, owner="app"):
     snap=_nodes(base)
-    score,target,dns,eligible=_choose_from_snapshot(snap,model=model,requires=requires,latency=latency)
+    tier="reflex" if latency else "balanced"
+    score,target,dns,eligible=_choose_from_snapshot(snap,model=model,requires=requires,latency=latency,tier=tier)
     ad=_ad_for_target(base,target,snapshot=snap)
     chosen=model
     if not chosen:
@@ -105,7 +135,7 @@ def infer(messages, *, model=None, requires=None, latency=False, priority="inter
       "context":{},
       "execution":{"priority":priority,"cancellable":True,"budget":{"wall_ms":int(timeout*1000)+5000,"child_jobs":0,"depth":0}},
       "authority":{"principal":"user","grants":["model.infer"],"confirmed_operations":[]},
-      "delivery":{"target":target},"provenance":{},"extensions":{"futurecrash":{"owner":owner}},
+      "delivery":{"target":target},"provenance":{},"extensions":{"futurecrash":{"owner":owner,"work_class":tier}},
     }
     # Submit work to the selected worker. delivery.target is descriptive/provenance;
     # transport placement must be real rather than relying on the origin node to
@@ -127,7 +157,7 @@ def infer(messages, *, model=None, requires=None, latency=False, priority="inter
     raise TimeoutError(f"Fabric inference timed out on {target}")
 
 def stream_infer(payload, *, requires=None, priority="interactive", timeout=180,
-                 base=DEFAULT_NODE, owner="lo", route=None):
+                 base=DEFAULT_NODE, owner="lo", route=None, work_class=None):
     """Route a mature Ollama chat payload to Fabric and yield its JSONL stream.
 
     A healthy turn remains sticky to one worker/model. Before the first streamed
@@ -138,6 +168,10 @@ def stream_infer(payload, *, requires=None, priority="interactive", timeout=180,
 
     model=payload.get("model") or None
     reqs=set(requires or ["text"])
+    decision = work_class or _classify_work(_last_user_text(payload.get("messages")), requires=reqs,
+                                            has_images=any(bool(m.get("images")) for m in payload.get("messages",[]) if isinstance(m,dict)),
+                                            tool_count=len(payload.get("tools") or []))
+    tier = decision.get("tier","balanced") if isinstance(decision,dict) else decision.tier
     tried=set()
     max_attempts=3
 
@@ -165,7 +199,7 @@ def stream_infer(payload, *, requires=None, priority="interactive", timeout=180,
                     names={m.get("name") for m in eligible}
                     chosen=preferred if preferred in names else max(eligible,key=lambda m:int(m.get("size") or 0)).get("name")
                 return target,dns,chosen
-        _,target,dns,eligible=_choose_from_snapshot(snap,model=model,requires=reqs,latency=False,exclude=tried)
+        _,target,dns,eligible=_choose_from_snapshot(snap,model=model,requires=reqs,latency=(tier=="reflex"),exclude=tried,tier=tier)
         ad=_ad_for_target(base,target,snapshot=snap)
         chosen=model
         if not chosen:
@@ -193,11 +227,11 @@ def stream_infer(payload, *, requires=None, priority="interactive", timeout=180,
         packet={
           "fabric":"fwp/1","kind":"task","origin":owner,"relationships":{},
           "work":{"operation":"model.infer","objective":"stream conversational inference","input":inp},
-          "capabilities":{"requires":list(reqs),"prefers":{"latency":"normal"}},
+          "capabilities":{"requires":list(reqs),"prefers":{"latency":"low" if tier=="reflex" else "normal","work_class":tier}},
           "context":{},"execution":{"priority":priority,"cancellable":True,
             "budget":{"wall_ms":int(timeout*1000)+5000,"child_jobs":0,"depth":0}},
           "authority":{"principal":"user","grants":["model.infer"],"confirmed_operations":[]},
-          "delivery":{"target":target},"provenance":{},"extensions":{"futurecrash":{"owner":owner}},
+          "delivery":{"target":target},"provenance":{},"extensions":{"futurecrash":{"owner":owner,"work_class":tier}},
         }
         endpoint=(f"https://{dns}:7332" if dns else base.rstrip('/'))+"/v1/infer/stream"
         req=urllib.request.Request(endpoint,data=json.dumps({"packet":packet}).encode(),

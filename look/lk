@@ -19,7 +19,7 @@ try:
 except Exception:
     readline = None
 
-VERSION="4.40.0"
+VERSION="4.41.0"
 
 LOOK_WORDMARK = r"""       ██╗      ██╗  ██╗
        ██║      ██║ ██╔╝
@@ -8406,6 +8406,18 @@ def _fabric_client_module():
 def _fabric_stream_chat(payload_obj, events=None, route=None):
     """Yield Ollama-shaped events through Fabric, preserving LO's vision retries."""
     client=_fabric_client_module()
+    try:
+        from conductor import classify as _conductor_classify, last_user_text as _conductor_last_user
+        _req=["text"]
+        if payload_obj.get("tools"): _req.append("tools")
+        if payload_obj.get("think"): _req.append("thinking")
+        if _ollama_payload_has_images(payload_obj): _req.append("vision")
+        work_class=_conductor_classify(_conductor_last_user(payload_obj.get("messages")), requires=_req,
+                                       has_images=_ollama_payload_has_images(payload_obj),
+                                       tool_count=len(payload_obj.get("tools") or [])).public()
+        if events: events.emit("conductor", **work_class)
+    except Exception:
+        work_class={"tier":"balanced","reason":"classifier unavailable","latency_bias":True,"quality_bias":True}
     attempts=[dict(payload_obj)]
     if _ollama_payload_has_images(payload_obj):
         without_tools=dict(payload_obj); without_tools.pop("tools",None); attempts.append(without_tools)
@@ -8419,7 +8431,7 @@ def _fabric_stream_chat(payload_obj, events=None, route=None):
         if events: events.emit("fabric_route", requires=requires, retry=index)
         try:
             announced=False
-            for event in client.stream_infer(current,requires=requires,priority="interactive",timeout=OLLAMA_CHAT_TIMEOUT,owner="lo",route=route):
+            for event in client.stream_infer(current,requires=requires,priority="interactive",timeout=OLLAMA_CHAT_TIMEOUT,owner="lo",route=route,work_class=work_class):
                 if events and event.get("_fabric_node") and not announced:
                     events.emit("fabric_worker", node=event.get("_fabric_node")); announced=True
                 yield event
