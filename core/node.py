@@ -29,7 +29,7 @@ except ImportError:
     from fabric_packet import ArtifactStore, FabricStore, normalize_packet, packet_summary, new_id
 from urllib.parse import urlparse, parse_qs
 
-VERSION = "4.6.5"
+VERSION = "4.6.6"
 DEFAULT_HOST = "127.0.0.1"
 DEFAULT_PORT = 7332
 PULSE_SECONDS = 1.0
@@ -286,6 +286,16 @@ class ModelRegistry:
             return http_json("http://127.0.0.1:11434/api/show", {"model": name}, timeout=2)
         except Exception:
             return {}
+
+    def snapshot(self):
+        """Return the last completed model snapshot without doing Ollama I/O.
+
+        Interactive request paths must never synchronously walk /api/show across
+        every installed model. The pulse thread owns discovery; request handlers
+        consume its last known-good result.
+        """
+        with self.lock:
+            return list(self.cached)
 
     def discover(self, force=False):
         with self.lock:
@@ -953,7 +963,12 @@ def _stream_model_infer(handler, raw):
     attempt = FABRIC_STORE.start(job["id"], worker)
     inp = (packet.get("work") or {}).get("input") or {}
     model = str(inp.get("model") or "")
-    models = MODELS.discover(force=True)
+    # The pulse thread owns model discovery. Streaming inference consumes the
+    # last completed snapshot so starting a user request cannot synchronously
+    # walk Ollama metadata for every installed model.
+    models = MODELS.snapshot()
+    if not models:
+        models = MODELS.discover(force=False)
     if not model:
         model = _node_preferred_model(models) or ""
     if not model or model not in {str(m.get("name") or "") for m in models}:
@@ -973,7 +988,7 @@ def _stream_model_infer(handler, raw):
     upstream = urllib.request.Request("http://127.0.0.1:11434/api/chat", data=json.dumps(payload).encode(),
                                       headers={"Content-Type":"application/json"})
     timeout=max(5.0,min(300.0,float(inp.get("timeout") or 180)))
-    final={}; first=True; chunks=0
+    final={}; first=True; chunks=0; committed=False
     try:
         with urllib.request.urlopen(upstream, timeout=timeout) as r:
             handler.send_response(200)
@@ -982,10 +997,15 @@ def _stream_model_infer(handler, raw):
             handler.send_header("X-Fabric-Job",job["id"])
             handler.send_header("X-Fabric-Node",worker)
             handler.end_headers()
+            committed=True
             for line in r:
                 if FABRIC_STORE.cancelled(job["id"]): raise InterruptedError("cancelled")
                 if not line.strip(): continue
-                event=json.loads(line)
+                try:
+                    event=json.loads(line)
+                except Exception as exc:
+                    preview=line.decode("utf-8","replace").strip()[:160]
+                    raise RuntimeError(f"Ollama returned a non-JSON stream frame: {preview!r}") from exc
                 chunks += 1
                 fragment=event.get("message") or {}
                 if first and (fragment.get("content") or fragment.get("thinking") or fragment.get("tool_calls")):
@@ -997,6 +1017,8 @@ def _stream_model_infer(handler, raw):
                     SUP.progress(lease_id,"stream",f"{chunks} chunks")
                 handler.wfile.write(line); handler.wfile.flush()
                 if event.get("done"): final=event
+        if not final.get("done"):
+            raise RuntimeError("Ollama stream ended without a final done frame")
         data={"ok":True,"model":model,"message":{"role":"assistant"},
               "done_reason":final.get("done_reason"),"prompt_eval_count":final.get("prompt_eval_count"),
               "eval_count":final.get("eval_count"),"eval_duration":final.get("eval_duration"),
@@ -1011,11 +1033,24 @@ def _stream_model_infer(handler, raw):
     except Exception as exc:
         FABRIC_STORE.finish(job["id"],"failed",error=str(exc),node=worker)
         SUP.release(lease_id,"failed",str(exc))
+        if committed:
+            # Once HTTP 200/NDJSON headers are on the wire we cannot legally send
+            # a second HTTP response. Keep the stream framed as JSON so clients
+            # receive an explicit Fabric error instead of an HTTP status line in
+            # the NDJSON body (which previously surfaced as JSONDecodeError).
+            try:
+                frame={"done":True,"_fabric_error":True,"error":str(exc),
+                       "message":{"role":"assistant","content":""}}
+                handler.wfile.write((json.dumps(frame,separators=(",",":"))+"\n").encode())
+                handler.wfile.flush()
+            except (BrokenPipeError, ConnectionResetError, OSError):
+                pass
+            return
         raise
 
 
 class API(BaseHTTPRequestHandler):
-    server_version = "FCLNode/4.6.5"
+    server_version = "FCLNode/4.6.6"
 
     def log_message(self, *a):
         pass

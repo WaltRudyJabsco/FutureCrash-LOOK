@@ -189,11 +189,18 @@ def stream_infer(payload, *, requires=None, priority="interactive", timeout=180,
             with urllib.request.urlopen(req,timeout=timeout) as response:
                 node=response.headers.get("X-Fabric-Node") or target
                 for raw in response:
-                    if raw.strip():
-                        emitted=True
+                    if not raw.strip():
+                        continue
+                    try:
                         event=json.loads(raw)
-                        event["_fabric_node"]=node
-                        yield event
+                    except Exception as exc:
+                        preview=raw.decode("utf-8","replace").strip()[:160]
+                        raise RuntimeError(f"Fabric stream protocol error from {node}: non-JSON frame {preview!r}") from exc
+                    if event.get("_fabric_error"):
+                        raise RuntimeError(f"Fabric inference failed on {node}: {event.get('error') or 'stream failed'}")
+                    emitted=True
+                    event["_fabric_node"]=node
+                    yield event
             return
         except urllib.error.HTTPError as exc:
             detail=exc.read().decode("utf-8","replace")
