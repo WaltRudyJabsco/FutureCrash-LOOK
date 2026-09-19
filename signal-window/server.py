@@ -1,8 +1,10 @@
 #!/usr/bin/env python3
-"""Signal Window 0.9.0 — a tiny visual/text body for LO."""
+"""Signal Window 1.0.0 — a native browser body for LO."""
 from __future__ import annotations
 
 import argparse
+import importlib.machinery
+import importlib.util
 import base64
 import json
 import mimetypes
@@ -227,17 +229,50 @@ def look_inference_config(explicit_base=None, explicit_model=None):
     source["model"]=source["model"] or "fallback"
     return endpoint.rstrip("/"),model,source
 
-def find_lo(explicit=""):
-    candidates=[explicit, shutil.which("lo"), shutil.which("lk")]
-    home=Path.home()
-    candidates += [
-        str(home/".local/bin/lo"), str(home/".local/bin/lk"),
-        str(home/".look/bin/lo"), str(home/".look/bin/lk"),
+_LO_ENGINE=None
+_LO_ENGINE_LOCK=threading.Lock()
+
+def _lo_engine_path(explicit=""):
+    candidates=[
+        explicit,
+        str(Path.home()/".local/share/look/lo_engine.py"),
+        str(ROOT.parent/"look/lo_engine.py"),
     ]
-    for c in candidates:
-        if c and Path(c).exists():
-            return str(Path(c).resolve())
+    for candidate in candidates:
+        if candidate and Path(candidate).is_file():
+            return str(Path(candidate).resolve())
     return ""
+
+def load_lo_engine(explicit=""):
+    global _LO_ENGINE
+    with _LO_ENGINE_LOCK:
+        if _LO_ENGINE is not None:
+            return _LO_ENGINE
+        path=_lo_engine_path(explicit)
+        if not path:
+            raise RuntimeError("native LO engine not found; reinstall Future Crash + LOOK")
+        loader=importlib.machinery.SourceFileLoader("signal_native_lo_engine",path)
+        spec=importlib.util.spec_from_loader(loader.name,loader)
+        if spec is None:
+            raise RuntimeError(f"cannot load native LO engine: {path}")
+        module=importlib.util.module_from_spec(spec)
+        loader.exec_module(module)
+        _LO_ENGINE=module
+        return module
+
+def native_lo_chat(profile,prompt,cwd,selected_paths,history):
+    engine=load_lo_engine()
+    interface_context=(
+        "INTERFACE: Signal Window browser. Answer the operator normally and truthfully. "
+        "The 256x256 Signal field is a separate opportunistic visual-expression channel; do not claim a scene was drawn unless the interface reports it. "
+        "Do not invent telemetry such as latency, lock state, noise floor, or interference. "
+        "Current weather must use the canonical weather tool. Generated files/images are artifacts for the browser to present, not windows to open on the compute worker."
+    )
+    result=engine.chat_once(
+        prompt,profile=profile,workspace=cwd,selected_paths=selected_paths,
+        history=history,interface_context=interface_context,
+    )
+    return str(result.get("text") or "").strip(), list(result.get("events") or [])
 
 def strip_ansi(s):
     s=re.sub(r"\x1b\[[0-9;?]*[ -/]*[@-~]","",s)
@@ -490,6 +525,37 @@ def _present_get(token):
             _PRESENTED.pop(token,None); return None
     return path if path.is_file() else None
 
+_SESSIONS={}
+_SESSION_LOCK=threading.Lock()
+_SESSION_TTL=6*3600
+
+def _session_history(session_id):
+    if not session_id:
+        return []
+    now=time.time()
+    with _SESSION_LOCK:
+        for key,(t,_rows) in list(_SESSIONS.items()):
+            if now-t > _SESSION_TTL:
+                _SESSIONS.pop(key,None)
+        item=_SESSIONS.get(session_id)
+        return list(item[1]) if item else []
+
+def _session_append(session_id,user_text,assistant_text):
+    if not session_id:
+        return
+    with _SESSION_LOCK:
+        rows=list(_SESSIONS.get(session_id,(0,[]))[1])
+        if user_text:
+            rows.append({"role":"user","content":str(user_text)[:12000]})
+        if assistant_text:
+            rows.append({"role":"assistant","content":str(assistant_text)[:12000]})
+        _SESSIONS[session_id]=(time.time(),rows[-12:])
+
+def _session_clear(session_id):
+    if session_id:
+        with _SESSION_LOCK:
+            _SESSIONS.pop(session_id,None)
+
 class App(BaseHTTPRequestHandler):
     mode="lo"; lo_cmd=""; backend="http://127.0.0.1:11434"; model="qwen3:8b"; profile="workspace"
     gallery_dir=Path.home()/".local/share/signal-window/gallery"
@@ -508,8 +574,9 @@ class App(BaseHTTPRequestHandler):
             data=p.read_bytes()
             return self.send_bytes(200,data,mimetypes.guess_type(p.name)[0] or "application/octet-stream")
         if self.path=="/api/status":
-            lo_ok=bool(self.lo_cmd)
-            return self.json(200,{"mode":self.mode,"lo":lo_ok,"lo_cmd":self.lo_cmd,"profile":self.profile,
+            lo_engine=_lo_engine_path()
+            lo_ok=bool(lo_engine)
+            return self.json(200,{"mode":self.mode,"lo":lo_ok,"lo_engine":lo_engine,"profile":self.profile,
                 "backend":self.backend,"model":self.model,"busy":type(self).request_lock.locked(),"node_activity":node_activity(),
                 "lo_timeout":self.lo_timeout,"gallery":str(self.gallery_dir) if self.gallery_enabled else None,
                 **(probe_ollama(self.backend) if self.mode=="ollama" else {"ok":lo_ok})})
@@ -517,6 +584,13 @@ class App(BaseHTTPRequestHandler):
         if path not in ("index.html","app.js","style.css"): return self.json(404,{"error":"not found"})
         p=ROOT/path; self.send_bytes(200,p.read_bytes(),mimetypes.guess_type(p.name)[0] or "application/octet-stream")
     def do_POST(self):
+        if self.path=="/api/session/clear":
+            try:
+                n=int(self.headers.get("Content-Length","0")); d=json.loads(self.rfile.read(n) or b"{}")
+                _session_clear(str(d.get("session") or ""))
+                return self.json(200,{"ok":True})
+            except Exception as exc:
+                return self.json(400,{"error":str(exc)})
         if self.path=="/api/visual":
             try:
                 n=int(self.headers.get("Content-Length","0")); d=json.loads(self.rfile.read(n) or b"{}")
@@ -585,10 +659,11 @@ class App(BaseHTTPRequestHandler):
                 full=(prompt or "Work with the dropped resources.")+file_note
                 node_progress(lease_id,"planning","assembling LO request")
                 if self.mode=="lo":
-                    if not self.lo_cmd:
-                        raise RuntimeError("LO not found; install LOOK/LO or start with --mode ollama")
-                    node_progress(lease_id,"inference","LO working")
-                    text,lo_events=lo_chat(self.lo_cmd,self.profile,full,td,timeout=self.lo_timeout)
+                    node_progress(lease_id,"inference","LO native engine working")
+                    session_id=str(d.get("session") or "").strip()[:120]
+                    history=_session_history(session_id)
+                    text,lo_events=native_lo_chat(self.profile,full,td,paths,history)
+                    _session_append(session_id,prompt or full,text)
                 else:
                     direct_base,direct_model,_=look_inference_config(
                         self.ollama if getattr(self,"ollama_explicit",False) else None,
@@ -638,7 +713,7 @@ def main():
     ap.add_argument("--gallery-dir",default=str(Path.home()/".local/share/signal-window/gallery"))
     ap.add_argument("--no-gallery",action="store_true",help="disable automatic PNG/scene archive")
     a=ap.parse_args()
-    App.mode=a.mode; App.lo_cmd=find_lo(a.lo); App.profile=a.profile; App.lo_timeout=max(1.0,a.lo_timeout)
+    App.mode=a.mode; App.lo_cmd=_lo_engine_path(a.lo); App.profile=a.profile; App.lo_timeout=max(1.0,a.lo_timeout)
     App.gallery_dir=Path(a.gallery_dir).expanduser().resolve(); App.gallery_enabled=not a.no_gallery
     App.ollama_explicit=bool(a.ollama); App.model_explicit=bool(a.model)
     App.ollama=normalize_ollama_url(a.ollama) if a.ollama else None
@@ -646,10 +721,10 @@ def main():
     App.backend,default_model,_=look_inference_config(App.ollama,a.model)
     if not App.model: App.model=default_model
     if a.mode=="lo":
-        state=f"LO {a.profile} · "+(App.lo_cmd if App.lo_cmd else "NOT FOUND")
+        state=f"LO NATIVE {a.profile} · "+(App.lo_cmd if App.lo_cmd else "NOT FOUND")
     else:
         p=probe_ollama(App.backend); state=("connected" if p.get("ok") else "unreachable: "+p.get("error","unknown"))
-    print(f"Signal Window 0.9.0 · http://{a.host}:{a.port} · {state} · gallery {App.gallery_dir if App.gallery_enabled else 'off'}")
+    print(f"Signal Window 1.0.0 · http://{a.host}:{a.port} · {state} · gallery {App.gallery_dir if App.gallery_enabled else 'off'}")
     ThreadingHTTPServer((a.host,a.port),App).serve_forever()
 
 if __name__=="__main__": main()

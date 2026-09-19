@@ -1,6 +1,8 @@
 const N=256;
 const main=document.querySelector('main'),A=document.querySelector('#ambient'),a=A.getContext('2d'),C=document.querySelector('#signal'),c=C.getContext('2d');
 const log=document.querySelector('#log'),form=document.querySelector('#form'),input=document.querySelector('#input'),drops=document.querySelector('#drops'),statusEl=document.querySelector('#status'),activity=document.querySelector('#activity'),activityText=document.querySelector('#activityText');
+const signalSession=localStorage.getItem('signal-session')||crypto.randomUUID();
+localStorage.setItem('signal-session',signalSession);
 a.imageSmoothingEnabled=c.imageSmoothingEnabled=false;
 let files=[],energy=.22,mood='quiet',particles=[],artQuietUntil=0;
 let art={mode:'display',hold:75,fade:25,born:0,fadeStart:0,persist:false};
@@ -93,13 +95,13 @@ async function walk(entry,prefix=''){if(entry.isFile)return new Promise(r=>entry
 addEventListener('dragover',e=>{e.preventDefault();document.body.classList.add('drag')});addEventListener('dragleave',()=>document.body.classList.remove('drag'));addEventListener('drop',async e=>{e.preventDefault();document.body.classList.remove('drag');const out=[];for(const item of e.dataTransfer.items||[]){const en=item.webkitGetAsEntry?.();if(en)out.push(...await walk(en));else{const f=item.getAsFile?.();if(f)out.push(await fileObj(f))}}files=out.slice(0,20);chips();input.focus()});
 form.addEventListener('submit',async e=>{e.preventDefault();const text=input.value.trim();if(!text&&!files.length)return;line('user','› '+(text||`[${files.length} dropped item${files.length===1?'':'s'}]`));input.value='';const sent=files;files=[];chips();
  if(/^\/(help|lk)$/i.test(text)){line('assistant','Signal commands: /help · /clear · /status · /gallery. Everything else goes to LO.');return}
- if(/^\/clear$/i.test(text)){log.innerHTML='';c.clearRect(0,0,N,N);art.born=0;event('CLEARED');return}
+ if(/^\/clear$/i.test(text)){log.innerHTML='';c.clearRect(0,0,N,N);art.born=0;fetch('/api/session/clear',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({session:signalSession})}).catch(()=>{});event('CLEARED');return}
  if(/^\/status$/i.test(text)){status();line('system',statusEl.title||statusEl.textContent);return}
  if(/^\/gallery$/i.test(text)){try{const d=await(await fetch('/api/status')).json();line('system','Gallery: '+(d.gallery||'disabled'))}catch{line('system','Gallery unavailable')}return}
  energy=.65;event('LO REQUEST',true);
  // Visual expression is independent work: start it immediately instead of waiting behind LO.
  const visualPromise=text?fetch('/api/visual',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({text})}).then(r=>r.json()).catch(()=>null):Promise.resolve(null);
- try{const r=await fetch('/api/chat',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({text,files:sent,visual:false})});const d=await r.json();if(!r.ok||d.error)throw Error(d.error||r.statusText);if(d.text)line('assistant',d.text);if(Array.isArray(d.lo_events) && d.lo_events.length){
+ try{const r=await fetch('/api/chat',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({text,files:sent,visual:false,session:signalSession})});const d=await r.json();if(!r.ok||d.error)throw Error(d.error||r.statusText);if(d.text)line('assistant',d.text);if(Array.isArray(d.lo_events) && d.lo_events.length){
    for(const e of d.lo_events){
      const name=String(e.event||'').replaceAll('_',' ');
      if(!name)continue;

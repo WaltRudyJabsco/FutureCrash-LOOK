@@ -1,3 +1,14 @@
+# 4.7.0 — Signal Native LO
+
+- Replaces Signal's subprocess `lo --events-json` bridge with a reusable in-process LO engine. Human terminal output is no longer a machine protocol.
+- Adds `look/lo_engine.py`, a structured machine edge around the mature LO tool/inference loop. Signal consumes response/tool/inference events directly.
+- Adds bounded browser-session conversation history, so follow-ups such as “and in Los Angeles?” carry the prior turn without reconstructing a terminal session.
+- `/clear` now clears both the Signal canvas/log and the server-side ephemeral LO session.
+- Signal service recovers the configured Ollama web-search key without sourcing arbitrary shell startup code, giving the browser the same web capability when configured.
+- Adds Signal-specific interface truth: LO must not invent lock state, latency, noise floor, or other fake Signal telemetry.
+- Preserves Fabric-native inference, shared LO tools, browser artifact presentation, and opportunistic parallel Signal expression.
+- LOOK 4.39.0; Unified Node 4.7.0; Signal Window 1.0.0.
+
 # 4.6.7 — Fabric Control-Plane Pressure Fix
 
 - Stops treating the one-second Fabric pulse as a reason to poll peers. Peer advertisements now refresh on a slow cadence with per-peer jitter and exponential backoff.

@@ -18,7 +18,7 @@ try:
 except Exception:
     readline = None
 
-VERSION="4.38.7"
+VERSION="4.39.0"
 
 LOOK_WORDMARK = r"""       ██╗      ██╗  ██╗
        ██║      ██║ ██╔╝
@@ -8489,7 +8489,7 @@ def _lo_action_from_tool(name,args,result):
     path=str(args.get("path") or args.get("url") or "").strip()
     return {"tool":name,"args":dict(args),"path":path} if path else None
 
-def ollama_chat(force_search=False, initial_prompt=None, allow_start=True, host_override=None, host_name=None, access_profile=None, selected_paths=None, workspace_override=None, one_shot=False, confirm_unsafe_override=False, events=None):
+def ollama_chat(force_search=False, initial_prompt=None, allow_start=True, host_override=None, host_name=None, access_profile=None, selected_paths=None, workspace_override=None, one_shot=False, confirm_unsafe_override=False, events=None, conversation_history=None, interface_context=None):
     """Minimal local chat; optional first prompt and web-search mode."""
     import json
     import urllib.request
@@ -8682,6 +8682,19 @@ def ollama_chat(force_search=False, initial_prompt=None, allow_start=True, host_
     recent_context_index=len(messages)
     recent_context=_recent_context()
     messages.append({"role":"system","content":recent_context})
+
+    # Machine interfaces such as Signal may keep a small ephemeral conversation
+    # session outside the terminal.  Accept only plain user/assistant text here:
+    # tool state and host receipts are always rebuilt by LOOK for the current turn.
+    if interface_context:
+        messages.append({"role":"system","content":str(interface_context)[:6000]})
+    for prior in list(conversation_history or [])[-12:]:
+        if not isinstance(prior,dict):
+            continue
+        role=str(prior.get("role") or "").strip().lower()
+        content=str(prior.get("content") or "").strip()
+        if role in {"user","assistant"} and content:
+            messages.append({"role":role,"content":content[:12000]})
 
     base_message_count=len(messages)
     pending_prompt = (initial_prompt or "").strip()

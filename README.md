@@ -1,6 +1,6 @@
-# Future Crash + LOOK 4.6.7
+# Future Crash + LOOK 4.7.0
 
-**Fabric control-plane pressure fix.** Peer discovery is now slow, cached, jittered and backed off; routing endpoints are in-memory snapshots; and transient Tailscale Serve bursts no longer depend on the default five-connection listen backlog. The Fabric pulse remains a local reconciliation clock rather than a network polling loop.
+**Signal Native LO.** Signal no longer spawns the human `lo` terminal command or parses terminal output. The browser calls a reusable in-process LO engine, receives structured events/results, keeps a bounded session history for follow-ups, and presents artifacts in the originating browser. The Fabric remains the inference substrate underneath LO.
 
 # Future Crash + LOOK 4.5.0 — Fabric Packets
 
