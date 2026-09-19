@@ -18,7 +18,7 @@ try:
 except Exception:
     readline = None
 
-VERSION="4.38.0"
+VERSION="4.38.1"
 
 LOOK_WORDMARK = r"""       ██╗      ██╗  ██╗
        ██║      ██║ ██╔╝
