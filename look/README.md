@@ -217,16 +217,17 @@ LOOK's command grammar remains the source of truth, but persistent AI/remote sta
 lk settings
 ```
 
-The panel shows the current access profile, Ollama host, preferred model, web-search key status, and Ollama tailnet-share state. Use arrows or `j`/`k` through `fzf`, press Enter to change/open a setting, and Esc to return.
+The panel shows the current access profile, machine-local preferred model, Fabric routing state, legacy direct Ollama override and its host-scoped model, web-search key status, and Ollama tailnet-share state. Use arrows or `j`/`k` through `fzf`, press Enter to change/open a setting, and Esc to return.
 
 The settings panel is deliberately only a UI over the existing commands and state files. Nothing new is stored just for the panel:
 
 ```text
-Access profile       ↔ lk ollama access
-Ollama host          ↔ lk ollama host
-Preferred model      ↔ lk ollama models
-Web search key       ↔ lk ollama key
-Tailnet share        ↔ lk ollama share
+Access profile          ↔ lk ollama access
+Local preferred model   ↔ lk models
+Legacy Ollama override  ↔ lk ollama host
+Legacy override model   ↔ lk ollama models
+Web search key          ↔ lk ollama key
+Tailnet share           ↔ lk ollama share
 ```
 
 The direct commands remain fully supported for scripts, muscle memory, and troubleshooting.

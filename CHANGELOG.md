@@ -1,3 +1,12 @@
+# 4.5.1 — Model Scope Fix
+
+- `Local preferred model` now always lists and selects models installed on the current machine, regardless of the legacy direct Ollama host override.
+- Direct remote Ollama hosts keep a separate machine-local preferred model, so selecting a 3090 model can no longer overwrite the M4/M3 local fallback.
+- `lk models`, the Local AI surface, Settings model picker, Settings benchmark, and general `lk benchmark` are explicitly local; `lk ollama models/test` remain the legacy direct-host controls.
+- Portable LOOK profiles no longer export `ollama_model`; restores from older profiles ignore that machine-specific file so a large-server preference cannot leak onto a laptop.
+- Settings expose the selected legacy override model separately while Fabric automatic routing remains independent of both local and legacy-host preferences.
+- Fixes the model-benchmark restore path to restore the endpoint-scoped preferred model.
+
 # 4.5.0 — Fabric Applications
 
 - LOOK settings now describe Fabric automatic routing separately from the legacy direct Ollama host override; local preferred model is explicitly a local/fallback choice.

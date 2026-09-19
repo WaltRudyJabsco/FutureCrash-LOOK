@@ -18,7 +18,7 @@ try:
 except Exception:
     readline = None
 
-VERSION="4.37.0"
+VERSION="4.37.1"
 
 LOOK_WORDMARK = r"""       ██╗      ██╗  ██╗
        ██║      ██║ ██╔╝
@@ -66,6 +66,7 @@ SKILL_FEEDBACK_QUEUE=STATE_DIR/"skill_feedback_queue"
 SKILL_FEEDBACK_LOCK=STATE_DIR/"skill_feedback.lock"
 OLLAMA_MODEL_FILE=STATE_DIR/"ollama_model"
 OLLAMA_MODELS_FILE=STATE_DIR/"ollama_models.json"
+OLLAMA_HOST_MODELS_FILE=STATE_DIR/"ollama_host_models.json"
 OLLAMA_HOSTS_FILE=STATE_DIR/"ollama_hosts.json"
 LO_ACCESS_FILE=STATE_DIR/"lo_access"
 LO_PERSONALITY_FILE=STATE_DIR/"lo_personality"
@@ -110,7 +111,7 @@ def _inference_config(base=None):
     base=_ollama_base(base)
     return {
         "endpoint":base,
-        "model":_active_ollama_model(),
+        "model":_preferred_model_for_base(base),
         "source":"environment" if os.environ.get("OLLAMA_HOST","").strip() else "saved/discovery",
         "host":_ollama_host_name(base),
     }
@@ -7981,6 +7982,82 @@ def _save_active_ollama_model(model):
         pass
 
 
+def _load_ollama_host_models():
+    """Machine-local direct-host preferences; never part of the portable profile."""
+    try:
+        data=json.loads(OLLAMA_HOST_MODELS_FILE.read_text(encoding="utf-8"))
+        return data if isinstance(data,dict) else {}
+    except (OSError,ValueError,TypeError):
+        return {}
+
+
+def _save_ollama_host_models(data):
+    STATE_DIR.mkdir(parents=True,exist_ok=True)
+    tmp=OLLAMA_HOST_MODELS_FILE.with_suffix(".tmp")
+    tmp.write_text(json.dumps(data,indent=2,sort_keys=True)+"\n",encoding="utf-8")
+    try: os.chmod(tmp,0o600)
+    except OSError: pass
+    tmp.replace(OLLAMA_HOST_MODELS_FILE)
+    try: os.chmod(OLLAMA_HOST_MODELS_FILE,0o600)
+    except OSError: pass
+
+
+def _preferred_model_for_base(base=None, installed=None, running=None):
+    """Resolve the model preference in the same scope as the Ollama endpoint.
+
+    Local preference belongs to this machine. Legacy remote/direct hosts keep a
+    separate machine-local preference so choosing a 3090 model can never change
+    the M4's local fallback model.
+    """
+    env=os.environ.get("LOOK_OLLAMA_MODEL","").strip()
+    if env:
+        return env
+    base=_normalize_ollama_url(base or LOCAL_OLLAMA_URL)
+    if _is_local_ollama(base):
+        return _active_ollama_model()
+    prefs=_load_ollama_host_models()
+    preferred=str(prefs.get(base) or "").strip()
+    if preferred:
+        return preferred
+    # Old releases had one global model preference. Reuse it only when the
+    # remote host actually has that model; otherwise prefer a resident model.
+    active=_active_ollama_model()
+    installed_names=[(m.get("name") or m.get("model") or "").strip() for m in (installed or [])]
+    installed_names=[x for x in installed_names if x]
+    if active and active in installed_names:
+        return active
+    running_names=[(m.get("name") or m.get("model") or "").strip() for m in (running or [])]
+    running_names=[x for x in running_names if x]
+    if running_names:
+        return running_names[0]
+    if installed_names:
+        return installed_names[0]
+    return active
+
+
+def _save_model_preference_for_base(base,model):
+    base=_normalize_ollama_url(base or LOCAL_OLLAMA_URL)
+    if _is_local_ollama(base):
+        _save_active_ollama_model(model)
+        return
+    prefs=_load_ollama_host_models()
+    prefs[base]=str(model).strip()
+    _save_ollama_host_models(prefs)
+
+
+def _local_model_label():
+    """Show stale portable-era preferences instead of pretending they are local."""
+    model=_active_ollama_model()
+    try:
+        installed=_ollama_tags(LOCAL_OLLAMA_URL, timeout=.45)
+        names={(m.get("name") or m.get("model") or "").strip() for m in installed}
+        if names and model not in names:
+            return f"{model} · not installed locally"
+    except Exception:
+        pass
+    return model
+
+
 def _choose_ollama_model(running):
     """Return the shared active model; loaded state is telemetry, never selection."""
     active=_active_ollama_model()
@@ -8380,9 +8457,8 @@ def ollama_chat(force_search=False, initial_prompt=None, allow_start=True, host_
         print("LOOK OLLAMA · server unavailable")
         return 1
 
-    # Model preference is global, but availability belongs to the selected host.
-    # Never send a model name to a remote Ollama that does not actually have it.
-    active = _active_ollama_model()
+    # Model preference follows endpoint scope: local fallback is machine-local;
+    # legacy direct remote hosts keep their own preference.
     running_names = [(m.get("name") or m.get("model") or "").strip() for m in (running or [])]
     running_names = [name for name in running_names if name]
     try:
@@ -8391,6 +8467,7 @@ def ollama_chat(force_search=False, initial_prompt=None, allow_start=True, host_
         installed = []
     installed_names = [(m.get("name") or m.get("model") or "").strip() for m in installed]
     installed_names = [name for name in installed_names if name]
+    active = _preferred_model_for_base(base, installed=installed, running=running)
 
     if active in installed_names:
         model = active
@@ -9547,9 +9624,9 @@ def inspect_tailscale():
 
 
 
-def _ollama_tags(base):
+def _ollama_tags(base, timeout=2):
     import json, urllib.request
-    with urllib.request.urlopen(base+"/api/tags", timeout=2) as response:
+    with urllib.request.urlopen(base+"/api/tags", timeout=timeout) as response:
         return json.load(response).get("models", [])
 
 
@@ -9635,7 +9712,12 @@ def vision_command(args):
         print(f"LOOK VISION · not found: {image}")
         return 1
     base=_ollama_base()
-    model=_active_ollama_model()
+    try:
+        installed=_ollama_tags(base)
+        running=_ollama_ps(base)
+    except Exception:
+        installed=[]; running=[]
+    model=_preferred_model_for_base(base,installed=installed,running=running)
     caps=_ollama_capabilities(base,model) or []
     if "vision" not in caps:
         print(f"LOOK VISION · {model} does not advertise vision")
@@ -9694,7 +9776,7 @@ def _ollama_set_model(base, model):
 
     # An empty generation request loads the model without asking it to answer.
     _ollama_post(base, "/api/generate", {"model":model, "prompt":"", "keep_alive":"10m"}, timeout=180)
-    _save_active_ollama_model(model)
+    _save_model_preference_for_base(base,model)
     return model
 
 
@@ -9707,7 +9789,7 @@ def _model_capability_label(caps):
 
 def _ollama_model_rows(base, names, loaded, disabled):
     rows=[]
-    selected_name=_active_ollama_model()
+    selected_name=_preferred_model_for_base(base, installed=[{"name":n} for n in names], running=[{"name":n} for n in loaded])
     width=max(64,shutil.get_terminal_size((100,24)).columns)
     # Leave enough room for TEST/LOAD/SEL glyphs and a useful capability tail.
     name_width=max(18,min(30,width-42))
@@ -9737,9 +9819,9 @@ def _ollama_model_rows(base, names, loaded, disabled):
     return rows
 
 
-def ollama_models(select_model=None):
-    """Tiny Ollama control panel: select a model or toggle LOOK benchmark inclusion with X."""
-    base=_ollama_base()
+def ollama_models(select_model=None, base_override=None):
+    """Select a model on one Ollama endpoint without leaking preference across hosts."""
+    base=_normalize_ollama_url(base_override) if base_override else _ollama_base()
     if _ensure_ollama_server(base, allow_start=_is_local_ollama(base)) is None:
         print("LOOK OLLAMA · server unavailable")
         return 1
@@ -10037,12 +10119,19 @@ def _benchmark_runtime_note(row):
     return ""
 
 
-def ollama_test(all_models=False):
-    base=_ollama_base()
+def ollama_test(all_models=False, base_override=None):
+    base=_normalize_ollama_url(base_override) if base_override else _ollama_base()
     running=_ensure_ollama_server(base, allow_start=_is_local_ollama(base))
     if running is None:
         print("LOOK OLLAMA · server unavailable")
         return 1
+
+    # Capture endpoint-scoped preference before a sweep unloads models.
+    try:
+        installed_before=_ollama_tags(base)
+    except Exception:
+        installed_before=[]
+    preferred_before=_preferred_model_for_base(base,installed=installed_before,running=running)
 
     disabled=_load_ollama_model_prefs()
     if all_models:
@@ -10056,7 +10145,6 @@ def ollama_test(all_models=False):
     else:
         # `lk ollama test` means the model selected in LOOK, not whichever
         # model happens to be resident in Ollama right now.
-        active=_active_ollama_model()
         try:
             installed=_ollama_tags(base)
         except Exception as exc:
@@ -10067,6 +10155,7 @@ def ollama_test(all_models=False):
             for m in installed
         ]
         installed_names=[m for m in installed_names if m]
+        active=_preferred_model_for_base(base,installed=installed,running=running)
         if active in installed_names:
             models=[active]
         else:
@@ -10163,11 +10252,10 @@ def ollama_test(all_models=False):
         )
 
     # Restore the user's preferred model after a sweep.
-    if all_models:
-        active=_active_ollama_model()
+    if all_models and preferred_before:
         try:
-            _ollama_set_model(base, preferred)
-            print(f"  restored   {active}")
+            _ollama_set_model(base, preferred_before)
+            print(f"  restored   {preferred_before}")
         except Exception:
             pass
     return 0
@@ -10207,7 +10295,7 @@ def _settings_memory_state():
 
 def _settings_vision_state():
     try:
-        caps=_ollama_capabilities(_ollama_base(),_active_ollama_model()) or []
+        caps=_ollama_capabilities(LOCAL_OLLAMA_URL,_active_ollama_model()) or []
         return "available" if "vision" in caps else "model lacks vision"
     except Exception:
         return "unknown"
@@ -10228,16 +10316,23 @@ def _settings_schedule_state():
 def _settings_rows():
     """Control-room registry: value + explanation + search vocabulary."""
     base=_ollama_base()
+    host_model=(
+        "uses local preferred" if _is_local_ollama(base)
+        else _preferred_model_for_base(base)
+    )
     return [
-        ("model","AI","Local preferred model",_active_ollama_model(),
-         "Fallback/local model for this machine. Fabric jobs select among models actually advertised by live nodes.",
+        ("model","AI","Local preferred model",_local_model_label(),
+         "Fallback/local model for this machine. The picker always shows this machine's Ollama models, regardless of the legacy host override.",
          "model ollama llm qwen gemma deepseek local fallback ai gpu"),
         ("fabricroute","AI","Inference routing","Fabric automatic",
          "Normal distributed work routes by live Fabric capability, load and residency. Explicit Ollama hosts remain a compatibility/debug override.",
          "fabric routing automatic distributed node remote local inference"),
         ("host","AI","Legacy Ollama override",_ollama_host_name(base),
-         "Compatibility/debug override for direct LO inference. It is not Fabric discovery and does not choose remote Fabric workers.",
+         "Compatibility/debug override for direct LO streaming. It is not Fabric discovery and does not choose remote Fabric workers.",
          "legacy host server ollama override remote local tailscale debug"),
+        ("hostmodel","AI","Legacy override model",host_model,
+         "Model preference for the selected direct Ollama host. Remote-host choices are stored separately and never overwrite the local fallback model.",
+         "legacy remote host model preference direct streaming ollama"),
         ("access","AI","Access profile",_load_lo_profile(),
          "Controls how much of the computer LO may use: conservative, workspace, power, or unsafe.",
          "access permission permissions safe power shell command tools security"),
@@ -10524,10 +10619,13 @@ def _settings_action(key):
     if key=="thinking": return _settings_pick_thinking()
     if key=="thinkdisplay": return _settings_pick_think_display()
     if key=="host": return _settings_pick_host()
+    if key=="hostmodel":
+        base=_ollama_base()
+        return ollama_models(base_override=(LOCAL_OLLAMA_URL if _is_local_ollama(base) else base))
     if key=="fabricroute":
         print("Fabric automatic routing is active for Fabric-native work. Direct LO streaming remains on the local/legacy transport until streaming FWP lands.")
         return 0
-    if key=="model": return ollama_models()
+    if key=="model": return ollama_models(base_override=LOCAL_OLLAMA_URL)
     if key=="key": return ollama_key([])
     if key=="share": return _settings_share_menu()
     if key=="sound": return _settings_pick_sound()
@@ -10536,7 +10634,7 @@ def _settings_action(key):
     if key=="memory": return _memory_command([])
     if key=="memorycompact": return _memory_command(["compact"])
     if key=="performance": return _ai_stats_command()
-    if key=="benchmark": return ollama_test(False)
+    if key=="benchmark": return ollama_test(False, base_override=LOCAL_OLLAMA_URL)
     if key=="vision":
         print("LOOK vision · include an image path in LO, or run `lk vision IMAGE [QUESTION]`")
         return 0
@@ -10639,7 +10737,7 @@ def inspect_ollama():
     try:
         with urllib.request.urlopen(base+'/api/ps',timeout=.8) as r: models=json.load(r).get('models',[])
         print(f"  server    {_c('ready','32')}")
-        print(f"  preferred {_active_ollama_model()}")
+        print(f"  preferred {_preferred_model_for_base(base, running=models)}")
         if models:
             names=[m.get('name') or m.get('model') or '?' for m in models[:6]]
             print(f"  resident  {', '.join(names)}")
@@ -11681,9 +11779,9 @@ def _surface_run(fn, *args):
         pass
     _surface_pause()
 
-def _ollama_surface_state():
+def _ollama_surface_state(base_override=None):
     import urllib.request
-    base=_ollama_base()
+    base=_normalize_ollama_url(base_override) if base_override else _ollama_base()
     ready=False
     resident="idle"
     try:
@@ -11708,11 +11806,11 @@ def _surface_ai():
         return inspect_ollama()
     while True:
         _surface_clear()
-        base,ready,resident=_ollama_surface_state()
+        base,ready,resident=_ollama_surface_state(LOCAL_OLLAMA_URL)
         _surface_header("local ai","control surface")
         print(f"  server       {_ollama_host_name(base)}")
         print(f"  ollama       {_c('● ready','32') if ready else _c('○ offline','33')}")
-        print(f"  model        {_active_ollama_model()}")
+        print(f"  model        {_local_model_label()}")
         print(f"  resident     {resident}")
         print(f"  thinking     {_load_thinking()}")
         print(f"  display      {_load_think_display()}")
@@ -11730,8 +11828,8 @@ def _surface_ai():
         print(f"  {_c('[esc]','2')} done")
         key=_surface_key().lower()
         if key in {"esc","q"}: return 0
-        if key=="m": _surface_run(ollama_models)
-        elif key=="b": _surface_run(ollama_test,False)
+        if key=="m": _surface_run(ollama_models,None,LOCAL_OLLAMA_URL)
+        elif key=="b": _surface_run(ollama_test,False,LOCAL_OLLAMA_URL)
         elif key=="v": _surface_run(_ai_stats_command)
         elif key=="t": _surface_run(lo_thinking,[])
         elif key=="d": _surface_run(lo_think_display,[])
@@ -12127,7 +12225,6 @@ PROFILE_STATE_FILES=(
     "lo_personality",
     "lo_thinking",
     "lo_think_display",
-    "ollama_model",
 )
 PROFILE_STATE_DIRS=("personalities",)
 PROFILE_CONFIG_FILES=("feedback.json",)
@@ -12177,7 +12274,7 @@ def _profile_manifest():
             "jobs/events",
             "Living AI queues/locks/socket/log",
             "PIDs/runtime proxies",
-            "machine-specific Ollama hosts",
+            "machine-specific Ollama hosts/models",
             "caches/generated feedback audio",
         ],
     }
@@ -12362,6 +12459,10 @@ def _profile_restore(source,args):
             for src in sorted(state_src.rglob("*")):
                 if not src.is_file(): continue
                 rel=src.relative_to(state_src)
+                # 4.5.0 and earlier exported this machine-specific choice.
+                # Ignore it on restore so a 3090 preference cannot poison an M4.
+                if rel == Path("ollama_model"):
+                    continue
                 dst=STATE_DIR/rel
                 dst.parent.mkdir(parents=True,exist_ok=True)
                 shutil.copy2(src,dst); restored+=1
@@ -12397,10 +12498,10 @@ def _profile_status():
     print()
     print("  INCLUDED")
     print("  memory · recent continuity · core · skills · personalities")
-    print("  access/personality/thinking preferences · model preference · feedback")
+    print("  access/personality/thinking preferences · feedback")
     print()
     print("  EXCLUDED")
-    print("  secrets · undo/trash · jobs/events · queues/locks/PIDs · hosts · caches")
+    print("  secrets · undo/trash · jobs/events · queues/locks/PIDs · hosts/models · caches")
     return 0
 
 
@@ -12939,8 +13040,8 @@ def main():
         return _surface_ai()
     if cmd=="system": return _surface_system()
     if cmd=="clean": return _surface_clean()
-    if cmd=="models": return ollama_models(rest[0] if rest else None)
-    if cmd=="benchmark": return ollama_test(all_models=("--all" in rest))
+    if cmd=="models": return ollama_models(rest[0] if rest else None, base_override=LOCAL_OLLAMA_URL)
+    if cmd=="benchmark": return ollama_test(all_models=("--all" in rest), base_override=LOCAL_OLLAMA_URL)
     if cmd=="web": return ollama_key(["status"] if not rest else rest)
     if cmd=="reveal": return reveal_command(rest)
     if cmd=="open": return open_command(rest,False)

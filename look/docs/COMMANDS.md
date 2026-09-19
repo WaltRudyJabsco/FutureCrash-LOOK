@@ -46,7 +46,7 @@ LO keeps at most 20 candidate memories on disk and offers at most eight to promp
 
 `lk profile restore SOURCE [--yes]` — restore a compatible ZIP/backup directory after validation; LOOK creates a local safety snapshot first.
 
-Portable profile data includes memory, recent continuity, core, skills, personalities, AI behavior preferences, preferred model name, and feedback settings. Secrets, undo/trash, jobs/events, queues/locks/PIDs, caches, and machine-specific host configuration are excluded.
+Portable profile data includes memory, recent continuity, core, skills, personalities, AI behavior preferences, and feedback settings. Secrets, undo/trash, jobs/events, queues/locks/PIDs, caches, and machine-specific Ollama host/model configuration are excluded.
 
 ## Feedback
 `lk feedback` · `lk feedback demo`
@@ -58,7 +58,7 @@ Portable profile data includes memory, recent continuity, core, skills, personal
 Sound defaults off. Motion defaults subtle. Feedback is automatically silent/static outside a TTY.
 
 ## Unified settings
-`lk settings` — access profile, Ollama host, preferred model, web-search key, tailnet share, feedback, and profile status. It is a UI over the direct commands above.
+`lk settings` — access profile, local preferred model, Fabric routing, legacy direct Ollama host/model, web-search key, tailnet share, feedback, and profile status. `lk models` is always local; `lk ollama models` follows the selected legacy direct host.
 
 ## System
 `lk home` · `lk doctor` · `lk config` · `lk secrets` · `lk undo` · `lk uninstall` · `lk version` · `lk help`

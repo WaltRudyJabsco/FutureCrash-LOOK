@@ -1,3 +1,10 @@
+## 4.37.1 — Machine-local model scope
+
+- Local model selection is pinned to localhost and is no longer affected by the legacy Ollama host override.
+- Remote direct-host model preferences are stored per endpoint and cannot overwrite the local fallback model.
+- `ollama_model` is no longer portable profile state; old profile restores skip it.
+- `lk models`/Local AI stay local, while `lk ollama models` deliberately follows the legacy direct host.
+
 ## 4.33.10
 
 - Enforces the documented 180-second timeout on primary streamed Ollama chat requests.
