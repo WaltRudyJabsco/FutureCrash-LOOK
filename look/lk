@@ -5970,6 +5970,38 @@ def _lo_requires_weather(prompt):
         text,
     ))
 
+def _lo_weather_location(prompt):
+    """Extract an explicit place for the deterministic WEATHER fast path.
+
+    Deliberately conservative: if the user did not name a place, LO leaves the
+    turn to normal tool planning rather than guessing a location.
+    """
+    text=" ".join(str(prompt or "").strip().split())
+    if not text or not _lo_requires_weather(text):
+        return None
+    patterns=(
+        r"\b(?:weather|forecast|temperature|temp|rain(?:ing)?|snow(?:ing)?|wind(?:y)?|humidity|precipitation)\b.*?\b(?:in|for|at|near)\s+(.+)$",
+        r"\b(?:in|for|at|near)\s+([^?!.]+?)(?:\s+(?:today|tonight|tomorrow|this morning|this afternoon|this evening))?[?!.]*$",
+    )
+    for pattern in patterns:
+        match=re.search(pattern,text,re.I)
+        if not match:
+            continue
+        place=match.group(1).strip(" \t,.;:?!")
+        place=re.sub(r"\s+(?:today|tonight|tomorrow|this morning|this afternoon|this evening)$","",place,flags=re.I).strip()
+        if 1 <= len(place) <= 96:
+            return place
+    return None
+
+def _lo_weather_only_query(prompt):
+    """True when WEATHER grounding is the only operational edge this turn needs."""
+    text=" ".join(str(prompt or "").casefold().split())
+    if not _lo_requires_weather(text):
+        return False
+    # Keep full tools for compound requests such as save/open/search/compare.
+    other=r"\b(save|write|create|copy|move|delete|remove|open|play|launch|search|find|file|folder|directory|compare|code|debug|run|command|process|port|generate|image|schedule)\b"
+    return not re.search(other,text)
+
 def _lo_explicit_web_scope(prompt):
     low=" ".join(str(prompt or "").casefold().split())
     return bool(re.search(r"\b(online|on the web|web|youtube(?:\.com)?|vimeo(?:\.com)?|website|site|url|browser)\b",low))
@@ -8432,8 +8464,12 @@ def _fabric_stream_chat(payload_obj, events=None, route=None):
         try:
             announced=False
             for event in client.stream_infer(current,requires=requires,priority="interactive",timeout=OLLAMA_CHAT_TIMEOUT,owner="lo",route=route,work_class=work_class):
+                if event.get("_fabric_meta") == "route":
+                    if events and not announced:
+                        events.emit("fabric_worker", node=event.get("_fabric_node"), model=event.get("_fabric_model")); announced=True
+                    continue
                 if events and event.get("_fabric_node") and not announced:
-                    events.emit("fabric_worker", node=event.get("_fabric_node")); announced=True
+                    events.emit("fabric_worker", node=event.get("_fabric_node"), model=event.get("_fabric_model")); announced=True
                 yield event
             return
         except RuntimeError as exc:
@@ -8963,6 +8999,7 @@ def ollama_chat(force_search=False, initial_prompt=None, allow_start=True, host_
         weather_required=_lo_requires_weather(prompt)
         weather_succeeded=False
         weather_repair_sent=False
+        weather_prefetched=False
         external_action_attempted=False
         external_action_succeeded=False
         last_external_result=""
@@ -8973,6 +9010,38 @@ def ollama_chat(force_search=False, initial_prompt=None, allow_start=True, host_
         mutation_repair_sent=False
         tool_refusal_repair_sent=False
         host_repair_final=False
+
+        # Deterministic live edges should not spend an LLM round deciding to call
+        # the obvious tool.  When a weather question names its location, obtain
+        # the canonical receipt first and let the model do only the human-facing
+        # phrasing. Ambiguous-location weather still uses normal model planning.
+        weather_location=_lo_weather_location(prompt) if weather_required else None
+        if weather_location:
+            tool_started=time.monotonic()
+            if events: events.emit("tool_start", tool="weather", mode="preflight")
+            try:
+                print(f"{_ansi_label('weather ›', '36')} {weather_location}")
+                with _activity("weather"):
+                    weather_content=_weather_lookup(weather_location)
+                weather_succeeded=not str(weather_content).startswith(("Weather lookup failed:","No weather location match"))
+                if weather_succeeded:
+                    weather_prefetched=True
+                    receipt=_info_receipt("weather",weather_content)
+                    if receipt:
+                        _show_info_receipt(receipt)
+                        if events: events.emit("source_receipt", **receipt)
+                    messages.append({"role":"system","content":(
+                        "LIVE WEATHER RECEIPT FOR THIS TURN\n" + weather_content +
+                        "\nUse this canonical WEATHER result to answer the user's latest question. "
+                        "Do not call weather again unless the receipt is unusable."
+                    )})
+            except Exception as exc:
+                weather_content=f"Weather lookup failed: {exc}"
+            if events:
+                events.emit("tool_done", tool="weather", mode="preflight",
+                            elapsed_tool_ms=int((time.monotonic()-tool_started)*1000),
+                            status=("ok" if weather_succeeded else "failed"))
+
         runtime=_lo_runtime_policy(thinking_mode, prompt)
         task_tier,budget=_lo_budget_for(prompt,thinking_mode,selected_paths)
         task_started=time.monotonic()
@@ -9007,7 +9076,8 @@ def ollama_chat(force_search=False, initial_prompt=None, allow_start=True, host_
             if supports_thinking:
                 payload_obj["think"]=runtime["think"]
             tools=[]
-            if supports_tools and not host_repair_final:
+            weather_text_fast_path=(weather_prefetched and _lo_weather_only_query(prompt))
+            if supports_tools and not host_repair_final and not weather_text_fast_path:
                 tools = _lo_tools(profile)
                 if has_web and not force_search:
                     tools.append(web_tool)
@@ -9061,6 +9131,7 @@ def ollama_chat(force_search=False, initial_prompt=None, allow_start=True, host_
                                 prompt_tokens=int(final_event.get("prompt_eval_count") or 0),
                                 output_tokens=int(final_event.get("eval_count") or 0),
                                 load_ms=int(float(final_event.get("load_duration") or 0)/1e6),
+                                prompt_eval_ms=int(float(final_event.get("prompt_eval_duration") or 0)/1e6),
                                 eval_ms=int(float(final_event.get("eval_duration") or 0)/1e6))
                 result={"message":aggregate}
                 if turn_image_paths:

@@ -7,10 +7,7 @@ result waiting. It deliberately contains no application semantics.
 from __future__ import annotations
 import json, time, urllib.request, urllib.error, uuid
 
-try:
-    from conductor import classify as _classify_work, last_user_text as _last_user_text
-except ImportError:
-    from .conductor import classify as _classify_work, last_user_text as _last_user_text
+from conductor import classify as _classify_work, last_user_text as _last_user_text
 
 DEFAULT_NODE = "http://127.0.0.1:7332"
 
@@ -220,6 +217,10 @@ def stream_infer(payload, *, requires=None, priority="interactive", timeout=180,
             continue
         if isinstance(route,dict):
             route.update({"target":target,"dns":dns,"model":chosen})
+        # Surface placement before opening the inference stream.  This separates
+        # routing time from prompt-evaluation/TTFT in LO telemetry instead of
+        # making the first model frame look like a ten-second routing decision.
+        yield {"_fabric_meta":"route", "_fabric_node":target, "_fabric_model":chosen}
         inp={"model":chosen,"messages":payload.get("messages") or [],"timeout":timeout,
              "keep_alive":payload.get("keep_alive",-1),"options":payload.get("options") or {}}
         if "think" in payload: inp["think"]=payload.get("think")

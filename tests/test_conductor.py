@@ -7,6 +7,8 @@ import fabric_client
 class ConductorTests(unittest.TestCase):
     def test_reflex(self):
         self.assertEqual(classify("what is the time?", requires=["text"]).tier, "reflex")
+    def test_weather_language_is_reflex_cognition(self):
+        self.assertEqual(classify("what is the weather in portland", requires=["text"]).tier, "reflex")
     def test_deep_code(self):
         self.assertEqual(classify("debug this Python traceback and explain the architecture", requires=["text","tools"]).tier, "deep")
     def test_vision_is_deep(self):

@@ -1,3 +1,11 @@
+## 4.9.1 — Fast Edge
+
+- Fixes the 4.9.0 installed-runtime packaging regression by installing and verifying `core/conductor.py` beside `fabric_client.py`.
+- Adds an installed-layout smoke import so a coherent source tree can no longer pass release validation while the installed Fabric runtime is incomplete.
+- Current weather with an explicit location now takes a deterministic WEATHER preflight edge before inference, eliminating the wasteful "ask model to call obvious tool" round.
+- Pure weather turns omit the full tool schema after a successful receipt, reducing prompt cost and allowing a text-only reflex model to phrase the result.
+- Fabric telemetry now announces worker/model placement before inference and reports prompt-evaluation time separately from output evaluation.
+
 ## 4.9.0 — Reflex Conductor
 
 - Added a zero-I/O deterministic conductor that classifies turns as reflex, balanced, or deep before placement.

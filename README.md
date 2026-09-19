@@ -1,4 +1,6 @@
-# Future Crash + LOOK 4.7.0
+# Future Crash + LOOK 4.9.1 — Fast Edge
+
+Deterministic live-weather preflight, smaller reflex prompts, truthful placement/prompt timing telemetry, and installed-runtime conductor verification.
 
 **Signal Native LO.** Signal no longer spawns the human `lo` terminal command or parses terminal output. The browser calls a reusable in-process LO engine, receives structured events/results, keeps a bounded session history for follow-ups, and presents artifacts in the originating browser. The Fabric remains the inference substrate underneath LO.
 

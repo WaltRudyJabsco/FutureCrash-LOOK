@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Future Crash + LOOK Unified Node 4.9.0.
+"""Future Crash + LOOK Unified Node 4.9.1.
 
 A small distributed supervisor for trusted personal machines. Immediate events stay
 asynchronous; a one-second fabric pulse reconciles presence, leases and stale work.
@@ -34,7 +34,7 @@ except ImportError:
     from fabric_packet import ArtifactStore, FabricStore, normalize_packet, packet_summary, new_id
 from urllib.parse import urlparse, parse_qs
 
-VERSION = "4.9.0"
+VERSION = "4.9.1"
 DEFAULT_HOST = "127.0.0.1"
 DEFAULT_PORT = 7332
 DEFAULT_INGRESS_PORT = 0
@@ -1289,7 +1289,7 @@ def _local_accept_watchdog(server):
 
 
 class API(BaseHTTPRequestHandler):
-    server_version = "FCLNode/4.9.0"
+    server_version = "FCLNode/4.9.1"
 
     def setup(self):
         self._metric_request_id = None
