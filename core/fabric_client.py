@@ -21,7 +21,8 @@ def _nodes(base):
 def _candidates(snapshot):
     rows=[]
     me=snapshot.get("self") or {}
-    rows.append((me.get("name") or "local", None, me))
+    me_name=me.get("name") or ((me.get("identity") or {}).get("name")) or "local"
+    rows.append((me_name, None, me))
     for p in snapshot.get("peers") or []:
         ad=p.get("node")
         if not ad: continue
@@ -29,18 +30,24 @@ def _candidates(snapshot):
         rows.append((name,p.get("dns"),ad))
     return rows
 
-def choose_node(base=DEFAULT_NODE, *, model=None, requires=None, latency=False, exclude=None):
-    """Choose the soonest plausible capable worker using only advertised facts."""
-    snap=_nodes(base); scored=[]
+
+def _find_target(snapshot, target):
+    for name,dns,ad in _candidates(snapshot):
+        if name == target:
+            return dns,ad
+    return None,{}
+
+
+def _choose_from_snapshot(snapshot, *, model=None, requires=None, latency=False, exclude=None):
+    scored=[]
     requires=set(requires or ["text"])
     excluded=set(exclude or [])
-    for name,dns,ad in _candidates(snap):
+    for name,dns,ad in _candidates(snapshot):
         if name in excluded:
             continue
         runtime=ad.get("runtime") or {}
         if runtime and runtime.get("ok") is False:
             continue
-        caps=ad.get("capabilities") or {}
         inf=ad.get("inference") or {}
         models=inf.get("models") or []
         if "text" in requires and not inf.get("available", bool(models)): continue
@@ -63,17 +70,22 @@ def choose_node(base=DEFAULT_NODE, *, model=None, requires=None, latency=False, 
     return scored[0]
 
 
-def _ad_for_target(base, target):
-    snap=_nodes(base)
-    for name,dns,ad in _candidates(snap):
-        if name==target:
-            return ad
-    return {}
+def choose_node(base=DEFAULT_NODE, *, model=None, requires=None, latency=False, exclude=None):
+    """Choose a worker from one atomic routing snapshot."""
+    return _choose_from_snapshot(_nodes(base), model=model, requires=requires,
+                                 latency=latency, exclude=exclude)
+
+
+def _ad_for_target(base, target, snapshot=None):
+    # `snapshot` lets one placement decision reuse the same control-plane truth.
+    snap=snapshot if snapshot is not None else _nodes(base)
+    return _find_target(snap,target)[1]
 
 def infer(messages, *, model=None, requires=None, latency=False, priority="interactive",
           think=False, options=None, timeout=90, base=DEFAULT_NODE, owner="app"):
-    score,target,dns,eligible=choose_node(base,model=model,requires=requires,latency=latency)
-    ad=_ad_for_target(base,target)
+    snap=_nodes(base)
+    score,target,dns,eligible=_choose_from_snapshot(snap,model=model,requires=requires,latency=latency)
+    ad=_ad_for_target(base,target,snapshot=snap)
     chosen=model
     if not chosen:
         preferred=((ad.get("inference") or {}).get("preferred_model"))
@@ -130,9 +142,15 @@ def stream_infer(payload, *, requires=None, priority="interactive", timeout=180,
     max_attempts=3
 
     def select(prefer_route=True):
+        # One /v1/nodes read per placement attempt. Older code re-fetched the
+        # control plane two or three times while choosing one worker, amplifying
+        # exactly the pressure a busy Fabric must avoid.
+        snap=_nodes(base)
         if prefer_route and isinstance(route,dict) and route.get("target") and route.get("target") not in tried:
             target=str(route["target"]); dns=route.get("dns")
-            ad=_ad_for_target(base,target)
+            found_dns,ad=_find_target(snap,target)
+            if found_dns is not None:
+                dns=found_dns
             models=((ad.get("inference") or {}).get("models") or [])
             eligible=[]
             for m in models:
@@ -147,8 +165,8 @@ def stream_infer(payload, *, requires=None, priority="interactive", timeout=180,
                     names={m.get("name") for m in eligible}
                     chosen=preferred if preferred in names else max(eligible,key=lambda m:int(m.get("size") or 0)).get("name")
                 return target,dns,chosen
-        _,target,dns,eligible=choose_node(base,model=model,requires=reqs,latency=False,exclude=tried)
-        ad=_ad_for_target(base,target)
+        _,target,dns,eligible=_choose_from_snapshot(snap,model=model,requires=reqs,latency=False,exclude=tried)
+        ad=_ad_for_target(base,target,snapshot=snap)
         chosen=model
         if not chosen:
             preferred=((ad.get("inference") or {}).get("preferred_model"))
@@ -217,12 +235,9 @@ def stream_infer(payload, *, requires=None, priority="interactive", timeout=180,
         tried.add(target)
         if isinstance(route,dict):
             route.clear()
-        # Give a just-released lease a moment to settle, then try another worker.
+        # Give a just-released lease a moment to settle. The next attempt owns
+        # the next routing snapshot; do not issue a speculative extra /v1/nodes poll.
         time.sleep(.15)
-        try:
-            choose_node(base,model=model,requires=reqs,latency=False,exclude=tried)
-        except Exception:
-            break
     if last_error:
         raise RuntimeError(f"Fabric inference unavailable after {len(tried)} worker attempt(s): {last_error}") from None
     raise RuntimeError("Fabric inference unavailable")

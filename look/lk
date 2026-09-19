@@ -19,7 +19,7 @@ try:
 except Exception:
     readline = None
 
-VERSION="4.39.1"
+VERSION="4.39.2"
 
 LOOK_WORDMARK = r"""       ██╗      ██╗  ██╗
        ██║      ██║ ██╔╝
@@ -7662,6 +7662,38 @@ def _info_envelope(source, edge, payload, *, as_of=None, source_url=None, direct
     }
 
 
+def _info_receipt(tool_name, tool_content):
+    """Return deterministic provenance for user-visible information tools.
+
+    The model may paraphrase a fact, but it does not own the evidence label.
+    LOOK emits this receipt directly from the edge that actually ran.
+    """
+    canonical={"weather":"WEATHER","place_lookup":"PLACE","wikipedia":"WIKI",
+               "wikidata":"DATA","papers":"PAPERS","archive":"ARCHIVE"}
+    if tool_name in canonical:
+        try:
+            row=json.loads(str(tool_content))
+        except Exception:
+            return None
+        if not isinstance(row,dict) or str(row.get("edge") or "") != canonical[tool_name]:
+            return None
+        return {k:row.get(k) for k in ("edge","source","confidence","as_of","retrieved_at","source_url") if row.get(k) is not None}
+    if tool_name=="web_search" and not str(tool_content).startswith(("Web search is unavailable","Web search failed")):
+        return {"edge":"SEARCH","source":"Ollama Web Search","confidence":"SEARCHED",
+                "retrieved_at":time.strftime("%Y-%m-%dT%H:%M:%S%z")}
+    return None
+
+
+def _show_info_receipt(receipt):
+    if not receipt:
+        return
+    bits=[str(receipt.get("edge") or "SOURCE"), str(receipt.get("source") or "unknown"),
+          str(receipt.get("confidence") or "")]
+    if receipt.get("as_of"):
+        bits.append("as of "+str(receipt["as_of"]))
+    print(f"{_ansi_label('source ›','2')} " + " · ".join(x for x in bits if x))
+
+
 def _place_lookup(query,count=5):
     import json
     from urllib.parse import urlencode
@@ -9191,6 +9223,11 @@ def ollama_chat(force_search=False, initial_prompt=None, allow_start=True, host_
                     else:
                         tool_content = f"Unknown tool: {name}"
 
+                    info_receipt=_info_receipt(name,tool_content)
+                    if info_receipt:
+                        _show_info_receipt(info_receipt)
+                        if events:
+                            events.emit("source_receipt", **info_receipt)
                     if events:
                         events.emit("tool_done", tool=name, elapsed_tool_ms=int((time.monotonic()-tool_event_started)*1000))
                     messages.append({

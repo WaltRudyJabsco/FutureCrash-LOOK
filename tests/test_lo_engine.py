@@ -13,6 +13,7 @@ class FakeCore:
     def ollama_chat(self, **kwargs):
         self.kwargs=kwargs
         kwargs['events'].emit('tool_start', tool='weather')
+        kwargs['events'].emit('source_receipt', edge='WEATHER', source='Open-Meteo', confidence='DIRECT')
         kwargs['events'].emit('response', text='Hello from LO')
         kwargs['events'].emit('request_done', status='ok')
         return 0
@@ -31,6 +32,8 @@ class NativeLoEngineTests(unittest.TestCase):
         self.assertEqual(fake.kwargs['conversation_history'][0]['content'],'weather in portland')
         self.assertEqual(fake.kwargs['interface_context'],'Signal browser')
         self.assertEqual(result['events'][0]['tool'],'weather')
+        self.assertEqual(result['events'][1]['edge'],'WEATHER')
+        self.assertEqual(result['events'][1]['source'],'Open-Meteo')
 
     def test_presentation_environment_is_restored(self):
         fake=FakeCore()

@@ -1,3 +1,13 @@
+# 4.7.2 — Fabric Control-Plane Isolation
+
+- Splits the node into two localhost listeners: local apps stay on `127.0.0.1:7332`, while Tailscale Serve proxies public `:7332` into isolated backend `127.0.0.1:7333`. Remote proxy pressure can no longer consume the local LO/Signal accept queue.
+- Bounds HTTP concurrency independently on the two planes (64 local / 32 ingress) and rejects excess ingress work instead of spawning unbounded request threads.
+- Adds `fcl-node http` / `/v1/http` pressure telemetry: accepted, active, completed, rejected, errors, endpoints, sources, and oldest active requests.
+- Reconciles the Tailscale Serve backend on every top-level install, replacing the old `:7332 → :7332` route with `:7332 → :7333`.
+- Reduces Fabric route selection to one `/v1/nodes` snapshot per placement attempt; removes duplicate and speculative routing polls.
+- Restores host-rendered provenance receipts for WEATHER/WIKI/DATA/PLACE/PAPERS/ARCHIVE and web search; Signal surfaces the same structured source receipt from native LO events.
+- LOOK 4.39.2; Unified Node 4.7.2; Signal Window remains 1.0.0.
+
 # 4.7.1 — Trust Basis
 
 - Injects an authoritative host-clock receipt into every LO turn; current date/time/offset come from the machine, never model memory.

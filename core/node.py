@@ -30,9 +30,10 @@ except ImportError:
     from fabric_packet import ArtifactStore, FabricStore, normalize_packet, packet_summary, new_id
 from urllib.parse import urlparse, parse_qs
 
-VERSION = "4.7.1"
+VERSION = "4.7.2"
 DEFAULT_HOST = "127.0.0.1"
 DEFAULT_PORT = 7332
+DEFAULT_INGRESS_PORT = 7333
 PULSE_SECONDS = 1.0
 PEER_REFRESH_SECONDS = 30.0
 PEER_NODE_REFRESH_SECONDS = 20.0
@@ -1092,6 +1093,72 @@ def _stream_model_infer(handler, raw):
         raise
 
 
+class HTTPMetrics:
+    """Tiny in-memory HTTP pressure meter. No I/O on the request hot path."""
+    def __init__(self, plane):
+        self.plane = str(plane)
+        self.lock = threading.RLock()
+        self.accepted = 0
+        self.active = {}
+        self.completed = 0
+        self.rejected = 0
+        self.errors = 0
+        self.last_error = None
+        self.peak_active = 0
+        self.by_endpoint = {}
+        self.by_source = {}
+        self.next_id = 0
+
+    def accepted_connection(self):
+        with self.lock:
+            self.accepted += 1
+
+    def rejected_connection(self):
+        with self.lock:
+            self.rejected += 1
+
+    def request_error(self, exc):
+        with self.lock:
+            self.errors += 1
+            self.last_error = f"{type(exc).__name__}: {exc}"[:240]
+
+    def start(self, method, path, source):
+        with self.lock:
+            self.next_id += 1
+            rid = self.next_id
+            key = f"{str(method).upper()} {path}"
+            self.by_endpoint[key] = int(self.by_endpoint.get(key) or 0) + 1
+            self.by_source[source] = int(self.by_source.get(source) or 0) + 1
+            self.active[rid] = {"method": str(method).upper(), "path": str(path),
+                                "source": str(source), "started": now()}
+            self.peak_active = max(self.peak_active, len(self.active))
+            return rid
+
+    def finish(self, rid):
+        if rid is None:
+            return
+        with self.lock:
+            if self.active.pop(rid, None) is not None:
+                self.completed += 1
+
+    def public(self):
+        t = now()
+        with self.lock:
+            oldest = sorted((dict(v, age_ms=int(max(0.0, t-float(v.get("started") or t))*1000))
+                             for v in self.active.values()),
+                            key=lambda x: x["age_ms"], reverse=True)[:12]
+            return {"plane": self.plane, "accepted": self.accepted,
+                    "active": len(self.active), "completed": self.completed,
+                    "rejected": self.rejected, "errors": self.errors,
+                    "last_error": self.last_error, "peak_active": self.peak_active,
+                    "by_endpoint": dict(sorted(self.by_endpoint.items())),
+                    "by_source": dict(sorted(self.by_source.items())),
+                    "oldest_active": oldest}
+
+
+HTTP_METRICS = {"local": HTTPMetrics("local"), "ingress": HTTPMetrics("ingress")}
+
+
 class FabricHTTPServer(ThreadingHTTPServer):
     # Defense in depth: transient Tailscale bursts must not fill the default
     # five-slot kernel backlog. Request threads do not block service shutdown.
@@ -1100,9 +1167,70 @@ class FabricHTTPServer(ThreadingHTTPServer):
     block_on_close = False
     allow_reuse_address = True
 
+    def __init__(self, server_address, RequestHandlerClass, *, plane="local"):
+        self.plane = str(plane)
+        self.metrics = HTTP_METRICS.setdefault(self.plane, HTTPMetrics(self.plane))
+        # Personal Fabric should never create unbounded request threads. Remote
+        # ingress is deliberately tighter; local UI/control traffic keeps its own lane.
+        self.max_active_requests = 32 if self.plane == "ingress" else 64
+        self._request_slots = threading.BoundedSemaphore(self.max_active_requests)
+        super().__init__(server_address, RequestHandlerClass)
+
+    def process_request(self, request, client_address):
+        self.metrics.accepted_connection()
+        if not self._request_slots.acquire(blocking=False):
+            self.metrics.rejected_connection()
+            try:
+                self.shutdown_request(request)
+            except Exception:
+                pass
+            return
+        try:
+            return super().process_request(request, client_address)
+        except Exception:
+            self._request_slots.release()
+            raise
+
+    def process_request_thread(self, request, client_address):
+        try:
+            return super().process_request_thread(request, client_address)
+        finally:
+            self._request_slots.release()
+
+    def handle_error(self, request, client_address):
+        exc = sys.exc_info()[1]
+        if exc is not None:
+            self.metrics.request_error(exc)
+        # Disconnects/timeouts are transport noise; keep the journal clean. Real
+        # programming faults retain ThreadingHTTPServer's traceback.
+        if isinstance(exc, (BrokenPipeError, ConnectionResetError, TimeoutError, OSError)):
+            return
+        return super().handle_error(request, client_address)
+
 
 class API(BaseHTTPRequestHandler):
-    server_version = "FCLNode/4.7.1"
+    server_version = "FCLNode/4.7.2"
+
+    def setup(self):
+        self._metric_request_id = None
+        super().setup()
+
+    def parse_request(self):
+        ok = super().parse_request()
+        if ok:
+            source = self.headers.get("X-Forwarded-For") or self.headers.get("Tailscale-User-Login") or self.client_address[0]
+            path = urlparse(self.path).path
+            self._metric_request_id = self.server.metrics.start(self.command, path, str(source))
+        return ok
+
+    def finish(self):
+        try:
+            super().finish()
+        finally:
+            try:
+                self.server.metrics.finish(self._metric_request_id)
+            except Exception:
+                pass
 
     def log_message(self, *a):
         pass
@@ -1136,6 +1264,9 @@ class API(BaseHTTPRequestHandler):
                                "last_error": WORKER_HEALTH.get("last_error"),
                                "errors": WORKER_HEALTH.get("errors", 0)},
             })
+        if path == "/v1/http":
+            return self.sendj(200, {"listeners": {name: meter.public() for name, meter in HTTP_METRICS.items()},
+                                    "local_port": DEFAULT_PORT, "ingress_port": DEFAULT_INGRESS_PORT})
         if path in ("/node", "/v1/node", "/v1/status"):
             return self.sendj(200, node_info())
         if path == "/v1/advertisement":
@@ -1341,18 +1472,24 @@ def _remote_url(snapshot, target, path):
 
 
 def _target_get(host, port, target, path):
+    # Local control never needs peer discovery. Keep simple diagnostics usable
+    # even when the network side of the Fabric is unhealthy.
+    if target in {None,"","local"}:
+        return _daemon_get(host,port,path)
     snap=_daemon_get(host,port,"/v1/nodes")
     local=(snap.get("self") or {}).get("name")
-    if target in {None,"","local",local}:
+    if target == local:
         return _daemon_get(host,port,path)
     url=_remote_url(snap,target,path)
     return http_json(url,timeout=4.0)
 
 
 def _target_post(host, port, target, path, payload, timeout=45.0):
+    if target in {None,"","local"}:
+        return http_json(_daemon_url(host,port,path),payload,timeout=timeout)
     snap=_daemon_get(host,port,"/v1/nodes")
     local=(snap.get("self") or {}).get("name")
-    if target in {None,"","local",local}:
+    if target == local:
         return http_json(_daemon_url(host,port,path),payload,timeout=timeout)
     url=_remote_url(snap,target,path)
     return http_json(url,payload,timeout=timeout)
@@ -1488,12 +1625,14 @@ def main():
     ap=argparse.ArgumentParser(description="Future Crash + LOOK unified node")
     ap.add_argument("command",nargs="?",default="serve",
         choices=["serve","status","nodes","activity","pulse","fabric","watch","models","qualify","services","service",
-                 "jobs","job","submit","packet","cancel","events"])
+                 "jobs","job","submit","packet","cancel","events","http"])
     ap.add_argument("args",nargs="*")
     ap.add_argument("--node",dest="node",default=None,help="target Fabric node name")
     ap.add_argument("--json",action="store_true",help="raw JSON where a human view exists")
     ap.add_argument("--yes",action="store_true",help="confirm a mutating managed-service action")
     ap.add_argument("--host",default=DEFAULT_HOST); ap.add_argument("--port",type=int,default=DEFAULT_PORT)
+    ap.add_argument("--ingress-port",type=int,default=DEFAULT_INGRESS_PORT,
+                    help="localhost backend reserved for Tailscale ingress; 0 disables")
     ap.add_argument("--version",action="version",version=f"Future Crash + LOOK node {VERSION}")
     a=ap.parse_args()
     if a.command != "serve":
@@ -1501,7 +1640,7 @@ def main():
             if a.command=="watch": return _watch(a.host,a.port)
             if a.command=="fabric": print_fabric_snapshot(_daemon_get(a.host,a.port,"/v1/nodes")); return 0
             if a.command=="nodes": print(json.dumps(_daemon_get(a.host,a.port,"/v1/nodes"),indent=2)); return 0
-            path={"status":"/v1/node","activity":"/v1/activity","pulse":"/v1/pulse","models":"/v1/models","services":"/v1/services"}.get(a.command)
+            path={"status":"/v1/node","activity":"/v1/activity","pulse":"/v1/pulse","models":"/v1/models","services":"/v1/services","http":"/v1/http"}.get(a.command)
             if path:
                 data=_target_get(a.host,a.port,a.node,path)
                 if a.command=="models" and not a.json: _print_models(data,a.node or "local")
@@ -1553,11 +1692,22 @@ def main():
     threading.Thread(target=background_qualifier,name="model-qualifier",daemon=True).start()
     threading.Thread(target=job_worker_loop,name="fabric-jobs",daemon=True).start()
     JOB_WAKE.set()
-    srv=FabricHTTPServer((a.host,a.port),API)
-    print(f"Future Crash + LOOK node {VERSION} · http://{a.host}:{a.port} · pulse {PULSE_SECONDS:g}s",flush=True)
+    srv=FabricHTTPServer((a.host,a.port),API,plane="local")
+    ingress=None
+    ingress_thread=None
+    if a.ingress_port and int(a.ingress_port) != int(a.port):
+        ingress=FabricHTTPServer((a.host,int(a.ingress_port)),API,plane="ingress")
+        ingress_thread=threading.Thread(target=ingress.serve_forever,kwargs={"poll_interval":.2},
+                                        name="fabric-ingress",daemon=True)
+        ingress_thread.start()
+    ingress_note=f" · ingress {a.host}:{a.ingress_port}" if ingress else ""
+    print(f"Future Crash + LOOK node {VERSION} · local http://{a.host}:{a.port}{ingress_note} · pulse {PULSE_SECONDS:g}s",flush=True)
     try: srv.serve_forever(poll_interval=.2)
     except KeyboardInterrupt: pass
-    finally: srv.server_close()
+    finally:
+        srv.server_close()
+        if ingress:
+            ingress.shutdown(); ingress.server_close()
     return 0
 
 

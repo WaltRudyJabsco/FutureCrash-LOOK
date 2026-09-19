@@ -1,3 +1,9 @@
+## 4.39.2 — Provenance receipts + lean Fabric routing
+
+- Emit deterministic source receipts from the information edge that actually ran instead of relying on model prose to preserve provenance.
+- Native LO event streams carry `source_receipt` metadata for browser interfaces such as Signal.
+- Fabric placement reuses one atomic node snapshot per attempt and removes duplicate control-plane polling.
+
 ## 4.39.1 — Trust basis
 
 - Refresh authoritative system-clock context on every LO turn.

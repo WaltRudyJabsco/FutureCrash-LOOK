@@ -103,9 +103,14 @@ form.addEventListener('submit',async e=>{e.preventDefault();const text=input.val
  const visualPromise=text?fetch('/api/visual',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({text})}).then(r=>r.json()).catch(()=>null):Promise.resolve(null);
  try{const r=await fetch('/api/chat',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({text,files:sent,visual:false,session:signalSession})});const d=await r.json();if(!r.ok||d.error)throw Error(d.error||r.statusText);if(d.text)line('assistant',d.text);if(Array.isArray(d.lo_events) && d.lo_events.length){
    for(const e of d.lo_events){
-     const name=String(e.event||'').replaceAll('_',' ');
+     const raw=String(e.event||'');
+     const name=raw.replaceAll('_',' ');
      if(!name)continue;
-     let detail=e.model||e.tool||e.tokens||e.message||'';
+     if(raw==='source_receipt'){
+       const bits=[e.edge,e.source,e.confidence,e.as_of?('as of '+e.as_of):''].filter(Boolean);
+       line('system','source › '+bits.join(' · '));
+     }
+     let detail=e.model||e.tool||e.tokens||e.message||e.edge||'';
      event(`LO ${name}${detail?' · '+detail:''}`);
    }
  } else event('LO RESPONSE');

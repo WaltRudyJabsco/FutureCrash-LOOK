@@ -41,3 +41,5 @@ class FabricClientPlacementTests(unittest.TestCase):
             out=fabric_client.infer([{"role":"user","content":"hi"}],model="m",timeout=1)
         self.assertEqual(out["fabric_node"],"worker")
         self.assertIn('https://worker.example:7332/v1/jobs',calls)
+        self.assertEqual(sum(url.endswith('/v1/nodes') for url in calls),1,
+                         'one placement must consume one routing snapshot')

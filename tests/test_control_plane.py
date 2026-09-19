@@ -8,6 +8,25 @@ class ControlPlaneTests(unittest.TestCase):
         self.assertGreaterEqual(node.FabricHTTPServer.request_queue_size, 64)
         self.assertTrue(node.FabricHTTPServer.daemon_threads)
 
+
+    def test_local_and_tailscale_ingress_use_distinct_backends(self):
+        self.assertEqual(node.DEFAULT_PORT, 7332)
+        self.assertEqual(node.DEFAULT_INGRESS_PORT, 7333)
+        self.assertNotEqual(node.DEFAULT_PORT, node.DEFAULT_INGRESS_PORT)
+
+    def test_http_pressure_meter_tracks_and_releases_requests(self):
+        meter = node.HTTPMetrics("test")
+        meter.accepted_connection()
+        rid = meter.start("GET", "/v1/nodes", "127.0.0.1")
+        live = meter.public()
+        self.assertEqual(live["accepted"], 1)
+        self.assertEqual(live["active"], 1)
+        self.assertEqual(live["by_endpoint"]["GET /v1/nodes"], 1)
+        meter.finish(rid)
+        done = meter.public()
+        self.assertEqual(done["active"], 0)
+        self.assertEqual(done["completed"], 1)
+
     def test_advertisement_reads_cache_without_rebuilding(self):
         cached = {
             "protocol": 1,
