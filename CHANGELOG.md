@@ -1,3 +1,12 @@
+## 5.1.4 — Weather Receipt Closure
+
+- Weather continuations such as `how about Beaverton OR`, `what is the high and low today`, and `is that accurate?` are now recognized host-side when WEATHER is the active conversational topic.
+- High/low follow-ups read `temperature_2m_max` / `temperature_2m_min` from one typed WEATHER receipt; LO no longer reconstructs daily extrema from conversational prose or adjacent temperatures.
+- Accuracy challenges trigger an independent National Weather Service observation check when available, with both provider values and timestamps preserved rather than silently choosing one.
+- WEATHER discourse state is derived only from recent user/assistant turns so transient system prompts cannot evict the active location.
+- This closes the weather-specific correctness pass; the same typed-receipt/follow-up pattern is intended for other Fabric capabilities.
+- Future Crash + LOOK 5.1.4; Unified Node 5.1.4; LOOK 4.43.3; Signal Window remains 1.1.2.
+
 # Changelog
 
 ## 5.1.3 — Signal Scene Guard

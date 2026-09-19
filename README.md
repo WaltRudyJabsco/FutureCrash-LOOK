@@ -1,4 +1,17 @@
-# Future Crash + LOOK 5.1.3 — Signal Scene Guard
+# Future Crash + LOOK 5.1.4 — Weather Receipt Closure
+
+This is the last weather-specific correctness pass. WEATHER now behaves like a typed Fabric capability rather than conversational prose: location-changing follow-ups stay attached to the active weather place, daily high/low values come directly from canonical receipt fields, and an accuracy challenge can trigger an independent National Weather Service observation check. The point is not to grow a weather app; it is to finish the receipt/follow-up pattern so the same machinery can move on to web, filesystem, calendar, services, and other capabilities.
+
+Regression conversation:
+
+```text
+weather in portland
+how about beaverton or
+what is the high and low today
+is that accurate?
+```
+
+The third turn must read Beaverton's typed daily extrema. The fourth may compare Open-Meteo against the nearest available NWS observation without silently choosing one provider as truth.
 
 A milestone release: the personal Fabric is observable, routable, pulse-synchronized, and now has a tiny physical-looking demo of itself. Deterministic Fast Edges keep obvious tool work out of unnecessary model-planning rounds, while LO adds a restrained patient waiting cadence for genuinely long inference.
 

@@ -1,3 +1,9 @@
+## 4.43.3
+
+- WEATHER follow-ups remain on the active typed receipt/location instead of relying on prose context.
+- Daily high/low questions are answered directly from canonical daily fields.
+- Weather accuracy challenges can cross-check the nearest National Weather Service observation.
+
 # Changelog
 
 ## 4.43.2
