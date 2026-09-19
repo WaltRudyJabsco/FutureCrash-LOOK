@@ -7672,7 +7672,7 @@ def _run_filesystem_tool_impl(workspace, name, args, profile="workspace"):
         return f"File tool internal error: {type(exc).__name__}: {exc}"
     return f"Unknown file tool: {name}"
 
-LOOK_INFO_USER_AGENT="LOOK-Shell/4.31.0 (local text client)"
+LOOK_INFO_USER_AGENT="LOOK-Shell/4.43.1 (local text client)"
 
 def _run_filesystem_tool(workspace, name, args, profile="workspace"):
     global _FILESYSTEM_ACCESS_PROFILE
@@ -9031,24 +9031,35 @@ def ollama_chat(force_search=False, initial_prompt=None, allow_start=True, host_
         if weather_location:
             tool_started=time.monotonic()
             if events: events.emit("tool_start", tool="weather", mode="preflight")
-            try:
-                print(f"{_ansi_label('weather ›', '36')} {weather_location}")
-                with _activity("weather"):
-                    weather_content=_weather_lookup(weather_location)
-                weather_succeeded=not str(weather_content).startswith(("Weather lookup failed:","No weather location match"))
-                if weather_succeeded:
-                    weather_prefetched=True
-                    receipt=_info_receipt("weather",weather_content)
-                    if receipt:
-                        _show_info_receipt(receipt)
-                        if events: events.emit("source_receipt", **receipt)
-                    messages.append({"role":"system","content":(
-                        "LIVE WEATHER RECEIPT FOR THIS TURN\n" + weather_content +
-                        "\nUse this canonical WEATHER result to answer the user's latest question. "
-                        "Do not call weather again unless the receipt is unusable."
-                    )})
-            except Exception as exc:
-                weather_content=f"Weather lookup failed: {exc}"
+            print(f"{_ansi_label('weather ›', '36')} {weather_location}")
+            weather_content=""
+            # WEATHER is a read-only/idempotent edge. One bounded retry makes a
+            # transient network/provider hiccup invisible without risking a
+            # duplicate mutation. Mutating capabilities must never inherit this.
+            for weather_attempt in range(2):
+                try:
+                    with _activity("weather" if weather_attempt == 0 else "weather retry"):
+                        weather_content=_weather_lookup(weather_location)
+                    weather_succeeded=not str(weather_content).startswith(("Weather lookup failed:","No weather location match"))
+                except Exception as exc:
+                    weather_content=f"Weather lookup failed: {exc}"
+                    weather_succeeded=False
+                if weather_succeeded or str(weather_content).startswith("No weather location match"):
+                    break
+                if weather_attempt == 0:
+                    if events: events.emit("tool_retry", tool="weather", mode="preflight", reason="transient_read_failure", attempt=2)
+                    time.sleep(.18)
+            if weather_succeeded:
+                weather_prefetched=True
+                receipt=_info_receipt("weather",weather_content)
+                if receipt:
+                    _show_info_receipt(receipt)
+                    if events: events.emit("source_receipt", **receipt)
+                messages.append({"role":"system","content":(
+                    "LIVE WEATHER RECEIPT FOR THIS TURN\n" + weather_content +
+                    "\nUse this canonical WEATHER result to answer the user's latest question. "
+                    "Do not call weather again unless the receipt is unusable."
+                )})
             if events:
                 events.emit("tool_done", tool="weather", mode="preflight",
                             elapsed_tool_ms=int((time.monotonic()-tool_started)*1000),

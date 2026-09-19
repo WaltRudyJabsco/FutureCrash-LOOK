@@ -1,4 +1,4 @@
-# Future Crash + LOOK 5.1.0 — Fabric Alive
+# Future Crash + LOOK 5.1.1 — Fabric Alive
 
 A milestone release: the personal Fabric is observable, routable, pulse-synchronized, and now has a tiny physical-looking demo of itself. Deterministic Fast Edges keep obvious tool work out of unnecessary model-planning rounds, while LO adds a restrained patient waiting cadence for genuinely long inference.
 

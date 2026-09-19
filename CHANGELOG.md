@@ -1,5 +1,10 @@
 # Changelog
 
+## 5.1.1 — Fabric Show Reliability
+- Dashboard `b` and `l` now call the node daemon control plane instead of creating a dashboard-local show, so the same canonical broadcast reaches peer dashboards and attached Signal browsers.
+- WEATHER preflight gets one bounded retry for transient failures because the edge is read-only and idempotent; mutation tools remain non-retrying by default.
+- Keeps the 5.1 Signal-attached display and leased light-show architecture intact.
+
 ## 5.1.0 — Signal Gets the Signal
 
 - Signal Window is now a Fabric-attached display: synchronized Fabric light shows reach desktop dashboards and mobile/iOS browser Signals through the local node.

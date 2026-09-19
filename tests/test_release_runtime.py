@@ -35,3 +35,16 @@ class ReleaseRuntimeTests(unittest.TestCase):
                 env=env, check=True, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
 
 if __name__ == '__main__': unittest.main()
+
+class Test511Reliability(unittest.TestCase):
+    def test_dashboard_hotkeys_use_daemon_control_plane(self):
+        text=(ROOT/'core'/'node.py').read_text()
+        dash=text[text.index('def _dashboard('):text.index('def _settings_view(') if 'def _settings_view(' in text else len(text)]
+        self.assertIn('_daemon_url(host, port, "/v1/beacon")', dash)
+        self.assertIn('_daemon_url(host, port, "/v1/lights")', dash)
+
+    def test_weather_preflight_has_bounded_read_retry(self):
+        text=(ROOT/'look'/'lk').read_text()
+        self.assertIn('for weather_attempt in range(2):', text)
+        self.assertIn('reason="transient_read_failure"', text)
+        self.assertIn('read-only/idempotent edge', text)

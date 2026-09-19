@@ -1,4 +1,4 @@
-# Signal Window 1.1.0
+# Signal Window 1.1.1
 
 Signal is now a native browser body for LO. The server imports LOOK's reusable LO engine directly rather than spawning and scraping the terminal CLI. Browser sessions keep a bounded ephemeral conversation history, `/clear` clears that server-side state, and generated/browser-displayable artifacts remain presentation targets rather than worker-side desktop windows.
 

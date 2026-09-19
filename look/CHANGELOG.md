@@ -1,5 +1,9 @@
-## 4.43.0
-- Added Fabric light-show routing and Signal-vs-Comfy intent guidance.
+# Changelog
+
+## 4.43.1
+- WEATHER preflight retries one transient read failure before giving up, while preserving fail-closed receipts and no blind retries for mutations.
+- Dashboard Fabric light hotkeys use the daemon control plane, matching the CLI broadcast path.
+
 - `lk fabric lights` exposes synchronized demo, disco, Christmas, pulse, RGB, and stop controls.
 
 ## 4.42.0 — Fabric Alive
