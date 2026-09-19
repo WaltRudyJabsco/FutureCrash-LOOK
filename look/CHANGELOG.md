@@ -1,3 +1,10 @@
+## 4.42.0 — Fabric Alive
+
+- `lk fabric beacon` gives the Fabric a synchronized, visible smoke test; `b` triggers it from `lk dash`.
+- LO's active inference spinner gains restrained patient status wording on genuinely long waits.
+- Weather Fast Edge now uses a compact receipt-only inference payload after deterministic retrieval.
+- Dashboard event polling now reads the newest bounded tail instead of eventually freezing on the oldest 128 ledger events.
+
 ## 4.9.1 — Fast Edge
 
 - Fixes the 4.9.0 installed-runtime packaging regression by installing and verifying `core/conductor.py` beside `fabric_client.py`.

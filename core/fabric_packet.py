@@ -300,6 +300,23 @@ class FabricStore:
             out.append(d)
         return out
 
+    def recent_events(self, *, limit: int = 128) -> list[dict[str, Any]]:
+        """Return the newest event tail in chronological order.
+
+        Dashboards want current truth, not the first 128 events ever recorded.
+        Cursor consumers should continue to use events(since=...).
+        """
+        limit = max(1, min(int(limit), 512))
+        with closing(self._connect()) as db:
+            rows = db.execute("SELECT * FROM events ORDER BY seq DESC LIMIT ?", (limit,)).fetchall()
+        out=[]
+        for row in reversed(rows):
+            d=dict(row)
+            try: d["data"] = json.loads(d.pop("data_json") or "{}")
+            except Exception: d["data"] = {}
+            out.append(d)
+        return out
+
 
 class ArtifactStore:
     """Small content-addressed object store for packet context and durable results."""

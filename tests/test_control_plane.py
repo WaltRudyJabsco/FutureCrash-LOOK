@@ -100,6 +100,33 @@ class ControlPlaneTests(unittest.TestCase):
         self.assertIn("CONTROL PLANE", text)
         self.assertIn("accepted 10", text)
 
+
+    def test_beacon_is_pulse_scheduled(self):
+        events=[{"type":"beacon","data":{"id":"demo","origin":"3090","start_pulse":100,"pattern":"rgb","sequence":["red","green","blue","white"]}}]
+        self.assertEqual(node._active_beacon(events, 100)["color"], "red")
+        self.assertEqual(node._active_beacon(events, 101)["color"], "green")
+        self.assertEqual(node._active_beacon(events, 102)["color"], "blue")
+        self.assertEqual(node._active_beacon(events, 103)["color"], "white")
+        self.assertIsNone(node._active_beacon(events, 104))
+
+    def test_dashboard_surfaces_active_beacon(self):
+        pulse=node.pulse_number()
+        sample = {
+            "nodes":{"self":{"name":"3090","version":node.VERSION,"pulse":{"number":pulse},"capabilities":{},"inference":{},"supervisor":{}},"peers":[]},
+            "health":{"ok":True}, "services":{"services":{}}, "jobs":{"jobs":[]}, "http":{"listeners":{"local":{}}},
+            "events":{"events":[{"type":"beacon","ts":node.now(),"data":{"id":"demo","origin":"3090","start_pulse":pulse,"pattern":"rgb","sequence":["red","green","blue","white"]}}]},
+        }
+        text=node._dash_render(sample, 92)
+        self.assertIn("FABRIC BEACON · RED", text)
+
+    def test_recent_events_returns_newest_tail(self):
+        with tempfile.TemporaryDirectory() as td:
+            store = FabricStore(Path(td) / "fabric.sqlite3")
+            for i in range(150):
+                store.event(None, "demo", "tick", str(i), node="test")
+            tail = store.recent_events(limit=5)
+            self.assertEqual([e["detail"] for e in tail], ["145", "146", "147", "148", "149"])
+
     def test_fabric_store_closes_sqlite_connections(self):
         # SQLite Connection.__enter__/__exit__ commits transactions but does not
         # close the connection. Repeated Fabric polling must therefore use an

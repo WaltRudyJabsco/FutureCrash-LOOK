@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Future Crash + LOOK Unified Node 4.9.1.
+"""Future Crash + LOOK Unified Node 5.0.0.
 
 A small distributed supervisor for trusted personal machines. Immediate events stay
 asynchronous; a one-second fabric pulse reconciles presence, leases and stale work.
@@ -34,7 +34,7 @@ except ImportError:
     from fabric_packet import ArtifactStore, FabricStore, normalize_packet, packet_summary, new_id
 from urllib.parse import urlparse, parse_qs
 
-VERSION = "4.9.1"
+VERSION = "5.0.0"
 DEFAULT_HOST = "127.0.0.1"
 DEFAULT_PORT = 7332
 DEFAULT_INGRESS_PORT = 0
@@ -64,6 +64,9 @@ IDENTITY_LOCK = threading.RLock()
 IDENTITY_CACHE = {"name": socket.gethostname(), "hostname": socket.gethostname(), "tailscale": {}}
 ADVERTISEMENT_LOCK = threading.RLock()
 ADVERTISEMENT_CACHE = {}
+BEACON_LOCK = threading.RLock()
+BEACON_SEEN = set()
+BEACON_PATTERNS = {"rgb": ("red", "green", "blue", "white"), "pulse": ("white", "off", "white")}
 
 
 
@@ -1288,8 +1291,80 @@ def _local_accept_watchdog(server):
         os._exit(70)
 
 
+def _beacon_record(payload: dict) -> dict:
+    """Record one synchronized Fabric beacon locally, idempotently."""
+    bid = str(payload.get("id") or "")
+    if not bid:
+        raise ValueError("beacon id required")
+    pattern = str(payload.get("pattern") or "rgb")
+    if pattern not in BEACON_PATTERNS:
+        raise ValueError(f"unknown beacon pattern: {pattern}")
+    start = int(payload.get("start_pulse") or 0)
+    if start <= 0:
+        raise ValueError("start_pulse required")
+    with BEACON_LOCK:
+        if bid in BEACON_SEEN:
+            return {"ok": True, "duplicate": True, "received_pulse": pulse_number()}
+        BEACON_SEEN.add(bid)
+        if len(BEACON_SEEN) > 256:
+            BEACON_SEEN.clear(); BEACON_SEEN.add(bid)
+    data = {"id": bid, "origin": str(payload.get("origin") or "unknown"),
+            "start_pulse": start, "pattern": pattern,
+            "sequence": list(BEACON_PATTERNS[pattern]), "received_pulse": pulse_number()}
+    FABRIC_STORE.event(None, "beacon", "scheduled", f"{pattern} at pulse {start}",
+                       node=identity()["name"], data=data)
+    return {"ok": True, **data}
+
+
+def _beacon_broadcast(pattern: str = "rgb", lead_pulses: int = 3) -> dict:
+    """Schedule one diagnostic visual against the shared wall-clock pulse."""
+    if pattern not in BEACON_PATTERNS:
+        raise ValueError(f"unknown beacon pattern: {pattern}")
+    lead_pulses = max(2, min(int(lead_pulses), 10))
+    local = identity()["name"]
+    payload = {"id": uuid.uuid4().hex[:12], "origin": local, "pattern": pattern,
+               "start_pulse": pulse_number() + lead_pulses}
+    local_result = _beacon_record(payload)
+    snapshot = {"self": node_info(), "peers": PEERS.public()}
+    deliveries = [{"node": local, "ok": True, "received_pulse": local_result.get("received_pulse")}]
+    for peer in snapshot.get("peers") or []:
+        ad = peer.get("node") or {}
+        name = ((ad.get("identity") or {}).get("name") or peer.get("name"))
+        if not name:
+            continue
+        try:
+            result = http_json(_remote_url(snapshot, name, "/v1/beacon"), payload, timeout=.8)
+            deliveries.append({"node": name, "ok": bool(result.get("ok")),
+                               "received_pulse": result.get("received_pulse")})
+        except Exception as exc:
+            deliveries.append({"node": name, "ok": False, "error": str(exc)})
+    return {"ok": all(x.get("ok") for x in deliveries), "id": payload["id"],
+            "pattern": pattern, "start_pulse": payload["start_pulse"],
+            "delivery": deliveries, "delivered": sum(1 for x in deliveries if x.get("ok")),
+            "expected": len(deliveries)}
+
+
+def _active_beacon(events, pulse=None):
+    """Return the color scheduled for the current shared pulse, if any."""
+    current = pulse_number() if pulse is None else int(pulse)
+    for event in reversed(events or []):
+        if event.get("type") != "beacon":
+            continue
+        data = event.get("data") or {}
+        try:
+            start = int(data.get("start_pulse"))
+        except Exception:
+            continue
+        seq = tuple(data.get("sequence") or BEACON_PATTERNS.get(str(data.get("pattern") or ""), ()))
+        offset = current - start
+        if 0 <= offset < len(seq):
+            return {"color": seq[offset], "pulse": current, "id": data.get("id"),
+                    "origin": data.get("origin"), "pattern": data.get("pattern")}
+    return None
+
+
 class API(BaseHTTPRequestHandler):
-    server_version = "FCLNode/4.9.1"
+    server_version = "FCLNode/5.0.0"
 
     def setup(self):
         self._metric_request_id = None
@@ -1381,6 +1456,8 @@ class API(BaseHTTPRequestHandler):
             return self.sendj(200, job)
         if path == "/v1/events":
             q = parse_qs(urlparse(self.path).query)
+            if "since" not in q:
+                return self.sendj(200, {"events": FABRIC_STORE.recent_events()})
             try: since = int((q.get("since") or [0])[0])
             except Exception: since = 0
             return self.sendj(200, {"events": FABRIC_STORE.events(since=since)})
@@ -1402,6 +1479,13 @@ class API(BaseHTTPRequestHandler):
     def do_POST(self):
         path = urlparse(self.path).path
         d = self.body()
+        if path == "/v1/beacon":
+            try:
+                if d.get("start_pulse"):
+                    return self.sendj(200, _beacon_record(d))
+                return self.sendj(200, _beacon_broadcast(str(d.get("pattern") or "rgb"), int(d.get("lead_pulses") or 3)))
+            except ValueError as exc:
+                return self.sendj(400, {"ok": False, "error": str(exc)})
         if path == "/v1/infer/stream":
             try:
                 return _stream_model_infer(self, d)
@@ -1705,6 +1789,10 @@ def _dash_render(data, width=92):
     live = 1 + sum(1 for p in peers if p.get("node"))
 
     lines = [f"FUTURE CRASH + LOOK · FABRIC DASH   {now_text}", rule]
+    beacon = _active_beacon(events)
+    if beacon:
+        lines.append(f"FABRIC BEACON · {str(beacon['color']).upper()} · pulse {beacon['pulse']} · from {beacon.get('origin') or 'fabric'}")
+        lines.append(rule)
     lines.append(f"FABRIC  {local.get('name','local')} · node {local.get('version','?')} · {live} node{'s' if live != 1 else ''}")
 
     warnings = []
@@ -1791,7 +1879,7 @@ def _dash_render(data, width=92):
     else:
         lines.append("no recent Fabric events")
 
-    lines += ["", rule, "[q] quit   [w] fabric watch   [s] settings   [d] doctor   [r] restart service   [space] refresh"]
+    lines += ["", rule, "[q] quit   [b] beacon   [w] watch   [s] settings   [d] doctor   [r] restart   [space] refresh"]
     return "\n".join(lines)
 
 
@@ -1861,7 +1949,7 @@ def _dashboard(host, port, interval=0.25):
     fd = sys.stdin.fileno()
     old = termios.tcgetattr(fd)
     alt = "\033[?1049h\033[?25l"
-    normal = "\033[?25h\033[?1049l"
+    normal = "\033[0m\033[?25h\033[?1049l"
 
     def raw_on():
         tty.setcbreak(fd)
@@ -1885,7 +1973,10 @@ def _dashboard(host, port, interval=0.25):
             if dirty or t - last_draw >= 1.0:
                 size = shutil.get_terminal_size((92, 30))
                 body = _dash_render(cache, size.columns)
-                sys.stdout.write("\033[2J\033[H" + body)
+                beacon = _active_beacon(((cache.get("events") or {}).get("events") or []))
+                bg = {"red":"41;97", "green":"42;30", "blue":"44;97", "white":"47;30"}.get((beacon or {}).get("color"))
+                prefix = (f"\033[{bg}m" if bg else "\033[0m") + "\033[2J\033[H"
+                sys.stdout.write(prefix + body)
                 errors = cache.get("_errors") or {}
                 if errors:
                     sys.stdout.write("\n" + " · ".join(f"{k}: {v}" for k, v in list(errors.items())[:2]))
@@ -1900,6 +1991,11 @@ def _dashboard(host, port, interval=0.25):
                 return 0
             if ch == " ":
                 dirty = True
+            elif ch in {"b", "B"}:
+                try:
+                    _beacon_broadcast("rgb", 3)
+                finally:
+                    dirty = True
             elif ch in {"w", "W"}:
                 raw_off()
                 try:
@@ -1987,7 +2083,7 @@ def main():
     ap=argparse.ArgumentParser(description="Future Crash + LOOK unified node")
     ap.add_argument("command",nargs="?",default="serve",
         choices=["serve","status","nodes","activity","pulse","fabric","watch","dashboard","models","qualify","services","service",
-                 "jobs","job","submit","packet","cancel","events","http"])
+                 "jobs","job","submit","packet","cancel","events","http","beacon"])
     ap.add_argument("args",nargs="*")
     ap.add_argument("--node",dest="node",default=None,help="target Fabric node name")
     ap.add_argument("--json",action="store_true",help="raw JSON where a human view exists")
@@ -2001,6 +2097,15 @@ def main():
         try:
             if a.command=="watch": return _watch(a.host,a.port)
             if a.command=="dashboard": return _dashboard(a.host,a.port)
+            if a.command=="beacon":
+                pattern = a.args[0] if a.args else "rgb"
+                result = http_json(_daemon_url(a.host,a.port,"/v1/beacon"), {"pattern": pattern, "lead_pulses": 3}, timeout=3.0)
+                print(f"FABRIC BEACON · {result.get('pattern','rgb')} · pulse {result.get('start_pulse','?')} · {result.get('delivered',0)}/{result.get('expected',0)} nodes")
+                for row in result.get("delivery") or []:
+                    mark = "✓" if row.get("ok") else "×"
+                    detail = f"received pulse {row.get('received_pulse')}" if row.get("ok") else str(row.get("error") or "failed")
+                    print(f"  {mark} {str(row.get('node') or '?'):<24} {detail}")
+                return 0 if result.get("ok") else 1
             if a.command=="fabric": print_fabric_snapshot(_daemon_get(a.host,a.port,"/v1/nodes")); return 0
             if a.command=="nodes": print(json.dumps(_daemon_get(a.host,a.port,"/v1/nodes"),indent=2)); return 0
             path={"status":"/v1/node","activity":"/v1/activity","pulse":"/v1/pulse","models":"/v1/models","services":"/v1/services","http":"/v1/http"}.get(a.command)

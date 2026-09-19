@@ -3052,10 +3052,22 @@ class _ActivityHandle:
     def start(self):
         if not sys.stdout.isatty(): return self
         frames=("◐","◓","◑","◒")
+        started=time.monotonic()
         def animate():
             i=0
             while not self.stop.is_set():
-                sys.stdout.write(f"\r\033[2K{_c(frames[i%4],'36')} {_c(self.label,'2')} {_c('· Ctrl-C cancel','2')}")
+                elapsed=time.monotonic()-started
+                # A little Bear-like patience, but only while a real request is active.
+                # The wording never invents a phase we have not observed.
+                if elapsed < 2.0:
+                    status=self.label
+                elif elapsed < 5.0:
+                    status="working on it…"
+                elif elapsed < 9.0:
+                    status="just a little longer…"
+                else:
+                    status=f"still working · {self.label}"
+                sys.stdout.write(f"\r\033[2K{_c(frames[i%4],'36')} {_c(status,'2')} {_c('· Ctrl-C cancel','2')}")
                 sys.stdout.flush(); i+=1; self.stop.wait(.12)
         self.worker=threading.Thread(target=animate,daemon=True); self.worker.start()
         return self
@@ -9059,24 +9071,41 @@ def ollama_chat(force_search=False, initial_prompt=None, allow_start=True, host_
         turn_fabric_route={} if fabric_mode else None
 
         for _ in range(budget["tool_rounds"]):
+            weather_text_fast_path=(weather_prefetched and _lo_weather_only_query(prompt))
+            payload_messages=messages
+            payload_context=budget["context"]
+            payload_output=budget["output"]
+            if weather_text_fast_path:
+                # A deterministic edge already did the retrieval. Do not make a reflex
+                # model reread LO's full tool/personality/context manual merely to phrase
+                # a trusted receipt. Keep the session state intact; compact only this call.
+                payload_messages=[
+                    {"role":"system","content":_temporal_context()},
+                    {"role":"system","content":(
+                        "FAST EDGE: Answer the user's weather question naturally and concisely from the trusted WEATHER receipt below. "
+                        "Do not recompute dates or weekdays, invent conditions, call tools, or mention internal routing.\n\n"
+                        + weather_content)},
+                    user_message,
+                ]
+                payload_context=min(int(payload_context),4096)
+                payload_output=min(int(payload_output),384)
             payload_obj = {
                 "model": model,
-                "messages": messages,
+                "messages": payload_messages,
                 "stream": False,
                 # LOOK is an interactive shell assistant. On a dedicated Ollama
                 # host, unloading the primary model between turns only creates
                 # cold-start latency with no user benefit.
                 "keep_alive": -1,
                 "options": {
-                    "num_ctx": budget["context"],
-                    "num_predict": budget["output"],
+                    "num_ctx": payload_context,
+                    "num_predict": payload_output,
                     "temperature": runtime["temperature"],
                 },
             }
             if supports_thinking:
                 payload_obj["think"]=runtime["think"]
             tools=[]
-            weather_text_fast_path=(weather_prefetched and _lo_weather_only_query(prompt))
             if supports_tools and not host_repair_final and not weather_text_fast_path:
                 tools = _lo_tools(profile)
                 if has_web and not force_search:
@@ -13135,8 +13164,8 @@ def _fabric_command(args):
     aliases={"list":"nodes","node":"status","model":"models"}
     sub=aliases.get(sub,sub)
     if sub=="dash": sub="dashboard"
-    if sub not in {"fabric","watch","dashboard","dash","nodes","activity","pulse","models","status","qualify","services","service","jobs","job","submit","packet","cancel","events","http"}:
-        print("usage: lk fabric [watch|dashboard|nodes|status [NODE]|activity [NODE]|pulse [NODE]|models [NODE] [--json]|http [NODE]|jobs [NODE]|job [NODE] ID|events [NODE]|submit [NODE] OP [key=value ...]|packet [NODE] FILE|cancel [NODE] ID|qualify [NODE] MODEL|services [NODE]|service [NODE] SERVICE start|stop|restart]")
+    if sub not in {"fabric","watch","dashboard","dash","beacon","nodes","activity","pulse","models","status","qualify","services","service","jobs","job","submit","packet","cancel","events","http"}:
+        print("usage: lk fabric [watch|dashboard|beacon [rgb|pulse]|nodes|status [NODE]|activity [NODE]|pulse [NODE]|models [NODE] [--json]|http [NODE]|jobs [NODE]|job [NODE] ID|events [NODE]|submit [NODE] OP [key=value ...]|packet [NODE] FILE|cancel [NODE] ID|qualify [NODE] MODEL|services [NODE]|service [NODE] SERVICE start|stop|restart]")
         return 2
     argv=[exe,sub]
     rest=list(args[1:])

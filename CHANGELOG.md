@@ -1,3 +1,13 @@
+## 5.0.0 — Fabric Alive
+
+- Adds `lk fabric beacon`: a synchronized pulse-scheduled RGB diagnostic that all open Fabric dashboards render together. Dashboard key `b` triggers the same demo locally.
+- Beacon delivery is real control-plane traffic; nodes schedule presentation against the shared one-second Fabric pulse instead of animating on packet arrival.
+- Adds a small patient/Bear-style waiting cadence to active LO inference without inventing fake progress states.
+- Compacts deterministic weather-edge inference: once the trusted WEATHER receipt exists, the reflex model receives only temporal truth, the receipt, and the user's question instead of LO's full tool/context manual.
+- Keeps credentials and external-tool semantics out of the beacon path; 5.0 remains a lightweight network proof, not a second orchestration system.
+- Fixes dashboard/event-tail staleness: ordinary `/v1/events` reads now return the newest bounded tail, while cursor-based `?since=` consumers retain ordered replay semantics.
+- LOOK 4.42.0; Unified Node 5.0.0; Future Crash 1.1.14; Signal Window 1.0.0.
+
 ## 4.9.1 — Fast Edge
 
 - Fixes the 4.9.0 installed-runtime packaging regression by installing and verifying `core/conductor.py` beside `fabric_client.py`.

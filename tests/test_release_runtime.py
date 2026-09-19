@@ -14,6 +14,15 @@ class ReleaseRuntimeTests(unittest.TestCase):
         self.assertIn('from conductor import classify', text)
         self.assertNotIn('from .conductor import', text)
 
+
+    def test_release_contains_beacon_and_fast_edge(self):
+        node_text=(ROOT/"core/node.py").read_text()
+        look_text=(ROOT/"look/lk").read_text()
+        self.assertIn('"/v1/beacon"', node_text)
+        self.assertIn('FABRIC BEACON', node_text)
+        self.assertIn('FAST EDGE:', look_text)
+        self.assertIn('just a little longer', look_text)
+
     def test_installed_layout_imports_together(self):
         with tempfile.TemporaryDirectory() as td:
             dest=Path(td)

@@ -1,6 +1,32 @@
-# Future Crash + LOOK 4.9.1 — Fast Edge
+# Future Crash + LOOK 5.0.0 — Fabric Alive
 
-Deterministic live-weather preflight, smaller reflex prompts, truthful placement/prompt timing telemetry, and installed-runtime conductor verification.
+A milestone release: the personal Fabric is observable, routable, pulse-synchronized, and now has a tiny physical-looking demo of itself. Deterministic Fast Edges keep obvious tool work out of unnecessary model-planning rounds, while LO adds a restrained patient waiting cadence for genuinely long inference.
+
+## Show somebody the Fabric
+
+Open the dashboard on every node:
+
+```sh
+lk dash
+```
+
+Then press **`b`** in any dashboard, or run:
+
+```sh
+lk fabric beacon
+```
+
+Every open dashboard schedules the same RGB flash against a future shared Fabric pulse. The packets may arrive at different moments; presentation is synchronized by the pulse. The command prints delivery receipts for each node. This is deliberately inference-free: if it works, peer discovery, event transport, the control plane, and shared pulse timing are all alive.
+
+For a quieter test:
+
+```sh
+lk fabric beacon pulse
+```
+
+## 5.0 optimization: Fast Edge really means fast
+
+For deterministic weather questions, LO retrieves the canonical live receipt first and then gives the reflex model only the trusted temporal context, weather receipt, and user question. It no longer makes a small model reread the full LO tool/context manual simply to phrase data we already have.
 
 **Signal Native LO.** Signal no longer spawns the human `lo` terminal command or parses terminal output. The browser calls a reusable in-process LO engine, receives structured events/results, keeps a bounded session history for follow-ups, and presents artifacts in the originating browser. The Fabric remains the inference substrate underneath LO.
 
