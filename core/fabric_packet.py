@@ -136,9 +136,25 @@ class FabricStore:
         self._init()
 
     def _connect(self):
-        db = sqlite3.connect(self.path, timeout=5.0)
+        # Mutable ledger state must recover if its parent disappears transiently
+        # during an update. Retry SQLITE_CANTOPEN once after recreating the parent.
+        self.path.parent.mkdir(parents=True, exist_ok=True)
+        try:
+            db = sqlite3.connect(self.path, timeout=5.0)
+        except sqlite3.OperationalError:
+            self.path.parent.mkdir(parents=True, exist_ok=True)
+            db = sqlite3.connect(self.path, timeout=5.0)
         db.row_factory = sqlite3.Row
+        db.execute("PRAGMA busy_timeout=5000")
         return db
+
+    def health(self):
+        try:
+            with self._connect() as db:
+                db.execute("SELECT 1").fetchone()
+            return {"ok": True, "path": str(self.path)}
+        except Exception as exc:
+            return {"ok": False, "path": str(self.path), "error": str(exc)}
 
     def _init(self):
         with self._connect() as db:

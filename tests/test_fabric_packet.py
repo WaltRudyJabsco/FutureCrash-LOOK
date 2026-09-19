@@ -1,4 +1,5 @@
 import tempfile
+import shutil
 import unittest
 from pathlib import Path
 import sys
@@ -20,6 +21,13 @@ class FabricPacketTests(unittest.TestCase):
     def test_digest_is_stable(self):
         p = self.packet()
         self.assertEqual(packet_digest(p), packet_digest(dict(p)))
+
+    def test_store_recreates_missing_parent(self):
+        with tempfile.TemporaryDirectory() as td:
+            parent = Path(td) / "state"
+            store = FabricStore(parent / "fabric.sqlite3")
+            shutil.rmtree(parent)
+            self.assertTrue(store.health()["ok"])
 
     def test_idempotency_returns_original_job(self):
         with tempfile.TemporaryDirectory() as td:

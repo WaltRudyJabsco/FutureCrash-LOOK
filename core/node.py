@@ -29,7 +29,7 @@ except ImportError:
     from fabric_packet import ArtifactStore, FabricStore, normalize_packet, packet_summary, new_id
 from urllib.parse import urlparse, parse_qs
 
-VERSION = "4.6.1"
+VERSION = "4.6.2"
 DEFAULT_HOST = "127.0.0.1"
 DEFAULT_PORT = 7332
 PULSE_SECONDS = 1.0
@@ -49,6 +49,7 @@ FABRIC_DB = STATE / "fabric.sqlite3"
 ARTIFACT_ROOT = STATE / "artifacts"
 FABRIC_STORE = FabricStore(FABRIC_DB)
 ARTIFACTS = ArtifactStore(ARTIFACT_ROOT)
+WORKER_HEALTH = {"alive": False, "last_loop": 0.0, "last_error": None, "errors": 0}
 
 
 def now() -> float:
@@ -398,9 +399,15 @@ def _node_preferred_model(models):
 def advertisement():
     ident = identity()
     models = MODELS.discover()
+    db = FABRIC_STORE.health()
+    worker_age = max(0.0, now() - float(WORKER_HEALTH.get("last_loop") or 0))
+    worker_ok = bool(WORKER_HEALTH.get("alive")) and worker_age < 3.0
     return {
         "protocol": 1,
         "version": VERSION,
+        "runtime": {"ok": bool(db.get("ok")) and worker_ok,
+                    "database": bool(db.get("ok")), "job_worker": worker_ok,
+                    "job_worker_error": WORKER_HEALTH.get("last_error")},
         "pulse": {"epoch": "unix-1s-v1", "number": pulse_number(), "period_ms": int(PULSE_SECONDS*1000)},
         "identity": ident,
         "platform": {"system": platform.system().lower(), "architecture": platform.machine()},
@@ -821,57 +828,64 @@ def execute_packet(packet, job_id, attempt, worker, lease_id):
 
 
 def job_worker_loop():
-    """Small deterministic worker. Distribution chooses a node before submission."""
+    """Small deterministic worker. Ledger faults degrade/retry; the thread stays alive."""
     worker = identity()["name"]
+    WORKER_HEALTH.update(alive=True, last_loop=now(), last_error=None)
     while True:
-        JOB_WAKE.wait(timeout=.5)
-        JOB_WAKE.clear()
-        queued = [j for j in reversed(FABRIC_STORE.jobs(128)) if j.get("status") == "queued"]
-        if not queued:
-            continue
-        # Human work first. FIFO within priority keeps behavior boring and inspectable.
-        queued.sort(key=lambda j: (PRIORITY.get((j.get("packet") or {}).get("priority"), 9), j.get("accepted") or 0))
-        for job in queued:
-            packet = FABRIC_STORE.get_packet(job["id"])
-            if not packet or not _dependencies_ready(packet):
+        try:
+            WORKER_HEALTH["last_loop"] = now()
+            JOB_WAKE.wait(timeout=.5)
+            JOB_WAKE.clear()
+            queued = [j for j in reversed(FABRIC_STORE.jobs(128)) if j.get("status") == "queued"]
+            WORKER_HEALTH.update(alive=True, last_loop=now(), last_error=None)
+            if not queued:
                 continue
-            if FABRIC_STORE.cancelled(job["id"]):
-                FABRIC_STORE.finish(job["id"], "cancelled", error="cancelled while queued", node=worker)
-                continue
-            priority = (packet.get("execution") or {}).get("priority", "interactive")
-            operation = (packet.get("work") or {}).get("operation", "task")
-            lease, busy = SUP.acquire(f"job:{job['id']}", priority, "dispatch", str(operation), worker=worker)
-            if not lease:
-                # Let the pulse/next wake try again; never spin against active human work.
-                JOB_WAKE.set()
+            queued.sort(key=lambda j: (PRIORITY.get((j.get("packet") or {}).get("priority"), 9), j.get("accepted") or 0))
+            for job in queued:
+                packet = FABRIC_STORE.get_packet(job["id"])
+                if not packet or not _dependencies_ready(packet):
+                    continue
+                if FABRIC_STORE.cancelled(job["id"]):
+                    FABRIC_STORE.finish(job["id"], "cancelled", error="cancelled while queued", node=worker)
+                    continue
+                priority = (packet.get("execution") or {}).get("priority", "interactive")
+                operation = (packet.get("work") or {}).get("operation", "task")
+                lease, busy = SUP.acquire(f"job:{job['id']}", priority, "dispatch", str(operation), worker=worker)
+                if not lease:
+                    break
+                lease_id = lease["id"]
+                attempt = FABRIC_STORE.start(job["id"], worker)
+                SUP.progress(lease_id, "working", str(operation))
+                FABRIC_STORE.event(job["id"], "progress", "working", str(operation), node=worker)
+                try:
+                    budget = (packet.get("execution") or {}).get("budget") or {}
+                    wall_ms = int(budget.get("wall_ms") or 0)
+                    deadline = (packet.get("execution") or {}).get("deadline")
+                    if deadline and now() > float(deadline):
+                        raise TimeoutError("job deadline already passed")
+                    started = now()
+                    data = execute_packet(packet, job["id"], attempt, worker, lease_id)
+                    if wall_ms and (now() - started) * 1000 > wall_ms:
+                        raise TimeoutError("job exceeded wall_ms budget")
+                    result = _result_packet(packet, data, worker=worker, attempt=attempt)
+                    FABRIC_STORE.finish(job["id"], "ok", result=result, node=worker)
+                    SUP.release(lease_id, "ok", "packet complete")
+                except InterruptedError as exc:
+                    FABRIC_STORE.finish(job["id"], "cancelled", error=str(exc), node=worker)
+                    SUP.release(lease_id, "cancelled", str(exc))
+                except PermissionError as exc:
+                    FABRIC_STORE.finish(job["id"], "denied", error=str(exc), node=worker)
+                    SUP.release(lease_id, "denied", str(exc))
+                except Exception as exc:
+                    FABRIC_STORE.finish(job["id"], "failed", error=str(exc), node=worker)
+                    SUP.release(lease_id, "failed", str(exc))
                 break
-            lease_id = lease["id"]
-            attempt = FABRIC_STORE.start(job["id"], worker)
-            SUP.progress(lease_id, "working", str(operation))
-            FABRIC_STORE.event(job["id"], "progress", "working", str(operation), node=worker)
-            try:
-                budget = (packet.get("execution") or {}).get("budget") or {}
-                wall_ms = int(budget.get("wall_ms") or 0)
-                deadline = (packet.get("execution") or {}).get("deadline")
-                if deadline and now() > float(deadline):
-                    raise TimeoutError("job deadline already passed")
-                started = now()
-                data = execute_packet(packet, job["id"], attempt, worker, lease_id)
-                if wall_ms and (now() - started) * 1000 > wall_ms:
-                    raise TimeoutError("job exceeded wall_ms budget")
-                result = _result_packet(packet, data, worker=worker, attempt=attempt)
-                FABRIC_STORE.finish(job["id"], "ok", result=result, node=worker)
-                SUP.release(lease_id, "ok", "packet complete")
-            except InterruptedError as exc:
-                FABRIC_STORE.finish(job["id"], "cancelled", error=str(exc), node=worker)
-                SUP.release(lease_id, "cancelled", str(exc))
-            except PermissionError as exc:
-                FABRIC_STORE.finish(job["id"], "denied", error=str(exc), node=worker)
-                SUP.release(lease_id, "denied", str(exc))
-            except Exception as exc:
-                FABRIC_STORE.finish(job["id"], "failed", error=str(exc), node=worker)
-                SUP.release(lease_id, "failed", str(exc))
-            break
+        except Exception as exc:
+            WORKER_HEALTH["alive"] = True
+            WORKER_HEALTH["last_loop"] = now()
+            WORKER_HEALTH["last_error"] = str(exc)
+            WORKER_HEALTH["errors"] = int(WORKER_HEALTH.get("errors") or 0) + 1
+            time.sleep(1.0)
 
 
 def _stream_model_infer(handler, raw):
@@ -969,7 +983,7 @@ def _stream_model_infer(handler, raw):
 
 
 class API(BaseHTTPRequestHandler):
-    server_version = "FCLNode/4.6.1"
+    server_version = "FCLNode/4.6.2"
 
     def log_message(self, *a):
         pass
@@ -991,7 +1005,17 @@ class API(BaseHTTPRequestHandler):
     def do_GET(self):
         path = urlparse(self.path).path
         if path in ("/health", "/v1/health"):
-            return self.sendj(200, {"ok": True, "version": VERSION, "pulse": pulse_number()})
+            db = FABRIC_STORE.health()
+            worker_age = max(0.0, now() - float(WORKER_HEALTH.get("last_loop") or 0))
+            worker_ok = bool(WORKER_HEALTH.get("alive")) and worker_age < 3.0
+            ok = bool(db.get("ok")) and worker_ok
+            return self.sendj(200 if ok else 503, {
+                "ok": ok, "version": VERSION, "pulse": pulse_number(),
+                "database": db,
+                "job_worker": {"ok": worker_ok, "last_loop_age_ms": int(worker_age*1000),
+                               "last_error": WORKER_HEALTH.get("last_error"),
+                               "errors": WORKER_HEALTH.get("errors", 0)},
+            })
         if path in ("/node", "/v1/node", "/v1/status"):
             return self.sendj(200, node_info())
         if path == "/v1/advertisement":

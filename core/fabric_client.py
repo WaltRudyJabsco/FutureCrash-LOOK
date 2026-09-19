@@ -34,6 +34,9 @@ def choose_node(base=DEFAULT_NODE, *, model=None, requires=None, latency=False):
     snap=_nodes(base); scored=[]
     requires=set(requires or ["text"])
     for name,dns,ad in _candidates(snap):
+        runtime=ad.get("runtime") or {}
+        if runtime and runtime.get("ok") is False:
+            continue
         caps=ad.get("capabilities") or {}
         inf=ad.get("inference") or {}
         models=inf.get("models") or []
@@ -102,7 +105,7 @@ def infer(messages, *, model=None, requires=None, latency=False, priority="inter
             out=((result.get("work") or {}).get("output") or {})
             out["fabric_node"]=target
             return out
-        time.sleep(.08)
+        time.sleep(.25)
     raise TimeoutError(f"Fabric inference timed out on {target}")
 
 def stream_infer(payload, *, requires=None, priority="interactive", timeout=180,

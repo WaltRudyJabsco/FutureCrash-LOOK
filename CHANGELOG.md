@@ -1,11 +1,19 @@
-# Future Crash + LOOK 4.6.1 — Turn Routing Hotfix
+# Future Crash + LOOK 4.6.2 — Fabric Resilience Hotfix
 
+- Fabric SQLite connections now recreate their parent state directory and retry `SQLITE_CANTOPEN` once instead of permanently stranding the worker.
+- The packet worker catches ledger/storage faults, backs off, records degraded state, and keeps running instead of dying silently.
+- `/health` now checks the Fabric database and worker heartbeat; an alive HTTP process with a dead worker reports unhealthy.
+- Node advertisements include runtime health so automatic inference routing skips degraded workers.
+- Fabric result polling backs off from 80 ms to 250 ms to avoid hammering a failed node.
+- Fixes the recurring `sqlite3.OperationalError: unable to open database file` failure observed on the 3090.
+
+# 4.6.1 — Turn Routing Hotfix
 - LO now pins one Fabric worker/model for the duration of a single operator turn, including tool continuation rounds. A new user turn may route again. This prevents a weather/tool request from hopping M4 → M3 between inference rounds because the first worker was briefly advertised busy.
 - Future Crash Ask/Workstation deterministically dispatch explicit current-weather requests to the canonical Open-Meteo edge before asking the model to summarize the verified receipt. Tiny models no longer have to discover the hidden pseudo-tool syntax for obvious weather questions.
 - Future Crash Fabric inference no longer pins its legacy model name; it uses the selected worker's machine-local preferred model.
 - LO's banner now says `auto · fabric:auto` in Fabric mode instead of showing a blank model and `local`.
 
-# 4.6.1 — Streaming Fabric
+# 4.6.0 — Streaming Fabric
 
 - LO conversational inference now routes through Fabric Work Packets by default while preserving streamed token events and the existing LO tool loop.
 - Streaming inference records accepted/attempt/first-token/progress/result events in the Fabric ledger and treats client disconnect as cancellation.
@@ -14,7 +22,7 @@
 - Vision requests retain compatibility retries that progressively defer tools and thinking controls.
 - `lk ollama host prune` now removes duplicate aliases that point at the same endpoint as well as offline saved hosts.
 - `lk ollama host reset` clears all saved legacy remote-host state and returns the compatibility override to local.
-- LOOK 4.38.1; Unified Node 4.6.1; Signal Window 0.9.0.
+- LOOK 4.38.2; Unified Node 4.6.2; Signal Window 0.9.0.
 
 # 4.5.1 — Model Scope Fix
 

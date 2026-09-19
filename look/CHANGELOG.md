@@ -336,14 +336,14 @@
 - Recursively inspect nested legacy model folders at bounded depth.
 - Preserve working managed generation behavior.
 
-## 4.6.1 — Memory lifecycle tuning
+## 4.6.2 — Memory lifecycle tuning
 
 - RECENT preserves sidebars; durable extraction does not.
 - Loosen candidate admission without loosening durable promotion.
 - Track memory metabolism: local suppression, merges, promotions, expirations, evictions.
 - Migrate and retire inactive legacy summary state.
 
-## 4.6.1 — Managed Comfy workstation
+## 4.6.2 — Managed Comfy workstation
 
 - Add managed Comfy start/stop/restart lifecycle.
 - Add deep mounted-drive discovery/bootstrap helper.
