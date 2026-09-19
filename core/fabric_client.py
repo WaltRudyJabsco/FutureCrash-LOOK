@@ -29,11 +29,14 @@ def _candidates(snapshot):
         rows.append((name,p.get("dns"),ad))
     return rows
 
-def choose_node(base=DEFAULT_NODE, *, model=None, requires=None, latency=False):
+def choose_node(base=DEFAULT_NODE, *, model=None, requires=None, latency=False, exclude=None):
     """Choose the soonest plausible capable worker using only advertised facts."""
     snap=_nodes(base); scored=[]
     requires=set(requires or ["text"])
+    excluded=set(exclude or [])
     for name,dns,ad in _candidates(snap):
+        if name in excluded:
+            continue
         runtime=ad.get("runtime") or {}
         if runtime and runtime.get("ok") is False:
             continue
@@ -92,9 +95,12 @@ def infer(messages, *, model=None, requires=None, latency=False, priority="inter
       "authority":{"principal":"user","grants":["model.infer"],"confirmed_operations":[]},
       "delivery":{"target":target},"provenance":{},"extensions":{"futurecrash":{"owner":owner}},
     }
-    submit=_json(base.rstrip('/')+"/v1/jobs",{"packet":packet},timeout=6.0)
-    job=(submit.get("job") or {}); jid=job.get("id") or packet.get("id")
+    # Submit work to the selected worker. delivery.target is descriptive/provenance;
+    # transport placement must be real rather than relying on the origin node to
+    # interpret a remote target later.
     pollbase=(f"https://{dns}:7332" if dns else base.rstrip('/'))
+    submit=_json(pollbase+"/v1/jobs",{"packet":packet},timeout=6.0)
+    job=(submit.get("job") or {}); jid=job.get("id") or packet.get("id")
     deadline=time.monotonic()+timeout+8
     while time.monotonic()<deadline:
         state=_json(pollbase+f"/v1/jobs/{jid}",timeout=4.0)
@@ -110,66 +116,99 @@ def infer(messages, *, model=None, requires=None, latency=False, priority="inter
 
 def stream_infer(payload, *, requires=None, priority="interactive", timeout=180,
                  base=DEFAULT_NODE, owner="lo", route=None):
-    """Route a mature Ollama chat payload to a Fabric worker and yield its JSONL stream."""
-    import urllib.parse
+    """Route a mature Ollama chat payload to Fabric and yield its JSONL stream.
+
+    A healthy turn remains sticky to one worker/model. Before the first streamed
+    event, however, BUSY or transport failure is a placement failure, not a user
+    failure: retry once on another eligible worker and update the turn route.
+    """
+    import socket
+
     model=payload.get("model") or None
-    # Keep one worker/model for the whole user turn. Tool rounds should not bounce
-    # between computers merely because the previous worker is still visible as busy
-    # in a peer advertisement. A new user turn gets a fresh route.
-    if isinstance(route, dict) and route.get("target"):
-        target=str(route["target"]); dns=route.get("dns")
-        ad=_ad_for_target(base,target)
-        models=((ad.get("inference") or {}).get("models") or [])
-        eligible=[]
-        reqs=set(requires or ["text"])
-        for m in models:
-            features=m.get("features") or {}
-            if model and m.get("name") != model: continue
-            if any(r in {"vision","tools","thinking","embedding"} and not features.get(r) for r in reqs): continue
-            eligible.append(m)
-        if not eligible:
-            raise RuntimeError(f"Fabric turn worker {target} no longer satisfies inference requirements")
-        chosen=str(route.get("model") or model or "")
-        if not chosen:
-            preferred=((ad.get("inference") or {}).get("preferred_model"))
-            names={m.get("name") for m in eligible}
-            chosen=preferred if preferred in names else max(eligible,key=lambda m:int(m.get("size") or 0)).get("name")
-    else:
-        score,target,dns,eligible=choose_node(base,model=model,requires=requires,latency=False)
+    reqs=set(requires or ["text"])
+    tried=set()
+    max_attempts=3
+
+    def select(prefer_route=True):
+        if prefer_route and isinstance(route,dict) and route.get("target") and route.get("target") not in tried:
+            target=str(route["target"]); dns=route.get("dns")
+            ad=_ad_for_target(base,target)
+            models=((ad.get("inference") or {}).get("models") or [])
+            eligible=[]
+            for m in models:
+                features=m.get("features") or {}
+                if model and m.get("name") != model: continue
+                if any(r in {"vision","tools","thinking","embedding"} and not features.get(r) for r in reqs): continue
+                eligible.append(m)
+            if eligible:
+                chosen=str(route.get("model") or model or "")
+                if not chosen:
+                    preferred=((ad.get("inference") or {}).get("preferred_model"))
+                    names={m.get("name") for m in eligible}
+                    chosen=preferred if preferred in names else max(eligible,key=lambda m:int(m.get("size") or 0)).get("name")
+                return target,dns,chosen
+        _,target,dns,eligible=choose_node(base,model=model,requires=reqs,latency=False,exclude=tried)
         ad=_ad_for_target(base,target)
         chosen=model
         if not chosen:
             preferred=((ad.get("inference") or {}).get("preferred_model"))
             names={m.get("name") for m in eligible}
             chosen=preferred if preferred in names else max(eligible,key=lambda m:int(m.get("size") or 0)).get("name")
-        if isinstance(route, dict):
+        return target,dns,chosen
+
+    last_error=None
+    for attempt_no in range(max_attempts):
+        target,dns,chosen=select(prefer_route=(attempt_no==0))
+        if isinstance(route,dict):
             route.update({"target":target,"dns":dns,"model":chosen})
-    inp={"model":chosen,"messages":payload.get("messages") or [],"timeout":timeout,
-         "keep_alive":payload.get("keep_alive",-1),"options":payload.get("options") or {}}
-    if "think" in payload: inp["think"]=payload.get("think")
-    if isinstance(payload.get("tools"),list): inp["tools"]=payload["tools"]
-    packet={
-      "fabric":"fwp/1","kind":"task","origin":owner,"relationships":{},
-      "work":{"operation":"model.infer","objective":"stream conversational inference","input":inp},
-      "capabilities":{"requires":requires or ["text"],"prefers":{"latency":"normal"}},
-      "context":{},"execution":{"priority":priority,"cancellable":True,
-        "budget":{"wall_ms":int(timeout*1000)+5000,"child_jobs":0,"depth":0}},
-      "authority":{"principal":"user","grants":["model.infer"],"confirmed_operations":[]},
-      "delivery":{"target":target},"provenance":{},"extensions":{"futurecrash":{"owner":owner}},
-    }
-    endpoint=(f"https://{dns}:7332" if dns else base.rstrip('/'))+"/v1/infer/stream"
-    req=urllib.request.Request(endpoint,data=json.dumps({"packet":packet}).encode(),
-                               headers={"Content-Type":"application/json"},method="POST")
-    try:
-        with urllib.request.urlopen(req,timeout=timeout) as response:
-            node=response.headers.get("X-Fabric-Node") or target
-            for raw in response:
-                if raw.strip():
-                    event=json.loads(raw)
-                    event["_fabric_node"]=node
-                    yield event
-    except urllib.error.HTTPError as exc:
-        detail=exc.read().decode("utf-8","replace")
-        try: detail=json.loads(detail).get("error") or detail
-        except Exception: pass
-        raise RuntimeError(f"Fabric inference HTTP {exc.code}: {detail}") from None
+        inp={"model":chosen,"messages":payload.get("messages") or [],"timeout":timeout,
+             "keep_alive":payload.get("keep_alive",-1),"options":payload.get("options") or {}}
+        if "think" in payload: inp["think"]=payload.get("think")
+        if isinstance(payload.get("tools"),list): inp["tools"]=payload["tools"]
+        packet={
+          "fabric":"fwp/1","kind":"task","origin":owner,"relationships":{},
+          "work":{"operation":"model.infer","objective":"stream conversational inference","input":inp},
+          "capabilities":{"requires":list(reqs),"prefers":{"latency":"normal"}},
+          "context":{},"execution":{"priority":priority,"cancellable":True,
+            "budget":{"wall_ms":int(timeout*1000)+5000,"child_jobs":0,"depth":0}},
+          "authority":{"principal":"user","grants":["model.infer"],"confirmed_operations":[]},
+          "delivery":{"target":target},"provenance":{},"extensions":{"futurecrash":{"owner":owner}},
+        }
+        endpoint=(f"https://{dns}:7332" if dns else base.rstrip('/'))+"/v1/infer/stream"
+        req=urllib.request.Request(endpoint,data=json.dumps({"packet":packet}).encode(),
+                                   headers={"Content-Type":"application/json"},method="POST")
+        emitted=False
+        try:
+            with urllib.request.urlopen(req,timeout=timeout) as response:
+                node=response.headers.get("X-Fabric-Node") or target
+                for raw in response:
+                    if raw.strip():
+                        emitted=True
+                        event=json.loads(raw)
+                        event["_fabric_node"]=node
+                        yield event
+            return
+        except urllib.error.HTTPError as exc:
+            detail=exc.read().decode("utf-8","replace")
+            try: detail=json.loads(detail).get("error") or detail
+            except Exception: pass
+            last_error=RuntimeError(f"Fabric inference HTTP {exc.code}: {detail}")
+            # 409 before streaming means placement raced with another job. Re-route.
+            if exc.code != 409 or emitted:
+                raise last_error from None
+        except (urllib.error.URLError, TimeoutError, socket.timeout) as exc:
+            last_error=exc
+            if emitted:
+                raise
+        tried.add(target)
+        if isinstance(route,dict):
+            route.clear()
+        # Give a just-released lease a moment to settle, then try another worker.
+        time.sleep(.15)
+        try:
+            choose_node(base,model=model,requires=reqs,latency=False,exclude=tried)
+        except Exception:
+            break
+    if last_error:
+        raise RuntimeError(f"Fabric inference unavailable after {len(tried)} worker attempt(s): {last_error}") from None
+    raise RuntimeError("Fabric inference unavailable")

@@ -1,3 +1,7 @@
+# Future Crash + LOOK 4.6.3
+
+**Fabric contention hotfix.** Signal no longer reserves the inference lane around LO, visual expression runs opportunistically in the background, selected non-streaming work is transported to its real worker, and LO can fail over before first token when a selected worker races busy.
+
 # Future Crash + LOOK 4.5.0 — Fabric Packets
 
 The Fabric now has a durable work protocol: immutable `fwp/1` packets, a local job ledger, attempts/results/events, capability and authority contracts, content-addressed artifacts, remote packet forwarding, cancellation, and a live multi-node event tape. See `docs/FABRIC-WORK-PACKET.md`.

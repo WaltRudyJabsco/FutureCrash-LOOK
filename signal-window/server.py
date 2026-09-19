@@ -115,14 +115,14 @@ def _extract_visual_json(raw):
     return None
 
 
-def _fabric_infer(messages, *, model=None, latency=True, options=None, timeout=90, owner="signal"):
+def _fabric_infer(messages, *, model=None, latency=True, options=None, timeout=90, owner="signal", priority="background"):
     try:
         import sys
         core = Path.home()/".local/share/future-crash-look/core"
         if str(core) not in sys.path: sys.path.insert(0,str(core))
         from fabric_client import infer
         return infer(messages, model=model, requires=["text"], latency=latency,
-                     priority="interactive", think=False, options=options or {},
+                     priority=priority, think=False, options=options or {},
                      timeout=timeout, owner=owner)
     except Exception:
         return None
@@ -556,12 +556,18 @@ class App(BaseHTTPRequestHandler):
         if not type(self).request_lock.acquire(blocking=False):
             return self.json(409,{"error":"Signal is already handling a request","activity":node_activity()})
         lease_id=None
-        lease_reply=node_acquire("signal")
-        if lease_reply and not lease_reply.get("lease"):
-            type(self).request_lock.release()
-            return self.json(409,{"error":"Local Labs is busy","activity":lease_reply.get("busy") or node_activity()})
-        if lease_reply and lease_reply.get("lease"):
-            lease_id=lease_reply["lease"].get("id")
+        # LO now owns real Fabric inference leases itself. Holding an outer Signal
+        # lease while spawning LO would reserve the same single-worker lane and can
+        # deadlock the child inference with HTTP 409 "worker busy". Keep the outer
+        # lease only for legacy direct-Ollama mode; Signal's local request_lock still
+        # prevents duplicate browser submissions.
+        if self.mode != "lo":
+            lease_reply=node_acquire("signal")
+            if lease_reply and not lease_reply.get("lease"):
+                type(self).request_lock.release()
+                return self.json(409,{"error":"Local Labs is busy","activity":lease_reply.get("busy") or node_activity()})
+            if lease_reply and lease_reply.get("lease"):
+                lease_id=lease_reply["lease"].get("id")
         try:
             n=int(self.headers.get("Content-Length","0"))
             d=json.loads(self.rfile.read(n) or b"{}")

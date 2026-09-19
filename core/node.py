@@ -29,7 +29,7 @@ except ImportError:
     from fabric_packet import ArtifactStore, FabricStore, normalize_packet, packet_summary, new_id
 from urllib.parse import urlparse, parse_qs
 
-VERSION = "4.6.2"
+VERSION = "4.6.3"
 DEFAULT_HOST = "127.0.0.1"
 DEFAULT_PORT = 7332
 PULSE_SECONDS = 1.0
@@ -983,7 +983,7 @@ def _stream_model_infer(handler, raw):
 
 
 class API(BaseHTTPRequestHandler):
-    server_version = "FCLNode/4.6.2"
+    server_version = "FCLNode/4.6.3"
 
     def log_message(self, *a):
         pass
