@@ -1,4 +1,4 @@
-## 4.38.4
+## 4.38.5
 
 - Fabric LO now tolerates transient control-plane route discovery timeouts instead of exposing raw urllib timeout errors.
 

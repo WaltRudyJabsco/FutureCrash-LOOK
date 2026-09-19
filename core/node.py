@@ -29,7 +29,7 @@ except ImportError:
     from fabric_packet import ArtifactStore, FabricStore, normalize_packet, packet_summary, new_id
 from urllib.parse import urlparse, parse_qs
 
-VERSION = "4.6.4"
+VERSION = "4.6.5"
 DEFAULT_HOST = "127.0.0.1"
 DEFAULT_PORT = 7332
 PULSE_SECONDS = 1.0
@@ -50,6 +50,9 @@ ARTIFACT_ROOT = STATE / "artifacts"
 FABRIC_STORE = FabricStore(FABRIC_DB)
 ARTIFACTS = ArtifactStore(ARTIFACT_ROOT)
 WORKER_HEALTH = {"alive": False, "last_loop": 0.0, "last_error": None, "errors": 0}
+IDENTITY_LOCK = threading.RLock()
+IDENTITY_CACHE = {"name": socket.gethostname(), "hostname": socket.gethostname(), "tailscale": {}}
+
 
 
 def now() -> float:
@@ -221,11 +224,21 @@ def tailscale_self():
         return {}
 
 
-def identity():
+def refresh_identity():
+    """Refresh slow Tailscale identity off the request path."""
     ts = tailscale_self()
-    # Tailscale hostname is the stable human network identity when available.
     name = ((ts.get("dns") or "").split(".", 1)[0] or ts.get("hostname") or socket.gethostname())
-    return {"name": name, "hostname": socket.gethostname(), "tailscale": ts}
+    value = {"name": name, "hostname": socket.gethostname(), "tailscale": ts}
+    with IDENTITY_LOCK:
+        IDENTITY_CACHE.clear()
+        IDENTITY_CACHE.update(value)
+    return dict(value)
+
+
+def identity():
+    """Return the last completed identity snapshot without spawning tailscale."""
+    with IDENTITY_LOCK:
+        return dict(IDENTITY_CACHE)
 
 
 def capabilities():
@@ -411,14 +424,18 @@ def advertisement():
     # Advertisement is on the routing hot path.  Use the last completed model
     # snapshot; pulse_loop owns refresh work in the background.
     models = MODELS.snapshot()
-    db = FABRIC_STORE.health()
+    # Routing must never synchronously touch SQLite.  A deep database check can
+    # wait behind SQLite's busy timeout; /v1/nodes is the control plane and must
+    # stay cheap.  The worker heartbeat is our hot-path evidence that the ledger
+    # was usable on its most recent loop.  /health still performs the deep check.
     worker_age = max(0.0, now() - float(WORKER_HEALTH.get("last_loop") or 0))
     worker_ok = bool(WORKER_HEALTH.get("alive")) and worker_age < 3.0
+    database_ok = worker_ok and not bool(WORKER_HEALTH.get("last_error"))
     return {
         "protocol": 1,
         "version": VERSION,
-        "runtime": {"ok": bool(db.get("ok")) and worker_ok,
-                    "database": bool(db.get("ok")), "job_worker": worker_ok,
+        "runtime": {"ok": database_ok and worker_ok,
+                    "database": database_ok, "job_worker": worker_ok,
                     "job_worker_error": WORKER_HEALTH.get("last_error")},
         "pulse": {"epoch": "unix-1s-v1", "number": pulse_number(), "period_ms": int(PULSE_SECONDS*1000)},
         "identity": ident,
@@ -559,10 +576,13 @@ def background_qualifier():
 
 def pulse_loop():
     last_peer = 0.0
+    # Warm the cached network identity here rather than in an HTTP request.
+    refresh_identity()
     while True:
         SUP.reconcile()
         MODELS.discover()
         if now() - last_peer >= PEER_REFRESH_SECONDS:
+            refresh_identity()
             PEERS.refresh()
             last_peer = now()
         # Align approximately to the next shared wall-clock beat without making work
@@ -995,7 +1015,7 @@ def _stream_model_infer(handler, raw):
 
 
 class API(BaseHTTPRequestHandler):
-    server_version = "FCLNode/4.6.4"
+    server_version = "FCLNode/4.6.5"
 
     def log_message(self, *a):
         pass

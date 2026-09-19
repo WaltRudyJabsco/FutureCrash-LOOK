@@ -1,4 +1,4 @@
-# Future Crash + LOOK 4.6.4
+# Future Crash + LOOK 4.6.5
 
 **Fabric routing hotfix.** The node control plane now stays responsive while Ollama model discovery refreshes in the background, preventing intermittent Signal-spawned LO route-selection timeouts. Signal contention and worker failover fixes from 4.6.3 remain intact.
 
