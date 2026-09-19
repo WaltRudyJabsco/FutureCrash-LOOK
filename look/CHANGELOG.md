@@ -343,7 +343,7 @@
 - Track memory metabolism: local suppression, merges, promotions, expirations, evictions.
 - Migrate and retire inactive legacy summary state.
 
-## 4.6.0 — Managed Comfy workstation
+## 4.6.1 — Managed Comfy workstation
 
 - Add managed Comfy start/stop/restart lifecycle.
 - Add deep mounted-drive discovery/bootstrap helper.

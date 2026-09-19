@@ -1244,6 +1244,27 @@ def _signal_repair_prompt(request, failed=""):
     )
 
 
+
+def _weather_intent(text):
+    """Return a location for an explicit current-weather request, else None.
+
+    Canonical edges are deterministic. Tiny local models should summarize weather,
+    not be responsible for discovering that live weather needs a tool.
+    """
+    raw=" ".join(str(text or "").strip().split())
+    low=raw.casefold()
+    weather_words=("weather","temperature","forecast","rain","raining","wind","snow","hot","cold")
+    current_words=("today","tonight","now","current","currently","tomorrow","forecast","weather","temperature","rain","raining","wind","snow")
+    if not any(w in low for w in weather_words) or not any(w in low for w in current_words):
+        return None
+    m=re.search(r"\b(?:in|for|at)\s+([^?!.]+)$", raw, flags=re.I)
+    if m:
+        location=m.group(1).strip(" ,")
+        # Strip trailing temporal phrases which Open-Meteo geocoding should not see.
+        location=re.sub(r"\s+\b(?:today|tonight|now|tomorrow)\b.*$", "", location, flags=re.I).strip(" ,")
+        if location: return location
+    return None
+
 # ---------- Permissioned Host Tools ----------
 
 TOOL_LANGUAGE = """
@@ -2079,7 +2100,7 @@ class Oracle(threading.Thread):
                     core = Path.home()/".local/share/future-crash-look/core"
                     if str(core) not in sys.path: sys.path.insert(0,str(core))
                     from fabric_client import infer as fabric_infer
-                    fout=fabric_infer(messages, model=self.model, requires=["text"],
+                    fout=fabric_infer(messages, model=None, requires=["text"],
                                       latency=background_kind,
                                       priority="background" if background_kind else "interactive",
                                       think=bool(payload.get("think")), options=payload.get("options") or {},
@@ -3120,7 +3141,11 @@ class FutureCrash:
                 })
             self.ask_signal_required = _wants_signal(text)
             self.ask_signal_request = text
-            if self.ask_signal_required:
+            weather_location=_weather_intent(text)
+            if weather_location:
+                request={"name":"weather","location":weather_location}
+                self._queue_tool_request(request,"ask","",history)
+            elif self.ask_signal_required:
                 signal_history = [{"role":"system","content":signal_packet}] if signal_packet else []
                 self._ask_oracle("signalcompile:ask", _signal_compile_prompt(text), signal_history)
             else:
@@ -3131,6 +3156,11 @@ class FutureCrash:
             self.work_pending_user = text
 
             history = list(self.work_history)
+            weather_location=_weather_intent(text)
+            if weather_location:
+                request={"name":"weather","location":weather_location}
+                self._queue_tool_request(request,"work","",history)
+                return
             memory_packet = self.memory.context_packet()
             signal_packet = self.signal.context_packet()
             if signal_packet:

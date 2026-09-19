@@ -106,17 +106,41 @@ def infer(messages, *, model=None, requires=None, latency=False, priority="inter
     raise TimeoutError(f"Fabric inference timed out on {target}")
 
 def stream_infer(payload, *, requires=None, priority="interactive", timeout=180,
-                 base=DEFAULT_NODE, owner="lo"):
+                 base=DEFAULT_NODE, owner="lo", route=None):
     """Route a mature Ollama chat payload to a Fabric worker and yield its JSONL stream."""
     import urllib.parse
     model=payload.get("model") or None
-    score,target,dns,eligible=choose_node(base,model=model,requires=requires,latency=False)
-    ad=_ad_for_target(base,target)
-    chosen=model
-    if not chosen:
-        preferred=((ad.get("inference") or {}).get("preferred_model"))
-        names={m.get("name") for m in eligible}
-        chosen=preferred if preferred in names else max(eligible,key=lambda m:int(m.get("size") or 0)).get("name")
+    # Keep one worker/model for the whole user turn. Tool rounds should not bounce
+    # between computers merely because the previous worker is still visible as busy
+    # in a peer advertisement. A new user turn gets a fresh route.
+    if isinstance(route, dict) and route.get("target"):
+        target=str(route["target"]); dns=route.get("dns")
+        ad=_ad_for_target(base,target)
+        models=((ad.get("inference") or {}).get("models") or [])
+        eligible=[]
+        reqs=set(requires or ["text"])
+        for m in models:
+            features=m.get("features") or {}
+            if model and m.get("name") != model: continue
+            if any(r in {"vision","tools","thinking","embedding"} and not features.get(r) for r in reqs): continue
+            eligible.append(m)
+        if not eligible:
+            raise RuntimeError(f"Fabric turn worker {target} no longer satisfies inference requirements")
+        chosen=str(route.get("model") or model or "")
+        if not chosen:
+            preferred=((ad.get("inference") or {}).get("preferred_model"))
+            names={m.get("name") for m in eligible}
+            chosen=preferred if preferred in names else max(eligible,key=lambda m:int(m.get("size") or 0)).get("name")
+    else:
+        score,target,dns,eligible=choose_node(base,model=model,requires=requires,latency=False)
+        ad=_ad_for_target(base,target)
+        chosen=model
+        if not chosen:
+            preferred=((ad.get("inference") or {}).get("preferred_model"))
+            names={m.get("name") for m in eligible}
+            chosen=preferred if preferred in names else max(eligible,key=lambda m:int(m.get("size") or 0)).get("name")
+        if isinstance(route, dict):
+            route.update({"target":target,"dns":dns,"model":chosen})
     inp={"model":chosen,"messages":payload.get("messages") or [],"timeout":timeout,
          "keep_alive":payload.get("keep_alive",-1),"options":payload.get("options") or {}}
     if "think" in payload: inp["think"]=payload.get("think")

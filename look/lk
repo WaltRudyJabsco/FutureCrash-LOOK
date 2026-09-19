@@ -8346,7 +8346,7 @@ def _fabric_client_module():
     return fabric_client
 
 
-def _fabric_stream_chat(payload_obj, events=None):
+def _fabric_stream_chat(payload_obj, events=None, route=None):
     """Yield Ollama-shaped events through Fabric, preserving LO's vision retries."""
     client=_fabric_client_module()
     attempts=[dict(payload_obj)]
@@ -8362,7 +8362,7 @@ def _fabric_stream_chat(payload_obj, events=None):
         if events: events.emit("fabric_route", requires=requires, retry=index)
         try:
             announced=False
-            for event in client.stream_infer(current,requires=requires,priority="interactive",timeout=OLLAMA_CHAT_TIMEOUT,owner="lo"):
+            for event in client.stream_infer(current,requires=requires,priority="interactive",timeout=OLLAMA_CHAT_TIMEOUT,owner="lo",route=route):
                 if events and event.get("_fabric_node") and not announced:
                     events.emit("fabric_worker", node=event.get("_fabric_node")); announced=True
                 yield event
@@ -8560,10 +8560,11 @@ def ollama_chat(force_search=False, initial_prompt=None, allow_start=True, host_
     has_web = bool(os.environ.get("OLLAMA_API_KEY"))
     mode = "LOOK OLLAMA SEARCH" if force_search else "LOOK OLLAMA"
     web_state = "required" if force_search else ("available" if has_web else "off")
-    shown_host=host_name or _ollama_host_name(base)
+    shown_host=("fabric:auto" if fabric_mode else (host_name or _ollama_host_name(base)))
     state=_c("●","32")
     title="LO SEARCH" if force_search else "LO"
-    print(f"{_c(title,'1;36')} · {model} · {shown_host} {state}   {_c(profile.upper(),'2')} · {_load_thinking()}/{_load_think_display()}")
+    shown_model=("auto" if fabric_mode else model)
+    print(f"{_c(title,'1;36')} · {shown_model} · {shown_host} {state}   {_c(profile.upper(),'2')} · {_load_thinking()}/{_load_think_display()}")
     pool=_load_ai_pool()
     fast_cfg=pool.get("roles",{}).get("fast",{})
     if fast_cfg.get("model"):
@@ -8895,6 +8896,9 @@ def ollama_chat(force_search=False, initial_prompt=None, allow_start=True, host_
         task_load_s=0.0
         task_trace=[]
         repeated_tool_calls={}
+        # Route once per operator turn, then keep every tool continuation on the
+        # same worker/model. This preserves locality and avoids cross-node thrash.
+        turn_fabric_route={} if fabric_mode else None
 
         for _ in range(budget["tool_rounds"]):
             payload_obj = {
@@ -8930,8 +8934,11 @@ def ollama_chat(force_search=False, initial_prompt=None, allow_start=True, host_
                 if events: events.emit("inference_start", round=task_rounds)
                 progress_tokens=0
                 try:
-                    stream_fn = _fabric_stream_chat if fabric_mode else (lambda payload, events=None: _ollama_stream_chat(base,payload,events=events))
-                    for event in stream_fn(payload_obj,events=events):
+                    if fabric_mode:
+                        stream_iter=_fabric_stream_chat(payload_obj,events=events,route=turn_fabric_route)
+                    else:
+                        stream_iter=_ollama_stream_chat(base,payload_obj,events=events)
+                    for event in stream_iter:
                         fragment=event.get("message",{}) or {}
                         thought=str(fragment.get("thinking") or "")
                         content=str(fragment.get("content") or "")
