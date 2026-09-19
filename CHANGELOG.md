@@ -1,3 +1,11 @@
+# 4.8.0 — Fabric Dashboard
+
+- Adds `lk dash`, a terminal-native Fabric operational cockpit built entirely over the existing node APIs.
+- Shows nodes, model residency, live work, trust basis, HTTP pressure, services, recent events, and actionable warnings.
+- Keeps mutation explicit: service restarts require confirmation; watch/settings/doctor remain separate tools reached from the dashboard.
+- Preserves 4.7.4 socket ownership and control-plane hardening.
+- LOOK 4.40.0; Unified Node 4.8.0; Signal Window remains 1.0.0.
+
 # 4.7.4 — Fabric Socket Ownership
 
 - Fixes the 3090 control-plane failure captured with a full 7332 listen backlog and unaccepted CLOSE-WAIT sockets.

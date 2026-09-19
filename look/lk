@@ -19,7 +19,7 @@ try:
 except Exception:
     readline = None
 
-VERSION="4.39.4"
+VERSION="4.40.0"
 
 LOOK_WORDMARK = r"""       ██╗      ██╗  ██╗
        ██║      ██║ ██╔╝
@@ -13051,8 +13051,9 @@ def _fabric_command(args):
     sub=(args[0] if args else "fabric")
     aliases={"list":"nodes","node":"status","model":"models"}
     sub=aliases.get(sub,sub)
-    if sub not in {"fabric","watch","nodes","activity","pulse","models","status","qualify","services","service","jobs","job","submit","packet","cancel","events","http"}:
-        print("usage: lk fabric [watch|nodes|status [NODE]|activity [NODE]|pulse [NODE]|models [NODE] [--json]|http [NODE]|jobs [NODE]|job [NODE] ID|events [NODE]|submit [NODE] OP [key=value ...]|packet [NODE] FILE|cancel [NODE] ID|qualify [NODE] MODEL|services [NODE]|service [NODE] SERVICE start|stop|restart]")
+    if sub=="dash": sub="dashboard"
+    if sub not in {"fabric","watch","dashboard","dash","nodes","activity","pulse","models","status","qualify","services","service","jobs","job","submit","packet","cancel","events","http"}:
+        print("usage: lk fabric [watch|dashboard|nodes|status [NODE]|activity [NODE]|pulse [NODE]|models [NODE] [--json]|http [NODE]|jobs [NODE]|job [NODE] ID|events [NODE]|submit [NODE] OP [key=value ...]|packet [NODE] FILE|cancel [NODE] ID|qualify [NODE] MODEL|services [NODE]|service [NODE] SERVICE start|stop|restart]")
         return 2
     argv=[exe,sub]
     rest=list(args[1:])
@@ -13270,6 +13271,7 @@ def main():
         result=_journal_touch(rest[0],create_missing=create_missing)
         print(_action_result(result))
         return 0 if result.startswith("FILE OK") else 1
+    if cmd=="dash": return _fabric_command(["dashboard"] + rest)
     if cmd in {"fabric","nodes"}: return _fabric_command((["nodes"] if cmd=="nodes" else rest))
     if cmd=="doctor": return doctor()
     if cmd=="locator-test": return _locator_test()

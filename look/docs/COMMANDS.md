@@ -57,6 +57,10 @@ Portable profile data includes memory, recent continuity, core, skills, personal
 
 Sound defaults off. Motion defaults subtle. Feedback is automatically silent/static outside a TTY.
 
+
+## Fabric dashboard
+`lk dash` — live operational cockpit over the resident Fabric APIs. Shows node health, peer/model activity, trust basis, active jobs, control-plane pressure, managed services, and recent Fabric events. Read-only by default; `r` offers a confirmed restart for named Fabric-managed services. `w` enters `lk fabric watch`, `s` opens settings, and `d` runs doctor.
+
 ## Unified settings
 `lk settings` — access profile, local preferred model, Fabric routing, legacy direct Ollama host/model, web-search key, tailnet share, feedback, and profile status. `lk models` is always local; `lk ollama models` follows the selected legacy direct host.
 

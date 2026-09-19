@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Future Crash + LOOK Unified Node 4.7.4.
+"""Future Crash + LOOK Unified Node 4.8.0.
 
 A small distributed supervisor for trusted personal machines. Immediate events stay
 asynchronous; a one-second fabric pulse reconciles presence, leases and stale work.
@@ -15,6 +15,7 @@ import json
 import os
 import platform
 import random
+import select
 import shutil
 import socket
 import subprocess
@@ -33,7 +34,7 @@ except ImportError:
     from fabric_packet import ArtifactStore, FabricStore, normalize_packet, packet_summary, new_id
 from urllib.parse import urlparse, parse_qs
 
-VERSION = "4.7.4"
+VERSION = "4.8.0"
 DEFAULT_HOST = "127.0.0.1"
 DEFAULT_PORT = 7332
 DEFAULT_INGRESS_PORT = 0
@@ -1288,7 +1289,7 @@ def _local_accept_watchdog(server):
 
 
 class API(BaseHTTPRequestHandler):
-    server_version = "FCLNode/4.7.4"
+    server_version = "FCLNode/4.8.0"
 
     def setup(self):
         self._metric_request_id = None
@@ -1654,6 +1655,282 @@ def _watch(host,port,interval=1.0):
         return 0
 
 
+
+
+def _dash_age(seconds):
+    try:
+        seconds = max(0, int(seconds))
+    except Exception:
+        return "?"
+    if seconds < 60:
+        return f"{seconds}s"
+    if seconds < 3600:
+        return f"{seconds // 60}m"
+    return f"{seconds // 3600}h"
+
+
+def _dash_model(node):
+    inf = node.get("inference") or {}
+    preferred = inf.get("preferred_model")
+    resident = inf.get("resident") or []
+    if preferred and preferred in resident:
+        return f"{preferred}*"
+    if resident:
+        return f"{resident[0]}*"
+    return preferred or "—"
+
+
+def _dash_state(node):
+    active = ((node.get("supervisor") or {}).get("active"))
+    if not active:
+        return "idle"
+    phase = str(active.get("phase") or active.get("state") or "working")
+    owner = str(active.get("owner") or "")
+    return f"{phase}:{owner}" if owner else phase
+
+
+def _dash_render(data, width=92):
+    """Pure dashboard renderer. Keep presentation separate from polling/control."""
+    snap = data.get("nodes") or {}
+    local = snap.get("self") or {}
+    health = data.get("health") or {}
+    services = (data.get("services") or {}).get("services") or {}
+    jobs = (data.get("jobs") or {}).get("jobs") or []
+    http = data.get("http") or {}
+    events = (data.get("events") or {}).get("events") or []
+    width = max(72, min(int(width or 92), 132))
+    rule = "─" * width
+    now_text = time.strftime("%Y-%m-%d %I:%M:%S %p %Z")
+    peers = [p for p in (snap.get("peers") or []) if p.get("node")]
+    live = 1 + sum(1 for p in peers if p.get("node"))
+
+    lines = [f"FUTURE CRASH + LOOK · FABRIC DASH   {now_text}", rule]
+    lines.append(f"FABRIC  {local.get('name','local')} · node {local.get('version','?')} · {live} node{'s' if live != 1 else ''}")
+
+    warnings = []
+    if not health.get("ok", False):
+        warnings.append("local node health degraded")
+    hm = ((http.get("listeners") or {}).get("local") or {})
+    if int(hm.get("active") or 0) >= 16:
+        warnings.append(f"HTTP active requests high ({hm.get('active')})")
+    if int(hm.get("rejected") or 0):
+        warnings.append(f"HTTP rejected {hm.get('rejected')}")
+    if int(hm.get("accept_errors") or 0):
+        warnings.append(f"HTTP accept errors {hm.get('accept_errors')}")
+    for name, st in services.items():
+        if st.get("managed") and st.get("state") not in {"active", "running"}:
+            warnings.append(f"{name} {st.get('state','unknown')}")
+    for peer in peers:
+        node = peer.get("node") or {}
+        if node.get("version") and node.get("version") != local.get("version"):
+            warnings.append(f"version mismatch: {peer.get('name')} {node.get('version')}")
+    if warnings:
+        lines += ["", "WARNINGS", rule, " · ".join(warnings[:4])]
+
+    lines += ["", "NODES", rule,
+              f"{'NODE':<23} {'STATE':<21} {'MODEL':<29} {'PULSE':>8}"]
+    rows = [(local.get("name") or "local", local, None)]
+    rows += [(p.get("name") or "peer", p.get("node") or {}, p) for p in peers]
+    for name, node, peer in rows:
+        pulse = str((node.get("pulse") or {}).get("number", "—"))
+        state = _dash_state(node)
+        if peer and peer.get("node_seen_at"):
+            age = _dash_age(now() - float(peer.get("node_seen_at") or now()))
+            state = f"{state} · seen {age}"
+        lines.append(f"{str(name):<23.23} {state:<21.21} {_dash_model(node):<29.29} {pulse:>8.8}")
+
+    lines += ["", "TRUST BASIS", rule]
+    clock = time.strftime("%Y-%m-%d %H:%M:%S %Z")
+    caps = local.get("capabilities") or {}
+    trust_bits = [f"clock ● {clock}",
+                  f"filesystem {'● local' if caps.get('filesystem') else '○ unavailable'}",
+                  f"fabric ● {live}/{live} advertising",
+                  "provenance ● host-rendered receipts"]
+    lines.append("   ".join(trust_bits))
+
+    active_jobs = [j for j in jobs if str(j.get("status") or "") not in {"ok", "done", "failed", "cancelled", "canceled"}]
+    lines += ["", "JOBS", rule]
+    if active_jobs:
+        for j in active_jobs[:5]:
+            packet = j.get("packet") or {}
+            op = packet.get("operation") or ((packet.get("work") or {}).get("operation")) or "?"
+            lines.append(f"{str(j.get('id') or '?')[:12]:<12} {str(j.get('status') or '?'):<10.10} {str(op):<24.24} {str(j.get('worker') or '—'):<20.20}")
+    else:
+        lines.append("none active")
+
+    lines += ["", "CONTROL PLANE", rule]
+    guard = (http.get("ingress_guard") or {}).get("ingress") or {}
+    lines.append(
+        f"local   accepted {int(hm.get('accepted') or 0):<6} completed {int(hm.get('completed') or 0):<6} "
+        f"active {int(hm.get('active') or 0):<3} rejected {int(hm.get('rejected') or 0):<3} errors {int(hm.get('errors') or 0):<3}"
+    )
+    if guard:
+        lines.append(
+            f"ingress accepted {int(guard.get('accepted') or 0):<6} completed {int(guard.get('completed') or 0):<6} "
+            f"active {int(guard.get('active') or 0):<3} rejected {int(guard.get('rejected') or 0):<3} errors {int(guard.get('errors') or 0):<3}"
+        )
+
+    lines += ["", "SERVICES", rule]
+    if services:
+        chunks = []
+        for name, st in services.items():
+            state = str(st.get("state") or "unknown")
+            glyph = "●" if state in {"active", "running"} else ("·" if state == "unmanaged" else "○")
+            chunks.append(f"{name} {glyph} {state}")
+        lines.append("   ".join(chunks))
+    else:
+        lines.append("service status pending…")
+
+    lines += ["", "RECENT", rule]
+    if events:
+        for e in events[-6:]:
+            stamp = time.strftime("%H:%M:%S", time.localtime(float(e.get("ts") or now())))
+            phase = str(e.get("phase") or e.get("type") or "event")[:14]
+            detail = str(e.get("detail") or "")[: max(20, width - 26)]
+            lines.append(f"{stamp}  {phase:<14} {detail}")
+    else:
+        lines.append("no recent Fabric events")
+
+    lines += ["", rule, "[q] quit   [w] fabric watch   [s] settings   [d] doctor   [r] restart service   [space] refresh"]
+    return "\n".join(lines)
+
+
+def _dash_fetch(host, port, cache, force=False):
+    """Poll at deliberately different cadences so the dashboard never becomes load."""
+    t = time.monotonic()
+    schedule = {
+        "nodes": ("/v1/nodes", 1.0),
+        "health": ("/health", 2.0),
+        "jobs": ("/v1/jobs", 2.0),
+        "http": ("/v1/http", 2.0),
+        "events": ("/v1/events", 1.0),
+        "services": ("/v1/services", 8.0),
+    }
+    for key, (path, cadence) in schedule.items():
+        due = float((cache.get("_next") or {}).get(key) or 0)
+        if not force and t < due:
+            continue
+        try:
+            cache[key] = _daemon_get(host, port, path)
+            cache.setdefault("_errors", {}).pop(key, None)
+        except Exception as exc:
+            cache.setdefault("_errors", {})[key] = str(exc)
+        cache.setdefault("_next", {})[key] = t + cadence
+    return cache
+
+
+def _dash_run_external(argv):
+    """Run a sibling LOOK UI with the dashboard terminal restored."""
+    exe = shutil.which("lk")
+    if not exe:
+        return
+    subprocess.call([exe] + list(argv))
+
+
+def _dash_restart_service(host, port):
+    services = (_daemon_get(host, port, "/v1/services").get("services") or {})
+    names = [name for name, st in services.items() if st.get("managed")]
+    if not names:
+        input("No Fabric-managed services on this node. Press Enter…")
+        return
+    print("\nManaged services: " + ", ".join(names))
+    name = input("Restart service (blank cancels): ").strip()
+    if not name:
+        return
+    if name not in names:
+        input(f"Unknown/unmanaged service: {name}. Press Enter…")
+        return
+    answer = input(f"Restart {name} on local node? [y/N] ").strip().lower()
+    if answer not in {"y", "yes"}:
+        return
+    result = _target_post(host, port, None, "/v1/services/action",
+                          {"service": name, "action": "restart", "confirm": True})
+    print(json.dumps(result, indent=2))
+    input("Press Enter…")
+
+
+def _dashboard(host, port, interval=0.25):
+    cache = {"_next": {}, "_errors": {}}
+    if not (sys.stdin.isatty() and sys.stdout.isatty()):
+        _dash_fetch(host, port, cache, force=True)
+        print(_dash_render(cache, shutil.get_terminal_size((92, 30)).columns))
+        return 0
+
+    import termios
+    import tty
+    fd = sys.stdin.fileno()
+    old = termios.tcgetattr(fd)
+    alt = "\033[?1049h\033[?25l"
+    normal = "\033[?25h\033[?1049l"
+
+    def raw_on():
+        tty.setcbreak(fd)
+        sys.stdout.write(alt)
+        sys.stdout.flush()
+
+    def raw_off():
+        try:
+            termios.tcsetattr(fd, termios.TCSADRAIN, old)
+        finally:
+            sys.stdout.write(normal)
+            sys.stdout.flush()
+
+    raw_on()
+    try:
+        dirty = True
+        last_draw = 0.0
+        while True:
+            _dash_fetch(host, port, cache, force=dirty)
+            t = time.monotonic()
+            if dirty or t - last_draw >= 1.0:
+                size = shutil.get_terminal_size((92, 30))
+                body = _dash_render(cache, size.columns)
+                sys.stdout.write("\033[2J\033[H" + body)
+                errors = cache.get("_errors") or {}
+                if errors:
+                    sys.stdout.write("\n" + " · ".join(f"{k}: {v}" for k, v in list(errors.items())[:2]))
+                sys.stdout.flush()
+                last_draw = t
+                dirty = False
+            ready, _, _ = select.select([sys.stdin], [], [], interval)
+            if not ready:
+                continue
+            ch = sys.stdin.read(1)
+            if ch in {"q", "Q", "\x03"}:
+                return 0
+            if ch == " ":
+                dirty = True
+            elif ch in {"w", "W"}:
+                raw_off()
+                try:
+                    _watch(host, port)
+                finally:
+                    raw_on(); dirty = True
+            elif ch in {"s", "S"}:
+                raw_off()
+                try:
+                    _dash_run_external(["settings"])
+                finally:
+                    raw_on(); dirty = True
+            elif ch in {"d", "D"}:
+                raw_off()
+                try:
+                    _dash_run_external(["doctor"])
+                    input("Press Enter to return to dashboard…")
+                finally:
+                    raw_on(); dirty = True
+            elif ch in {"r", "R"}:
+                raw_off()
+                try:
+                    _dash_restart_service(host, port)
+                finally:
+                    raw_on(); dirty = True
+    except KeyboardInterrupt:
+        return 0
+    finally:
+        raw_off()
+
+
 def _coerce_cli_value(value):
     try:
         return json.loads(value)
@@ -1709,7 +1986,7 @@ def _print_jobs(data, target="local"):
 def main():
     ap=argparse.ArgumentParser(description="Future Crash + LOOK unified node")
     ap.add_argument("command",nargs="?",default="serve",
-        choices=["serve","status","nodes","activity","pulse","fabric","watch","models","qualify","services","service",
+        choices=["serve","status","nodes","activity","pulse","fabric","watch","dashboard","models","qualify","services","service",
                  "jobs","job","submit","packet","cancel","events","http"])
     ap.add_argument("args",nargs="*")
     ap.add_argument("--node",dest="node",default=None,help="target Fabric node name")
@@ -1723,6 +2000,7 @@ def main():
     if a.command != "serve":
         try:
             if a.command=="watch": return _watch(a.host,a.port)
+            if a.command=="dashboard": return _dashboard(a.host,a.port)
             if a.command=="fabric": print_fabric_snapshot(_daemon_get(a.host,a.port,"/v1/nodes")); return 0
             if a.command=="nodes": print(json.dumps(_daemon_get(a.host,a.port,"/v1/nodes"),indent=2)); return 0
             path={"status":"/v1/node","activity":"/v1/activity","pulse":"/v1/pulse","models":"/v1/models","services":"/v1/services","http":"/v1/http"}.get(a.command)

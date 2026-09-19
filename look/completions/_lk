@@ -43,6 +43,7 @@ _lk() {
     'net:network addresses'
     'tailscale:tailnet status'
     'fabric:distributed supervisor fabric'
+    'dash:fabric operational dashboard'
     'nodes:fabric peer nodes'
     'env:environment'
     'path:PATH diagnostics'
@@ -91,7 +92,7 @@ _lk() {
 
   case "$words[2]" in
     fabric)
-      (( CURRENT == 3 )) && _values 'fabric action' status nodes activity pulse models http qualify services service jobs job events submit packet cancel watch
+      (( CURRENT == 3 )) && _values 'fabric action' status nodes activity pulse models http qualify services service jobs job events submit packet cancel watch dashboard dash
       return
       ;;
     ollama)

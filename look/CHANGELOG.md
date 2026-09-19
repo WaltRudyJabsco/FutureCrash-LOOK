@@ -1,3 +1,9 @@
+## 4.40.0 — Fabric dashboard
+
+- Adds `lk dash` as the operational cockpit over Fabric truth.
+- `lk fabric dashboard` / `lk fabric dash` are aliases for the same view.
+- Dashboard links to Fabric watch, settings, doctor, and confirmed managed-service restart.
+
 ## 4.39.4 — Fabric socket ownership
 
 - Ships with Unified Node 4.7.4 control-plane socket lifecycle and accept-failure recovery.

@@ -75,6 +75,31 @@ class ControlPlaneTests(unittest.TestCase):
             server.shutdown()
             server.server_close()
 
+    def test_dashboard_renderer_surfaces_operational_truth(self):
+        sample = {
+            "nodes": {
+                "self": {"name":"3090","version":node.VERSION,"pulse":{"number":123},
+                         "capabilities":{"filesystem":True},
+                         "inference":{"preferred_model":"qwen","resident":["qwen"]},
+                         "supervisor":{"active":None}},
+                "peers": [{"name":"m4","node_seen_at":node.now(),"node":{
+                    "version":node.VERSION,"pulse":{"number":123},
+                    "inference":{"preferred_model":"tiny","resident":[]},
+                    "supervisor":{"active":None}}}]},
+            "health":{"ok":True},
+            "services":{"services":{"node":{"managed":True,"state":"active"}}},
+            "jobs":{"jobs":[]},
+            "http":{"listeners":{"local":{"accepted":10,"completed":9,"active":1,"rejected":0,"errors":0,"accept_errors":0}}},
+            "events":{"events":[]},
+        }
+        text = node._dash_render(sample, 100)
+        self.assertIn("FABRIC DASH", text)
+        self.assertIn("3090", text)
+        self.assertIn("m4", text)
+        self.assertIn("TRUST BASIS", text)
+        self.assertIn("CONTROL PLANE", text)
+        self.assertIn("accepted 10", text)
+
     def test_fabric_store_closes_sqlite_connections(self):
         # SQLite Connection.__enter__/__exit__ commits transactions but does not
         # close the connection. Repeated Fabric polling must therefore use an
