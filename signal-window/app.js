@@ -97,7 +97,9 @@ form.addEventListener('submit',async e=>{e.preventDefault();const text=input.val
  if(/^\/status$/i.test(text)){status();line('system',statusEl.title||statusEl.textContent);return}
  if(/^\/gallery$/i.test(text)){try{const d=await(await fetch('/api/status')).json();line('system','Gallery: '+(d.gallery||'disabled'))}catch{line('system','Gallery unavailable')}return}
  energy=.65;event('LO REQUEST',true);
- try{const r=await fetch('/api/chat',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({text,files:sent})});const d=await r.json();if(!r.ok||d.error)throw Error(d.error||r.statusText);if(d.text)line('assistant',d.text);if(Array.isArray(d.lo_events) && d.lo_events.length){
+ // Visual expression is independent work: start it immediately instead of waiting behind LO.
+ const visualPromise=text?fetch('/api/visual',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({text})}).then(r=>r.json()).catch(()=>null):Promise.resolve(null);
+ try{const r=await fetch('/api/chat',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({text,files:sent,visual:false})});const d=await r.json();if(!r.ok||d.error)throw Error(d.error||r.statusText);if(d.text)line('assistant',d.text);if(Array.isArray(d.lo_events) && d.lo_events.length){
    for(const e of d.lo_events){
      const name=String(e.event||'').replaceAll('_',' ');
      if(!name)continue;
@@ -105,10 +107,11 @@ form.addEventListener('submit',async e=>{e.preventDefault();const text=input.val
      event(`LO ${name}${detail?' · '+detail:''}`);
    }
  } else event('LO RESPONSE');
- const vk=d.visual?.kind;
- if(vk==='draw'){event(d.visual.attempts>1?'SIGNAL REPAIRED':'SIGNAL RESPONSE');draw(d.signal)}
+ if(Array.isArray(d.artifacts))for(const x of d.artifacts){const a=document.createElement('a');a.href=x.url;a.target='_blank';a.rel='noopener';a.textContent='↗ '+x.name;a.className='artifact';log.append(a);event('ARTIFACT READY · '+x.name)}
+ const vd=await visualPromise; const vk=vd?.visual?.kind;
+ if(vk==='draw'){event(vd.visual.attempts>1?'SIGNAL REPAIRED':'SIGNAL RESPONSE');draw(vd.signal)}
  else if(vk==='nochange')event('SIGNAL NO CHANGE');
- else if(vk==='error')event('SIGNAL ERROR · '+(d.visual.error||'UNKNOWN'));
+ else if(vk==='error')event('SIGNAL ERROR · '+(vd.visual.error||'UNKNOWN'));
  event('READY');energy=Math.max(.25,energy*.65)}
  catch(err){event('ERROR · '+err.message);line('error','! '+err.message);energy=.15}});
 input.addEventListener('keydown',e=>{if(e.key==='Enter'&&!e.shiftKey){e.preventDefault();form.requestSubmit()}});

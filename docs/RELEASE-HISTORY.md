@@ -2178,7 +2178,7 @@ The 2.3.8 shell namespace remains unchanged: canonical `lk ...`, permanent `lk*`
 Versions:
 
 - Future Crash + LOOK: 2.4.0
-- LOOK: 4.4.0
+- LOOK: 4.5.0
 - Future Crash: 1.1.10
 
 ## A human-facing settings surface

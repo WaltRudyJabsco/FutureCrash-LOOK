@@ -1,4 +1,4 @@
-# Future Crash + LOOK 4.4.0 — Fabric Packets
+# Future Crash + LOOK 4.5.0 — Fabric Packets
 
 The Fabric now has a durable work protocol: immutable `fwp/1` packets, a local job ledger, attempts/results/events, capability and authority contracts, content-addressed artifacts, remote packet forwarding, cancellation, and a live multi-node event tape. See `docs/FABRIC-WORK-PACKET.md`.
 
@@ -1151,3 +1151,8 @@ On Linux + NVIDIA systems, the installer offers managed ComfyUI setup. It discov
 ## 4.1 Fabric Pulse / 4.1.1 Fabric Truth
 
 Every installed machine is now a peer in the Future Crash compute fabric. `lk fabric` shows the local supervisor, peers and warm models; `lk fabric models` shows model capability advertisements; `lk fabric pulse` exposes the shared reconciliation beat. Immediate work remains asynchronous—the pulse exists to refresh truth and recover from stale state, not to slow the network into lockstep.
+
+
+## 4.5 Fabric application integration
+
+Fabric-native work routes automatically across live capable nodes. The LOOK Ollama host setting is retained only as a direct-inference compatibility/debug override. Signal browser sessions run visual expression in parallel with LO and present surfaced images/PDFs/files back to the requesting browser instead of opening them on the worker desktop. Future Crash Ask/Workstation use a canonical Open-Meteo weather edge for live weather.

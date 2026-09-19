@@ -18,7 +18,7 @@ try:
 except Exception:
     readline = None
 
-VERSION="4.36.0"
+VERSION="4.37.0"
 
 LOOK_WORDMARK = r"""       ██╗      ██╗  ██╗
        ██║      ██║ ██╔╝
@@ -653,6 +653,17 @@ def _resolve_ollama_host(token):
 def ollama_hosts(args):
     args=list(args or [])
     data=_load_ollama_hosts()
+
+    if args and args[0]=="prune":
+        removed=[]
+        for name,item in list(data["hosts"].items()):
+            if name=="local": continue
+            if not _probe_ollama(item.get("url",""),.35):
+                removed.append(name); data["hosts"].pop(name,None)
+        if data.get("default") in removed: data["default"]="local"
+        _save_ollama_hosts(data)
+        print("✓ pruned legacy Ollama hosts · "+(", ".join(removed) if removed else "none"))
+        return 0
 
     if args and args[0]=="forget":
         if len(args)<2:
@@ -6377,7 +6388,7 @@ def _run_capability_tool(name,args,workspace,profile):
             args.get("prompt",""),
             args.get("negative",""),
             args.get("seed"),
-            open_result=True,
+            open_result=(os.environ.get("LOOK_PRESENTATION", "desktop") != "browser"),
         )
         return ("IMAGE OK · " if success else "IMAGE FAILED · ")+result
     if name=="schedule_prompt":
@@ -10218,12 +10229,15 @@ def _settings_rows():
     """Control-room registry: value + explanation + search vocabulary."""
     base=_ollama_base()
     return [
-        ("model","AI","Preferred model",_active_ollama_model(),
-         "Choose the local model LO uses. Model capability and speed can differ dramatically.",
-         "model ollama llm qwen gemma deepseek local ai gpu"),
-        ("host","AI","Ollama host",_ollama_host_name(base),
-         "Choose which local or tailnet Ollama server supplies LO.",
-         "host server ollama remote local tailscale 3090"),
+        ("model","AI","Local preferred model",_active_ollama_model(),
+         "Fallback/local model for this machine. Fabric jobs select among models actually advertised by live nodes.",
+         "model ollama llm qwen gemma deepseek local fallback ai gpu"),
+        ("fabricroute","AI","Inference routing","Fabric automatic",
+         "Normal distributed work routes by live Fabric capability, load and residency. Explicit Ollama hosts remain a compatibility/debug override.",
+         "fabric routing automatic distributed node remote local inference"),
+        ("host","AI","Legacy Ollama override",_ollama_host_name(base),
+         "Compatibility/debug override for direct LO inference. It is not Fabric discovery and does not choose remote Fabric workers.",
+         "legacy host server ollama override remote local tailscale debug"),
         ("access","AI","Access profile",_load_lo_profile(),
          "Controls how much of the computer LO may use: conservative, workspace, power, or unsafe.",
          "access permission permissions safe power shell command tools security"),
@@ -10510,6 +10524,9 @@ def _settings_action(key):
     if key=="thinking": return _settings_pick_thinking()
     if key=="thinkdisplay": return _settings_pick_think_display()
     if key=="host": return _settings_pick_host()
+    if key=="fabricroute":
+        print("Fabric automatic routing is active for Fabric-native work. Direct LO streaming remains on the local/legacy transport until streaming FWP lands.")
+        return 0
     if key=="model": return ollama_models()
     if key=="key": return ollama_key([])
     if key=="share": return _settings_share_menu()

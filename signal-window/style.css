@@ -61,3 +61,4 @@ main.mode-compact #activity{height:18px;line-height:17px;flex-basis:18px}
 #activity::-webkit-scrollbar{display:none}
 #activityText{display:inline-block;min-width:max-content;animation:none!important;padding-right:28px}
 #activity.busy #activityText{animation:none!important}
+.artifact{display:block;margin:.45rem 0;padding:.45rem .6rem;border:1px solid currentColor;text-decoration:none;font:12px/1.3 monospace;opacity:.9}.artifact:hover{opacity:1}

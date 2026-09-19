@@ -1,4 +1,14 @@
-# 4.4.0 — Fabric Integration
+# 4.5.0 — Fabric Applications
+
+- LOOK settings now describe Fabric automatic routing separately from the legacy direct Ollama host override; local preferred model is explicitly a local/fallback choice.
+- `lk ollama host prune` removes offline saved legacy host profiles without touching live Fabric discovery.
+- Future Crash Ask/Workstation gain canonical live weather via Open-Meteo and are explicitly forbidden from inventing current weather.
+- Signal 0.9 starts visual expression as independent parallel Fabric work instead of serially after LO, and encourages cheap primitive expression without confusing it with generated images.
+- Signal browser sessions set `LOOK_PRESENTATION=browser`, so generated images no longer auto-open GUI previews on the compute host.
+- Files explicitly surfaced by LO (images, PDFs, text, Markdown, HTML) receive one-hour opaque presentation URLs and appear as browser artifact links in Signal. Computation location no longer determines presentation location.
+- Browser presentation never exposes arbitrary directory browsing; only files surfaced by the completed LO transaction are registered.
+
+# 4.5.0 — Fabric Integration
 
 - Adds `model.infer` as a first-class Fabric Work Packet operation.
 - Adds `core/fabric_client.py`: application-side capability routing, packet submission, and result waiting.
@@ -6,9 +16,9 @@
 - Future Crash Oracle, ambient observations, fortunes, memory compression, Threads, work, and Signal compilation now use Fabric inference when possible, with direct Ollama fallback. Background Oracle work is submitted as background priority.
 - Inference workers are selected from live advertisements using hard capability/model eligibility first, then busy state, residency, and latency preference. This is intentionally a small deterministic scheduler, not an AI scheduler.
 - Existing LO remains on its streaming Ollama transport in this release: replacing it with the current non-streaming packet inference would regress first-token streaming, cancellation, and tool-loop behavior. The Fabric event/supervisor substrate remains available around LO and is the target for a later streaming packet transport.
-- Signal Window 0.8.0; LOOK 4.36.0; Unified Node 4.4.0.
+- Signal Window 0.9.0; LOOK 4.37.0; Unified Node 4.5.0.
 
-## 4.4.0 — Fabric Packets
+## 4.5.0 — Fabric Packets
 
 - Immutable `fwp/1` work contracts with relationships, requirements/preferences, context manifests, budgets, authority, delivery and provenance.
 - Durable SQLite job ledger with attempts, results, cancellation, idempotency and event history.

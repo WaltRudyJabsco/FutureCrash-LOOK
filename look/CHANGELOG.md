@@ -367,7 +367,7 @@
 - Add LO tools for image generation and scheduling.
 - Add vision/media/scheduler surfaces to settings, doctor, help, and completion.
 
-## 4.4.0 — Search-first settings control room
+## 4.5.0 — Search-first settings control room
 
 - Rebuild `lk settings` around semantic search, descriptions, preview pane, and live current values.
 - Add `lk settings SEARCH` prefiltered entry.

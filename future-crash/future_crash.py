@@ -50,6 +50,7 @@ import time
 import tty
 import urllib.error
 import urllib.request
+import urllib.parse
 from collections import deque
 from dataclasses import dataclass, field
 from pathlib import Path
@@ -1254,6 +1255,7 @@ When an operation is genuinely useful, append exactly one hidden JSON request:
 [[/TOOL]]
 
 Available tools:
+  weather {"name":"weather","location":"CITY OR PLACE"}
   web_search {"name":"web_search","query":"CURRENT INFORMATION TO SEARCH FOR"}
   thread_list {"name":"thread_list"}
   thread_create {"name":"thread_create","title":"SHORT NAME","every_seconds":300,
@@ -1291,6 +1293,7 @@ Rules:
 - Use thread_update when the operator asks to rename, reschedule, repurpose, or
   change the action of an existing Thread. Include only fields that should change.
 - Use thread_list/pause/resume/cancel when the operator asks about existing Threads.
+- MUST use weather for current weather, temperature, rain, wind, or forecast questions. Never invent weather from model memory.
 - Use web_search when the operator explicitly asks for live/current web information,
   or when answering accurately requires information that may have changed recently.
 - Do not use web_search for ordinary timeless conversation.
@@ -1309,9 +1312,10 @@ Rules:
 
 class HostTools:
     TOOL_RE = re.compile(r"\[\[TOOL\]\](.*?)\[\[/TOOL\]\]", re.S | re.I)
-    VALID = {"web_search", "model_wake", "thread_list", "thread_create", "thread_update", "thread_pause", "thread_resume", "thread_cancel",
+    VALID = {"weather", "web_search", "model_wake", "thread_list", "thread_create", "thread_update", "thread_pause", "thread_resume", "thread_cancel",
              "list", "read", "find", "mkdir", "write", "append", "run", "open"}
     CAPABILITY = {
+        "weather": "WEATHER",
         "web_search": "WEB SEARCH",
         "model_wake": "MODEL WAKE",
         "thread_list": "THREADS",
@@ -1415,6 +1419,8 @@ class HostTools:
             except Exception:
                 return raw
 
+        if name == "weather":
+            return f"WEATHER  {request.get('location', '')}"
         if name == "web_search":
             return f"WEB SEARCH  {request.get('query', '')}"
         if name == "thread_list":
@@ -1457,7 +1463,7 @@ class HostTools:
 
     def needs_permission(self, request):
         # Public web search changes nothing on the host.
-        return request.get("name") not in ("web_search", "thread_list")
+        return request.get("name") not in ("weather", "web_search", "thread_list")
 
     def grant_session(self, request):
         # Command execution is intentionally never silently sticky.
@@ -1485,6 +1491,22 @@ class HostTools:
                 return True, "MODEL WAKE // scheduled wake occurred; no external host action"
             if name.startswith("thread_"):
                 return False, "INTERNAL THREAD OPERATION MUST BE HANDLED BY FUTURE CRASH"
+            if name == "weather":
+                location = str(request.get("location", "")).strip()
+                if not location:
+                    return False, "WEATHER REQUIRES A LOCATION"
+                q=urllib.parse.urlencode({"name":location,"count":1,"language":"en","format":"json"})
+                with urllib.request.urlopen("https://geocoding-api.open-meteo.com/v1/search?"+q, timeout=12) as response:
+                    geo=json.loads(response.read().decode("utf-8","replace"))
+                matches=geo.get("results") or []
+                if not matches:
+                    return False, f"WEATHER LOCATION NOT FOUND: {location}"
+                place=matches[0]
+                q=urllib.parse.urlencode({"latitude":place["latitude"],"longitude":place["longitude"],"timezone":"auto","temperature_unit":"fahrenheit","wind_speed_unit":"mph","precipitation_unit":"inch","current":"temperature_2m,apparent_temperature,relative_humidity_2m,precipitation,weather_code,cloud_cover,wind_speed_10m,wind_direction_10m","daily":"weather_code,temperature_2m_max,temperature_2m_min,precipitation_probability_max,precipitation_sum","forecast_days":3})
+                with urllib.request.urlopen("https://api.open-meteo.com/v1/forecast?"+q, timeout=12) as response:
+                    data=json.loads(response.read().decode("utf-8","replace"))
+                return True, "WEATHER // OPEN-METEO // VERIFIED\n"+json.dumps({"location":{"name":place.get("name"),"admin1":place.get("admin1"),"country":place.get("country")},"observed_at":(data.get("current") or {}).get("time"),"current":data.get("current") or {},"current_units":data.get("current_units") or {},"daily":data.get("daily") or {}},ensure_ascii=False)
+
             if name == "web_search":
                 query = str(request.get("query", "")).strip()
                 if not query:
