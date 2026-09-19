@@ -1,4 +1,4 @@
-# Future Crash + LOOK 5.0.0 — Fabric Alive
+# Future Crash + LOOK 5.1.0 — Fabric Alive
 
 A milestone release: the personal Fabric is observable, routable, pulse-synchronized, and now has a tiny physical-looking demo of itself. Deterministic Fast Edges keep obvious tool work out of unnecessary model-planning rounds, while LO adds a restrained patient waiting cadence for genuinely long inference.
 
@@ -1188,3 +1188,7 @@ Every installed machine is now a peer in the Future Crash compute fabric. `lk fa
 ## 4.5 Fabric application integration
 
 Fabric-native work routes automatically across live capable nodes. The LOOK Ollama host setting is retained only as a direct-inference compatibility/debug override. **Local preferred model is machine-local**: its picker always comes from `127.0.0.1:11434`; a legacy remote host keeps its own separate direct-host preference and neither setting controls Fabric automatic placement. Signal browser sessions run visual expression in parallel with LO and present surfaced images/PDFs/files back to the requesting browser instead of opening them on the worker desktop. Future Crash Ask/Workstation use a canonical Open-Meteo weather edge for live weather.
+
+## 5.1 Fabric lights + Signal-first visuals
+
+Run `lk dash` on several nodes and open Signal on a phone/tablet, then try `lk fabric lights demo`. `lk fabric lights disco` and `christmas` repeat until Ctrl-C; the show is a pulse-derived lease, not a streamed animation. Signal scenes are the default lightweight visual expression channel; explicit draw/generate/picture/artwork requests use Comfy and generated image artifacts are presented inline in Signal.

@@ -1,10 +1,10 @@
 const N=256;
 const main=document.querySelector('main'),A=document.querySelector('#ambient'),a=A.getContext('2d'),C=document.querySelector('#signal'),c=C.getContext('2d');
-const log=document.querySelector('#log'),form=document.querySelector('#form'),input=document.querySelector('#input'),drops=document.querySelector('#drops'),statusEl=document.querySelector('#status'),activity=document.querySelector('#activity'),activityText=document.querySelector('#activityText');
+const log=document.querySelector('#log'),form=document.querySelector('#form'),input=document.querySelector('#input'),drops=document.querySelector('#drops'),statusEl=document.querySelector('#status'),activity=document.querySelector('#activity'),activityText=document.querySelector('#activityText'),fabricLight=document.querySelector('#fabricLight');
 const signalSession=localStorage.getItem('signal-session')||crypto.randomUUID();
 localStorage.setItem('signal-session',signalSession);
 a.imageSmoothingEnabled=c.imageSmoothingEnabled=false;
-let files=[],energy=.22,mood='quiet',particles=[],artQuietUntil=0;
+let files=[],energy=.22,mood='quiet',particles=[],artQuietUntil=0,visualTurn=0;
 let art={mode:'display',hold:75,fade:25,born:0,fadeStart:0,persist:false};
 for(let i=0;i<260;i++)particles.push({x:Math.random()*N,y:Math.random()*N,v:3+Math.random()*12,p:Math.random()*12|0});
 
@@ -99,8 +99,6 @@ form.addEventListener('submit',async e=>{e.preventDefault();const text=input.val
  if(/^\/status$/i.test(text)){status();line('system',statusEl.title||statusEl.textContent);return}
  if(/^\/gallery$/i.test(text)){try{const d=await(await fetch('/api/status')).json();line('system','Gallery: '+(d.gallery||'disabled'))}catch{line('system','Gallery unavailable')}return}
  energy=.65;event('LO REQUEST',true);
- // Visual expression is independent work: start it immediately instead of waiting behind LO.
- const visualPromise=text?fetch('/api/visual',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({text})}).then(r=>r.json()).catch(()=>null):Promise.resolve(null);
  try{const r=await fetch('/api/chat',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({text,files:sent,visual:false,session:signalSession})});const d=await r.json();if(!r.ok||d.error)throw Error(d.error||r.statusText);if(d.text)line('assistant',d.text);if(Array.isArray(d.lo_events) && d.lo_events.length){
    for(const e of d.lo_events){
      const raw=String(e.event||'');
@@ -114,11 +112,27 @@ form.addEventListener('submit',async e=>{e.preventDefault();const text=input.val
      event(`LO ${name}${detail?' · '+detail:''}`);
    }
  } else event('LO RESPONSE');
- if(Array.isArray(d.artifacts))for(const x of d.artifacts){const a=document.createElement('a');a.href=x.url;a.target='_blank';a.rel='noopener';a.textContent='↗ '+x.name;a.className='artifact';log.append(a);event('ARTIFACT READY · '+x.name)}
- const vd=await visualPromise; const vk=vd?.visual?.kind;
- if(vk==='draw'){event(vd.visual.attempts>1?'SIGNAL REPAIRED':'SIGNAL RESPONSE');draw(vd.signal)}
- else if(vk==='nochange')event('SIGNAL NO CHANGE');
- else if(vk==='error')event('SIGNAL ERROR · '+(vd.visual.error||'UNKNOWN'));
+ if(Array.isArray(d.artifacts))for(const x of d.artifacts){
+   if(String(x.type||'').startsWith('image/')){const img=document.createElement('img');img.src=x.url;img.alt=x.name;img.className='artifact-image';log.append(img)}
+   const a=document.createElement('a');a.href=x.url;a.target='_blank';a.rel='noopener';a.textContent='↗ '+x.name;a.className='artifact';log.append(a);event('ARTIFACT READY · '+x.name)}
+ const myTurn=++visualTurn;
+ if(text||d.text){event('SIGNAL COMPOSE',true);fetch('/api/visual',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({text,answer:d.text||'',events:d.lo_events||[]})}).then(r=>r.json()).then(vd=>{
+   if(myTurn!==visualTurn)return;const vk=vd?.visual?.kind;
+   if(vk==='draw'){event(vd.visual.fallback?'SIGNAL FALLBACK':'SIGNAL RESPONSE');draw(vd.signal)}
+   else if(vk==='error')event('SIGNAL ERROR · '+(vd.visual.error||'UNKNOWN'));
+ }).catch(err=>event('SIGNAL ERROR · '+err.message))}
  event('READY');energy=Math.max(.25,energy*.65)}
  catch(err){event('ERROR · '+err.message);line('error','! '+err.message);energy=.15}});
+
+let lastFabricLight='';
+async function pollFabricLight(){
+ try{const r=await fetch('/api/fabric/lights',{cache:'no-store'});if(!r.ok)return;const d=await r.json();const light=d.light||null;const color=String(light?.color||'off');const key=(light?.show_id||light?.id||'')+':'+color;
+  const css={red:'#7b1717',green:'#176b35',blue:'#173d7b',white:'#d8e4dc',off:'transparent'}[color]||'transparent';
+  fabricLight.style.background=css;fabricLight.style.opacity=color==='off'?'0':'0.82';
+  if(light&&key!==lastFabricLight){event(`FABRIC ${String(light.pattern||'LIGHT').toUpperCase()} · ${color.toUpperCase()}`);lastFabricLight=key}
+  if(!light){fabricLight.style.opacity='0';lastFabricLight=''}
+ }catch{}
+}
+setInterval(pollFabricLight,400);pollFabricLight();
+
 input.addEventListener('keydown',e=>{if(e.key==='Enter'&&!e.shiftKey){e.preventDefault();form.requestSubmit()}});

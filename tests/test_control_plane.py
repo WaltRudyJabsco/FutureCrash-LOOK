@@ -187,3 +187,22 @@ class ControlPlaneTests(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main()
+
+class LightShowTests(unittest.TestCase):
+    def test_repeating_light_show_cycles_until_lease_expiry(self):
+        events=[{"type":"beacon","data":{"id":"r1","show_id":"show","origin":"3090","start_pulse":100,
+                                              "pattern":"christmas","sequence":["red","green"],
+                                              "repeat":True,"expires_pulse":105}}]
+        self.assertEqual(node._active_beacon(events,100)["color"],"red")
+        self.assertEqual(node._active_beacon(events,101)["color"],"green")
+        self.assertEqual(node._active_beacon(events,102)["color"],"red")
+        self.assertIsNone(node._active_beacon(events,106))
+
+    def test_stop_event_cancels_show(self):
+        events=[
+            {"type":"beacon","data":{"id":"r1","show_id":"show","origin":"3090","start_pulse":100,
+                                       "pattern":"disco","sequence":["blue","red"],"repeat":True,"expires_pulse":200}},
+            {"type":"beacon","data":{"id":"stop","show_id":"show","origin":"3090","start_pulse":103,
+                                       "pattern":"disco","sequence":["blue","red"],"stopped":True}},
+        ]
+        self.assertIsNone(node._active_beacon(events,104))

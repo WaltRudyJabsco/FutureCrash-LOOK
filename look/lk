@@ -6440,7 +6440,7 @@ def _capability_tools():
     return [
         {"type":"function","function":{
             "name":"generate_image",
-            "description":"Generate a local image through configured ComfyUI and save it to LOOK's image output folder. This tool already owns the configured automatic preview; do not follow it with open_path/preview_path unless the user separately asks. Use when the user explicitly asks to create/generate/render an image.",
+            "description":"Generate a local image through configured ComfyUI and save it to LOOK's image output folder. This tool already owns the configured automatic preview; do not follow it with open_path/preview_path unless the user separately asks. Use when the user explicitly asks to create/generate/render/draw an image, make a picture, illustration, artwork, or photo. A Signal/Signal image/Signal scene request belongs to the lightweight Signal canvas instead.",
             "parameters":{"type":"object","properties":{
                 "prompt":{"type":"string"},
                 "negative":{"type":"string"},
@@ -13164,8 +13164,8 @@ def _fabric_command(args):
     aliases={"list":"nodes","node":"status","model":"models"}
     sub=aliases.get(sub,sub)
     if sub=="dash": sub="dashboard"
-    if sub not in {"fabric","watch","dashboard","dash","beacon","nodes","activity","pulse","models","status","qualify","services","service","jobs","job","submit","packet","cancel","events","http"}:
-        print("usage: lk fabric [watch|dashboard|beacon [rgb|pulse]|nodes|status [NODE]|activity [NODE]|pulse [NODE]|models [NODE] [--json]|http [NODE]|jobs [NODE]|job [NODE] ID|events [NODE]|submit [NODE] OP [key=value ...]|packet [NODE] FILE|cancel [NODE] ID|qualify [NODE] MODEL|services [NODE]|service [NODE] SERVICE start|stop|restart]")
+    if sub not in {"fabric","watch","dashboard","dash","beacon","lights","nodes","activity","pulse","models","status","qualify","services","service","jobs","job","submit","packet","cancel","events","http"}:
+        print("usage: lk fabric [watch|dashboard|beacon [rgb|pulse]|lights [demo|rgb|pulse|christmas|disco|stop]|nodes|status [NODE]|activity [NODE]|pulse [NODE]|models [NODE] [--json]|http [NODE]|jobs [NODE]|job [NODE] ID|events [NODE]|submit [NODE] OP [key=value ...]|packet [NODE] FILE|cancel [NODE] ID|qualify [NODE] MODEL|services [NODE]|service [NODE] SERVICE start|stop|restart]")
         return 2
     argv=[exe,sub]
     rest=list(args[1:])

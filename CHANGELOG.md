@@ -1,3 +1,14 @@
+# Changelog
+
+## 5.1.0 — Signal Gets the Signal
+
+- Signal Window is now a Fabric-attached display: synchronized Fabric light shows reach desktop dashboards and mobile/iOS browser Signals through the local node.
+- Added `lk fabric lights demo|rgb|pulse|christmas|disco|stop`; disco/christmas are pulse-derived leased shows that run until Ctrl-C and expire safely if the origin disappears.
+- Signal-first visual policy: every successful browser exchange gets an asynchronous Signal scene attempt, with a tiny deterministic fallback instead of silent visual failure.
+- Signal composition now sees the actual answer and source receipts rather than racing ahead from the user prompt alone.
+- Signal-language requests are explicitly separated from Comfy image generation; generated image artifacts render inline in the browser, including mobile.
+- Dashboard `l` triggers the longer synchronized light demo; `b` remains the short diagnostic beacon.
+
 ## 5.0.0 — Fabric Alive
 
 - Adds `lk fabric beacon`: a synchronized pulse-scheduled RGB diagnostic that all open Fabric dashboards render together. Dashboard key `b` triggers the same demo locally.

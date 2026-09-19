@@ -1,3 +1,7 @@
+## 4.43.0
+- Added Fabric light-show routing and Signal-vs-Comfy intent guidance.
+- `lk fabric lights` exposes synchronized demo, disco, Christmas, pulse, RGB, and stop controls.
+
 ## 4.42.0 — Fabric Alive
 
 - `lk fabric beacon` gives the Fabric a synchronized, visible smoke test; `b` triggers it from `lk dash`.

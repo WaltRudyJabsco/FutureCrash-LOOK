@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Signal Window 1.0.0 — a native browser body for LO."""
+"""Signal Window 1.1.0 — a native browser body for LO."""
 from __future__ import annotations
 
 import argparse
@@ -129,13 +129,18 @@ def _fabric_infer(messages, *, model=None, latency=True, options=None, timeout=9
     except Exception:
         return None
 
-def signal_interpret(base, model, user_text, answer):
+def signal_interpret(base, model, user_text, answer, events=None):
     prompt = f"""You are the visual reflex of Signal Window.
 USER:
 {user_text[:2400]}
 
 ASSISTANT:
 {answer[:3200]}
+
+SOURCE RECEIPTS:
+{json.dumps([e for e in (events or []) if isinstance(e,dict) and e.get("event")=="source_receipt"][-4:], ensure_ascii=False)[:1800]}
+
+Always express this exchange visually when practical. Return a non-empty scene for normal successful exchanges; use {{}} only when drawing would be actively misleading. Signal scenes are lightweight framebuffer expression, never Comfy/image generation.
 
 {SURFACE_CONTRACT}
 """
@@ -156,17 +161,26 @@ ASSISTANT:
                 with urllib.request.urlopen(req,timeout=90) as r:
                     raw=json.loads(r.read()).get("message",{}).get("content","").strip()
             obj=_extract_visual_json(raw)
-            if obj is not None:
-                return {"kind":"draw" if obj else "nochange","signal":obj or None,"attempts":attempt+1}
-            last_error="invalid graphics JSON"
+            if obj:
+                return {"kind":"draw","signal":obj,"attempts":attempt+1}
+            last_error="empty or invalid graphics JSON"
             messages += [
                 {"role":"assistant","content":raw[:12000]},
                 {"role":"user","content":"That was invalid. Return ONLY one valid JSON object matching the schema, or {}."}
             ]
         except Exception as e:
             last_error=str(e)
-    return {"kind":"error","signal":None,"attempts":2,"error":last_error or "visual generation failed"}
-
+    # A failed reflex should not leave Signal visually silent. Keep this fallback
+    # deliberately tiny and deterministic; it is expression, not fabricated data.
+    label = "SIGNAL"
+    low=(user_text+" "+answer).lower()
+    if "weather" in low: label="WEATHER"
+    elif "headline" in low or "news" in low: label="NEWS"
+    elif low.strip().startswith(("hello","hi ","hey ")): label="HELLO"
+    fallback={"clear":"#020503","state":{"energy":0.45,"mood":"responsive"},
+              "display":{"mode":"moment","hold":15,"fade":12},
+              "ops":[["pulse",128,128,38,"#8fd6a2"],["text",92,134,"#8fd6a2",label,13]]}
+    return {"kind":"draw","signal":fallback,"attempts":2,"fallback":True,"error":last_error or "visual generation failed"}
 
 
 def _run_json_command(argv, timeout=8):
@@ -266,7 +280,9 @@ def native_lo_chat(profile,prompt,cwd,selected_paths,history):
         "INTERFACE: Signal Window browser. Answer the operator normally and truthfully. "
         "The 256x256 Signal field is a separate opportunistic visual-expression channel; do not claim a scene was drawn unless the interface reports it. "
         "Do not invent telemetry such as latency, lock state, noise floor, or interference. "
-        "Current weather must use the canonical weather tool. Generated files/images are artifacts for the browser to present, not windows to open on the compute worker."
+        "Current weather must use the canonical weather tool. Generated files/images are artifacts for the browser to present, not windows to open on the compute worker. "
+        "In this interface, 'Signal', 'Signal image', 'Signal view', or 'signal scene' mean the lightweight 256x256 Signal canvas, not image generation. "
+        "Do not call generate_image merely because the user mentions Signal. Only use Comfy/image generation when the user explicitly asks to draw, generate, render, make a picture, illustration, artwork, or photo outside the Signal canvas."
     )
     result=engine.chat_once(
         prompt,profile=profile,workspace=cwd,selected_paths=selected_paths,
@@ -468,6 +484,9 @@ def _node_call(path, payload=None, timeout=.6):
     except Exception:
         return None
 
+def _node_get(path, timeout=.8):
+    return _node_call(path, payload=None, timeout=timeout)
+
 def node_activity():
     return _node_call("/v1/activity")
 
@@ -573,6 +592,12 @@ class App(BaseHTTPRequestHandler):
             if not p: return self.json(404,{"error":"presentation expired or missing"})
             data=p.read_bytes()
             return self.send_bytes(200,data,mimetypes.guess_type(p.name)[0] or "application/octet-stream")
+        if self.path=="/api/fabric/lights":
+            try:
+                value=_node_get("/v1/lights")
+                return self.json(200,value or {"pulse":0,"light":None})
+            except Exception as exc:
+                return self.json(502,{"error":str(exc)})
         if self.path=="/api/status":
             lo_engine=_lo_engine_path()
             lo_ok=bool(lo_engine)
@@ -595,9 +620,11 @@ class App(BaseHTTPRequestHandler):
             try:
                 n=int(self.headers.get("Content-Length","0")); d=json.loads(self.rfile.read(n) or b"{}")
                 prompt=str(d.get("text","")).strip()
-                if not prompt: return self.json(200,{"visual":{"kind":"nochange"},"signal":None})
+                answer=str(d.get("answer","")).strip()
+                events=d.get("events") if isinstance(d.get("events"),list) else []
+                if not prompt and not answer: return self.json(200,{"visual":{"kind":"nochange"},"signal":None})
                 base,model,_=look_inference_config(self.ollama if getattr(self,"ollama_explicit",False) else None,self.model if getattr(self,"model_explicit",False) else None)
-                visual=signal_interpret(base,model,prompt,"")
+                visual=signal_interpret(base,model,prompt,answer,events)
                 return self.json(200,{"signal":visual.get("signal"),"visual":{k:v for k,v in visual.items() if k!="signal"}})
             except Exception as exc:
                 return self.json(502,{"error":str(exc)})
@@ -657,6 +684,8 @@ class App(BaseHTTPRequestHandler):
                 if paths:
                     file_note="\n\nDROPPED RESOURCES:\n"+"\n".join(f"- {p}" for p in paths)
                 full=(prompt or "Work with the dropped resources.")+file_note
+                if "signal" in (prompt or "").lower():
+                    full += "\n\nINTERFACE NOTE: Signal refers to this browser's lightweight 256x256 canvas. Do not call image generation solely to satisfy a Signal/Signal image/Signal view request."
                 node_progress(lease_id,"planning","assembling LO request")
                 if self.mode=="lo":
                     node_progress(lease_id,"inference","LO native engine working")
@@ -677,7 +706,7 @@ class App(BaseHTTPRequestHandler):
                 self.model if getattr(self,"model_explicit",False) else None)
             if want_visual:
                 node_progress(lease_id,"visual","composing Signal scene")
-                visual=signal_interpret(resolved_base,resolved_model,prompt or "Work with the dropped resources.",text)
+                visual=signal_interpret(resolved_base,resolved_model,prompt or "Work with the dropped resources.",text,lo_events)
                 node_progress(lease_id,"render","applying Signal primitives")
             else:
                 visual={"kind":"parallel","signal":None,"attempts":0}
@@ -724,7 +753,7 @@ def main():
         state=f"LO NATIVE {a.profile} · "+(App.lo_cmd if App.lo_cmd else "NOT FOUND")
     else:
         p=probe_ollama(App.backend); state=("connected" if p.get("ok") else "unreachable: "+p.get("error","unknown"))
-    print(f"Signal Window 1.0.0 · http://{a.host}:{a.port} · {state} · gallery {App.gallery_dir if App.gallery_enabled else 'off'}")
+    print(f"Signal Window 1.1.0 · http://{a.host}:{a.port} · {state} · gallery {App.gallery_dir if App.gallery_enabled else 'off'}")
     ThreadingHTTPServer((a.host,a.port),App).serve_forever()
 
 if __name__=="__main__": main()

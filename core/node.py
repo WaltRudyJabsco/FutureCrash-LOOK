@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Future Crash + LOOK Unified Node 5.0.0.
+"""Future Crash + LOOK Unified Node 5.1.0.
 
 A small distributed supervisor for trusted personal machines. Immediate events stay
 asynchronous; a one-second fabric pulse reconciles presence, leases and stale work.
@@ -34,7 +34,7 @@ except ImportError:
     from fabric_packet import ArtifactStore, FabricStore, normalize_packet, packet_summary, new_id
 from urllib.parse import urlparse, parse_qs
 
-VERSION = "5.0.0"
+VERSION = "5.1.0"
 DEFAULT_HOST = "127.0.0.1"
 DEFAULT_PORT = 7332
 DEFAULT_INGRESS_PORT = 0
@@ -66,7 +66,13 @@ ADVERTISEMENT_LOCK = threading.RLock()
 ADVERTISEMENT_CACHE = {}
 BEACON_LOCK = threading.RLock()
 BEACON_SEEN = set()
-BEACON_PATTERNS = {"rgb": ("red", "green", "blue", "white"), "pulse": ("white", "off", "white")}
+BEACON_PATTERNS = {
+    "rgb": ("red", "green", "blue", "white"),
+    "pulse": ("white", "off", "white"),
+    "demo": ("white", "off", "red", "green", "blue", "white", "off", "red", "off", "green", "off", "blue", "off", "white", "white", "off"),
+    "christmas": ("red", "green", "red", "green", "white", "green", "red", "off"),
+    "disco": ("blue", "red", "white", "green", "blue", "off", "red", "green", "white", "off"),
+}
 
 
 
@@ -1308,10 +1314,16 @@ def _beacon_record(payload: dict) -> dict:
         BEACON_SEEN.add(bid)
         if len(BEACON_SEEN) > 256:
             BEACON_SEEN.clear(); BEACON_SEEN.add(bid)
-    data = {"id": bid, "origin": str(payload.get("origin") or "unknown"),
+    repeat = bool(payload.get("repeat", False))
+    expires_pulse = int(payload.get("expires_pulse") or 0)
+    show_id = str(payload.get("show_id") or bid)
+    stopped = bool(payload.get("stopped", False))
+    data = {"id": bid, "show_id": show_id, "origin": str(payload.get("origin") or "unknown"),
             "start_pulse": start, "pattern": pattern,
-            "sequence": list(BEACON_PATTERNS[pattern]), "received_pulse": pulse_number()}
-    FABRIC_STORE.event(None, "beacon", "scheduled", f"{pattern} at pulse {start}",
+            "sequence": list(BEACON_PATTERNS[pattern]), "received_pulse": pulse_number(),
+            "repeat": repeat, "expires_pulse": expires_pulse, "stopped": stopped}
+    phase = "stopped" if stopped else ("renewed" if payload.get("renew") else "scheduled")
+    FABRIC_STORE.event(None, "beacon", phase, f"{pattern} at pulse {start}",
                        node=identity()["name"], data=data)
     return {"ok": True, **data}
 
@@ -1345,26 +1357,84 @@ def _beacon_broadcast(pattern: str = "rgb", lead_pulses: int = 3) -> dict:
 
 
 def _active_beacon(events, pulse=None):
-    """Return the color scheduled for the current shared pulse, if any."""
+    """Return the color scheduled for the current shared pulse, if any.
+
+    Repeating light shows are leases: renewals extend expires_pulse while keeping
+    the original start pulse, so every renderer derives the same frame locally.
+    """
     current = pulse_number() if pulse is None else int(pulse)
+    stopped = set()
+    stop_all = False
     for event in reversed(events or []):
         if event.get("type") != "beacon":
             continue
         data = event.get("data") or {}
+        show_id = str(data.get("show_id") or data.get("id") or "")
+        if data.get("stopped"):
+            if show_id == "*": stop_all = True
+            elif show_id: stopped.add(show_id)
+            continue
+        if stop_all or (show_id and show_id in stopped):
+            continue
         try:
             start = int(data.get("start_pulse"))
         except Exception:
             continue
+        expires = int(data.get("expires_pulse") or 0)
+        if expires and current > expires:
+            continue
         seq = tuple(data.get("sequence") or BEACON_PATTERNS.get(str(data.get("pattern") or ""), ()))
+        if not seq:
+            continue
         offset = current - start
-        if 0 <= offset < len(seq):
-            return {"color": seq[offset], "pulse": current, "id": data.get("id"),
-                    "origin": data.get("origin"), "pattern": data.get("pattern")}
+        if offset < 0:
+            continue
+        if data.get("repeat"):
+            offset %= len(seq)
+        elif offset >= len(seq):
+            continue
+        return {"color": seq[offset], "pulse": current, "id": data.get("id"),
+                "show_id": show_id, "origin": data.get("origin"), "pattern": data.get("pattern"),
+                "repeat": bool(data.get("repeat")), "expires_pulse": expires}
     return None
 
 
+def _lights_broadcast(pattern="demo", *, show_id=None, start_pulse=None, repeat=False,
+                      lease_pulses=8, stopped=False):
+    """Broadcast a synchronized light show; renderers derive frames from pulse."""
+    if pattern not in BEACON_PATTERNS:
+        raise ValueError(f"unknown light pattern: {pattern}")
+    local = identity()["name"]
+    show_id = str(show_id or uuid.uuid4().hex[:12])
+    start_pulse = int(start_pulse or (pulse_number() + 3))
+    payload = {
+        "id": uuid.uuid4().hex[:12], "show_id": show_id, "origin": local,
+        "pattern": pattern, "start_pulse": start_pulse, "repeat": bool(repeat),
+        "expires_pulse": (pulse_number() + max(3, int(lease_pulses))) if repeat and not stopped else 0,
+        "renew": bool(repeat), "stopped": bool(stopped),
+    }
+    local_result = _beacon_record(payload)
+    snapshot = {"self": node_info(), "peers": PEERS.public()}
+    deliveries = [{"node": local, "ok": True, "received_pulse": local_result.get("received_pulse")}]
+    for peer in snapshot.get("peers") or []:
+        ad = peer.get("node") or {}
+        name = ((ad.get("identity") or {}).get("name") or peer.get("name"))
+        if not name:
+            continue
+        try:
+            result = http_json(_remote_url(snapshot, name, "/v1/beacon"), payload, timeout=.8)
+            deliveries.append({"node": name, "ok": bool(result.get("ok")),
+                               "received_pulse": result.get("received_pulse")})
+        except Exception as exc:
+            deliveries.append({"node": name, "ok": False, "error": str(exc)})
+    return {"ok": all(x.get("ok") for x in deliveries), "show_id": show_id,
+            "pattern": pattern, "start_pulse": start_pulse, "repeat": bool(repeat),
+            "delivery": deliveries, "delivered": sum(1 for x in deliveries if x.get("ok")),
+            "expected": len(deliveries)}
+
+
 class API(BaseHTTPRequestHandler):
-    server_version = "FCLNode/5.0.0"
+    server_version = "FCLNode/5.1.0"
 
     def setup(self):
         self._metric_request_id = None
@@ -1454,6 +1524,9 @@ class API(BaseHTTPRequestHandler):
                 return self.sendj(404, {"error": "job not found"})
             job["packet_full"] = FABRIC_STORE.get_packet(pid)
             return self.sendj(200, job)
+        if path == "/v1/lights":
+            events = FABRIC_STORE.recent_events(limit=96)
+            return self.sendj(200, {"pulse": pulse_number(), "light": _active_beacon(events)})
         if path == "/v1/events":
             q = parse_qs(urlparse(self.path).query)
             if "since" not in q:
@@ -1484,6 +1557,14 @@ class API(BaseHTTPRequestHandler):
                 if d.get("start_pulse"):
                     return self.sendj(200, _beacon_record(d))
                 return self.sendj(200, _beacon_broadcast(str(d.get("pattern") or "rgb"), int(d.get("lead_pulses") or 3)))
+            except ValueError as exc:
+                return self.sendj(400, {"ok": False, "error": str(exc)})
+        if path == "/v1/lights":
+            try:
+                return self.sendj(200, _lights_broadcast(
+                    str(d.get("pattern") or "demo"), show_id=d.get("show_id"),
+                    start_pulse=d.get("start_pulse"), repeat=bool(d.get("repeat")),
+                    lease_pulses=int(d.get("lease_pulses") or 8), stopped=bool(d.get("stopped"))))
             except ValueError as exc:
                 return self.sendj(400, {"ok": False, "error": str(exc)})
         if path == "/v1/infer/stream":
@@ -1879,7 +1960,7 @@ def _dash_render(data, width=92):
     else:
         lines.append("no recent Fabric events")
 
-    lines += ["", rule, "[q] quit   [b] beacon   [w] watch   [s] settings   [d] doctor   [r] restart   [space] refresh"]
+    lines += ["", rule, "[q] quit   [b] beacon   [l] light demo   [w] watch   [s] settings   [d] doctor   [r] restart   [space] refresh"]
     return "\n".join(lines)
 
 
@@ -1996,6 +2077,11 @@ def _dashboard(host, port, interval=0.25):
                     _beacon_broadcast("rgb", 3)
                 finally:
                     dirty = True
+            elif ch in {"l", "L"}:
+                try:
+                    _lights_broadcast("demo")
+                finally:
+                    dirty = True
             elif ch in {"w", "W"}:
                 raw_off()
                 try:
@@ -2083,7 +2169,7 @@ def main():
     ap=argparse.ArgumentParser(description="Future Crash + LOOK unified node")
     ap.add_argument("command",nargs="?",default="serve",
         choices=["serve","status","nodes","activity","pulse","fabric","watch","dashboard","models","qualify","services","service",
-                 "jobs","job","submit","packet","cancel","events","http","beacon"])
+                 "jobs","job","submit","packet","cancel","events","http","beacon","lights"])
     ap.add_argument("args",nargs="*")
     ap.add_argument("--node",dest="node",default=None,help="target Fabric node name")
     ap.add_argument("--json",action="store_true",help="raw JSON where a human view exists")
@@ -2106,6 +2192,37 @@ def main():
                     detail = f"received pulse {row.get('received_pulse')}" if row.get("ok") else str(row.get("error") or "failed")
                     print(f"  {mark} {str(row.get('node') or '?'):<24} {detail}")
                 return 0 if result.get("ok") else 1
+            if a.command=="lights":
+                pattern = a.args[0] if a.args else "demo"
+                if pattern == "stop":
+                    result = http_json(_daemon_url(a.host,a.port,"/v1/lights"), {"pattern":"pulse","show_id":"*","start_pulse":pulse_number(),"stopped":True}, timeout=3.0)
+                    print("FABRIC LIGHTS · stopped")
+                    return 0
+                if pattern not in BEACON_PATTERNS:
+                    ap.error("lights pattern must be demo|rgb|pulse|christmas|disco|stop")
+                repeating = pattern in {"christmas","disco"}
+                if not repeating:
+                    result = http_json(_daemon_url(a.host,a.port,"/v1/lights"), {"pattern":pattern}, timeout=3.0)
+                    print(f"FABRIC LIGHTS · {pattern} · pulse {result.get('start_pulse','?')} · {result.get('delivered',0)}/{result.get('expected',0)} nodes")
+                    return 0 if result.get("ok") else 1
+                show_id = uuid.uuid4().hex[:12]
+                start_pulse = pulse_number() + 3
+                print(f"FABRIC LIGHTS · {pattern} · Ctrl-C stops · show {show_id}")
+                try:
+                    while True:
+                        result = http_json(_daemon_url(a.host,a.port,"/v1/lights"), {
+                            "pattern":pattern,"show_id":show_id,"start_pulse":start_pulse,
+                            "repeat":True,"lease_pulses":8}, timeout=3.0)
+                        time.sleep(5.0)
+                except KeyboardInterrupt:
+                    try:
+                        http_json(_daemon_url(a.host,a.port,"/v1/lights"), {
+                            "pattern":pattern,"show_id":show_id,"start_pulse":start_pulse,
+                            "stopped":True}, timeout=2.0)
+                    except Exception:
+                        pass
+                    print("\nFABRIC LIGHTS · stopped")
+                    return 0
             if a.command=="fabric": print_fabric_snapshot(_daemon_get(a.host,a.port,"/v1/nodes")); return 0
             if a.command=="nodes": print(json.dumps(_daemon_get(a.host,a.port,"/v1/nodes"),indent=2)); return 0
             path={"status":"/v1/node","activity":"/v1/activity","pulse":"/v1/pulse","models":"/v1/models","services":"/v1/services","http":"/v1/http"}.get(a.command)

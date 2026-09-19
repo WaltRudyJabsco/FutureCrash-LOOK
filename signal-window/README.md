@@ -1,4 +1,4 @@
-# Signal Window 1.0.0
+# Signal Window 1.1.0
 
 Signal is now a native browser body for LO. The server imports LOOK's reusable LO engine directly rather than spawning and scraping the terminal CLI. Browser sessions keep a bounded ephemeral conversation history, `/clear` clears that server-side state, and generated/browser-displayable artifacts remain presentation targets rather than worker-side desktop windows.
 
@@ -29,3 +29,7 @@ Manual development remains:
 ```bash
 python3 server.py
 ```
+
+## Fabric-attached display
+
+Signal 1.1 follows synchronized Fabric light shows from its host node, so iPhone/iPad/browser clients can participate without becoming compute nodes. Ordinary exchanges asynchronously compose a Signal scene after the answer; image generation remains a separate explicit artifact path.

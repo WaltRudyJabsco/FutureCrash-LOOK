@@ -23,3 +23,17 @@ class SignalSessionTests(unittest.TestCase):
         self.assertEqual(server._session_history(sid),[])
 
 if __name__=='__main__': unittest.main()
+
+class SignalVisualPolicyTests(unittest.TestCase):
+    def test_signal_client_has_fabric_light_display(self):
+        root=Path(__file__).resolve().parents[1]
+        html=(root/'signal-window/index.html').read_text()
+        js=(root/'signal-window/app.js').read_text()
+        self.assertIn('id="fabricLight"', html)
+        self.assertIn('/api/fabric/lights', js)
+
+    def test_signal_composes_after_answer(self):
+        root=Path(__file__).resolve().parents[1]
+        js=(root/'signal-window/app.js').read_text()
+        self.assertIn("answer:d.text||''", js)
+        self.assertNotIn("const visualPromise=text?fetch('/api/visual'", js)
