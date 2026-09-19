@@ -1,3 +1,11 @@
+# 4.7.1 — Trust Basis
+
+- Injects an authoritative host-clock receipt into every LO turn; current date/time/offset come from the machine, never model memory.
+- Treats current and forecast weather as a host-enforced fresh-data boundary. A prose-only weather answer is rejected and repaired into a WEATHER tool call.
+- If a model still fails to obtain a live WEATHER receipt after repair, LO refuses to present fabricated current weather.
+- Keeps temporal grounding local to the request so Fabric-routed inference receives the originating turn's trusted temporal frame.
+- LOOK 4.39.1; Unified Node 4.7.1; Signal Window remains 1.0.0.
+
 # 4.7.0 — Signal Native LO
 
 - Replaces Signal's subprocess `lo --events-json` bridge with a reusable in-process LO engine. Human terminal output is no longer a machine protocol.

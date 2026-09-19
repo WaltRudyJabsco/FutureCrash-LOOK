@@ -1,5 +1,6 @@
 #!/usr/bin/env python3
 import os, platform, re, select, shutil, subprocess, sys, termios, tty, threading, time, hashlib, json, uuid, signal, tempfile, wave, math, struct, zipfile, socket
+from datetime import datetime
 import http.client
 import urllib.request, urllib.parse, urllib.error
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
@@ -18,7 +19,7 @@ try:
 except Exception:
     readline = None
 
-VERSION="4.39.0"
+VERSION="4.39.1"
 
 LOOK_WORDMARK = r"""       ██╗      ██╗  ██╗
        ██║      ██║ ██╔╝
@@ -5945,6 +5946,30 @@ def _mutation_truth_summary(result):
             return verb+" "+clean[len(prefix):].lstrip(" ·")
     return clean or "Filesystem change completed."
 
+def _temporal_context():
+    """Return authoritative wall-clock context from the host, never model memory."""
+    now=datetime.now().astimezone()
+    zone=now.tzname() or "local"
+    return (
+        "TRUSTED TEMPORAL CONTEXT\n"
+        f"request_time: {now.isoformat(timespec='seconds')}\n"
+        f"current_date: {now.date().isoformat()}\n"
+        f"local_time: {now.strftime('%H:%M:%S')}\n"
+        f"timezone: {zone}\n"
+        f"utc_offset: {now.strftime('%z')[:3]}:{now.strftime('%z')[3:]}\n"
+        "source: host_system_clock\n"
+        "This is authoritative for this turn. Never infer the current date, time, year, "
+        "timezone, or relative dates from model knowledge or prior conversation."
+    )
+
+def _lo_requires_weather(prompt):
+    """Current/forecast weather is a live edge, never a model-knowledge answer."""
+    text=" ".join(str(prompt or "").casefold().split())
+    return bool(re.search(
+        r"\b(weather|forecast|temperature|temp|rain(?:ing)?|snow(?:ing)?|wind(?:y)?|humidity|precipitation)\b",
+        text,
+    ))
+
 def _lo_explicit_web_scope(prompt):
     low=" ".join(str(prompt or "").casefold().split())
     return bool(re.search(r"\b(online|on the web|web|youtube(?:\.com)?|vimeo(?:\.com)?|website|site|url|browser)\b",low))
@@ -8854,6 +8879,10 @@ def ollama_chat(force_search=False, initial_prompt=None, allow_start=True, host_
                 f"{last_action['path']} via {last_action['tool']}. Resolve it/that/the same one against this "
                 "referent when context fits. Do not search merely to rediscover this exact item."
             )})
+        # Time is an observed host fact, not language-model knowledge. Refresh it on
+        # every turn and keep exactly one current temporal receipt in context.
+        messages=[m for m in messages if not (m.get("role")=="system" and str(m.get("content","")).startswith("TRUSTED TEMPORAL CONTEXT\n"))]
+        messages.append({"role":"system","content":_temporal_context()})
         messages.append(user_message)
 
         # Search mode is deliberately deterministic: search first, then answer.
@@ -8887,6 +8916,9 @@ def ollama_chat(force_search=False, initial_prompt=None, allow_start=True, host_
         # enforced by the host so prose can never masquerade as execution.
         mutation_required=(profile!="conservative" and _lo_requires_filesystem_action(prompt))
         external_action_required=(profile!="conservative" and _lo_requires_external_action(prompt))
+        weather_required=_lo_requires_weather(prompt)
+        weather_succeeded=False
+        weather_repair_sent=False
         external_action_attempted=False
         external_action_succeeded=False
         last_external_result=""
@@ -9046,6 +9078,7 @@ def ollama_chat(force_search=False, initial_prompt=None, allow_start=True, host_
                             print(f"{_ansi_label('weather ›', '36')} {location}")
                             with _activity("weather"):
                                 tool_content=_weather_lookup(location)
+                            weather_succeeded=not str(tool_content).startswith(("Weather lookup failed:","No weather location match"))
                         except Exception as exc: tool_content=f"Weather lookup failed: {exc}"
                     elif name == "place_lookup":
                         query=args.get("query","")
@@ -9168,6 +9201,21 @@ def ollama_chat(force_search=False, initial_prompt=None, allow_start=True, host_
                 continue
 
             answer = message.get("content", "").strip()
+
+            # Fresh weather is a host-enforced trust boundary. A prose-only model
+            # answer is never allowed to masquerade as a live observation.
+            if weather_required and not weather_succeeded:
+                if not weather_repair_sent:
+                    weather_repair_sent=True
+                    messages.append({"role":"system","content":(
+                        "LIVE WEATHER GROUNDING REQUIRED. The user's latest question depends on current or forecast weather, "
+                        "but no successful WEATHER receipt exists for this turn. Call the weather tool now for the relevant location. "
+                        "Do not answer from model memory, prior conversation, or an assumed date/time."
+                    )})
+                    continue
+                answer=("I can't give a trustworthy current-weather answer because this turn did not obtain "
+                        "a successful live WEATHER receipt.")
+                message={"role":"assistant","content":answer,"thinking":"","tool_calls":[]}
 
             # Some otherwise capable models reason correctly about a shell
             # inspection but emit prose instead of crossing into a tool call.

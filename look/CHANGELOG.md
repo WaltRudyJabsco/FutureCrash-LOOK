@@ -1,3 +1,8 @@
+## 4.39.1 — Trust basis
+
+- Refresh authoritative system-clock context on every LO turn.
+- Enforce live WEATHER receipts for current/forecast weather before an answer may cross the final-response boundary.
+
 ## 4.38.5
 
 - Fabric LO now tolerates transient control-plane route discovery timeouts instead of exposing raw urllib timeout errors.
