@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Future Crash + LOOK Unified Node 4.7.3.
+"""Future Crash + LOOK Unified Node 4.7.4.
 
 A small distributed supervisor for trusted personal machines. Immediate events stay
 asynchronous; a one-second fabric pulse reconciles presence, leases and stale work.
@@ -7,6 +7,7 @@ asynchronous; a one-second fabric pulse reconciles presence, leases and stale wo
 from __future__ import annotations
 
 import argparse
+import errno
 import sys
 import faulthandler
 import signal
@@ -32,7 +33,7 @@ except ImportError:
     from fabric_packet import ArtifactStore, FabricStore, normalize_packet, packet_summary, new_id
 from urllib.parse import urlparse, parse_qs
 
-VERSION = "4.7.3"
+VERSION = "4.7.4"
 DEFAULT_HOST = "127.0.0.1"
 DEFAULT_PORT = 7332
 DEFAULT_INGRESS_PORT = 0
@@ -1106,6 +1107,8 @@ class HTTPMetrics:
         self.rejected = 0
         self.errors = 0
         self.last_error = None
+        self.accept_errors = 0
+        self.last_accept_error = None
         self.peak_active = 0
         self.by_endpoint = {}
         self.by_source = {}
@@ -1123,6 +1126,11 @@ class HTTPMetrics:
         with self.lock:
             self.errors += 1
             self.last_error = f"{type(exc).__name__}: {exc}"[:240]
+
+    def accept_error(self, exc):
+        with self.lock:
+            self.accept_errors += 1
+            self.last_accept_error = f"{type(exc).__name__}: {exc}"[:240]
 
     def start(self, method, path, source):
         with self.lock:
@@ -1152,7 +1160,10 @@ class HTTPMetrics:
             return {"plane": self.plane, "accepted": self.accepted,
                     "active": len(self.active), "completed": self.completed,
                     "rejected": self.rejected, "errors": self.errors,
-                    "last_error": self.last_error, "peak_active": self.peak_active,
+                    "last_error": self.last_error,
+                    "accept_errors": self.accept_errors,
+                    "last_accept_error": self.last_accept_error,
+                    "peak_active": self.peak_active,
                     "by_endpoint": dict(sorted(self.by_endpoint.items())),
                     "by_source": dict(sorted(self.by_source.items())),
                     "oldest_active": oldest}
@@ -1162,8 +1173,8 @@ HTTP_METRICS = {"local": HTTPMetrics("local"), "ingress": HTTPMetrics("ingress")
 
 
 class FabricHTTPServer(ThreadingHTTPServer):
-    # Defense in depth: transient Tailscale bursts must not fill the default
-    # five-slot kernel backlog. Request threads do not block service shutdown.
+    # Keep the local control plane deliberately boring. Every socket accepted by
+    # the process has exactly one owner and exactly one shutdown path.
     request_queue_size = 128
     daemon_threads = True
     block_on_close = False
@@ -1172,70 +1183,112 @@ class FabricHTTPServer(ThreadingHTTPServer):
     def __init__(self, server_address, RequestHandlerClass, *, plane="local"):
         self.plane = str(plane)
         self.metrics = HTTP_METRICS.setdefault(self.plane, HTTPMetrics(self.plane))
-        # Personal Fabric should never create unbounded request threads. Remote
-        # ingress is deliberately tighter; local UI/control traffic keeps its own lane.
         self.max_active_requests = 32 if self.plane == "ingress" else 64
         self._request_slots = threading.BoundedSemaphore(self.max_active_requests)
         self.loop_heartbeat = time.monotonic()
+        self.last_accept_success = time.monotonic()
+        self.accept_failure_streak = 0
+        self.last_accept_exception = None
         super().__init__(server_address, RequestHandlerClass)
 
     def service_actions(self):
-        # serve_forever calls this once per poll. A stale value means the accept
-        # loop itself stopped advancing, which request-level health cannot see.
         self.loop_heartbeat = time.monotonic()
+
+    def get_request(self):
+        # A readable listening socket plus a failing accept() creates a hot spin:
+        # select immediately wakes again while the kernel backlog keeps filling.
+        # Record that condition and back off so the watchdog can fail the daemon
+        # cleanly instead of leaving an alive-but-useless process.
+        try:
+            request, address = super().get_request()
+        except OSError as exc:
+            self.accept_failure_streak += 1
+            self.last_accept_exception = exc
+            self.metrics.accept_error(exc)
+            time.sleep(0.05)
+            raise
+        self.accept_failure_streak = 0
+        self.last_accept_exception = None
+        self.last_accept_success = time.monotonic()
+        return request, address
+
+    def _dispose_request(self, request):
+        try:
+            self.shutdown_request(request)
+        except Exception:
+            try:
+                request.close()
+            except Exception:
+                pass
 
     def process_request(self, request, client_address):
         self.metrics.accepted_connection()
         if not self._request_slots.acquire(blocking=False):
             self.metrics.rejected_connection()
-            try:
-                self.shutdown_request(request)
-            except Exception:
-                pass
+            self._dispose_request(request)
             return
         try:
-            return super().process_request(request, client_address)
-        except Exception:
+            thread = threading.Thread(
+                target=self._owned_request,
+                args=(request, client_address),
+                name="fabric-http",
+                daemon=True,
+            )
+            thread.start()
+        except BaseException:
             self._request_slots.release()
+            self._dispose_request(request)
             raise
 
-    def process_request_thread(self, request, client_address):
+    def _owned_request(self, request, client_address):
+        # Do not rely on ThreadingMixIn's implicit lifecycle here. This is the
+        # control-plane invariant: accepted socket -> handler -> shutdown, even
+        # for parser failures, disconnects, exceptions and rejected work.
         try:
-            return super().process_request_thread(request, client_address)
+            self.finish_request(request, client_address)
+        except BaseException:
+            self.handle_error(request, client_address)
         finally:
-            self._request_slots.release()
+            try:
+                self._dispose_request(request)
+            finally:
+                self._request_slots.release()
 
     def handle_error(self, request, client_address):
         exc = sys.exc_info()[1]
         if exc is not None:
             self.metrics.request_error(exc)
-        # Disconnects/timeouts are transport noise; keep the journal clean. Real
-        # programming faults retain ThreadingHTTPServer's traceback.
         if isinstance(exc, (BrokenPipeError, ConnectionResetError, TimeoutError, OSError)):
             return
         return super().handle_error(request, client_address)
 
 
 def _local_accept_watchdog(server):
-    """Fail the daemon if localhost stops accepting while the process is alive.
+    """Terminate an alive-but-unusable local HTTP server with evidence.
 
-    systemd/launchd can recover a crashed process; they cannot recover a Python
-    process that still owns its socket but whose accept loop is wedged. Dump all
-    Python thread stacks first so every recovery leaves evidence.
+    The 4.7.3 failure was not a sleeping accept loop: accept() itself stopped
+    succeeding, so serve_forever spun while the kernel queue filled. Watch both
+    the loop heartbeat and consecutive accept failures.
     """
     stale_seconds = 8.0
+    fatal_accept_streak = 8
     while True:
         time.sleep(1.0)
-        age = time.monotonic() - float(getattr(server, "loop_heartbeat", 0.0))
-        if age > stale_seconds:
-            print(f"FCL NODE · local accept loop stalled for {age:.1f}s; terminating for service-manager recovery",
-                  file=sys.stderr, flush=True)
-            faulthandler.dump_traceback(file=sys.stderr, all_threads=True)
-            os._exit(70)
+        loop_age = time.monotonic() - float(getattr(server, "loop_heartbeat", 0.0))
+        streak = int(getattr(server, "accept_failure_streak", 0))
+        if loop_age <= stale_seconds and streak < fatal_accept_streak:
+            continue
+        exc = getattr(server, "last_accept_exception", None)
+        reason = (f"accept failed {streak} consecutive times ({exc})" if streak >= fatal_accept_streak
+                  else f"accept loop stalled for {loop_age:.1f}s")
+        print(f"FCL NODE · local HTTP unhealthy: {reason}; terminating for service-manager recovery",
+              file=sys.stderr, flush=True)
+        faulthandler.dump_traceback(file=sys.stderr, all_threads=True)
+        os._exit(70)
 
 
 class API(BaseHTTPRequestHandler):
-    server_version = "FCLNode/4.7.3"
+    server_version = "FCLNode/4.7.4"
 
     def setup(self):
         self._metric_request_id = None

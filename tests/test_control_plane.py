@@ -1,6 +1,15 @@
+import os
+import socket
+import tempfile
+import threading
+import time
 import unittest
+import urllib.request
+from http.server import BaseHTTPRequestHandler
+from pathlib import Path
 from unittest.mock import patch
 from core import node, ingress
+from core.fabric_packet import FabricStore
 
 
 class ControlPlaneTests(unittest.TestCase):
@@ -28,6 +37,57 @@ class ControlPlaneTests(unittest.TestCase):
         done = meter.public()
         self.assertEqual(done["active"], 0)
         self.assertEqual(done["completed"], 1)
+
+
+    def test_abrupt_clients_do_not_poison_local_listener(self):
+        class TinyHandler(BaseHTTPRequestHandler):
+            protocol_version = "HTTP/1.0"
+            def log_message(self, *args):
+                pass
+            def do_GET(self):
+                body = b"ok"
+                self.send_response(200)
+                self.send_header("Content-Length", str(len(body)))
+                self.send_header("Connection", "close")
+                self.end_headers()
+                self.wfile.write(body)
+
+        server = node.FabricHTTPServer(("127.0.0.1", 0), TinyHandler, plane="test-abrupt")
+        thread = threading.Thread(target=server.serve_forever, kwargs={"poll_interval": 0.01}, daemon=True)
+        thread.start()
+        host, port = server.server_address
+        try:
+            # Reproduce the real failure shape: peers connect, begin an HTTP
+            # request, then disappear before a response exists. Do enough cycles
+            # to exceed the old 128-entry listen backlog several times.
+            for _ in range(400):
+                s = socket.create_connection((host, port), timeout=1.0)
+                s.sendall(b"GET / HTTP/1.0\r\nHost: local\r\n")
+                s.close()
+            deadline = time.time() + 3.0
+            while time.time() < deadline and server.metrics.active:
+                time.sleep(0.01)
+            with urllib.request.urlopen(f"http://{host}:{port}/", timeout=1.0) as response:
+                self.assertEqual(response.read(), b"ok")
+            self.assertEqual(server.metrics.public()["active"], 0)
+            self.assertEqual(server.accept_failure_streak, 0)
+        finally:
+            server.shutdown()
+            server.server_close()
+
+    def test_fabric_store_closes_sqlite_connections(self):
+        # SQLite Connection.__enter__/__exit__ commits transactions but does not
+        # close the connection. Repeated Fabric polling must therefore use an
+        # explicit closing() owner rather than depend on GC/finalizers.
+        with tempfile.TemporaryDirectory() as td:
+            store = FabricStore(Path(td) / "fabric.sqlite3")
+            before = len(os.listdir("/proc/self/fd")) if os.path.isdir("/proc/self/fd") else None
+            for _ in range(300):
+                self.assertTrue(store.health()["ok"])
+                store.events(since=0, limit=1)
+            if before is not None:
+                after = len(os.listdir("/proc/self/fd"))
+                self.assertLessEqual(after, before + 4)
 
     def test_advertisement_reads_cache_without_rebuilding(self):
         cached = {

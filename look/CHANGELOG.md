@@ -1,3 +1,8 @@
+## 4.39.4 — Fabric socket ownership
+
+- Ships with Unified Node 4.7.4 control-plane socket lifecycle and accept-failure recovery.
+- `lk fabric http` surfaces accept-error telemetry from the node.
+
 ## 4.39.3 — Fabric HTTP diagnostics
 
 - `lk fabric http` now passes through to the Unified Node HTTP pressure view.

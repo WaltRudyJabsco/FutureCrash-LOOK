@@ -1,3 +1,13 @@
+# 4.7.4 — Fabric Socket Ownership
+
+- Fixes the 3090 control-plane failure captured with a full 7332 listen backlog and unaccepted CLOSE-WAIT sockets.
+- Makes local HTTP socket ownership explicit: every accepted socket has one handler and one guaranteed shutdown path.
+- Detects repeated accept() failures instead of hot-spinning with a full kernel backlog; dumps thread state and exits for systemd/launchd recovery.
+- Explicitly closes every SQLite Fabric connection instead of relying on interpreter finalization.
+- Extends HTTP telemetry with accept-error evidence.
+- Adds abrupt-disconnect/control-plane stress regression coverage.
+- LOOK 4.39.4; Unified Node 4.7.4; Signal Window remains 1.0.0.
+
 # 4.7.3 — Fabric Ingress Guard
 
 - Moves Tailscale-facing :7333 ingress into a separate `fcl-ingress` process. The 4.7.2 split used two sockets in one Python process, so a process-wide stall could still strand both accept queues.

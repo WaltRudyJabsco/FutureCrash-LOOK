@@ -7,6 +7,7 @@ progress live beside it rather than being written back into it.
 from __future__ import annotations
 
 import base64
+from contextlib import closing
 import hashlib
 import json
 import os
@@ -150,14 +151,14 @@ class FabricStore:
 
     def health(self):
         try:
-            with self._connect() as db:
+            with closing(self._connect()) as db:
                 db.execute("SELECT 1").fetchone()
             return {"ok": True, "path": str(self.path)}
         except Exception as exc:
             return {"ok": False, "path": str(self.path), "error": str(exc)}
 
     def _init(self):
-        with self._connect() as db:
+        with closing(self._connect()) as db:
             db.executescript("""
             PRAGMA journal_mode=WAL;
             CREATE TABLE IF NOT EXISTS packets (
@@ -199,7 +200,7 @@ class FabricStore:
         idem = _dict(packet.get("execution")).get("idempotency")
         blob = canonical_bytes(packet).decode("utf-8")
         digest = packet_digest(packet)
-        with self.lock, self._connect() as db:
+        with self.lock, closing(self._connect()) as db:
             existing = db.execute("SELECT digest FROM packets WHERE id=?", (pid,)).fetchone()
             if existing:
                 if existing["digest"] != digest:
@@ -218,12 +219,12 @@ class FabricStore:
         return self.get_job(pid), True
 
     def get_packet(self, pid: str) -> dict[str, Any] | None:
-        with self._connect() as db:
+        with closing(self._connect()) as db:
             row = db.execute("SELECT packet_json FROM packets WHERE id=?", (pid,)).fetchone()
         return json.loads(row["packet_json"]) if row else None
 
     def get_job(self, pid: str) -> dict[str, Any] | None:
-        with self._connect() as db:
+        with closing(self._connect()) as db:
             row = db.execute("SELECT * FROM jobs WHERE id=?", (pid,)).fetchone()
         if not row:
             return None
@@ -240,12 +241,12 @@ class FabricStore:
 
     def jobs(self, limit: int = 32) -> list[dict[str, Any]]:
         limit = max(1, min(int(limit), 256))
-        with self._connect() as db:
+        with closing(self._connect()) as db:
             ids = [r["id"] for r in db.execute("SELECT id FROM jobs ORDER BY accepted DESC LIMIT ?", (limit,))]
         return [j for pid in ids if (j := self.get_job(pid))]
 
     def start(self, pid: str, worker: str) -> int:
-        with self.lock, self._connect() as db:
+        with self.lock, closing(self._connect()) as db:
             row = db.execute("SELECT attempt,status FROM jobs WHERE id=?", (pid,)).fetchone()
             if not row: raise KeyError(pid)
             attempt = int(row["attempt"]) + 1
@@ -258,7 +259,7 @@ class FabricStore:
 
     def finish(self, pid: str, status: str, *, result: dict[str, Any] | None = None, error: str | None = None, node: str = ""):
         blob = json.dumps(result, separators=(",", ":"), ensure_ascii=False) if result is not None else None
-        with self.lock, self._connect() as db:
+        with self.lock, closing(self._connect()) as db:
             db.execute("UPDATE jobs SET status=?,finished=?,result_packet=?,error=? WHERE id=?",
                        (status, utc_ts(), blob, error, pid))
             db.commit()
@@ -266,7 +267,7 @@ class FabricStore:
                    data={"result_id": (result or {}).get("id")})
 
     def request_cancel(self, pid: str, *, node: str, reason: str = "user") -> bool:
-        with self.lock, self._connect() as db:
+        with self.lock, closing(self._connect()) as db:
             row = db.execute("SELECT status FROM jobs WHERE id=?", (pid,)).fetchone()
             if not row: return False
             if row["status"] in {"ok", "failed", "cancelled", "denied"}: return True
@@ -276,12 +277,12 @@ class FabricStore:
         return True
 
     def cancelled(self, pid: str) -> bool:
-        with self._connect() as db:
+        with closing(self._connect()) as db:
             row = db.execute("SELECT cancel_requested FROM jobs WHERE id=?", (pid,)).fetchone()
         return bool(row and row["cancel_requested"])
 
     def event(self, pid: str | None, typ: str, phase: str | None, detail: str | None, *, node: str, data: dict[str, Any] | None = None):
-        with self.lock, self._connect() as db:
+        with self.lock, closing(self._connect()) as db:
             db.execute("INSERT INTO events(ts,job_id,type,phase,detail,node,data_json) VALUES(?,?,?,?,?,?,?)",
                        (utc_ts(), pid, typ, phase, detail, node,
                         json.dumps(data or {}, separators=(",", ":"), ensure_ascii=False)))
@@ -289,7 +290,7 @@ class FabricStore:
 
     def events(self, *, since: int = 0, limit: int = 128) -> list[dict[str, Any]]:
         limit = max(1, min(int(limit), 512))
-        with self._connect() as db:
+        with closing(self._connect()) as db:
             rows = db.execute("SELECT * FROM events WHERE seq>? ORDER BY seq ASC LIMIT ?", (int(since), limit)).fetchall()
         out=[]
         for row in rows:

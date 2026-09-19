@@ -21,7 +21,7 @@ import time
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from urllib.parse import urlsplit
 
-VERSION = "4.7.3"
+VERSION = "4.7.4"
 DEFAULT_HOST = "127.0.0.1"
 DEFAULT_PORT = 7333
 DEFAULT_BACKEND_HOST = "127.0.0.1"
@@ -145,7 +145,7 @@ class GuardServer(ThreadingHTTPServer):
 
 
 class Handler(BaseHTTPRequestHandler):
-    server_version = "FCLIngress/4.7.3"
+    server_version = "FCLIngress/4.7.4"
     protocol_version = "HTTP/1.0"  # response EOF is the stream boundary; no keep-alive pool.
 
     def log_message(self, *args):
