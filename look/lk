@@ -18,7 +18,7 @@ try:
 except Exception:
     readline = None
 
-VERSION="4.37.1"
+VERSION="4.38.0"
 
 LOOK_WORDMARK = r"""       ██╗      ██╗  ██╗
        ██║      ██║ ██╔╝
@@ -655,8 +655,27 @@ def ollama_hosts(args):
     args=list(args or [])
     data=_load_ollama_hosts()
 
+    if args and args[0]=="reset":
+        removed=[name for name in data["hosts"] if name!="local"]
+        data={"default":"local","hosts":{"local":{"url":LOCAL_OLLAMA_URL}}}
+        _save_ollama_hosts(data)
+        print("✓ reset legacy Ollama hosts · "+(", ".join(removed) if removed else "already clean"))
+        return 0
+
     if args and args[0]=="prune":
         removed=[]
+        # Prune means cruft, not merely offline: duplicate aliases for the same
+        # normalized endpoint are stale state even when that endpoint is healthy.
+        by_url={}
+        for name,item in data["hosts"].items():
+            if name=="local": continue
+            by_url.setdefault(item.get("url",""),[]).append(name)
+        for url,names in by_url.items():
+            if len(names)>1:
+                keep=data.get("default") if data.get("default") in names else sorted(names,key=str.casefold)[0]
+                for name in names:
+                    if name!=keep:
+                        removed.append(name); data["hosts"].pop(name,None)
         for name,item in list(data["hosts"].items()):
             if name=="local": continue
             if not _probe_ollama(item.get("url",""),.35):
@@ -8317,6 +8336,45 @@ def _ollama_http_error(exc):
     return f"{label} · {detail}" if detail else label
 
 
+def _fabric_client_module():
+    # Installed LOOK and source-tree LOOK both find the same tiny Fabric client.
+    candidates=[Path.home()/".local/share/future-crash-look/core", ROOT.parent/"core"]
+    for path in candidates:
+        if (path/"fabric_client.py").exists() and str(path) not in sys.path:
+            sys.path.insert(0,str(path))
+    import fabric_client
+    return fabric_client
+
+
+def _fabric_stream_chat(payload_obj, events=None):
+    """Yield Ollama-shaped events through Fabric, preserving LO's vision retries."""
+    client=_fabric_client_module()
+    attempts=[dict(payload_obj)]
+    if _ollama_payload_has_images(payload_obj):
+        without_tools=dict(payload_obj); without_tools.pop("tools",None); attempts.append(without_tools)
+        without_think=dict(without_tools); without_think.pop("think",None); attempts.append(without_think)
+    last=None
+    for index,current in enumerate(attempts):
+        requires=["text"]
+        if current.get("tools"): requires.append("tools")
+        if current.get("think"): requires.append("thinking")
+        if _ollama_payload_has_images(current): requires.append("vision")
+        if events: events.emit("fabric_route", requires=requires, retry=index)
+        try:
+            announced=False
+            for event in client.stream_infer(current,requires=requires,priority="interactive",timeout=OLLAMA_CHAT_TIMEOUT,owner="lo"):
+                if events and event.get("_fabric_node") and not announced:
+                    events.emit("fabric_worker", node=event.get("_fabric_node")); announced=True
+                yield event
+            return
+        except RuntimeError as exc:
+            last=str(exc)
+            if index==len(attempts)-1: raise
+            if events: events.emit("inference_retry", reason="vision_compatibility", attempt=index+1)
+            continue
+    raise RuntimeError(last or "Fabric inference failed")
+
+
 def _ollama_stream_chat(base,payload_obj, events=None):
     """Yield Ollama chat events; vision gets a narrow compatibility retry on HTTP 400."""
     import json, urllib.request, urllib.error
@@ -8436,11 +8494,15 @@ def ollama_chat(force_search=False, initial_prompt=None, allow_start=True, host_
     import json
     import urllib.request
 
-    base = _ollama_base(host_override)
+    # Normal LO belongs to Fabric. Explicit @host/--host and OLLAMA_HOST remain
+    # deliberate compatibility/debug escape hatches to direct Ollama streaming.
+    fabric_mode = not host_override and not os.environ.get("OLLAMA_HOST","").strip()
+    base = _ollama_base(host_override) if not fabric_mode else LOCAL_OLLAMA_URL
     if events:
         events.emit("request_start")
-        events.emit("endpoint_resolved", endpoint=base, host=host_name or _ollama_host_name(base),
-                    source="override" if host_override else ("environment" if os.environ.get("OLLAMA_HOST","").strip() else "saved/discovery"))
+        events.emit("endpoint_resolved", endpoint=("fabric://automatic" if fabric_mode else base),
+                    host=("fabric" if fabric_mode else (host_name or _ollama_host_name(base))),
+                    source=("fabric" if fabric_mode else ("override" if host_override else "environment")))
     profile=(access_profile or _load_lo_profile()).lower()
     if profile not in LO_PROFILES:
         print(f"LOOK OLLAMA · unknown access profile: {profile}")
@@ -8449,43 +8511,43 @@ def ollama_chat(force_search=False, initial_prompt=None, allow_start=True, host_
         print("· cancelled")
         return 0
 
-    running = _ensure_ollama_server(base, allow_start=(allow_start and _is_local_ollama(base)))
-    if running is None:
-        if events:
-            events.emit("error", stage="endpoint", error="server unavailable")
-            events.emit("request_done", status="error")
-        print("LOOK OLLAMA · server unavailable")
-        return 1
-
-    # Model preference follows endpoint scope: local fallback is machine-local;
-    # legacy direct remote hosts keep their own preference.
-    running_names = [(m.get("name") or m.get("model") or "").strip() for m in (running or [])]
-    running_names = [name for name in running_names if name]
-    try:
-        installed = _ollama_tags(base)
-    except Exception:
-        installed = []
-    installed_names = [(m.get("name") or m.get("model") or "").strip() for m in installed]
-    installed_names = [name for name in installed_names if name]
-    active = _preferred_model_for_base(base, installed=installed, running=running)
-
-    if active in installed_names:
-        model = active
-    elif installed_names:
-        print(f"LOOK OLLAMA · active model is not installed on this host: {active}")
-        print("  choose an installed model with `lk models`")
-        return 1
+    if fabric_mode:
+        # Model selection happens on the selected worker. Each node advertises its
+        # machine-local preferred model; capability requirements filter first.
+        running_names=[]; installed=[]; installed_names=[]
+        model=""; resident=False; model_caps=None
+        supports_thinking=True; supports_vision=True; supports_tools=True
+        if events: events.emit("model_selected", model="fabric:auto")
     else:
-        print(f"LOOK OLLAMA · {shown_host if 'shown_host' in locals() else _ollama_host_name(base)} is reachable, but has no models installed")
-        return 1
-    resident = model in running_names
-    if events:
-        events.emit("model_selected", model=model)
-        events.emit("model_resident", model=model, resident=resident, running_models=running_names)
-    model_caps=_ollama_capabilities(base, model)
-    supports_thinking=bool(model_caps and "thinking" in model_caps)
-    supports_vision=bool(model_caps and "vision" in model_caps)
-    supports_tools=(model_caps is None or "tools" in model_caps)
+        running = _ensure_ollama_server(base, allow_start=(allow_start and _is_local_ollama(base)))
+        if running is None:
+            if events:
+                events.emit("error", stage="endpoint", error="server unavailable")
+                events.emit("request_done", status="error")
+            print("LOOK OLLAMA · server unavailable")
+            return 1
+        running_names = [(m.get("name") or m.get("model") or "").strip() for m in (running or [])]
+        running_names = [name for name in running_names if name]
+        try: installed = _ollama_tags(base)
+        except Exception: installed = []
+        installed_names = [(m.get("name") or m.get("model") or "").strip() for m in installed]
+        installed_names = [name for name in installed_names if name]
+        active = _preferred_model_for_base(base, installed=installed, running=running)
+        if active in installed_names: model = active
+        elif installed_names:
+            print(f"LOOK OLLAMA · active model is not installed on this host: {active}")
+            return 1
+        else:
+            print(f"LOOK OLLAMA · {_ollama_host_name(base)} is reachable, but has no models installed")
+            return 1
+        resident = model in running_names
+        if events:
+            events.emit("model_selected", model=model)
+            events.emit("model_resident", model=model, resident=resident, running_models=running_names)
+        model_caps=_ollama_capabilities(base, model)
+        supports_thinking=bool(model_caps and "thinking" in model_caps)
+        supports_vision=bool(model_caps and "vision" in model_caps)
+        supports_tools=(model_caps is None or "tools" in model_caps)
 
     workspace = Path(workspace_override).expanduser().resolve() if workspace_override else _safe_cwd().resolve()
     selected_paths=[Path(p).expanduser().resolve() for p in (selected_paths or [])]
@@ -8868,7 +8930,8 @@ def ollama_chat(force_search=False, initial_prompt=None, allow_start=True, host_
                 if events: events.emit("inference_start", round=task_rounds)
                 progress_tokens=0
                 try:
-                    for event in _ollama_stream_chat(base,payload_obj,events=events):
+                    stream_fn = _fabric_stream_chat if fabric_mode else (lambda payload, events=None: _ollama_stream_chat(base,payload,events=events))
+                    for event in stream_fn(payload_obj,events=events):
                         fragment=event.get("message",{}) or {}
                         thought=str(fragment.get("thinking") or "")
                         content=str(fragment.get("content") or "")
@@ -10324,11 +10387,11 @@ def _settings_rows():
         ("model","AI","Local preferred model",_local_model_label(),
          "Fallback/local model for this machine. The picker always shows this machine's Ollama models, regardless of the legacy host override.",
          "model ollama llm qwen gemma deepseek local fallback ai gpu"),
-        ("fabricroute","AI","Inference routing","Fabric automatic",
-         "Normal distributed work routes by live Fabric capability, load and residency. Explicit Ollama hosts remain a compatibility/debug override.",
+        ("fabricroute","AI","Inference routing","Fabric automatic · LO streaming",
+         "LO and Fabric-native work route by live capability, load, residency and each node's local preferred model. Explicit Ollama hosts remain a compatibility/debug override.",
          "fabric routing automatic distributed node remote local inference"),
         ("host","AI","Legacy Ollama override",_ollama_host_name(base),
-         "Compatibility/debug override for direct LO streaming. It is not Fabric discovery and does not choose remote Fabric workers.",
+         "Compatibility/debug only. Normal LO ignores this saved host and uses Fabric; explicit host targeting still uses direct Ollama streaming.",
          "legacy host server ollama override remote local tailscale debug"),
         ("hostmodel","AI","Legacy override model",host_model,
          "Model preference for the selected direct Ollama host. Remote-host choices are stored separately and never overwrite the local fallback model.",
@@ -10623,7 +10686,7 @@ def _settings_action(key):
         base=_ollama_base()
         return ollama_models(base_override=(LOCAL_OLLAMA_URL if _is_local_ollama(base) else base))
     if key=="fabricroute":
-        print("Fabric automatic routing is active for Fabric-native work. Direct LO streaming remains on the local/legacy transport until streaming FWP lands.")
+        print("Fabric automatic routing is active for LO streaming and Fabric-native work. Explicit host targeting remains available for direct/debug sessions.")
         return 0
     if key=="model": return ollama_models(base_override=LOCAL_OLLAMA_URL)
     if key=="key": return ollama_key([])

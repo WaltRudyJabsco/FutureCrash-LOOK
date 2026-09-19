@@ -56,13 +56,27 @@ def choose_node(base=DEFAULT_NODE, *, model=None, requires=None, latency=False):
     scored.sort(key=lambda x:x[0])
     return scored[0]
 
+
+def _ad_for_target(base, target):
+    snap=_nodes(base)
+    for name,dns,ad in _candidates(snap):
+        if name==target:
+            return ad
+    return {}
+
 def infer(messages, *, model=None, requires=None, latency=False, priority="interactive",
           think=False, options=None, timeout=90, base=DEFAULT_NODE, owner="app"):
     score,target,dns,eligible=choose_node(base,model=model,requires=requires,latency=latency)
+    ad=_ad_for_target(base,target)
     chosen=model
     if not chosen:
-        pool=sorted(eligible,key=lambda m:int(m.get("size") or 0))
-        chosen=(pool[0] if latency else pool[-1]).get("name")
+        preferred=((ad.get("inference") or {}).get("preferred_model"))
+        names={m.get("name") for m in eligible}
+        if preferred in names:
+            chosen=preferred
+        else:
+            pool=sorted(eligible,key=lambda m:int(m.get("size") or 0))
+            chosen=(pool[0] if latency else pool[-1]).get("name")
     packet={
       "fabric":"fwp/1","kind":"task","origin":owner,
       "relationships":{},
@@ -90,3 +104,45 @@ def infer(messages, *, model=None, requires=None, latency=False, priority="inter
             return out
         time.sleep(.08)
     raise TimeoutError(f"Fabric inference timed out on {target}")
+
+def stream_infer(payload, *, requires=None, priority="interactive", timeout=180,
+                 base=DEFAULT_NODE, owner="lo"):
+    """Route a mature Ollama chat payload to a Fabric worker and yield its JSONL stream."""
+    import urllib.parse
+    model=payload.get("model") or None
+    score,target,dns,eligible=choose_node(base,model=model,requires=requires,latency=False)
+    ad=_ad_for_target(base,target)
+    chosen=model
+    if not chosen:
+        preferred=((ad.get("inference") or {}).get("preferred_model"))
+        names={m.get("name") for m in eligible}
+        chosen=preferred if preferred in names else max(eligible,key=lambda m:int(m.get("size") or 0)).get("name")
+    inp={"model":chosen,"messages":payload.get("messages") or [],"timeout":timeout,
+         "keep_alive":payload.get("keep_alive",-1),"options":payload.get("options") or {}}
+    if "think" in payload: inp["think"]=payload.get("think")
+    if isinstance(payload.get("tools"),list): inp["tools"]=payload["tools"]
+    packet={
+      "fabric":"fwp/1","kind":"task","origin":owner,"relationships":{},
+      "work":{"operation":"model.infer","objective":"stream conversational inference","input":inp},
+      "capabilities":{"requires":requires or ["text"],"prefers":{"latency":"normal"}},
+      "context":{},"execution":{"priority":priority,"cancellable":True,
+        "budget":{"wall_ms":int(timeout*1000)+5000,"child_jobs":0,"depth":0}},
+      "authority":{"principal":"user","grants":["model.infer"],"confirmed_operations":[]},
+      "delivery":{"target":target},"provenance":{},"extensions":{"futurecrash":{"owner":owner}},
+    }
+    endpoint=(f"https://{dns}:7332" if dns else base.rstrip('/'))+"/v1/infer/stream"
+    req=urllib.request.Request(endpoint,data=json.dumps({"packet":packet}).encode(),
+                               headers={"Content-Type":"application/json"},method="POST")
+    try:
+        with urllib.request.urlopen(req,timeout=timeout) as response:
+            node=response.headers.get("X-Fabric-Node") or target
+            for raw in response:
+                if raw.strip():
+                    event=json.loads(raw)
+                    event["_fabric_node"]=node
+                    yield event
+    except urllib.error.HTTPError as exc:
+        detail=exc.read().decode("utf-8","replace")
+        try: detail=json.loads(detail).get("error") or detail
+        except Exception: pass
+        raise RuntimeError(f"Fabric inference HTTP {exc.code}: {detail}") from None

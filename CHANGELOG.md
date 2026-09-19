@@ -1,3 +1,14 @@
+# 4.6.0 — Streaming Fabric
+
+- LO conversational inference now routes through Fabric Work Packets by default while preserving streamed token events and the existing LO tool loop.
+- Streaming inference records accepted/attempt/first-token/progress/result events in the Fabric ledger and treats client disconnect as cancellation.
+- Each node advertises its machine-local preferred model; automatic routing uses that preference when the selected worker can satisfy the request.
+- Explicit LO host targeting remains a direct Ollama compatibility/debug escape hatch.
+- Vision requests retain compatibility retries that progressively defer tools and thinking controls.
+- `lk ollama host prune` now removes duplicate aliases that point at the same endpoint as well as offline saved hosts.
+- `lk ollama host reset` clears all saved legacy remote-host state and returns the compatibility override to local.
+- LOOK 4.38.0; Unified Node 4.6.0; Signal Window 0.9.0.
+
 # 4.5.1 — Model Scope Fix
 
 - `Local preferred model` now always lists and selects models installed on the current machine, regardless of the legacy direct Ollama host override.

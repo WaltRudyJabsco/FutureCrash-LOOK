@@ -14,3 +14,7 @@ class FabricClientRoutingTests(unittest.TestCase):
         with patch.object(fabric_client,"_nodes",return_value=snap):
             _,name,_,_=fabric_client.choose_node(model="same")
         self.assertEqual(name,"peer")
+
+    def test_choose_node_api_stays_four_tuple(self):
+        with patch.object(fabric_client, "_nodes", return_value={"self":{"name":"m4","inference":{"available":True,"models":[{"name":"tiny","size":2,"features":{"text":True}}]},"supervisor":{"active":None}},"peers":[]}):
+            self.assertEqual(len(fabric_client.choose_node()), 4)

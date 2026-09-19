@@ -114,7 +114,7 @@ _lk() {
             local -a hosts
             hosts=("${(@f)$(_look_saved_hosts)}")
             _describe -t hosts 'saved Ollama host' hosts
-            _values 'host action' forget
+            _values 'host action' forget prune reset
             return
           elif [[ "$words[4]" == "forget" && CURRENT == 5 ]]; then
             local -a hosts

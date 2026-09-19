@@ -29,7 +29,7 @@ except ImportError:
     from fabric_packet import ArtifactStore, FabricStore, normalize_packet, packet_summary, new_id
 from urllib.parse import urlparse, parse_qs
 
-VERSION = "4.5.1"
+VERSION = "4.6.0"
 DEFAULT_HOST = "127.0.0.1"
 DEFAULT_PORT = 7332
 PULSE_SECONDS = 1.0
@@ -385,6 +385,16 @@ class PeerRegistry:
 PEERS = PeerRegistry()
 
 
+def _node_preferred_model(models):
+    path = Path.home() / ".local/share/look/ollama_model"
+    try:
+        preferred = path.read_text(encoding="utf-8").strip()
+    except OSError:
+        preferred = ""
+    names = {str(m.get("name") or "") for m in models}
+    return preferred if preferred in names else None
+
+
 def advertisement():
     ident = identity()
     models = MODELS.discover()
@@ -399,6 +409,8 @@ def advertisement():
             "available": bool(models),
             "models": models,
             "resident": [m["name"] for m in models if m.get("resident")],
+            # Machine-local preference is node state, not a network-global model setting.
+            "preferred_model": _node_preferred_model(models),
         },
         "supervisor": SUP.status(),
     }
@@ -862,8 +874,102 @@ def job_worker_loop():
             break
 
 
+def _stream_model_infer(handler, raw):
+    """Execute one FWP model.infer attempt and stream Ollama JSONL to the caller.
+
+    The HTTP connection is the cancellation boundary: if the interface goes away,
+    closing the upstream Ollama response stops this attempt instead of leaving an
+    orphan generation behind.
+    """
+    worker = identity()["name"]
+    packet = normalize_packet(raw.get("packet") if isinstance(raw, dict) and isinstance(raw.get("packet"), dict) else raw,
+                              origin=worker)
+    operation = (packet.get("work") or {}).get("operation")
+    if operation != "model.infer":
+        raise ValueError("stream endpoint accepts only model.infer")
+    target = str((packet.get("delivery") or {}).get("target") or "")
+    if target and target not in {"local", worker}:
+        raise ValueError("stream request must be sent directly to its selected worker")
+    ok, reason = _job_authorized(packet, operation)
+    if not ok:
+        raise PermissionError(reason)
+    req_ok, missing = _requirements_ok(packet)
+    if not req_ok:
+        raise ValueError("missing capabilities: " + ", ".join(missing))
+    job, created = FABRIC_STORE.submit(packet, node=worker)
+    if not created:
+        raise ValueError("stream packet id already exists")
+    priority = (packet.get("execution") or {}).get("priority", "interactive")
+    lease, busy = SUP.acquire(f"job:{job['id']}", priority, "inference", "streaming model inference", worker=worker)
+    if not lease:
+        raise RuntimeError("worker busy")
+    lease_id = lease["id"]
+    attempt = FABRIC_STORE.start(job["id"], worker)
+    inp = (packet.get("work") or {}).get("input") or {}
+    model = str(inp.get("model") or "")
+    models = MODELS.discover(force=True)
+    if not model:
+        model = _node_preferred_model(models) or ""
+    if not model or model not in {str(m.get("name") or "") for m in models}:
+        SUP.release(lease_id, "failed", "model unavailable")
+        FABRIC_STORE.finish(job["id"], "failed", error=f"model unavailable: {model}", node=worker)
+        raise ValueError(f"model unavailable: {model}")
+    messages = inp.get("messages")
+    if not isinstance(messages, list):
+        messages = [{"role":"user","content":str(inp.get("prompt") or "")}]
+    payload = {"model":model, "messages":messages, "stream":True,
+               "keep_alive":inp.get("keep_alive",-1),
+               "options":inp.get("options") if isinstance(inp.get("options"),dict) else {}}
+    if "think" in inp: payload["think"] = bool(inp.get("think"))
+    if isinstance(inp.get("tools"),list): payload["tools"] = inp["tools"]
+    FABRIC_STORE.event(job["id"], "progress", "inference", f"{model} streaming", node=worker)
+    SUP.progress(lease_id, "inference", f"{model} streaming")
+    upstream = urllib.request.Request("http://127.0.0.1:11434/api/chat", data=json.dumps(payload).encode(),
+                                      headers={"Content-Type":"application/json"})
+    timeout=max(5.0,min(300.0,float(inp.get("timeout") or 180)))
+    final={}; first=True; chunks=0
+    try:
+        with urllib.request.urlopen(upstream, timeout=timeout) as r:
+            handler.send_response(200)
+            handler.send_header("Content-Type","application/x-ndjson")
+            handler.send_header("Cache-Control","no-store")
+            handler.send_header("X-Fabric-Job",job["id"])
+            handler.send_header("X-Fabric-Node",worker)
+            handler.end_headers()
+            for line in r:
+                if FABRIC_STORE.cancelled(job["id"]): raise InterruptedError("cancelled")
+                if not line.strip(): continue
+                event=json.loads(line)
+                chunks += 1
+                fragment=event.get("message") or {}
+                if first and (fragment.get("content") or fragment.get("thinking") or fragment.get("tool_calls")):
+                    first=False
+                    FABRIC_STORE.event(job["id"],"progress","first-token",model,node=worker)
+                    SUP.progress(lease_id,"first-token",model)
+                elif chunks % 16 == 0:
+                    FABRIC_STORE.event(job["id"],"progress","stream",f"{chunks} chunks",node=worker)
+                    SUP.progress(lease_id,"stream",f"{chunks} chunks")
+                handler.wfile.write(line); handler.wfile.flush()
+                if event.get("done"): final=event
+        data={"ok":True,"model":model,"message":{"role":"assistant"},
+              "done_reason":final.get("done_reason"),"prompt_eval_count":final.get("prompt_eval_count"),
+              "eval_count":final.get("eval_count"),"eval_duration":final.get("eval_duration"),
+              "total_duration":final.get("total_duration")}
+        result=_result_packet(packet,data,worker=worker,attempt=attempt)
+        FABRIC_STORE.finish(job["id"],"ok",result=result,node=worker)
+        SUP.release(lease_id,"ok","stream complete")
+    except (BrokenPipeError, ConnectionResetError, InterruptedError) as exc:
+        FABRIC_STORE.request_cancel(job["id"],node=worker,reason="stream client disconnected")
+        FABRIC_STORE.finish(job["id"],"cancelled",error=str(exc),node=worker)
+        SUP.release(lease_id,"cancelled","stream client disconnected")
+    except Exception as exc:
+        FABRIC_STORE.finish(job["id"],"failed",error=str(exc),node=worker)
+        SUP.release(lease_id,"failed",str(exc))
+        raise
+
+
 class API(BaseHTTPRequestHandler):
-    server_version = "FCLNode/4.5.1"
+    server_version = "FCLNode/4.6.0"
 
     def log_message(self, *a):
         pass
@@ -935,6 +1041,15 @@ class API(BaseHTTPRequestHandler):
     def do_POST(self):
         path = urlparse(self.path).path
         d = self.body()
+        if path == "/v1/infer/stream":
+            try:
+                return _stream_model_infer(self, d)
+            except PermissionError as exc:
+                return self.sendj(403, {"ok":False,"error":str(exc)})
+            except ValueError as exc:
+                return self.sendj(400, {"ok":False,"error":str(exc)})
+            except Exception as exc:
+                return self.sendj(409, {"ok":False,"error":str(exc)})
         if path == "/v1/lease/acquire":
             lease, busy = SUP.acquire(str(d.get("owner") or "unknown"),
                                       str(d.get("priority") or "interactive"),
