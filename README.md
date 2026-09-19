@@ -1,4 +1,18 @@
-# Future Crash + LOOK 5.1.4 — Weather Receipt Closure
+# Future Crash + LOOK 5.1.5 — Control Plane Clarity
+
+The Fabric dashboard now says what its HTTP counters actually mean. `conn` counts accepted TCP sockets, `req` counts successfully parsed HTTP requests, and `done` counts request handlers that reached a terminal state. This matters for the guarded Tailscale ingress because health probes, abandoned sockets, or incomplete HTTP handshakes can legitimately make connections much larger than requests without implying a leak.
+
+The dashboard also gains **`f` to freeze**. Freezing stops dashboard polling/repaint only; Fabric services, inference, Signal, and peer traffic continue normally. Press `f` again to resume.
+
+Example control-plane line:
+
+```text
+local   conn 1820   req 1820   done 1820   active 0   rej 0   err 0   rate 0.32/s
+ingress conn 361    req 123    done 123    active 0   rej 0   err 0   no-http 238  early 0  rate 0.08/s
+```
+
+The second line is no longer mysterious: 238 accepted ingress connections did not become valid HTTP requests. That is now visible as its own state rather than being mistaken for unfinished work.
+
 
 This is the last weather-specific correctness pass. WEATHER now behaves like a typed Fabric capability rather than conversational prose: location-changing follow-ups stay attached to the active weather place, daily high/low values come directly from canonical receipt fields, and an accuracy challenge can trigger an independent National Weather Service observation check. The point is not to grow a weather app; it is to finish the receipt/follow-up pattern so the same machinery can move on to web, filesystem, calendar, services, and other capabilities.
 

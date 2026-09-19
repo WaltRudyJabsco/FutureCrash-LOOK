@@ -21,7 +21,7 @@ import time
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from urllib.parse import urlsplit
 
-VERSION = "5.1.0"
+VERSION = "5.1.5"
 DEFAULT_HOST = "127.0.0.1"
 DEFAULT_PORT = 7333
 DEFAULT_BACKEND_HOST = "127.0.0.1"
@@ -49,9 +49,12 @@ class Metrics:
         self.lock = threading.RLock()
         self.accepted = 0
         self.active = 0
+        self.started = 0
         self.completed = 0
+        self.client_closed_early = 0
         self.rejected = 0
         self.errors = 0
+        self.request_times = []
         self.peak_active = 0
         self.by_endpoint: dict[str, int] = {}
         self.last_error: str | None = None
@@ -63,6 +66,12 @@ class Metrics:
     def on_start(self, method: str, path: str):
         with self.lock:
             self.active += 1
+            self.started += 1
+            stamp = monotonic()
+            self.request_times.append(stamp)
+            if len(self.request_times) > 4096:
+                cutoff = stamp - 60.0
+                self.request_times = [t for t in self.request_times if t >= cutoff]
             self.peak_active = max(self.peak_active, self.active)
             key = f"{method} {path}"
             self.by_endpoint[key] = self.by_endpoint.get(key, 0) + 1
@@ -71,6 +80,10 @@ class Metrics:
         with self.lock:
             self.active = max(0, self.active - 1)
             self.completed += 1
+
+    def on_client_closed(self):
+        with self.lock:
+            self.client_closed_early += 1
 
     def on_reject(self):
         with self.lock:
@@ -83,11 +96,20 @@ class Metrics:
 
     def public(self):
         with self.lock:
+            stamp = monotonic()
+            recent_requests = sum(1 for ts in self.request_times if ts >= stamp - 60.0)
             return {
                 "version": VERSION,
                 "accepted": self.accepted,
+                "connections_accepted": self.accepted,
+                "requests_started": self.started,
+                "connections_without_request": max(0, self.accepted - self.started - self.rejected),
+                "requests_last_60s": recent_requests,
+                "requests_per_sec_60s": round(recent_requests / 60.0, 3),
                 "active": self.active,
                 "completed": self.completed,
+                "requests_completed": self.completed,
+                "client_closed_early": self.client_closed_early,
                 "rejected": self.rejected,
                 "errors": self.errors,
                 "peak_active": self.peak_active,
@@ -145,7 +167,7 @@ class GuardServer(ThreadingHTTPServer):
 
 
 class Handler(BaseHTTPRequestHandler):
-    server_version = "FCLIngress/5.1.0"
+    server_version = "FCLIngress/5.1.5"
     protocol_version = "HTTP/1.0"  # response EOF is the stream boundary; no keep-alive pool.
 
     def log_message(self, *args):
@@ -223,7 +245,7 @@ class Handler(BaseHTTPRequestHandler):
                 if data:
                     self.wfile.write(data)
         except (BrokenPipeError, ConnectionResetError, socket.timeout):
-            pass
+            METRICS.on_client_closed()
         except Exception as exc:
             METRICS.on_error(exc)
             try:

@@ -1,3 +1,12 @@
+## 5.1.5 — Control Plane Clarity
+
+- Dashboard HTTP telemetry now distinguishes accepted TCP connections from parsed HTTP requests and completed requests, so ingress counts no longer look like unexplained request loss.
+- Ingress metrics expose connections that never produced a valid HTTP request, early client disconnects, 60-second request rate, and per-endpoint totals.
+- `lk dash` now shows `conn / req / done / active / no-http / early / rate` instead of the ambiguous accepted/completed pair.
+- Adds `[f] freeze` to pause dashboard repaint/polling for inspection and copy/paste while the Fabric continues running normally.
+- Keeps the transport unchanged: this release improves accounting and observability rather than tuning healthy socket behavior blindly.
+- Future Crash + LOOK 5.1.5; Unified Node/ingress 5.1.5; LOOK remains 4.43.3; Signal Window remains 1.1.2.
+
 ## 5.1.4 — Weather Receipt Closure
 
 - Weather continuations such as `how about Beaverton OR`, `what is the high and low today`, and `is that accurate?` are now recognized host-side when WEATHER is the active conversational topic.

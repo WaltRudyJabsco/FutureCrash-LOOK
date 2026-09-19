@@ -34,7 +34,7 @@ except ImportError:
     from fabric_packet import ArtifactStore, FabricStore, normalize_packet, packet_summary, new_id
 from urllib.parse import urlparse, parse_qs
 
-VERSION = "5.1.4"
+VERSION = "5.1.5"
 DEFAULT_HOST = "127.0.0.1"
 DEFAULT_PORT = 7332
 DEFAULT_INGRESS_PORT = 0
@@ -1122,6 +1122,7 @@ class HTTPMetrics:
         self.peak_active = 0
         self.by_endpoint = {}
         self.by_source = {}
+        self.request_times = []
         self.next_id = 0
 
     def accepted_connection(self):
@@ -1149,6 +1150,10 @@ class HTTPMetrics:
             key = f"{str(method).upper()} {path}"
             self.by_endpoint[key] = int(self.by_endpoint.get(key) or 0) + 1
             self.by_source[source] = int(self.by_source.get(source) or 0) + 1
+            self.request_times.append(now())
+            cutoff = now() - 60.0
+            if len(self.request_times) > 4096:
+                self.request_times = [t for t in self.request_times if t >= cutoff]
             self.active[rid] = {"method": str(method).upper(), "path": str(path),
                                 "source": str(source), "started": now()}
             self.peak_active = max(self.peak_active, len(self.active))
@@ -1167,8 +1172,15 @@ class HTTPMetrics:
             oldest = sorted((dict(v, age_ms=int(max(0.0, t-float(v.get("started") or t))*1000))
                              for v in self.active.values()),
                             key=lambda x: x["age_ms"], reverse=True)[:12]
+            recent_requests = sum(1 for ts in self.request_times if ts >= t - 60.0)
             return {"plane": self.plane, "accepted": self.accepted,
+                    "connections_accepted": self.accepted,
+                    "requests_started": sum(self.by_endpoint.values()),
+                    "connections_without_request": max(0, self.accepted - sum(self.by_endpoint.values()) - self.rejected),
+                    "requests_last_60s": recent_requests,
+                    "requests_per_sec_60s": round(recent_requests / 60.0, 3),
                     "active": len(self.active), "completed": self.completed,
+                    "requests_completed": self.completed,
                     "rejected": self.rejected, "errors": self.errors,
                     "last_error": self.last_error,
                     "accept_errors": self.accept_errors,
@@ -1434,7 +1446,7 @@ def _lights_broadcast(pattern="demo", *, show_id=None, start_pulse=None, repeat=
 
 
 class API(BaseHTTPRequestHandler):
-    server_version = "FCLNode/5.1.4"
+    server_version = "FCLNode/5.1.5"
 
     def setup(self):
         self._metric_request_id = None
@@ -1930,14 +1942,22 @@ def _dash_render(data, width=92):
     lines += ["", "CONTROL PLANE", rule]
     guard = (http.get("ingress_guard") or {}).get("ingress") or {}
     lines.append(
-        f"local   accepted {int(hm.get('accepted') or 0):<6} completed {int(hm.get('completed') or 0):<6} "
-        f"active {int(hm.get('active') or 0):<3} rejected {int(hm.get('rejected') or 0):<3} errors {int(hm.get('errors') or 0):<3}"
+        f"local   conn {int(hm.get('connections_accepted', hm.get('accepted')) or 0):<6} "
+        f"req {int(hm.get('requests_started') or 0):<6} done {int(hm.get('requests_completed', hm.get('completed')) or 0):<6} "
+        f"active {int(hm.get('active') or 0):<3} rej {int(hm.get('rejected') or 0):<3} err {int(hm.get('errors') or 0):<3} "
+        f"rate {float(hm.get('requests_per_sec_60s') or 0):.2f}/s"
     )
     if guard:
         lines.append(
-            f"ingress accepted {int(guard.get('accepted') or 0):<6} completed {int(guard.get('completed') or 0):<6} "
-            f"active {int(guard.get('active') or 0):<3} rejected {int(guard.get('rejected') or 0):<3} errors {int(guard.get('errors') or 0):<3}"
+            f"ingress conn {int(guard.get('connections_accepted', guard.get('accepted')) or 0):<6} "
+            f"req {int(guard.get('requests_started') or 0):<6} done {int(guard.get('requests_completed', guard.get('completed')) or 0):<6} "
+            f"active {int(guard.get('active') or 0):<3} rej {int(guard.get('rejected') or 0):<3} err {int(guard.get('errors') or 0):<3} "
+            f"no-http {int(guard.get('connections_without_request') or 0):<4} early {int(guard.get('client_closed_early') or 0):<4} "
+            f"rate {float(guard.get('requests_per_sec_60s') or 0):.2f}/s"
         )
+        top = sorted((guard.get('by_endpoint') or {}).items(), key=lambda kv: kv[1], reverse=True)[:3]
+        if top:
+            lines.append("ingress top · " + "   ".join(f"{name} {count}" for name, count in top))
 
     lines += ["", "SERVICES", rule]
     if services:
@@ -1960,7 +1980,7 @@ def _dash_render(data, width=92):
     else:
         lines.append("no recent Fabric events")
 
-    lines += ["", rule, "[q] quit   [b] beacon   [l] light demo   [w] watch   [s] settings   [d] doctor   [r] restart   [space] refresh"]
+    lines += ["", rule, "[q] quit   [f] freeze   [b] beacon   [l] light demo   [w] watch   [s] settings   [d] doctor   [r] restart   [space] refresh"]
     return "\n".join(lines)
 
 
@@ -2047,13 +2067,17 @@ def _dashboard(host, port, interval=0.25):
     raw_on()
     try:
         dirty = True
+        frozen = False
         last_draw = 0.0
         while True:
-            _dash_fetch(host, port, cache, force=dirty)
+            if not frozen:
+                _dash_fetch(host, port, cache, force=dirty)
             t = time.monotonic()
             if dirty or t - last_draw >= 1.0:
                 size = shutil.get_terminal_size((92, 30))
                 body = _dash_render(cache, size.columns)
+                if frozen:
+                    body += "\n\n[FROZEN] press f to resume live telemetry"
                 beacon = _active_beacon(((cache.get("events") or {}).get("events") or []))
                 bg = {"red":"41;97", "green":"42;30", "blue":"44;97", "white":"47;30"}.get((beacon or {}).get("color"))
                 prefix = (f"\033[{bg}m" if bg else "\033[0m") + "\033[2J\033[H"
@@ -2071,6 +2095,9 @@ def _dashboard(host, port, interval=0.25):
             if ch in {"q", "Q", "\x03"}:
                 return 0
             if ch == " ":
+                dirty = True
+            elif ch in {"f", "F"}:
+                frozen = not frozen
                 dirty = True
             elif ch in {"b", "B"}:
                 # Dashboard is a client of the daemon, not a second Fabric node.
