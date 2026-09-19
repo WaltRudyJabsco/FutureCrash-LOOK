@@ -34,7 +34,7 @@ except ImportError:
     from fabric_packet import ArtifactStore, FabricStore, normalize_packet, packet_summary, new_id
 from urllib.parse import urlparse, parse_qs
 
-VERSION = "5.1.2"
+VERSION = "5.1.3"
 DEFAULT_HOST = "127.0.0.1"
 DEFAULT_PORT = 7332
 DEFAULT_INGRESS_PORT = 0
@@ -1434,7 +1434,7 @@ def _lights_broadcast(pattern="demo", *, show_id=None, start_pulse=None, repeat=
 
 
 class API(BaseHTTPRequestHandler):
-    server_version = "FCLNode/5.1.2"
+    server_version = "FCLNode/5.1.3"
 
     def setup(self):
         self._metric_request_id = None

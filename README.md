@@ -1,4 +1,4 @@
-# Future Crash + LOOK 5.1.2 — Weather Edge
+# Future Crash + LOOK 5.1.3 — Signal Scene Guard
 
 A milestone release: the personal Fabric is observable, routable, pulse-synchronized, and now has a tiny physical-looking demo of itself. Deterministic Fast Edges keep obvious tool work out of unnecessary model-planning rounds, while LO adds a restrained patient waiting cadence for genuinely long inference.
 

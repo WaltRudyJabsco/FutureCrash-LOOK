@@ -1,5 +1,14 @@
 # Changelog
 
+## 5.1.3 — Signal Scene Guard
+
+- Rejects degenerate conversational Signal scenes such as a saturated full-canvas clear or one giant filled rectangle.
+- Adds deterministic domain fallbacks: weather card, news card, greeting pulse, and a neutral micro-signal.
+- Weather fallback extracts only numeric values already present in the trusted answer; it never invents missing conditions.
+- Visual responses now report `scene_source`, `fallback_kind`, and `fallback_reason` so the activity tape reveals whether a scene came from the reflex model or a template.
+- Keeps full-screen color fills reserved for the separate Fabric light-show layer.
+- Signal Window 1.1.2; Unified Node 5.1.3; LOOK remains 4.43.2.
+
 ## 5.1.2 — Weather Edge
 - WEATHER resolves location deterministically before inference: explicit place → recent explicit weather place in the browser/session → optional `LOOK_WEATHER_LOCATION` / `LO_WEATHER_LOCATION`.
 - US state shorthand is canonicalized before Open-Meteo geocoding (`portland or` → `portland, Oregon`).

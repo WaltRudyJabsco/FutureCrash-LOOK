@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Signal Window 1.1.1 — a native browser body for LO."""
+"""Signal Window 1.1.2 — a native browser body for LO."""
 from __future__ import annotations
 
 import argparse
@@ -129,6 +129,139 @@ def _fabric_infer(messages, *, model=None, latency=True, options=None, timeout=9
     except Exception:
         return None
 
+def _hex_rgb(value):
+    m=re.fullmatch(r"#([0-9a-fA-F]{6})", str(value or "").strip())
+    if not m:
+        return None
+    raw=m.group(1)
+    return tuple(int(raw[i:i+2],16) for i in (0,2,4))
+
+
+def _scene_rejection_reason(scene):
+    """Reject low-information scenes that look like renderer/fallback failures.
+
+    A large solid slab is useful for Fabric lights, but conversational Signal scenes
+    should carry some structure. This check lives on the server so every browser gets
+    the same quality gate.
+    """
+    if not isinstance(scene,dict):
+        return "not_object"
+    ops=scene.get("ops")
+    if ops is None:
+        ops=[]
+    if not isinstance(ops,list):
+        return "ops_not_list"
+    if len(ops) > 512:
+        return "too_many_ops"
+
+    clear_rgb=_hex_rgb(scene.get("clear"))
+    # A bright/saturated clear with no marks is almost always the infamous color slab.
+    if clear_rgb and not ops:
+        hi=max(clear_rgb); lo=min(clear_rgb)
+        if hi >= 128 and hi-lo >= 55:
+            return "solid_clear"
+
+    meaningful=0
+    slab_area=0.0
+    for op in ops:
+        if not isinstance(op,list) or not op:
+            continue
+        kind=str(op[0])
+        if kind == "rect" and len(op) >= 7 and bool(op[6]):
+            try:
+                w=max(0.0,float(op[3])); h=max(0.0,float(op[4]))
+                slab_area=max(slab_area,(w*h)/(256.0*256.0))
+            except Exception:
+                pass
+        if kind in {"text","line","poly","polyline","bezier","circle","ellipse","pulse","pixel","dither","noise"}:
+            meaningful += 1
+        elif kind == "rect":
+            # A smaller rectangle is useful structure; a near-full fill is not.
+            try:
+                if float(op[3])*float(op[4]) < 0.75*256*256:
+                    meaningful += 1
+            except Exception:
+                meaningful += 1
+    if slab_area >= 0.82 and meaningful == 0:
+        return "solid_rect"
+    return ""
+
+
+def _weather_numbers(answer):
+    text=str(answer or "")
+    out={}
+    patterns={
+        "temp": [r"(?:current(?: temperature)?|temperature|feels like)[^0-9-]{0,20}(-?\d+(?:\.\d+)?)\s*°?\s*F", r"(-?\d+(?:\.\d+)?)\s*°F"],
+        "high": [r"(?:high|high of)[^0-9-]{0,12}(-?\d+(?:\.\d+)?)\s*°?\s*F"],
+        "low": [r"(?:low|low of)[^0-9-]{0,12}(-?\d+(?:\.\d+)?)\s*°?\s*F"],
+    }
+    for key, pats in patterns.items():
+        for pat in pats:
+            m=re.search(pat,text,re.I)
+            if m:
+                try: out[key]=round(float(m.group(1)))
+                except Exception: pass
+                break
+    return out
+
+
+def _deterministic_signal_scene(user_text, answer, events=None, reason="visual_generation_failed"):
+    """Small, truthful scenes for when the reflex model cannot draw usefully."""
+    low=(str(user_text or "")+" "+str(answer or "")).lower()
+    base={"clear":"#020503","state":{"energy":0.42,"mood":"quiet"},
+          "display":{"mode":"moment","hold":15,"fade":12}}
+
+    if "weather" in low:
+        nums=_weather_numbers(answer)
+        ops=[
+            ["rect",20,30,216,190,"#284c35",False,2],
+            ["text",31,55,"#8fd6a2","WEATHER",14],
+            # A tiny cloud: deterministic, cheap, and never invents a condition label.
+            ["circle",100,106,20,"#6f8f79",False,2],
+            ["circle",126,96,25,"#6f8f79",False,2],
+            ["circle",154,108,19,"#6f8f79",False,2],
+            ["line",82,123,172,123,"#6f8f79",2],
+        ]
+        if "temp" in nums:
+            ops.append(["text",31,167,"#d8e4dc",f"{nums['temp']} F",28])
+        if "high" in nums or "low" in nums:
+            bits=[]
+            if "high" in nums: bits.append(f"H {nums['high']}")
+            if "low" in nums: bits.append(f"L {nums['low']}")
+            ops.append(["text",31,196,"#8fd6a2","  ".join(bits),12])
+        base["state"]={"energy":0.34,"mood":"calm"}; base["ops"]=ops
+        return base,"weather_card"
+
+    if any(k in low for k in ("headline","headlines","news")):
+        base["state"]={"energy":0.55,"mood":"curious"}
+        base["ops"]=[
+            ["rect",18,35,220,180,"#284c35",False,2],
+            ["text",29,61,"#8fd6a2","NEWS",15],
+            ["line",29,79,222,79,"#6f8f79",1],
+            ["line",29,104,205,104,"#8fd6a2",3],
+            ["line",29,128,184,128,"#6f8f79",3],
+            ["line",29,152,214,152,"#8fd6a2",3],
+            ["line",29,176,165,176,"#6f8f79",3],
+        ]
+        return base,"news_card"
+
+    stripped=str(user_text or "").strip().lower()
+    if re.match(r"^(hello|hi|hey)\b", stripped):
+        base["state"]={"energy":0.50,"mood":"bright"}
+        base["ops"]=[["pulse",128,115,34,"#8fd6a2"],["text",103,174,"#8fd6a2","HELLO",13]]
+        return base,"greeting"
+
+    # Generic fallback is intentionally abstract. It confirms activity without
+    # pretending to visualize facts that were not parsed deterministically.
+    base["ops"]=[
+        ["rect",28,42,200,164,"#284c35",False,2],
+        ["text",42,72,"#8fd6a2","SIGNAL",13],
+        ["polyline",[[42,143],[68,127],[92,151],[118,111],[145,136],[174,102],[211,124]],"#8fd6a2",2],
+        ["pulse",202,72,10,"#6f8f79"],
+    ]
+    return base,"micro_signal"
+
+
 def signal_interpret(base, model, user_text, answer, events=None):
     prompt = f"""You are the visual reflex of Signal Window.
 USER:
@@ -141,6 +274,8 @@ SOURCE RECEIPTS:
 {json.dumps([e for e in (events or []) if isinstance(e,dict) and e.get("event")=="source_receipt"][-4:], ensure_ascii=False)[:1800]}
 
 Always express this exchange visually when practical. Return a non-empty scene for normal successful exchanges; use {{}} only when drawing would be actively misleading. Signal scenes are lightweight framebuffer expression, never Comfy/image generation.
+
+Do not return a full-canvas solid color or a single giant filled rectangle. A conversational Signal scene must contain visible structure: lines, type, shapes, or a small composition.
 
 {SURFACE_CONTRACT}
 """
@@ -162,25 +297,23 @@ Always express this exchange visually when practical. Return a non-empty scene f
                     raw=json.loads(r.read()).get("message",{}).get("content","").strip()
             obj=_extract_visual_json(raw)
             if obj:
-                return {"kind":"draw","signal":obj,"attempts":attempt+1}
-            last_error="empty or invalid graphics JSON"
+                rejected=_scene_rejection_reason(obj)
+                if not rejected:
+                    return {"kind":"draw","signal":obj,"attempts":attempt+1,"scene_source":"reflex_model"}
+                last_error=f"rejected low-information scene: {rejected}"
+            else:
+                last_error="empty or invalid graphics JSON"
             messages += [
                 {"role":"assistant","content":raw[:12000]},
-                {"role":"user","content":"That was invalid. Return ONLY one valid JSON object matching the schema, or {}."}
+                {"role":"user","content":"That scene was invalid or visually degenerate. Return ONLY one valid structured scene with multiple meaningful marks; never use a full-screen solid color."}
             ]
         except Exception as e:
             last_error=str(e)
-    # A failed reflex should not leave Signal visually silent. Keep this fallback
-    # deliberately tiny and deterministic; it is expression, not fabricated data.
-    label = "SIGNAL"
-    low=(user_text+" "+answer).lower()
-    if "weather" in low: label="WEATHER"
-    elif "headline" in low or "news" in low: label="NEWS"
-    elif low.strip().startswith(("hello","hi ","hey ")): label="HELLO"
-    fallback={"clear":"#020503","state":{"energy":0.45,"mood":"responsive"},
-              "display":{"mode":"moment","hold":15,"fade":12},
-              "ops":[["pulse",128,128,38,"#8fd6a2"],["text",92,134,"#8fd6a2",label,13]]}
-    return {"kind":"draw","signal":fallback,"attempts":2,"fallback":True,"error":last_error or "visual generation failed"}
+
+    fallback,fallback_kind=_deterministic_signal_scene(user_text,answer,events,last_error)
+    return {"kind":"draw","signal":fallback,"attempts":2,"fallback":True,
+            "scene_source":"template","fallback_kind":fallback_kind,
+            "fallback_reason":last_error or "visual generation failed"}
 
 
 def _run_json_command(argv, timeout=8):
@@ -753,7 +886,7 @@ def main():
         state=f"LO NATIVE {a.profile} · "+(App.lo_cmd if App.lo_cmd else "NOT FOUND")
     else:
         p=probe_ollama(App.backend); state=("connected" if p.get("ok") else "unreachable: "+p.get("error","unknown"))
-    print(f"Signal Window 1.1.1 · http://{a.host}:{a.port} · {state} · gallery {App.gallery_dir if App.gallery_enabled else 'off'}")
+    print(f"Signal Window 1.1.2 · http://{a.host}:{a.port} · {state} · gallery {App.gallery_dir if App.gallery_enabled else 'off'}")
     ThreadingHTTPServer((a.host,a.port),App).serve_forever()
 
 if __name__=="__main__": main()

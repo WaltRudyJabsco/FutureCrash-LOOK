@@ -37,3 +37,24 @@ class SignalVisualPolicyTests(unittest.TestCase):
         js=(root/'signal-window/app.js').read_text()
         self.assertIn("answer:d.text||''", js)
         self.assertNotIn("const visualPromise=text?fetch('/api/visual'", js)
+
+class SignalSceneGuardTests(unittest.TestCase):
+    def test_rejects_solid_green_clear(self):
+        scene={"clear":"#00ff00","ops":[]}
+        self.assertEqual(server._scene_rejection_reason(scene),'solid_clear')
+
+    def test_rejects_full_canvas_filled_rect(self):
+        scene={"clear":"#020503","ops":[["rect",0,0,256,256,"#00aa33",True,1]]}
+        self.assertEqual(server._scene_rejection_reason(scene),'solid_rect')
+
+    def test_accepts_structured_scene(self):
+        scene={"clear":"#020503","ops":[["rect",20,20,216,180,"#284c35",False,2],["text",30,50,"#8fd6a2","OK",12]]}
+        self.assertEqual(server._scene_rejection_reason(scene),'')
+
+    def test_weather_fallback_is_structured_and_truthful(self):
+        scene,kind=server._deterministic_signal_scene('weather in portland','Current temperature is 63°F with a high of 68°F and low of 53°F.')
+        self.assertEqual(kind,'weather_card')
+        self.assertEqual(server._scene_rejection_reason(scene),'')
+        texts=[op[4] for op in scene['ops'] if op and op[0]=='text']
+        self.assertTrue(any('63 F' in t for t in texts))
+        self.assertTrue(any('H 68' in t and 'L 53' in t for t in texts))

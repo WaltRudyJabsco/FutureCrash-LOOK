@@ -118,7 +118,7 @@ form.addEventListener('submit',async e=>{e.preventDefault();const text=input.val
  const myTurn=++visualTurn;
  if(text||d.text){event('SIGNAL COMPOSE',true);fetch('/api/visual',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({text,answer:d.text||'',events:d.lo_events||[]})}).then(r=>r.json()).then(vd=>{
    if(myTurn!==visualTurn)return;const vk=vd?.visual?.kind;
-   if(vk==='draw'){event(vd.visual.fallback?'SIGNAL FALLBACK':'SIGNAL RESPONSE');draw(vd.signal)}
+   if(vk==='draw'){const src=vd.visual.scene_source||'unknown',kind=vd.visual.fallback_kind||'';event(vd.visual.fallback?`SIGNAL FALLBACK · ${kind||src}`:`SIGNAL RESPONSE · ${src}`);draw(vd.signal)}
    else if(vk==='error')event('SIGNAL ERROR · '+(vd.visual.error||'UNKNOWN'));
  }).catch(err=>event('SIGNAL ERROR · '+err.message))}
  event('READY');energy=Math.max(.25,energy*.65)}
