@@ -1,3 +1,9 @@
+## 4.44.1 — Ambient Fabric dashboard
+
+- `lk dash` renders meaningful Fabric state transitions as optional, restrained ambient color flashes.
+- RECENT now states its observation scope, labels LOCAL/REMOTE events, and makes cross-day timestamps obvious.
+- Stream/chunk noise never triggers color flashes.
+
 ## 4.43.3
 
 - WEATHER follow-ups remain on the active typed receipt/location instead of relying on prose context.

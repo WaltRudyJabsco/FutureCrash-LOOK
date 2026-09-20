@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Future Crash + LOOK Unified Node 5.2.1.
+"""Future Crash + LOOK Unified Node 5.2.2.
 
 A small distributed supervisor for trusted personal machines. Immediate events stay
 asynchronous; a one-second fabric pulse reconciles presence, leases and stale work.
@@ -38,7 +38,7 @@ except ImportError:
     from memory_store import FabricMemory
 from urllib.parse import urlparse, parse_qs
 
-VERSION = "5.2.1"
+VERSION = "5.2.2"
 DEFAULT_HOST = "127.0.0.1"
 DEFAULT_PORT = 7332
 DEFAULT_INGRESS_PORT = 0
@@ -1481,7 +1481,7 @@ def _memory_sync() -> dict:
 
 
 class API(BaseHTTPRequestHandler):
-    server_version = "FCLNode/5.2.1"
+    server_version = "FCLNode/5.2.2"
 
     def setup(self):
         self._metric_request_id = None
@@ -1916,6 +1916,55 @@ def _dash_state(node):
     return f"{phase}:{owner}" if owner else phase
 
 
+def _dash_event_scope(event, local_name):
+    """Describe where an observed event happened without pretending ledgers are global."""
+    event_node = str((event or {}).get("node") or "")
+    if not event_node or event_node == str(local_name or ""):
+        return "LOCAL"
+    return "REMOTE"
+
+
+def _dash_event_stamp(ts, current=None):
+    """Keep same-day events compact; make stale cross-day rows obvious."""
+    current = float(current if current is not None else now())
+    stamp = float(ts or current)
+    a = time.localtime(stamp)
+    b = time.localtime(current)
+    if (a.tm_year, a.tm_yday) == (b.tm_year, b.tm_yday):
+        return time.strftime("%H:%M:%S", a)
+    return time.strftime("%a %H:%M", a)
+
+
+def _dash_event_flash(event):
+    """Map meaningful Fabric state transitions to restrained ambient telemetry.
+
+    Return an ANSI background SGR fragment, or None for noisy/low-value events.
+    This is presentation only: producers never emit terminal-color instructions.
+    """
+    if not event:
+        return None
+    typ = str(event.get("type") or "").lower()
+    phase = str(event.get("phase") or "").lower()
+    detail = str(event.get("detail") or "").lower()
+    if typ == "release":
+        if phase in {"ok", "done", "complete", "completed", "success"}:
+            return "42;30"       # green · successful completion
+        if phase in {"failed", "error", "denied", "cancelled", "canceled"}:
+            return "41;97"       # red · failed/cancelled work
+    if typ == "control" and "cancel" in (phase + " " + detail):
+        return "41;97"
+    if typ == "memory" or phase in {"tool", "capability", "receipt"}:
+        return "46;30"           # cyan · deterministic/tool work
+    if typ == "progress":
+        if phase == "dispatch":
+            return "44;97"       # blue · work accepted/dispatched
+        if phase in {"inference", "first-token"}:
+            return "48;5;214;30" # amber · model inference
+        if phase == "working":
+            return "45;97"       # purple · remote/general Fabric work
+    return None
+
+
 def _dash_render(data, width=92):
     """Pure dashboard renderer. Keep presentation separate from polling/control."""
     snap = data.get("nodes") or {}
@@ -2020,17 +2069,18 @@ def _dash_render(data, width=92):
     else:
         lines.append("service status pending…")
 
-    lines += ["", "RECENT", rule]
+    lines += ["", "RECENT · OBSERVED BY THIS NODE", rule]
     if events:
         for e in events[-6:]:
-            stamp = time.strftime("%H:%M:%S", time.localtime(float(e.get("ts") or now())))
-            phase = str(e.get("phase") or e.get("type") or "event")[:14]
-            detail = str(e.get("detail") or "")[: max(20, width - 26)]
-            lines.append(f"{stamp}  {phase:<14} {detail}")
+            stamp = _dash_event_stamp(e.get("ts"))
+            scope = _dash_event_scope(e, local.get("name"))
+            phase = str(e.get("phase") or e.get("type") or "event")[:12]
+            detail = str(e.get("detail") or "")[: max(20, width - 35)]
+            lines.append(f"{stamp:<9} {scope:<6} {phase:<12} {detail}")
     else:
-        lines.append("no recent Fabric events")
+        lines.append("no recent Fabric events observed here")
 
-    lines += ["", rule, "[q] quit   [f] freeze   [b] beacon   [l] light demo   [w] watch   [s] settings   [d] doctor   [r] restart   [space] refresh"]
+    lines += ["", rule, "[q] quit   [a] activity color   [f] freeze   [b] beacon   [l] light demo   [w] watch   [s] settings   [d] doctor   [r] restart   [space] refresh"]
     return "\n".join(lines)
 
 
@@ -2042,7 +2092,7 @@ def _dash_fetch(host, port, cache, force=False):
         "health": ("/health", 2.0),
         "jobs": ("/v1/jobs", 2.0),
         "http": ("/v1/http", 2.0),
-        "events": ("/v1/events", 1.0),
+        "events": ("/v1/events", 0.5),
         "services": ("/v1/services", 8.0),
     }
     for key, (path, cadence) in schedule.items():
@@ -2118,18 +2168,42 @@ def _dashboard(host, port, interval=0.25):
     try:
         dirty = True
         frozen = False
+        activity_colors = True
+        activity_flash = None
+        activity_flash_until = 0.0
+        last_event_seq = None
         last_draw = 0.0
         while True:
             if not frozen:
                 _dash_fetch(host, port, cache, force=dirty)
+                observed = ((cache.get("events") or {}).get("events") or [])
+                newest_seq = int((observed[-1] or {}).get("seq") or 0) if observed else 0
+                if last_event_seq is None:
+                    # Opening Dash should not replay yesterday's activity as a flash.
+                    last_event_seq = newest_seq
+                elif newest_seq > last_event_seq:
+                    fresh = [e for e in observed if int(e.get("seq") or 0) > last_event_seq]
+                    last_event_seq = newest_seq
+                    if activity_colors:
+                        for event in reversed(fresh):
+                            color = _dash_event_flash(event)
+                            if color:
+                                activity_flash = color
+                                activity_flash_until = time.monotonic() + 0.38
+                                dirty = True
+                                break
             t = time.monotonic()
+            if activity_flash and t >= activity_flash_until:
+                activity_flash = None
+                dirty = True
             if dirty or t - last_draw >= 1.0:
                 size = shutil.get_terminal_size((92, 30))
                 body = _dash_render(cache, size.columns)
                 if frozen:
                     body += "\n\n[FROZEN] press f to resume live telemetry"
                 beacon = _active_beacon(((cache.get("events") or {}).get("events") or []))
-                bg = {"red":"41;97", "green":"42;30", "blue":"44;97", "white":"47;30"}.get((beacon or {}).get("color"))
+                beacon_bg = {"red":"41;97", "green":"42;30", "blue":"44;97", "white":"47;30"}.get((beacon or {}).get("color"))
+                bg = beacon_bg or activity_flash
                 prefix = (f"\033[{bg}m" if bg else "\033[0m") + "\033[2J\033[H"
                 sys.stdout.write(prefix + body)
                 errors = cache.get("_errors") or {}
@@ -2145,6 +2219,10 @@ def _dashboard(host, port, interval=0.25):
             if ch in {"q", "Q", "\x03"}:
                 return 0
             if ch == " ":
+                dirty = True
+            elif ch in {"a", "A"}:
+                activity_colors = not activity_colors
+                activity_flash = None
                 dirty = True
             elif ch in {"f", "F"}:
                 frozen = not frozen

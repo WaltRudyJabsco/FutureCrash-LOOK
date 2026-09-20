@@ -1,3 +1,12 @@
+# 5.2.2 — Ambient Fabric
+
+- `lk dash` now uses brief, restrained whole-terminal color flashes as passive Fabric telemetry: blue dispatch, amber inference, cyan capability/memory work, green success, red failure/cancel, purple general/remote work.
+- Activity colors are derived from canonical Fabric events; producers never emit terminal-color instructions. Repeated stream/chunk events are deliberately ignored so Dash does not strobe.
+- `a` toggles activity colors without affecting the existing synchronized Beacon or Light Demo.
+- RECENT is now explicitly `RECENT · OBSERVED BY THIS NODE` and labels each event LOCAL or REMOTE. Cross-day events show a weekday/time so stale activity cannot look current merely because the live clock is ticking.
+- Added `docs/GREENFIELD_FORK.md`, preserving the post-5.2 counterfactual design work without changing production architecture: distinct LOOK/LO/Future Crash/Signal projects, heterogeneous workers beyond Ollama, dual-resident model experiments, ephemeral browser/WebGPU workers, small-model cognitive maintenance, provenance, Show Work, and ambient observability.
+- No rename of Fabric in production. Naming remains an experimental-fork decision.
+
 # 5.2.1 — Evidence Labels + Ask Flow
 
 - Future Crash Ask and Workstation now surface the provenance emitted by LOOK's canonical engine.

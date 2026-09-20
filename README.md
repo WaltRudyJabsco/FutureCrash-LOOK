@@ -1253,3 +1253,7 @@ Fabric-native work routes automatically across live capable nodes. The LOOK Olla
 ## 5.1 Fabric lights + Signal-first visuals
 
 Run `lk dash` on several nodes and open Signal on a phone/tablet, then try `lk fabric lights demo`. `lk fabric lights disco` and `christmas` repeat until Ctrl-C; the show is a pulse-derived lease, not a streamed animation. Signal scenes are the default lightweight visual expression channel; explicit draw/generate/picture/artwork requests use Comfy and generated image artifacts are presented inline in Signal.
+
+## Experimental greenfield fork brief
+
+The stable project remains intentionally plural: LOOK/`lk` is the Unix tool, LO is the cognitive work network, Future Crash is the retro ambient interface, and Signal is the browser-native instrument. `docs/GREENFIELD_FORK.md` captures the separate “start over without starting over” experiment: capability-oriented Fabric workers beyond Ollama, heterogeneous/dual-resident inference, ephemeral browser/WebGPU workers, small-model cognitive maintenance, provenance, and Show Work demos. It is a design brief, not a production migration plan.
