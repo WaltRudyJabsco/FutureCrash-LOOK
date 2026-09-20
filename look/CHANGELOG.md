@@ -1,3 +1,8 @@
+## 4.44.3 — Model observability
+
+- Dash replaces the ambiguous model asterisk with compact residency and qualification evidence.
+- Fabric model inspection shows tested/untested/stale/failed state, TTFT, tok/s, and READY compliance.
+
 ## 4.44.2 — Dash polish
 
 - Color-coded RECENT, Mini Dash, simpler controls, no Freeze/Activity toggle.

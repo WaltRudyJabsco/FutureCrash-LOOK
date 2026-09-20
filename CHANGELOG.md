@@ -1,3 +1,9 @@
+# 5.2.4 — Model Observability
+
+- Dash MODEL cells now distinguish configured model, residency, qualification freshness, and measured generation rate instead of an ambiguous `*`.
+- `lk fabric models [NODE]` exposes resident/available state, tested/untested/stale/failed qualification, TTFT, generation speed, and exact READY compliance.
+- Background qualification remains opportunistic: resident models only, 20 seconds idle, once per 24 hours, and preemptible by interactive work.
+
 # 5.2.3 — Dash Polish
 
 - RECENT uses the same semantic color vocabulary as ambient activity flashes.

@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Future Crash + LOOK Unified Node 5.2.3.
+"""Future Crash + LOOK Unified Node 5.2.4.
 
 A small distributed supervisor for trusted personal machines. Immediate events stay
 asynchronous; a one-second fabric pulse reconciles presence, leases and stale work.
@@ -38,7 +38,7 @@ except ImportError:
     from memory_store import FabricMemory
 from urllib.parse import urlparse, parse_qs
 
-VERSION = "5.2.3"
+VERSION = "5.2.4"
 DEFAULT_HOST = "127.0.0.1"
 DEFAULT_PORT = 7332
 DEFAULT_INGRESS_PORT = 0
@@ -1481,7 +1481,7 @@ def _memory_sync() -> dict:
 
 
 class API(BaseHTTPRequestHandler):
-    server_version = "FCLNode/5.2.3"
+    server_version = "FCLNode/5.2.4"
 
     def setup(self):
         self._metric_request_id = None
@@ -1810,15 +1810,20 @@ def _target_post(host, port, target, path, payload, timeout=45.0):
 
 def _print_models(data, target="local"):
     print(f"FABRIC MODELS · {target}")
-    print("─"*76)
-    print(f"{'MODEL':<28} {'PARAM':>8}  V  T  R  {'STATE':<10} {'TOK/S':>7}")
+    print("─"*118)
+    print(f"{'MODEL':<28} {'PARAM':>8}  V  T  R  {'STATE':<9} {'TEST':<14} {'TTFT':>7} {'TOK/S':>7} {'READY':>7}")
     for m in data.get("models") or []:
         f=m.get("features") or {}; q=m.get("qualification") or {}
         state="resident" if m.get("resident") else "available"
         rate=q.get("generation_tok_s")
+        ttft=q.get("ttft_ms")
+        ready=("yes" if q.get("instruction_ok") else "no") if q.get("tested_at") else "—"
+        test=_qualification_label(m)
+        ttft_text=f"{int(ttft)}ms" if isinstance(ttft,(int,float)) else "—"
+        rate_text=f"{float(rate):.1f}" if isinstance(rate,(int,float)) else "—"
         print(f"{str(m.get('name') or '?'):<28.28} {str(m.get('parameter_size') or '?'):>8}  "
               f"{'✓' if f.get('vision') else '·'}  {'✓' if f.get('tools') else '·'}  {'✓' if f.get('thinking') else '·'}  "
-              f"{state:<10} {str(rate if rate is not None else '—'):>7}")
+              f"{state:<9} {test:<14.14} {ttft_text:>7} {rate_text:>7} {ready:>7}")
 
 
 def _watch(host,port,interval=1.0):
@@ -1896,15 +1901,53 @@ def _dash_age(seconds):
     return f"{seconds // 3600}h"
 
 
+def _qualification_state(model, current=None):
+    """Classify lightweight node qualification without inventing an IQ score."""
+    q = (model or {}).get("qualification") or {}
+    tested_at = float(q.get("tested_at") or 0)
+    if not tested_at:
+        return "untested", None
+    age = max(0.0, (now() if current is None else float(current)) - tested_at)
+    if not q.get("ok"):
+        return "failed", age
+    if age >= QUALIFY_RECHECK_SECONDS:
+        return "stale", age
+    return "qualified", age
+
+
+def _qualification_label(model, current=None, compact=False):
+    state, age = _qualification_state(model, current=current)
+    if state == "untested":
+        return "—" if compact else "untested"
+    age_text = _dash_age(age)
+    if state == "qualified":
+        return f"Q {age_text}" if compact else f"qualified {age_text}"
+    if state == "stale":
+        return f"S {age_text}" if compact else f"stale {age_text}"
+    return f"! {age_text}" if compact else f"failed {age_text}"
+
+
 def _dash_model(node):
+    """Compact model truth: configured model, residency count and qualification evidence."""
     inf = node.get("inference") or {}
-    preferred = inf.get("preferred_model")
-    resident = inf.get("resident") or []
-    if preferred and preferred in resident:
-        return f"{preferred}*"
-    if resident:
-        return f"{resident[0]}*"
-    return preferred or "—"
+    models = inf.get("models") or []
+    preferred = str(inf.get("preferred_model") or "")
+    resident = [str(x) for x in (inf.get("resident") or []) if str(x)]
+    by_name = {str(m.get("name") or ""): m for m in models if m.get("name")}
+    primary_name = preferred or (resident[0] if resident else (next(iter(by_name), "")))
+    if not primary_name:
+        return "—"
+    primary = by_name.get(primary_name) or {}
+    residency = "R" if primary_name in resident else "cold"
+    if len(resident) > 1:
+        residency = f"R{len(resident)}"
+    qualification = _qualification_label(primary, compact=True)
+    rate = ((primary.get("qualification") or {}).get("generation_tok_s"))
+    perf = f"{rate:g}t/s" if isinstance(rate, (int, float)) else ""
+    bits = [primary_name, residency, qualification]
+    if perf:
+        bits.append(perf)
+    return " · ".join(bits)
 
 
 def _dash_state(node):
