@@ -48,3 +48,59 @@ def test_dash_model_summary_distinguishes_residency_and_qualification():
     assert "R2" in rendered
     assert "Q 1m" in rendered
     assert "62t/s" in rendered
+
+
+def _dash_fixture():
+    t=node.now()
+    local={
+        "name":"3090","version":node.VERSION,"pulse":{"number":123},
+        "capabilities":{"filesystem":True},"supervisor":{"active":None},
+        "inference":{
+            "preferred_model":"qwen3.8:27b","resident":["qwen3.8:27b"],
+            "models":[{"name":"qwen3.8:27b","resident":True,
+                       "qualification":{"tested_at":t-60,"ok":True,"generation_tok_s":56.0},
+                       "benchmark":{"tested_at":t-120,"fit":"EXCELLENT","tools":3,"agent":True,"exact":True}}],
+        },
+    }
+    peer={"name":"m3","node_seen_at":t-2,"node":{
+        "name":"m3","version":node.VERSION,"pulse":{"number":123},"supervisor":{"active":None},
+        "inference":{"preferred_model":"qwen3:8b","resident":["qwen3:8b"],"models":[{"name":"qwen3:8b","resident":True}]},
+    }}
+    events={"events":[{"seq":i,"ts":t-i,"node":"m3","type":"progress","phase":"inference","detail":"qwen3:8b responding"} for i in range(1,8)]}
+    return {
+        "nodes":{"self":local,"peers":[peer]},"health":{"ok":True},"jobs":{"jobs":[]},
+        "http":{"listeners":{"local":{"requests_completed":12,"active":0,"errors":0}}},
+        "services":{"services":{"node":{"state":"running"},"signal":{"state":"running"}}},
+        "events":events,
+    }
+
+
+def test_dash_live_renderer_never_pages_medium_height():
+    body=node._dash_render(_dash_fixture(),92,height=28,ansi=False)
+    assert len(body.splitlines()) <= 28
+    assert "RECENT" in body
+    assert "[q] quit" in body
+    assert "TRUST BASIS" not in body
+
+
+def test_dash_live_renderer_protects_recent_in_short_window():
+    body=node._dash_render(_dash_fixture(),82,height=18,ansi=False)
+    assert len(body.splitlines()) <= 18
+    assert "RECENT" in body
+    assert "responding" in body
+    assert "[q] quit" in body
+
+
+def test_dash_snapshot_without_height_remains_full():
+    body=node._dash_render(_dash_fixture(),92,ansi=False)
+    assert "TRUST BASIS" in body
+    assert "CONTROL PLANE" in body
+    assert "SERVICES" in body
+
+
+def test_dash_model_includes_full_benchmark_evidence_compactly():
+    rendered=node._dash_model((_dash_fixture()["nodes"]["self"]))
+    assert "B:EXCE" in rendered
+    assert "T3/3" in rendered
+    assert "A✓" in rendered
+    assert "E✓" in rendered

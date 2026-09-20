@@ -19,7 +19,7 @@ try:
 except Exception:
     readline = None
 
-VERSION="4.44.3"
+VERSION="4.44.4"
 
 LOOK_WORDMARK = r"""       ██╗      ██╗  ██╗
        ██║      ██║ ██╔╝
@@ -67,6 +67,7 @@ SKILL_FEEDBACK_QUEUE=STATE_DIR/"skill_feedback_queue"
 SKILL_FEEDBACK_LOCK=STATE_DIR/"skill_feedback.lock"
 OLLAMA_MODEL_FILE=STATE_DIR/"ollama_model"
 OLLAMA_MODELS_FILE=STATE_DIR/"ollama_models.json"
+OLLAMA_BENCHMARK_FILE=STATE_DIR/"ollama_benchmarks.json"
 OLLAMA_HOST_MODELS_FILE=STATE_DIR/"ollama_host_models.json"
 OLLAMA_HOSTS_FILE=STATE_DIR/"ollama_hosts.json"
 LO_ACCESS_FILE=STATE_DIR/"lo_access"
@@ -7925,7 +7926,7 @@ def _run_filesystem_tool_impl(workspace, name, args, profile="workspace"):
         return f"File tool internal error: {type(exc).__name__}: {exc}"
     return f"Unknown file tool: {name}"
 
-LOOK_INFO_USER_AGENT="LOOK-Shell/4.44.3 (local text client)"
+LOOK_INFO_USER_AGENT="LOOK-Shell/4.44.4 (local text client)"
 
 def _run_filesystem_tool(workspace, name, args, profile="workspace"):
     global _FILESYSTEM_ACCESS_PROFILE
@@ -10820,6 +10821,49 @@ def _benchmark_runtime_note(row):
     return ""
 
 
+def _load_ollama_benchmarks():
+    try:
+        data=json.loads(OLLAMA_BENCHMARK_FILE.read_text(encoding="utf-8"))
+        return data if isinstance(data,dict) else {}
+    except Exception:
+        return {}
+
+
+def _save_ollama_benchmarks(data):
+    STATE_DIR.mkdir(parents=True,exist_ok=True)
+    tmp=OLLAMA_BENCHMARK_FILE.with_suffix(".tmp")
+    tmp.write_text(json.dumps(data,indent=2,sort_keys=True)+"\n",encoding="utf-8")
+    try: os.chmod(tmp,0o600)
+    except OSError: pass
+    tmp.replace(OLLAMA_BENCHMARK_FILE)
+
+
+def _record_ollama_benchmark(base,row):
+    """Persist benchmark evidence; the node only advertises records measured locally."""
+    model=str((row or {}).get("model") or "").strip()
+    if not model:
+        return
+    record={
+        "tested_at":time.time(),
+        "base":_normalize_ollama_url(base),
+        "scope":"local" if _is_local_ollama(base) else "remote",
+        "fit":_benchmark_runtime_fit(row),
+        "ttft":row.get("ttft"),
+        "rate":row.get("rate"),
+        "tools":row.get("tools"),
+        "agent":row.get("agent"),
+        "exact":row.get("exact"),
+        "declared_tools":row.get("declared_tools"),
+        "caps":row.get("caps"),
+        "fatal_error":row.get("fatal_error"),
+        "speed_error":row.get("speed_error"),
+        "tool_error":row.get("tool_error"),
+    }
+    data=_load_ollama_benchmarks()
+    data[model]=record
+    _save_ollama_benchmarks(data)
+
+
 def ollama_test(all_models=False, base_override=None):
     base=_normalize_ollama_url(base_override) if base_override else _ollama_base()
     running=_ensure_ollama_server(base, allow_start=_is_local_ollama(base))
@@ -10883,9 +10927,14 @@ def ollama_test(all_models=False, base_override=None):
         print(f"  testing {model} ...", flush=True)
         try:
             row=_benchmark_one_model(base, model)
-            rows.append(row)
         except Exception as exc:
-            rows.append({"model":model,"fatal_error":str(exc)})
+            row={"model":model,"fatal_error":str(exc)}
+        rows.append(row)
+        try:
+            _record_ollama_benchmark(base,row)
+        except Exception:
+            # Benchmark reporting must not fail because optional history persistence did.
+            pass
         if all_models:
             try:
                 _ollama_post(base, "/api/generate", {"model":model, "keep_alive":0}, timeout=30)

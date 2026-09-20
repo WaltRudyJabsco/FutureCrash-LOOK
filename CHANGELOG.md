@@ -1,3 +1,12 @@
+# 5.2.5 — Responsive Dash + Benchmark Evidence
+
+- Make live Dash height-aware: full, condensed, and compact compositions fit the terminal rectangle without paging.
+- Protect RECENT and controls as terminal height shrinks; secondary telemetry compresses first.
+- Keep `lk dash --snapshot`/non-TTY rendering full for copyable diagnostics.
+- Persist LOOK model benchmark evidence and advertise local results alongside lightweight background qualification.
+- Extend `lk fabric models` with benchmark fit, tool, agent, and exact-response evidence.
+- Preserve Mini, Beacon, Lights, semantic event colors, and non-blocking keyboard behavior.
+
 # 5.2.4 — Model Observability
 
 - Dash MODEL cells now distinguish configured model, residency, qualification freshness, and measured generation rate instead of an ambiguous `*`.

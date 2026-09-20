@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Future Crash + LOOK Unified Node 5.2.4.
+"""Future Crash + LOOK Unified Node 5.2.5.
 
 A small distributed supervisor for trusted personal machines. Immediate events stay
 asynchronous; a one-second fabric pulse reconciles presence, leases and stale work.
@@ -38,7 +38,7 @@ except ImportError:
     from memory_store import FabricMemory
 from urllib.parse import urlparse, parse_qs
 
-VERSION = "5.2.4"
+VERSION = "5.2.5"
 DEFAULT_HOST = "127.0.0.1"
 DEFAULT_PORT = 7332
 DEFAULT_INGRESS_PORT = 0
@@ -59,6 +59,7 @@ PRIORITY = {"interactive": 0, "followup": 1, "background": 2}
 STATE = Path.home() / ".local/share/future-crash-look"
 STATE.mkdir(parents=True, exist_ok=True)
 MODEL_STATE = STATE / "model_profiles.json"
+LOOK_BENCHMARK_STATE = Path.home() / ".local/share/look/ollama_benchmarks.json"
 FABRIC_DB = STATE / "fabric.sqlite3"
 ARTIFACT_ROOT = STATE / "artifacts"
 FABRIC_STORE = FabricStore(FABRIC_DB)
@@ -300,6 +301,15 @@ def save_profiles(d):
     tmp.replace(MODEL_STATE)
 
 
+def load_look_benchmarks():
+    """Read LOOK's durable benchmark evidence without making it node-owned state."""
+    try:
+        data=json.loads(LOOK_BENCHMARK_STATE.read_text(encoding="utf-8"))
+        return data if isinstance(data,dict) else {}
+    except Exception:
+        return {}
+
+
 class ModelRegistry:
     def __init__(self):
         self.lock = threading.RLock()
@@ -336,6 +346,7 @@ class ModelRegistry:
             except Exception:
                 return self.cached
             resident = {str(x.get("name") or x.get("model") or ""): x for x in ps}
+            benchmarks = load_look_benchmarks()
             out = []
             for item in tags:
                 name = str(item.get("name") or item.get("model") or "")
@@ -368,6 +379,8 @@ class ModelRegistry:
                     "resident": name in resident,
                     "resident_size": (resident.get(name) or {}).get("size_vram"),
                     "qualification": profile.get("qualification"),
+                    "benchmark": ((benchmarks.get(name) or {})
+                                  if (benchmarks.get(name) or {}).get("scope") == "local" else None),
                 })
             self.cached, self.cached_at = out, now()
             return out
@@ -1481,7 +1494,7 @@ def _memory_sync() -> dict:
 
 
 class API(BaseHTTPRequestHandler):
-    server_version = "FCLNode/5.2.4"
+    server_version = "FCLNode/5.2.5"
 
     def setup(self):
         self._metric_request_id = None
@@ -1810,20 +1823,22 @@ def _target_post(host, port, target, path, payload, timeout=45.0):
 
 def _print_models(data, target="local"):
     print(f"FABRIC MODELS · {target}")
-    print("─"*118)
-    print(f"{'MODEL':<28} {'PARAM':>8}  V  T  R  {'STATE':<9} {'TEST':<14} {'TTFT':>7} {'TOK/S':>7} {'READY':>7}")
+    print("─"*146)
+    print(f"{'MODEL':<27} {'STATE':<9} {'LIVE TEST':<14} {'TTFT':>7} {'TOK/S':>7} {'BENCH':<9} {'TOOLS':>7} {'AGENT':>7} {'EXACT':>7}")
     for m in data.get("models") or []:
-        f=m.get("features") or {}; q=m.get("qualification") or {}
+        q=m.get("qualification") or {}; b=m.get("benchmark") or {}
         state="resident" if m.get("resident") else "available"
-        rate=q.get("generation_tok_s")
-        ttft=q.get("ttft_ms")
-        ready=("yes" if q.get("instruction_ok") else "no") if q.get("tested_at") else "—"
+        rate=q.get("generation_tok_s"); ttft=q.get("ttft_ms")
         test=_qualification_label(m)
         ttft_text=f"{int(ttft)}ms" if isinstance(ttft,(int,float)) else "—"
         rate_text=f"{float(rate):.1f}" if isinstance(rate,(int,float)) else "—"
-        print(f"{str(m.get('name') or '?'):<28.28} {str(m.get('parameter_size') or '?'):>8}  "
-              f"{'✓' if f.get('vision') else '·'}  {'✓' if f.get('tools') else '·'}  {'✓' if f.get('thinking') else '·'}  "
-              f"{state:<9} {test:<14.14} {ttft_text:>7} {rate_text:>7} {ready:>7}")
+        bench_state,_=_benchmark_state(m)
+        bench=(str(b.get("fit") or "ERROR").upper() if bench_state!="untested" else "untested")
+        tools=(f"{b.get('tools')}/3" if isinstance(b.get('tools'),int) else "—")
+        agent=("yes" if b.get("agent") else "no") if b.get("tested_at") else "—"
+        exact=("yes" if b.get("exact") else "no") if b.get("tested_at") else "—"
+        print(f"{str(m.get('name') or '?'):<27.27} {state:<9} {test:<14.14} {ttft_text:>7} {rate_text:>7} "
+              f"{bench:<9.9} {tools:>7} {agent:>7} {exact:>7}")
 
 
 def _watch(host,port,interval=1.0):
@@ -1927,8 +1942,38 @@ def _qualification_label(model, current=None, compact=False):
     return f"! {age_text}" if compact else f"failed {age_text}"
 
 
+def _benchmark_state(model):
+    b=(model or {}).get("benchmark") or {}
+    if not b.get("tested_at"):
+        return "untested", None
+    age=max(0.0, now()-float(b.get("tested_at") or 0))
+    if b.get("fatal_error") or b.get("speed_error") or str(b.get("fit") or "").upper()=="ERROR":
+        return "failed", age
+    return "benchmarked", age
+
+
+def _benchmark_label(model, compact=False):
+    state,age=_benchmark_state(model)
+    if state=="untested":
+        return "B—" if compact else "unbenchmarked"
+    if state=="failed":
+        return f"B! {_dash_age(age)}" if compact else f"benchmark failed {_dash_age(age)}"
+    b=(model or {}).get("benchmark") or {}
+    fit=str(b.get("fit") or "?").upper()
+    tools=b.get("tools")
+    agent=b.get("agent")
+    exact=b.get("exact")
+    if compact:
+        bits=[f"B:{fit[:4]}"]
+        if isinstance(tools,int): bits.append(f"T{tools}/3")
+        if agent is not None: bits.append("A✓" if agent else "A·")
+        if exact is not None: bits.append("E✓" if exact else "E·")
+        return " ".join(bits)
+    return f"{fit} · tools {tools if isinstance(tools,int) else '—'}/3 · agent {'yes' if agent else 'no'} · exact {'yes' if exact else 'no'} · {_dash_age(age)}"
+
+
 def _dash_model(node):
-    """Compact model truth: configured model, residency count and qualification evidence."""
+    """Compact model truth: configured model, residency, live qualification and benchmark evidence."""
     inf = node.get("inference") or {}
     models = inf.get("models") or []
     preferred = str(inf.get("preferred_model") or "")
@@ -1947,6 +1992,9 @@ def _dash_model(node):
     bits = [primary_name, residency, qualification]
     if perf:
         bits.append(perf)
+    benchmark=_benchmark_label(primary,compact=True)
+    if benchmark != "B—":
+        bits.append(benchmark)
     return " · ".join(bits)
 
 
@@ -2057,10 +2105,8 @@ def _dash_render_mini(data, width=44, ansi=False):
     return "\n".join(lines)
 
 
-def _dash_render(data, width=92, ansi=False, mini=False):
-    """Pure dashboard renderer. Keep presentation separate from polling/control."""
-    if mini:
-        return _dash_render_mini(data, width, ansi=ansi)
+def _dash_render_full(data, width=92, ansi=False):
+    """Full-height dashboard renderer."""
     snap = data.get("nodes") or {}
     local = snap.get("self") or {}
     health = data.get("health") or {}
@@ -2101,8 +2147,11 @@ def _dash_render(data, width=92, ansi=False, mini=False):
     if warnings:
         lines += ["", "WARNINGS", rule, " · ".join(warnings[:4])]
 
+    node_w=23 if width>=104 else 20
+    state_w=21 if width>=104 else 16
+    model_w=max(24,width-node_w-state_w-11)
     lines += ["", "NODES", rule,
-              f"{'NODE':<23} {'STATE':<21} {'MODEL':<29} {'PULSE':>8}"]
+              f"{'NODE':<{node_w}} {'STATE':<{state_w}} {'MODEL':<{model_w}} {'PULSE':>8}"]
     rows = [(local.get("name") or "local", local, None)]
     rows += [(p.get("name") or "peer", p.get("node") or {}, p) for p in peers]
     for name, node, peer in rows:
@@ -2111,7 +2160,7 @@ def _dash_render(data, width=92, ansi=False, mini=False):
         if peer and peer.get("node_seen_at"):
             age = _dash_age(now() - float(peer.get("node_seen_at") or now()))
             state = f"{state} · seen {age}"
-        lines.append(f"{str(name):<23.23} {state:<21.21} {_dash_model(node):<29.29} {pulse:>8.8}")
+        lines.append(f"{str(name):<{node_w}.{node_w}} {state:<{state_w}.{state_w}} {_dash_model(node):<{model_w}.{model_w}} {pulse:>8.8}")
 
     lines += ["", "TRUST BASIS", rule]
     clock = time.strftime("%Y-%m-%d %H:%M:%S %Z")
@@ -2172,6 +2221,83 @@ def _dash_render(data, width=92, ansi=False, mini=False):
 
     lines += ["", rule, "[q] quit   [m] mini   [b] beacon   [l] lights   [w] watch   [s] settings   [d] doctor   [r] restart   [space] refresh"]
     return "\n".join(lines)
+
+
+def _dash_summary_rows(data):
+    snap=data.get("nodes") or {}; local=snap.get("self") or {}
+    peers=[p for p in (snap.get("peers") or []) if p.get("node")]
+    return [(local.get("name") or "local",local)] + [(p.get("name") or "peer",p.get("node") or {}) for p in peers]
+
+
+def _dash_render_compact(data, width=92, height=20, ansi=False):
+    """Short-window dashboard: protect identity, workers, RECENT and controls."""
+    width=max(54,min(int(width or 92),132)); rule="─"*width
+    snap=data.get("nodes") or {}; local=snap.get("self") or {}; rows=_dash_summary_rows(data)
+    events=(data.get("events") or {}).get("events") or []; jobs=(data.get("jobs") or {}).get("jobs") or []
+    active=[j for j in jobs if str(j.get("status") or "") not in {"ok","done","failed","cancelled","canceled"}]
+    lines=[f"FABRIC · {local.get('name','local')} · {len(rows)} node{'s' if len(rows)!=1 else ''} · {time.strftime('%H:%M:%S')}",rule]
+    max_nodes=2 if height<18 else 3
+    for name,node in rows[:max_nodes]:
+        lines.append(f"{str(name):<20.20} {_dash_state(node):<13.13} {_dash_model(node)[:max(12,width-36)]}")
+    if len(rows)>max_nodes:
+        lines.append(f"+ {len(rows)-max_nodes} more node{'s' if len(rows)-max_nodes!=1 else ''}")
+    http=data.get("http") or {}; hm=((http.get("listeners") or {}).get("local") or {})
+    services=(data.get("services") or {}).get("services") or {}
+    svc_ok=sum(1 for st in services.values() if str(st.get("state") or "") in {"active","running","unmanaged"})
+    lines += [f"jobs {len(active)} · ctl active {int(hm.get('active') or 0)} err {int(hm.get('errors') or 0)} · services {svc_ok}/{len(services) if services else 0}","RECENT",rule]
+    # Reserve the footer and show as much recent activity as the rectangle allows.
+    recent_slots=max(1,min(5,int(height)-len(lines)-2))
+    if events:
+        for e in events[-recent_slots:]: lines.append(_dash_recent_line(e,local.get("name"),width,ansi=ansi))
+    else:
+        lines.append("· no recent Fabric events")
+    lines += [rule,"[q] quit  [m] mini  [b] beacon  [l] lights  [space] refresh"]
+    return "\n".join(lines[-int(height):])
+
+
+def _dash_render_condensed(data, width=92, height=30, ansi=False):
+    """Medium-height dashboard: combine secondary telemetry, never sacrifice RECENT."""
+    width=max(64,min(int(width or 92),132)); rule="─"*width
+    snap=data.get("nodes") or {}; local=snap.get("self") or {}; rows=_dash_summary_rows(data)
+    health=data.get("health") or {}; jobs=(data.get("jobs") or {}).get("jobs") or []
+    services=(data.get("services") or {}).get("services") or {}; events=(data.get("events") or {}).get("events") or []
+    http=data.get("http") or {}; hm=((http.get("listeners") or {}).get("local") or {})
+    active=[j for j in jobs if str(j.get("status") or "") not in {"ok","done","failed","cancelled","canceled"}]
+    lines=[f"FUTURE CRASH + LOOK · FABRIC DASH   {time.strftime('%Y-%m-%d %I:%M:%S %p %Z')}",rule,
+           f"FABRIC  {local.get('name','local')} · node {local.get('version','?')} · {len(rows)} node{'s' if len(rows)!=1 else ''}","",
+           "NODES / MODELS",rule]
+    node_slots=max(1,min(len(rows),4))
+    for name,node in rows[:node_slots]:
+        lines.append(f"{str(name):<22.22} {_dash_state(node):<14.14} {_dash_model(node)[:max(16,width-39)]}")
+    if len(rows)>node_slots: lines.append(f"+ {len(rows)-node_slots} more node(s)")
+    svc_chunks=[]
+    for name,st in services.items():
+        state=str(st.get("state") or "unknown"); glyph="●" if state in {"active","running"} else ("·" if state=="unmanaged" else "○")
+        svc_chunks.append(f"{name}{glyph}")
+    lines += ["",f"STATUS · jobs {len(active)} · health {'ok' if health.get('ok') else 'degraded'} · ctl {int(hm.get('requests_completed',hm.get('completed')) or 0)} done/{int(hm.get('errors') or 0)} err · " + (" ".join(svc_chunks) if svc_chunks else "services pending"),
+              "","RECENT · OBSERVED BY THIS NODE",rule]
+    recent_slots=max(2,min(6,int(height)-len(lines)-2))
+    if events:
+        for e in events[-recent_slots:]: lines.append(_dash_recent_line(e,local.get("name"),width,ansi=ansi))
+    else: lines.append("· no recent Fabric events observed here")
+    lines += [rule,"[q] quit   [m] mini   [b] beacon   [l] lights   [w] watch   [s] settings   [space] refresh"]
+    return "\n".join(lines[:int(height)])
+
+
+def _dash_render(data, width=92, height=None, ansi=False, mini=False):
+    """Responsive live renderer; snapshots stay full while live Dash fits its rectangle."""
+    if mini:
+        return _dash_render_mini(data,width,ansi=ansi)
+    if height is None:
+        return _dash_render_full(data,width,ansi=ansi)
+    height=max(10,int(height))
+    if height >= 36:
+        body=_dash_render_full(data,width,ansi=ansi)
+        if len(body.splitlines()) <= height:
+            return body
+    if height >= 23:
+        return _dash_render_condensed(data,width,height,ansi=ansi)
+    return _dash_render_compact(data,width,height,ansi=ansi)
 
 
 def _dash_fetch(host, port, cache, force=False):
@@ -2285,7 +2411,7 @@ def _dashboard(host, port, interval=0.25):
                 dirty = True
             if dirty or t - last_draw >= 1.0:
                 size = shutil.get_terminal_size((92, 30))
-                body = _dash_render(cache, size.columns, ansi=True, mini=mini)
+                body = _dash_render(cache, size.columns, height=size.lines, ansi=True, mini=mini)
                 beacon = _active_beacon(((cache.get("events") or {}).get("events") or []))
                 beacon_bg = {"red":"41;97", "green":"42;30", "blue":"44;97", "white":"47;30"}.get((beacon or {}).get("color"))
                 bg = beacon_bg or activity_flash

@@ -1,3 +1,10 @@
+## 4.44.4 — Responsive Dash + benchmark evidence
+
+- Persist model benchmark results to `~/.local/share/look/ollama_benchmarks.json`.
+- Keep live qualification and full benchmark evidence distinct.
+- Surface benchmark fit/tools/agent/exact results through Fabric model observability.
+- Make live Dash choose full, condensed, or compact layouts from terminal height.
+
 ## 4.44.3 — Model observability
 
 - Dash replaces the ambiguous model asterisk with compact residency and qualification evidence.
