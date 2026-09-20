@@ -59,3 +59,15 @@ class Test520PersonaMemory(unittest.TestCase):
         source=(ROOT/'core'/'node.py').read_text(encoding='utf-8')
         self.assertIn('if path == "/v1/memory":', source)
         self.assertIn('_memory_sync()', source)
+
+
+class Test529OllamaDispatch(unittest.TestCase):
+    def test_management_subcommands_bypass_long_form_chat(self):
+        source=(ROOT/'look'/'lk').read_text(encoding='utf-8')
+        marker='and sys.argv[2] not in {'
+        start=source.index(marker)
+        end=source.index('}', start)
+        guard=source[start:end]
+        for command in ('models','test','curate','warm','key','host','hosts','share','access','endpoint'):
+            self.assertIn(f'"{command}"', guard, command)
+

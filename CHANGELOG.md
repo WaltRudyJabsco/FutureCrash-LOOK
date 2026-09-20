@@ -1,3 +1,9 @@
+# 5.2.9 — Ollama Command Dispatch Fix
+
+- Fixed `lk ollama curate ...` and `lk ollama warm ...` being mistaken for long-form LO chat prompts before the Ollama subcommand dispatcher could see them.
+- Added a release regression test covering every first-class Ollama management subcommand that must bypass chat dispatch.
+- No curator policy, model residency, benchmark, or Fabric scheduling behavior changed.
+
 # 5.2.8 — Adaptive Model Curator
 
 - Replace the first resident-set concurrency probe with stabilized 4096-context, repeated median measurements and a physical sanity bound; impossible >N× results are no longer scored.
