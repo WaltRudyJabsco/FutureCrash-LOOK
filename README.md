@@ -1,4 +1,11 @@
-# Future Crash + LOOK 5.1.5 — Control Plane Clarity
+# Future Crash + LOOK 5.1.6 — Conversation Channels
+
+
+## 5.1.6: Future Crash conversation channels
+
+Future Crash keeps three outputs separate: conversational text, Signal visuals, and telemetry. Oracle/Workstation answers are committed to the normal transcript first. If a visual was requested, a dedicated Signal compiler receives the operator request plus the finished answer and updates the canvas as a sidecar. Signal receipts are compiler feedback/status only; they are not conversation messages.
+
+This also keeps the large Signal grammar out of ordinary short prompts, which makes small models less likely to answer a greeting with render protocol instead of prose.
 
 The Fabric dashboard now says what its HTTP counters actually mean. `conn` counts accepted TCP sockets, `req` counts successfully parsed HTTP requests, and `done` counts request handlers that reached a terminal state. This matters for the guarded Tailscale ingress because health probes, abandoned sockets, or incomplete HTTP handshakes can legitimately make connections much larger than requests without implying a leak.
 
@@ -857,7 +864,7 @@ This release establishes the following baseline:
 | --- | ---: |
 | Future Crash + LOOK | **2.3.4** |
 | LOOK | **4.3.4** |
-| Future Crash | **1.1.14** |
+| Future Crash | **1.1.15** |
 
 Signal rendering is now compiled separately from conversation: explicit Signal requests use a focused no-thinking 1200-token render pass, while ordinary Workstation conversation retains its own reasoning budget.
 | Memory schema | **1** |

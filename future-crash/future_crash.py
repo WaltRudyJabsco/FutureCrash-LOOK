@@ -73,7 +73,7 @@ WHITE = CSI + "38;5;255m"
 GRAY = CSI + "38;5;245m"
 DARK = CSI + "38;5;239m"
 
-VERSION = "1.1.14"
+VERSION = "1.1.15"
 GLYPHS = "0123456789ABCDEF"
 SPARKS = "▁▂▃▄▅▆▇█"
 
@@ -1225,18 +1225,27 @@ def _wants_signal(text):
     low = str(text or "").casefold()
     return any(word in low for word in VISUAL_WORDS)
 
-def _signal_compile_prompt(request):
+def _signal_compile_prompt(request, answer=""):
+    # Signal is a visual sidecar, not the conversation channel. The compiler
+    # sees the finished Oracle answer so the drawing can reflect actual meaning
+    # without replacing the human-readable exchange.
+    context = ""
+    if str(answer or "").strip():
+        context = "\n\nVISIBLE ORACLE ANSWER (visual context only):\n" + str(answer).strip()[:2400]
     return (
-        "OPERATOR REQUEST:\n" + str(request or "") +
+        "OPERATOR REQUEST:\n" + str(request or "") + context +
         "\n\nCompile this directly for the Future Crash Signal Field. "
         "OUTPUT ONLY one valid [[SIGNAL]]...[[/SIGNAL]] block. "
         "No explanation, planning, analysis, markdown fence, or prose. "
         "If animation was requested, include FPS and at least two FRAME sections."
     )
 
-def _signal_repair_prompt(request, failed=""):
+def _signal_repair_prompt(request, failed="", answer=""):
+    context = ""
+    if str(answer or "").strip():
+        context = "\n\nVISIBLE ORACLE ANSWER (visual context only):\n" + str(answer).strip()[:2400]
     return (
-        "OPERATOR REQUEST:\n" + str(request or "") +
+        "OPERATOR REQUEST:\n" + str(request or "") + context +
         "\n\nPREVIOUS SIGNAL COMPILE DID NOT EMIT A PARSEABLE PROGRAM.\n" +
         ("FAILED OUTPUT (do not imitate its narration):\n" + str(failed or "")[:1200] + "\n\n" if failed else "") +
         "Compile the requested visual again. OUTPUT ONLY one valid [[SIGNAL]]...[[/SIGNAL]] block. "
@@ -2064,14 +2073,12 @@ class Oracle(threading.Thread):
                 elif kind == "work":
                     system = (
                         "You are Future Crash Workstation. Be practical, technically competent, concise, "
-                        "and explicit. Prefer working solutions over speculation.\n" +
-                        SIGNAL_LANGUAGE + "\n" + TOOL_LANGUAGE
+                        "and explicit. Prefer working solutions over speculation.\n" + TOOL_LANGUAGE
                     )
                 else:
                     system = (
                         "You are Future Crash Oracle. Answer directly and compactly. "
-                        "Useful first, dry charm second. No unnecessary preamble.\n" +
-                        SIGNAL_LANGUAGE + "\n" + TOOL_LANGUAGE
+                        "Useful first, dry charm second. No unnecessary preamble.\n" + TOOL_LANGUAGE
                     )
 
                 messages.append({"role": "system", "content": system})
@@ -2105,7 +2112,14 @@ class Oracle(threading.Thread):
                                       priority="background" if background_kind else "interactive",
                                       think=bool(payload.get("think")), options=payload.get("options") or {},
                                       timeout=request_timeout, owner="future-crash."+kind.split(":",1)[0])
-                    response={"message":fout.get("message") or {}}
+                    message=dict(fout.get("message") or {})
+                    if not str(message.get("content") or "").strip():
+                        for field in ("text", "response", "content"):
+                            candidate=fout.get(field)
+                            if isinstance(candidate,str) and candidate.strip():
+                                message["content"]=candidate
+                                break
+                    response={"message":message}
                 except Exception:
                     data = json.dumps(payload).encode()
                     req = urllib.request.Request(self.url + "/api/chat", data=data,
@@ -2240,8 +2254,10 @@ class FutureCrash:
         self.work_history = []
         self.ask_signal_required = False
         self.ask_signal_request = ""
+        self.ask_signal_answer = ""
         self.work_signal_required = False
         self.work_signal_request = ""
+        self.work_signal_answer = ""
         self.work_log = []
         self.work_pending_user = None
         self.work_notice = ""
@@ -2647,38 +2663,42 @@ class FutureCrash:
                         elif request:
                             self.answer = text
                             self._queue_tool_request(request, "ask", text)
-                        elif self.ask_signal_required and not drew:
-                            self.busy = True
-                            self._ask_oracle("signalrepair:ask", _signal_repair_prompt(self.ask_signal_request, text))
                         else:
-                            self.ask_signal_required = False
                             self.answer = text
                             self.set_mode("answer")
+                            if self.ask_signal_required and not drew:
+                                self.ask_signal_answer = text
+                                # Signal receipts stay on the visual side. They are useful
+                                # compiler feedback but must never pollute Oracle chat context.
+                                signal_context = self.signal.context_packet()
+                                signal_history = [{"role":"system","content":signal_context}] if signal_context else []
+                                self._ask_oracle("signalcompile:ask", _signal_compile_prompt(self.ask_signal_request, text), signal_history)
+                            else:
+                                self.ask_signal_required = False
+                                self.ask_signal_answer = ""
                 elif kind.startswith("signalcompile:"):
                     target = kind.split(":", 1)[1]
                     if target == "ask":
-                        clean, drew = self.signal.parse_from_response(text) if not err else ("", False)
+                        _clean, drew = self.signal.parse_from_response(text) if not err else ("", False)
                         if not drew:
-                            self._ask_oracle("signalrepair:ask", _signal_repair_prompt(self.ask_signal_request, text))
+                            self._ask_oracle("signalrepair:ask", _signal_repair_prompt(self.ask_signal_request, text, self.ask_signal_answer))
                             self.last_frame = ""
                             continue
                         self.ask_signal_required = False
-                        self.answer = clean.strip() if clean.strip() else "SIGNAL UPDATED"
-                        self.set_mode("answer")
+                        self.ask_signal_answer = ""
+                        self.work_notice = "SIGNAL UPDATED"
+                        self.work_notice_until = time.time() + 2.0
                         self.audio.cue("oracle")
                     elif target == "work":
-                        clean, drew = self.signal.parse_from_response(text) if not err else ("", False)
+                        _clean, drew = self.signal.parse_from_response(text) if not err else ("", False)
                         if not drew:
-                            self._ask_oracle("signalrepair:work", _signal_repair_prompt(self.work_signal_request, text))
+                            self._ask_oracle("signalrepair:work", _signal_repair_prompt(self.work_signal_request, text, self.work_signal_answer))
                             self.last_frame = ""
                             continue
                         self.work_signal_required = False
-                        final = clean.strip() if clean.strip() else "SIGNAL UPDATED"
-                        self.work_log.append(("oracle", final))
-                        self.work_history.append({"role":"assistant","content":final})
-                        if self.work_pending_user is not None:
-                            self.memory.add_exchange(self.work_pending_user, final)
-                            self.work_pending_user = None
+                        self.work_signal_answer = ""
+                        self.work_notice = "SIGNAL UPDATED"
+                        self.work_notice_until = time.time() + 2.0
                         self.audio.cue("oracle")
                     elif target.startswith("thread:"):
                         task_id = target.split(":", 1)[1]
@@ -2696,21 +2716,19 @@ class FutureCrash:
                 elif kind.startswith("signalrepair:"):
                     target = kind.split(":", 1)[1]
                     if target == "ask":
-                        clean, drew = self.signal.parse_from_response(text) if not err else ("", False)
+                        _clean, drew = self.signal.parse_from_response(text) if not err else ("", False)
                         self.ask_signal_required = False
-                        self.answer = (clean.strip() if clean.strip() else ("SIGNAL UPDATED" if drew else "SIGNAL PROGRAM FAILED // no parseable display program returned"))
-                        self.set_mode("answer")
+                        self.ask_signal_answer = ""
+                        self.work_notice = "SIGNAL UPDATED" if drew else "SIGNAL COMPILE FAILED"
+                        self.work_notice_until = time.time() + 2.5
                         if drew:
                             self.audio.cue("oracle")
                     elif target == "work":
-                        clean, drew = self.signal.parse_from_response(text) if not err else ("", False)
+                        _clean, drew = self.signal.parse_from_response(text) if not err else ("", False)
                         self.work_signal_required = False
-                        final = clean.strip() if clean.strip() else ("SIGNAL UPDATED" if drew else "SIGNAL PROGRAM FAILED // no parseable display program returned")
-                        self.work_log.append(("oracle", final))
-                        self.work_history.append({"role":"assistant","content":final})
-                        if self.work_pending_user is not None:
-                            self.memory.add_exchange(self.work_pending_user, final)
-                            self.work_pending_user = None
+                        self.work_signal_answer = ""
+                        self.work_notice = "SIGNAL UPDATED" if drew else "SIGNAL COMPILE FAILED"
+                        self.work_notice_until = time.time() + 2.5
                         if drew:
                             self.audio.cue("oracle")
                     elif target.startswith("thread:"):
@@ -2782,21 +2800,26 @@ class FutureCrash:
                             # host operation chain has actually completed.
                             history = list(self.work_history)
                             self._queue_tool_request(request, "work", text, history)
-                        elif self.work_signal_required and not drew:
-                            # A visual request is not complete until a parseable Signal block exists.
-                            # One silent compiler pass prevents planning chatter from masquerading as output.
-                            self.busy = True
-                            self._ask_oracle("signalrepair:work", _signal_repair_prompt(self.work_signal_request, text))
                         else:
-                            self.work_signal_required = False
                             final = text
                             self.work_log.append(("oracle", final))
                             self.work_history.append({"role":"assistant","content":final})
+                            should_fold = False
                             if self.work_pending_user is not None:
                                 should_fold = self.memory.add_exchange(self.work_pending_user, final)
                                 self.work_pending_user = None
-                                if should_fold and not self.memory.pending_consolidation:
-                                    self.memory.pending_consolidation = True
+                            if should_fold and not self.memory.pending_consolidation:
+                                self.memory.pending_consolidation = True
+                            if self.work_signal_required and not drew:
+                                self.work_signal_answer = final
+                                # Signal compilation is a sidecar; transcript is already committed.
+                                signal_context = self.signal.context_packet()
+                                signal_history = [{"role":"system","content":signal_context}] if signal_context else []
+                                self._ask_oracle("signalcompile:work", _signal_compile_prompt(self.work_signal_request, final), signal_history)
+                            else:
+                                self.work_signal_required = False
+                                self.work_signal_answer = ""
+                                if self.memory.pending_consolidation:
                                     self.busy = True
                                     self.work_notice = "MEMORY PRESSURE // consolidation queued for idle inference"
                                     self.work_notice_until = time.time() + 4.0
@@ -3123,10 +3146,7 @@ class FutureCrash:
             self.answer = ""
             self.set_mode("answer")
             memory_packet = self.memory.context_packet()
-            signal_packet = self.signal.context_packet()
             history = []
-            if signal_packet:
-                history.append({"role":"system","content":signal_packet})
             if memory_packet:
                 history.append({
                     "role": "system",
@@ -3145,9 +3165,6 @@ class FutureCrash:
             if weather_location:
                 request={"name":"weather","location":weather_location}
                 self._queue_tool_request(request,"ask","",history)
-            elif self.ask_signal_required:
-                signal_history = [{"role":"system","content":signal_packet}] if signal_packet else []
-                self._ask_oracle("signalcompile:ask", _signal_compile_prompt(text), signal_history)
             else:
                 self._ask_oracle("ask", text, history)
         else:
@@ -3162,9 +3179,6 @@ class FutureCrash:
                 self._queue_tool_request(request,"work","",history)
                 return
             memory_packet = self.memory.context_packet()
-            signal_packet = self.signal.context_packet()
-            if signal_packet:
-                history = [{"role":"system","content":signal_packet}] + history
             if memory_packet:
                 history = [{
                     "role": "system",
@@ -3182,11 +3196,7 @@ class FutureCrash:
                 history = history[:-1]
             self.work_signal_required = _wants_signal(text)
             self.work_signal_request = text
-            if self.work_signal_required:
-                signal_history = [{"role":"system","content":signal_packet}] if signal_packet else []
-                self._ask_oracle("signalcompile:work", _signal_compile_prompt(text), signal_history)
-            else:
-                self._ask_oracle("work", text, history)
+            self._ask_oracle("work", text, history)
 
     def box(self, title, lines, width, height, color=GREEN):
         inner = max(1, width - 4)

@@ -1,3 +1,13 @@
+## 5.1.6 — Conversation Channels
+
+- Restores Future Crash Oracle/Workstation as a normal user ↔ Oracle conversation while Signal remains a visual sidecar.
+- Normal ask/work prompts no longer embed the full Signal language; Signal grammar is used only by the dedicated compiler/repair passes.
+- Signal receipts/context are no longer injected into ordinary Oracle conversation history. They remain available to the Signal compiler only.
+- Explicit visual requests now complete the visible text answer first, then compile the Signal scene asynchronously from the request + finished answer.
+- `SIGNAL UPDATED` / compile-failure receipts move to the transient status line instead of becoming assistant chat messages.
+- Future Crash tolerates canonical Fabric text surfaced outside `message.content` before declaring an empty visible response.
+- Future Crash 1.1.15; Future Crash + LOOK / Unified Node / ingress 5.1.6. LOOK remains 4.43.3; Signal Window remains 1.1.2.
+
 ## 5.1.5 — Control Plane Clarity
 
 - Dashboard HTTP telemetry now distinguishes accepted TCP connections from parsed HTTP requests and completed requests, so ingress counts no longer look like unexplained request loss.
