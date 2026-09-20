@@ -18,6 +18,9 @@ def test_resident_set_probe_never_cold_loads_models():
     assert "ThreadPoolExecutor" in block
     assert "_ollama_set_model" not in block
     assert '"keep_alive":0' not in block
+    assert "statistics.median" in block
+    assert "physical ceiling" in block
+    assert "range(3)" in block
 
 
 def test_ollama_test_exposes_resident_set_flag():

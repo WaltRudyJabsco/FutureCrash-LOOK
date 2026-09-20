@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Future Crash + LOOK Unified Node 5.2.7.
+"""Future Crash + LOOK Unified Node 5.2.8.
 
 A small distributed supervisor for trusted personal machines. Immediate events stay
 asynchronous; a one-second fabric pulse reconciles presence, leases and stale work.
@@ -39,7 +39,7 @@ except ImportError:
     from memory_store import FabricMemory
 from urllib.parse import urlparse, parse_qs
 
-VERSION = "5.2.7"
+VERSION = "5.2.8"
 DEFAULT_HOST = "127.0.0.1"
 DEFAULT_PORT = 7332
 DEFAULT_INGRESS_PORT = 0
@@ -52,6 +52,10 @@ WATCH_PEER_REFRESH_SECONDS = 3.0
 MODEL_REFRESH_SECONDS = 15.0
 QUALIFY_RECHECK_SECONDS = 24 * 60 * 60
 QUALIFY_IDLE_SECONDS = 20.0
+CURATOR_INTERVAL_SECONDS = 10.0
+CURATOR_IDLE_SECONDS = 30.0
+CURATOR_CONTEXT = 4096
+CURATOR_MAX_RESIDENT = 3
 INTERACTIVE_STALE_SECONDS = 45.0
 BACKGROUND_STALE_SECONDS = 12.0
 HISTORY_LIMIT = 64
@@ -61,6 +65,8 @@ STATE = Path.home() / ".local/share/future-crash-look"
 STATE.mkdir(parents=True, exist_ok=True)
 MODEL_STATE = STATE / "model_profiles.json"
 LOOK_BENCHMARK_STATE = Path.home() / ".local/share/look/ollama_benchmarks.json"
+LOOK_MODEL_PREFS = Path.home() / ".local/share/look/ollama_models.json"
+CURATOR_STATE = STATE / "model_curator.json"
 FABRIC_DB = STATE / "fabric.sqlite3"
 ARTIFACT_ROOT = STATE / "artifacts"
 FABRIC_STORE = FabricStore(FABRIC_DB)
@@ -72,6 +78,7 @@ IDENTITY_CACHE = {"name": socket.gethostname(), "hostname": socket.gethostname()
 ADVERTISEMENT_LOCK = threading.RLock()
 ADVERTISEMENT_CACHE = {}
 BEACON_LOCK = threading.RLock()
+CURATOR_LOCK = threading.RLock()
 BEACON_SEEN = set()
 BEACON_PATTERNS = {
     "rgb": ("red", "green", "blue", "white"),
@@ -311,6 +318,229 @@ def load_look_benchmarks():
         return {}
 
 
+def load_curator_state():
+    """Small durable policy record. Auto curation is opt-in on existing installs."""
+    default={"mode":"observe","profile":"balanced","last_action":0.0,"last_reason":"","hold_deep_until":0.0}
+    try:
+        data=json.loads(CURATOR_STATE.read_text(encoding="utf-8"))
+        if isinstance(data,dict): default.update(data)
+    except Exception:
+        pass
+    if default.get("mode") not in {"observe","auto"}: default["mode"]="observe"
+    if default.get("profile") not in {"reflex","balanced","deep"}: default["profile"]="balanced"
+    return default
+
+
+def save_curator_state(state):
+    tmp=CURATOR_STATE.with_suffix(".tmp")
+    tmp.write_text(json.dumps(state,indent=2,sort_keys=True)+"\n",encoding="utf-8")
+    os.chmod(tmp,0o600)
+    tmp.replace(CURATOR_STATE)
+
+
+def _model_bytes(model):
+    """Use quantized file size as a conservative cold-placement estimate."""
+    try: return max(0,int(model.get("size") or 0))
+    except Exception: return 0
+
+
+def _benchmark_role_evidence(model):
+    """Purpose evidence, not an IQ score. Values are only routing hints."""
+    b=model.get("benchmark") or {}
+    q=model.get("qualification") or {}
+    size=_model_bytes(model)
+    gib=size/(1024**3) if size else 0.0
+    ttft=float(b.get("ttft") if isinstance(b.get("ttft"),(int,float)) else (q.get("ttft_ms") or 0)/1000.0)
+    rate=float(b.get("rate") if isinstance(b.get("rate"),(int,float)) else (q.get("generation_tok_s") or 0))
+    reasoning=int(b.get("reasoning") or 0) if isinstance(b.get("reasoning"),(int,float)) else 0
+    tools=int(b.get("tools") or 0) if isinstance(b.get("tools"),(int,float)) else 0
+    agent=bool(b.get("agent")); exact=bool(b.get("exact") or q.get("instruction_ok"))
+    fit=str(b.get("fit") or "").upper()
+    # Tuple ordering intentionally preserves raw evidence instead of manufacturing
+    # a universal number. Callers can compare candidates for one role only.
+    reflex=(1 if exact else 0, 1 if ttft and ttft<=2.0 else 0, rate, -gib)
+    general=(1 if fit in {"EXCELLENT","GOOD"} else 0, tools, 1 if agent else 0, reasoning, rate, -abs(gib-6.0))
+    deep=(reasoning, 1 if agent else 0, tools, 1 if fit not in {"POOR","ERROR"} else 0, gib)
+    return {"reflex":reflex,"balanced":general,"deep":deep,
+            "raw":{"ttft":ttft or None,"rate":rate or None,"reasoning":reasoning,"tools":tools,
+                   "agent":agent,"exact":exact,"fit":fit or None,"size_gib":round(gib,2)}}
+
+
+def _gpu_budget(models):
+    """Estimate model-placement budget while respecting non-Ollama GPU residents.
+
+    NVIDIA can tell us total/used VRAM. Subtract current Ollama VRAM to expose the
+    amount occupied by Comfy, desktop graphics, etc. macOS uses a conservative
+    unified-memory budget because Metal shares memory with the OS.
+    """
+    ollama_vram=sum(float(m.get("resident_size") or 0) for m in models if m.get("resident"))
+    smi=binary("nvidia-smi")
+    if smi:
+        p=run(smi,"--query-gpu=memory.total,memory.used","--format=csv,noheader,nounits",timeout=2)
+        if p and p.returncode==0 and p.stdout.strip():
+            try:
+                total_mib,used_mib=[float(x.strip()) for x in p.stdout.splitlines()[0].split(",")[:2]]
+                total=total_mib*1024**2; used=used_mib*1024**2
+                external=max(0.0,used-ollama_vram)
+                reserve=max(1024**3,total*0.05)
+                budget=max(0.0,total-external-reserve)
+                return {"kind":"vram","total":int(total),"used":int(used),"external":int(external),
+                        "reserve":int(reserve),"model_budget":int(budget)}
+            except Exception:
+                pass
+    if platform.system().lower()=="darwin":
+        p=run("sysctl","-n","hw.memsize",timeout=2)
+        try: total=int((p.stdout or "0").strip()) if p and p.returncode==0 else 0
+        except Exception: total=0
+        if total:
+            reserve=max(6*1024**3,int(total*0.25))
+            return {"kind":"unified","total":total,"used":None,"external":None,"reserve":reserve,
+                    "model_budget":max(0,total-reserve)}
+    # Unknown accelerator: placement may still work through CPU, but do not guess a
+    # dense multi-model set from disk sizes alone.
+    return {"kind":"unknown","total":None,"used":None,"external":None,"reserve":None,"model_budget":None}
+
+
+def _curator_disabled_models():
+    try:
+        data=json.loads(LOOK_MODEL_PREFS.read_text(encoding="utf-8"))
+        return {str(x) for x in (data.get("disabled") or []) if str(x).strip()}
+    except Exception:
+        return set()
+
+
+def _curator_candidates(models):
+    disabled=_curator_disabled_models()
+    rows=[]
+    for m in models:
+        if str(m.get("name") or "") in disabled:
+            continue
+        if not (m.get("features") or {}).get("text",True):
+            continue
+        row=dict(m); row["role_evidence"]=_benchmark_role_evidence(m)
+        rows.append(row)
+    return rows
+
+
+def curator_plan(profile="balanced", models=None):
+    """Return a deterministic resident-set recommendation for this node."""
+    profile=profile if profile in {"reflex","balanced","deep"} else "balanced"
+    models=list(models if models is not None else MODELS.discover(force=True))
+    candidates=_curator_candidates(models)
+    budget=_gpu_budget(models)
+    limit=budget.get("model_budget")
+    current=[m["name"] for m in candidates if m.get("resident")]
+    if not candidates:
+        return {"ok":False,"profile":profile,"target":[],"current":current,"budget":budget,"reason":"no text models installed"}
+
+    def fits(selected, candidate):
+        if limit is None:
+            return len(selected)==0
+        wanted=sum(int(_model_bytes(x)*1.10) for x in [*selected,candidate])
+        return wanted <= int(limit)
+
+    def best(rows, role, reverse=True):
+        return sorted(rows,key=lambda m:m["role_evidence"][role],reverse=reverse)[0] if rows else None
+
+    # Size bands are deliberately broad. Benchmarks decide within a band; size only
+    # expresses the operational role of small/medium/large resident workers.
+    small=[m for m in candidates if _model_bytes(m) and _model_bytes(m)<=3*1024**3]
+    medium=[m for m in candidates if 3*1024**3 < _model_bytes(m) <= 11*1024**3]
+    large=[m for m in candidates if _model_bytes(m)>11*1024**3]
+    selected=[]; reason=[]
+    if profile=="deep":
+        choice=best(candidates,"deep")
+        if choice:
+            selected=[choice]; reason.append("deep work reserves the strongest deep candidate")
+            # Large deep workers run alone by policy: reclaim VRAM and avoid turning a
+            # 27/30B worker into a partially CPU-offloaded imitation of itself.
+            if _model_bytes(choice)<=0.55*(limit or 0):
+                helper=best([m for m in small if m["name"]!=choice["name"]],"reflex")
+                if helper and fits(selected,helper): selected.append(helper); reason.append("small reflex helper fits beside deep worker")
+    elif profile=="reflex":
+        choice=best(small or medium or candidates,"reflex")
+        if choice: selected=[choice]; reason.append("reflex work prefers the smallest measured responsive worker")
+    else:
+        mid=best(medium,"balanced") or best(small,"balanced") or best(candidates,"balanced")
+        if mid and fits([],mid): selected=[mid]
+        elif mid and limit is None: selected=[mid]
+        helper=best([m for m in small if not selected or m["name"]!=selected[0]["name"]],"reflex")
+        if helper and fits(selected,helper) and len(selected)<CURATOR_MAX_RESIDENT:
+            selected.append(helper)
+        if not selected:
+            # A machine with only a large model still gets a usable plan.
+            choice=best(candidates,"balanced")
+            if choice: selected=[choice]
+        reason.append("balanced keeps a capable general worker plus a small reflex worker when the measured budget permits")
+
+    target=[m["name"] for m in selected]
+    return {"ok":True,"profile":profile,"target":target,"current":current,"budget":budget,
+            "reason":"; ".join(reason),
+            "models":[{"name":m["name"],"size":_model_bytes(m),"resident":bool(m.get("resident")),
+                       "roles":m["role_evidence"]["raw"]} for m in candidates]}
+
+
+def _ollama_residency_action(model, keep):
+    payload={"model":model,"prompt":"","stream":False,"keep_alive":(-1 if keep else 0)}
+    if keep:
+        payload["options"]={"num_ctx":CURATOR_CONTEXT}
+    return http_json("http://127.0.0.1:11434/api/generate",payload,timeout=180 if keep else 30)
+
+
+def curator_apply(profile="balanced", reason="manual"):
+    """Converge local Ollama residency on the requested canonical set."""
+    if SUP.status()["active"] is not None:
+        return {"ok":False,"skipped":"supervisor busy","plan":curator_plan(profile)}
+    plan=curator_plan(profile)
+    if not plan.get("ok"): return plan
+    target=list(plan.get("target") or []); current=list(plan.get("current") or [])
+    unloaded=[]; loaded=[]; errors=[]
+    # Reclaim first. Large-model requests must not inherit VRAM pressure from the
+    # balanced resident set.
+    for name in current:
+        if name not in target:
+            try: _ollama_residency_action(name,False); unloaded.append(name)
+            except Exception as exc: errors.append(f"unload {name}: {exc}")
+    for name in target:
+        if name not in current:
+            try: _ollama_residency_action(name,True); loaded.append(name)
+            except Exception as exc: errors.append(f"load {name}: {exc}")
+    MODELS.discover(force=True); refresh_advertisement()
+    state=load_curator_state(); state.update(last_action=now(),last_reason=reason,profile=profile)
+    save_curator_state(state)
+    result={"ok":not errors,"profile":profile,"target":target,"loaded":loaded,"unloaded":unloaded,"errors":errors,
+            "reason":plan.get("reason"),"budget":plan.get("budget")}
+    try:
+        FABRIC_STORE.event("curator","model","curation",f"{profile}: "+(", ".join(target) or "none"),
+                           node=identity()["name"],data={"loaded":loaded,"unloaded":unloaded,"reason":reason})
+    except Exception:
+        pass
+    return result
+
+
+def curator_status():
+    state=load_curator_state(); profile=state.get("profile","balanced")
+    plan=curator_plan(profile)
+    return {"state":state,"plan":plan}
+
+
+def background_curator():
+    """Opt-in resident-set manager. Human work always outranks reshuffling."""
+    while True:
+        time.sleep(CURATOR_INTERVAL_SECONDS)
+        state=load_curator_state()
+        if state.get("mode")!="auto": continue
+        if SUP.status()["active"] is not None: continue
+        if now()-SUP.last_human_activity < CURATOR_IDLE_SECONDS: continue
+        profile="deep" if now()<float(state.get("hold_deep_until") or 0) else "balanced"
+        try:
+            plan=curator_plan(profile)
+            if plan.get("ok") and set(plan.get("target") or [])!=set(plan.get("current") or []):
+                curator_apply(profile,reason="background policy")
+        except Exception:
+            pass
+
+
 class ModelRegistry:
     def __init__(self):
         self.lock = threading.RLock()
@@ -515,6 +745,7 @@ def _build_advertisement():
             "preferred_model": _node_preferred_model(models),
         },
         "supervisor": SUP.status(),
+        "curation": load_curator_state(),
     }
 
 def refresh_advertisement():
@@ -1006,6 +1237,20 @@ def job_worker_loop():
             time.sleep(1.0)
 
 
+def _curator_prepare_packet(packet):
+    """For auto mode, make room for genuinely deep work before taking the lease."""
+    state=load_curator_state()
+    if state.get("mode")!="auto": return None
+    prefs=(packet.get("capabilities") or {}).get("prefers") or {}
+    tier=str(prefs.get("work_class") or ((packet.get("extensions") or {}).get("futurecrash") or {}).get("work_class") or "balanced")
+    if tier!="deep": return None
+    state["hold_deep_until"]=now()+90.0
+    state["profile"]="deep"
+    save_curator_state(state)
+    with CURATOR_LOCK:
+        return curator_apply("deep",reason="deep interactive work")
+
+
 def _stream_model_infer(handler, raw):
     """Execute one FWP model.infer attempt and stream Ollama JSONL to the caller.
 
@@ -1032,6 +1277,10 @@ def _stream_model_infer(handler, raw):
     if not created:
         raise ValueError("stream packet id already exists")
     priority = (packet.get("execution") or {}).get("priority", "interactive")
+    try:
+        _curator_prepare_packet(packet)
+    except Exception:
+        pass
     lease, busy = SUP.acquire(f"job:{job['id']}", priority, "inference", "streaming model inference", worker=worker)
     if not lease:
         raise RuntimeError("worker busy")
@@ -1495,7 +1744,7 @@ def _memory_sync() -> dict:
 
 
 class API(BaseHTTPRequestHandler):
-    server_version = "FCLNode/5.2.7"
+    server_version = "FCLNode/5.2.8"
 
     def setup(self):
         self._metric_request_id = None
@@ -1572,6 +1821,8 @@ class API(BaseHTTPRequestHandler):
             return self.sendj(200, capabilities())
         if path == "/v1/models":
             return self.sendj(200, {"models": MODELS.discover()})
+        if path == "/v1/models/curation":
+            return self.sendj(200, curator_status())
         if path == "/v1/services":
             return self.sendj(200, {"services": managed_services()})
         if path == "/v1/nodes":
@@ -1681,6 +1932,22 @@ class API(BaseHTTPRequestHandler):
             if not name:
                 return self.sendj(400, {"error": "model required"})
             return self.sendj(200, qualify_model(name, automatic=False))
+        if path == "/v1/models/curation":
+            state=load_curator_state()
+            mode=str(d.get("mode") or state.get("mode") or "observe").lower()
+            profile=str(d.get("profile") or state.get("profile") or "balanced").lower()
+            if mode not in {"observe","auto"}:
+                return self.sendj(400,{"ok":False,"error":"mode must be observe or auto"})
+            if profile not in {"reflex","balanced","deep"}:
+                return self.sendj(400,{"ok":False,"error":"profile must be reflex, balanced, or deep"})
+            state.update(mode=mode,profile=profile)
+            save_curator_state(state)
+            if d.get("apply"):
+                with CURATOR_LOCK:
+                    result=curator_apply(profile,reason=str(d.get("reason") or "operator apply"))
+                result["state"]=load_curator_state()
+                return self.sendj(200 if result.get("ok") else 409,result)
+            return self.sendj(200,{"ok":True,"state":state,"plan":curator_plan(profile)})
         if path == "/v1/services/action":
             name = str(d.get("service") or "")
             action = str(d.get("action") or "")
@@ -2837,6 +3104,7 @@ def main():
         faulthandler.register(signal.SIGUSR1, file=sys.stderr, all_threads=True)
     threading.Thread(target=pulse_loop,name="fabric-pulse",daemon=True).start()
     threading.Thread(target=background_qualifier,name="model-qualifier",daemon=True).start()
+    threading.Thread(target=background_curator,name="model-curator",daemon=True).start()
     threading.Thread(target=job_worker_loop,name="fabric-jobs",daemon=True).start()
     JOB_WAKE.set()
     srv=FabricHTTPServer((a.host,a.port),API,plane="local")

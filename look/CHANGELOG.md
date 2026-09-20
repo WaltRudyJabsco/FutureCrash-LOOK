@@ -1,3 +1,9 @@
+## 4.44.7 — Adaptive model curator
+
+- Stabilize resident-set concurrency testing with warm-up, alternating solo order, three-run medians, and a physical sanity bound.
+- Add model-curator controls and purpose evidence display.
+- Add canonical 4096-context warm commands for repeatable residency experiments.
+
 ## 4.44.6 — Model roles + resident-set evidence
 
 - Model benchmarks now include three deterministic reasoning probes.

@@ -19,7 +19,7 @@ try:
 except Exception:
     readline = None
 
-VERSION="4.44.6"
+VERSION="4.44.7"
 
 LOOK_WORDMARK = r"""       ██╗      ██╗  ██╗
        ██║      ██║ ██╔╝
@@ -1407,6 +1407,15 @@ AI / OLLAMA
   lk ollama models     model panel · Enter select · X enable/disable
   lk ollama test       benchmark LOOK-selected model
   lk ollama test --all compare enabled installed models
+  lk ollama test --resident-set
+                       stabilized concurrency test of warm workers
+  lk ollama curate     show canonical resident-set plan
+  lk ollama curate --apply
+                       converge residency on the balanced plan
+  lk ollama curate auto on|off
+                       enable/disable dynamic resident-set management
+  lk ollama warm MODEL [MODEL ...]
+                       warm explicit models at 4096 context
   lk ollama endpoint [--json]
                        resolved shared Ollama endpoint + model
   lk model current [--json]
@@ -7926,7 +7935,7 @@ def _run_filesystem_tool_impl(workspace, name, args, profile="workspace"):
         return f"File tool internal error: {type(exc).__name__}: {exc}"
     return f"Unknown file tool: {name}"
 
-LOOK_INFO_USER_AGENT="LOOK-Shell/4.44.6 (local text client)"
+LOOK_INFO_USER_AGENT="LOOK-Shell/4.44.7 (local text client)"
 
 def _run_filesystem_tool(workspace, name, args, profile="workspace"):
     global _FILESYSTEM_ACCESS_PROFILE
@@ -10641,6 +10650,7 @@ def _benchmark_chat(base, model, prompt, tools=None):
         ],
         "stream":False,
         "keep_alive":"10m",
+        "options":{"num_ctx":4096},
     }
     if tools:
         payload["tools"]=tools
@@ -10676,6 +10686,7 @@ def _benchmark_speed(base, model):
         "messages":[{"role":"user","content":"Reply with exactly: LOOK-OK"}],
         "stream":True,
         "keep_alive":"10m",
+        "options":{"num_ctx":4096},
     }).encode("utf-8")
     request=urllib.request.Request(
         base+"/api/chat", data=payload,
@@ -11045,12 +11056,15 @@ def ollama_test(all_models=False, base_override=None):
 
 
 def ollama_test_resident_set(base_override=None):
-    """Measure whether the currently warm Ollama workers overlap under load.
+    """Measure useful overlap among already-resident workers without changing the set.
 
-    Never cold-loads a model. It compares sequential and simultaneous micro-probes
-    so Fabric gets evidence about the resident set rather than guessing from size.
+    The first implementation compared a cold-ish sequential pass with a later warm
+    concurrent pass and could report impossible >N× speedups. This version stabilizes
+    every resident worker, alternates sequential order, repeats both phases, and uses
+    medians with a physical sanity bound.
     """
     from concurrent.futures import ThreadPoolExecutor, as_completed
+    import statistics
     base=_normalize_ollama_url(base_override) if base_override else _ollama_base()
     try:
         running=_ollama_ps(base)
@@ -11060,21 +11074,17 @@ def ollama_test_resident_set(base_override=None):
     names=[]; vram={}
     for item in running:
         name=(item.get("name") or item.get("model") or "").strip()
-        if not name or name in names:
-            continue
+        if not name or name in names: continue
         names.append(name)
         raw=item.get("size_vram")
-        if isinstance(raw,(int,float)):
-            vram[name]=float(raw)
+        if isinstance(raw,(int,float)): vram[name]=float(raw)
     print("LOOK RESIDENT SET TEST")
-    print("  warm models only · no cold loads · exact-response micro-probe")
+    print("  warm models only · 4096 context · 3× median · no cold loads or evictions")
     if not names:
-        print("  resident   none")
-        return 1
+        print("  resident   none"); return 1
     print("  resident   " + ", ".join(names))
     if len(names)<2:
-        print("  need at least two resident models to measure overlap")
-        return 1
+        print("  need at least two resident models to measure overlap"); return 1
 
     def probe(name):
         started=time.monotonic()
@@ -11084,37 +11094,143 @@ def ollama_test_resident_set(base_override=None):
         except Exception as exc:
             return {"model":name,"ok":False,"error":str(exc),"elapsed":time.monotonic()-started}
 
-    seq_start=time.monotonic(); sequential=[]
+    print("  stabilize  " + ", ".join(names), flush=True)
     for name in names:
-        sequential.append(probe(name))
-    seq_wall=time.monotonic()-seq_start
+        probe(name)  # deliberately untimed warm/cache equalizer
 
-    conc_start=time.monotonic(); concurrent=[]
-    with ThreadPoolExecutor(max_workers=len(names),thread_name_prefix="ollama-set") as pool:
-        futures=[pool.submit(probe,name) for name in names]
-        for fut in as_completed(futures):
-            concurrent.append(fut.result())
-    conc_wall=time.monotonic()-conc_start
-    concurrent.sort(key=lambda row:names.index(row["model"]))
-    seq_by={row["model"]:row for row in sequential}
+    seq_samples={name:[] for name in names}; seq_ttft={name:[] for name in names}; seq_rate={name:[] for name in names}
+    seq_exact={name:[] for name in names}; seq_walls=[]
+    for round_no in range(3):
+        order=names if round_no%2==0 else list(reversed(names))
+        started=time.monotonic()
+        for name in order:
+            row=probe(name)
+            if row.get("ok"):
+                seq_samples[name].append(float(row["elapsed"])); seq_ttft[name].append(float(row["ttft"])); seq_rate[name].append(float(row["rate"])); seq_exact[name].append(bool(row["exact"]))
+        seq_walls.append(time.monotonic()-started)
 
+    conc_samples={name:[] for name in names}; conc_ttft={name:[] for name in names}; conc_rate={name:[] for name in names}
+    conc_exact={name:[] for name in names}; conc_walls=[]
+    for _ in range(3):
+        started=time.monotonic(); rows=[]
+        with ThreadPoolExecutor(max_workers=len(names),thread_name_prefix="ollama-set") as pool:
+            futures=[pool.submit(probe,name) for name in names]
+            for fut in as_completed(futures): rows.append(fut.result())
+        conc_walls.append(time.monotonic()-started)
+        for row in rows:
+            name=row["model"]
+            if row.get("ok"):
+                conc_samples[name].append(float(row["elapsed"])); conc_ttft[name].append(float(row["ttft"])); conc_rate[name].append(float(row["rate"])); conc_exact[name].append(bool(row["exact"]))
+
+    med=lambda xs: statistics.median(xs) if xs else 0.0
     print()
-    print(f"{'MODEL':<28} {'VRAM':>8} {'SEQ':>8} {'CONC':>8} {'TTFT':>8} {'TOK/S':>8} {'EXACT':>7}")
-    print("-"*83)
-    for row in concurrent:
-        name=row["model"]; seq=seq_by.get(name,{})
+    print(f"{'MODEL':<28} {'VRAM':>8} {'ALONE':>8} {'TOGETHER':>10} {'TTFT':>8} {'TOK/S':>8} {'EXACT':>7}")
+    print("-"*89)
+    for name in names:
         mem=(f"{vram[name]/1024**3:.1f}G" if name in vram else "—")
-        if not row.get("ok"):
-            print(f"{name:<28.28} {mem:>8} {float(seq.get('elapsed') or 0):>7.2f}s {'ERR':>8} {'—':>8} {'—':>8} {'—':>7}")
-            continue
-        print(f"{name:<28.28} {mem:>8} {float(seq.get('elapsed') or 0):>7.2f}s {float(row.get('elapsed') or 0):>7.2f}s "
-              f"{float(row.get('ttft') or 0):>7.2f}s {float(row.get('rate') or 0):>8.1f} {('yes' if row.get('exact') else 'no'):>7}")
-    overlap=(seq_wall/conc_wall) if conc_wall>0 else 0.0
+        print(f"{name:<28.28} {mem:>8} {med(seq_samples[name]):>7.2f}s {med(conc_samples[name]):>9.2f}s "
+              f"{med(conc_ttft[name]):>7.2f}s {med(conc_rate[name]):>8.1f} {('yes' if conc_exact[name] and all(conc_exact[name]) else 'no'):>7}")
+
+    sequential_wall=med(seq_walls); concurrent_wall=med(conc_walls)
+    alone=[med(seq_samples[n]) for n in names if seq_samples[n]]
+    serial_work=sum(alone); ideal=max(alone) if alone else 0.0
+    speedup=(serial_work/concurrent_wall) if concurrent_wall>0 else 0.0
+    efficiency=(ideal/concurrent_wall) if concurrent_wall>0 and ideal>0 else 0.0
+    plausible=speedup <= len(names)*1.15
     print()
-    print(f"  sequential wall   {seq_wall:.2f}s")
-    print(f"  concurrent wall   {conc_wall:.2f}s")
-    print(f"  overlap factor    {overlap:.2f}x  (1.00x ≈ queued; higher means useful overlap)")
-    print("  note              micro-probe only; real contexts and KV pressure can change the result")
+    print(f"  sequential wall   {sequential_wall:.2f}s median")
+    print(f"  concurrent wall   {concurrent_wall:.2f}s median")
+    if plausible:
+        print(f"  useful speedup    {speedup:.2f}x  (physical ceiling ≈ {len(names):.0f}x for {len(names)} workers)")
+        print(f"  parallel efficiency {efficiency*100:.0f}%  (100% = perfect overlap at solo speed)")
+    else:
+        print(f"  useful speedup    NOT SCORED · observed {speedup:.2f}x exceeds sanity bound")
+        print("  warning           cache/order/runtime conditions changed between phases")
+    print("  note              micro-probe only; real contexts, CPU spill and KV pressure can change the result")
+    return 0
+
+def _curator_request(payload=None):
+    url="http://127.0.0.1:7332/v1/models/curation"
+    data=None if payload is None else json.dumps(payload).encode("utf-8")
+    req=urllib.request.Request(url,data=data,headers={"Content-Type":"application/json"},method=("POST" if data is not None else "GET"))
+    with urllib.request.urlopen(req,timeout=190 if data and payload.get("apply") else 8) as response:
+        return json.loads(response.read().decode("utf-8","replace"))
+
+
+def _format_gib(value):
+    if not isinstance(value,(int,float)): return "—"
+    return f"{float(value)/(1024**3):.1f}G"
+
+
+def ollama_curate(args):
+    """Inspect or control the node's evidence-driven resident-set curator."""
+    args=list(args or [])
+    if args[:1]==["auto"]:
+        if len(args)<2 or args[1] not in {"on","off"}:
+            print("usage: lk ollama curate auto on|off")
+            return 2
+        mode="auto" if args[1]=="on" else "observe"
+        try: data=_curator_request({"mode":mode})
+        except Exception as exc:
+            print(f"LOOK CURATOR · {exc}"); return 1
+        print(f"LOOK MODEL CURATOR · {mode.upper()}")
+        if mode=="auto": print("  interactive deep work may reserve the large worker; idle time returns to the balanced resident set")
+        return 0
+    profile="balanced"
+    for item in args:
+        if item in {"reflex","balanced","deep"}: profile=item
+    apply="--apply" in args
+    try:
+        data=_curator_request({"profile":profile,"apply":True,"reason":"lk ollama curate"}) if apply else _curator_request({"profile":profile})
+    except urllib.error.HTTPError as exc:
+        detail=exc.read().decode("utf-8","replace")
+        print(f"LOOK CURATOR · HTTP {exc.code} · {detail[:300]}"); return 1
+    except Exception as exc:
+        print(f"LOOK CURATOR · {exc}"); return 1
+    state=data.get("state") or {}; plan=data.get("plan") or data
+    if data.get("target") is not None and not plan.get("target"): plan=data
+    print("LOOK MODEL CURATOR")
+    print(f"  mode      {state.get('mode','observe')}")
+    print(f"  profile   {plan.get('profile',profile)}")
+    budget=plan.get("budget") or data.get("budget") or {}
+    if budget:
+        print(f"  budget    {_format_gib(budget.get('model_budget'))} models · {_format_gib(budget.get('external'))} non-Ollama · {_format_gib(budget.get('reserve'))} reserve")
+    current=plan.get("current") or []
+    target=plan.get("target") or data.get("target") or []
+    print("  current   "+(", ".join(current) if current else "none"))
+    print("  target    "+(", ".join(target) if target else "none"))
+    reason=plan.get("reason") or data.get("reason")
+    if reason: print(f"  why       {reason}")
+    if apply:
+        print("  unloaded  "+(", ".join(data.get("unloaded") or []) or "none"))
+        print("  loaded    "+(", ".join(data.get("loaded") or []) or "none"))
+        for err in data.get("errors") or []: print(f"  error     {err}")
+    models=plan.get("models") or []
+    if models:
+        print("\n  PURPOSE EVIDENCE")
+        print(f"  {'MODEL':<27} {'SIZE':>6} {'FIT':>10} {'RSN':>5} {'TOOLS':>6} {'AGENT':>6} {'TTFT':>7} {'TOK/S':>7}")
+        for row in models:
+            r=row.get("roles") or {}
+            print(f"  {str(row.get('name') or ''):<27.27} {_format_gib(row.get('size')):>6} {str(r.get('fit') or '—'):>10} {str(r.get('reasoning') if r.get('reasoning') is not None else '—'):>5} {str(r.get('tools') if r.get('tools') is not None else '—'):>6} {('yes' if r.get('agent') else 'no'):>6} {(f'{r.get('ttft'):.2f}s' if isinstance(r.get('ttft'),(int,float)) else '—'):>7} {(f'{r.get('rate'):.1f}' if isinstance(r.get('rate'),(int,float)) else '—'):>7}")
+    return 0 if data.get("ok",True) else 1
+
+
+def ollama_warm(args):
+    """Warm explicit models at the canonical 4096 context without changing selection."""
+    names=[x for x in (args or []) if not x.startswith("-")]
+    if not names:
+        print("usage: lk ollama warm MODEL [MODEL ...]"); return 2
+    base=LOCAL_OLLAMA_URL
+    for name in names:
+        print(f"  warming {name} ...",flush=True)
+        try:
+            _ollama_post(base,"/api/generate",{"model":name,"prompt":"","stream":False,"keep_alive":-1,"options":{"num_ctx":4096}},timeout=180)
+        except Exception as exc:
+            print(f"  {name} · error · {exc}"); return 1
+    try:
+        running=_ollama_ps(base)
+        print("LOOK WARM SET · "+", ".join((m.get("name") or m.get("model") or "?") for m in running))
+    except Exception: pass
     return 0
 
 
@@ -14044,6 +14160,10 @@ def main():
             if "--resident-set" in rest[1:]:
                 return ollama_test_resident_set()
             return ollama_test(all_models=("--all" in rest[1:]))
+        if rest and rest[0]=="curate":
+            return ollama_curate(rest[1:])
+        if rest and rest[0]=="warm":
+            return ollama_warm(rest[1:])
         return inspect_ollama()
     if cmd=="env": return inspect_env()
     if cmd=="path": return inspect_path()

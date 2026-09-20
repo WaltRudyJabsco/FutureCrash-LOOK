@@ -18,6 +18,13 @@ class ConductorTests(unittest.TestCase):
         _,name,_,models=fabric_client._choose_from_snapshot(snap,requires=["text"],tier="reflex")
         self.assertEqual(name,"small")
         self.assertEqual(models[0]["name"],"tiny")
+    def test_deep_uses_role_benchmark_evidence(self):
+        weak={"name":"weak","size":8_000_000_000,"resident":True,"features":{"text":True},"qualification":{"ttft_ms":100,"generation_tok_s":60},"benchmark":{"reasoning":0,"tools":0,"agent":False,"exact":True,"fit":"GOOD"}}
+        strong={"name":"strong","size":8_000_000_000,"resident":True,"features":{"text":True},"qualification":{"ttft_ms":150,"generation_tok_s":55},"benchmark":{"reasoning":3,"tools":3,"agent":True,"exact":True,"fit":"GOOD"}}
+        snap={"self":{"name":"box","runtime":{"ok":True},"inference":{"available":True,"models":[weak,strong]},"supervisor":{"active":None}},"peers":[]}
+        _,_,_,models=fabric_client._choose_from_snapshot(snap,requires=["text"],tier="deep")
+        self.assertEqual(models[0]["name"],"strong")
+
     def test_deep_prefers_capacity_when_latency_is_close(self):
         snap={"self":{"name":"small","runtime":{"ok":True},"inference":{"available":True,"models":[{"name":"tiny","size":2_000_000_000,"resident":True,"features":{"text":True},"qualification":{"ttft_ms":100,"generation_tok_s":80}}]},"supervisor":{"active":None}},"peers":[{"name":"big","dns":"big.ts.net","node":{"runtime":{"ok":True},"inference":{"available":True,"models":[{"name":"big","size":20_000_000_000,"resident":True,"features":{"text":True},"qualification":{"ttft_ms":120,"generation_tok_s":80}}]},"supervisor":{"active":None}}}]}
         _,name,_,_=fabric_client._choose_from_snapshot(snap,requires=["text"],tier="deep")

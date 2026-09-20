@@ -1,3 +1,12 @@
+# 5.2.8 — Adaptive Model Curator
+
+- Replace the first resident-set concurrency probe with stabilized 4096-context, repeated median measurements and a physical sanity bound; impossible >N× results are no longer scored.
+- Add an evidence-driven model curator that plans canonical resident sets from installed model size, local benchmark evidence, current non-Ollama GPU pressure, and platform memory budget.
+- Add `lk ollama curate`, `lk ollama curate --apply`, and opt-in `lk ollama curate auto on|off`; automatic mode reserves a deep worker for deep interactive work and returns to a balanced medium+small set when idle.
+- Add `lk ollama warm MODEL...` using the canonical 4096 context.
+- Respect LOOK-disabled models during curation and keep large deep models alone when their footprint would otherwise force unhealthy mixed residency.
+- Let Fabric routing use benchmark role evidence as a placement hint while preserving hard capability requirements, live latency, residency, load, and node availability.
+
 # 5.2.7 — Model Roles + Resident Sets
 
 - Replace opaque multi-model `R2` residency with compact identities such as `R[q3:8b,g3:1b]`.

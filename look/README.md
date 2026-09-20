@@ -140,6 +140,19 @@ lk ollama
 lk ollama models
 lk ollama test
 lk ollama test --all
+
+Model residency / curation:
+
+```bash
+lk ollama test --resident-set
+lk ollama curate
+lk ollama curate --apply
+lk ollama curate auto on
+lk ollama warm MODEL [MODEL ...]
+```
+
+The curator treats a resident set as the scheduling unit: balanced mode prefers a measured general worker plus a small reflex worker when the local memory budget permits; deep mode reclaims other Ollama residents for the strongest deep worker. Automatic curation is opt-in and yields to interactive work.
+
 ```
 
 LO can inspect and modify the current workspace through bounded LOOK tools: list, read, search, write, copy, move, remove, and make directories. In the default `workspace` profile, arbitrary shell execution remains unavailable. `power` and `unsafe` explicitly add shell-command capability, with different confirmation behavior. The model handles meaning; LOOK controls which capabilities are exposed.

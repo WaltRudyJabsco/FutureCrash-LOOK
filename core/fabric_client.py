@@ -50,6 +50,20 @@ def _model_expected_ms(model, tier="balanced"):
     generation=(expected_tokens/tok*1000.0) if tok>0 else 1200.0
     return ttft+generation
 
+def _benchmark_role_bias(model, tier):
+    """Small evidence bonus for the requested role; never overrides hard requirements."""
+    b=model.get("benchmark") or {}
+    fit=str(b.get("fit") or "").upper()
+    reasoning=int(b.get("reasoning") or 0) if isinstance(b.get("reasoning"),(int,float)) else 0
+    tools=int(b.get("tools") or 0) if isinstance(b.get("tools"),(int,float)) else 0
+    agent=bool(b.get("agent")); exact=bool(b.get("exact"))
+    if tier=="reflex":
+        return -(350.0 if exact else 0.0) -(100.0 if fit=="EXCELLENT" else 0.0)
+    if tier=="deep":
+        return -(reasoning*220.0) -(tools*70.0) -(180.0 if agent else 0.0)
+    return -(reasoning*80.0) -(tools*60.0) -(120.0 if agent else 0.0) -(80.0 if fit in {"GOOD","EXCELLENT"} else 0.0)
+
+
 def _choose_from_snapshot(snapshot, *, model=None, requires=None, latency=False, exclude=None, tier="balanced"):
     scored=[]
     requires=set(requires or ["text"])
@@ -89,7 +103,8 @@ def _choose_from_snapshot(snapshot, *, model=None, requires=None, latency=False,
                 policy=-(size/1e9)*35.0
             else:
                 policy=(size/1e9)*3.0
-            score=busy_penalty+cold_penalty+network_penalty+expected+preferred_bonus+policy
+            evidence_bias=_benchmark_role_bias(m,tier)
+            score=busy_penalty+cold_penalty+network_penalty+expected+preferred_bonus+policy+evidence_bias
             scored.append((score,name,dns,[m]))
     if not scored: raise RuntimeError("Fabric has no worker satisfying this inference request")
     scored.sort(key=lambda x:x[0])
