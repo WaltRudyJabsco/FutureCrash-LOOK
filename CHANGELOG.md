@@ -1,3 +1,11 @@
+# 5.2.6 — Adaptive Dash Geometry
+
+- Replace coarse height breakpoints with fit-first responsive layout selection.
+- Add a landscape renderer that spends horizontal width to preserve node/model, jobs, trust, control, service, ingress, and RECENT evidence in short terminals.
+- Let RECENT consume spare rows instead of leaving large blank regions in medium windows.
+- Preserve the full diagnostic renderer whenever it physically fits; Mini remains an explicit operator mode, not an automatic fallback.
+- Keep model qualification and benchmark evidence unchanged.
+
 # 5.2.5 — Responsive Dash + Benchmark Evidence
 
 - Make live Dash height-aware: full, condensed, and compact compositions fit the terminal rectangle without paging.

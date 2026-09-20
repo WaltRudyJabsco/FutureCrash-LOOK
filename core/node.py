@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Future Crash + LOOK Unified Node 5.2.5.
+"""Future Crash + LOOK Unified Node 5.2.6.
 
 A small distributed supervisor for trusted personal machines. Immediate events stay
 asynchronous; a one-second fabric pulse reconciles presence, leases and stale work.
@@ -15,6 +15,7 @@ import json
 import os
 import platform
 import random
+import re
 import select
 import shutil
 import socket
@@ -38,7 +39,7 @@ except ImportError:
     from memory_store import FabricMemory
 from urllib.parse import urlparse, parse_qs
 
-VERSION = "5.2.5"
+VERSION = "5.2.6"
 DEFAULT_HOST = "127.0.0.1"
 DEFAULT_PORT = 7332
 DEFAULT_INGRESS_PORT = 0
@@ -1494,7 +1495,7 @@ def _memory_sync() -> dict:
 
 
 class API(BaseHTTPRequestHandler):
-    server_version = "FCLNode/5.2.5"
+    server_version = "FCLNode/5.2.6"
 
     def setup(self):
         self._metric_request_id = None
@@ -2080,6 +2081,40 @@ def _dash_recent_line(event, local_name, width, ansi=False):
     return f"\033[{fg}m{row}\033[0m" if ansi and fg else row
 
 
+def _dash_controls(width, mini=False):
+    """One-row control legend sized to the terminal; hidden hotkeys still work."""
+    width=max(20,int(width or 80))
+    if mini:
+        choices=[
+            "[q] quit   [m] full   [b] beacon   [l] lights",
+            "[q] quit   [m] full   [b] beacon",
+            "[q] quit   [m] full",
+        ]
+    else:
+        choices=[
+            "[q] quit   [m] mini   [b] beacon   [l] lights   [w] watch   [s] settings   [d] doctor   [r] restart   [space] refresh",
+            "[q] quit   [m] mini   [b] beacon   [l] lights   [s] settings   [space] refresh",
+            "[q] quit   [m] mini   [b] beacon   [l] lights   [space] refresh",
+            "[q] quit   [m] mini   [space] refresh",
+        ]
+    for text in choices:
+        if len(text) <= width:
+            return text
+    return choices[-1][:width]
+
+
+def _dash_visible_len(text):
+    return len(re.sub(r"\x1b\[[0-9;]*m", "", str(text)))
+
+
+def _dash_visual_rows(text, width):
+    """Count terminal rows, including accidental wrapping, before choosing a layout."""
+    width=max(1,int(width or 1)); total=0
+    for line in str(text).splitlines() or [""]:
+        total += max(1, (_dash_visible_len(line)+width-1)//width)
+    return total
+
+
 def _dash_render_mini(data, width=44, ansi=False):
     snap = data.get("nodes") or {}
     local = snap.get("self") or {}
@@ -2101,7 +2136,7 @@ def _dash_render_mini(data, width=44, ansi=False):
             lines.append(f"\033[{fg}m{row}\033[0m" if ansi and fg else row)
     else:
         lines.append("· no recent events")
-    lines += [rule, "[m] full   [b] beacon   [l] lights   [q] quit"]
+    lines += [rule, _dash_controls(width, mini=True)]
     return "\n".join(lines)
 
 
@@ -2219,7 +2254,7 @@ def _dash_render_full(data, width=92, ansi=False):
     else:
         lines.append("no recent Fabric events observed here")
 
-    lines += ["", rule, "[q] quit   [m] mini   [b] beacon   [l] lights   [w] watch   [s] settings   [d] doctor   [r] restart   [space] refresh"]
+    lines += ["", rule, _dash_controls(width)]
     return "\n".join(lines)
 
 
@@ -2251,54 +2286,150 @@ def _dash_render_compact(data, width=92, height=20, ansi=False):
         for e in events[-recent_slots:]: lines.append(_dash_recent_line(e,local.get("name"),width,ansi=ansi))
     else:
         lines.append("· no recent Fabric events")
-    lines += [rule,"[q] quit  [m] mini  [b] beacon  [l] lights  [space] refresh"]
+    lines += [rule,_dash_controls(width)]
     return "\n".join(lines[-int(height):])
 
 
-def _dash_render_condensed(data, width=92, height=30, ansi=False):
-    """Medium-height dashboard: combine secondary telemetry, never sacrifice RECENT."""
-    width=max(64,min(int(width or 92),132)); rule="─"*width
+def _dash_service_bits(data):
+    services=(data.get("services") or {}).get("services") or {}
+    bits=[]
+    for name,st in services.items():
+        state=str(st.get("state") or "unknown")
+        glyph="●" if state in {"active","running"} else ("·" if state=="unmanaged" else "○")
+        bits.append(f"{name}{glyph}")
+    return bits
+
+
+def _dash_control_summary(data):
+    http=data.get("http") or {}; hm=((http.get("listeners") or {}).get("local") or {})
+    return (f"local {int(hm.get('requests_completed',hm.get('completed')) or 0)} done · "
+            f"active {int(hm.get('active') or 0)} · err {int(hm.get('errors') or 0)}")
+
+
+def _dash_ingress_summary(data):
+    guard=(((data.get("http") or {}).get("ingress_guard") or {}).get("ingress") or {})
+    if not guard:
+        return "ingress —"
+    return (f"ingress {int(guard.get('requests_completed',guard.get('completed')) or 0)} done · "
+            f"active {int(guard.get('active') or 0)} · err {int(guard.get('errors') or 0)}")
+
+
+def _dash_render_wide(data, width=120, height=28, ansi=False):
+    """Information-dense landscape layout: spend horizontal pixels to save rows."""
+    width=max(96,min(int(width or 120),196)); rule="─"*width
     snap=data.get("nodes") or {}; local=snap.get("self") or {}; rows=_dash_summary_rows(data)
     health=data.get("health") or {}; jobs=(data.get("jobs") or {}).get("jobs") or []
-    services=(data.get("services") or {}).get("services") or {}; events=(data.get("events") or {}).get("events") or []
-    http=data.get("http") or {}; hm=((http.get("listeners") or {}).get("local") or {})
+    events=(data.get("events") or {}).get("events") or []
+    active=[j for j in jobs if str(j.get("status") or "") not in {"ok","done","failed","cancelled","canceled"}]
+    services=" ".join(_dash_service_bits(data)) or "pending"
+    caps=local.get("capabilities") or {}
+    trust=(f"clock● fs{'●' if caps.get('filesystem') else '○'} "
+           f"fabric {len(rows)}/{len(rows)} receipts●")
+
+    lines=[f"FUTURE CRASH + LOOK · FABRIC DASH   {time.strftime('%Y-%m-%d %I:%M:%S %p %Z')}",rule,
+           f"FABRIC  {local.get('name','local')} · node {local.get('version','?')} · {len(rows)} node{'s' if len(rows)!=1 else ''} · health {'ok' if health.get('ok') else 'degraded'}",
+           "", "NODES / MODELS", rule]
+
+    node_w=22 if width>=124 else 18
+    state_w=15 if width>=124 else 12
+    for name,node in rows:
+        model_width=max(24,width-node_w-state_w-3)
+        lines.append(f"{str(name):<{node_w}.{node_w}} {_dash_state(node):<{state_w}.{state_w}} {_dash_model(node)[:model_width]}")
+
+    # Landscape terminals often have plenty of columns and very few rows.  Fold
+    # secondary telemetry into two compact columns rather than throwing it away.
+    lines += [""]
+    gap="   │   "
+    left_w=max(34,(width-len(gap))//2)
+    right_w=max(30,width-len(gap)-left_w)
+    ops=[
+        (f"JOBS · {len(active)} active", f"TRUST · {trust}"),
+        (f"CONTROL · {_dash_control_summary(data)}", f"SERVICES · {services}"),
+        (f"{_dash_ingress_summary(data)}", ""),
+    ]
+    for left,right in ops:
+        lines.append(f"{left[:left_w]:<{left_w}}{gap}{right[:right_w]}")
+
+    lines += ["", "RECENT · OBSERVED BY THIS NODE", rule]
+    # Fill the rectangle instead of using a fixed six-row ceiling.  RECENT is the
+    # most useful spare-space consumer because every extra row carries real state.
+    footer_rows=2
+    recent_slots=max(2,int(height)-len(lines)-footer_rows)
+    if events:
+        for e in events[-recent_slots:]:
+            lines.append(_dash_recent_line(e,local.get("name"),width,ansi=ansi))
+    else:
+        lines.append("· no recent Fabric events observed here")
+    lines += [rule,_dash_controls(width)]
+    return "\n".join(lines[:int(height)])
+
+
+def _dash_render_condensed(data, width=92, height=30, ansi=False):
+    """Medium rectangle: degrade detail gradually and use every available row."""
+    width=max(64,min(int(width or 92),160)); rule="─"*width
+    snap=data.get("nodes") or {}; local=snap.get("self") or {}; rows=_dash_summary_rows(data)
+    health=data.get("health") or {}; jobs=(data.get("jobs") or {}).get("jobs") or []
+    events=(data.get("events") or {}).get("events") or []
     active=[j for j in jobs if str(j.get("status") or "") not in {"ok","done","failed","cancelled","canceled"}]
     lines=[f"FUTURE CRASH + LOOK · FABRIC DASH   {time.strftime('%Y-%m-%d %I:%M:%S %p %Z')}",rule,
-           f"FABRIC  {local.get('name','local')} · node {local.get('version','?')} · {len(rows)} node{'s' if len(rows)!=1 else ''}","",
+           f"FABRIC  {local.get('name','local')} · node {local.get('version','?')} · {len(rows)} node{'s' if len(rows)!=1 else ''} · health {'ok' if health.get('ok') else 'degraded'}","",
            "NODES / MODELS",rule]
-    node_slots=max(1,min(len(rows),4))
-    for name,node in rows[:node_slots]:
+    for name,node in rows:
         lines.append(f"{str(name):<22.22} {_dash_state(node):<14.14} {_dash_model(node)[:max(16,width-39)]}")
-    if len(rows)>node_slots: lines.append(f"+ {len(rows)-node_slots} more node(s)")
-    svc_chunks=[]
-    for name,st in services.items():
-        state=str(st.get("state") or "unknown"); glyph="●" if state in {"active","running"} else ("·" if state=="unmanaged" else "○")
-        svc_chunks.append(f"{name}{glyph}")
-    lines += ["",f"STATUS · jobs {len(active)} · health {'ok' if health.get('ok') else 'degraded'} · ctl {int(hm.get('requests_completed',hm.get('completed')) or 0)} done/{int(hm.get('errors') or 0)} err · " + (" ".join(svc_chunks) if svc_chunks else "services pending"),
-              "","RECENT · OBSERVED BY THIS NODE",rule]
-    recent_slots=max(2,min(6,int(height)-len(lines)-2))
+
+    services=" ".join(_dash_service_bits(data)) or "pending"
+    # Add secondary evidence whenever the row budget permits.  This avoids the old
+    # cliff where a 35-row terminal suddenly collapsed to a nearly-mini dashboard.
+    reserve_recent=5
+    reserve_footer=4
+    spare=int(height)-len(lines)-reserve_recent-reserve_footer
+    if spare>0:
+        lines += [""]
+        spare-=1
+    if spare>0:
+        lines.append(f"JOBS · {len(active)} active   CONTROL · {_dash_control_summary(data)}")
+        spare-=1
+    if spare>0:
+        lines.append(f"SERVICES · {services}")
+        spare-=1
+    if spare>0:
+        lines.append(f"TRUST · clock● · filesystem {'●' if (local.get('capabilities') or {}).get('filesystem') else '○'} · fabric {len(rows)}/{len(rows)} · receipts●")
+        spare-=1
+    if spare>0:
+        lines.append(_dash_ingress_summary(data))
+        spare-=1
+
+    lines += ["","RECENT · OBSERVED BY THIS NODE",rule]
+    recent_slots=max(2,int(height)-len(lines)-2)
     if events:
-        for e in events[-recent_slots:]: lines.append(_dash_recent_line(e,local.get("name"),width,ansi=ansi))
-    else: lines.append("· no recent Fabric events observed here")
-    lines += [rule,"[q] quit   [m] mini   [b] beacon   [l] lights   [w] watch   [s] settings   [space] refresh"]
+        for e in events[-recent_slots:]:
+            lines.append(_dash_recent_line(e,local.get("name"),width,ansi=ansi))
+    else:
+        lines.append("· no recent Fabric events observed here")
+    lines += [rule,_dash_controls(width)]
     return "\n".join(lines[:int(height)])
 
 
 def _dash_render(data, width=92, height=None, ansi=False, mini=False):
-    """Responsive live renderer; snapshots stay full while live Dash fits its rectangle."""
+    """Responsive renderer driven by information fit, not coarse height breakpoints."""
     if mini:
         return _dash_render_mini(data,width,ansi=ansi)
     if height is None:
         return _dash_render_full(data,width,ansi=ansi)
-    height=max(10,int(height))
-    if height >= 36:
-        body=_dash_render_full(data,width,ansi=ansi)
-        if len(body.splitlines()) <= height:
-            return body
-    if height >= 23:
+    width=max(1,int(width)); height=max(10,int(height))
+
+    # First choice is always the richest renderer if it physically fits.
+    full=_dash_render_full(data,width,ansi=ansi)
+    if _dash_visual_rows(full,width) <= height:
+        return full
+
+    # Wide/short is its own geometry.  Use the width instead of punishing a
+    # landscape Mac simply because it has fewer terminal rows than a portrait pane.
+    if width >= 104 and height >= 19:
+        return _dash_render_wide(data,width,height,ansi=ansi)
+    if height >= 18:
         return _dash_render_condensed(data,width,height,ansi=ansi)
     return _dash_render_compact(data,width,height,ansi=ansi)
-
 
 def _dash_fetch(host, port, cache, force=False):
     """Poll at deliberately different cadences so the dashboard never becomes load."""

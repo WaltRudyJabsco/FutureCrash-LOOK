@@ -104,3 +104,40 @@ def test_dash_model_includes_full_benchmark_evidence_compactly():
     assert "T3/3" in rendered
     assert "A✓" in rendered
     assert "E✓" in rendered
+
+
+
+def test_dash_landscape_uses_width_instead_of_collapsing_to_compact():
+    body=node._dash_render(_dash_fixture(),120,height=22,ansi=False)
+    assert len(body.splitlines()) <= 22
+    assert "NODES / MODELS" in body
+    assert "CONTROL ·" in body
+    assert "TRUST ·" in body
+    assert "SERVICES ·" in body
+    assert "RECENT" in body
+
+
+def test_dash_medium_uses_available_rows_for_telemetry_and_recent():
+    body=node._dash_render(_dash_fixture(),92,height=28,ansi=False)
+    lines=body.splitlines()
+    assert len(lines) >= 24
+    assert len(lines) <= 28
+    assert "JOBS ·" in body
+    assert "SERVICES ·" in body
+    assert "TRUST ·" in body
+    assert "RECENT" in body
+
+
+def test_dash_portrait_prefers_full_when_full_content_fits():
+    body=node._dash_render(_dash_fixture(),82,height=50,ansi=False)
+    assert "TRUST BASIS" in body
+    assert "CONTROL PLANE" in body
+    assert "SERVICES" in body
+
+
+
+def test_dash_live_lines_do_not_wrap_at_common_mac_widths():
+    for width,height in [(82,18),(92,28),(104,22),(120,22),(120,28)]:
+        body=node._dash_render(_dash_fixture(),width,height=height,ansi=False)
+        assert node._dash_visual_rows(body,width) <= height
+        assert all(len(line) <= width for line in body.splitlines())

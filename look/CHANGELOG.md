@@ -1,3 +1,9 @@
+## 4.44.5 — Adaptive Dash geometry
+
+- Responsive Dash now chooses by actual information fit and terminal geometry rather than height alone.
+- Wide/short terminals use two-column operational telemetry instead of collapsing to near-Mini.
+- Medium layouts use spare rows for additional telemetry and RECENT activity instead of leaving dead space.
+
 ## 4.44.4 — Responsive Dash + benchmark evidence
 
 - Persist model benchmark results to `~/.local/share/look/ollama_benchmarks.json`.
