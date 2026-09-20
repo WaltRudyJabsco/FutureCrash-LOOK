@@ -1,3 +1,11 @@
+# 5.2.7 — Model Roles + Resident Sets
+
+- Replace opaque multi-model `R2` residency with compact identities such as `R[q3:8b,g3:1b]`.
+- Extend manual model benchmarks with three deterministic reasoning probes and preserve raw role evidence instead of inventing one universal model score.
+- Add `lk ollama test --resident-set` to compare sequential vs concurrent response of the models already warm in Ollama; it never cold-loads or evicts a model.
+- Surface purpose evidence in `lk fabric models` and compact Dash model summaries.
+- Reserve a physical right-edge gutter in full Dash so the PULSE column is not clipped by terminal last-cell behavior.
+
 # 5.2.6 — Adaptive Dash Geometry
 
 - Replace coarse height breakpoints with fit-first responsive layout selection.

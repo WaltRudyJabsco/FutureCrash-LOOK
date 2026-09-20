@@ -19,7 +19,7 @@ try:
 except Exception:
     readline = None
 
-VERSION="4.44.5"
+VERSION="4.44.6"
 
 LOOK_WORDMARK = r"""       ██╗      ██╗  ██╗
        ██║      ██║ ██╔╝
@@ -7926,7 +7926,7 @@ def _run_filesystem_tool_impl(workspace, name, args, profile="workspace"):
         return f"File tool internal error: {type(exc).__name__}: {exc}"
     return f"Unknown file tool: {name}"
 
-LOOK_INFO_USER_AGENT="LOOK-Shell/4.44.5 (local text client)"
+LOOK_INFO_USER_AGENT="LOOK-Shell/4.44.6 (local text client)"
 
 def _run_filesystem_tool(workspace, name, args, profile="workspace"):
     global _FILESYSTEM_ACCESS_PROFILE
@@ -10647,6 +10647,27 @@ def _benchmark_chat(base, model, prompt, tools=None):
     return _ollama_post(base, "/api/chat", payload, timeout=180)
 
 
+def _benchmark_reasoning(base, model):
+    """Three tiny deterministic reasoning probes. Raw pass count only; never an IQ score."""
+    probes=[
+        ("Start with 7. Triple it, subtract 5, square the result, then divide by 4. Reply exactly with the final integer.", "64"),
+        ("All Norks are Plims. No Plims are Vets. Some Tars are Norks. Can any of those Tars that are Norks be Vets? Reply exactly YES or NO.", "NO"),
+        ("A drawer has 5 red socks, 4 blue socks, and 3 green socks. Without looking, what is the minimum number of socks you must draw to guarantee three of one color? Reply exactly with the integer.", "7"),
+    ]
+    passed=0
+    details=[]
+    for prompt,expected in probes:
+        try:
+            response=_benchmark_chat(base,model,prompt)
+            text=str((response.get("message") or {}).get("content") or "").strip()
+            ok=(text==expected)
+            passed += 1 if ok else 0
+            details.append({"expected":expected,"answer":text[:80],"ok":ok})
+        except Exception as exc:
+            details.append({"expected":expected,"answer":"","ok":False,"error":str(exc)})
+    return passed,details
+
+
 def _benchmark_speed(base, model):
     """Measure first content arrival and Ollama's reported generation rate."""
     import json, urllib.request
@@ -10709,6 +10730,14 @@ def _benchmark_one_model(base, model):
     except Exception as exc:
         results["speed_error"]=str(exc)
         return results
+
+    try:
+        reasoning,reasoning_detail=_benchmark_reasoning(base,model)
+        results["reasoning"]=reasoning
+        results["reasoning_detail"]=reasoning_detail
+    except Exception as exc:
+        results["reasoning"]=0
+        results["reasoning_error"]=str(exc)
 
     declared_tools=None if caps is None else ("tools" in caps)
     results["declared_tools"]=declared_tools
@@ -10853,6 +10882,8 @@ def _record_ollama_benchmark(base,row):
         "tools":row.get("tools"),
         "agent":row.get("agent"),
         "exact":row.get("exact"),
+        "reasoning":row.get("reasoning"),
+        "reasoning_detail":row.get("reasoning_detail"),
         "declared_tools":row.get("declared_tools"),
         "caps":row.get("caps"),
         "fatal_error":row.get("fatal_error"),
@@ -10917,7 +10948,7 @@ def ollama_test(all_models=False, base_override=None):
         return 1
 
     print("LOOK MODEL TEST")
-    print("  warm-model TTFT · generation rate · runtime fit · exact response · tool judgment · natural agent execution")
+    print("  warm-model TTFT · generation rate · runtime fit · exact response · reasoning · tool judgment · natural agent execution")
     if all_models and disabled:
         print(f"  enabled models only · {len(disabled)} disabled")
     print()
@@ -10942,17 +10973,17 @@ def ollama_test(all_models=False, base_override=None):
                 pass
 
     print()
-    print(f"{'MODEL':<28} {'TTFT':>7} {'TOK/S':>8} {'FIT':>10} {'TOOLS':>9} {'AGENT':>7} {'EXACT':>7}  CAPABILITIES")
-    print("-"*106)
+    print(f"{'MODEL':<28} {'TTFT':>7} {'TOK/S':>8} {'FIT':>10} {'RSN':>6} {'TOOLS':>9} {'AGENT':>7} {'EXACT':>7}  CAPABILITIES")
+    print("-"*114)
     for row in rows:
         model=row["model"]
         if row.get("fatal_error"):
-            print(f"{model:<28} {'—':>7} {'—':>8} {'ERROR':>10} {'error':>9} {'—':>7} {'—':>7}  fatal")
+            print(f"{model:<28} {'—':>7} {'—':>8} {'ERROR':>10} {'—':>6} {'error':>9} {'—':>7} {'—':>7}  fatal")
             print(f"  error · {row['fatal_error']}")
             continue
         if row.get("speed_error"):
             caps=_model_capability_label(row.get("caps"))
-            print(f"{model:<28} {'error':>7} {'—':>8} {'ERROR':>10} {'—':>9} {'—':>7} {'—':>7}  {caps}")
+            print(f"{model:<28} {'error':>7} {'—':>8} {'ERROR':>10} {'—':>6} {'—':>9} {'—':>7} {'—':>7}  {caps}")
             print(f"  speed error · {row['speed_error']}")
             continue
 
@@ -10964,11 +10995,13 @@ def ollama_test(all_models=False, base_override=None):
         caps=_model_capability_label(row.get("caps"))
         agent_text="yes" if row.get("agent") else "no"
         fit=_benchmark_runtime_fit(row)
+        reasoning_text=(f"{int(row.get('reasoning'))}/3" if isinstance(row.get("reasoning"),int) else "—")
         print(
             f"{model:<28} "
             f"{row['ttft']:>6.2f}s "
             f"{row['rate']:>8.1f} "
             f"{fit:>10} "
+            f"{reasoning_text:>6} "
             f"{tools_text:>9} "
             f"{agent_text:>7} "
             f"{('yes' if row['exact'] else 'no'):>7}  "
@@ -11010,6 +11043,79 @@ def ollama_test(all_models=False, base_override=None):
             pass
     return 0
 
+
+def ollama_test_resident_set(base_override=None):
+    """Measure whether the currently warm Ollama workers overlap under load.
+
+    Never cold-loads a model. It compares sequential and simultaneous micro-probes
+    so Fabric gets evidence about the resident set rather than guessing from size.
+    """
+    from concurrent.futures import ThreadPoolExecutor, as_completed
+    base=_normalize_ollama_url(base_override) if base_override else _ollama_base()
+    try:
+        running=_ollama_ps(base)
+    except Exception as exc:
+        print(f"LOOK OLLAMA · {exc}")
+        return 1
+    names=[]; vram={}
+    for item in running:
+        name=(item.get("name") or item.get("model") or "").strip()
+        if not name or name in names:
+            continue
+        names.append(name)
+        raw=item.get("size_vram")
+        if isinstance(raw,(int,float)):
+            vram[name]=float(raw)
+    print("LOOK RESIDENT SET TEST")
+    print("  warm models only · no cold loads · exact-response micro-probe")
+    if not names:
+        print("  resident   none")
+        return 1
+    print("  resident   " + ", ".join(names))
+    if len(names)<2:
+        print("  need at least two resident models to measure overlap")
+        return 1
+
+    def probe(name):
+        started=time.monotonic()
+        try:
+            ttft,rate,elapsed,exact=_benchmark_speed(base,name)
+            return {"model":name,"ok":True,"ttft":ttft,"rate":rate,"elapsed":elapsed,"exact":exact}
+        except Exception as exc:
+            return {"model":name,"ok":False,"error":str(exc),"elapsed":time.monotonic()-started}
+
+    seq_start=time.monotonic(); sequential=[]
+    for name in names:
+        sequential.append(probe(name))
+    seq_wall=time.monotonic()-seq_start
+
+    conc_start=time.monotonic(); concurrent=[]
+    with ThreadPoolExecutor(max_workers=len(names),thread_name_prefix="ollama-set") as pool:
+        futures=[pool.submit(probe,name) for name in names]
+        for fut in as_completed(futures):
+            concurrent.append(fut.result())
+    conc_wall=time.monotonic()-conc_start
+    concurrent.sort(key=lambda row:names.index(row["model"]))
+    seq_by={row["model"]:row for row in sequential}
+
+    print()
+    print(f"{'MODEL':<28} {'VRAM':>8} {'SEQ':>8} {'CONC':>8} {'TTFT':>8} {'TOK/S':>8} {'EXACT':>7}")
+    print("-"*83)
+    for row in concurrent:
+        name=row["model"]; seq=seq_by.get(name,{})
+        mem=(f"{vram[name]/1024**3:.1f}G" if name in vram else "—")
+        if not row.get("ok"):
+            print(f"{name:<28.28} {mem:>8} {float(seq.get('elapsed') or 0):>7.2f}s {'ERR':>8} {'—':>8} {'—':>8} {'—':>7}")
+            continue
+        print(f"{name:<28.28} {mem:>8} {float(seq.get('elapsed') or 0):>7.2f}s {float(row.get('elapsed') or 0):>7.2f}s "
+              f"{float(row.get('ttft') or 0):>7.2f}s {float(row.get('rate') or 0):>8.1f} {('yes' if row.get('exact') else 'no'):>7}")
+    overlap=(seq_wall/conc_wall) if conc_wall>0 else 0.0
+    print()
+    print(f"  sequential wall   {seq_wall:.2f}s")
+    print(f"  concurrent wall   {conc_wall:.2f}s")
+    print(f"  overlap factor    {overlap:.2f}x  (1.00x ≈ queued; higher means useful overlap)")
+    print("  note              micro-probe only; real contexts and KV pressure can change the result")
+    return 0
 
 
 def _settings_share_state():
@@ -13792,7 +13898,9 @@ def main():
     if cmd=="system": return _surface_system()
     if cmd=="clean": return _surface_clean()
     if cmd=="models": return ollama_models(rest[0] if rest else None, base_override=LOCAL_OLLAMA_URL)
-    if cmd=="benchmark": return ollama_test(all_models=("--all" in rest), base_override=LOCAL_OLLAMA_URL)
+    if cmd=="benchmark":
+        if "--resident-set" in rest: return ollama_test_resident_set(base_override=LOCAL_OLLAMA_URL)
+        return ollama_test(all_models=("--all" in rest), base_override=LOCAL_OLLAMA_URL)
     if cmd=="web": return ollama_key(["status"] if not rest else rest)
     if cmd=="reveal": return reveal_command(rest)
     if cmd=="open": return open_command(rest,False)
@@ -13933,6 +14041,8 @@ def main():
         if rest and rest[0]=="models":
             return ollama_models(rest[1] if len(rest)>1 else None)
         if rest and rest[0]=="test":
+            if "--resident-set" in rest[1:]:
+                return ollama_test_resident_set()
             return ollama_test(all_models=("--all" in rest[1:]))
         return inspect_ollama()
     if cmd=="env": return inspect_env()

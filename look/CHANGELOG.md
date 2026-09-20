@@ -1,3 +1,10 @@
+## 4.44.6 — Model roles + resident-set evidence
+
+- Model benchmarks now include three deterministic reasoning probes.
+- Add `lk ollama test --resident-set` to measure useful overlap among already-resident models without changing residency.
+- Fabric model telemetry exposes exact resident identities and raw purpose evidence rather than a single synthetic model score.
+- Full Dash leaves a one-column right gutter so PULSE remains visible.
+
 ## 4.44.5 — Adaptive Dash geometry
 
 - Responsive Dash now chooses by actual information fit and terminal geometry rather than height alone.

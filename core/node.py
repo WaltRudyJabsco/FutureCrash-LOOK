@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Future Crash + LOOK Unified Node 5.2.6.
+"""Future Crash + LOOK Unified Node 5.2.7.
 
 A small distributed supervisor for trusted personal machines. Immediate events stay
 asynchronous; a one-second fabric pulse reconciles presence, leases and stale work.
@@ -39,7 +39,7 @@ except ImportError:
     from memory_store import FabricMemory
 from urllib.parse import urlparse, parse_qs
 
-VERSION = "5.2.6"
+VERSION = "5.2.7"
 DEFAULT_HOST = "127.0.0.1"
 DEFAULT_PORT = 7332
 DEFAULT_INGRESS_PORT = 0
@@ -1495,7 +1495,7 @@ def _memory_sync() -> dict:
 
 
 class API(BaseHTTPRequestHandler):
-    server_version = "FCLNode/5.2.6"
+    server_version = "FCLNode/5.2.7"
 
     def setup(self):
         self._metric_request_id = None
@@ -1824,8 +1824,8 @@ def _target_post(host, port, target, path, payload, timeout=45.0):
 
 def _print_models(data, target="local"):
     print(f"FABRIC MODELS · {target}")
-    print("─"*146)
-    print(f"{'MODEL':<27} {'STATE':<9} {'LIVE TEST':<14} {'TTFT':>7} {'TOK/S':>7} {'BENCH':<9} {'TOOLS':>7} {'AGENT':>7} {'EXACT':>7}")
+    print("─"*176)
+    print(f"{'MODEL':<27} {'STATE':<9} {'LIVE TEST':<14} {'TTFT':>7} {'TOK/S':>7} {'BENCH':<9} {'PURPOSE EVIDENCE':<30} {'TOOLS':>7} {'AGENT':>7} {'EXACT':>7}")
     for m in data.get("models") or []:
         q=m.get("qualification") or {}; b=m.get("benchmark") or {}
         state="resident" if m.get("resident") else "available"
@@ -1835,11 +1835,12 @@ def _print_models(data, target="local"):
         rate_text=f"{float(rate):.1f}" if isinstance(rate,(int,float)) else "—"
         bench_state,_=_benchmark_state(m)
         bench=(str(b.get("fit") or "ERROR").upper() if bench_state!="untested" else "untested")
+        purpose=_purpose_label(m,compact=True) or "—"
         tools=(f"{b.get('tools')}/3" if isinstance(b.get('tools'),int) else "—")
         agent=("yes" if b.get("agent") else "no") if b.get("tested_at") else "—"
         exact=("yes" if b.get("exact") else "no") if b.get("tested_at") else "—"
         print(f"{str(m.get('name') or '?'):<27.27} {state:<9} {test:<14.14} {ttft_text:>7} {rate_text:>7} "
-              f"{bench:<9.9} {tools:>7} {agent:>7} {exact:>7}")
+              f"{bench:<9.9} {purpose:<30.30} {tools:>7} {agent:>7} {exact:>7}")
 
 
 def _watch(host,port,interval=1.0):
@@ -1973,8 +1974,59 @@ def _benchmark_label(model, compact=False):
     return f"{fit} · tools {tools if isinstance(tools,int) else '—'}/3 · agent {'yes' if agent else 'no'} · exact {'yes' if exact else 'no'} · {_dash_age(age)}"
 
 
+def _model_short_name(name):
+    """Human-scale model identity for dense Dash residency lists."""
+    name=str(name or "").strip()
+    if not name:
+        return "?"
+    base,sep,tag=name.partition(":")
+    low=base.casefold()
+    family=base
+    for prefix,short in (("qwen", "q"), ("gemma", "g"), ("llama", "l"),
+                         ("deepseek", "d"), ("mistral", "m"), ("phi", "p")):
+        if low.startswith(prefix):
+            family=short + base[len(prefix):]
+            break
+    family=family.replace("-", "")
+    return f"{family}:{tag}" if sep and tag else family
+
+
+def _purpose_label(model, compact=False):
+    """Expose benchmark evidence by purpose without pretending it is one IQ score."""
+    b=(model or {}).get("benchmark") or {}
+    if not b.get("tested_at"):
+        return ""
+    exact=b.get("exact")
+    ttft=b.get("ttft")
+    rate=b.get("rate")
+    reflex_parts=[]
+    if exact is not None:
+        reflex_parts.append(bool(exact))
+    if isinstance(ttft,(int,float)):
+        reflex_parts.append(float(ttft) <= 2.5)
+    if isinstance(rate,(int,float)) and float(rate) > 0:
+        reflex_parts.append(float(rate) >= 40.0)
+    reflex=sum(reflex_parts) if reflex_parts else None
+    reasoning=b.get("reasoning")
+    tools=b.get("tools")
+    agent=b.get("agent")
+    if compact:
+        bits=[]
+        if reflex is not None: bits.append(f"RFX{reflex}/{len(reflex_parts)}")
+        if isinstance(reasoning,int): bits.append(f"RSN{reasoning}/3")
+        if isinstance(tools,int): bits.append(f"T{tools}/3")
+        if agent is not None: bits.append("A✓" if agent else "A·")
+        return " ".join(bits)
+    bits=[]
+    if reflex is not None: bits.append(f"reflex {reflex}/{len(reflex_parts)}")
+    if isinstance(reasoning,int): bits.append(f"reasoning {reasoning}/3")
+    if isinstance(tools,int): bits.append(f"tools {tools}/3")
+    if agent is not None: bits.append(f"agent {'yes' if agent else 'no'}")
+    return " · ".join(bits)
+
+
 def _dash_model(node):
-    """Compact model truth: configured model, residency, live qualification and benchmark evidence."""
+    """Compact model truth: configured model, exact residency, live qualification and benchmark evidence."""
     inf = node.get("inference") or {}
     models = inf.get("models") or []
     preferred = str(inf.get("preferred_model") or "")
@@ -1984,18 +2036,25 @@ def _dash_model(node):
     if not primary_name:
         return "—"
     primary = by_name.get(primary_name) or {}
-    residency = "R" if primary_name in resident else "cold"
-    if len(resident) > 1:
-        residency = f"R{len(resident)}"
+    if not resident:
+        residency = "cold"
+    elif len(resident)==1 and resident[0]==primary_name:
+        residency = "R"
+    else:
+        residency = "R[" + ",".join(_model_short_name(x) for x in resident) + "]"
+        if primary_name not in resident:
+            residency = "cold+" + residency
     qualification = _qualification_label(primary, compact=True)
     rate = ((primary.get("qualification") or {}).get("generation_tok_s"))
     perf = f"{rate:g}t/s" if isinstance(rate, (int, float)) else ""
     bits = [primary_name, residency, qualification]
     if perf:
         bits.append(perf)
-    benchmark=_benchmark_label(primary,compact=True)
-    if benchmark != "B—":
-        bits.append(benchmark)
+    purpose=_purpose_label(primary,compact=True)
+    if purpose:
+        bits.append(purpose)
+    elif _benchmark_label(primary,compact=True) != "B—":
+        bits.append(_benchmark_label(primary,compact=True))
     return " · ".join(bits)
 
 
@@ -2149,7 +2208,9 @@ def _dash_render_full(data, width=92, ansi=False):
     jobs = (data.get("jobs") or {}).get("jobs") or []
     http = data.get("http") or {}
     events = (data.get("events") or {}).get("events") or []
-    width = max(72, min(int(width or 92), 132))
+    # Leave one physical terminal column unused. Some emulators wrap/clobber the
+    # final cell, which made the PULSE column appear chopped at the right edge.
+    width = max(72, min(max(72, int(width or 92) - 1), 131))
     rule = "─" * width
     now_text = time.strftime("%Y-%m-%d %I:%M:%S %p %Z")
     peers = [p for p in (snap.get("peers") or []) if p.get("node")]

@@ -45,7 +45,7 @@ def test_dash_model_summary_distinguishes_residency_and_qualification():
     }
     rendered = node._dash_model(info)
     assert "qwen3:8b" in rendered
-    assert "R2" in rendered
+    assert "R[q3:8b,g3:1b]" in rendered
     assert "Q 1m" in rendered
     assert "62t/s" in rendered
 
@@ -59,7 +59,8 @@ def _dash_fixture():
             "preferred_model":"qwen3.8:27b","resident":["qwen3.8:27b"],
             "models":[{"name":"qwen3.8:27b","resident":True,
                        "qualification":{"tested_at":t-60,"ok":True,"generation_tok_s":56.0},
-                       "benchmark":{"tested_at":t-120,"fit":"EXCELLENT","tools":3,"agent":True,"exact":True}}],
+                       "benchmark":{"tested_at":t-120,"fit":"EXCELLENT","tools":3,"agent":True,"exact":True,
+                                    "ttft":0.8,"rate":56.0,"reasoning":3}}],
         },
     }
     peer={"name":"m3","node_seen_at":t-2,"node":{
@@ -98,12 +99,12 @@ def test_dash_snapshot_without_height_remains_full():
     assert "SERVICES" in body
 
 
-def test_dash_model_includes_full_benchmark_evidence_compactly():
+def test_dash_model_includes_purpose_evidence_compactly():
     rendered=node._dash_model((_dash_fixture()["nodes"]["self"]))
-    assert "B:EXCE" in rendered
+    assert "RFX3/3" in rendered
+    assert "RSN3/3" in rendered
     assert "T3/3" in rendered
     assert "A✓" in rendered
-    assert "E✓" in rendered
 
 
 
@@ -141,3 +142,23 @@ def test_dash_live_lines_do_not_wrap_at_common_mac_widths():
         body=node._dash_render(_dash_fixture(),width,height=height,ansi=False)
         assert node._dash_visual_rows(body,width) <= height
         assert all(len(line) <= width for line in body.splitlines())
+
+
+def test_full_dash_leaves_right_edge_gutter_for_pulse_column():
+    body=node._dash_render(_dash_fixture(),92,height=60,ansi=False)
+    lines=body.splitlines()
+    node_header=next(line for line in lines if "PULSE" in line and "MODEL" in line)
+    assert len(node_header) <= 91
+    node_rows=[line for line in lines if line.startswith("3090") or line.startswith("m3 ")]
+    assert node_rows
+    assert all(len(line) <= 91 for line in node_rows)
+
+
+def test_purpose_label_is_raw_evidence_not_single_score():
+    model={"benchmark":{"tested_at":node.now(),"exact":True,"ttft":1.0,"rate":60.0,
+                        "reasoning":2,"tools":3,"agent":True}}
+    label=node._purpose_label(model,compact=True)
+    assert "RFX3/3" in label
+    assert "RSN2/3" in label
+    assert "T3/3" in label
+    assert "A✓" in label
