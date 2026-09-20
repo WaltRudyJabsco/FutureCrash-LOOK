@@ -48,3 +48,14 @@ class Test511Reliability(unittest.TestCase):
         self.assertIn('for weather_attempt in range(2):', text)
         self.assertIn('reason="transient_read_failure"', text)
         self.assertIn('read-only/idempotent edge', text)
+
+class Test520PersonaMemory(unittest.TestCase):
+    def test_installer_ships_fabric_memory(self):
+        install=(ROOT/'install.sh').read_text(encoding='utf-8')
+        self.assertIn('core/memory_store.py', install)
+        self.assertIn('import conductor, fabric_client, memory_store', install)
+
+    def test_node_exposes_memory_api(self):
+        source=(ROOT/'core'/'node.py').read_text(encoding='utf-8')
+        self.assertIn('if path == "/v1/memory":', source)
+        self.assertIn('_memory_sync()', source)

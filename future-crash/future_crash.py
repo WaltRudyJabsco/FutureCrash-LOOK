@@ -73,7 +73,7 @@ WHITE = CSI + "38;5;255m"
 GRAY = CSI + "38;5;245m"
 DARK = CSI + "38;5;239m"
 
-VERSION = "1.1.15"
+VERSION = "1.2.0"
 GLYPHS = "0123456789ABCDEF"
 SPARKS = "▁▂▃▄▅▆▇█"
 
@@ -2000,6 +2000,62 @@ class InferenceCoordinator:
         self.label=""
 
 
+# ---------- Shared conversational engine ----------
+
+def _shared_access_profile():
+    """Authority belongs to the user/session, never to the Oracle persona."""
+    allowed={"conservative","workspace","power","unsafe"}
+    for value in (os.environ.get("FUTURE_CRASH_PROFILE"), os.environ.get("LOOK_FUTURE_CRASH_PROFILE")):
+        value=str(value or "").strip().lower()
+        if value in allowed:
+            return value
+    try:
+        value=(Path.home()/".local/share/look/lo_access").read_text(encoding="utf-8").strip().lower()
+        if value in allowed:
+            return value
+    except OSError:
+        pass
+    return "workspace"
+
+
+def _shared_lo_chat(prompt, history=None, mode="ask"):
+    """Run Oracle through LOOK's canonical LO/Fabric engine.
+
+    Future Crash owns presentation. The shared engine owns trusted time, tools,
+    memory retrieval, routing, and canonical visible response extraction.
+    """
+    candidates=[
+        Path.home()/".local/share/look",
+        Path(__file__).resolve().parents[1]/"look",
+    ]
+    for path in candidates:
+        if (path/"lo_engine.py").exists() and str(path) not in sys.path:
+            sys.path.insert(0,str(path))
+    import lo_engine
+    clean=[]
+    local_context=[]
+    for row in list(history or [])[-12:]:
+        if not isinstance(row,dict):
+            continue
+        role=str(row.get("role") or "").lower()
+        text=str(row.get("content") or "").strip()
+        if role in {"user","assistant"} and text:
+            clean.append({"role":role,"content":text})
+        elif role=="system" and text:
+            local_context.append(text[:3000])
+    interface=(
+        "INTERFACE: Future Crash Oracle " + ("Workstation" if mode=="work" else "Ask") + ". "
+        "Return normal conversational prose only. Signal rendering is a separate sidecar. "
+        "Do not emit Signal receipts or renderer status into the conversation."
+    )
+    if local_context:
+        interface += "\n\nORACLE LOCAL MEMORY (this Future Crash instance only):\n" + "\n\n".join(local_context)[-4500:]
+    return lo_engine.chat_once(
+        str(prompt), profile=_shared_access_profile(), history=clean,
+        interface_context=interface, persona="oracle"
+    )
+
+
 # ---------- Ollama ----------
 
 class Oracle(threading.Thread):
@@ -2024,6 +2080,20 @@ class Oracle(threading.Thread):
                 continue
 
             try:
+                if kind in {"ask","work"}:
+                    try:
+                        result=_shared_lo_chat(prompt, history, mode=kind)
+                        text=str(result.get("text") or "").strip()
+                        if not text:
+                            raise RuntimeError("shared LO returned no visible response")
+                        self.responses.put((kind, text, None))
+                        continue
+                    except Exception as shared_exc:
+                        # Standalone Future Crash remains usable if LOOK is not installed,
+                        # but surface the reason in diagnostics rather than silently changing brains.
+                        if os.environ.get("FUTURE_CRASH_REQUIRE_FABRIC","0") == "1":
+                            raise shared_exc
+
                 messages = [
                     {"role":"system","content":_future_crash_personality()}
                 ]
@@ -2265,8 +2335,7 @@ class FutureCrash:
         self.rain = [self.rng.randint(0, 30) for _ in range(80)]
 
     def _model_label(self):
-        source="shared" if getattr(self.args,"follow_look_model",False) else "override"
-        return f"{self.oracle.model} · {source}"
+        return f"ORACLE · FABRIC:AUTO · {_shared_access_profile().upper()}"
 
     def _activity_label(self, kind):
         """Human-scale label for the one Oracle job currently in flight."""
@@ -3161,23 +3230,13 @@ class FutureCrash:
                 })
             self.ask_signal_required = _wants_signal(text)
             self.ask_signal_request = text
-            weather_location=_weather_intent(text)
-            if weather_location:
-                request={"name":"weather","location":weather_location}
-                self._queue_tool_request(request,"ask","",history)
-            else:
-                self._ask_oracle("ask", text, history)
+            self._ask_oracle("ask", text, history)
         else:
             self.work_log.append(("you", text))
             self.work_history.append({"role":"user","content":text})
             self.work_pending_user = text
 
             history = list(self.work_history)
-            weather_location=_weather_intent(text)
-            if weather_location:
-                request={"name":"weather","location":weather_location}
-                self._queue_tool_request(request,"work","",history)
-                return
             memory_packet = self.memory.context_packet()
             if memory_packet:
                 history = [{

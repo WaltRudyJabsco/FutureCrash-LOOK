@@ -1,13 +1,13 @@
 #!/usr/bin/env bash
 set -euo pipefail
 ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
-echo "Future Crash + LOOK 5.1.6 · Conversation Channels"
+echo "Future Crash + LOOK 5.2.0 · Personas + Fabric Memory"
 echo "────────────────────────────────────────"
 
 # Refuse a mixed bundle before mutating the machine. A unified release must move
 # LOOK and the node together.
 EXPECTED_RELEASE="$(tr -d '[:space:]' < "$ROOT/VERSION")"
-[[ "$EXPECTED_RELEASE" == "5.1.6" ]] || { echo "BUNDLE ERROR: expected release 5.1.6, found $EXPECTED_RELEASE"; exit 4; }
+[[ "$EXPECTED_RELEASE" == "5.2.0" ]] || { echo "BUNDLE ERROR: expected release 5.2.0, found $EXPECTED_RELEASE"; exit 4; }
 grep -q 'def _fabric_command' "$ROOT/look/lk" || { echo "BUNDLE ERROR: LOOK source has no Fabric command"; exit 4; }
 grep -q 'choices=.*serve.*fabric' "$ROOT/core/node.py" || { echo "BUNDLE ERROR: node source has no Fabric CLI"; exit 4; }
 
@@ -22,7 +22,7 @@ done
 ((UNINSTALL)) && exit 0
 if ((DRY_RUN)); then
   echo
-  echo "[dry-run] would install/restart Unified Node 5.1.6, Fabric dashboard, and Signal Window 1.1.2"
+  echo "[dry-run] would install/restart Unified Node 5.2.0, Persona Registry, Fabric Memory, and Signal Window 1.1.2"
   echo "[dry-run] would reconcile Tailscale :7332 → separate fcl-ingress :7333 and verify Fabric CLI wiring"
   exit 0
 fi
@@ -32,6 +32,7 @@ install -m 0755 "$ROOT/core/node.py" "$HOME/.local/share/future-crash-look/core/
 install -m 0644 "$ROOT/core/fabric_packet.py" "$HOME/.local/share/future-crash-look/core/fabric_packet.py"
 install -m 0644 "$ROOT/core/fabric_client.py" "$HOME/.local/share/future-crash-look/core/fabric_client.py"
 install -m 0644 "$ROOT/core/conductor.py" "$HOME/.local/share/future-crash-look/core/conductor.py"
+install -m 0644 "$ROOT/core/memory_store.py" "$HOME/.local/share/future-crash-look/core/memory_store.py"
 install -m 0755 "$ROOT/core/fcl-node" "$HOME/.local/bin/fcl-node"
 install -m 0755 "$ROOT/core/ingress.py" "$HOME/.local/share/future-crash-look/core/ingress.py"
 install -m 0755 "$ROOT/core/fcl-ingress" "$HOME/.local/bin/fcl-ingress"
@@ -123,8 +124,11 @@ fi
 if ! cmp -s "$ROOT/core/conductor.py" "$HOME/.local/share/future-crash-look/core/conductor.py"; then
   echo "INSTALL ERROR: installed conductor differs from release" >&2; exit 8
 fi
+if ! cmp -s "$ROOT/core/memory_store.py" "$HOME/.local/share/future-crash-look/core/memory_store.py"; then
+  echo "INSTALL ERROR: installed Fabric memory differs from release" >&2; exit 8
+fi
 if ! PYTHONPATH="$HOME/.local/share/future-crash-look/core" python3 - <<'PY_RUNTIME' >/dev/null 2>&1
-import conductor, fabric_client
+import conductor, fabric_client, memory_store
 assert conductor.classify("ping").tier == "reflex"
 assert callable(fabric_client.stream_infer)
 PY_RUNTIME

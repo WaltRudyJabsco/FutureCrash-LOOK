@@ -1,3 +1,25 @@
+# Future Crash + LOOK 5.2.0
+
+**Personas + Fabric Memory**
+
+5.2 makes the architecture explicit: **persona is presentation; Fabric is intelligence**. Future Crash Ask and X Workstation both speak as Oracle through the same LO/Fabric engine, with trusted time, tools, user access profile, scoped memory, and conductor routing. Oracle can land on the M4, M3, or 3090 without changing identity.
+
+New memory commands:
+
+```bash
+lk memory fabric
+lk memory shared
+lk memory persona oracle
+lk memory add-shared "..."
+lk memory add-persona oracle "..."
+lk memory add-local "..."
+lk memory sync
+```
+
+Fabric Memory is intentionally small and inspectable. Shared and persona scopes replicate across live trusted nodes; node scope stays local. Existing LO memory and Future Crash local memory are preserved.
+
+---
+
 # Future Crash + LOOK 5.1.6 — Conversation Channels
 
 

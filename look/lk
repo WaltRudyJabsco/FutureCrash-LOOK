@@ -19,7 +19,7 @@ try:
 except Exception:
     readline = None
 
-VERSION="4.41.0"
+VERSION="4.44.0"
 
 LOOK_WORDMARK = r"""       ██╗      ██╗  ██╗
        ██║      ██║ ██╔╝
@@ -1435,8 +1435,15 @@ MEMORY + CRAFT
   lk memory            inspect Living Memory: core summary, durable domains/atoms,
                        recent conversation, candidates, compiler diagnostics
                        candidates are cheap hypotheses; durable memory must earn promotion
-  lk memory add TEXT   add a candidate memory (default importance 60)
+  lk memory add TEXT   add a local LO candidate memory (default importance 60)
   lk memory add TEXT --importance N
+  lk memory shared     inspect Fabric-wide shared memory
+  lk memory persona [NAME]  inspect persona-scoped Fabric memory
+  lk memory local      inspect this node's local Fabric memory
+  lk memory add-shared TEXT [--importance N]
+  lk memory add-persona NAME TEXT [--importance N]
+  lk memory add-local TEXT [--importance N]
+  lk memory sync       merge shared/persona memory across live Fabric nodes
                        add with importance 1–100
   lk memory forget TEXT
                        remove matching candidate + durable atomic memories
@@ -1491,7 +1498,7 @@ ACCESS + PERMISSIONS
 
 LO PERSONALITY + THINKING
   lk personality       show personality choices
-  lk personality NAME  lo · robot · max · philosopher
+  lk personality NAME  lo · robot · max · philosopher · oracle · pirate
   lk thinking          show thinking depth
   lk thinking MODE     light · adaptive · deep
   lk think-display     show thinking presentation
@@ -2615,6 +2622,18 @@ def _compile_memory(base,model,memory,force=False):
     return memory,changed
 
 
+def _fabric_memory_context(query="", persona=None):
+    try:
+        candidates=[Path.home()/".local/share/future-crash-look/core", ROOT.parent/"core"]
+        for path in candidates:
+            if (path/"memory_store.py").exists() and str(path) not in sys.path:
+                sys.path.insert(0,str(path))
+        from memory_store import context_text
+        return context_text(persona=persona or _load_personality(), query=query, limit=8)
+    except Exception:
+        return ""
+
+
 def _memory_context(memory,query=""):
     parts=[]
     core=str(memory.get("core_summary","")).strip()
@@ -2654,9 +2673,13 @@ def _memory_context(memory,query=""):
         core_text=skills=""
     if core_text: parts.insert(0,core_text)
     if skills: parts.insert(1 if core_text else 0,skills)
-    personality=_personality_text()
+    personality_name=_load_personality()
+    personality=_personality_text(personality_name)
     if personality:
         parts.insert((1 if core_text else 0)+(1 if skills else 0),personality)
+    fabric_memory=_fabric_memory_context(query, personality_name)
+    if fabric_memory:
+        parts.append(fabric_memory)
     return "\n\n".join(parts)
 
 
@@ -2740,8 +2763,85 @@ def _forget_memory(fragment):
     return (before_candidates-len(memory["memories"]))+(before_durable-len(memory["durable"]))
 
 
+def _fabric_memory_store():
+    candidates=[Path.home()/".local/share/future-crash-look/core", ROOT.parent/"core"]
+    for path in candidates:
+        if (path/"memory_store.py").exists() and str(path) not in sys.path:
+            sys.path.insert(0,str(path))
+    from memory_store import FabricMemory, node_name
+    return FabricMemory(), node_name()
+
+
+def _fabric_memory_sync():
+    try:
+        req=urllib.request.Request("http://127.0.0.1:7332/v1/memory",
+            data=json.dumps({"action":"sync"}).encode(), headers={"Content-Type":"application/json"})
+        with urllib.request.urlopen(req,timeout=4.0) as response:
+            return json.loads(response.read() or b"{}")
+    except Exception as exc:
+        return {"ok":False,"error":str(exc)}
+
+
+def _fabric_memory_show(scope=None):
+    store,node=_fabric_memory_store()
+    items=store.public(include_local=True).get("items") or []
+    if scope:
+        items=[x for x in items if str(x.get("scope") or "").lower()==scope.lower()]
+    _title("Fabric memory")
+    print(f"  NODE {node} · {len(items)} item(s)")
+    if not items:
+        print("  No memories in this scope.")
+        return 0
+    for item in sorted(items,key=lambda x:(str(x.get("scope")), -int(x.get("importance") or 0), -float(x.get("updated_at") or 0))):
+        text=str(item.get("text") or "")
+        shown=text if len(text)<=92 else text[:89]+"…"
+        print(f"  {str(item.get('scope','')):<20} {int(item.get('importance') or 0):>3}  {shown}")
+    return 0
+
+
 def _memory_command(args):
     memory=_load_memory()
+    if args and args[0] in {"shared","local","persona","fabric","sync","add-shared","add-persona","add-local"}:
+        cmd=args[0]
+        if cmd=="sync":
+            result=_fabric_memory_sync()
+            if result.get("ok"):
+                print(f"Fabric memory synced · {result.get('count',0)} replicated item(s) · pulled {result.get('pulled',0)} · pushed {result.get('pushed',0)}")
+                return 0
+            print(f"Fabric memory sync failed · {result.get('error','unknown error')}")
+            return 1
+        if cmd in {"shared","local","persona","fabric"}:
+            if cmd=="shared": scope="shared"
+            elif cmd=="local":
+                _,node=_fabric_memory_store(); scope="node:"+node.lower()
+            elif cmd=="persona": scope="persona:"+str(args[1] if len(args)>1 else _load_personality()).lower()
+            else: scope=None
+            return _fabric_memory_show(scope)
+        store,node=_fabric_memory_store()
+        words=list(args[1:]); importance=60
+        if "--importance" in words:
+            i=words.index("--importance")
+            try: importance=int(words[i+1])
+            except (ValueError,IndexError):
+                print("importance must be 1–100"); return 2
+            words=words[:i]+words[i+2:]
+        if cmd=="add-persona":
+            if len(words)<2:
+                print("usage: lk memory add-persona NAME TEXT [--importance N]"); return 2
+            scope="persona:"+words.pop(0).lower()
+        elif cmd=="add-shared": scope="shared"
+        else: scope="node:"+node.lower()
+        if not words:
+            print(f"usage: lk memory {cmd} TEXT [--importance N]"); return 2
+        item=store.add(scope," ".join(words),importance)
+        print(f"Fabric memory saved · {item.get('scope')} · {item.get('id')}")
+        if scope=="shared" or scope.startswith("persona:"):
+            result=_fabric_memory_sync()
+            if result.get("ok"):
+                print(f"  synced across Fabric · {result.get('count',0)} replicated item(s)")
+            else:
+                print("  saved locally; Fabric sync unavailable")
+        return 0
     if args and args[0]=="clear":
         if not _confirm("Clear LO user memory? [y/N] "): return 1
         _save_memory(_empty_memory())
@@ -2861,6 +2961,16 @@ def _memory_command(args):
             print(f"  worker error · {str(memory.get('last_worker_error'))[:120]}")
         print("  recent stores both sides of each exchange; display shows user side only")
         print("  candidates are cheap hypotheses; durable atoms earn promotion; compiler rewrites compact domain summaries")
+        try:
+            fstore,fnode=_fabric_memory_store()
+            fitems=fstore.public(include_local=True).get("items") or []
+            shared=sum(1 for x in fitems if x.get("scope")=="shared")
+            persona=sum(1 for x in fitems if str(x.get("scope") or "").startswith("persona:"))
+            local=sum(1 for x in fitems if str(x.get("scope") or "").startswith("node:"))
+            print(f"  Fabric memory · shared {shared} · persona {persona} · local {local} · node {fnode}")
+            print("  use `lk memory fabric` to inspect scopes; `lk memory sync` to reconcile peers")
+        except Exception:
+            pass
     _page_text(buf.getvalue())
     return 0
 
@@ -5578,7 +5688,7 @@ LO_PROFILES=("conservative","workspace","power","unsafe")
 _SESSION_COMMAND_GRANTS=set()
 
 
-LO_PERSONALITIES=("lo","robot","max","philosopher")
+LO_PERSONALITIES=("lo","robot","max","philosopher","oracle","pirate")
 LO_THINKING=("light","adaptive","deep")
 LO_THINK_DISPLAY=("compact","full","quiet")
 
@@ -6342,6 +6452,8 @@ def lo_personality(args):
         "robot":"dry · strange · retro-futurist",
         "max":"rapid · punchy · synthetic-TV energy",
         "philosopher":"reflective · first-principles · poetic restraint",
+        "oracle":"Future Crash · dry · compact · signal-aware",
+        "pirate":"nautical · capable · restrained mischief",
     })
 
 def lo_thinking(args):
@@ -7813,7 +7925,7 @@ def _run_filesystem_tool_impl(workspace, name, args, profile="workspace"):
         return f"File tool internal error: {type(exc).__name__}: {exc}"
     return f"Unknown file tool: {name}"
 
-LOOK_INFO_USER_AGENT="LOOK-Shell/4.43.3 (local text client)"
+LOOK_INFO_USER_AGENT="LOOK-Shell/4.44.0 (local text client)"
 
 def _run_filesystem_tool(workspace, name, args, profile="workspace"):
     global _FILESYSTEM_ACCESS_PROFILE

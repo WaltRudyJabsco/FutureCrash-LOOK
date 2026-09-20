@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Future Crash + LOOK Unified Node 5.1.0.
+"""Future Crash + LOOK Unified Node 5.2.0.
 
 A small distributed supervisor for trusted personal machines. Immediate events stay
 asynchronous; a one-second fabric pulse reconciles presence, leases and stale work.
@@ -32,9 +32,13 @@ try:
     from .fabric_packet import ArtifactStore, FabricStore, normalize_packet, packet_summary, new_id
 except ImportError:
     from fabric_packet import ArtifactStore, FabricStore, normalize_packet, packet_summary, new_id
+try:
+    from .memory_store import FabricMemory
+except ImportError:
+    from memory_store import FabricMemory
 from urllib.parse import urlparse, parse_qs
 
-VERSION = "5.1.6"
+VERSION = "5.2.0"
 DEFAULT_HOST = "127.0.0.1"
 DEFAULT_PORT = 7332
 DEFAULT_INGRESS_PORT = 0
@@ -59,6 +63,7 @@ FABRIC_DB = STATE / "fabric.sqlite3"
 ARTIFACT_ROOT = STATE / "artifacts"
 FABRIC_STORE = FabricStore(FABRIC_DB)
 ARTIFACTS = ArtifactStore(ARTIFACT_ROOT)
+FABRIC_MEMORY = FabricMemory()
 WORKER_HEALTH = {"alive": False, "last_loop": 0.0, "last_error": None, "errors": 0}
 IDENTITY_LOCK = threading.RLock()
 IDENTITY_CACHE = {"name": socket.gethostname(), "hostname": socket.gethostname(), "tailscale": {}}
@@ -1445,8 +1450,38 @@ def _lights_broadcast(pattern="demo", *, show_id=None, start_pulse=None, repeat=
             "expected": len(deliveries)}
 
 
+def _memory_sync() -> dict:
+    """Explicit bounded peer merge of shared/persona memory."""
+    snapshot = {"self": node_info(), "peers": PEERS.public()}
+    combined = list(FABRIC_MEMORY.public(include_local=False).get("items") or [])
+    pulled = pushed = failures = 0
+    peers = snapshot.get("peers") or {}
+    if isinstance(peers, dict):
+        peer_names = list(peers.keys())
+    else:
+        peer_names = [str(x.get("name") or "") for x in peers if isinstance(x, dict) and x.get("name")]
+    for name in peer_names:
+        try:
+            remote = http_json(_remote_url(snapshot, name, "/v1/memory"), timeout=.8)
+            combined.extend(remote.get("items") or [])
+            pulled += 1
+        except Exception:
+            failures += 1
+    merged = FABRIC_MEMORY.merge(combined)
+    union = FABRIC_MEMORY.public(include_local=False).get("items") or []
+    for name in peer_names:
+        try:
+            http_json(_remote_url(snapshot, name, "/v1/memory"), {"action":"merge", "items": union}, timeout=.8)
+            pushed += 1
+        except Exception:
+            failures += 1
+    FABRIC_STORE.event(None, "memory", "sync", f"{len(union)} shared/persona memories",
+                       node=identity()["name"], data={"pulled":pulled,"pushed":pushed,"failures":failures})
+    return {"ok": True, "count": len(union), "pulled": pulled, "pushed": pushed, "failures": failures, "merge": merged}
+
+
 class API(BaseHTTPRequestHandler):
-    server_version = "FCLNode/5.1.6"
+    server_version = "FCLNode/5.2.0"
 
     def setup(self):
         self._metric_request_id = None
@@ -1536,6 +1571,8 @@ class API(BaseHTTPRequestHandler):
                 return self.sendj(404, {"error": "job not found"})
             job["packet_full"] = FABRIC_STORE.get_packet(pid)
             return self.sendj(200, job)
+        if path == "/v1/memory":
+            return self.sendj(200, FABRIC_MEMORY.public(include_local=True))
         if path == "/v1/lights":
             events = FABRIC_STORE.recent_events(limit=96)
             return self.sendj(200, {"pulse": pulse_number(), "light": _active_beacon(events)})
@@ -1564,6 +1601,19 @@ class API(BaseHTTPRequestHandler):
     def do_POST(self):
         path = urlparse(self.path).path
         d = self.body()
+        if path == "/v1/memory":
+            try:
+                action=str(d.get("action") or "merge").lower()
+                if action == "add":
+                    item=FABRIC_MEMORY.add(str(d.get("scope") or "shared"), str(d.get("text") or ""), int(d.get("importance") or 60), identity()["name"])
+                    return self.sendj(200, {"ok":True,"item":item})
+                if action == "merge":
+                    return self.sendj(200, FABRIC_MEMORY.merge(d.get("items") or []))
+                if action == "sync":
+                    return self.sendj(200, _memory_sync())
+                return self.sendj(400, {"ok":False,"error":"memory action must be add, merge, or sync"})
+            except ValueError as exc:
+                return self.sendj(400, {"ok":False,"error":str(exc)})
         if path == "/v1/beacon":
             try:
                 if d.get("start_pulse"):

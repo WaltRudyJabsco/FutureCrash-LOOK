@@ -98,7 +98,7 @@ def available() -> bool:
 
 
 def chat_once(prompt: str, *, profile='workspace', workspace=None, selected_paths=None,
-              history=None, interface_context=None):
+              history=None, interface_context=None, persona=None):
     """Run one LO operator turn and return structured machine data."""
     core=_load_core()
     _load_web_key()
@@ -112,7 +112,10 @@ def chat_once(prompt: str, *, profile='workspace', workspace=None, selected_path
     # callers consume EventCollector instead; stdout/stderr never become a protocol.
     with _CHAT_LOCK, contextlib.redirect_stdout(out), contextlib.redirect_stderr(err):
         old=os.environ.get('LOOK_PRESENTATION')
+        old_persona=os.environ.get('LOOK_LO_PERSONALITY')
         os.environ['LOOK_PRESENTATION']='browser'
+        if persona:
+            os.environ['LOOK_LO_PERSONALITY']=str(persona).strip().lower()
         try:
             rc=core.ollama_chat(
                 initial_prompt=str(prompt), allow_start=True,
@@ -125,6 +128,11 @@ def chat_once(prompt: str, *, profile='workspace', workspace=None, selected_path
                 os.environ.pop('LOOK_PRESENTATION',None)
             else:
                 os.environ['LOOK_PRESENTATION']=old
+            if persona:
+                if old_persona is None:
+                    os.environ.pop('LOOK_LO_PERSONALITY',None)
+                else:
+                    os.environ['LOOK_LO_PERSONALITY']=old_persona
 
     response=''
     error=''
@@ -139,4 +147,4 @@ def chat_once(prompt: str, *, profile='workspace', workspace=None, selected_path
         raise RuntimeError(error)
     if not response:
         raise RuntimeError('LO completed without a final response')
-    return {'text':response,'events':events.rows,'returncode':int(rc or 0)}
+    return {'text':response,'events':events.rows,'returncode':int(rc or 0),'persona':str(persona or '')}
