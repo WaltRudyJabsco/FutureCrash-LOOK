@@ -1,3 +1,11 @@
+# 5.2.3 — Dash Polish
+
+- RECENT uses the same semantic color vocabulary as ambient activity flashes.
+- Mini Dash (`m`) provides a compact activity instrument for small terminal windows.
+- Removed broken Freeze and redundant Activity Color hotkeys; ambient colors are normal Dash behavior.
+- Beacon and Lights remain explicit Fabric-wide test/demo controls.
+- Quiet events may remain visible in RECENT without flashing; stream/token noise stays suppressed.
+
 # 5.2.2 — Ambient Fabric
 
 - `lk dash` now uses brief, restrained whole-terminal color flashes as passive Fabric telemetry: blue dispatch, amber inference, cyan capability/memory work, green success, red failure/cancel, purple general/remote work.

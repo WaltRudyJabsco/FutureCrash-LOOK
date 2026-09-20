@@ -1,3 +1,7 @@
+## 4.44.2 — Dash polish
+
+- Color-coded RECENT, Mini Dash, simpler controls, no Freeze/Activity toggle.
+
 ## 4.44.1 — Ambient Fabric dashboard
 
 - `lk dash` renders meaningful Fabric state transitions as optional, restrained ambient color flashes.

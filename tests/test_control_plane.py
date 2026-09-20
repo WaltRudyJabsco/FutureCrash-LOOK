@@ -117,7 +117,9 @@ class ControlPlaneTests(unittest.TestCase):
         self.assertIn("CONTROL PLANE", text)
         self.assertIn("conn 10", text)
         self.assertIn("CONTROL PLANE", text)
-        self.assertIn("[f] freeze", text)
+        self.assertIn("[m] mini", text)
+        self.assertNotIn("[f] freeze", text)
+        self.assertNotIn("[a] activity color", text)
 
 
     def test_ingress_metrics_distinguish_connections_from_http_requests(self):
