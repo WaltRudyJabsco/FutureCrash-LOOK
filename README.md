@@ -1210,6 +1210,8 @@ LOOK's canonical namespace is `lk`. The fast collision-resistant view commands a
 
 `lk ollama test` reports capability and interactive runtime separately. `FIT` is based on broad warm TTFT/generation-rate thresholds (EXCELLENT, GOOD, SLOW, POOR). A POOR result is a prompt to inspect `lk ai stats` and `ollama ps`; timing alone is not treated as proof of GPU spill.
 
+`lk ollama test --all` is the platform qualification sweep: disabled models are skipped, each enabled model is tested alone at 4096 context, cold load time is separated from a three-sample warm median, and the prior resident set is restored afterward. Run it locally on each node so the resulting benchmark describes that machine. `lk ollama curate` then combines those node-local measurements with the node-local enabled/disabled model policy and current GPU pressure.
+
 
 ### Settings control room
 

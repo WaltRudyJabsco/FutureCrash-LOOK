@@ -24,6 +24,8 @@ PACKET_KINDS = {"task", "event", "observation", "result", "artifact", "control"}
 PRIORITIES = {"interactive", "followup", "background"}
 MAX_PACKET_BYTES = 512 * 1024
 MAX_INLINE_ARTIFACT_BYTES = 8 * 1024 * 1024
+EVENT_RETENTION_ROWS = 20000
+EVENT_RETENTION_SECONDS = 7 * 24 * 60 * 60
 
 
 def utc_ts() -> float:
@@ -283,9 +285,15 @@ class FabricStore:
 
     def event(self, pid: str | None, typ: str, phase: str | None, detail: str | None, *, node: str, data: dict[str, Any] | None = None):
         with self.lock, closing(self._connect()) as db:
-            db.execute("INSERT INTO events(ts,job_id,type,phase,detail,node,data_json) VALUES(?,?,?,?,?,?,?)",
+            cur=db.execute("INSERT INTO events(ts,job_id,type,phase,detail,node,data_json) VALUES(?,?,?,?,?,?,?)",
                        (utc_ts(), pid, typ, phase, detail, node,
-                        json.dumps(data or {}, separators=(",", ":"), ensure_ascii=False)))
+                        json.dumps(data or {}, separators=(",",":"), ensure_ascii=False)))
+            # The event ledger is an operational tail, not an infinite message queue.
+            # Prune occasionally so disconnected dashboards cannot create permanent debt.
+            seq=int(cur.lastrowid or 0)
+            if seq and seq % 256 == 0:
+                db.execute("DELETE FROM events WHERE ts < ?", (utc_ts()-EVENT_RETENTION_SECONDS,))
+                db.execute("DELETE FROM events WHERE seq <= ?", (max(0,seq-EVENT_RETENTION_ROWS),))
             db.commit()
 
     def events(self, *, since: int = 0, limit: int = 128) -> list[dict[str, Any]]:

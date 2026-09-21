@@ -10626,6 +10626,55 @@ def ollama_models(select_model=None, base_override=None):
     return 0
 
 
+def _benchmark_guard(active, ttl=3600):
+    """Best-effort local node guard so background model management cannot contaminate a sweep."""
+    if not _is_local_ollama(_ollama_base()):
+        return False
+    payload={"active":bool(active),"ttl":int(ttl),"reason":"lk ollama test"}
+    try:
+        req=urllib.request.Request(
+            "http://127.0.0.1:7332/v1/models/benchmark-guard",
+            data=json.dumps(payload).encode("utf-8"),
+            headers={"Content-Type":"application/json"}, method="POST")
+        with urllib.request.urlopen(req,timeout=3) as response:
+            json.loads(response.read().decode("utf-8","replace"))
+        return True
+    except Exception:
+        return False
+
+
+def _unload_all_ollama(base):
+    """Unload every resident Ollama model on one endpoint; used only by isolated benchmarks."""
+    try:
+        running=_ollama_ps(base)
+    except Exception:
+        running=[]
+    for item in running:
+        name=(item.get("name") or item.get("model") or "").strip()
+        if not name:
+            continue
+        try:
+            _ollama_post(base,"/api/generate",{"model":name,"keep_alive":0},timeout=30)
+        except Exception:
+            pass
+
+
+def _restore_resident_set(base, names):
+    """Restore the pre-benchmark warm set at the canonical 4096 context."""
+    _unload_all_ollama(base)
+    restored=[]
+    for name in names:
+        try:
+            _ollama_post(base,"/api/generate",{
+                "model":name,"prompt":"","stream":False,"keep_alive":-1,
+                "options":{"num_ctx":4096},
+            },timeout=180)
+            restored.append(name)
+        except Exception:
+            pass
+    return restored
+
+
 def _benchmark_tool(name, description, properties, required):
     return {
         "type":"function",
@@ -10725,19 +10774,52 @@ def _tool_call(result):
     return str(fn.get("name") or ""), fn.get("arguments") or {}
 
 
-def _benchmark_one_model(base, model):
-    """Small LOOK-specific test: responsiveness first, then tools only when supported."""
-    results={"model":model}
+def _benchmark_one_model(base, model, isolated=False):
+    """LOOK-specific capability test plus comparable warm performance evidence.
+
+    In isolated mode the target is the only Ollama resident model. Load time is
+    reported separately; one stabilization pass is discarded and warm speed uses
+    the median of three identical probes.
+    """
+    import statistics
+    results={"model":model,"performance_scope":"isolated" if isolated else "ambient"}
     caps=_ollama_capabilities(base,model)
     results["caps"]=caps
 
-    # Warm/load before timing so model-load time does not masquerade as token latency.
-    _ollama_post(base, "/api/generate", {"model":model, "prompt":"", "keep_alive":"10m"}, timeout=180)
+    if isolated:
+        _unload_all_ollama(base)
 
-    # Speed/basic behavior is useful even when the model cannot call tools.
+    # Time model residency separately from TTFT. Never let a cold load masquerade
+    # as interactive token latency.
+    load_started=time.monotonic()
+    _ollama_post(base, "/api/generate", {
+        "model":model,"prompt":"","stream":False,"keep_alive":-1,
+        "options":{"num_ctx":4096},
+    }, timeout=180)
+    results["load_s"]=time.monotonic()-load_started
+
+    # Capture the actual residency split Ollama achieved on this machine.
     try:
-        ttft, rate, total, exact=_benchmark_speed(base, model)
-        results.update(ttft=ttft, rate=rate, total=total, exact=exact)
+        ps=_ollama_ps(base)
+        row=next((x for x in ps if (x.get("name") or x.get("model"))==model),None) or {}
+        total=float(row.get("size") or 0); gpu=float(row.get("size_vram") or 0)
+        results["resident_size"]=int(total) if total else None
+        results["resident_vram"]=int(gpu) if gpu else None
+        results["gpu_pct"]=(100.0*gpu/total) if total>0 else None
+    except Exception:
+        pass
+
+    # Stabilize prompt/cache/runtime state, then measure three equal warm probes.
+    try:
+        _benchmark_speed(base,model)
+        samples=[_benchmark_speed(base,model) for _ in range(3)]
+        results.update(
+            ttft=statistics.median(x[0] for x in samples),
+            rate=statistics.median(x[1] for x in samples),
+            total=statistics.median(x[2] for x in samples),
+            exact=all(bool(x[3]) for x in samples),
+            performance_samples=[{"ttft":x[0],"rate":x[1],"total":x[2],"exact":bool(x[3])} for x in samples],
+        )
     except Exception as exc:
         results["speed_error"]=str(exc)
         return results
@@ -10752,8 +10834,6 @@ def _benchmark_one_model(base, model):
 
     declared_tools=None if caps is None else ("tools" in caps)
     results["declared_tools"]=declared_tools
-
-    # If Ollama explicitly says tools are unsupported, do not turn that into a benchmark crash.
     if declared_tools is False:
         results["tools"]=None
         return results
@@ -10771,68 +10851,36 @@ def _benchmark_one_model(base, model):
         {"query":{"type":"string"}},["query"]
     )
 
-    checks=[]
-    tool_errors=[]
+    checks=[]; tool_errors=[]
     tests=[
-        (
-            "read",
-            "Read README.txt before answering what this project is.",
-            [read_tool],
-            lambda name,args: name=="read_file" and str(args.get("path","")).endswith("README.txt"),
-        ),
-        (
-            "copy",
-            "Copy alpha.txt to alpha-copy.txt. Do not rewrite the file.",
-            [copy_tool,read_tool],
-            lambda name,args: (
-                name=="copy_path"
-                and str(args.get("source","")).endswith("alpha.txt")
-                and str(args.get("destination","")).endswith("alpha-copy.txt")
-            ),
-        ),
-        (
-            "web",
-            "What is the latest Ollama release? Use current information.",
-            [web_tool],
-            lambda name,args: name=="web_search" and bool(str(args.get("query","")).strip()),
-        ),
+        ("read","Read README.txt before answering what this project is.",[read_tool],
+         lambda name,args: name=="read_file" and str(args.get("path","")).endswith("README.txt")),
+        ("copy","Copy alpha.txt to alpha-copy.txt. Do not rewrite the file.",[copy_tool,read_tool],
+         lambda name,args: name=="copy_path" and str(args.get("source","")).endswith("alpha.txt") and str(args.get("destination","")).endswith("alpha-copy.txt")),
+        ("web","What is the latest Ollama release? Use current information.",[web_tool],
+         lambda name,args: name=="web_search" and bool(str(args.get("query","")).strip())),
     ]
     for label,prompt,tools,judge in tests:
         try:
             response=_benchmark_chat(base,model,prompt,tools)
-            name,args=_tool_call(response)
-            passed=bool(judge(name,args))
-            results[label]=passed
-            checks.append(passed)
+            name,args=_tool_call(response); passed=bool(judge(name,args))
+            results[label]=passed; checks.append(passed)
         except Exception as exc:
-            results[label]=False
-            checks.append(False)
-            tool_errors.append(f"{label}: {exc}")
-
+            results[label]=False; checks.append(False); tool_errors.append(f"{label}: {exc}")
     results["tools"]=sum(checks)
 
-    # Separate from schema judgment: can the model cross from natural reasoning
-    # into a real tool call without being explicitly told which tool to invoke?
     run_tool=_benchmark_tool(
-        "run_command",
-        "Run a shell command on the computer when inspection requires it.",
+        "run_command","Run a shell command on the computer when inspection requires it.",
         {"command":{"type":"string"}},["command"]
     )
     try:
-        response=_benchmark_chat(
-            base,model,
-            "What version of Ollama is installed on this computer? Determine it directly rather than telling me how to check.",
-            [run_tool]
-        )
-        name,args=_tool_call(response)
-        command=" ".join(str(args.get("command","")).split())
+        response=_benchmark_chat(base,model,
+            "What version of Ollama is installed on this computer? Determine it directly rather than telling me how to check.",[run_tool])
+        name,args=_tool_call(response); command=" ".join(str(args.get("command","")).split())
         results["agent"]=bool(name=="run_command" and command=="ollama --version")
     except Exception as exc:
-        results["agent"]=False
-        tool_errors.append(f"agent: {exc}")
-
-    if tool_errors:
-        results["tool_error"]="; ".join(tool_errors)
+        results["agent"]=False; tool_errors.append(f"agent: {exc}")
+    if tool_errors: results["tool_error"]="; ".join(tool_errors)
     return results
 
 
@@ -10888,6 +10936,12 @@ def _record_ollama_benchmark(base,row):
         "base":_normalize_ollama_url(base),
         "scope":"local" if _is_local_ollama(base) else "remote",
         "fit":_benchmark_runtime_fit(row),
+        "performance_scope":row.get("performance_scope"),
+        "load_s":row.get("load_s"),
+        "gpu_pct":row.get("gpu_pct"),
+        "resident_size":row.get("resident_size"),
+        "resident_vram":row.get("resident_vram"),
+        "performance_samples":row.get("performance_samples"),
         "ttft":row.get("ttft"),
         "rate":row.get("rate"),
         "tools":row.get("tools"),
@@ -10910,148 +10964,85 @@ def ollama_test(all_models=False, base_override=None):
     base=_normalize_ollama_url(base_override) if base_override else _ollama_base()
     running=_ensure_ollama_server(base, allow_start=_is_local_ollama(base))
     if running is None:
-        print("LOOK OLLAMA · server unavailable")
-        return 1
+        print("LOOK OLLAMA · server unavailable"); return 1
 
-    # Capture endpoint-scoped preference before a sweep unloads models.
-    try:
-        installed_before=_ollama_tags(base)
-    except Exception:
-        installed_before=[]
-    preferred_before=_preferred_model_for_base(base,installed=installed_before,running=running)
+    try: installed=_ollama_tags(base)
+    except Exception as exc:
+        print(f"LOOK OLLAMA · {exc}"); return 1
+    try: resident_before=[(m.get("name") or m.get("model") or "").strip() for m in _ollama_ps(base)]
+    except Exception: resident_before=[]
+    resident_before=[m for m in resident_before if m]
 
     disabled=_load_ollama_model_prefs()
+    names=[(m.get("name") or m.get("model") or "").strip() for m in installed]
+    names=[m for m in names if m]
     if all_models:
-        try:
-            installed=_ollama_tags(base)
-        except Exception as exc:
-            print(f"LOOK OLLAMA · {exc}")
-            return 1
-        models=[(m.get("name") or m.get("model") or "").strip() for m in installed]
-        models=[m for m in models if m and m not in disabled]
+        models=[m for m in names if m not in disabled]
     else:
-        # `lk ollama test` means the model selected in LOOK, not whichever
-        # model happens to be resident in Ollama right now.
-        try:
-            installed=_ollama_tags(base)
-        except Exception as exc:
-            print(f"LOOK OLLAMA · {exc}")
-            return 1
-        installed_names=[
-            (m.get("name") or m.get("model") or "").strip()
-            for m in installed
-        ]
-        installed_names=[m for m in installed_names if m]
         active=_preferred_model_for_base(base,installed=installed,running=running)
-        if active in installed_names:
-            models=[active]
-        else:
+        if active not in names:
             print(f"LOOK OLLAMA · active model is not installed on this host: {active}")
-            if installed_names:
-                print("  choose an installed model with `lk ollama models`")
+            if names: print("  choose an installed model with `lk ollama models`")
             return 1
-
+        models=[active]
     if not models:
-        if all_models and disabled:
-            print("LOOK OLLAMA · no enabled models to test · use lk ollama models and X to enable one")
-        else:
-            print("LOOK OLLAMA · no models to test")
+        print("LOOK OLLAMA · no enabled models to test" if all_models else "LOOK OLLAMA · no models to test")
         return 1
 
+    isolated=bool(all_models)
+    guarded=_benchmark_guard(True) if isolated and _is_local_ollama(base) else False
     print("LOOK MODEL TEST")
-    print("  warm-model TTFT · generation rate · runtime fit · exact response · reasoning · tool judgment · natural agent execution")
+    if isolated:
+        print("  isolated per-model sweep · target alone · 4096 context · 1 stabilization + 3 warm samples")
+        print("  cold load reported separately · background qualifier/curator paused while local sweep owns residency")
+    else:
+        print("  warm-model TTFT · generation rate · runtime fit · exact response · reasoning · tool judgment · natural agent execution")
     if all_models and disabled:
-        print(f"  enabled models only · {len(disabled)} disabled")
+        print(f"  enabled models only · {len(disabled)} disabled: "+", ".join(sorted(disabled)))
     print()
 
     rows=[]
-    for model in models:
-        print(f"  testing {model} ...", flush=True)
-        try:
-            row=_benchmark_one_model(base, model)
-        except Exception as exc:
-            row={"model":model,"fatal_error":str(exc)}
-        rows.append(row)
-        try:
-            _record_ollama_benchmark(base,row)
-        except Exception:
-            # Benchmark reporting must not fail because optional history persistence did.
-            pass
-        if all_models:
-            try:
-                _ollama_post(base, "/api/generate", {"model":model, "keep_alive":0}, timeout=30)
-            except Exception:
-                pass
+    try:
+        for model in models:
+            print(f"  testing {model} ...",flush=True)
+            try: row=_benchmark_one_model(base,model,isolated=isolated)
+            except Exception as exc: row={"model":model,"fatal_error":str(exc),"performance_scope":"isolated" if isolated else "ambient"}
+            rows.append(row)
+            try: _record_ollama_benchmark(base,row)
+            except Exception: pass
+            if isolated: _unload_all_ollama(base)
+    finally:
+        if isolated:
+            restored=_restore_resident_set(base,resident_before)
+            if guarded: _benchmark_guard(False)
 
     print()
-    print(f"{'MODEL':<28} {'TTFT':>7} {'TOK/S':>8} {'FIT':>10} {'RSN':>6} {'TOOLS':>9} {'AGENT':>7} {'EXACT':>7}  CAPABILITIES")
-    print("-"*114)
+    print(f"{'MODEL':<28} {'LOAD':>7} {'GPU':>5} {'TTFT':>7} {'TOK/S':>8} {'FIT':>10} {'RSN':>6} {'TOOLS':>9} {'AGENT':>7} {'EXACT':>7}  CAPABILITIES")
+    print("-"*130)
     for row in rows:
         model=row["model"]
         if row.get("fatal_error"):
-            print(f"{model:<28} {'—':>7} {'—':>8} {'ERROR':>10} {'—':>6} {'error':>9} {'—':>7} {'—':>7}  fatal")
-            print(f"  error · {row['fatal_error']}")
-            continue
+            print(f"{model:<28} {'—':>7} {'—':>5} {'—':>7} {'—':>8} {'ERROR':>10} {'—':>6} {'error':>9} {'—':>7} {'—':>7}  fatal")
+            print(f"  error · {row['fatal_error']}"); continue
         if row.get("speed_error"):
             caps=_model_capability_label(row.get("caps"))
-            print(f"{model:<28} {'error':>7} {'—':>8} {'ERROR':>10} {'—':>6} {'—':>9} {'—':>7} {'—':>7}  {caps}")
-            print(f"  speed error · {row['speed_error']}")
-            continue
-
-        tools=row.get("tools")
-        if tools is None:
-            tools_text="n/a"
-        else:
-            tools_text=f"{tools}/3"
-        caps=_model_capability_label(row.get("caps"))
-        agent_text="yes" if row.get("agent") else "no"
-        fit=_benchmark_runtime_fit(row)
-        reasoning_text=(f"{int(row.get('reasoning'))}/3" if isinstance(row.get("reasoning"),int) else "—")
-        print(
-            f"{model:<28} "
-            f"{row['ttft']:>6.2f}s "
-            f"{row['rate']:>8.1f} "
-            f"{fit:>10} "
-            f"{reasoning_text:>6} "
-            f"{tools_text:>9} "
-            f"{agent_text:>7} "
-            f"{('yes' if row['exact'] else 'no'):>7}  "
-            f"{caps}"
-        )
+            print(f"{model:<28} {'—':>7} {'—':>5} {'error':>7} {'—':>8} {'ERROR':>10} {'—':>6} {'—':>9} {'—':>7} {'—':>7}  {caps}")
+            print(f"  speed error · {row['speed_error']}"); continue
+        tools=row.get("tools"); tools_text="n/a" if tools is None else f"{tools}/3"
+        caps=_model_capability_label(row.get("caps")); agent_text="yes" if row.get("agent") else "no"
+        fit=_benchmark_runtime_fit(row); reasoning_text=f"{int(row.get('reasoning'))}/3" if isinstance(row.get("reasoning"),int) else "—"
+        load_text=f"{float(row.get('load_s')):.2f}s" if isinstance(row.get("load_s"),(int,float)) else "—"
+        gpu_text=f"{float(row.get('gpu_pct')):.0f}%" if isinstance(row.get("gpu_pct"),(int,float)) else "—"
+        print(f"{model:<28} {load_text:>7} {gpu_text:>5} {row['ttft']:>6.2f}s {row['rate']:>8.1f} {fit:>10} {reasoning_text:>6} {tools_text:>9} {agent_text:>7} {('yes' if row['exact'] else 'no'):>7}  {caps}")
         note=_benchmark_runtime_note(row)
-        if note:
-            print(f"  runtime note · {note}")
-        if row.get("tool_error"):
-            print(f"  tool note · {row['tool_error']}")
+        if note: print(f"  runtime note · {note}")
+        if row.get("tool_error"): print(f"  tool note · {row['tool_error']}")
 
     good=[r for r in rows if "ttft" in r]
-    tool_good=[r for r in good if isinstance(r.get("tools"),int)]
-    if tool_good:
-        fit_rank={"ERROR":0,"POOR":1,"SLOW":2,"GOOD":3,"EXCELLENT":4}
-        winner=max(tool_good, key=lambda r:(fit_rank.get(_benchmark_runtime_fit(r),0),bool(r.get("agent")),r["tools"],bool(r["exact"]),-r["ttft"],r["rate"]))
-        runtime_fit=_benchmark_runtime_fit(winner)
-        print(
-            f"\n  LOOK fit   {runtime_fit} · {winner['model']} · tools {winner['tools']}/3 · "
-            f"agent {'yes' if winner.get('agent') else 'no'} · "
-            f"{winner['ttft']:.2f}s TTFT · {winner['rate']:.1f} tok/s"
-        )
-        note=_benchmark_runtime_note(winner)
-        if note:
-            print(f"             {note}")
-    elif good:
-        winner=max(good,key=lambda r:(bool(r["exact"]),-r["ttft"],r["rate"]))
-        print(
-            f"\n  chat fit   {winner['model']} · {winner['ttft']:.2f}s TTFT · "
-            f"{winner['rate']:.1f} tok/s · tools unavailable"
-        )
-
-    # Restore the user's preferred model after a sweep.
-    if all_models and preferred_before:
-        try:
-            _ollama_set_model(base, preferred_before)
-            print(f"  restored   {preferred_before}")
-        except Exception:
-            pass
+    if good:
+        print("\n  performance is model-alone warm median on this node" if isolated else "\n  performance measured in current ambient residency")
+    if isolated:
+        print("  restored   "+(", ".join(restored) if restored else "no prior resident models"))
     return 0
 
 
@@ -11197,8 +11188,12 @@ def ollama_curate(args):
         print(f"  budget    {_format_gib(budget.get('model_budget'))} models · {_format_gib(budget.get('external'))} non-Ollama · {_format_gib(budget.get('reserve'))} reserve")
     current=plan.get("current") or []
     target=plan.get("target") or data.get("target") or []
+    disabled=plan.get("disabled") or []
+    eligible=plan.get("eligible") or []
     print("  current   "+(", ".join(current) if current else "none"))
     print("  target    "+(", ".join(target) if target else "none"))
+    print("  eligible  "+(", ".join(eligible) if eligible else "none"))
+    print("  disabled  "+(", ".join(disabled) if disabled else "none"))
     reason=plan.get("reason") or data.get("reason")
     if reason: print(f"  why       {reason}")
     if apply:

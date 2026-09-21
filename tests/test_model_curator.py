@@ -33,6 +33,15 @@ class ModelCuratorTests(unittest.TestCase):
             plan=node.curator_plan("reflex",models=self.models)
         self.assertEqual(plan["target"],["tiny:1b"])
 
+    def test_plan_exposes_node_local_disabled_and_eligible_sets(self):
+        with mock.patch.object(node,"_gpu_budget",return_value=self.budget), \
+             mock.patch.object(node,"_curator_disabled_models",return_value={"tiny:1b"}):
+            plan=node.curator_plan("balanced",models=self.models)
+        self.assertEqual(plan["disabled"],["tiny:1b"])
+        self.assertNotIn("tiny:1b",plan["eligible"])
+        self.assertNotIn("tiny:1b",plan["target"])
+
+
 
 if __name__ == "__main__":
     unittest.main()

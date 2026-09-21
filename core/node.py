@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Future Crash + LOOK Unified Node 5.2.8.
+"""Future Crash + LOOK Unified Node 5.2.11.
 
 A small distributed supervisor for trusted personal machines. Immediate events stay
 asynchronous; a one-second fabric pulse reconciles presence, leases and stale work.
@@ -39,7 +39,7 @@ except ImportError:
     from memory_store import FabricMemory
 from urllib.parse import urlparse, parse_qs
 
-VERSION = "5.2.8"
+VERSION = "5.2.11"
 DEFAULT_HOST = "127.0.0.1"
 DEFAULT_PORT = 7332
 DEFAULT_INGRESS_PORT = 0
@@ -79,6 +79,8 @@ ADVERTISEMENT_LOCK = threading.RLock()
 ADVERTISEMENT_CACHE = {}
 BEACON_LOCK = threading.RLock()
 CURATOR_LOCK = threading.RLock()
+BENCHMARK_GUARD = {"until": 0.0, "reason": ""}
+BENCHMARK_GUARD_LOCK = threading.RLock()
 BEACON_SEEN = set()
 BEACON_PATTERNS = {
     "rgb": ("red", "green", "blue", "white"),
@@ -426,10 +428,11 @@ def curator_plan(profile="balanced", models=None):
     """Return a deterministic resident-set recommendation for this node."""
     profile=profile if profile in {"reflex","balanced","deep"} else "balanced"
     models=list(models if models is not None else MODELS.discover(force=True))
+    disabled=sorted(_curator_disabled_models())
     candidates=_curator_candidates(models)
     budget=_gpu_budget(models)
     limit=budget.get("model_budget")
-    current=[m["name"] for m in candidates if m.get("resident")]
+    current=[m["name"] for m in models if m.get("resident")]
     if not candidates:
         return {"ok":False,"profile":profile,"target":[],"current":current,"budget":budget,"reason":"no text models installed"}
 
@@ -475,6 +478,7 @@ def curator_plan(profile="balanced", models=None):
 
     target=[m["name"] for m in selected]
     return {"ok":True,"profile":profile,"target":target,"current":current,"budget":budget,
+            "disabled":disabled,"eligible":[m["name"] for m in candidates],
             "reason":"; ".join(reason),
             "models":[{"name":m["name"],"size":_model_bytes(m),"resident":bool(m.get("resident")),
                        "roles":m["role_evidence"]["raw"]} for m in candidates]}
@@ -524,11 +528,30 @@ def curator_status():
     return {"state":state,"plan":plan}
 
 
+def benchmark_guard_active():
+    with BENCHMARK_GUARD_LOCK:
+        return now() < float(BENCHMARK_GUARD.get("until") or 0)
+
+
+def benchmark_guard_state():
+    with BENCHMARK_GUARD_LOCK:
+        active=benchmark_guard_active()
+        return {"active":active,"until":float(BENCHMARK_GUARD.get("until") or 0),"reason":BENCHMARK_GUARD.get("reason") or ""}
+
+
+def benchmark_guard_set(active, ttl=3600, reason="operator benchmark"):
+    with BENCHMARK_GUARD_LOCK:
+        BENCHMARK_GUARD["until"] = now()+max(30,min(int(ttl or 3600),7200)) if active else 0.0
+        BENCHMARK_GUARD["reason"] = str(reason or "") if active else ""
+    return benchmark_guard_state()
+
+
 def background_curator():
     """Opt-in resident-set manager. Human work always outranks reshuffling."""
     while True:
         time.sleep(CURATOR_INTERVAL_SECONDS)
         state=load_curator_state()
+        if benchmark_guard_active(): continue
         if state.get("mode")!="auto": continue
         if SUP.status()["active"] is not None: continue
         if now()-SUP.last_human_activity < CURATOR_IDLE_SECONDS: continue
@@ -875,6 +898,8 @@ def background_qualifier():
         time.sleep(5)
         if SUP.status()["active"] is not None:
             continue
+        if benchmark_guard_active():
+            continue
         if now() - SUP.last_human_activity < QUALIFY_IDLE_SECONDS:
             continue
         profiles = load_profiles()
@@ -1185,6 +1210,8 @@ def job_worker_loop():
             WORKER_HEALTH["last_loop"] = now()
             JOB_WAKE.wait(timeout=.5)
             JOB_WAKE.clear()
+            if benchmark_guard_active():
+                continue
             queued = [j for j in reversed(FABRIC_STORE.jobs(128)) if j.get("status") == "queued"]
             WORKER_HEALTH.update(alive=True, last_loop=now(), last_error=None)
             if not queued:
@@ -1303,6 +1330,22 @@ def _stream_model_infer(handler, raw):
     messages = inp.get("messages")
     if not isinstance(messages, list):
         messages = [{"role":"user","content":str(inp.get("prompt") or "")}]
+    # Vision pixels travel as artifacts, never inside the immutable work packet.
+    # Rehydrate only at the selected worker's Ollama edge.
+    hydrated=[]
+    for message in messages:
+        if not isinstance(message,dict):
+            hydrated.append(message); continue
+        copy=dict(message)
+        refs=copy.pop("image_artifacts",None)
+        if refs:
+            images=[]
+            for digest in refs:
+                _meta,data=ARTIFACTS.get(str(digest))
+                images.append(base64.b64encode(data).decode("ascii"))
+            copy["images"]=images
+        hydrated.append(copy)
+    messages=hydrated
     payload = {"model":model, "messages":messages, "stream":True,
                "keep_alive":inp.get("keep_alive",-1),
                "options":inp.get("options") if isinstance(inp.get("options"),dict) else {}}
@@ -1744,7 +1787,7 @@ def _memory_sync() -> dict:
 
 
 class API(BaseHTTPRequestHandler):
-    server_version = "FCLNode/5.2.8"
+    server_version = "FCLNode/5.2.11"
 
     def setup(self):
         self._metric_request_id = None
@@ -1823,6 +1866,8 @@ class API(BaseHTTPRequestHandler):
             return self.sendj(200, {"models": MODELS.discover()})
         if path == "/v1/models/curation":
             return self.sendj(200, curator_status())
+        if path == "/v1/models/benchmark-guard":
+            return self.sendj(200, benchmark_guard_state())
         if path == "/v1/services":
             return self.sendj(200, {"services": managed_services()})
         if path == "/v1/nodes":
@@ -1932,6 +1977,9 @@ class API(BaseHTTPRequestHandler):
             if not name:
                 return self.sendj(400, {"error": "model required"})
             return self.sendj(200, qualify_model(name, automatic=False))
+        if path == "/v1/models/benchmark-guard":
+            state=benchmark_guard_set(bool(d.get("active")), d.get("ttl") or 3600, d.get("reason") or "operator benchmark")
+            return self.sendj(200,{"ok":True,**state})
         if path == "/v1/models/curation":
             state=load_curator_state()
             mode=str(d.get("mode") or state.get("mode") or "observe").lower()
@@ -2129,12 +2177,20 @@ def _watch(host,port,interval=1.0):
                 if remote:
                     next_peer_poll[name] = tnow + WATCH_PEER_REFRESH_SECONDS
                 try:
-                    data=http_json(f"{base}/v1/events?since={cursors.get(name,0)}",timeout=.8)
+                    # First contact joins the live tail. Reconnects continue from the
+                    # cursor only while this watch process is alive; an overnight gap
+                    # never becomes thousands of historical events to drain/render.
+                    if name not in cursors:
+                        data=http_json(f"{base}/v1/events",timeout=.8)
+                    else:
+                        data=http_json(f"{base}/v1/events?since={cursors[name]}",timeout=.8)
                     events=data.get("events") or []
                     if events:
                         cursors[name]=max(int(e.get("seq") or 0) for e in events)
-                        for e in events:
+                        for e in events[-14:]:
                             e=dict(e); e["source"]=name; live_events.append(e)
+                    elif name not in cursors:
+                        cursors[name]=0
                 except Exception:
                     if remote:
                         next_peer_poll[name] = tnow + max(5.0, WATCH_PEER_REFRESH_SECONDS * 2)

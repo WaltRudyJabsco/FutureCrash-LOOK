@@ -5,7 +5,7 @@ Apps request capabilities; this module handles node choice, packet submission an
 result waiting. It deliberately contains no application semantics.
 """
 from __future__ import annotations
-import json, time, urllib.request, urllib.error, uuid
+import base64, json, time, urllib.request, urllib.error, uuid
 
 from conductor import classify as _classify_work, last_user_text as _last_user_text
 
@@ -168,6 +168,38 @@ def infer(messages, *, model=None, requires=None, latency=False, priority="inter
         time.sleep(.25)
     raise TimeoutError(f"Fabric inference timed out on {target}")
 
+def _stage_image_artifacts(payload, endpoint):
+    """Move Ollama image blobs out of the work packet and into Fabric artifacts.
+
+    Packets are control-plane contracts. Pixel data travels on the artifact path so
+    vision requests stay small and remote workers receive the image exactly once.
+    """
+    messages=[]
+    staged=[]
+    for message in payload.get("messages") or []:
+        if not isinstance(message,dict):
+            messages.append(message); continue
+        copy=dict(message)
+        images=copy.pop("images",None)
+        refs=[]
+        for index,encoded in enumerate(images or []):
+            if not isinstance(encoded,str) or not encoded:
+                continue
+            result=_json(endpoint.rstrip("/")+"/v1/artifacts", {
+                "base64":encoded,
+                "media_type":"image/png",
+                "name":f"lo-vision-{index+1}.png",
+            }, timeout=20.0)
+            meta=result.get("artifact") or {}
+            digest=meta.get("digest")
+            if not digest:
+                raise RuntimeError("Fabric artifact staging returned no digest")
+            refs.append(digest); staged.append(digest)
+        if refs:
+            copy["image_artifacts"]=refs
+        messages.append(copy)
+    return messages,staged
+
 def stream_infer(payload, *, requires=None, priority="interactive", timeout=180,
                  base=DEFAULT_NODE, owner="lo", route=None, work_class=None):
     """Route a mature Ollama chat payload to Fabric and yield its JSONL stream.
@@ -236,7 +268,11 @@ def stream_infer(payload, *, requires=None, priority="interactive", timeout=180,
         # routing time from prompt-evaluation/TTFT in LO telemetry instead of
         # making the first model frame look like a ten-second routing decision.
         yield {"_fabric_meta":"route", "_fabric_node":target, "_fabric_model":chosen}
-        inp={"model":chosen,"messages":payload.get("messages") or [],"timeout":timeout,
+        endpoint_base=(f"https://{dns}:7332" if dns else base.rstrip('/'))
+        staged_messages,_staged=_stage_image_artifacts(payload, endpoint_base) if any(
+            bool(m.get("images")) for m in payload.get("messages",[]) if isinstance(m,dict)
+        ) else (payload.get("messages") or [],[])
+        inp={"model":chosen,"messages":staged_messages,"timeout":timeout,
              "keep_alive":payload.get("keep_alive",-1),"options":payload.get("options") or {}}
         if "think" in payload: inp["think"]=payload.get("think")
         if isinstance(payload.get("tools"),list): inp["tools"]=payload["tools"]
@@ -249,7 +285,7 @@ def stream_infer(payload, *, requires=None, priority="interactive", timeout=180,
           "authority":{"principal":"user","grants":["model.infer"],"confirmed_operations":[]},
           "delivery":{"target":target},"provenance":{},"extensions":{"futurecrash":{"owner":owner,"work_class":tier}},
         }
-        endpoint=(f"https://{dns}:7332" if dns else base.rstrip('/'))+"/v1/infer/stream"
+        endpoint=endpoint_base+"/v1/infer/stream"
         req=urllib.request.Request(endpoint,data=json.dumps({"packet":packet}).encode(),
                                    headers={"Content-Type":"application/json"},method="POST")
         emitted=False

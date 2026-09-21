@@ -1,3 +1,20 @@
+# 5.2.11 — Live Tail + Vision Artifacts
+
+- Move LO vision pixels out of Fabric work packets. The selected worker receives image data through the content-addressed artifact endpoint, while the inference packet carries only SHA-256 artifact references; the worker rehydrates images only at its Ollama edge.
+- Preserve the 512 KiB Fabric packet guard instead of hiding oversized vision requests by raising it.
+- Make `lk fabric watch` join the current event tail on first contact rather than starting at sequence zero and draining an overnight backlog. A live watch only follows cursor events accumulated during that watch session.
+- Bound the operational Fabric event ledger to seven days / 20,000 rows, pruned incrementally, so disconnected clients cannot create permanent replay debt or an ever-growing event database.
+- Keep explicit event history available through the retained ledger while making live-vs-history semantics distinct.
+
+# 5.2.10 — Isolated Model Qualification
+
+- Make `lk ollama test --all` a comparable per-node sweep: one target model resident at a time, canonical 4096 context, one discarded stabilization pass, then three identical warm samples with median TTFT/generation rate.
+- Report cold model load time separately from warm TTFT, plus Ollama's achieved GPU residency percentage when available.
+- Add a local benchmark guard so the background qualifier, adaptive curator, and Fabric job worker cannot silently alter Ollama residency during a benchmark sweep. The guard has a TTL and is released in `finally`.
+- Restore the exact pre-sweep resident model names instead of loading only the selected/default model afterward.
+- Keep enable/disable policy node-local: each node's curator now reports its eligible and disabled model sets explicitly, making machine-specific curation visible.
+- Persist benchmark scope, load time, GPU share, and raw warm samples alongside capability evidence for later platform/model policy decisions.
+
 # 5.2.9 — Ollama Command Dispatch Fix
 
 - Fixed `lk ollama curate ...` and `lk ollama warm ...` being mistaken for long-form LO chat prompts before the Ollama subcommand dispatcher could see them.

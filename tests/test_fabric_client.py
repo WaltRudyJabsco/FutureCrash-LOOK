@@ -43,3 +43,19 @@ class FabricClientPlacementTests(unittest.TestCase):
         self.assertIn('https://worker.example:7332/v1/jobs',calls)
         self.assertEqual(sum(url.endswith('/v1/nodes') for url in calls),1,
                          'one placement must consume one routing snapshot')
+
+class FabricVisionArtifactTests(unittest.TestCase):
+    def test_image_blobs_stage_as_artifact_refs(self):
+        import base64
+        calls=[]
+        encoded=base64.b64encode(b'not-really-a-png').decode('ascii')
+        def fake_json(url,payload=None,timeout=5.0):
+            calls.append((url,payload))
+            return {"artifact":{"digest":"sha256:"+"a"*64}}
+        payload={"messages":[{"role":"user","content":"what is this","images":[encoded]}]}
+        with patch.object(fabric_client,"_json",side_effect=fake_json):
+            messages,refs=fabric_client._stage_image_artifacts(payload,"http://worker:7332")
+        self.assertNotIn("images",messages[0])
+        self.assertEqual(messages[0]["image_artifacts"],refs)
+        self.assertEqual(len(refs),1)
+        self.assertTrue(calls[0][0].endswith('/v1/artifacts'))

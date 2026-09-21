@@ -139,13 +139,13 @@ lo search current Qwen3 tool support
 lk ollama
 lk ollama models
 lk ollama test
-lk ollama test --all
+lk ollama test --all       # isolated enabled-model sweep on this node
 
 Model residency / curation:
 
 ```bash
 lk ollama test --resident-set
-lk ollama curate
+lk ollama curate           # shows node-local eligible + disabled set
 lk ollama curate --apply
 lk ollama curate auto on
 lk ollama warm MODEL [MODEL ...]

@@ -1,3 +1,9 @@
+## 4.44.8 — Isolated per-node model qualification
+
+- `lk ollama test --all` now benchmarks enabled models alone under identical 4096-context residency conditions and reports load time separately from warm median TTFT.
+- Preserve/restore the pre-test warm set and expose node-local eligible/disabled model candidates in `lk ollama curate`.
+- Coordinate with the local Unified Node benchmark guard so automatic qualification/curation and Fabric jobs cannot contaminate residency measurements.
+
 ## 4.44.7 — Adaptive model curator
 
 - Stabilize resident-set concurrency testing with warm-up, alternating solo order, three-run medians, and a physical sanity bound.
