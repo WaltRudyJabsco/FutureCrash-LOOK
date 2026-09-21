@@ -5840,6 +5840,8 @@ def _resource_visual_intent(prompt):
         "look at", "look closer", "see", "shown", "visible", "written", "text",
         "sign", "tattoo", "color", "colour", "wearing", "background", "foreground",
         "face", "hair", "chest", "shirt", "jacket", "object",
+        "describe", "description", "identify", "what is this", "what's this",
+        "what am i looking at", "what do you see",
     )
     comparison_terms=(
         "compare", "difference", "different", "first one", "second one",
@@ -9320,6 +9322,14 @@ def ollama_chat(force_search=False, initial_prompt=None, allow_start=True, host_
                 f"{last_action['path']} via {last_action['tool']}. Resolve it/that/the same one against this "
                 "referent when context fits. Do not search merely to rediscover this exact item."
             )})
+        if turn_image_paths:
+            messages.append({"role":"system","content":(
+                "DIRECT VISION INPUT: The latest user turn has image pixels attached directly to this model request. "
+                "Inspect those pixels yourself when answering what/describe/identify/visual questions. "
+                "Do NOT call preview_path, open_path, or reveal_path merely to inspect an attached image; those tools "
+                "are only for an explicit request to open, preview, show externally, or reveal the file on the host. "
+                "The filename/resource metadata is not a substitute for describing the visible image content."
+            )})
         # Time is an observed host fact, not language-model knowledge. Refresh it on
         # every turn and keep exactly one current temporal receipt in context.
         messages=[m for m in messages if not (m.get("role")=="system" and str(m.get("content","")).startswith("TRUSTED TEMPORAL CONTEXT\n"))]
@@ -9539,6 +9549,22 @@ def ollama_chat(force_search=False, initial_prompt=None, allow_start=True, host_
             tools=[]
             if supports_tools and not host_repair_final and not weather_text_fast_path:
                 tools = _lo_tools(profile)
+                if turn_image_paths:
+                    # Attached pixels are already available to the model. Keep host GUI
+                    # preview/open tools out of ordinary vision-understanding turns so
+                    # the model cannot confuse "inspect the image" with "open it for
+                    # the operator". Explicit host-preview wording keeps those tools.
+                    lower_prompt=" ".join(str(prompt).casefold().split())
+                    explicit_host_preview=(
+                        "quick look" in lower_prompt or "preview it" in lower_prompt or
+                        "preview this" in lower_prompt or "open it" in lower_prompt or
+                        "open this" in lower_prompt or "reveal it" in lower_prompt or
+                        "reveal this" in lower_prompt
+                    )
+                    if not explicit_host_preview:
+                        tools=[t for t in tools if ((t.get("function") or {}).get("name")) not in {
+                            "preview_path","open_path","reveal_path"
+                        }]
                 if has_web and not force_search:
                     tools.append(web_tool)
                 payload_obj["tools"] = tools

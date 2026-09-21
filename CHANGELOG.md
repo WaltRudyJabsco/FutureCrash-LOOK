@@ -1,3 +1,9 @@
+# 5.2.14 — Direct Vision Context
+
+- Treat image-description follow-ups such as `describe it`, `identify it`, and `what do you see` as visual turns so the active image artifact is reattached.
+- Tell the selected vision model explicitly that image pixels are direct model input and filename/resource metadata is not a substitute for inspecting them.
+- Suppress `preview_path`, `open_path`, and `reveal_path` during ordinary image-understanding turns, while preserving them for explicit host preview/open requests.
+
 # 5.2.13 — Vision Runtime Fix
 
 - Fix vision artifact hydration on the Unified Node by importing Python's `base64` module at runtime before converting artifact bytes into Ollama image payloads.
