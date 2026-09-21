@@ -1,3 +1,10 @@
+# 5.2.12 — Interactive Reliability
+
+- Keep `lk dash` alive when Ctrl-C is used to leave Watch. The LOOK launcher now lets the dashboard/watch child own SIGINT and continues waiting instead of surfacing a parent `KeyboardInterrupt` traceback.
+- Treat inference HTTP 409 `worker busy` as temporary capacity pressure for interactive work. Routing still tries distinct workers first, then uses a short bounded grace window with fresh placement snapshots before declaring the Fabric unavailable. Background work continues to fail fast.
+- Make streaming inference lease cleanup exception-safe across the entire post-acquire path, including model discovery and vision-artifact hydration, so a pre-stream failure cannot leave a ghost BUSY worker behind.
+- Add regression coverage for bounded busy retry, dashboard Ctrl-C ownership, and final streaming-lease cleanup.
+
 # 5.2.11 — Live Tail + Vision Artifacts
 
 - Move LO vision pixels out of Fabric work packets. The selected worker receives image data through the content-addressed artifact endpoint, while the inference packet carries only SHA-256 artifact references; the worker rehydrates images only at its Ollama edge.

@@ -13894,7 +13894,19 @@ def _fabric_command(args):
         argv += rest
     else:
         argv += rest
-    return subprocess.call(argv)
+
+    # Dashboard/watch own Ctrl-C inside the child process. Both parent and child
+    # share the terminal process group, so Python may interrupt this wait at the
+    # same instant the child is using Ctrl-C to leave Watch. Keep waiting for the
+    # child instead of turning a normal UI action into a traceback.
+    proc=subprocess.Popen(argv)
+    while True:
+        try:
+            return proc.wait()
+        except KeyboardInterrupt:
+            if sub in {"dashboard","watch"}:
+                continue
+            raise
 
 def main():
     _safe_cwd(repair=True)

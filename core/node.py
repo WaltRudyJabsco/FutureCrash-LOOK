@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Future Crash + LOOK Unified Node 5.2.11.
+"""Future Crash + LOOK Unified Node 5.2.12.
 
 A small distributed supervisor for trusted personal machines. Immediate events stay
 asynchronous; a one-second fabric pulse reconciles presence, leases and stale work.
@@ -39,7 +39,7 @@ except ImportError:
     from memory_store import FabricMemory
 from urllib.parse import urlparse, parse_qs
 
-VERSION = "5.2.11"
+VERSION = "5.2.12"
 DEFAULT_HOST = "127.0.0.1"
 DEFAULT_PORT = 7332
 DEFAULT_INGRESS_PORT = 0
@@ -1312,109 +1312,125 @@ def _stream_model_infer(handler, raw):
     if not lease:
         raise RuntimeError("worker busy")
     lease_id = lease["id"]
-    attempt = FABRIC_STORE.start(job["id"], worker)
-    inp = (packet.get("work") or {}).get("input") or {}
-    model = str(inp.get("model") or "")
-    # The pulse thread owns model discovery. Streaming inference consumes the
-    # last completed snapshot so starting a user request cannot synchronously
-    # walk Ollama metadata for every installed model.
-    models = MODELS.snapshot()
-    if not models:
-        models = MODELS.discover(force=False)
-    if not model:
-        model = _node_preferred_model(models) or ""
-    if not model or model not in {str(m.get("name") or "") for m in models}:
-        SUP.release(lease_id, "failed", "model unavailable")
-        FABRIC_STORE.finish(job["id"], "failed", error=f"model unavailable: {model}", node=worker)
-        raise ValueError(f"model unavailable: {model}")
-    messages = inp.get("messages")
-    if not isinstance(messages, list):
-        messages = [{"role":"user","content":str(inp.get("prompt") or "")}]
-    # Vision pixels travel as artifacts, never inside the immutable work packet.
-    # Rehydrate only at the selected worker's Ollama edge.
-    hydrated=[]
-    for message in messages:
-        if not isinstance(message,dict):
-            hydrated.append(message); continue
-        copy=dict(message)
-        refs=copy.pop("image_artifacts",None)
-        if refs:
-            images=[]
-            for digest in refs:
-                _meta,data=ARTIFACTS.get(str(digest))
-                images.append(base64.b64encode(data).decode("ascii"))
-            copy["images"]=images
-        hydrated.append(copy)
-    messages=hydrated
-    payload = {"model":model, "messages":messages, "stream":True,
-               "keep_alive":inp.get("keep_alive",-1),
-               "options":inp.get("options") if isinstance(inp.get("options"),dict) else {}}
-    if "think" in inp: payload["think"] = bool(inp.get("think"))
-    if isinstance(inp.get("tools"),list): payload["tools"] = inp["tools"]
-    FABRIC_STORE.event(job["id"], "progress", "inference", f"{model} streaming", node=worker)
-    SUP.progress(lease_id, "inference", f"{model} streaming")
-    upstream = urllib.request.Request("http://127.0.0.1:11434/api/chat", data=json.dumps(payload).encode(),
-                                      headers={"Content-Type":"application/json"})
-    timeout=max(5.0,min(300.0,float(inp.get("timeout") or 180)))
-    final={}; first=True; chunks=0; committed=False
+    lease_done = False
+
+    def _release(status, detail):
+        nonlocal lease_done
+        if lease_done:
+            return False
+        lease_done = True
+        return SUP.release(lease_id, status, detail)
+
     try:
-        with urllib.request.urlopen(upstream, timeout=timeout) as r:
-            handler.send_response(200)
-            handler.send_header("Content-Type","application/x-ndjson")
-            handler.send_header("Cache-Control","no-store")
-            handler.send_header("X-Fabric-Job",job["id"])
-            handler.send_header("X-Fabric-Node",worker)
-            handler.end_headers()
-            committed=True
-            for line in r:
-                if FABRIC_STORE.cancelled(job["id"]): raise InterruptedError("cancelled")
-                if not line.strip(): continue
+        attempt = FABRIC_STORE.start(job["id"], worker)
+        inp = (packet.get("work") or {}).get("input") or {}
+        model = str(inp.get("model") or "")
+        # The pulse thread owns model discovery. Streaming inference consumes the
+        # last completed snapshot so starting a user request cannot synchronously
+        # walk Ollama metadata for every installed model.
+        models = MODELS.snapshot()
+        if not models:
+            models = MODELS.discover(force=False)
+        if not model:
+            model = _node_preferred_model(models) or ""
+        if not model or model not in {str(m.get("name") or "") for m in models}:
+            _release("failed", "model unavailable")
+            FABRIC_STORE.finish(job["id"], "failed", error=f"model unavailable: {model}", node=worker)
+            raise ValueError(f"model unavailable: {model}")
+        messages = inp.get("messages")
+        if not isinstance(messages, list):
+            messages = [{"role":"user","content":str(inp.get("prompt") or "")}]
+        # Vision pixels travel as artifacts, never inside the immutable work packet.
+        # Rehydrate only at the selected worker's Ollama edge.
+        hydrated=[]
+        for message in messages:
+            if not isinstance(message,dict):
+                hydrated.append(message); continue
+            copy=dict(message)
+            refs=copy.pop("image_artifacts",None)
+            if refs:
+                images=[]
+                for digest in refs:
+                    _meta,data=ARTIFACTS.get(str(digest))
+                    images.append(base64.b64encode(data).decode("ascii"))
+                copy["images"]=images
+            hydrated.append(copy)
+        messages=hydrated
+        payload = {"model":model, "messages":messages, "stream":True,
+                   "keep_alive":inp.get("keep_alive",-1),
+                   "options":inp.get("options") if isinstance(inp.get("options"),dict) else {}}
+        if "think" in inp: payload["think"] = bool(inp.get("think"))
+        if isinstance(inp.get("tools"),list): payload["tools"] = inp["tools"]
+        FABRIC_STORE.event(job["id"], "progress", "inference", f"{model} streaming", node=worker)
+        SUP.progress(lease_id, "inference", f"{model} streaming")
+        upstream = urllib.request.Request("http://127.0.0.1:11434/api/chat", data=json.dumps(payload).encode(),
+                                          headers={"Content-Type":"application/json"})
+        timeout=max(5.0,min(300.0,float(inp.get("timeout") or 180)))
+        final={}; first=True; chunks=0; committed=False
+        try:
+            with urllib.request.urlopen(upstream, timeout=timeout) as r:
+                handler.send_response(200)
+                handler.send_header("Content-Type","application/x-ndjson")
+                handler.send_header("Cache-Control","no-store")
+                handler.send_header("X-Fabric-Job",job["id"])
+                handler.send_header("X-Fabric-Node",worker)
+                handler.end_headers()
+                committed=True
+                for line in r:
+                    if FABRIC_STORE.cancelled(job["id"]): raise InterruptedError("cancelled")
+                    if not line.strip(): continue
+                    try:
+                        event=json.loads(line)
+                    except Exception as exc:
+                        preview=line.decode("utf-8","replace").strip()[:160]
+                        raise RuntimeError(f"Ollama returned a non-JSON stream frame: {preview!r}") from exc
+                    chunks += 1
+                    fragment=event.get("message") or {}
+                    if first and (fragment.get("content") or fragment.get("thinking") or fragment.get("tool_calls")):
+                        first=False
+                        FABRIC_STORE.event(job["id"],"progress","first-token",model,node=worker)
+                        SUP.progress(lease_id,"first-token",model)
+                    elif chunks % 16 == 0:
+                        FABRIC_STORE.event(job["id"],"progress","stream",f"{chunks} chunks",node=worker)
+                        SUP.progress(lease_id,"stream",f"{chunks} chunks")
+                    handler.wfile.write(line); handler.wfile.flush()
+                    if event.get("done"): final=event
+            if not final.get("done"):
+                raise RuntimeError("Ollama stream ended without a final done frame")
+            data={"ok":True,"model":model,"message":{"role":"assistant"},
+                  "done_reason":final.get("done_reason"),"prompt_eval_count":final.get("prompt_eval_count"),
+                  "eval_count":final.get("eval_count"),"eval_duration":final.get("eval_duration"),
+                  "total_duration":final.get("total_duration")}
+            result=_result_packet(packet,data,worker=worker,attempt=attempt)
+            FABRIC_STORE.finish(job["id"],"ok",result=result,node=worker)
+            _release("ok","stream complete")
+        except (BrokenPipeError, ConnectionResetError, InterruptedError) as exc:
+            FABRIC_STORE.request_cancel(job["id"],node=worker,reason="stream client disconnected")
+            FABRIC_STORE.finish(job["id"],"cancelled",error=str(exc),node=worker)
+            _release("cancelled","stream client disconnected")
+        except Exception as exc:
+            FABRIC_STORE.finish(job["id"],"failed",error=str(exc),node=worker)
+            _release("failed",str(exc))
+            if committed:
+                # Once HTTP 200/NDJSON headers are on the wire we cannot legally send
+                # a second HTTP response. Keep the stream framed as JSON so clients
+                # receive an explicit Fabric error instead of an HTTP status line in
+                # the NDJSON body (which previously surfaced as JSONDecodeError).
                 try:
-                    event=json.loads(line)
-                except Exception as exc:
-                    preview=line.decode("utf-8","replace").strip()[:160]
-                    raise RuntimeError(f"Ollama returned a non-JSON stream frame: {preview!r}") from exc
-                chunks += 1
-                fragment=event.get("message") or {}
-                if first and (fragment.get("content") or fragment.get("thinking") or fragment.get("tool_calls")):
-                    first=False
-                    FABRIC_STORE.event(job["id"],"progress","first-token",model,node=worker)
-                    SUP.progress(lease_id,"first-token",model)
-                elif chunks % 16 == 0:
-                    FABRIC_STORE.event(job["id"],"progress","stream",f"{chunks} chunks",node=worker)
-                    SUP.progress(lease_id,"stream",f"{chunks} chunks")
-                handler.wfile.write(line); handler.wfile.flush()
-                if event.get("done"): final=event
-        if not final.get("done"):
-            raise RuntimeError("Ollama stream ended without a final done frame")
-        data={"ok":True,"model":model,"message":{"role":"assistant"},
-              "done_reason":final.get("done_reason"),"prompt_eval_count":final.get("prompt_eval_count"),
-              "eval_count":final.get("eval_count"),"eval_duration":final.get("eval_duration"),
-              "total_duration":final.get("total_duration")}
-        result=_result_packet(packet,data,worker=worker,attempt=attempt)
-        FABRIC_STORE.finish(job["id"],"ok",result=result,node=worker)
-        SUP.release(lease_id,"ok","stream complete")
-    except (BrokenPipeError, ConnectionResetError, InterruptedError) as exc:
-        FABRIC_STORE.request_cancel(job["id"],node=worker,reason="stream client disconnected")
-        FABRIC_STORE.finish(job["id"],"cancelled",error=str(exc),node=worker)
-        SUP.release(lease_id,"cancelled","stream client disconnected")
-    except Exception as exc:
-        FABRIC_STORE.finish(job["id"],"failed",error=str(exc),node=worker)
-        SUP.release(lease_id,"failed",str(exc))
-        if committed:
-            # Once HTTP 200/NDJSON headers are on the wire we cannot legally send
-            # a second HTTP response. Keep the stream framed as JSON so clients
-            # receive an explicit Fabric error instead of an HTTP status line in
-            # the NDJSON body (which previously surfaced as JSONDecodeError).
-            try:
-                frame={"done":True,"_fabric_error":True,"error":str(exc),
-                       "message":{"role":"assistant","content":""}}
-                handler.wfile.write((json.dumps(frame,separators=(",",":"))+"\n").encode())
-                handler.wfile.flush()
-            except (BrokenPipeError, ConnectionResetError, OSError):
-                pass
-            return
-        raise
+                    frame={"done":True,"_fabric_error":True,"error":str(exc),
+                           "message":{"role":"assistant","content":""}}
+                    handler.wfile.write((json.dumps(frame,separators=(",",":"))+"\n").encode())
+                    handler.wfile.flush()
+                except (BrokenPipeError, ConnectionResetError, OSError):
+                    pass
+                return
+            raise
+    finally:
+        # Any failure between lease acquisition and the streaming try block must
+        # release the lane too (artifact hydration/model discovery included).
+        # Otherwise a one-off vision error can leave a permanent ghost BUSY worker.
+        if not lease_done:
+            _release("failed", "stream aborted before completion")
 
 
 class HTTPMetrics:
@@ -1787,7 +1803,7 @@ def _memory_sync() -> dict:
 
 
 class API(BaseHTTPRequestHandler):
-    server_version = "FCLNode/5.2.11"
+    server_version = "FCLNode/5.2.12"
 
     def setup(self):
         self._metric_request_id = None

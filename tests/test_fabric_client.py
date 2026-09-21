@@ -59,3 +59,34 @@ class FabricVisionArtifactTests(unittest.TestCase):
         self.assertEqual(messages[0]["image_artifacts"],refs)
         self.assertEqual(len(refs),1)
         self.assertTrue(calls[0][0].endswith('/v1/artifacts'))
+
+class FabricBusyGraceTests(unittest.TestCase):
+    def test_interactive_busy_worker_gets_bounded_retry(self):
+        import io, urllib.error
+
+        snap={"self":{"name":"local","inference":{"available":True,"preferred_model":"m","models":[{"name":"m","size":2,"resident":True,"features":{"text":True}}]},"supervisor":{"active":None}},"peers":[]}
+        calls={"n":0}
+
+        class Headers(dict):
+            def get(self,key,default=None): return super().get(key,default)
+
+        class Response:
+            headers=Headers({"X-Fabric-Node":"local"})
+            def __enter__(self): return self
+            def __exit__(self,*args): return False
+            def __iter__(self):
+                yield b'{"message":{"role":"assistant","content":"ok"},"done":true}\n'
+
+        def fake_urlopen(req, timeout=None):
+            calls["n"] += 1
+            if calls["n"] == 1:
+                raise urllib.error.HTTPError(req.full_url,409,"busy",{},io.BytesIO(b'{"error":"worker busy"}'))
+            return Response()
+
+        payload={"model":"m","messages":[{"role":"user","content":"hi"}],"options":{}}
+        with patch.object(fabric_client,"_nodes",return_value=snap), \
+             patch.object(fabric_client.urllib.request,"urlopen",side_effect=fake_urlopen), \
+             patch.object(fabric_client.time,"sleep",return_value=None):
+            events=list(fabric_client.stream_infer(payload,timeout=1))
+        self.assertGreaterEqual(calls["n"],2)
+        self.assertTrue(any(e.get("done") for e in events if isinstance(e,dict)))

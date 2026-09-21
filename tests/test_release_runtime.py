@@ -71,3 +71,17 @@ class Test529OllamaDispatch(unittest.TestCase):
         for command in ('models','test','curate','warm','key','host','hosts','share','access','endpoint'):
             self.assertIn(f'"{command}"', guard, command)
 
+
+class Test5212InteractiveReliability(unittest.TestCase):
+    def test_dash_launcher_keeps_child_ownership_of_ctrl_c(self):
+        source=(ROOT/'look'/'lk').read_text(encoding='utf-8')
+        block=source[source.index('def _fabric_command('):source.index('def main():')]
+        self.assertIn('proc=subprocess.Popen(argv)', block)
+        self.assertIn('except KeyboardInterrupt:', block)
+        self.assertIn('if sub in {"dashboard","watch"}:', block)
+
+    def test_stream_lease_has_final_cleanup(self):
+        source=(ROOT/'core'/'node.py').read_text(encoding='utf-8')
+        block=source[source.index('def _stream_model_infer('):source.index('class HTTPMetrics:')]
+        self.assertIn('if not lease_done:', block)
+        self.assertIn('_release("failed", "stream aborted before completion")', block)

@@ -253,18 +253,40 @@ def stream_infer(payload, *, requires=None, priority="interactive", timeout=180,
         return target,dns,chosen
 
     last_error=None
-    for attempt_no in range(max_attempts):
+    attempt_no=0
+    busy_grace_deadline=None
+    busy_retry_seconds=.35
+    # BUSY is temporary capacity pressure, not capability failure. Interactive
+    # work gets a short bounded grace period after distinct workers have raced
+    # busy; background work still fails fast so it never crowds human requests.
+    busy_grace_seconds=min(8.0,max(2.0,float(timeout)*.08)) if priority != "background" else 0.0
+
+    while attempt_no < max_attempts or (busy_grace_deadline and time.monotonic() < busy_grace_deadline):
+        if attempt_no >= max_attempts:
+            tried.clear()
+            attempt_no=0
+            time.sleep(busy_retry_seconds)
         try:
-            target,dns,chosen=select(prefer_route=(attempt_no==0))
+            target,dns,chosen=select(prefer_route=(attempt_no==0 and busy_grace_deadline is None))
         except (urllib.error.URLError, TimeoutError, socket.timeout) as exc:
-            # Route discovery is control-plane work.  A transient slow /v1/nodes
+            # Route discovery is control-plane work. A transient slow /v1/nodes
             # response should not leak a raw urllib timeout into LO.
             last_error=exc
+            attempt_no += 1
             time.sleep(.15)
             continue
+        except RuntimeError as exc:
+            # All currently eligible workers may be in the exclusion set. During
+            # the interactive BUSY grace window, clear it and ask a fresh snapshot.
+            last_error=exc
+            if busy_grace_deadline and time.monotonic() < busy_grace_deadline:
+                tried.clear(); attempt_no=0
+                time.sleep(busy_retry_seconds)
+                continue
+            break
         if isinstance(route,dict):
             route.update({"target":target,"dns":dns,"model":chosen})
-        # Surface placement before opening the inference stream.  This separates
+        # Surface placement before opening the inference stream. This separates
         # routing time from prompt-evaluation/TTFT in LO telemetry instead of
         # making the first model frame look like a ten-second routing decision.
         yield {"_fabric_meta":"route", "_fabric_node":target, "_fabric_model":chosen}
@@ -311,18 +333,21 @@ def stream_infer(payload, *, requires=None, priority="interactive", timeout=180,
             try: detail=json.loads(detail).get("error") or detail
             except Exception: pass
             last_error=RuntimeError(f"Fabric inference HTTP {exc.code}: {detail}")
-            # 409 before streaming means placement raced with another job. Re-route.
+            # 409 before streaming is temporary placement pressure. Try distinct
+            # workers first, then briefly wait/re-route instead of telling the user
+            # the Fabric is unavailable merely because every lane was busy now.
             if exc.code != 409 or emitted:
                 raise last_error from None
+            if busy_grace_seconds and busy_grace_deadline is None:
+                busy_grace_deadline=time.monotonic()+busy_grace_seconds
         except (urllib.error.URLError, TimeoutError, socket.timeout) as exc:
             last_error=exc
             if emitted:
                 raise
         tried.add(target)
+        attempt_no += 1
         if isinstance(route,dict):
             route.clear()
-        # Give a just-released lease a moment to settle. The next attempt owns
-        # the next routing snapshot; do not issue a speculative extra /v1/nodes poll.
         time.sleep(.15)
     if last_error:
         raise RuntimeError(f"Fabric inference unavailable after {len(tried)} worker attempt(s): {last_error}") from None
