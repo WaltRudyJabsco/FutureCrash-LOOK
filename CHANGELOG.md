@@ -1,3 +1,9 @@
+# 5.2.13 — Vision Runtime Fix
+
+- Fix vision artifact hydration on the Unified Node by importing Python's `base64` module at runtime before converting artifact bytes into Ollama image payloads.
+- Add a regression test that exercises the runtime symbol used by the artifact-to-vision bridge, preventing this NameError from returning.
+- No scheduler, artifact format, packet-size, or model-curation behavior changed.
+
 # 5.2.12 — Interactive Reliability
 
 - Keep `lk dash` alive when Ctrl-C is used to leave Watch. The LOOK launcher now lets the dashboard/watch child own SIGINT and continues waiting instead of surfacing a parent `KeyboardInterrupt` traceback.

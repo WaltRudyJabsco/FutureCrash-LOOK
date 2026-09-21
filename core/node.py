@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Future Crash + LOOK Unified Node 5.2.12.
+"""Future Crash + LOOK Unified Node 5.2.13.
 
 A small distributed supervisor for trusted personal machines. Immediate events stay
 asynchronous; a one-second fabric pulse reconciles presence, leases and stale work.
@@ -7,6 +7,7 @@ asynchronous; a one-second fabric pulse reconciles presence, leases and stale wo
 from __future__ import annotations
 
 import argparse
+import base64
 import errno
 import sys
 import faulthandler
@@ -39,7 +40,7 @@ except ImportError:
     from memory_store import FabricMemory
 from urllib.parse import urlparse, parse_qs
 
-VERSION = "5.2.12"
+VERSION = "5.2.13"
 DEFAULT_HOST = "127.0.0.1"
 DEFAULT_PORT = 7332
 DEFAULT_INGRESS_PORT = 0
@@ -1803,7 +1804,7 @@ def _memory_sync() -> dict:
 
 
 class API(BaseHTTPRequestHandler):
-    server_version = "FCLNode/5.2.12"
+    server_version = "FCLNode/5.2.13"
 
     def setup(self):
         self._metric_request_id = None
