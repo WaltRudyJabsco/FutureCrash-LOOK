@@ -1,28 +1,35 @@
 #!/usr/bin/env bash
 set -euo pipefail
 ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
-echo "Future Crash + LOOK 5.3.2 · Decision Plane"
+echo "Future Crash + LOOK 5.4.1 · Canonical Decision Worker"
 echo "────────────────────────────────────────"
 
 # Refuse a mixed bundle before mutating the machine. A unified release must move
 # LOOK and the node together.
 EXPECTED_RELEASE="$(tr -d '[:space:]' < "$ROOT/VERSION")"
-[[ "$EXPECTED_RELEASE" == "5.3.2" ]] || { echo "BUNDLE ERROR: expected release 5.3.2, found $EXPECTED_RELEASE"; exit 4; }
+[[ "$EXPECTED_RELEASE" == "5.4.1" ]] || { echo "BUNDLE ERROR: expected release 5.4.1, found $EXPECTED_RELEASE"; exit 4; }
 grep -q 'def _fabric_command' "$ROOT/look/lk" || { echo "BUNDLE ERROR: LOOK source has no Fabric command"; exit 4; }
 grep -q 'choices=.*serve.*fabric' "$ROOT/core/node.py" || { echo "BUNDLE ERROR: node source has no Fabric CLI"; exit 4; }
 
 DRY_RUN=0
 UNINSTALL=0
+OPENJEV_MODE="${FCL_OPENJEV_MODE:-auto}"
 for a in "$@"; do
   [[ "$a" == "--dry-run" ]] && DRY_RUN=1
   [[ "$a" == "--uninstall" ]] && UNINSTALL=1
+  [[ "$a" == "--openjev=off" ]] && OPENJEV_MODE="off"
+  [[ "$a" == "--openjev=auto" ]] && OPENJEV_MODE="auto"
+  [[ "$a" == "--openjev=adopt" ]] && OPENJEV_MODE="adopt"
+  [[ "$a" == "--openjev=install" ]] && OPENJEV_MODE="install"
 done
+case "$OPENJEV_MODE" in off|auto|adopt|install) ;; *) echo "BUNDLE ERROR: invalid --openjev mode: $OPENJEV_MODE"; exit 4;; esac
 
 "$ROOT/install-look.sh" "$@"
 ((UNINSTALL)) && exit 0
 if ((DRY_RUN)); then
   echo
-  echo "[dry-run] would install/restart Unified Node 5.3.2, Decision Plane, OpenJev shadow adapter, Fabric Media Catalog, Streaming Artifacts, Fabric Memory, and Signal Window 1.2.0"
+  echo "[dry-run] would install/restart Unified Node 5.4.1, canonical Decision Plane, optional OpenJev worker, Fabric Media Catalog, Streaming Artifacts, Fabric Memory, and Signal Window 1.2.0"
+  echo "[dry-run] OpenJev mode: $OPENJEV_MODE (auto adopts an existing worker; absence is non-fatal)"
   echo "[dry-run] would reconcile Tailscale :7332 → separate fcl-ingress :7333 and verify Fabric CLI wiring"
   exit 0
 fi
@@ -40,18 +47,105 @@ install -m 0755 "$ROOT/core/ingress.py" "$HOME/.local/share/future-crash-look/co
 install -m 0755 "$ROOT/core/fcl-ingress" "$HOME/.local/bin/fcl-ingress"
 install -m 0644 "$ROOT/VERSION" "$HOME/.local/share/future-crash-look/RELEASE"
 
+# Keep the optional Local Labs server controller in lockstep when this machine uses it.
+# Upgrade both legacy and canonical locations if present, then normalize ~/.local/bin/server
+# to the canonical controller. Machines without a server controller remain untouched.
+SERVER_PRESENT=0
+[[ -e "$HOME/.local/bin/server" ]] && SERVER_PRESENT=1
+[[ -d "$HOME/.local/share/local-labs-host" ]] && SERVER_PRESENT=1
+[[ -d "$HOME/.local/share/3090-server" ]] && SERVER_PRESENT=1
+if [[ "$SERVER_PRESENT" == "1" ]]; then
+  mkdir -p "$HOME/.local/share/local-labs-host" "$HOME/.local/bin"
+  install -m 0755 "$ROOT/local-labs-host/server.py" "$HOME/.local/share/local-labs-host/server.py"
+  [[ -d "$HOME/.local/share/3090-server" ]] && install -m 0755 "$ROOT/local-labs-host/server.py" "$HOME/.local/share/3090-server/server.py"
+  ln -sfn "$HOME/.local/share/local-labs-host/server.py" "$HOME/.local/bin/server"
+fi
+
 # Signal is an interface over the same node. Its installer owns platform service edges.
 if [[ -x "$ROOT/signal-window/install.sh" ]]; then
   "$ROOT/signal-window/install.sh" || true
 fi
+
+# OpenJev is an optional decision worker, never a bundle dependency. Normal
+# upgrades adopt a compatible existing install; explicit --openjev=install is
+# the only mode allowed to clone/download large model assets.
+OPENJEV_ROOT="$HOME/.local/share/open-jev"
+OPENJEV_CHECKPOINT="$OPENJEV_ROOT/models/Open-Jev-2B/package/checkpoint"
+OPENJEV_READY=0
+if [[ "$OPENJEV_MODE" == "install" && ! -x "$OPENJEV_ROOT/.venv/bin/python" ]]; then
+  echo "OpenJev · installing optional decision worker"
+  command -v git >/dev/null 2>&1 || { echo "OpenJev install skipped: git unavailable"; OPENJEV_MODE="off"; }
+  if [[ "$OPENJEV_MODE" != "off" ]]; then
+    mkdir -p "$(dirname "$OPENJEV_ROOT")"
+    git clone https://github.com/Zefan-Cai/Open-Jev.git "$OPENJEV_ROOT" || { echo "OpenJev clone failed · continuing without learned decision worker"; OPENJEV_MODE="off"; }
+  fi
+fi
+if [[ "$OPENJEV_MODE" == "install" && -d "$OPENJEV_ROOT" ]]; then
+  if [[ ! -x "$OPENJEV_ROOT/.venv/bin/python" ]]; then
+    python3 -m venv "$OPENJEV_ROOT/.venv" || true
+    "$OPENJEV_ROOT/.venv/bin/python" -m pip install -U pip >/dev/null 2>&1 || true
+    (cd "$OPENJEV_ROOT" && .venv/bin/python -m pip install -e '.[train]') || true
+  fi
+  if [[ ! -e "$OPENJEV_CHECKPOINT" && -x "$OPENJEV_ROOT/.venv/bin/python" ]]; then
+    "$OPENJEV_ROOT/.venv/bin/python" -m pip install -q huggingface_hub || true
+    if [[ -x "$OPENJEV_ROOT/.venv/bin/hf" ]]; then
+      "$OPENJEV_ROOT/.venv/bin/hf" download ZefanCai/Open-Jev-2B \
+        --revision 0c7aa498b1627be8da4acf34c863ff0ee0a92785 \
+        --local-dir "$OPENJEV_ROOT/models/Open-Jev-2B" || true
+    fi
+  fi
+fi
+if [[ "$OPENJEV_MODE" != "off" && -x "$OPENJEV_ROOT/.venv/bin/python" && -e "$OPENJEV_CHECKPOINT" ]]; then
+  OPENJEV_READY=1
+elif [[ "$OPENJEV_MODE" == "adopt" ]]; then
+  echo "OpenJev adopt requested but no compatible install was found · continuing without it"
+fi
+
+mkdir -p "$HOME/.config/future-crash-look"
+python3 - "$HOME/.config/future-crash-look/config.json" "$OPENJEV_READY" <<'PY_CONFIG'
+import json,sys
+from pathlib import Path
+path=Path(sys.argv[1]); ready=bool(int(sys.argv[2]))
+try: data=json.loads(path.read_text())
+except Exception: data={}
+if not isinstance(data,dict): data={}
+decision=data.get("decision") if isinstance(data.get("decision"),dict) else {}
+decision.update({"enabled":ready,"provider":"openjev","url":"http://127.0.0.1:8791","mode":"live" if ready else "fallback"})
+data["decision"]=decision
+path.write_text(json.dumps(data,indent=2,sort_keys=True)+"\n")
+path.chmod(0o600)
+PY_CONFIG
 
 OS="$(uname -s)"
 if [[ "$OS" == "Linux" ]] && command -v systemctl >/dev/null 2>&1; then
   mkdir -p "$HOME/.config/systemd/user"
   install -m 0644 "$ROOT/core/future-crash-look-node.service" "$HOME/.config/systemd/user/future-crash-look-node.service"
   install -m 0644 "$ROOT/core/future-crash-look-ingress.service" "$HOME/.config/systemd/user/future-crash-look-ingress.service"
+  install -m 0644 "$ROOT/core/future-crash-look-openjev.service" "$HOME/.config/systemd/user/future-crash-look-openjev.service"
   systemctl --user daemon-reload
   systemctl --user enable future-crash-look-node.service future-crash-look-ingress.service >/dev/null 2>&1 || true
+  if (( OPENJEV_READY )); then
+    systemctl --user enable future-crash-look-openjev.service >/dev/null 2>&1 || true
+    if python3 - <<'PY_JEV' >/dev/null 2>&1
+import socket
+s=socket.socket(); s.settimeout(.2)
+try: s.connect(("127.0.0.1",8791)); ok=True
+except OSError: ok=False
+finally: s.close()
+raise SystemExit(0 if ok else 1)
+PY_JEV
+    then
+      # Do not kill an already-working manually launched experiment just to claim it.
+      # The unit is enabled and will become lifecycle authority on the next clean start.
+      echo "  OpenJev decision worker: existing :8791 adopted · systemd unit enabled"
+    else
+      systemctl --user restart future-crash-look-openjev.service || systemctl --user start future-crash-look-openjev.service || true
+      echo "  OpenJev decision worker: configured on 127.0.0.1:8791"
+    fi
+  else
+    systemctl --user disable --now future-crash-look-openjev.service >/dev/null 2>&1 || true
+    echo "  OpenJev decision worker: optional/unavailable · Fabric fallback active"
+  fi
   systemctl --user restart future-crash-look-node.service || systemctl --user start future-crash-look-node.service || true
   systemctl --user restart future-crash-look-ingress.service || systemctl --user start future-crash-look-ingress.service || true
 elif [[ "$OS" == "Darwin" ]] && command -v launchctl >/dev/null 2>&1; then

@@ -15,6 +15,9 @@ def test_dash_activity_colors_are_semantic_not_stream_noise():
     assert node._dash_event_flash({"type":"release", "phase":"ok"}) == "42;30"
     assert node._dash_event_flash({"type":"release", "phase":"failed"}) == "41;97"
     assert node._dash_event_flash({"type":"progress", "phase":"stream"}) is None
+    assert node._dash_event_flash({"type":"decision", "phase":"judge"}) == "48;5;214;30"
+    assert node._dash_event_flash({"type":"decision", "phase":"answered"}) == "42;30"
+    assert node._dash_event_flash({"type":"decision", "phase":"provider-down"}) == "41;97"
 
 
 def test_dash_recent_scope_distinguishes_local_and_remote():
@@ -54,7 +57,7 @@ def _dash_fixture():
     t=node.now()
     local={
         "name":"3090","version":node.VERSION,"pulse":{"number":123},
-        "capabilities":{"filesystem":True},"supervisor":{"active":None},
+        "capabilities":{"filesystem":True,"decision.openjev":True},"supervisor":{"active":None},
         "inference":{
             "preferred_model":"qwen3.8:27b","resident":["qwen3.8:27b"],
             "models":[{"name":"qwen3.8:27b","resident":True,
@@ -97,6 +100,7 @@ def test_dash_snapshot_without_height_remains_full():
     assert "TRUST BASIS" in body
     assert "CONTROL PLANE" in body
     assert "SERVICES" in body
+    assert "COGNITION / DECISION" in body
 
 
 def test_dash_model_includes_purpose_evidence_compactly():

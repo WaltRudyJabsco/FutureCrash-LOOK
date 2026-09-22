@@ -6,7 +6,7 @@
 
 Decision requests are renderer-neutral and visible across trusted Fabric nodes. `lk fabric decisions` lists pending requests, `lk fabric answer ...` resolves one, and Signal can surface the same request with one-tap choices. The answering UI does not execute work; any continuation is still a normal authorized Fabric Work Packet.
 
-An optional OpenJev-compatible shadow adapter (`FCL_DECISION_URL`, default `http://127.0.0.1:3000`) lets the Fabric compare learned typed decisions without making OpenJev a dependency or authority. `lk fabric decision-shadow ...` probes it directly.
+OpenJev is an optional first-class Fabric decision worker, configured canonically at `http://127.0.0.1:8791` when installed. The Decision Plane remains authoritative: deterministic fast paths stay instant, learned judgment supplies bounded evidence, and missing/broken OpenJev degrades cleanly to existing behavior. `lk fabric decision-provider` shows worker state; `lk fabric decision-shadow ...` remains available for direct probes.
 
 ## 5.2.19 — Media Session Reliability
 

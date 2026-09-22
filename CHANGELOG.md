@@ -1,3 +1,12 @@
+# 5.4.1 — Canonical Decision Worker
+
+- Promote the Decision Plane into normal Fabric cognition: deterministic fast paths, learned judgment, human clarification, and graceful fallbacks share one policy path.
+- OpenJev is now an optional first-class decision worker with config, health, systemd lifecycle, installer adoption/install modes, capability discovery, and Local Labs server controls.
+- LO media ambiguity can use OpenJev live while exact controls remain deterministic and instantaneous.
+- Decision telemetry records probability distribution, top-two margin, confidence, latency, policy disposition, and provider failures for later evaluation.
+- Dash adds cognition/decision visibility and semantic JUDGE / ASK / ACT feedback without turning uncertainty into a blocking UI.
+- Missing, disabled, or failed OpenJev degrades to existing deterministic/LLM behavior; it is never a hard dependency.
+
 # 5.3.2 — Decision Interaction
 
 - Make `lk fabric ask` interactive in a TTY while remaining renderer-neutral: terminal, Signal, or another Fabric surface may answer the same pending decision.

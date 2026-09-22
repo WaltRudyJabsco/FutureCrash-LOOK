@@ -15,7 +15,9 @@ class MediaLOSurfaceTests(unittest.TestCase):
 
     def test_narrow_media_commands_preflight_before_inference(self):
         self.assertIn('def _lo_media_intent(prompt):', self.source)
-        self.assertIn('media_intent=None if force_search else _lo_media_intent(prompt)', self.source)
+        self.assertIn('media_intent=None if force_search else _lo_media_intent_profile(prompt,profile)', self.source)
+        self.assertIn('def _lo_media_decision_intent(prompt,profile="workspace"):', self.source)
+        self.assertIn('/v1/decisions/shadow', self.source)
         self.assertIn('cannot turn "play Talking Heads" into an internet search', self.source)
 
     def test_media_ordinals_and_single_worker_reuse_are_present(self):

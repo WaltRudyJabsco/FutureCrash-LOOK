@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Future Crash + LOOK Unified Node 5.3.2.
+"""Future Crash + LOOK Unified Node 5.4.1.
 
 A small distributed supervisor for trusted personal machines. Immediate events stay
 asynchronous; a one-second fabric pulse reconciles presence, leases and stale work.
@@ -43,12 +43,12 @@ try:
 except ImportError:
     from ui_model import actions as ui_actions, build_ui_model
 try:
-    from .decision import OpenJevShadow, new_request as new_decision_request
+    from .decision import OpenJevShadow, new_request as new_decision_request, provider_status as decision_provider_status, plan as decision_plan
 except ImportError:
-    from decision import OpenJevShadow, new_request as new_decision_request
+    from decision import OpenJevShadow, new_request as new_decision_request, provider_status as decision_provider_status, plan as decision_plan
 from urllib.parse import urlparse, parse_qs
 
-VERSION = "5.3.2"
+VERSION = "5.4.1"
 DEFAULT_HOST = "127.0.0.1"
 DEFAULT_PORT = 7332
 DEFAULT_INGRESS_PORT = 0
@@ -316,6 +316,8 @@ def capabilities():
         "decision.request": True,
         "decision.answer": True,
         "decision.shadow": True,
+        "decision.choice": probe("127.0.0.1", 8791),
+        "decision.openjev": probe("127.0.0.1", 8791),
     }
 
 
@@ -962,6 +964,7 @@ MANAGED_SERVICES = {
     "ollama": {"linux": "ollama.service", "darwin": None},
     "comfy": {"linux": "server-comfy.service", "darwin": None},
     "mercury": {"linux": "server-mercury.service", "darwin": None},
+    "openjev": {"linux": "future-crash-look-openjev.service", "darwin": None},
 }
 
 def service_status(name: str):
@@ -2128,12 +2131,24 @@ def _decision_expiry_loop():
         time.sleep(.5)
 
 
-def _openjev_shadow(state, question, candidates):
-    return OpenJevShadow().try_choice(state=state,question=question,candidates=candidates)
+def _openjev_shadow(state, question, candidates, *, profile="workspace", consequence="low", reversible=True):
+    result=OpenJevShadow().try_choice(state=state,question=question,candidates=candidates)
+    if result.get("ok"):
+        result["policy"]=decision_plan(profile=profile,confidence=float(result.get("confidence") or 0.0),
+            margin=float(result.get("margin") or 0.0),consequence=consequence,reversible=bool(reversible)).public()
+    phase="judge" if result.get("ok") else "provider-down"
+    try:
+        FABRIC_STORE.event(None,"decision",phase,str(result.get("choice") or result.get("error") or "openjev"),node=identity()["name"],
+            data={"provider":"openjev","choice":result.get("choice"),"probabilities":result.get("probabilities") or {},
+                  "confidence":result.get("confidence"),"margin":result.get("margin"),"elapsed_ms":result.get("elapsed_ms"),
+                  "url":result.get("url")})
+    except Exception:
+        pass
+    return result
 
 
 class API(BaseHTTPRequestHandler):
-    server_version = "FCLNode/5.3.2"
+    server_version = "FCLNode/5.4.1"
 
     def setup(self):
         self._metric_request_id = None
@@ -2260,6 +2275,12 @@ class API(BaseHTTPRequestHandler):
             return self.sendj(200, capabilities())
         if path == "/v1/models":
             return self.sendj(200, {"models": MODELS.discover()})
+        if path == "/v1/decisions/provider":
+            status=decision_provider_status()
+            status["reachable"]=bool(probe("127.0.0.1",8791)) if status.get("enabled") else False
+            if status.get("reachable") and status.get("state") == "configured": status["state"]="ready"
+            elif status.get("enabled") and not status.get("reachable"): status["state"]="down"
+            return self.sendj(200,status)
         if path == "/v1/decisions":
             return self.sendj(200, {"decisions": FABRIC_STORE.decisions(pending_only=True), "node": identity()["name"]})
         if path == "/v1/decisions/fabric":
@@ -2343,6 +2364,7 @@ class API(BaseHTTPRequestHandler):
                     choices=d.get("choices") or [],
                     profile=str(d.get("profile") or "workspace"),
                     confidence=float(d.get("confidence") or 0.0),
+                    margin=float(d.get("margin") or 0.0),
                     consequence=str(d.get("consequence") or "low"),
                     reversible=bool(d.get("reversible",True)),
                     preferred=d.get("preferred"), fallback=d.get("fallback"),
@@ -2375,7 +2397,8 @@ class API(BaseHTTPRequestHandler):
             candidates=d.get("candidates") or []
             if not isinstance(candidates,list) or len(candidates)<2:
                 return self.sendj(400,{"ok":False,"error":"at least two candidates required"})
-            return self.sendj(200,_openjev_shadow(str(d.get("state") or ""),str(d.get("question") or "Choose the best option."),[str(x) for x in candidates]))
+            return self.sendj(200,_openjev_shadow(str(d.get("state") or ""),str(d.get("question") or "Choose the best option."),[str(x) for x in candidates],
+                profile=str(d.get("profile") or "workspace"),consequence=str(d.get("consequence") or "low"),reversible=bool(d.get("reversible",True))))
         if path == "/v1/memory":
             try:
                 action=str(d.get("action") or "merge").lower()
@@ -2901,10 +2924,12 @@ def _dash_event_flash(event):
         return "41;97"
     if typ == "memory" or phase in {"tool", "capability", "receipt"}:
         return "46;30"           # cyan · deterministic/tool work
-    if typ == "decision" and phase == "pending":
-        return "48;5;214;30"     # amber · optional human input available
+    if typ == "decision" and phase in {"judge", "pending"}:
+        return "48;5;214;30"     # amber · probabilistic judgment / human input
     if typ == "decision" and phase in {"answered", "timeout"}:
-        return "46;30"           # cyan · uncertainty collapsed / policy resolved
+        return "42;30"           # green · uncertainty collapsed / action authorized
+    if typ == "decision" and phase in {"provider-down", "error"}:
+        return "41;97"           # red · learned worker unavailable; Fabric will degrade
     if typ == "progress":
         if phase == "dispatch":
             return "44;97"       # blue · work accepted/dispatched
@@ -3034,6 +3059,17 @@ def _dash_decision_line(decision, width=92):
     return prefix + question[:room] + suffix
 
 
+def _dash_decision_summary(data):
+    events=(data.get("events") or {}).get("events") or []
+    judges=[e for e in events if str(e.get("type") or "") == "decision" and str(e.get("phase") or "") == "judge"]
+    pending=len(_dash_pending_decisions(data))
+    last=judges[-1] if judges else None
+    info=(last or {}).get("data") or {}
+    return {"ready":bool(((data.get("nodes") or {}).get("self") or {}).get("capabilities",{}).get("decision.openjev")),
+            "last":info.get("choice"),"confidence":info.get("confidence"),"margin":info.get("margin"),
+            "latency_ms":info.get("elapsed_ms"),"judged":len(judges),"pending":pending}
+
+
 def _dash_render_full(data, width=92, ansi=False):
     """Full-height dashboard renderer."""
     snap = data.get("nodes") or {}
@@ -3095,6 +3131,16 @@ def _dash_render_full(data, width=92, ansi=False):
         lines.append(f"{str(name):<{node_w}.{node_w}} {state:<{state_w}.{state_w}} {_dash_model(node):<{model_w}.{model_w}} {pulse:>8.8}")
 
     lines += ["", "CAPABILITIES", rule, _dash_capability_summary(data, width)]
+    ds=_dash_decision_summary(data)
+    decision_state="● ready" if ds["ready"] else "○ unavailable"
+    last_bits=[]
+    if ds.get("last"): last_bits.append(str(ds["last"]))
+    if isinstance(ds.get("confidence"),(int,float)): last_bits.append(f"conf {ds['confidence']:.2f}")
+    if isinstance(ds.get("margin"),(int,float)): last_bits.append(f"margin {ds['margin']:.2f}")
+    if isinstance(ds.get("latency_ms"),(int,float)): last_bits.append(f"{ds['latency_ms']:.0f}ms")
+    lines += ["", "COGNITION / DECISION", rule,
+              f"rules ● ready   OpenJev 2B {decision_state}   pending {ds['pending']}   observed {ds['judged']}",
+              "last · "+(" · ".join(last_bits) if last_bits else "no learned decision observed")]
     lines += ["", "TRUST BASIS", rule]
     clock = time.strftime("%Y-%m-%d %H:%M:%S %Z")
     caps = local.get("capabilities") or {}
@@ -3575,7 +3621,7 @@ def main():
     ap.add_argument("command",nargs="?",default="serve",
         choices=["serve","status","nodes","activity","pulse","fabric","watch","dashboard","models","qualify","services","service",
                  "jobs","job","submit","packet","cancel","events","http","beacon","lights","artifact-add","artifact","artifacts","media-catalog","media-identify",
-                 "decisions","decision","answer","ask","decision-shadow"])
+                 "decisions","decision","answer","ask","decision-shadow","decision-provider"])
     ap.add_argument("args",nargs="*")
     ap.add_argument("--node",dest="node",default=None,help="target Fabric node name")
     ap.add_argument("--json",action="store_true",help="raw JSON where a human view exists")
@@ -3698,6 +3744,19 @@ def main():
                     print(f"FABRIC ARTIFACT · {meta.get('name') or digest}")
                     print(f"  {digest} · {meta.get('bytes','?')} bytes · {meta.get('media_type','application/octet-stream')}")
                     print(f"  {url}")
+                return 0
+            if a.command=="decision-provider":
+                data=_target_get(a.host,a.port,a.node,"/v1/decisions/provider") if a.node else _daemon_get(a.host,a.port,"/v1/decisions/provider")
+                if a.json:
+                    print(json.dumps(data,indent=2)); return 0
+                print("FABRIC DECISION WORKER")
+                print("─"*64)
+                print(f"  provider    {data.get('provider','?')}")
+                print(f"  state       {data.get('state','?')}")
+                print(f"  mode        {data.get('mode','?')}")
+                print(f"  endpoint    {data.get('url','?')}")
+                if data.get('latency_ms') is not None: print(f"  latency     {float(data['latency_ms']):.0f} ms")
+                if data.get('last_error'): print(f"  last error  {data.get('last_error')}")
                 return 0
             if a.command=="decisions":
                 data=_target_get(a.host,a.port,a.node,"/v1/decisions") if a.node else _daemon_get(a.host,a.port,"/v1/decisions/fabric")

@@ -32,7 +32,7 @@ elif [[ "$OS" == "Darwin" ]]; then
 fi
 
 cat <<TXT
-Local Labs Host Controller v0.5.1 installed.
+Local Labs Host Controller v0.6.0 installed.
   program: $INSTALL_DIR/server.py
   platform: $OS
 

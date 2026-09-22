@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 """
-Local Labs Host Controller v0.5.1
+Local Labs Host Controller v0.6.0
 
 Milestone 2 — observe + operate known services:
   server status
@@ -30,7 +30,7 @@ from pathlib import Path
 from typing import Optional
 
 
-VERSION = "0.5.1"
+VERSION = "0.6.0"
 HOME = Path.home()
 
 
@@ -84,6 +84,16 @@ SERVICES = (
         process_patterns=("/usr/bin/uwsgi", "searx.webapp"),
         install_paths=("/usr/local/searxng/searxng-src", "/etc/searxng/settings.yml"),
         health_path="/",
+    ),
+    ServiceSpec(
+        id="openjev",
+        name="OpenJev Decision",
+        port=8791,
+        user_unit="future-crash-look-openjev.service",
+        process_patterns=("jev.server", "Open-Jev"),
+        install_paths=("~/.local/share/open-jev", "~/.config/systemd/user/future-crash-look-openjev.service"),
+        health_path="/",
+        gpu=True,
     ),
     ServiceSpec(
         id="signal",
@@ -543,8 +553,10 @@ def discover(snap: dict, json_mode: bool = False) -> None:
 
 
 def get_spec(name: str) -> ServiceSpec:
+    aliases={"decision":"openjev","jev":"openjev"}
+    name=aliases.get(str(name).lower(),name)
     for spec in SERVICES:
-        if spec.id == name or spec.name.lower() == name.lower():
+        if spec.id == name or spec.name.lower() == str(name).lower():
             return spec
     print(f"Unknown service: {name}", file=sys.stderr)
     print("Known: " + ", ".join(s.id for s in SERVICES), file=sys.stderr)
@@ -621,7 +633,11 @@ def start_all() -> None:
     states = {s["id"]: s for s in snap["services"]}
     for spec in SERVICES:
         _, unit = service_unit(spec)
-        if unit and not states[spec.id]["running"]:
+        state=states[spec.id]
+        # Optional decision workers remain opt-in; `server start openjev` is explicit.
+        if spec.id=="openjev" and not ((state.get("systemd") or {}).get("enabled")):
+            continue
+        if unit and not state["running"]:
             action("start", spec.id)
 
 

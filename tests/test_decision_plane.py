@@ -31,6 +31,16 @@ class DecisionPolicyTests(unittest.TestCase):
             self.assertEqual(plan.timeout_action,'cancel')
             self.assertTrue(plan.requires_confirmation)
 
+    def test_margin_can_authorize_low_risk_reversible_judgment(self):
+        planned=decision.plan(profile='workspace',confidence=.62,margin=.48,consequence='low',reversible=True)
+        self.assertEqual(planned.action,'act')
+        self.assertEqual(planned.timeout_action,'continue')
+
+    def test_margin_never_bypasses_consequence_confirmation(self):
+        planned=decision.plan(profile='power',confidence=.99,margin=.90,consequence='high',reversible=True)
+        self.assertEqual(planned.action,'ask')
+        self.assertTrue(planned.requires_confirmation)
+
     def test_request_default_fallback_follows_profile(self):
         workspace=decision.new_request(question='Use it?',choices=[{'value':'yes'},{'value':'no'}],profile='workspace',preferred='yes')
         power=decision.new_request(question='Use it?',choices=[{'value':'yes'},{'value':'no'}],profile='power',preferred='yes',confidence=.5)
@@ -84,6 +94,7 @@ class OpenJevShadowTests(unittest.TestCase):
         self.assertEqual(result['choice'],'media.play')
         self.assertAlmostEqual(result['confidence'],0.91)
         self.assertAlmostEqual(result['probabilities']['web.search'],0.09)
+        self.assertAlmostEqual(result['margin'],0.82)
 
     def test_choice_omits_model_for_zefancai_openjev_server(self):
         body=b'{"answers":{"decision":{"choice":"a","probabilities":{"a":0.8,"b":0.2},"confidence":0.6}}}'
@@ -142,6 +153,8 @@ class DecisionSurfaceTests(unittest.TestCase):
     def test_installer_ships_decision_plane(self):
         install=(ROOT/'install.sh').read_text(encoding='utf-8')
         self.assertIn('core/decision.py',install)
+        self.assertIn('future-crash-look-openjev.service',install)
+        self.assertIn('--openjev=install',install)
         self.assertIn('import conductor, fabric_client, memory_store, decision',install)
 
 

@@ -95,7 +95,7 @@ _lk() {
 
   case "$words[2]" in
     fabric)
-      (( CURRENT == 3 )) && _values 'fabric action' status nodes activity pulse models http qualify services service jobs job events submit packet cancel watch dashboard dash beacon lights
+      (( CURRENT == 3 )) && _values 'fabric action' status nodes activity pulse models http qualify services service jobs job events submit packet cancel watch dashboard dash beacon lights decisions decision decision-provider answer ask decision-shadow
       return
       ;;
     ollama)

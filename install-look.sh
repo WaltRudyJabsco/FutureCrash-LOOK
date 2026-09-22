@@ -3,7 +3,7 @@ set -euo pipefail
 
 ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 
-PRODUCT_VERSION="5.3.2"
+PRODUCT_VERSION="5.4.1"
 LOOK_VERSION="4.46.0"
 FUTURE_CRASH_VERSION="1.2.1"
 
@@ -21,12 +21,13 @@ usage() {
 LOOK + FUTURE CRASH — system installer
 
 Usage:
-  ./install.sh [--dry-run] [--yes] [--no-optional] [--force-downgrade] [--uninstall]
+  ./install.sh [--dry-run] [--yes] [--no-optional] [--force-downgrade] [--openjev=MODE] [--uninstall]
 
   --dry-run          show what the installer would do
   --yes              accept optional component prompts
   --no-optional      install without optional Remote + AI/media components
   --force-downgrade  deliberately install over a newer unified release
+  --openjev=MODE     unified installer option; LOOK accepts and defers it
   --uninstall        remove Future Crash + LOOK owned files
 EOF
 }
@@ -37,6 +38,7 @@ while (($#)); do
     --yes|-y) ASSUME_YES=1 ;;
     --no-optional) NO_OPTIONAL=1 ;;
     --force-downgrade) FORCE_DOWNGRADE=1 ;;
+    --openjev=off|--openjev=auto|--openjev=adopt|--openjev=install) : ;;
     --uninstall)
       if command -v lk >/dev/null 2>&1; then
         exec lk uninstall
