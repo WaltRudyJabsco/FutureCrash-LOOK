@@ -93,16 +93,20 @@ def build_ui_model(data: dict[str, Any], *, mini: bool = False) -> dict[str, Any
     ]
     events = (data.get("events") or {}).get("events") or []
     services = (data.get("services") or {}).get("services") or {}
+    decisions = (data.get("decisions") or {}).get("decisions") or []
+    pending_decisions = [d for d in decisions if str(d.get("status") or "pending") == "pending"]
     return {
         "schema": "fabric-ui-v1",
         "summary": {
             "node_count": len(rows),
             "active_jobs": len(active_jobs),
+            "pending_decisions": len(pending_decisions),
             "health_ok": bool((data.get("health") or {}).get("ok", False)),
         },
         "nodes": rows,
         "capabilities": _capability_index(rows),
         "jobs": active_jobs,
+        "decisions": pending_decisions,
         "services": services,
         "recent": events,
         "actions": actions(mini=mini),

@@ -24,7 +24,7 @@ try:
 except Exception:
     readline = None
 
-VERSION="4.45.1"
+VERSION="4.46.0"
 
 LOOK_WORDMARK = r"""       ██╗      ██╗  ██╗
        ██║      ██║ ██╔╝
@@ -8070,7 +8070,7 @@ def _run_filesystem_tool_impl(workspace, name, args, profile="workspace"):
         return f"File tool internal error: {type(exc).__name__}: {exc}"
     return f"Unknown file tool: {name}"
 
-LOOK_INFO_USER_AGENT="LOOK-Shell/4.45.1 (local text client)"
+LOOK_INFO_USER_AGENT="LOOK-Shell/4.46.0 (local text client)"
 
 def _run_filesystem_tool(workspace, name, args, profile="workspace"):
     global _FILESYSTEM_ACCESS_PROFILE
@@ -15319,21 +15319,34 @@ def _fabric_command(args):
     aliases={"list":"nodes","node":"status","model":"models"}
     sub=aliases.get(sub,sub)
     if sub=="dash": sub="dashboard"
-    if sub not in {"fabric","watch","dashboard","dash","beacon","lights","nodes","activity","pulse","models","status","qualify","services","service","jobs","job","submit","packet","cancel","events","http"}:
-        print("usage: lk fabric [watch|dashboard|beacon [rgb|pulse]|lights [demo|rgb|pulse|christmas|disco|stop]|nodes|status [NODE]|activity [NODE]|pulse [NODE]|models [NODE] [--json]|http [NODE]|jobs [NODE]|job [NODE] ID|events [NODE]|submit [NODE] OP [key=value ...]|packet [NODE] FILE|cancel [NODE] ID|qualify [NODE] MODEL|services [NODE]|service [NODE] SERVICE start|stop|restart]")
+    if sub not in {"fabric","watch","dashboard","dash","beacon","lights","nodes","activity","pulse","models","status","qualify","services","service","jobs","job","submit","packet","cancel","events","http","decisions","decision","answer","ask","decision-shadow"}:
+        print("usage: lk fabric [watch|dashboard|decisions [NODE]|decision [NODE] ID|answer [NODE] ID CHOICE|ask [NODE] QUESTION [CHOICE ...]|decision-shadow [NODE] STATE QUESTION CANDIDATE...|beacon|lights|nodes|status|activity|pulse|models|jobs|events|submit|packet|cancel|qualify|services|service]")
         return 2
     argv=[exe,sub]
     rest=list(args[1:])
-    if sub in {"status","activity","pulse","models","services","jobs","events","http"}:
+    if sub in {"status","activity","pulse","models","services","jobs","events","http","decisions"}:
         if rest and not rest[0].startswith("-"):
             argv += ["--node",rest.pop(0)]
         argv += rest
-    elif sub in {"job","cancel"}:
+    elif sub in {"job","cancel","decision"}:
         if not rest:
             print(f"usage: lk fabric {sub} [NODE] ID"); return 2
         if len(rest)>=2:
             argv += ["--node",rest.pop(0)]
         argv += rest[:1]
+    elif sub=="answer":
+        if len(rest)<2:
+            print("usage: lk fabric answer [NODE] ID CHOICE"); return 2
+        if len(rest)>=3:
+            argv += ["--node",rest.pop(0)]
+        argv += rest[:2]
+    elif sub in {"ask","decision-shadow"}:
+        if not rest:
+            print(f"usage: lk fabric {sub} [NODE] ..."); return 2
+        # Explicit @node avoids guessing whether natural-language question text is a node.
+        if rest[0].startswith("@"):
+            argv += ["--node",rest.pop(0)[1:]]
+        argv += rest
     elif sub=="submit":
         if not rest:
             print("usage: lk fabric submit [NODE] OP [key=value ...]"); return 2
@@ -15476,6 +15489,8 @@ def main():
     if cmd=="thinking": return lo_thinking(rest)
     if cmd in {"think-display","thinkdisplay"}: return lo_think_display(rest)
     if cmd in {"media","music"}: return media(rest)
+    # Natural shorthand: `lk play TARGET` is the obvious media entry point.
+    if cmd=="play": return media(["play",*rest]) if rest else media(["play"])
     if cmd=="player": return media_player()
     if cmd=="_ollama-share-proxy": return _ollama_share_proxy()
     modes={"detail":"detail","dirs":"dirs","files":"files","tree":"tree","recent":"recent","size":"size"}

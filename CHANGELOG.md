@@ -1,3 +1,20 @@
+# 5.3.1 — Decision Interaction
+
+- Make `lk fabric ask` interactive in a TTY while remaining renderer-neutral: terminal, Signal, or another Fabric surface may answer the same pending decision.
+- Poll while waiting so a Signal answer immediately releases the originating terminal; bare Enter leaves the decision pending instead of blocking.
+- Add the obvious `lk play TARGET` shorthand and route it directly to the existing LOOK media session instead of falling through to the file renderer.
+- Keep decision deadlines/fallback policy authoritative in Fabric; the terminal is only another optional consumer.
+
+# 5.3.0 — Decision Plane
+
+- Human clarification becomes a renderer-neutral Fabric object instead of a blocking terminal prompt.
+- Decisions carry confidence, consequence, reversibility, deadline, preferred choice, and timeout policy.
+- Power/Unsafe can auto-continue only low-consequence reversible work; Workspace/Conservative defer; consequential/irreversible work requires explicit confirmation and cancels on silence.
+- Pending decisions aggregate across trusted nodes and can be answered from terminal or Signal.
+- Continuation work re-enters the normal Fabric Work Packet authorization path; UI surfaces never execute work directly.
+- Adds an optional OpenJev-compatible shadow adapter at `/v1/decisions/shadow` with no model/runtime dependency.
+- Signal 1.2.0 adds a compact decision card with countdown and one-tap answers.
+
 # 5.2.19 — Media Session Reliability
 
 - Reuse the LOOK-owned mpv process for ordinary play requests instead of spawning overlapping players.

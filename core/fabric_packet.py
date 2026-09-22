@@ -195,6 +195,18 @@ class FabricStore:
               node TEXT,
               data_json TEXT
             );
+            CREATE TABLE IF NOT EXISTS decisions (
+              id TEXT PRIMARY KEY,
+              created REAL NOT NULL,
+              expires REAL NOT NULL,
+              status TEXT NOT NULL,
+              request_json TEXT NOT NULL,
+              selected TEXT,
+              source TEXT,
+              resolved REAL
+            );
+            CREATE INDEX IF NOT EXISTS decisions_status_expires
+              ON decisions(status, expires);
             """)
 
     def submit(self, packet: dict[str, Any], *, node: str) -> tuple[dict[str, Any], bool]:
@@ -325,6 +337,96 @@ class FabricStore:
             except Exception: d["data"] = {}
             out.append(d)
         return out
+
+    def add_decision(self, request: dict[str, Any], *, node: str) -> dict[str, Any]:
+        """Persist a portable DecisionRequest without tying it to any renderer."""
+        if not isinstance(request, dict) or request.get("schema") != "fabric-decision-v1":
+            raise ValueError("fabric-decision-v1 request required")
+        did=str(request.get("id") or "")
+        if not did:
+            raise ValueError("decision id required")
+        blob=json.dumps(request,separators=(",",":"),ensure_ascii=False)
+        with self.lock, closing(self._connect()) as db:
+            db.execute(
+                "INSERT OR IGNORE INTO decisions(id,created,expires,status,request_json) VALUES(?,?,?,?,?)",
+                (did,float(request.get("created") or utc_ts()),float(request.get("expires") or utc_ts()),"pending",blob),
+            )
+            db.commit()
+        self.event(request.get("job_id"),"decision","pending",request.get("question"),node=node,
+                   data={"decision_id":did,"expires":request.get("expires"),"preferred":request.get("preferred")})
+        return self.get_decision(did) or request
+
+    @staticmethod
+    def _decision_row(row) -> dict[str, Any] | None:
+        if not row:
+            return None
+        try: request=json.loads(row["request_json"] or "{}")
+        except Exception: request={}
+        request["status"]=row["status"]
+        request["selected"]=row["selected"]
+        request["response_source"]=row["source"]
+        request["resolved"]=row["resolved"]
+        return request
+
+    def get_decision(self, did: str) -> dict[str, Any] | None:
+        with closing(self._connect()) as db:
+            row=db.execute("SELECT * FROM decisions WHERE id=?",(str(did),)).fetchone()
+        return self._decision_row(row)
+
+    def decisions(self, *, pending_only: bool = False, limit: int = 64) -> list[dict[str, Any]]:
+        limit=max(1,min(int(limit),256))
+        query="SELECT * FROM decisions"
+        args=[]
+        if pending_only:
+            query += " WHERE status='pending'"
+        query += " ORDER BY created DESC LIMIT ?"
+        args.append(limit)
+        with closing(self._connect()) as db:
+            rows=db.execute(query,tuple(args)).fetchall()
+        return [d for row in rows if (d:=self._decision_row(row))]
+
+    def resolve_decision(self, did: str, selected: str, *, source: str, node: str) -> dict[str, Any]:
+        """Resolve exactly once. Late answers are returned as conflicts, not rewrites."""
+        did=str(did); selected=str(selected)
+        with self.lock, closing(self._connect()) as db:
+            row=db.execute("SELECT * FROM decisions WHERE id=?",(did,)).fetchone()
+            if not row:
+                raise KeyError(did)
+            current=self._decision_row(row) or {}
+            if current.get("status") != "pending":
+                return current
+            allowed={str(x.get("value")) for x in (current.get("choices") or []) if isinstance(x,dict)}
+            if selected not in allowed:
+                raise ValueError(f"invalid decision choice: {selected}")
+            when=utc_ts()
+            db.execute("UPDATE decisions SET status='answered',selected=?,source=?,resolved=? WHERE id=? AND status='pending'",
+                       (selected,str(source or "human"),when,did))
+            db.commit()
+        result=self.get_decision(did) or {}
+        self.event(result.get("job_id"),"decision","answered",selected,node=node,
+                   data={"decision_id":did,"source":source})
+        return result
+
+    def expire_decisions(self, *, node: str) -> list[dict[str, Any]]:
+        """Resolve due optional decisions to their declared fallback without blocking work."""
+        now=utc_ts(); expired=[]
+        with self.lock, closing(self._connect()) as db:
+            rows=db.execute("SELECT * FROM decisions WHERE status='pending' AND expires<=? ORDER BY expires ASC",(now,)).fetchall()
+            for row in rows:
+                current=self._decision_row(row) or {}
+                fallback=str(current.get("fallback") or "defer")
+                choices={str(x.get("value")) for x in (current.get("choices") or []) if isinstance(x,dict)}
+                selected=fallback if fallback in choices else None
+                status="timed_out"
+                db.execute("UPDATE decisions SET status=?,selected=?,source='timeout',resolved=? WHERE id=? AND status='pending'",
+                           (status,selected,now,row["id"]))
+                current.update(status=status,selected=selected,response_source="timeout",resolved=now,timeout_action=fallback)
+                expired.append(current)
+            db.commit()
+        for current in expired:
+            self.event(current.get("job_id"),"decision","timeout",str(current.get("timeout_action") or "defer"),node=node,
+                       data={"decision_id":current.get("id"),"selected":current.get("selected")})
+        return expired
 
 
 class ArtifactStore:

@@ -1,6 +1,6 @@
 const N=256;
 const main=document.querySelector('main'),A=document.querySelector('#ambient'),a=A.getContext('2d'),C=document.querySelector('#signal'),c=C.getContext('2d');
-const log=document.querySelector('#log'),form=document.querySelector('#form'),input=document.querySelector('#input'),drops=document.querySelector('#drops'),statusEl=document.querySelector('#status'),activity=document.querySelector('#activity'),activityText=document.querySelector('#activityText'),fabricLight=document.querySelector('#fabricLight');
+const log=document.querySelector('#log'),form=document.querySelector('#form'),input=document.querySelector('#input'),drops=document.querySelector('#drops'),decisionPanel=document.querySelector('#decisionPanel'),statusEl=document.querySelector('#status'),activity=document.querySelector('#activity'),activityText=document.querySelector('#activityText'),fabricLight=document.querySelector('#fabricLight');
 const signalSession=localStorage.getItem('signal-session')||crypto.randomUUID();
 localStorage.setItem('signal-session',signalSession);
 a.imageSmoothingEnabled=c.imageSmoothingEnabled=false;
@@ -123,6 +123,31 @@ form.addEventListener('submit',async e=>{e.preventDefault();const text=input.val
  }).catch(err=>event('SIGNAL ERROR · '+err.message))}
  event('READY');energy=Math.max(.25,energy*.65)}
  catch(err){event('ERROR · '+err.message);line('error','! '+err.message);energy=.15}});
+
+let activeDecisionKey='';
+function renderDecision(d){
+ if(!d){decisionPanel.hidden=true;decisionPanel.innerHTML='';activeDecisionKey='';return}
+ const key=String(d.node||'local')+':'+String(d.id||'');
+ const left=Math.max(0,Math.ceil((Number(d.expires||0)*1000-Date.now())/1000));
+ decisionPanel.hidden=false;decisionPanel.innerHTML='';
+ const head=document.createElement('div');head.className='decision-head';
+ const who=document.createElement('span');who.textContent=`FABRIC INPUT · ${d.node||d.origin||'local'}`;
+ const timer=document.createElement('span');timer.textContent=`${left}s`;head.append(who,timer);
+ const q=document.createElement('div');q.className='decision-question';q.textContent=String(d.question||'Decision required');
+ const choices=document.createElement('div');choices.className='decision-choices';
+ for(const choice of (d.choices||[])){const b=document.createElement('button');b.type='button';b.className='decision-choice';b.textContent=String(choice.label||choice.value);b.onclick=()=>answerDecision(d,choice.value);choices.append(b)}
+ const meta=document.createElement('div');meta.className='decision-meta';
+ const fallback=String(d.fallback||'defer');meta.textContent=`${d.profile||'workspace'} · ${Math.round(Number(d.confidence||0)*100)}% · timeout: ${fallback}`;
+ decisionPanel.append(head,q,choices,meta);
+ if(key!==activeDecisionKey){event('FABRIC INPUT REQUEST');activeDecisionKey=key}
+}
+async function answerDecision(d,selected){
+ try{const r=await fetch('/api/fabric/decisions/answer',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({node:d.node,id:d.id,selected})});const out=await r.json();if(!r.ok||out.error)throw Error(out.error||r.statusText);event(`FABRIC INPUT · ${selected}`);activeDecisionKey='';await pollDecisions();input.focus()}catch(err){event('DECISION ERROR · '+err.message)}
+}
+async function pollDecisions(){
+ try{const r=await fetch('/api/fabric/decisions',{cache:'no-store'});if(!r.ok)return;const d=await r.json();const rows=Array.isArray(d.decisions)?d.decisions:[];renderDecision(rows[0]||null)}catch{}
+}
+setInterval(pollDecisions,750);pollDecisions();
 
 let lastFabricLight='';
 async function pollFabricLight(){

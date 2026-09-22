@@ -67,3 +67,13 @@ main.mode-compact #activity{height:18px;line-height:17px;flex-basis:18px}
 #fabricLight{position:absolute;inset:0;z-index:5;pointer-events:none;opacity:0;transition:opacity .08s linear,background .08s linear;mix-blend-mode:screen}
 .scan{z-index:6}
 .artifact-image{display:block;max-width:min(100%,420px);max-height:300px;object-fit:contain;margin:.5rem 0;border:1px solid #31543a;background:#020503}
+
+/* v1.2 Fabric decision requests: human input is a portable capability. */
+#decisionPanel{flex:0 0 auto;border:1px solid #31543a;background:#08130b;margin:6px 0;padding:8px 9px;font-size:11px;line-height:1.35}
+#decisionPanel[hidden]{display:none}
+.decision-head{display:flex;justify-content:space-between;gap:10px;color:#5f8e69;letter-spacing:.05em;margin-bottom:5px}
+.decision-question{color:#d0dfd4;margin-bottom:7px}
+.decision-meta{color:#53775d;margin-top:5px}
+.decision-choices{display:flex;gap:6px;flex-wrap:wrap}
+.decision-choice{font:inherit;color:#9ed2aa;background:#071009;border:1px solid #31543a;padding:4px 7px;cursor:pointer}
+.decision-choice:hover,.decision-choice:focus{border-color:#8fd6a2;color:#d4e5d8;outline:0}

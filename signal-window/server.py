@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Signal Window 1.1.2 — a native browser body for LO."""
+"""Signal Window 1.2.0 — a native browser body for LO and Fabric decisions."""
 from __future__ import annotations
 
 import argparse
@@ -731,6 +731,12 @@ class App(BaseHTTPRequestHandler):
                 return self.json(200,value or {"pulse":0,"light":None})
             except Exception as exc:
                 return self.json(502,{"error":str(exc)})
+        if self.path=="/api/fabric/decisions":
+            try:
+                value=_node_get("/v1/decisions/fabric",timeout=1.6)
+                return self.json(200,value or {"decisions":[],"count":0})
+            except Exception as exc:
+                return self.json(502,{"error":str(exc),"decisions":[]})
         if self.path=="/api/status":
             lo_engine=_lo_engine_path()
             lo_ok=bool(lo_engine)
@@ -742,6 +748,15 @@ class App(BaseHTTPRequestHandler):
         if path not in ("index.html","app.js","style.css"): return self.json(404,{"error":"not found"})
         p=ROOT/path; self.send_bytes(200,p.read_bytes(),mimetypes.guess_type(p.name)[0] or "application/octet-stream")
     def do_POST(self):
+        if self.path=="/api/fabric/decisions/answer":
+            try:
+                n=int(self.headers.get("Content-Length","0")); d=json.loads(self.rfile.read(n) or b"{}")
+                value=_node_call("/v1/decisions/answer",{
+                    "node":d.get("node"),"id":d.get("id"),"selected":d.get("selected"),"source":"signal"
+                },timeout=3.0)
+                return self.json(200,value or {"ok":True})
+            except Exception as exc:
+                return self.json(502,{"error":str(exc)})
         if self.path=="/api/session/clear":
             try:
                 n=int(self.headers.get("Content-Length","0")); d=json.loads(self.rfile.read(n) or b"{}")
@@ -886,7 +901,7 @@ def main():
         state=f"LO NATIVE {a.profile} · "+(App.lo_cmd if App.lo_cmd else "NOT FOUND")
     else:
         p=probe_ollama(App.backend); state=("connected" if p.get("ok") else "unreachable: "+p.get("error","unknown"))
-    print(f"Signal Window 1.1.2 · http://{a.host}:{a.port} · {state} · gallery {App.gallery_dir if App.gallery_enabled else 'off'}")
+    print(f"Signal Window 1.2.0 · http://{a.host}:{a.port} · {state} · gallery {App.gallery_dir if App.gallery_enabled else 'off'}")
     ThreadingHTTPServer((a.host,a.port),App).serve_forever()
 
 if __name__=="__main__": main()

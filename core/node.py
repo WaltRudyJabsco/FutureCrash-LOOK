@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Future Crash + LOOK Unified Node 5.2.17.
+"""Future Crash + LOOK Unified Node 5.3.1.
 
 A small distributed supervisor for trusted personal machines. Immediate events stay
 asynchronous; a one-second fabric pulse reconciles presence, leases and stale work.
@@ -42,9 +42,13 @@ try:
     from .ui_model import actions as ui_actions, build_ui_model
 except ImportError:
     from ui_model import actions as ui_actions, build_ui_model
+try:
+    from .decision import OpenJevShadow, new_request as new_decision_request
+except ImportError:
+    from decision import OpenJevShadow, new_request as new_decision_request
 from urllib.parse import urlparse, parse_qs
 
-VERSION = "5.2.17"
+VERSION = "5.3.1"
 DEFAULT_HOST = "127.0.0.1"
 DEFAULT_PORT = 7332
 DEFAULT_INGRESS_PORT = 0
@@ -308,6 +312,10 @@ def capabilities():
         "artifact.range": True,
         "artifact.stream": True,
         "artifact.catalog": True,
+        # Human clarification is a Fabric capability, not a terminal-only prompt.
+        "decision.request": True,
+        "decision.answer": True,
+        "decision.shadow": True,
     }
 
 
@@ -2044,8 +2052,88 @@ def _artifact_target_url(host, port, target, digest):
     return _remote_url(snapshot, target, path)
 
 
+def _decision_apply(decision, selected, *, source="human"):
+    """Apply only the already-authorized packet attached to a selected choice.
+
+    A renderer never executes work. It merely resolves the decision; normal FWP
+    authorization remains the final gate for any continuation packet.
+    """
+    choice=None
+    for item in decision.get("choices") or []:
+        if isinstance(item,dict) and str(item.get("value")) == str(selected):
+            choice=item; break
+    if not choice or not isinstance(choice.get("packet"),dict):
+        return {"ok":True,"continued":False}
+    packet=normalize_packet(choice["packet"],origin=identity()["name"])
+    job,created=FABRIC_STORE.submit(packet,node=identity()["name"])
+    if created: JOB_WAKE.set()
+    FABRIC_STORE.event(decision.get("job_id"),"decision","continued",str(selected),node=identity()["name"],
+                       data={"decision_id":decision.get("id"),"continuation_job":job.get("id") if job else None,"source":source})
+    return {"ok":True,"continued":True,"created":created,"job":job}
+
+
+def _decision_resolve(did, selected, *, source="human"):
+    before=FABRIC_STORE.get_decision(did)
+    if not before:
+        raise KeyError(did)
+    if before.get("status") != "pending":
+        return {"decision":before,"continuation":{"ok":True,"continued":False,"already_resolved":True}}
+    decision=FABRIC_STORE.resolve_decision(did,selected,source=source,node=identity()["name"])
+    return {"decision":decision,"continuation":_decision_apply(decision,selected,source=source)}
+
+
+def _fabric_decisions():
+    """Aggregate pending decision requests from reachable trusted Fabric nodes."""
+    local_name=identity()["name"]
+    rows=[]; errors=[]
+    for item in FABRIC_STORE.decisions(pending_only=True,limit=64):
+        row=dict(item); row["node"]=local_name; rows.append(row)
+    snapshot={"self":node_info(),"peers":PEERS.public()}
+    for peer in snapshot.get("peers") or []:
+        ad=peer.get("node") or {}
+        name=((ad.get("identity") or {}).get("name") or peer.get("name"))
+        if not name or not peer.get("dns") or not ad:
+            continue
+        try:
+            remote=http_json(_remote_url(snapshot,name,"/v1/decisions"),timeout=.8)
+            for item in remote.get("decisions") or []:
+                if isinstance(item,dict):
+                    row=dict(item); row["node"]=name; rows.append(row)
+        except Exception as exc:
+            errors.append({"node":name,"error":str(exc)})
+    rows.sort(key=lambda x:float(x.get("created") or 0),reverse=True)
+    return {"schema":"fabric-decisions-v1","decisions":rows,"count":len(rows),"errors":errors}
+
+
+def _decision_answer_fabric(node, did, selected, source="human"):
+    local=identity()["name"]
+    if node in {None,"","local",local}:
+        return _decision_resolve(did,selected,source=source)
+    snapshot={"self":node_info(),"peers":PEERS.public()}
+    url=_remote_url(snapshot,node,"/v1/decisions/answer")
+    return http_json(url,{"id":did,"selected":selected,"source":source},timeout=3.0)
+
+
+def _decision_expiry_loop():
+    """Deadlines are progress guarantees: a missed prompt never locks the Fabric."""
+    while True:
+        try:
+            for decision in FABRIC_STORE.expire_decisions(node=identity()["name"]):
+                selected=decision.get("selected")
+                if selected and str((decision.get("policy") or {}).get("timeout_action")) == "continue":
+                    _decision_apply(decision,selected,source="timeout")
+        except Exception as exc:
+            try: FABRIC_STORE.event(None,"decision","expiry-error",str(exc),node=identity()["name"])
+            except Exception: pass
+        time.sleep(.5)
+
+
+def _openjev_shadow(state, question, candidates):
+    return OpenJevShadow().try_choice(state=state,question=question,candidates=candidates)
+
+
 class API(BaseHTTPRequestHandler):
-    server_version = "FCLNode/5.2.17"
+    server_version = "FCLNode/5.3.1"
 
     def setup(self):
         self._metric_request_id = None
@@ -2172,6 +2260,14 @@ class API(BaseHTTPRequestHandler):
             return self.sendj(200, capabilities())
         if path == "/v1/models":
             return self.sendj(200, {"models": MODELS.discover()})
+        if path == "/v1/decisions":
+            return self.sendj(200, {"decisions": FABRIC_STORE.decisions(pending_only=True), "node": identity()["name"]})
+        if path == "/v1/decisions/fabric":
+            return self.sendj(200, _fabric_decisions())
+        if path.startswith("/v1/decisions/"):
+            did=path.split("/",3)[3]
+            decision=FABRIC_STORE.get_decision(did)
+            return self.sendj(200,{"decision":decision}) if decision else self.sendj(404,{"error":"decision not found"})
         if path == "/v1/models/curation":
             return self.sendj(200, curator_status())
         if path == "/v1/models/benchmark-guard":
@@ -2217,6 +2313,7 @@ class API(BaseHTTPRequestHandler):
                 "nodes": {"self": node_info(), "peers": PEERS.public()},
                 "health": {"ok": bool(db.get("ok")) and worker_ok},
                 "jobs": {"jobs": FABRIC_STORE.jobs()},
+                "decisions": {"decisions": FABRIC_STORE.decisions(pending_only=True)},
                 "services": {"services": managed_services()},
                 "events": {"events": FABRIC_STORE.recent_events()},
             }
@@ -2239,6 +2336,46 @@ class API(BaseHTTPRequestHandler):
     def do_POST(self):
         path = urlparse(self.path).path
         d = self.body()
+        if path == "/v1/decisions":
+            try:
+                req=new_decision_request(
+                    question=str(d.get("question") or ""),
+                    choices=d.get("choices") or [],
+                    profile=str(d.get("profile") or "workspace"),
+                    confidence=float(d.get("confidence") or 0.0),
+                    consequence=str(d.get("consequence") or "low"),
+                    reversible=bool(d.get("reversible",True)),
+                    preferred=d.get("preferred"), fallback=d.get("fallback"),
+                    deadline_seconds=d.get("deadline_seconds"),
+                    origin=str(d.get("origin") or identity()["name"]),
+                    job_id=d.get("job_id"), channels=d.get("channels"),
+                    context=d.get("context") if isinstance(d.get("context"),dict) else {},
+                    provider=str(d.get("provider") or "deterministic"),
+                )
+                shadow=None
+                if bool(d.get("shadow_openjev")):
+                    labels=[str(x.get("label") or x.get("value")) for x in req.get("choices") or []]
+                    shadow=_openjev_shadow(str((req.get("context") or {}).get("state") or ""),req["question"],labels)
+                    req["shadow"]={"openjev":shadow}
+                stored=FABRIC_STORE.add_decision(req,node=identity()["name"])
+                return self.sendj(201,{"ok":True,"decision":stored,"shadow":shadow})
+            except (ValueError,TypeError) as exc:
+                return self.sendj(400,{"ok":False,"error":str(exc)})
+        if path == "/v1/decisions/answer":
+            try:
+                result=_decision_answer_fabric(d.get("node"),str(d.get("id") or ""),str(d.get("selected") or ""),str(d.get("source") or "human"))
+                return self.sendj(200,{"ok":True,**result})
+            except KeyError:
+                return self.sendj(404,{"ok":False,"error":"decision not found"})
+            except ValueError as exc:
+                return self.sendj(400,{"ok":False,"error":str(exc)})
+            except Exception as exc:
+                return self.sendj(502,{"ok":False,"error":str(exc)})
+        if path == "/v1/decisions/shadow":
+            candidates=d.get("candidates") or []
+            if not isinstance(candidates,list) or len(candidates)<2:
+                return self.sendj(400,{"ok":False,"error":"at least two candidates required"})
+            return self.sendj(200,_openjev_shadow(str(d.get("state") or ""),str(d.get("question") or "Choose the best option."),[str(x) for x in candidates]))
         if path == "/v1/memory":
             try:
                 action=str(d.get("action") or "merge").lower()
@@ -2764,6 +2901,10 @@ def _dash_event_flash(event):
         return "41;97"
     if typ == "memory" or phase in {"tool", "capability", "receipt"}:
         return "46;30"           # cyan · deterministic/tool work
+    if typ == "decision" and phase == "pending":
+        return "48;5;214;30"     # amber · optional human input available
+    if typ == "decision" and phase in {"answered", "timeout"}:
+        return "46;30"           # cyan · uncertainty collapsed / policy resolved
     if typ == "progress":
         if phase == "dispatch":
             return "44;97"       # blue · work accepted/dispatched
@@ -2877,6 +3018,22 @@ def _dash_capability_summary(data, width=92):
     return "  ".join(bits) or "none advertised"
 
 
+def _dash_pending_decisions(data):
+    return [d for d in ((data.get("decisions") or {}).get("decisions") or [])
+            if str(d.get("status") or "pending") == "pending"]
+
+
+def _dash_decision_line(decision, width=92):
+    question=" ".join(str(decision.get("question") or "input requested").split())
+    node=str(decision.get("node") or decision.get("origin") or "local")
+    remaining=max(0,int(float(decision.get("expires") or now())-now()))
+    fallback=str(decision.get("fallback") or "defer")
+    prefix=f"INPUT · {node} · {remaining}s · "
+    suffix=f" · timeout:{fallback}"
+    room=max(12,int(width)-len(prefix)-len(suffix))
+    return prefix + question[:room] + suffix
+
+
 def _dash_render_full(data, width=92, ansi=False):
     """Full-height dashboard renderer."""
     snap = data.get("nodes") or {}
@@ -2886,6 +3043,7 @@ def _dash_render_full(data, width=92, ansi=False):
     jobs = (data.get("jobs") or {}).get("jobs") or []
     http = data.get("http") or {}
     events = (data.get("events") or {}).get("events") or []
+    pending_decisions = _dash_pending_decisions(data)
     # Leave one physical terminal column unused. Some emulators wrap/clobber the
     # final cell, which made the PULSE column appear chopped at the right edge.
     width = max(72, min(max(72, int(width or 92) - 1), 131))
@@ -2956,6 +3114,11 @@ def _dash_render_full(data, width=92, ansi=False):
     else:
         lines.append("none active")
 
+    if pending_decisions:
+        lines += ["", f"HUMAN INPUT · {len(pending_decisions)} PENDING", rule]
+        for decision in pending_decisions[:3]:
+            lines.append(_dash_decision_line(decision,width))
+
     lines += ["", "CONTROL PLANE", rule]
     guard = (http.get("ingress_guard") or {}).get("ingress") or {}
     lines.append(
@@ -3010,6 +3173,7 @@ def _dash_render_compact(data, width=92, height=20, ansi=False):
     snap=data.get("nodes") or {}; local=snap.get("self") or {}; rows=_dash_summary_rows(data)
     events=(data.get("events") or {}).get("events") or []; jobs=(data.get("jobs") or {}).get("jobs") or []
     active=[j for j in jobs if str(j.get("status") or "") not in {"ok","done","failed","cancelled","canceled"}]
+    pending_decisions=_dash_pending_decisions(data)
     lines=[f"FABRIC · {local.get('name','local')} · {len(rows)} node{'s' if len(rows)!=1 else ''} · {time.strftime('%H:%M:%S')}",rule]
     max_nodes=2 if height<18 else 3
     for name,node in rows[:max_nodes]:
@@ -3019,7 +3183,7 @@ def _dash_render_compact(data, width=92, height=20, ansi=False):
     http=data.get("http") or {}; hm=((http.get("listeners") or {}).get("local") or {})
     services=(data.get("services") or {}).get("services") or {}
     svc_ok=sum(1 for st in services.values() if str(st.get("state") or "") in {"active","running","unmanaged"})
-    lines += [f"jobs {len(active)} · ctl active {int(hm.get('active') or 0)} err {int(hm.get('errors') or 0)} · services {svc_ok}/{len(services) if services else 0}","RECENT",rule]
+    lines += [f"jobs {len(active)} · input {len(pending_decisions)} · ctl active {int(hm.get('active') or 0)} err {int(hm.get('errors') or 0)} · services {svc_ok}/{len(services) if services else 0}","RECENT",rule]
     # Reserve the footer and show as much recent activity as the rectangle allows.
     recent_slots=max(1,min(5,int(height)-len(lines)-2))
     if events:
@@ -3061,6 +3225,7 @@ def _dash_render_wide(data, width=120, height=28, ansi=False):
     health=data.get("health") or {}; jobs=(data.get("jobs") or {}).get("jobs") or []
     events=(data.get("events") or {}).get("events") or []
     active=[j for j in jobs if str(j.get("status") or "") not in {"ok","done","failed","cancelled","canceled"}]
+    pending_decisions=_dash_pending_decisions(data)
     services=" ".join(_dash_service_bits(data)) or "pending"
     caps=local.get("capabilities") or {}
     trust=(f"clock● fs{'●' if caps.get('filesystem') else '○'} "
@@ -3083,7 +3248,7 @@ def _dash_render_wide(data, width=120, height=28, ansi=False):
     left_w=max(34,(width-len(gap))//2)
     right_w=max(30,width-len(gap)-left_w)
     ops=[
-        (f"JOBS · {len(active)} active", f"TRUST · {trust}"),
+        (f"JOBS · {len(active)} active · INPUT {len(pending_decisions)}", f"TRUST · {trust}"),
         (f"CONTROL · {_dash_control_summary(data)}", f"SERVICES · {services}"),
         (f"{_dash_ingress_summary(data)}", f"CAPS · {_dash_capability_summary(data, right_w-7)}"),
     ]
@@ -3111,6 +3276,7 @@ def _dash_render_condensed(data, width=92, height=30, ansi=False):
     health=data.get("health") or {}; jobs=(data.get("jobs") or {}).get("jobs") or []
     events=(data.get("events") or {}).get("events") or []
     active=[j for j in jobs if str(j.get("status") or "") not in {"ok","done","failed","cancelled","canceled"}]
+    pending_decisions=_dash_pending_decisions(data)
     lines=[f"FUTURE CRASH + LOOK · FABRIC DASH   {time.strftime('%Y-%m-%d %I:%M:%S %p %Z')}",rule,
            f"FABRIC  {local.get('name','local')} · node {local.get('version','?')} · {len(rows)} node{'s' if len(rows)!=1 else ''} · health {'ok' if health.get('ok') else 'degraded'}","",
            "NODES / MODELS",rule]
@@ -3127,7 +3293,7 @@ def _dash_render_condensed(data, width=92, height=30, ansi=False):
         lines += [""]
         spare-=1
     if spare>0:
-        lines.append(f"JOBS · {len(active)} active   CONTROL · {_dash_control_summary(data)}")
+        lines.append(f"JOBS · {len(active)} active · INPUT {len(pending_decisions)}   CONTROL · {_dash_control_summary(data)}")
         spare-=1
     if spare>0:
         lines.append(f"SERVICES · {services}")
@@ -3180,6 +3346,7 @@ def _dash_fetch(host, port, cache, force=False):
         "jobs": ("/v1/jobs", 2.0),
         "http": ("/v1/http", 2.0),
         "events": ("/v1/events", 0.5),
+        "decisions": ("/v1/decisions/fabric", 2.0),
         "services": ("/v1/services", 8.0),
     }
     for key, (path, cadence) in schedule.items():
@@ -3407,7 +3574,8 @@ def main():
     ap=argparse.ArgumentParser(description="Future Crash + LOOK unified node")
     ap.add_argument("command",nargs="?",default="serve",
         choices=["serve","status","nodes","activity","pulse","fabric","watch","dashboard","models","qualify","services","service",
-                 "jobs","job","submit","packet","cancel","events","http","beacon","lights","artifact-add","artifact","artifacts","media-catalog","media-identify"])
+                 "jobs","job","submit","packet","cancel","events","http","beacon","lights","artifact-add","artifact","artifacts","media-catalog","media-identify",
+                 "decisions","decision","answer","ask","decision-shadow"])
     ap.add_argument("args",nargs="*")
     ap.add_argument("--node",dest="node",default=None,help="target Fabric node name")
     ap.add_argument("--json",action="store_true",help="raw JSON where a human view exists")
@@ -3531,6 +3699,87 @@ def main():
                     print(f"  {digest} · {meta.get('bytes','?')} bytes · {meta.get('media_type','application/octet-stream')}")
                     print(f"  {url}")
                 return 0
+            if a.command=="decisions":
+                data=_target_get(a.host,a.port,a.node,"/v1/decisions") if a.node else _daemon_get(a.host,a.port,"/v1/decisions/fabric")
+                if a.json:
+                    print(json.dumps(data,indent=2)); return 0
+                rows=data.get("decisions") or []
+                print(f"FABRIC DECISIONS · {len(rows)} pending")
+                print("─"*96)
+                now_ts=now()
+                for row in rows:
+                    left=max(0,int(float(row.get("expires") or now_ts)-now_ts))
+                    print(f"  {str(row.get('id') or '?'):<42.42} {str(row.get('node') or a.node or 'local'):<16.16} {left:>3}s  {str(row.get('question') or '')[:30]}")
+                return 0
+            if a.command=="decision":
+                if not a.args: ap.error("decision requires ID")
+                print(json.dumps(_target_get(a.host,a.port,a.node,f"/v1/decisions/{a.args[0]}"),indent=2)); return 0
+            if a.command=="answer":
+                if len(a.args)<2: ap.error("answer requires DECISION_ID CHOICE")
+                result=_target_post(a.host,a.port,None,"/v1/decisions/answer",{
+                    "node":a.node,"id":a.args[0],"selected":a.args[1],"source":"terminal"},timeout=5.0)
+                print(json.dumps(result,indent=2) if a.json else f"FABRIC DECISION · {a.args[0]} → {a.args[1]}")
+                return 0
+            if a.command=="ask":
+                if not a.args: ap.error("ask requires QUESTION [CHOICE ...]")
+                question=a.args[0]; labels=a.args[1:] or ["yes","no"]
+                payload={
+                    "question":question,
+                    "choices":[{"value":str(x),"label":str(x)} for x in labels],
+                    "profile":os.environ.get("FCL_ACCESS_PROFILE","workspace"),
+                    "confidence":0.5,"consequence":"low","reversible":True,
+                    "shadow_openjev":str(os.environ.get("FCL_DECISION_SHADOW") or "").lower() in {"1","true","yes","on"},
+                }
+                result=_target_post(a.host,a.port,a.node,"/v1/decisions",payload,timeout=4.0)
+                d=result.get("decision") or {}
+                if a.json:
+                    print(json.dumps(result,indent=2)); return 0
+                did=str(d.get("id") or "")
+                print(f"FABRIC ASK · {did or '?'} · {d.get('question','')} · {int(max(0,float(d.get('expires') or now())-now()))}s")
+                # A terminal is one consumer of a Fabric decision, not its owner.
+                # Poll while stdin is idle so Signal/Dash can answer the same request
+                # and release this terminal immediately rather than making ASK block.
+                if not (did and sys.stdin.isatty() and sys.stdout.isatty()):
+                    return 0
+                import select
+                choices=[str(x.get("value")) for x in (d.get("choices") or []) if isinstance(x,dict)]
+                prompt=" / ".join(choices)
+                print(f"  [{prompt}]  Enter leaves it pending for Signal/Fabric")
+                sys.stdout.write("  > "); sys.stdout.flush()
+                expires=float(d.get("expires") or now())
+                while now() < expires:
+                    current=(_target_get(a.host,a.port,a.node,f"/v1/decisions/{did}").get("decision") or {})
+                    if current.get("status") != "pending":
+                        sys.stdout.write("\r\033[2K")
+                        print(f"FABRIC DECISION · {did} → {current.get('selected') or current.get('status')} · {current.get('response_source') or 'timeout'}")
+                        return 0
+                    ready,_,_=select.select([sys.stdin],[],[],0.25)
+                    if not ready:
+                        continue
+                    entered=sys.stdin.readline().strip()
+                    if not entered:
+                        print(f"FABRIC ASK · pending · answer anywhere with decision {did}")
+                        return 0
+                    folded=entered.casefold()
+                    selected=next((x for x in choices if x.casefold()==folded),None)
+                    if selected is None and entered.isdigit() and 1 <= int(entered) <= len(choices):
+                        selected=choices[int(entered)-1]
+                    if selected is None:
+                        print(f"  choose {' / '.join(choices)} (or number); Enter leaves pending")
+                        sys.stdout.write("  > "); sys.stdout.flush(); continue
+                    answered=_target_post(a.host,a.port,None,"/v1/decisions/answer",{
+                        "node":a.node,"id":did,"selected":selected,"source":"terminal"},timeout=5.0)
+                    resolved=answered.get("decision") or current
+                    print(f"FABRIC DECISION · {did} → {resolved.get('selected') or selected}")
+                    return 0
+                final=(_target_get(a.host,a.port,a.node,f"/v1/decisions/{did}").get("decision") or {})
+                print(f"FABRIC DECISION · {did} → {final.get('selected') or final.get('status') or 'timed out'}")
+                return 0
+            if a.command=="decision-shadow":
+                if len(a.args)<3: ap.error("decision-shadow requires STATE QUESTION CANDIDATE...")
+                result=_target_post(a.host,a.port,a.node,"/v1/decisions/shadow",{
+                    "state":a.args[0],"question":a.args[1],"candidates":a.args[2:]},timeout=4.0)
+                print(json.dumps(result,indent=2)); return 0
             if a.command=="jobs":
                 data=_target_get(a.host,a.port,a.node,"/v1/jobs")
                 if a.json: print(json.dumps(data,indent=2))
@@ -3580,6 +3829,7 @@ def main():
     threading.Thread(target=background_qualifier,name="model-qualifier",daemon=True).start()
     threading.Thread(target=background_curator,name="model-curator",daemon=True).start()
     threading.Thread(target=job_worker_loop,name="fabric-jobs",daemon=True).start()
+    threading.Thread(target=_decision_expiry_loop,name="fabric-decisions",daemon=True).start()
     JOB_WAKE.set()
     srv=FabricHTTPServer((a.host,a.port),API,plane="local")
     threading.Thread(target=_local_accept_watchdog,args=(srv,),name="fabric-http-watchdog",daemon=True).start()

@@ -1,3 +1,11 @@
+# 5.3.0 — Decision Plane
+
+- Adds renderer-neutral Fabric DecisionRequests with confidence, consequence, reversibility, deadline, preferred choice, and timeout policy.
+- Adds non-blocking deadline semantics: Power/Unsafe may continue low-risk reversible work; Workspace/Conservative defer; consequential/irreversible work cancels without explicit confirmation.
+- Adds Fabric-wide decision discovery and answering plus Signal one-tap decision cards.
+- Adds optional OpenJev-compatible shadow decisions without making the learned worker authoritative or required.
+- Adds `lk fabric decisions`, `decision`, `answer`, `ask`, and `decision-shadow`.
+
 # 5.2.19 — Media Session Reliability
 
 - Reuse the LOOK-owned mpv process for ordinary play requests instead of spawning overlapping players.

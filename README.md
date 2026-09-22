@@ -1,4 +1,12 @@
-# Future Crash + LOOK 5.2.19
+# Future Crash + LOOK 5.3.0
+
+## 5.3.0 — Decision Plane
+
+5.3.0 makes uncertainty a first-class Fabric object. A job can ask the human a tiny question without making a terminal or browser a lock: DecisionRequests carry choices, confidence, consequence, reversibility, a deadline, and an explicit timeout policy. Power/Unsafe may continue low-consequence reversible work after silence; Workspace/Conservative defer; destructive or irreversible work still requires explicit confirmation.
+
+Decision requests are renderer-neutral and visible across trusted Fabric nodes. `lk fabric decisions` lists pending requests, `lk fabric answer ...` resolves one, and Signal can surface the same request with one-tap choices. The answering UI does not execute work; any continuation is still a normal authorized Fabric Work Packet.
+
+An optional OpenJev-compatible shadow adapter (`FCL_DECISION_URL`, default `http://127.0.0.1:3000`) lets the Fabric compare learned typed decisions without making OpenJev a dependency or authority. `lk fabric decision-shadow ...` probes it directly.
 
 ## 5.2.19 — Media Session Reliability
 

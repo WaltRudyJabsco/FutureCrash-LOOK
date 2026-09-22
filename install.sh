@@ -1,13 +1,13 @@
 #!/usr/bin/env bash
 set -euo pipefail
 ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
-echo "Future Crash + LOOK 5.2.19 · Media Session Reliability"
+echo "Future Crash + LOOK 5.3.1 · Decision Plane"
 echo "────────────────────────────────────────"
 
 # Refuse a mixed bundle before mutating the machine. A unified release must move
 # LOOK and the node together.
 EXPECTED_RELEASE="$(tr -d '[:space:]' < "$ROOT/VERSION")"
-[[ "$EXPECTED_RELEASE" == "5.2.19" ]] || { echo "BUNDLE ERROR: expected release 5.2.19, found $EXPECTED_RELEASE"; exit 4; }
+[[ "$EXPECTED_RELEASE" == "5.3.1" ]] || { echo "BUNDLE ERROR: expected release 5.3.1, found $EXPECTED_RELEASE"; exit 4; }
 grep -q 'def _fabric_command' "$ROOT/look/lk" || { echo "BUNDLE ERROR: LOOK source has no Fabric command"; exit 4; }
 grep -q 'choices=.*serve.*fabric' "$ROOT/core/node.py" || { echo "BUNDLE ERROR: node source has no Fabric CLI"; exit 4; }
 
@@ -22,7 +22,7 @@ done
 ((UNINSTALL)) && exit 0
 if ((DRY_RUN)); then
   echo
-  echo "[dry-run] would install/restart Unified Node 5.2.19, Fabric Media Catalog, Streaming Artifacts, Shared Fabric UI Model, Vision Artifacts, Fabric Memory, and Signal Window 1.1.2"
+  echo "[dry-run] would install/restart Unified Node 5.3.1, Decision Plane, OpenJev shadow adapter, Fabric Media Catalog, Streaming Artifacts, Fabric Memory, and Signal Window 1.2.0"
   echo "[dry-run] would reconcile Tailscale :7332 → separate fcl-ingress :7333 and verify Fabric CLI wiring"
   exit 0
 fi
@@ -32,6 +32,7 @@ install -m 0755 "$ROOT/core/node.py" "$HOME/.local/share/future-crash-look/core/
 install -m 0644 "$ROOT/core/fabric_packet.py" "$HOME/.local/share/future-crash-look/core/fabric_packet.py"
 install -m 0644 "$ROOT/core/fabric_client.py" "$HOME/.local/share/future-crash-look/core/fabric_client.py"
 install -m 0644 "$ROOT/core/conductor.py" "$HOME/.local/share/future-crash-look/core/conductor.py"
+install -m 0644 "$ROOT/core/decision.py" "$HOME/.local/share/future-crash-look/core/decision.py"
 install -m 0644 "$ROOT/core/memory_store.py" "$HOME/.local/share/future-crash-look/core/memory_store.py"
 install -m 0644 "$ROOT/core/ui_model.py" "$HOME/.local/share/future-crash-look/core/ui_model.py"
 install -m 0755 "$ROOT/core/fcl-node" "$HOME/.local/bin/fcl-node"
@@ -132,10 +133,14 @@ fi
 if ! cmp -s "$ROOT/core/memory_store.py" "$HOME/.local/share/future-crash-look/core/memory_store.py"; then
   echo "INSTALL ERROR: installed Fabric memory differs from release" >&2; exit 8
 fi
+if ! cmp -s "$ROOT/core/decision.py" "$HOME/.local/share/future-crash-look/core/decision.py"; then
+  echo "INSTALL ERROR: installed Fabric decision plane differs from release" >&2; exit 8
+fi
 if ! PYTHONPATH="$HOME/.local/share/future-crash-look/core" python3 - <<'PY_RUNTIME' >/dev/null 2>&1
-import conductor, fabric_client, memory_store
+import conductor, fabric_client, memory_store, decision
 assert conductor.classify("ping").tier == "reflex"
 assert callable(fabric_client.stream_infer)
+assert decision.plan(profile="power", confidence=.7).timeout_action == "continue"
 PY_RUNTIME
 then
   echo "INSTALL ERROR: installed Fabric runtime modules do not import together" >&2
