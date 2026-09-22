@@ -1,0 +1,79 @@
+:root{color-scheme:dark;font-family:ui-monospace,SFMono-Regular,Menlo,Consolas,monospace;background:#050806;color:#a9cbb1}
+*{box-sizing:border-box}html,body{margin:0;min-height:100%;background:#050806}
+body{display:grid;place-items:center;min-height:100vh;padding:18px}
+main{width:min(940px,96vw);height:min(420px,82vh);display:grid;grid-template-columns:minmax(260px,38%) 1fr;border:1px solid #25422d;background:#071009;box-shadow:0 16px 60px #000}
+.face{padding:15px;border-right:1px solid #1d3825;display:flex;flex-direction:column;min-width:0}
+.label{font-size:11px;letter-spacing:.12em;color:#5c8867;display:flex;justify-content:space-between;margin-bottom:10px}
+#status{opacity:.75}.screen{position:relative;aspect-ratio:1/1;max-height:100%;margin:auto;overflow:hidden;background:#020503;border:1px solid #183520;box-shadow:inset 0 0 28px #000}
+canvas{position:absolute;inset:0;width:100%;height:100%;image-rendering:pixelated}
+#ambient{opacity:.88}#signal{filter:drop-shadow(0 0 2px #8fd6a2)}
+.scan{position:absolute;inset:0;pointer-events:none;background:repeating-linear-gradient(to bottom,transparent 0,transparent 2px,rgba(0,0,0,.18) 3px);mix-blend-mode:multiply}
+.scan:after{content:"";position:absolute;left:0;right:0;height:18%;background:linear-gradient(transparent,rgba(145,255,174,.055),transparent);animation:sweep 4.8s linear infinite}
+@keyframes sweep{from{top:-20%}to{top:105%}}
+.terminal{min-width:0;display:flex;flex-direction:column;padding:15px}
+#log{flex:1;overflow:auto;white-space:pre-wrap;font-size:13px;line-height:1.5;padding-right:8px}.user{color:#d0dfd4}.assistant{color:#91c79e}.system{color:#4f7759}.error{color:#d99090}
+form{display:flex;gap:8px;border-top:1px solid #17321f;padding-top:10px;align-items:flex-start}
+textarea{flex:1;resize:none;overflow:auto;border:0;outline:0;background:transparent;color:#d4e5d8;font:inherit;max-height:120px}
+#drops{display:flex;gap:5px;flex-wrap:wrap;padding:4px 0}.chip{font-size:10px;border:1px solid #31543a;padding:3px 5px;color:#789b80}
+.drag main{outline:1px solid #8fd6a2}
+@media(max-width:650px){body{padding:0;place-items:stretch}main{width:100vw;height:100dvh;grid-template-columns:1fr;grid-template-rows:minmax(210px,43vh) 1fr;border:0}.face{border-right:0;border-bottom:1px solid #1d3825;padding:10px}.terminal{padding:10px}.screen{height:100%;width:auto}}
+
+/* v0.3: the viewport's shape, not device identity, owns the layout. */
+.terminal{min-height:0;overflow:hidden}
+#log{min-height:0;overflow-y:auto;overscroll-behavior:contain;scrollbar-width:thin}
+#activity{height:22px;flex:0 0 22px;overflow:hidden;white-space:nowrap;border-top:1px solid #102619;
+  color:#53775d;font-size:10px;line-height:21px;letter-spacing:.05em;position:relative}
+#activityText{display:inline-block;min-width:100%;animation:none}
+#activity.busy #activityText{animation:ticker 8s linear infinite}
+.beacon{float:right;margin-left:8px;color:#446c50}.busy .beacon{animation:blink .65s steps(1) infinite;color:#91c79e}
+@keyframes blink{50%{opacity:.15}} @keyframes ticker{0%{transform:translateX(0)}50%{transform:translateX(-12%)}100%{transform:translateX(0)}}
+form{flex:0 0 auto}
+@media (orientation:portrait){
+ main{grid-template-columns:1fr;grid-template-rows:minmax(190px,38vh) minmax(0,1fr)}
+ .face{border-right:0;border-bottom:1px solid #1d3825}
+}
+@media (orientation:landscape){
+ main{grid-template-columns:minmax(150px,38%) minmax(0,1fr);grid-template-rows:1fr}
+ .face{border-right:1px solid #1d3825;border-bottom:0}
+}
+@media (orientation:landscape) and (max-height:330px){
+ body{padding:5px}.label{margin-bottom:4px}.face,.terminal{padding:7px}
+ main{height:calc(100dvh - 10px);width:min(980px,calc(100vw - 10px));grid-template-columns:minmax(120px,30vh) 1fr}
+ #log{font-size:11px;line-height:1.35}#activity{height:18px;line-height:17px;flex-basis:18px}
+}
+
+/* v0.4 geometry: JS selects the mode; Signal itself is never non-square. */
+main{--signal-size:256px;min-width:0;min-height:0}
+.face{min-width:0;min-height:0;overflow:hidden}
+.screen{flex:0 0 var(--signal-size);width:var(--signal-size)!important;height:var(--signal-size)!important;
+  max-width:none!important;max-height:none!important;aspect-ratio:1/1!important}
+main.mode-wide{grid-template-columns:calc(var(--signal-size) + 30px) minmax(0,1fr);grid-template-rows:1fr}
+main.mode-wide .face{border-right:1px solid #1d3825;border-bottom:0}
+main.mode-stacked{grid-template-columns:1fr;grid-template-rows:calc(var(--signal-size) + 45px) minmax(0,1fr)}
+main.mode-stacked .face{border-right:0;border-bottom:1px solid #1d3825}
+main.mode-compact{grid-template-columns:calc(var(--signal-size) + 16px) minmax(0,1fr);grid-template-rows:1fr}
+main.mode-compact .face,.mode-compact .terminal{padding:7px}
+main.mode-compact .label{margin-bottom:4px}.mode-compact #log{font-size:11px;line-height:1.3}
+main.mode-compact #activity{height:18px;line-height:17px;flex-basis:18px}
+
+/* v0.4.1 activity is an event tape, not simulated telemetry. */
+#activity{overflow-x:auto;overflow-y:hidden;scrollbar-width:none}
+#activity::-webkit-scrollbar{display:none}
+#activityText{display:inline-block;min-width:max-content;animation:none!important;padding-right:28px}
+#activity.busy #activityText{animation:none!important}
+.artifact{display:block;margin:.45rem 0;padding:.45rem .6rem;border:1px solid currentColor;text-decoration:none;font:12px/1.3 monospace;opacity:.9}.artifact:hover{opacity:1}
+
+/* v1.1 Fabric-attached display + inline generated artifacts. */
+#fabricLight{position:absolute;inset:0;z-index:5;pointer-events:none;opacity:0;transition:opacity .08s linear,background .08s linear;mix-blend-mode:screen}
+.scan{z-index:6}
+.artifact-image{display:block;max-width:min(100%,420px);max-height:300px;object-fit:contain;margin:.5rem 0;border:1px solid #31543a;background:#020503}
+
+/* v1.2 Fabric decision requests: human input is a portable capability. */
+#decisionPanel{flex:0 0 auto;border:1px solid #31543a;background:#08130b;margin:6px 0;padding:8px 9px;font-size:11px;line-height:1.35}
+#decisionPanel[hidden]{display:none}
+.decision-head{display:flex;justify-content:space-between;gap:10px;color:#5f8e69;letter-spacing:.05em;margin-bottom:5px}
+.decision-question{color:#d0dfd4;margin-bottom:7px}
+.decision-meta{color:#53775d;margin-top:5px}
+.decision-choices{display:flex;gap:6px;flex-wrap:wrap}
+.decision-choice{font:inherit;color:#9ed2aa;background:#071009;border:1px solid #31543a;padding:4px 7px;cursor:pointer}
+.decision-choice:hover,.decision-choice:focus{border-color:#8fd6a2;color:#d4e5d8;outline:0}

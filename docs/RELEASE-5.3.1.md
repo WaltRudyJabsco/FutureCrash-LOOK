@@ -1,4 +1,4 @@
-# 5.3.1 — Decision Interaction
+# 5.3.2 — Decision Interaction
 
 This release closes the first interaction gaps found in the 5.3.0 Decision Plane.
 
