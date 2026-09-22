@@ -277,23 +277,43 @@ Historical installers predating this guard cannot be retroactively protected.
 
 .SH MEDIA
 .TP
+.B lk player
+Open the tiny live LOOK miniplayer for the current MediaSession. Closing it does not stop playback.
+.TP
 .B lk media
-Show the active supported media player and track.
+Show the current LOOK media session, state, track, progress, and queue position.
 .TP
-.B lk media toggle
-Toggle play/pause, then report the resulting player state and track.
+.B lk media scan ROOT
+Build or refresh the fast dependency-free media library index for ROOT. Media bytes are not hashed or decoded during the scan.
 .TP
-.B lk media next
-Advance to the next track, then report the resulting player state and track.
+.B lk media play TARGET [--shuffle]
+Play a file, directory, or indexed artist/album/title query as a LOOK-owned queue.
 .TP
-.B lk media prev
-Return to the previous track, then report the resulting player state and track.
+.B lk media queue
+Show the canonical queue around the current item.
 .TP
-.B lk media stop
-Stop playback, or pause on players without a distinct stop command, then report the resulting state.
+.B lk media find QUERY
+Search indexed artist, album, title, format, and path text.
+.TP
+.B lk media save NAME
+Save the current queue as a persistent playlist.
+.TP
+.B lk media load NAME
+Restore and play a saved playlist.
+.TP
+.B lk media playlists
+List saved playlists.
+.TP
+.B lk media repeat [off|all]
+Set or toggle repeat-all for the current queue.
+.TP
+.B lk media stream PATH
+Explicitly register PATH as a Fabric artifact and play its byte-range stream. Remote content-addressed form: lk media stream @NODE sha256:DIGEST.
+.TP
+.B lk media toggle / next / prev / stop
+Control the LOOK-owned media session. When no LOOK session exists, supported system-player control remains available.
 .PP
-On macOS, LOOK currently controls running Music or Spotify applications.
-On Linux, LOOK uses the MPRIS ecosystem through playerctl.
+mpv is the preferred optional playback edge. LOOK owns queue/session meaning; mpv owns decoding and rendering. Same-node queues may use direct local file access, while remote/content-addressed entries use Fabric artifact streams.
 .SH INTELLIGENCE VERSIONS
 .TP
 .B lk skills version

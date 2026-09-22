@@ -1,3 +1,13 @@
+# 5.2.16 — Media Sessions + Library Queue
+
+- Add dependency-free `look/media_core.py`: the queue/library model is pure logic; playback, filesystem, terminal, and Fabric transport remain edges.
+- Add fast `lk media scan ROOT` indexing with no full-file hashing or decoding, plus `library`, `find`, `artists`, and `albums` views. No media root or storage layout is hard-coded.
+- Add persistent LOOK-owned `MediaSession` queues, directory/album/artist/query playback, `--shuffle`, queue inspection, repeat-all, and clear/restart behavior.
+- Keep mpv as the optional dumb playback engine. LOOK mirrors its canonical queue into an M3U8 runtime edge and reconciles live playlist position back into MediaSession.
+- Add saved queue playlists (`save`, `load`, `playlists`, and `playlist ...`) that exclude player PID/socket/runtime state so they survive ordinary restarts and remain repairable after storage moves.
+- Add `lk player`, a tiny live terminal miniplayer with progress, queue position, seek, previous/next, repeat, stop, and close-without-stopping controls.
+- Preserve generic artifact transport. Same-node queues may use direct local file URIs; `lk media stream` explicitly exercises Fabric registration/range streaming, and remote digest entries still use Fabric streams.
+
 # 5.2.15 — Streaming Artifacts + Media Proof
 
 - Generalize Fabric artifacts beyond small in-memory blobs: existing large files can be registered in place by SHA-256 without copying them into the Fabric state directory. Physical path remains a node-local location, while the artifact digest is the logical identity.

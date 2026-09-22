@@ -7,6 +7,11 @@ from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from contextlib import contextmanager
 from pathlib import Path
 
+_LOOK_MODULE_DIR=Path(__file__).resolve().parent
+if str(_LOOK_MODULE_DIR) not in sys.path:
+    sys.path.insert(0,str(_LOOK_MODULE_DIR))
+import media_core
+
 try:
     import readline
     try:
@@ -19,7 +24,7 @@ try:
 except Exception:
     readline = None
 
-VERSION="4.44.8"
+VERSION="4.45.0"
 
 LOOK_WORDMARK = r"""       ██╗      ██╗  ██╗
        ██║      ██║ ██╔╝
@@ -48,6 +53,9 @@ SCHEDULE_FILE=STATE_DIR/"schedule.json"
 SCHEDULE_HISTORY_FILE=STATE_DIR/"schedule_history.json"
 SERVICES_FILE=STATE_DIR/"services.json"
 MEDIA_SESSION_FILE=STATE_DIR/"media_session.json"
+MEDIA_LIBRARY_FILE=STATE_DIR/"media_library.json"
+MEDIA_PLAYLIST_DIR=STATE_DIR/"media_playlists"
+MEDIA_QUEUE_FILE=STATE_DIR/"media_queue.m3u8"
 MEDIA_IPC_FILE=STATE_DIR/"media.sock"
 _SESSION_PATH_GRANTS=[]
 _ONCE_PATH_GRANTS=[]
@@ -1490,11 +1498,20 @@ MAKE
                        extensionless names ask: [d]irectory or [f]ile
 
 MEDIA
-  lk media             show current player / state / track
-  lk media toggle      play / pause, then show current state
-  lk media next        next track, then show current state
-  lk media prev        previous track, then show current state
-  lk media stop        stop/pause, then show current state
+  lk player            tiny live miniplayer over LOOK MediaSession
+  lk media             show current queue / state / track
+  lk media play TARGET play file, directory, or indexed library query
+  lk media play TARGET --shuffle
+                       construct a shuffled LOOK-owned queue
+  lk media queue       inspect the canonical queue
+  lk media scan ROOT   fast dependency-free library index
+  lk media find QUERY  search artist / album / title / path
+  lk media save NAME   save current queue as a playlist
+  lk media load NAME   restore + play a saved playlist
+  lk media playlists   list saved playlists
+  lk media repeat      toggle repeat-all for current queue
+  lk media stream PATH explicit Fabric byte-stream playback proof
+  lk media toggle / next / prev / stop
   mm / mn / mp         fast aliases: toggle / next / previous
 
 ACCESS + PERMISSIONS
@@ -7937,7 +7954,7 @@ def _run_filesystem_tool_impl(workspace, name, args, profile="workspace"):
         return f"File tool internal error: {type(exc).__name__}: {exc}"
     return f"Unknown file tool: {name}"
 
-LOOK_INFO_USER_AGENT="LOOK-Shell/4.44.8 (local text client)"
+LOOK_INFO_USER_AGENT="LOOK-Shell/4.45.0 (local text client)"
 
 def _run_filesystem_tool(workspace, name, args, profile="workspace"):
     global _FILESYSTEM_ACCESS_PROFILE
@@ -12737,6 +12754,38 @@ def _media_artifact(digest,node=None):
     return _media_fabric_cli(args)
 
 
+def _media_read_json(path, default):
+    try:
+        data=json.loads(Path(path).read_text(encoding="utf-8"))
+        return data
+    except (OSError,ValueError,TypeError):
+        return default
+
+
+def _media_library():
+    return media_core.normalize_library(_media_read_json(MEDIA_LIBRARY_FILE,{}))
+
+
+def _media_save_library(library):
+    _atomic_json(MEDIA_LIBRARY_FILE,media_core.normalize_library(library))
+
+
+def _media_session():
+    if not MEDIA_SESSION_FILE.exists():
+        return None
+    data=_media_read_json(MEDIA_SESSION_FILE,{})
+    if not isinstance(data,dict):
+        return None
+    return media_core.normalize_session(data)
+
+
+def _media_save_session(session):
+    session=media_core.normalize_session(session)
+    session["updated"]=time.time()
+    _atomic_json(MEDIA_SESSION_FILE,session)
+    return session
+
+
 def _media_mpv_request(command):
     """Send one command to the LOOK-owned mpv session, if one is alive."""
     if not hasattr(socket,"AF_UNIX") or not MEDIA_IPC_FILE.exists():
@@ -12766,61 +12815,207 @@ def _media_mpv_property(name):
     return None
 
 
-def _media_mpv_control(action):
-    # Prefer the LOOK-owned stream session so the old transport keys naturally
-    # control Fabric playback; fall through to Music/Spotify/MPRIS otherwise.
-    probe=_media_mpv_request(["get_property","idle-active"])
-    if not probe:
+def _media_mpv_alive():
+    return bool(_media_mpv_request(["get_property","idle-active"]))
+
+
+def _media_time(value):
+    if not isinstance(value,(int,float)) or value < 0:
+        return "--:--"
+    seconds=int(value)
+    if seconds >= 3600:
+        return f"{seconds//3600}:{(seconds%3600)//60:02d}:{seconds%60:02d}"
+    return f"{seconds//60}:{seconds%60:02d}"
+
+
+def _media_entry_label(entry):
+    artist=str(entry.get("artist") or "").strip()
+    title=str(entry.get("title") or "").strip()
+    if not title:
+        title=Path(str(entry.get("path") or entry.get("digest") or "Media")).name
+    return f"{artist} — {title}" if artist else title
+
+
+def _media_sync_session(session=None):
+    """Reconcile runtime position into LOOK's canonical queue state."""
+    session=session or _media_session()
+    if not session:
         return None
-    if action=="status":
-        title=_media_mpv_property("media-title") or "Fabric media"
+    if _media_mpv_alive():
+        pos=_media_mpv_property("playlist-pos")
+        if isinstance(pos,int) and session.get("queue"):
+            runtime_map=session.get("runtime_queue_indices") or []
+            if isinstance(runtime_map,list) and 0 <= pos < len(runtime_map):
+                session["current_index"]=max(0,min(int(runtime_map[pos]),len(session["queue"])-1))
+            else:
+                session["current_index"]=max(0,min(pos,len(session["queue"])-1))
+        idle=bool(_media_mpv_property("idle-active"))
         paused=bool(_media_mpv_property("pause"))
-        pos=_media_mpv_property("time-pos")
-        duration=_media_mpv_property("duration")
-        state="paused" if paused else "playing"
-        timing=""
-        if isinstance(pos,(int,float)):
-            timing=f" · {int(pos)//60}:{int(pos)%60:02d}"
-            if isinstance(duration,(int,float)):
-                timing+=f"/{int(duration)//60}:{int(duration)%60:02d}"
-        print(f"Fabric/mpv · {state} · {title}{timing}")
-        return 0
-    command={
-        "toggle":["cycle","pause"],
-        "next":["playlist-next","force"],
-        "prev":["playlist-prev","force"],
-        "stop":["quit"],
-    }[action]
-    result=_media_mpv_request(command)
-    if action=="stop":
-        # mpv may close its IPC socket before replying to `quit`; a successful
-        # preflight proves this was our live session and the command was delivered.
-        try: MEDIA_SESSION_FILE.unlink(missing_ok=True)
-        except OSError: pass
-        return 0
-    if result and result.get("error")=="success":
-        return 0
-    return 1
+        session["state"]="stopped" if idle else ("paused" if paused else "playing")
+        session["position"]=_media_mpv_property("time-pos")
+        session["duration"]=_media_mpv_property("duration")
+        session["volume"]=_media_mpv_property("volume")
+        return _media_save_session(session)
+    if session.get("state") in {"playing","paused"}:
+        session["state"]="stopped"
+        session.pop("pid",None)
+        return _media_save_session(session)
+    return session
 
 
-def _media_launch_stream(url,source=""):
-    """Launch a Fabric byte stream using a mature media engine, not our own codec stack."""
+def _media_status_snapshot():
+    session=_media_sync_session()
+    if not session:
+        return None
+    queue=session.get("queue") or []
+    idx=int(session.get("current_index") or 0)
+    entry=queue[idx] if queue and 0 <= idx < len(queue) else {}
+    return {
+        "session":session,
+        "entry":entry,
+        "index":idx,
+        "count":len(queue),
+        "state":session.get("state") or "stopped",
+        "position":session.get("position"),
+        "duration":session.get("duration"),
+        "volume":session.get("volume"),
+    }
+
+
+def _media_entry_source(entry):
+    """Resolve one queue entry at the player edge.
+
+    Same-node files stay local; remote/content-addressed entries use Fabric streams.
+    This keeps the queue independent of transport while avoiding pointless loopback I/O.
+    """
+    path=str(entry.get("path") or "").strip()
+    if path:
+        target=Path(path).expanduser()
+        if target.is_file():
+            return target.resolve().as_uri()
+    digest=str(entry.get("digest") or "").strip()
+    if digest:
+        payload=_media_artifact(digest,str(entry.get("node") or "") or None)
+        url=str(payload.get("stream_url") or "")
+        if url:
+            return url
+    raise FileNotFoundError(path or digest or "media queue entry")
+
+
+def _media_write_m3u(queue):
+    MEDIA_QUEUE_FILE.parent.mkdir(parents=True,exist_ok=True)
+    lines=["#EXTM3U"]
+    playable=[]
+    missing=[]
+    index_map=[]
+    for queue_index,entry in enumerate(queue):
+        try:
+            source=_media_entry_source(entry)
+        except (RuntimeError,FileNotFoundError,ValueError) as exc:
+            missing.append((_media_entry_label(entry),str(exc)))
+            continue
+        lines.append(f"#EXTINF:-1,{_media_entry_label(entry)}")
+        lines.append(source)
+        playable.append(entry)
+        index_map.append(queue_index)
+    MEDIA_QUEUE_FILE.write_text("\n".join(lines)+"\n",encoding="utf-8")
+    try: os.chmod(MEDIA_QUEUE_FILE,0o600)
+    except OSError: pass
+    return playable,missing,index_map
+
+
+def _media_mpv_binary():
     configured=str(os.environ.get("LOOK_MEDIA_PLAYER","")).strip()
-    mpv=shutil.which(configured) if configured else shutil.which("mpv")
-    if configured and not mpv and Path(configured).exists():
-        mpv=configured
+    if configured:
+        found=shutil.which(configured)
+        if found: return found
+        if Path(configured).exists(): return configured
+    return shutil.which("mpv") or ""
+
+
+def _media_launch_session(session):
+    """Mirror LOOK's canonical queue into mpv and start at the requested item."""
+    session=media_core.normalize_session(session)
+    queue=session.get("queue") or []
+    if not queue:
+        print("LOOK media · queue is empty")
+        return 1
+    mpv=_media_mpv_binary()
+    if not mpv:
+        # A single item can still use the 5.2.15 fallback path. Multi-item queues
+        # require mpv because LOOK deliberately does not implement a codec/player loop.
+        if len(queue)==1:
+            try:
+                return _media_launch_stream(_media_entry_source(queue[0]),_media_entry_label(queue[0]),session=session)
+            except (RuntimeError,FileNotFoundError) as exc:
+                print(f"LOOK media · {exc}")
+                return 1
+        print("LOOK media · queue playback needs mpv")
+        print("  install mpv with your package manager; the library/index itself has no dependency")
+        return 1
+
+    playable,missing,index_map=_media_write_m3u(queue)
+    if not playable:
+        print("LOOK media · no playable queue entries")
+        return 1
+    if missing:
+        # Missing entries are skipped at the edge, but canonical queue remains untouched
+        # so a moved disk can be repaired/reindexed rather than silently forgotten.
+        print(f"LOOK media · {len(missing)} unavailable queue item(s) skipped")
+
+    try: MEDIA_IPC_FILE.unlink(missing_ok=True)
+    except OSError: pass
+    wanted=max(0,min(int(session.get("current_index") or 0),len(queue)-1))
+    if wanted in index_map:
+        idx=index_map.index(wanted)
+    else:
+        idx=next((i for i,qidx in enumerate(index_map) if qidx>wanted),0)
+    session["runtime_queue_indices"]=index_map
+    cmd=[
+        mpv,
+        f"--input-ipc-server={MEDIA_IPC_FILE}",
+        "--no-terminal",
+        "--idle=yes",
+        f"--playlist={MEDIA_QUEUE_FILE}",
+        f"--playlist-start={idx}",
+    ]
+    if session.get("repeat")=="all":
+        cmd.append("--loop-playlist=inf")
+    try:
+        proc=subprocess.Popen(cmd,stdin=subprocess.DEVNULL,stdout=subprocess.DEVNULL,stderr=subprocess.DEVNULL)
+    except OSError as exc:
+        print(f"LOOK media · player launch failed: {exc}")
+        return 1
+    session["pid"]=proc.pid
+    session["player"]="mpv"
+    session["state"]="playing"
+    session["current_index"]=index_map[idx]
+    _media_save_session(session)
+    print(f"LOOK media · queue → mpv · {len(queue)} item{'s' if len(queue)!=1 else ''}")
+    return 0
+
+
+def _media_launch_stream(url,source="",session=None):
+    """Launch one Fabric byte stream using a mature media engine."""
+    mpv=_media_mpv_binary()
     if mpv:
         try: MEDIA_IPC_FILE.unlink(missing_ok=True)
         except OSError: pass
-        cmd=[mpv,f"--input-ipc-server={MEDIA_IPC_FILE}","--no-terminal",url]
+        cmd=[mpv,f"--input-ipc-server={MEDIA_IPC_FILE}","--no-terminal","--idle=yes",url]
         proc=subprocess.Popen(cmd,stdin=subprocess.DEVNULL,stdout=subprocess.DEVNULL,stderr=subprocess.DEVNULL)
-        STATE_DIR.mkdir(parents=True,exist_ok=True)
-        _atomic_json(MEDIA_SESSION_FILE,{"pid":proc.pid,"url":url,"source":source,"started":time.time(),"player":"mpv"})
+        if session is None:
+            session=media_core.new_session([{"title":source or "Fabric media","digest":"stream"}])
+        session["pid"]=proc.pid
+        session["url"]=url
+        session["source"]=source
+        session["started"]=time.time()
+        session["player"]="mpv"
+        session["state"]="playing"
+        _media_save_session(session)
         print(f"LOOK media · Fabric stream → mpv" + (f" · {source}" if source else ""))
         return 0
 
-    # VLC remains a useful zero-configuration fallback, but mpv is preferred because
-    # its tiny JSON IPC lets LOOK's existing media controls own the session directly.
+    configured=str(os.environ.get("LOOK_MEDIA_PLAYER","")).strip()
     vlc=shutil.which(configured) if configured else shutil.which("vlc")
     try:
         if not vlc and sys.platform=="darwin" and Path("/Applications/VLC.app").exists():
@@ -12845,8 +13040,9 @@ def _media_launch_stream(url,source=""):
 
 
 def _media_stream_command(args):
+    """Explicit Fabric-stream proof path. Queue playback may optimize same-node files locally."""
     if not args:
-        print("usage: lk media play PATH | lk media play @NODE sha256:DIGEST")
+        print("usage: lk media stream PATH | lk media stream @NODE sha256:DIGEST")
         return 2
     try:
         if args[0].startswith("@"):
@@ -12858,17 +13054,23 @@ def _media_stream_command(args):
                 raise ValueError("remote playback requires a sha256:DIGEST artifact")
             payload=_media_artifact(digest,node)
             source=f"{node}:{(payload.get('artifact') or {}).get('name') or digest}"
+            entry={"node":node,"digest":digest,"title":(payload.get("artifact") or {}).get("name") or digest}
         elif args[0].startswith("sha256:"):
             payload=_media_artifact(args[0])
             source=(payload.get("artifact") or {}).get("name") or args[0]
+            entry={"digest":args[0],"title":source}
         else:
             path=" ".join(args)
             payload=_media_register(path)
-            source=(payload.get("artifact") or {}).get("name") or str(Path(path).name)
+            meta=payload.get("artifact") or {}
+            source=meta.get("name") or str(Path(path).name)
+            entry=media_core.entry_from_path(path)
+            entry["digest"]=meta.get("digest")
         url=str(payload.get("stream_url") or "")
         if not url:
             raise RuntimeError("Fabric returned no stream URL")
-        return _media_launch_stream(url,source)
+        session=media_core.new_session([entry])
+        return _media_launch_stream(url,source,session=session)
     except (RuntimeError,ValueError,FileNotFoundError) as exc:
         print(f"LOOK media · {exc}")
         return 1
@@ -12913,28 +13115,415 @@ def _media_info_command(args):
     return 0
 
 
+def _media_scan_command(args):
+    if not args:
+        print("usage: lk media scan ROOT")
+        return 2
+    root=Path(" ".join(args)).expanduser()
+    started=time.monotonic()
+    try:
+        library=media_core.scan_root(root,_media_library())
+    except (OSError,NotADirectoryError) as exc:
+        print(f"LOOK media · {exc}")
+        return 1
+    _media_save_library(library)
+    base=str(root.resolve())
+    count=sum(1 for row in library["entries"] if row.get("root")==base)
+    print(f"LOOK MEDIA LIBRARY · {count:,} items · {time.monotonic()-started:.2f}s")
+    print(f"  root  {base}")
+    print(f"  index {MEDIA_LIBRARY_FILE}")
+    print("  fast scan · no media bytes hashed or decoded")
+    return 0
+
+
+def _media_library_command():
+    library=_media_library()
+    entries=library.get("entries") or []
+    artists={str(x.get("artist") or "") for x in entries if x.get("artist")}
+    albums={(str(x.get("artist") or ""),str(x.get("album") or "")) for x in entries if x.get("album")}
+    print(f"LOOK MEDIA LIBRARY · {len(entries):,} items · {len(artists):,} artists · {len(albums):,} albums")
+    if not library.get("roots"):
+        print("  no roots indexed · run: lk media scan /path/to/music")
+    else:
+        for root in library["roots"]:
+            n=sum(1 for row in entries if row.get("root")==root)
+            print(f"  {n:>6,}  {root}")
+    return 0
+
+
+def _media_find_command(args):
+    if not args:
+        print("usage: lk media find QUERY")
+        return 2
+    query=" ".join(args)
+    rows=media_core.search_entries(_media_library(),query)
+    print(f"LOOK MEDIA FIND · {query} · {len(rows):,} match{'es' if len(rows)!=1 else ''}")
+    for row in rows[:30]:
+        artist=str(row.get("artist") or "")
+        album=str(row.get("album") or "")
+        track=row.get("track")
+        prefix=f"{track:02d} " if isinstance(track,int) else ""
+        left=" · ".join(x for x in (artist,album) if x)
+        print(f"  {left + ' · ' if left else ''}{prefix}{row.get('title') or Path(row.get('path','')).name}")
+    if len(rows)>30:
+        print(f"  … {len(rows)-30:,} more")
+    return 0 if rows else 1
+
+
+def _media_group_command(field,args):
+    query=" ".join(args).casefold().strip()
+    rows=_media_library().get("entries") or []
+    counts={}
+    for row in rows:
+        value=str(row.get(field) or "").strip()
+        if not value or (query and query not in value.casefold()):
+            continue
+        counts[value]=counts.get(value,0)+1
+    label="ARTISTS" if field=="artist" else "ALBUMS"
+    print(f"LOOK MEDIA {label} · {len(counts):,}")
+    for value,count in sorted(counts.items(),key=lambda item:item[0].casefold())[:200]:
+        print(f"  {count:>4}  {value}")
+    return 0
+
+
+def _media_resolve_targets(args):
+    shuffle=False
+    clean=[]
+    for arg in args:
+        if arg=="--shuffle": shuffle=True
+        else: clean.append(arg)
+    if not clean:
+        raise ValueError("play requires a file, directory, library query, or artifact")
+
+    if clean[0].startswith("@"):
+        if len(clean)<2 or not clean[1].startswith("sha256:"):
+            raise ValueError("remote playback requires @NODE sha256:DIGEST")
+        payload=_media_artifact(clean[1],clean[0][1:])
+        meta=payload.get("artifact") or {}
+        return [{"node":clean[0][1:],"digest":clean[1],"title":meta.get("name") or clean[1]}],shuffle
+    if clean[0].startswith("sha256:"):
+        payload=_media_artifact(clean[0])
+        meta=payload.get("artifact") or {}
+        return [{"digest":clean[0],"title":meta.get("name") or clean[0]}],shuffle
+
+    text=" ".join(clean)
+    path=Path(text).expanduser()
+    if path.exists():
+        path=path.resolve()
+        if path.is_file():
+            if path.suffix.casefold() not in media_core.MEDIA_EXTENSIONS:
+                raise ValueError(f"unsupported media file: {path.name}")
+            return [media_core.entry_from_path(path)],shuffle
+        if path.is_dir():
+            rows=media_core.entries_under(_media_library(),path)
+            if not rows:
+                rows=media_core.scan_root(path).get("entries") or []
+            if not rows:
+                raise ValueError(f"no playable media under {path}")
+            return rows,shuffle
+
+    rows=media_core.resolve_query(_media_library(),text)
+    if not rows:
+        raise ValueError(f"no library match for {text!r}; run lk media find or lk media scan")
+    return rows,shuffle
+
+
+def _media_play_command(args):
+    try:
+        rows,shuffle=_media_resolve_targets(args)
+    except (RuntimeError,ValueError,FileNotFoundError,OSError) as exc:
+        print(f"LOOK media · {exc}")
+        return 1
+    session=media_core.new_session(rows,shuffle=shuffle)
+    return _media_launch_session(session)
+
+
+def _media_queue_command():
+    snap=_media_status_snapshot()
+    if not snap:
+        print("LOOK media · queue is empty")
+        return 0
+    queue=snap["session"].get("queue") or []
+    idx=snap["index"]
+    print(f"LOOK MEDIA QUEUE · {len(queue)} items · {snap['state']} · {idx+1 if queue else 0}/{len(queue)}")
+    if not queue:
+        return 0
+    start=max(0,idx-5)
+    end=min(len(queue),start+15)
+    start=max(0,end-15)
+    for pos in range(start,end):
+        marker="▶" if pos==idx else " "
+        row=queue[pos]
+        album=str(row.get("album") or "")
+        suffix=f" · {album}" if album else ""
+        print(f" {marker} {pos+1:>4}  {_media_entry_label(row)}{suffix}")
+    if end < len(queue):
+        print(f"     … {len(queue)-end} more")
+    return 0
+
+
+def _media_clear_command():
+    if _media_mpv_alive():
+        _media_mpv_request(["quit"])
+    for path in (MEDIA_SESSION_FILE,MEDIA_QUEUE_FILE):
+        try: Path(path).unlink(missing_ok=True)
+        except OSError: pass
+    print("LOOK media · queue cleared")
+    return 0
+
+
+def _media_playlist_path(name):
+    return MEDIA_PLAYLIST_DIR/(media_core.playlist_name(name)+".json")
+
+
+def _media_playlist_save(name):
+    session=_media_sync_session()
+    if not session or not session.get("queue"):
+        print("LOOK media · nothing in the queue to save")
+        return 1
+    try:
+        path=_media_playlist_path(name)
+    except ValueError as exc:
+        print(f"LOOK media · {exc}")
+        return 1
+    payload=media_core.playlist_payload(name,session)
+    _atomic_json(path,payload)
+    print(f"LOOK PLAYLIST · saved {payload['name']} · {len(payload['queue'])} items")
+    print(f"  {path}")
+    return 0
+
+
+def _media_playlist_load(name,shuffle=False):
+    try:
+        path=_media_playlist_path(name)
+    except ValueError as exc:
+        print(f"LOOK media · {exc}")
+        return 1
+    payload=_media_read_json(path,{})
+    queue=payload.get("queue") if isinstance(payload,dict) else None
+    if not isinstance(queue,list) or not queue:
+        print(f"LOOK media · playlist not found or empty: {name}")
+        return 1
+    session=media_core.new_session(queue,shuffle=shuffle)
+    return _media_launch_session(session)
+
+
+def _media_playlist_list():
+    MEDIA_PLAYLIST_DIR.mkdir(parents=True,exist_ok=True)
+    paths=sorted(MEDIA_PLAYLIST_DIR.glob("*.json"),key=lambda p:p.stem.casefold())
+    print(f"LOOK PLAYLISTS · {len(paths)}")
+    for path in paths:
+        payload=_media_read_json(path,{})
+        queue=payload.get("queue") if isinstance(payload,dict) else []
+        print(f"  {len(queue) if isinstance(queue,list) else 0:>4}  {payload.get('name') or path.stem}")
+    return 0
+
+
+def _media_playlist_command(args):
+    if not args or args[0] in {"list","ls"}:
+        return _media_playlist_list()
+    sub=args[0].lower()
+    rest=args[1:]
+    if sub=="save":
+        if not rest: print("usage: lk media playlist save NAME"); return 2
+        return _media_playlist_save(" ".join(rest))
+    if sub in {"load","play"}:
+        shuffle="--shuffle" in rest
+        name=" ".join(x for x in rest if x!="--shuffle")
+        if not name: print("usage: lk media playlist load NAME [--shuffle]"); return 2
+        return _media_playlist_load(name,shuffle=shuffle)
+    print("usage: lk media playlist [list|save NAME|load NAME [--shuffle]]")
+    return 2
+
+
+def _media_control_session(action):
+    session=_media_session()
+    alive=_media_mpv_alive()
+    if action in {"play","toggle"} and not alive:
+        if session and session.get("queue"):
+            return _media_launch_session(session)
+        return None
+    if not alive:
+        if action in {"next","prev"} and session and session.get("queue"):
+            step=1 if action=="next" else -1
+            session["current_index"]=(int(session.get("current_index") or 0)+step)%len(session["queue"])
+            return _media_launch_session(session)
+        if action=="stop" and session:
+            session["state"]="stopped"
+            _media_save_session(session)
+            return 0
+        return None
+
+    if action=="status":
+        snap=_media_status_snapshot()
+        if not snap: return None
+        entry=snap["entry"]
+        timing=f" · {_media_time(snap['position'])}/{_media_time(snap['duration'])}" if isinstance(snap["position"],(int,float)) else ""
+        q=f" · {snap['index']+1}/{snap['count']}" if snap["count"] else ""
+        print(f"LOOK media · {snap['state']} · {_media_entry_label(entry)}{timing}{q}")
+        return 0
+    command={
+        "play":["set_property","pause",False],
+        "pause":["set_property","pause",True],
+        "toggle":["cycle","pause"],
+        "next":["playlist-next","force"],
+        "prev":["playlist-prev","force"],
+        "stop":["quit"],
+    }[action]
+    result=_media_mpv_request(command)
+    if action=="stop":
+        if session:
+            session["state"]="stopped"
+            session.pop("pid",None)
+            _media_save_session(session)
+        return 0
+    if result and result.get("error")=="success":
+        time.sleep(.03)
+        _media_sync_session(session)
+        return 0
+    return 1
+
+
+def _media_repeat_command(args):
+    session=_media_session()
+    if not session:
+        print("LOOK media · no active queue")
+        return 1
+    requested=(args[0].lower() if args else ("off" if session.get("repeat")=="all" else "all"))
+    if requested not in {"off","all"}:
+        print("usage: lk media repeat [off|all]")
+        return 2
+    session["repeat"]=requested
+    _media_save_session(session)
+    if _media_mpv_alive():
+        _media_mpv_request(["set_property","loop-playlist","inf" if requested=="all" else "no"])
+    print(f"LOOK media · repeat {requested}")
+    return 0
+
+
+def _media_player_line(text,width):
+    text=str(text)
+    if len(text)>width:
+        return text[:max(0,width-1)]+"…"
+    return text+" "*(width-len(text))
+
+
+def _media_player_render():
+    snap=_media_status_snapshot()
+    width=max(42,min(88,shutil.get_terminal_size((72,24)).columns-2))
+    inner=width-2
+    if not snap:
+        lines=["LOOK PLAYER","", "No LOOK media queue.", "", "Run: lk media play <file|directory|query>"]
+        body=[_media_player_line(x,inner) for x in lines]
+    else:
+        entry=snap["entry"]
+        artist=str(entry.get("artist") or "").strip()
+        title=str(entry.get("title") or _media_entry_label(entry)).strip()
+        album=str(entry.get("album") or "").strip()
+        pos=snap["position"] if isinstance(snap["position"],(int,float)) else 0
+        duration=snap["duration"] if isinstance(snap["duration"],(int,float)) else 0
+        bar_width=max(12,inner-23)
+        ratio=max(0.0,min(1.0,(pos/duration) if duration else 0.0))
+        filled=int(round(ratio*bar_width))
+        bar="━"*filled+"─"*(bar_width-filled)
+        state=str(snap["state"]).upper()
+        queue=snap["session"].get("queue") or []
+        footer=(f"Queue {snap['index']+1}/{len(queue)}  ·  "
+                f"Shuffle {'on' if snap['session'].get('shuffle') else 'off'}  ·  "
+                f"Repeat {snap['session'].get('repeat','off')}")
+        body=[
+            _media_player_line(f"{artist} — {title}" if artist else title,inner),
+            _media_player_line(album,inner),
+            _media_player_line("",inner),
+            _media_player_line(f"{bar}  {_media_time(pos)} / {_media_time(duration)}",inner),
+            _media_player_line(f"{state}  ·  {footer}",inner),
+            _media_player_line("",inner),
+            _media_player_line("space play/pause   ←/→ seek 10s   p/n previous/next",inner),
+            _media_player_line("r repeat   x stop   q close player",inner),
+        ]
+    top="┌"+"─"*(width-2)+"┐"
+    bottom="└"+"─"*(width-2)+"┘"
+    title=" LOOK PLAYER "
+    top=top[:2]+title+top[2+len(title):]
+    out=[top]+["│"+line+"│" for line in body]+[bottom]
+    return "\n".join(out)
+
+
+def media_player():
+    """Tiny live view over MediaSession; closing it never stops playback."""
+    if not (sys.stdin.isatty() and sys.stdout.isatty()):
+        print(_media_player_render())
+        return 0
+    fd=sys.stdin.fileno()
+    old=termios.tcgetattr(fd)
+    try:
+        tty.setcbreak(fd)
+        sys.stdout.write("\033[2J")
+        while True:
+            sys.stdout.write("\033[H"+_media_player_render()+"\033[J")
+            sys.stdout.flush()
+            key=_read_tty_key(fd,.25)
+            if not key:
+                continue
+            if key in {"q","esc"}: return 0
+            if key==" ": _media_control_session("toggle")
+            elif key=="n": _media_control_session("next")
+            elif key=="p": _media_control_session("prev")
+            elif key=="left": _media_mpv_request(["seek",-10,"relative"])
+            elif key=="right": _media_mpv_request(["seek",10,"relative"])
+            elif key=="r": _media_repeat_command([])
+            elif key=="x": _media_control_session("stop")
+    except KeyboardInterrupt:
+        return 0
+    finally:
+        try: termios.tcsetattr(fd,termios.TCSADRAIN,old)
+        except Exception: pass
+        sys.stdout.write("\n")
+        sys.stdout.flush()
+
+
 def media(args):
     raw=(args[0].lower() if args else "status")
-    if raw=="add":
-        return _media_add_command(args[1:])
-    if raw=="info":
-        return _media_info_command(args[1:])
-    if raw in {"stream","open"} or (raw=="play" and len(args)>1):
-        return _media_stream_command(args[1:])
+    if raw=="add": return _media_add_command(args[1:])
+    if raw=="info": return _media_info_command(args[1:])
+    if raw in {"stream","open"}: return _media_stream_command(args[1:])
+    if raw=="scan": return _media_scan_command(args[1:])
+    if raw in {"library","lib"}: return _media_library_command()
+    if raw=="find": return _media_find_command(args[1:])
+    if raw=="artists": return _media_group_command("artist",args[1:])
+    if raw=="albums": return _media_group_command("album",args[1:])
+    if raw=="queue": return _media_queue_command()
+    if raw=="clear": return _media_clear_command()
+    if raw in {"playlist","playlists"}: return _media_playlist_command(args[1:] if raw=="playlist" else ["list"])
+    if raw=="save":
+        if len(args)<2: print("usage: lk media save NAME"); return 2
+        return _media_playlist_save(" ".join(args[1:]))
+    if raw=="load":
+        if len(args)<2: print("usage: lk media load NAME [--shuffle]"); return 2
+        rest=args[1:]; shuffle="--shuffle" in rest
+        return _media_playlist_load(" ".join(x for x in rest if x!="--shuffle"),shuffle=shuffle)
+    if raw=="repeat": return _media_repeat_command(args[1:])
+    if raw=="play" and len(args)>1: return _media_play_command(args[1:])
 
-    # `lk media play` with no source keeps the historical transport-control meaning.
-    aliases={"play":"toggle","pause":"toggle","playpause":"toggle","previous":"prev","back":"prev"}
+    aliases={"playpause":"toggle","previous":"prev","back":"prev"}
     action=aliases.get(raw,raw)
-    if action not in {"status","toggle","next","prev","stop"}:
-        print("usage: lk media [status|play|pause|next|prev|stop|add PATH|play PATH|play @NODE DIGEST|info [@NODE] DIGEST]")
+    if action not in {"status","play","pause","toggle","next","prev","stop"}:
+        print("usage: lk media [status|play [TARGET] [--shuffle]|pause|toggle|next|prev|stop|queue|clear]")
+        print("                [scan ROOT|library|find QUERY|artists|albums|playlist ...|repeat [off|all]]")
+        print("                [add PATH|stream PATH|stream @NODE DIGEST|info [@NODE] DIGEST]")
         return 2
 
-    mpv_result=_media_mpv_control(action)
-    if mpv_result is not None:
-        return mpv_result
+    result=_media_control_session(action)
+    if result is not None:
+        if action not in {"status","stop"}:
+            _media_control_session("status")
+        return result
+
+    # No LOOK-owned session: retain useful control of existing system players.
     system=platform.system()
-    if system=="Darwin": return _media_macos(action)
-    if system=="Linux": return _media_linux(action)
+    legacy_action={"play":"toggle","pause":"toggle"}.get(action,action)
+    if system=="Darwin": return _media_macos(legacy_action)
+    if system=="Linux": return _media_linux(legacy_action)
     print(f"LOOK media · unsupported platform: {system}"); return 1
 
 
@@ -13264,7 +13853,8 @@ _COMMANDS = [
     ("lk clean", "", "system", "Conservative maintenance surface"),
     ("lk web", "[...]", "ai", "Web-search key/status"),
     ("lk budget", "[...]", "ai", "LO context/token budget"),
-    ("lk media", "[...]", "media", "Media controls", "lk music"),
+    ("lk media", "[...]", "media", "Media library, queue, playlists, transport", "lk music"),
+    ("lk player", "", "media", "Live LOOK miniplayer"),
     ("mm", "", "media", "Toggle media playback", "lk media toggle"),
     ("mn", "", "media", "Next media item", "lk media next"),
     ("mp", "", "media", "Previous media item", "lk media prev"),
@@ -14232,6 +14822,7 @@ def main():
     if cmd=="thinking": return lo_thinking(rest)
     if cmd in {"think-display","thinkdisplay"}: return lo_think_display(rest)
     if cmd in {"media","music"}: return media(rest)
+    if cmd=="player": return media_player()
     if cmd=="_ollama-share-proxy": return _ollama_share_proxy()
     modes={"detail":"detail","dirs":"dirs","files":"files","tree":"tree","recent":"recent","size":"size"}
     if cmd=="games": print("No games installed."); return 0

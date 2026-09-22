@@ -1,13 +1,13 @@
 #!/usr/bin/env bash
 set -euo pipefail
 ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
-echo "Future Crash + LOOK 5.2.15 · Streaming Artifacts"
+echo "Future Crash + LOOK 5.2.16 · Media Sessions"
 echo "────────────────────────────────────────"
 
 # Refuse a mixed bundle before mutating the machine. A unified release must move
 # LOOK and the node together.
 EXPECTED_RELEASE="$(tr -d '[:space:]' < "$ROOT/VERSION")"
-[[ "$EXPECTED_RELEASE" == "5.2.15" ]] || { echo "BUNDLE ERROR: expected release 5.2.15, found $EXPECTED_RELEASE"; exit 4; }
+[[ "$EXPECTED_RELEASE" == "5.2.16" ]] || { echo "BUNDLE ERROR: expected release 5.2.16, found $EXPECTED_RELEASE"; exit 4; }
 grep -q 'def _fabric_command' "$ROOT/look/lk" || { echo "BUNDLE ERROR: LOOK source has no Fabric command"; exit 4; }
 grep -q 'choices=.*serve.*fabric' "$ROOT/core/node.py" || { echo "BUNDLE ERROR: node source has no Fabric CLI"; exit 4; }
 
@@ -22,7 +22,7 @@ done
 ((UNINSTALL)) && exit 0
 if ((DRY_RUN)); then
   echo
-  echo "[dry-run] would install/restart Unified Node 5.2.15, Streaming Artifacts, Shared Fabric UI Model, Vision Artifacts, Fabric Memory, and Signal Window 1.1.2"
+  echo "[dry-run] would install/restart Unified Node 5.2.16, Media Sessions, Streaming Artifacts, Shared Fabric UI Model, Vision Artifacts, Fabric Memory, and Signal Window 1.1.2"
   echo "[dry-run] would reconcile Tailscale :7332 → separate fcl-ingress :7333 and verify Fabric CLI wiring"
   exit 0
 fi
@@ -109,6 +109,10 @@ if ! cmp -s "$ROOT/look/lo_engine.py" "$HOME/.local/share/look/lo_engine.py"; th
 fi
 if ! cmp -s "$ROOT/look/lk" "$HOME/.local/share/look/lk"; then
   echo "INSTALL ERROR: installed LOOK does not match this checkout" >&2
+  exit 5
+fi
+if ! cmp -s "$ROOT/look/media_core.py" "$HOME/.local/share/look/media_core.py"; then
+  echo "INSTALL ERROR: installed media core does not match this checkout" >&2
   exit 5
 fi
 if ! cmp -s "$ROOT/core/node.py" "$HOME/.local/share/future-crash-look/core/node.py"; then

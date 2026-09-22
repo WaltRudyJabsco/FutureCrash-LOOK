@@ -51,7 +51,8 @@ _lk() {
     'path:PATH diagnostics'
     'why:explain command resolution'
     'ollama:Ollama models/hosts/search/access'
-    'media:system media transport'
+    'media:media library/session/transport'
+    'player:live LOOK miniplayer'
     'memory:LO user memory'
     'forget:forget matching user memory'
     'clear-memory:clear LO user memory'
@@ -157,7 +158,10 @@ _lk() {
       return
       ;;
     media|music)
-      (( CURRENT == 3 )) && _values 'media action' status play pause toggle next prev stop add stream info
+      (( CURRENT == 3 )) && _values 'media action' status play pause toggle next prev stop queue clear scan library find artists albums save load playlists playlist repeat add stream info
+      if (( CURRENT >= 4 )) && [[ "$words[3]" == (scan|play|add|stream|info) ]]; then
+        _files
+      fi
       return
       ;;
     memory)

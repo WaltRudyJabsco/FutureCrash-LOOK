@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Future Crash + LOOK Unified Node 5.2.15.
+"""Future Crash + LOOK Unified Node 5.2.16.
 
 A small distributed supervisor for trusted personal machines. Immediate events stay
 asynchronous; a one-second fabric pulse reconciles presence, leases and stale work.
@@ -44,7 +44,7 @@ except ImportError:
     from ui_model import actions as ui_actions, build_ui_model
 from urllib.parse import urlparse, parse_qs
 
-VERSION = "5.2.15"
+VERSION = "5.2.16"
 DEFAULT_HOST = "127.0.0.1"
 DEFAULT_PORT = 7332
 DEFAULT_INGRESS_PORT = 0
@@ -1870,7 +1870,7 @@ def _artifact_target_url(host, port, target, digest):
 
 
 class API(BaseHTTPRequestHandler):
-    server_version = "FCLNode/5.2.15"
+    server_version = "FCLNode/5.2.16"
 
     def setup(self):
         self._metric_request_id = None

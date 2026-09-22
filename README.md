@@ -1,4 +1,19 @@
-# Future Crash + LOOK 5.2.1
+# Future Crash + LOOK 5.2.16
+
+## 5.2.16 — Media Sessions + Library Queue
+
+Fabric's streaming-artifact proof now has a deliberately small daily-use media surface. `lk media scan ROOT` builds a fast dependency-free catalog, `lk media play` can construct queues from files/directories/albums/artists/search text, saved playlists persist the queue independently of the playback engine, and `lk player` provides a tiny live terminal miniplayer. mpv still owns decoding/rendering; LOOK owns queue/session meaning. No media root is hard-coded.
+
+```bash
+lk media scan /srv/media/music
+lk media play "Remain in Light"
+lk media queue
+lk player
+lk media save Driving
+```
+
+---
+
 
 ## 5.2.1 — Evidence labels
 

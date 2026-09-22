@@ -7,6 +7,7 @@ class ReleaseRuntimeTests(unittest.TestCase):
     def test_installer_ships_conductor(self):
         text=(ROOT/"install.sh").read_text()
         self.assertIn('core/conductor.py', text)
+        self.assertIn('look/media_core.py', (ROOT/'install-look.sh').read_text())
         self.assertIn('import conductor, fabric_client', text)
 
     def test_flat_runtime_import_contract(self):

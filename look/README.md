@@ -604,14 +604,21 @@ The unified installer installs `_lk` and `_lo` completion definitions under `~/.
 LOOK exposes a small cross-platform transport surface:
 
 ```sh
+lk player
 lk media
-lk media toggle
-lk media next
-lk media prev
-lk media stop
+lk media scan /srv/media/music
+lk media library
+lk media find "talking heads"
+lk media play "Remain in Light"
+lk media play /srv/media/music/Talking\ Heads --shuffle
+lk media queue
+lk media save Driving
+lk media load Driving
+lk media playlists
+lk media repeat all
+lk media stream /path/to/movie.mp4
+lk media stream @3090 sha256:...
 lk media add /path/to/song.flac
-lk media play /path/to/movie.mp4
-lk media play @3090 sha256:...
 lk media info @3090 sha256:...
 ```
 

@@ -1,3 +1,10 @@
+## 4.45.0 — Media sessions + miniplayer
+
+- Add a dependency-free media library/session core.
+- Add fast library scanning/search, canonical queues, saved playlists, repeat, and directory/query playback.
+- Add `lk player`, a tiny live terminal view over the current LOOK MediaSession.
+- Keep mpv as the optional playback edge and preserve Fabric range-stream transport for remote/content-addressed media.
+
 ## 4.44.8 — Isolated per-node model qualification
 
 - `lk ollama test --all` now benchmarks enabled models alone under identical 4096-context residency conditions and reports load time separately from warm median TTFT.
