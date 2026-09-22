@@ -1,8 +1,21 @@
-# 5.2.14 — Direct Vision Context
+# 5.2.15 — Streaming Artifacts + Media Proof
 
-- Treat image-description follow-ups such as `describe it`, `identify it`, and `what do you see` as visual turns so the active image artifact is reattached.
-- Tell the selected vision model explicitly that image pixels are direct model input and filename/resource metadata is not a substitute for inspecting them.
-- Suppress `preview_path`, `open_path`, and `reveal_path` during ordinary image-understanding turns, while preserving them for explicit host preview/open requests.
+- Generalize Fabric artifacts beyond small in-memory blobs: existing large files can be registered in place by SHA-256 without copying them into the Fabric state directory. Physical path remains a node-local location, while the artifact digest is the logical identity.
+- Add HTTP `HEAD` and single-range `GET` support (`Accept-Ranges`, `206`, `Content-Range`) for artifacts so large audio/video/data files can seek and stream without whole-file downloads or RAM buffering.
+- File-backed artifacts fail closed if their observed size/mtime changes after registration; re-registering establishes a new content identity/location record. Public artifact metadata never exposes the node-local source path.
+- Nodes now advertise `artifact.read`, `artifact.range`, and `artifact.stream` as generic capabilities. Media is the proof case, not a special storage architecture.
+- Extend `fcl-node` with `artifact-add` and `artifact` inspection/URL commands, including peer stream URL resolution.
+- Extend `lk media`: existing no-argument transport controls remain compatible, while `lk media add PATH`, `lk media play PATH`, `lk media play @NODE sha256:DIGEST`, and `lk media info` exercise Fabric artifact transport.
+- Prefer optional `mpv` as the dumb playback edge. LOOK launches it with a local JSON IPC socket so the existing play/pause/next/previous/stop controls can operate the LOOK-owned stream session; VLC/system playback remains a fallback.
+- Do not introduce a media-library database, fixed `/mnt/music` path, transcoder, codec stack, or storage layout. The coming 3090 storage audit can reorganize physical disks without changing the artifact/stream contract.
+
+# 5.2.14 — Shared Fabric UI Model
+
+- Added `core/ui_model.py`: a renderer-neutral presentation model for nodes, capabilities, jobs, services, recent events, and actions.
+- Dash controls now render from the shared action registry instead of duplicating their semantics in terminal code.
+- Dash full/wide views expose a compact capability summary, so the UI begins reflecting Fabric as a graph of capabilities rather than only machines/services.
+- Added `GET /v1/ui/state`, a stable `fabric-ui-v1` JSON surface for Signal and future renderers; no HTML, ANSI, or terminal assumptions leak into the model.
+- This is an incremental mainline change, not a UI rewrite: existing Dash/LOOK/Future Crash behavior and hotkeys remain intact.
 
 # 5.2.13 — Vision Runtime Fix
 

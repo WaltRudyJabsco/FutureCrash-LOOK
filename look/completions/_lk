@@ -157,7 +157,7 @@ _lk() {
       return
       ;;
     media|music)
-      (( CURRENT == 3 )) && _values 'media action' status toggle next prev stop
+      (( CURRENT == 3 )) && _values 'media action' status play pause toggle next prev stop add stream info
       return
       ;;
     memory)

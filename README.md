@@ -1259,3 +1259,22 @@ Run `lk dash` on several nodes and open Signal on a phone/tablet, then try `lk f
 ## Experimental greenfield fork brief
 
 The stable project remains intentionally plural: LOOK/`lk` is the Unix tool, LO is the cognitive work network, Future Crash is the retro ambient interface, and Signal is the browser-native instrument. `docs/GREENFIELD_FORK.md` captures the separate “start over without starting over” experiment: capability-oriented Fabric workers beyond Ollama, heterogeneous/dual-resident inference, ephemeral browser/WebGPU workers, small-model cognitive maintenance, provenance, and Show Work demos. It is a design brief, not a production migration plan.
+## Shared Fabric UI model (5.2.14)
+
+Fabric now publishes a small renderer-neutral `fabric-ui-v1` state document at `/v1/ui/state`. Dash consumes the same action/capability vocabulary that Signal and Future Crash can reuse later. The intent is deliberately incremental: keep ANSI terminal and vanilla web renderers, while centralizing meaning rather than adopting a heavyweight TUI/web framework.
+
+## Streaming artifacts + media proof (5.2.15)
+
+Fabric artifacts can now be file-backed as well as small managed blobs. `fcl-node artifact-add PATH` hashes an existing file and records its node-local location without copying the bytes into Fabric state. The artifact endpoint supports HTTP byte ranges, so a consumer can seek through a large movie, recording, dataset, or music file without downloading it first. Nodes advertise this as `artifact.read`, `artifact.range`, and `artifact.stream`; media is only the first visible consumer.
+
+LOOK keeps playback deliberately thin. If `mpv` is available, `lk media play PATH` registers the local file and hands the Fabric stream URL to mpv; `lk media play @NODE sha256:DIGEST` consumes an artifact from another Fabric node. The historical `lk media play` with no path remains a play/pause transport control. `lk media add PATH` and `lk media info [@NODE] DIGEST` expose the underlying artifact for testing. VLC/system playback remains a fallback.
+
+```text
+source node                     playback node
+───────────                     ─────────────
+file → artifact identity → HTTP Range stream → mpv/browser
+       sha256:...
+```
+
+No media root is hard-coded. A future storage audit can move the 3090 library onto a clean `/srv/...` layout and re-register/reindex locations without changing consumers or Fabric identity semantics.
+

@@ -10,6 +10,7 @@ import base64
 from contextlib import closing
 import hashlib
 import json
+import mimetypes
 import os
 import sqlite3
 import threading
@@ -327,7 +328,14 @@ class FabricStore:
 
 
 class ArtifactStore:
-    """Small content-addressed object store for packet context and durable results."""
+    """Content-addressed artifacts with small managed blobs and large file references.
+
+    Small generated/context artifacts remain copied into the store. Large existing files
+    can instead be registered in place: the digest identifies their observed contents,
+    while the source path remains a replaceable physical location.
+    """
+    HASH_CHUNK_BYTES = 1024 * 1024
+
     def __init__(self, root: Path):
         self.root = root
         self.root.mkdir(parents=True, exist_ok=True)
@@ -344,13 +352,58 @@ class ArtifactStore:
             tmp.write_bytes(data)
             os.chmod(tmp, 0o600)
             tmp.replace(blob)
-            meta.write_text(json.dumps({"digest": digest, "bytes": len(data), "media_type": media_type,
-                                        "name": name, "created": utc_ts()}, indent=2) + "\n")
+            meta.write_text(json.dumps({
+                "digest": digest, "bytes": len(data), "media_type": media_type,
+                "name": name, "created": utc_ts(), "storage": "managed",
+            }, indent=2) + "\n")
             os.chmod(meta, 0o600)
         return self.metadata(digest)
 
     def put_base64(self, encoded: str, **kwargs) -> dict[str, Any]:
         return self.put(base64.b64decode(encoded.encode("ascii"), validate=True), **kwargs)
+
+    def register_file(self, path: str | Path, *, media_type: str | None = None, name: str | None = None) -> dict[str, Any]:
+        """Register an existing local file without copying it into Fabric storage.
+
+        Hashing happens once at registration. Later reads verify the observed size and
+        nanosecond mtime before serving so a mutable path cannot silently impersonate
+        the content-addressed artifact. Re-register after moving or changing a file.
+        """
+        source = Path(path).expanduser().resolve()
+        if not source.is_file():
+            raise FileNotFoundError(source)
+        stat = source.stat()
+        digest_hash = hashlib.sha256()
+        with source.open("rb") as fh:
+            while True:
+                chunk = fh.read(self.HASH_CHUNK_BYTES)
+                if not chunk:
+                    break
+                digest_hash.update(chunk)
+        hexdigest = digest_hash.hexdigest()
+        digest = f"sha256:{hexdigest}"
+        guessed = mimetypes.guess_type(source.name)[0] or "application/octet-stream"
+        meta = self.root / f"{hexdigest}.json"
+        managed_blob = self.root / hexdigest
+        if managed_blob.is_file() and meta.is_file():
+            # A durable managed copy is already the strongest local location. Do not
+            # replace it with a path reference that could later disappear.
+            return self.metadata(digest)
+        record = {
+            "digest": digest,
+            "bytes": int(stat.st_size),
+            "media_type": str(media_type or guessed),
+            "name": str(name or source.name),
+            "created": utc_ts(),
+            "storage": "external",
+            "path": str(source),
+            "mtime_ns": int(stat.st_mtime_ns),
+        }
+        tmp = meta.with_suffix(".json.tmp")
+        tmp.write_text(json.dumps(record, indent=2) + "\n")
+        os.chmod(tmp, 0o600)
+        tmp.replace(meta)
+        return record
 
     def _hex(self, digest: str) -> str:
         if not digest.startswith("sha256:") or len(digest) != 71:
@@ -360,13 +413,36 @@ class ArtifactStore:
     def metadata(self, digest: str) -> dict[str, Any]:
         h = self._hex(digest)
         meta = self.root / f"{h}.json"
-        if not meta.exists(): raise FileNotFoundError(digest)
-        return json.loads(meta.read_text())
+        if not meta.exists():
+            raise FileNotFoundError(digest)
+        data = json.loads(meta.read_text())
+        data.setdefault("storage", "managed")  # Backward compatibility with pre-5.2.15 artifacts.
+        return data
 
-    def get(self, digest: str) -> tuple[dict[str, Any], bytes]:
+    def path_for(self, digest: str) -> tuple[dict[str, Any], Path]:
+        """Resolve an artifact to a local readable path without loading its bytes."""
         h = self._hex(digest)
         meta = self.metadata(digest)
-        data = (self.root / h).read_bytes()
+        if meta.get("storage") == "external":
+            path = Path(str(meta.get("path") or ""))
+            if not path.is_file():
+                raise FileNotFoundError(digest)
+            stat = path.stat()
+            if int(stat.st_size) != int(meta.get("bytes") or -1) or int(stat.st_mtime_ns) != int(meta.get("mtime_ns") or -1):
+                raise IOError(f"artifact source changed since registration: {digest}")
+            return meta, path
+        path = self.root / h
+        if not path.is_file():
+            raise FileNotFoundError(digest)
+        return meta, path
+
+    def get(self, digest: str) -> tuple[dict[str, Any], bytes]:
+        """Load a small artifact into memory; large artifacts must use streaming/range I/O."""
+        h = self._hex(digest)
+        meta, path = self.path_for(digest)
+        if int(meta.get("bytes") or 0) > MAX_INLINE_ARTIFACT_BYTES:
+            raise ValueError("artifact is too large for in-memory retrieval; use stream/range access")
+        data = path.read_bytes()
         if hashlib.sha256(data).hexdigest() != h:
             raise IOError(f"artifact integrity check failed: {digest}")
         return meta, data

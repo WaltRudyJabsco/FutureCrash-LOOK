@@ -126,11 +126,18 @@ copied into every request. The node includes a small SHA-256 content-addressed s
 ```text
 POST /v1/artifacts
 GET  /v1/artifacts/sha256:<digest>
+HEAD /v1/artifacts/sha256:<digest>
 ```
 
 An artifact can have several representations (original image, thumbnail, text description,
 embedding) while the packet refers to the resource conceptually. Move meaning when possible;
 move bytes only when necessary.
+
+From 5.2.15, an artifact may also be a node-local file-backed location. Registration hashes the
+existing file but does not copy it into Fabric state. `GET` supports one HTTP byte range and `HEAD`
+advertises length/range support, which is enough for ordinary audio/video seeking and for other
+large-file consumers. The external path never appears in public peer metadata. If the file changes
+size or nanosecond mtime after registration, that location is rejected until it is registered again.
 
 ## Authority
 
@@ -156,7 +163,9 @@ GET  /v1/jobs/<id>                  packet + attempt + result
 POST /v1/jobs/<id>/control          cancel
 GET  /v1/events?since=<seq>         append-only event tape
 POST /v1/artifacts                  store small inline artifact (base64)
-GET  /v1/artifacts/sha256:<digest>  retrieve artifact bytes
+GET  /v1/artifacts/sha256:<digest>  retrieve/stream artifact bytes; supports Range
+HEAD /v1/artifacts/sha256:<digest>  inspect stream length/range capability
+GET  /v1/artifacts/sha256:<digest>?meta=1  public metadata (no local path)
 ```
 
 Existing node/model/service endpoints remain available. The new job layer is additive and is

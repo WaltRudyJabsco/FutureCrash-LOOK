@@ -3,7 +3,7 @@ set -euo pipefail
 
 ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 
-PRODUCT_VERSION="5.2.14"
+PRODUCT_VERSION="5.2.15"
 LOOK_VERSION="4.44.8"
 FUTURE_CRASH_VERSION="1.2.1"
 
@@ -221,6 +221,20 @@ if [[ "$(uname -s)" == "Linux" ]] && have nvidia-smi; then
 else
   echo "  · no Linux NVIDIA GPU detected on this machine"
   echo "  A client can still use ComfyUI hosted on another LOOK machine."
+fi
+
+echo
+echo "LOOK MEDIA"
+if have mpv; then
+  echo "  ✓ mpv · Fabric stream playback + LOOK transport control"
+else
+  echo "  mpv is the optional playback edge for Fabric range streams; codecs stay outside LOOK."
+  if ask "  Install mpv?" Y; then
+    run brew install mpv
+    if ((!DRY)); then installed_packages+=("mpv"); fi
+  else
+    echo "  · skipped mpv (VLC/system player remains usable)"
+  fi
 fi
 
 ZDIR="${ZSH:-$HOME/.oh-my-zsh}"

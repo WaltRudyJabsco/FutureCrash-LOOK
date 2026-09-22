@@ -47,6 +47,8 @@ COMFY_CONFIG_FILE=STATE_DIR/"comfy.json"
 SCHEDULE_FILE=STATE_DIR/"schedule.json"
 SCHEDULE_HISTORY_FILE=STATE_DIR/"schedule_history.json"
 SERVICES_FILE=STATE_DIR/"services.json"
+MEDIA_SESSION_FILE=STATE_DIR/"media_session.json"
+MEDIA_IPC_FILE=STATE_DIR/"media.sock"
 _SESSION_PATH_GRANTS=[]
 _ONCE_PATH_GRANTS=[]
 _FILESYSTEM_ACCESS_PROFILE="workspace"
@@ -5840,8 +5842,6 @@ def _resource_visual_intent(prompt):
         "look at", "look closer", "see", "shown", "visible", "written", "text",
         "sign", "tattoo", "color", "colour", "wearing", "background", "foreground",
         "face", "hair", "chest", "shirt", "jacket", "object",
-        "describe", "description", "identify", "what is this", "what's this",
-        "what am i looking at", "what do you see",
     )
     comparison_terms=(
         "compare", "difference", "different", "first one", "second one",
@@ -9322,14 +9322,6 @@ def ollama_chat(force_search=False, initial_prompt=None, allow_start=True, host_
                 f"{last_action['path']} via {last_action['tool']}. Resolve it/that/the same one against this "
                 "referent when context fits. Do not search merely to rediscover this exact item."
             )})
-        if turn_image_paths:
-            messages.append({"role":"system","content":(
-                "DIRECT VISION INPUT: The latest user turn has image pixels attached directly to this model request. "
-                "Inspect those pixels yourself when answering what/describe/identify/visual questions. "
-                "Do NOT call preview_path, open_path, or reveal_path merely to inspect an attached image; those tools "
-                "are only for an explicit request to open, preview, show externally, or reveal the file on the host. "
-                "The filename/resource metadata is not a substitute for describing the visible image content."
-            )})
         # Time is an observed host fact, not language-model knowledge. Refresh it on
         # every turn and keep exactly one current temporal receipt in context.
         messages=[m for m in messages if not (m.get("role")=="system" and str(m.get("content","")).startswith("TRUSTED TEMPORAL CONTEXT\n"))]
@@ -9549,22 +9541,6 @@ def ollama_chat(force_search=False, initial_prompt=None, allow_start=True, host_
             tools=[]
             if supports_tools and not host_repair_final and not weather_text_fast_path:
                 tools = _lo_tools(profile)
-                if turn_image_paths:
-                    # Attached pixels are already available to the model. Keep host GUI
-                    # preview/open tools out of ordinary vision-understanding turns so
-                    # the model cannot confuse "inspect the image" with "open it for
-                    # the operator". Explicit host-preview wording keeps those tools.
-                    lower_prompt=" ".join(str(prompt).casefold().split())
-                    explicit_host_preview=(
-                        "quick look" in lower_prompt or "preview it" in lower_prompt or
-                        "preview this" in lower_prompt or "open it" in lower_prompt or
-                        "open this" in lower_prompt or "reveal it" in lower_prompt or
-                        "reveal this" in lower_prompt
-                    )
-                    if not explicit_host_preview:
-                        tools=[t for t in tools if ((t.get("function") or {}).get("name")) not in {
-                            "preview_path","open_path","reveal_path"
-                        }]
                 if has_web and not force_search:
                     tools.append(web_tool)
                 payload_obj["tools"] = tools
@@ -12728,12 +12704,234 @@ def _media_linux(action):
         print(f"LOOK media · {e}"); return 1
 
 
+def _media_fcl_node():
+    exe=shutil.which("fcl-node") or str(HOME/".local/bin/fcl-node")
+    return exe if Path(exe).exists() else ""
+
+
+def _media_fabric_cli(args):
+    exe=_media_fcl_node()
+    if not exe:
+        raise RuntimeError("Unified Node is not installed")
+    p=subprocess.run([exe,*args,"--json"],capture_output=True,text=True,timeout=600)
+    if p.returncode!=0:
+        raise RuntimeError((p.stderr or p.stdout or "Fabric artifact command failed").strip())
+    try:
+        return json.loads(p.stdout)
+    except ValueError as exc:
+        raise RuntimeError("Fabric artifact command returned invalid JSON") from exc
+
+
+def _media_register(path):
+    target=Path(path).expanduser().resolve()
+    if not target.is_file():
+        raise FileNotFoundError(target)
+    return _media_fabric_cli(["artifact-add",str(target)])
+
+
+def _media_artifact(digest,node=None):
+    args=["artifact"]
+    if node:
+        args += ["--node",node]
+    args.append(digest)
+    return _media_fabric_cli(args)
+
+
+def _media_mpv_request(command):
+    """Send one command to the LOOK-owned mpv session, if one is alive."""
+    if not hasattr(socket,"AF_UNIX") or not MEDIA_IPC_FILE.exists():
+        return None
+    request={"command":list(command),"request_id":uuid.uuid4().hex[:8]}
+    try:
+        with socket.socket(socket.AF_UNIX,socket.SOCK_STREAM) as sock:
+            sock.settimeout(.6)
+            sock.connect(str(MEDIA_IPC_FILE))
+            sock.sendall((json.dumps(request,separators=(",",":"))+"\n").encode())
+            data=b""
+            while b"\n" not in data and len(data)<65536:
+                chunk=sock.recv(4096)
+                if not chunk: break
+                data+=chunk
+        if not data:
+            return None
+        return json.loads(data.splitlines()[0])
+    except (OSError,ValueError):
+        return None
+
+
+def _media_mpv_property(name):
+    result=_media_mpv_request(["get_property",name])
+    if result and result.get("error")=="success":
+        return result.get("data")
+    return None
+
+
+def _media_mpv_control(action):
+    # Prefer the LOOK-owned stream session so the old transport keys naturally
+    # control Fabric playback; fall through to Music/Spotify/MPRIS otherwise.
+    probe=_media_mpv_request(["get_property","idle-active"])
+    if not probe:
+        return None
+    if action=="status":
+        title=_media_mpv_property("media-title") or "Fabric media"
+        paused=bool(_media_mpv_property("pause"))
+        pos=_media_mpv_property("time-pos")
+        duration=_media_mpv_property("duration")
+        state="paused" if paused else "playing"
+        timing=""
+        if isinstance(pos,(int,float)):
+            timing=f" · {int(pos)//60}:{int(pos)%60:02d}"
+            if isinstance(duration,(int,float)):
+                timing+=f"/{int(duration)//60}:{int(duration)%60:02d}"
+        print(f"Fabric/mpv · {state} · {title}{timing}")
+        return 0
+    command={
+        "toggle":["cycle","pause"],
+        "next":["playlist-next","force"],
+        "prev":["playlist-prev","force"],
+        "stop":["quit"],
+    }[action]
+    result=_media_mpv_request(command)
+    if action=="stop":
+        # mpv may close its IPC socket before replying to `quit`; a successful
+        # preflight proves this was our live session and the command was delivered.
+        try: MEDIA_SESSION_FILE.unlink(missing_ok=True)
+        except OSError: pass
+        return 0
+    if result and result.get("error")=="success":
+        return 0
+    return 1
+
+
+def _media_launch_stream(url,source=""):
+    """Launch a Fabric byte stream using a mature media engine, not our own codec stack."""
+    configured=str(os.environ.get("LOOK_MEDIA_PLAYER","")).strip()
+    mpv=shutil.which(configured) if configured else shutil.which("mpv")
+    if configured and not mpv and Path(configured).exists():
+        mpv=configured
+    if mpv:
+        try: MEDIA_IPC_FILE.unlink(missing_ok=True)
+        except OSError: pass
+        cmd=[mpv,f"--input-ipc-server={MEDIA_IPC_FILE}","--no-terminal",url]
+        proc=subprocess.Popen(cmd,stdin=subprocess.DEVNULL,stdout=subprocess.DEVNULL,stderr=subprocess.DEVNULL)
+        STATE_DIR.mkdir(parents=True,exist_ok=True)
+        _atomic_json(MEDIA_SESSION_FILE,{"pid":proc.pid,"url":url,"source":source,"started":time.time(),"player":"mpv"})
+        print(f"LOOK media · Fabric stream → mpv" + (f" · {source}" if source else ""))
+        return 0
+
+    # VLC remains a useful zero-configuration fallback, but mpv is preferred because
+    # its tiny JSON IPC lets LOOK's existing media controls own the session directly.
+    vlc=shutil.which(configured) if configured else shutil.which("vlc")
+    try:
+        if not vlc and sys.platform=="darwin" and Path("/Applications/VLC.app").exists():
+            subprocess.Popen(["open","-a","VLC",url],stdout=subprocess.DEVNULL,stderr=subprocess.DEVNULL)
+            print("LOOK media · Fabric stream → VLC")
+            return 0
+        if vlc:
+            subprocess.Popen([vlc,url],stdin=subprocess.DEVNULL,stdout=subprocess.DEVNULL,stderr=subprocess.DEVNULL)
+            print("LOOK media · Fabric stream → VLC")
+            return 0
+    except OSError as exc:
+        print(f"LOOK media · player launch failed: {exc}")
+        return 1
+
+    result=_tool_open_url(url)
+    if result.startswith("URL OPEN OK"):
+        print("LOOK media · Fabric stream → system browser/player")
+        return 0
+    print("LOOK media · no mpv/VLC player available")
+    print(f"  stream: {url}")
+    return 1
+
+
+def _media_stream_command(args):
+    if not args:
+        print("usage: lk media play PATH | lk media play @NODE sha256:DIGEST")
+        return 2
+    try:
+        if args[0].startswith("@"):
+            if len(args)<2:
+                raise ValueError("remote playback requires @NODE and sha256:DIGEST")
+            node=args[0][1:]
+            digest=args[1]
+            if not digest.startswith("sha256:"):
+                raise ValueError("remote playback requires a sha256:DIGEST artifact")
+            payload=_media_artifact(digest,node)
+            source=f"{node}:{(payload.get('artifact') or {}).get('name') or digest}"
+        elif args[0].startswith("sha256:"):
+            payload=_media_artifact(args[0])
+            source=(payload.get("artifact") or {}).get("name") or args[0]
+        else:
+            path=" ".join(args)
+            payload=_media_register(path)
+            source=(payload.get("artifact") or {}).get("name") or str(Path(path).name)
+        url=str(payload.get("stream_url") or "")
+        if not url:
+            raise RuntimeError("Fabric returned no stream URL")
+        return _media_launch_stream(url,source)
+    except (RuntimeError,ValueError,FileNotFoundError) as exc:
+        print(f"LOOK media · {exc}")
+        return 1
+
+
+def _media_add_command(args):
+    if not args:
+        print("usage: lk media add PATH")
+        return 2
+    try:
+        payload=_media_register(" ".join(args))
+    except (RuntimeError,FileNotFoundError) as exc:
+        print(f"LOOK media · {exc}")
+        return 1
+    meta=payload.get("artifact") or {}
+    print(f"FABRIC MEDIA · {meta.get('name') or 'artifact'}")
+    print(f"  {meta.get('digest')} · {meta.get('bytes',0)} bytes · {meta.get('media_type','application/octet-stream')}")
+    print(f"  stream {payload.get('stream_url')}")
+    return 0
+
+
+def _media_info_command(args):
+    if not args:
+        print("usage: lk media info [@NODE] sha256:DIGEST")
+        return 2
+    try:
+        if args[0].startswith("@"):
+            if len(args)<2: raise ValueError("info requires @NODE and sha256:DIGEST")
+            payload=_media_artifact(args[1],args[0][1:])
+        else:
+            payload=_media_artifact(args[0])
+    except (RuntimeError,ValueError) as exc:
+        print(f"LOOK media · {exc}")
+        return 1
+    meta=payload.get("artifact") or {}
+    print(f"FABRIC MEDIA · {meta.get('name') or meta.get('digest') or '?'}")
+    print(f"  node   {payload.get('node','local')}")
+    print(f"  type   {meta.get('media_type','application/octet-stream')}")
+    print(f"  bytes  {meta.get('bytes','?')}")
+    print(f"  range  {'yes' if meta.get('range') else 'no'}")
+    print(f"  stream {payload.get('stream_url')}")
+    return 0
+
+
 def media(args):
-    action=(args[0].lower() if args else "status")
+    raw=(args[0].lower() if args else "status")
+    if raw=="add":
+        return _media_add_command(args[1:])
+    if raw=="info":
+        return _media_info_command(args[1:])
+    if raw in {"stream","open"} or (raw=="play" and len(args)>1):
+        return _media_stream_command(args[1:])
+
+    # `lk media play` with no source keeps the historical transport-control meaning.
     aliases={"play":"toggle","pause":"toggle","playpause":"toggle","previous":"prev","back":"prev"}
-    action=aliases.get(action,action)
+    action=aliases.get(raw,raw)
     if action not in {"status","toggle","next","prev","stop"}:
-        print("usage: lk media [status|toggle|next|prev|stop]"); return 2
+        print("usage: lk media [status|play|pause|next|prev|stop|add PATH|play PATH|play @NODE DIGEST|info [@NODE] DIGEST]")
+        return 2
+
+    mpv_result=_media_mpv_control(action)
+    if mpv_result is not None:
+        return mpv_result
     system=platform.system()
     if system=="Darwin": return _media_macos(action)
     if system=="Linux": return _media_linux(action)

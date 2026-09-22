@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Future Crash + LOOK Unified Node 5.2.14.
+"""Future Crash + LOOK Unified Node 5.2.15.
 
 A small distributed supervisor for trusted personal machines. Immediate events stay
 asynchronous; a one-second fabric pulse reconciles presence, leases and stale work.
@@ -38,9 +38,13 @@ try:
     from .memory_store import FabricMemory
 except ImportError:
     from memory_store import FabricMemory
+try:
+    from .ui_model import actions as ui_actions, build_ui_model
+except ImportError:
+    from ui_model import actions as ui_actions, build_ui_model
 from urllib.parse import urlparse, parse_qs
 
-VERSION = "5.2.14"
+VERSION = "5.2.15"
 DEFAULT_HOST = "127.0.0.1"
 DEFAULT_PORT = 7332
 DEFAULT_INGRESS_PORT = 0
@@ -294,6 +298,11 @@ def capabilities():
         "node": True,
         "comfyui": probe("127.0.0.1", 8188),
         "mercury": probe("127.0.0.1", 8888),
+        # Artifact transport is a first-class capability. Media is only the first
+        # visible consumer; the same range primitive serves large datasets/files.
+        "artifact.read": True,
+        "artifact.range": True,
+        "artifact.stream": True,
     }
 
 
@@ -1803,8 +1812,65 @@ def _memory_sync() -> dict:
     return {"ok": True, "count": len(union), "pulled": pulled, "pushed": pushed, "failures": failures, "merge": merged}
 
 
+def _artifact_public_metadata(meta):
+    """Return artifact facts safe to expose to peer/browser consumers."""
+    visible = {k: v for k, v in dict(meta or {}).items() if k not in {"path", "mtime_ns"}}
+    visible["range"] = True
+    visible["stream"] = True
+    return visible
+
+
+def _parse_byte_range(value, size):
+    """Parse one HTTP byte range as inclusive start/end offsets.
+
+    Fabric deliberately supports one range at a time: it is enough for media seeking
+    and keeps the transport edge boring. Multipart ranges can be added only if a real
+    consumer proves they are needed.
+    """
+    size = max(0, int(size))
+    if not value:
+        return 0, max(-1, size - 1), False
+    raw = str(value).strip()
+    if not raw.startswith("bytes=") or "," in raw:
+        raise ValueError("unsupported byte range")
+    spec = raw[6:].strip()
+    if "-" not in spec or size <= 0:
+        raise ValueError("unsatisfiable byte range")
+    left, right = spec.split("-", 1)
+    if not left:
+        try:
+            suffix = int(right)
+        except ValueError as exc:
+            raise ValueError("invalid byte range") from exc
+        if suffix <= 0:
+            raise ValueError("invalid byte range")
+        start = max(0, size - suffix)
+        end = size - 1
+    else:
+        try:
+            start = int(left)
+            end = int(right) if right else size - 1
+        except ValueError as exc:
+            raise ValueError("invalid byte range") from exc
+        if start < 0 or end < start or start >= size:
+            raise ValueError("unsatisfiable byte range")
+        end = min(end, size - 1)
+    return start, end, True
+
+
+def _artifact_target_url(host, port, target, digest):
+    path = f"/v1/artifacts/{digest}"
+    if target in {None, "", "local"}:
+        return _daemon_url(host, port, path)
+    snapshot = _daemon_get(host, port, "/v1/nodes")
+    local = (snapshot.get("self") or {}).get("name")
+    if target == local:
+        return _daemon_url(host, port, path)
+    return _remote_url(snapshot, target, path)
+
+
 class API(BaseHTTPRequestHandler):
-    server_version = "FCLNode/5.2.14"
+    server_version = "FCLNode/5.2.15"
 
     def setup(self):
         self._metric_request_id = None
@@ -1844,6 +1910,56 @@ class API(BaseHTTPRequestHandler):
             return json.loads(self.rfile.read(int(self.headers.get("Content-Length", "0"))) or b"{}")
         except Exception:
             return {}
+
+    def _serve_artifact(self, digest, *, head=False):
+        try:
+            meta, source = ARTIFACTS.path_for(digest)
+        except Exception:
+            if head:
+                self.send_response(404)
+                self.send_header("Content-Length", "0")
+                self.end_headers()
+                return
+            return self.sendj(404, {"error": "artifact not found"})
+        size = int(meta.get("bytes") or 0)
+        try:
+            start, end, partial = _parse_byte_range(self.headers.get("Range"), size)
+        except ValueError:
+            self.send_response(416)
+            self.send_header("Content-Range", f"bytes */{size}")
+            self.send_header("Accept-Ranges", "bytes")
+            self.send_header("Content-Length", "0")
+            self.end_headers()
+            return
+        length = 0 if size == 0 else (end - start + 1)
+        self.send_response(206 if partial else 200)
+        self.send_header("Content-Type", meta.get("media_type") or "application/octet-stream")
+        self.send_header("Content-Length", str(length))
+        self.send_header("Accept-Ranges", "bytes")
+        self.send_header("X-Fabric-Digest", digest)
+        if partial:
+            self.send_header("Content-Range", f"bytes {start}-{end}/{size}")
+        self.end_headers()
+        if head or length <= 0:
+            return
+        with source.open("rb") as fh:
+            fh.seek(start)
+            remaining = length
+            while remaining > 0:
+                chunk = fh.read(min(1024 * 1024, remaining))
+                if not chunk:
+                    break
+                self.wfile.write(chunk)
+                remaining -= len(chunk)
+
+    def do_HEAD(self):
+        path = urlparse(self.path).path
+        if path.startswith("/v1/artifacts/"):
+            digest = path.split("/", 3)[3]
+            return self._serve_artifact(digest, head=True)
+        self.send_response(404)
+        self.send_header("Content-Length", "0")
+        self.end_headers()
 
     def do_GET(self):
         path = urlparse(self.path).path
@@ -1910,19 +2026,31 @@ class API(BaseHTTPRequestHandler):
             try: since = int((q.get("since") or [0])[0])
             except Exception: since = 0
             return self.sendj(200, {"events": FABRIC_STORE.events(since=since)})
+        if path == "/v1/ui/state":
+            db = FABRIC_STORE.health()
+            worker_age = max(0.0, now() - float(WORKER_HEALTH.get("last_loop") or 0))
+            worker_ok = bool(WORKER_HEALTH.get("alive")) and worker_age < 3.0
+            snapshot = {
+                "nodes": {"self": node_info(), "peers": PEERS.public()},
+                "health": {"ok": bool(db.get("ok")) and worker_ok},
+                "jobs": {"jobs": FABRIC_STORE.jobs()},
+                "services": {"services": managed_services()},
+                "events": {"events": FABRIC_STORE.recent_events()},
+            }
+            return self.sendj(200, build_ui_model(snapshot))
         if path.startswith("/v1/artifacts/"):
             digest = path.split("/", 3)[3]
-            try:
-                meta, data = ARTIFACTS.get(digest)
-            except Exception:
-                return self.sendj(404, {"error": "artifact not found"})
-            self.send_response(200)
-            self.send_header("Content-Type", meta.get("media_type") or "application/octet-stream")
-            self.send_header("Content-Length", str(len(data)))
-            self.send_header("X-Fabric-Digest", digest)
-            self.end_headers()
-            self.wfile.write(data)
-            return
+            q = parse_qs(urlparse(self.path).query)
+            if str((q.get("meta") or [""])[0]).casefold() in {"1", "true", "yes"}:
+                try:
+                    meta = ARTIFACTS.metadata(digest)
+                    # path_for validates that a file-backed artifact still points at
+                    # the bytes it advertised, without loading the media into RAM.
+                    ARTIFACTS.path_for(digest)
+                    return self.sendj(200, {"artifact": _artifact_public_metadata(meta)})
+                except Exception:
+                    return self.sendj(404, {"error": "artifact not found"})
+            return self._serve_artifact(digest)
         return self.sendj(404, {"error": "not found"})
 
     def do_POST(self):
@@ -2481,25 +2609,24 @@ def _dash_recent_line(event, local_name, width, ansi=False):
 
 
 def _dash_controls(width, mini=False):
-    """One-row control legend sized to the terminal; hidden hotkeys still work."""
+    """Render the shared action model into one terminal row.
+
+    Actions are defined once in ``ui_model`` so Signal/Future Crash can eventually
+    present the same controls without copying Dash semantics.
+    """
     width=max(20,int(width or 80))
-    if mini:
-        choices=[
-            "[q] quit   [m] full   [b] beacon   [l] lights",
-            "[q] quit   [m] full   [b] beacon",
-            "[q] quit   [m] full",
-        ]
-    else:
-        choices=[
-            "[q] quit   [m] mini   [b] beacon   [l] lights   [w] watch   [s] settings   [d] doctor   [r] restart   [space] refresh",
-            "[q] quit   [m] mini   [b] beacon   [l] lights   [s] settings   [space] refresh",
-            "[q] quit   [m] mini   [b] beacon   [l] lights   [space] refresh",
-            "[q] quit   [m] mini   [space] refresh",
-        ]
-    for text in choices:
+    items=[a for a in ui_actions(mini=mini) if not a.get("hidden")]
+    # Least important actions disappear first; their hotkeys continue to work.
+    drop_order=("restart","doctor","watch","settings","lights","beacon")
+    def render(rows):
+        return "   ".join(f"[{a['key']}] {a['label']}" for a in rows)
+    text=render(items)
+    for action_id in drop_order:
         if len(text) <= width:
-            return text
-    return choices[-1][:width]
+            break
+        items=[a for a in items if a.get("id") != action_id]
+        text=render(items)
+    return text[:width]
 
 
 def _dash_visible_len(text):
@@ -2537,6 +2664,27 @@ def _dash_render_mini(data, width=44, ansi=False):
         lines.append("· no recent events")
     lines += [rule, _dash_controls(width, mini=True)]
     return "\n".join(lines)
+
+
+def _dash_capability_summary(data, width=92):
+    """Compact capability truth derived from the shared renderer-neutral model."""
+    ui=build_ui_model(data)
+    caps=ui.get("capabilities") or []
+    if not caps:
+        return "none advertised"
+    preferred=("model.vision","model.tools","ollama","comfyui","filesystem","signal","mercury")
+    by_id={str(c.get("id")): c for c in caps}
+    ordered=[by_id[x] for x in preferred if x in by_id]
+    ordered += [c for c in caps if c not in ordered]
+    bits=[]
+    for cap in ordered:
+        name=str(cap.get("id") or "?").replace("model.", "")
+        count=int(cap.get("count") or 0)
+        bits.append(f"{name}:{count}")
+        if len("  ".join(bits)) >= max(20,int(width)-8):
+            bits.pop()
+            break
+    return "  ".join(bits) or "none advertised"
 
 
 def _dash_render_full(data, width=92, ansi=False):
@@ -2598,6 +2746,7 @@ def _dash_render_full(data, width=92, ansi=False):
             state = f"{state} · seen {age}"
         lines.append(f"{str(name):<{node_w}.{node_w}} {state:<{state_w}.{state_w}} {_dash_model(node):<{model_w}.{model_w}} {pulse:>8.8}")
 
+    lines += ["", "CAPABILITIES", rule, _dash_capability_summary(data, width)]
     lines += ["", "TRUST BASIS", rule]
     clock = time.strftime("%Y-%m-%d %H:%M:%S %Z")
     caps = local.get("capabilities") or {}
@@ -2660,9 +2809,9 @@ def _dash_render_full(data, width=92, ansi=False):
 
 
 def _dash_summary_rows(data):
-    snap=data.get("nodes") or {}; local=snap.get("self") or {}
-    peers=[p for p in (snap.get("peers") or []) if p.get("node")]
-    return [(local.get("name") or "local",local)] + [(p.get("name") or "peer",p.get("node") or {}) for p in peers]
+    """Dash consumes renderer-neutral node rows from the shared UI model."""
+    ui=build_ui_model(data)
+    return [(row.get("name") or "node", row.get("node") or {}) for row in (ui.get("nodes") or [])]
 
 
 def _dash_render_compact(data, width=92, height=20, ansi=False):
@@ -2746,7 +2895,7 @@ def _dash_render_wide(data, width=120, height=28, ansi=False):
     ops=[
         (f"JOBS · {len(active)} active", f"TRUST · {trust}"),
         (f"CONTROL · {_dash_control_summary(data)}", f"SERVICES · {services}"),
-        (f"{_dash_ingress_summary(data)}", ""),
+        (f"{_dash_ingress_summary(data)}", f"CAPS · {_dash_capability_summary(data, right_w-7)}"),
     ]
     for left,right in ops:
         lines.append(f"{left[:left_w]:<{left_w}}{gap}{right[:right_w]}")
@@ -3068,7 +3217,7 @@ def main():
     ap=argparse.ArgumentParser(description="Future Crash + LOOK unified node")
     ap.add_argument("command",nargs="?",default="serve",
         choices=["serve","status","nodes","activity","pulse","fabric","watch","dashboard","models","qualify","services","service",
-                 "jobs","job","submit","packet","cancel","events","http","beacon","lights"])
+                 "jobs","job","submit","packet","cancel","events","http","beacon","lights","artifact-add","artifact"])
     ap.add_argument("args",nargs="*")
     ap.add_argument("--node",dest="node",default=None,help="target Fabric node name")
     ap.add_argument("--json",action="store_true",help="raw JSON where a human view exists")
@@ -3129,6 +3278,40 @@ def main():
                 data=_target_get(a.host,a.port,a.node,path)
                 if a.command=="models" and not a.json: _print_models(data,a.node or "local")
                 else: print(json.dumps(data,indent=2))
+                return 0
+            if a.command=="artifact-add":
+                if not a.args: ap.error("artifact-add requires PATH")
+                try:
+                    meta = ARTIFACTS.register_file(a.args[0])
+                except (OSError, ValueError) as exc:
+                    print(f"FCL ARTIFACT · {exc}", file=sys.stderr)
+                    return 1
+                try:
+                    FABRIC_STORE.event(None, "artifact", "registered", meta.get("name") or meta["digest"],
+                                       node=identity()["name"], data={"digest":meta["digest"],"bytes":meta.get("bytes"),"media_type":meta.get("media_type")})
+                except Exception:
+                    pass
+                payload = {"artifact": _artifact_public_metadata(meta),
+                           "stream_url": _artifact_target_url(a.host, a.port, None, meta["digest"])}
+                if a.json:
+                    print(json.dumps(payload, indent=2))
+                else:
+                    print(f"FABRIC ARTIFACT · {meta.get('name') or Path(a.args[0]).name}")
+                    print(f"  {meta['digest']} · {meta.get('bytes',0)} bytes · file-backed")
+                    print(f"  {payload['stream_url']}")
+                return 0
+            if a.command=="artifact":
+                if not a.args: ap.error("artifact requires DIGEST")
+                digest = a.args[0]
+                url = _artifact_target_url(a.host, a.port, a.node, digest)
+                meta = http_json(url + "?meta=1", timeout=4.0).get("artifact") or {}
+                payload = {"artifact": meta, "stream_url": url, "node": a.node or "local"}
+                if a.json:
+                    print(json.dumps(payload, indent=2))
+                else:
+                    print(f"FABRIC ARTIFACT · {meta.get('name') or digest}")
+                    print(f"  {digest} · {meta.get('bytes','?')} bytes · {meta.get('media_type','application/octet-stream')}")
+                    print(f"  {url}")
                 return 0
             if a.command=="jobs":
                 data=_target_get(a.host,a.port,a.node,"/v1/jobs")

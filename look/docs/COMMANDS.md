@@ -90,7 +90,7 @@ Extensionless ambiguous names prompt for `[d]irectory` or `[f]ile`. The ambiguit
 `lk <Tab>` completes LOOK commands contextually. `lmk <Tab>` completes explicit mode flags and existing parent directories for a new path. `lk ollama`, `lk memory`, and `lk skills` expose their subcommands; `lk ollama host` includes saved host names. `lo` completes access flags and `@host` choices, then leaves prompt text unconstrained.
 
 ## Media
-`lk media` · `lk media toggle` · `lk media next` · `lk media prev` · `lk media stop`
+`lk media` · `lk media toggle` · `lk media next` · `lk media prev` · `lk media stop` · `lk media add PATH` · `lk media play PATH` · `lk media play @NODE DIGEST` · `lk media info [@NODE] DIGEST`
 
 Every successful transport action reports the resulting player state/track. macOS controls an already-open Music or Spotify instance; Linux uses MPRIS via `playerctl`.
 

@@ -1,13 +1,13 @@
 #!/usr/bin/env bash
 set -euo pipefail
 ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
-echo "Future Crash + LOOK 5.2.14 · Direct Vision Context"
+echo "Future Crash + LOOK 5.2.15 · Streaming Artifacts"
 echo "────────────────────────────────────────"
 
 # Refuse a mixed bundle before mutating the machine. A unified release must move
 # LOOK and the node together.
 EXPECTED_RELEASE="$(tr -d '[:space:]' < "$ROOT/VERSION")"
-[[ "$EXPECTED_RELEASE" == "5.2.14" ]] || { echo "BUNDLE ERROR: expected release 5.2.14, found $EXPECTED_RELEASE"; exit 4; }
+[[ "$EXPECTED_RELEASE" == "5.2.15" ]] || { echo "BUNDLE ERROR: expected release 5.2.15, found $EXPECTED_RELEASE"; exit 4; }
 grep -q 'def _fabric_command' "$ROOT/look/lk" || { echo "BUNDLE ERROR: LOOK source has no Fabric command"; exit 4; }
 grep -q 'choices=.*serve.*fabric' "$ROOT/core/node.py" || { echo "BUNDLE ERROR: node source has no Fabric CLI"; exit 4; }
 
@@ -22,7 +22,7 @@ done
 ((UNINSTALL)) && exit 0
 if ((DRY_RUN)); then
   echo
-  echo "[dry-run] would install/restart Unified Node 5.2.14, Direct Vision Context, Persona Registry, Fabric Memory, and Signal Window 1.1.2"
+  echo "[dry-run] would install/restart Unified Node 5.2.15, Streaming Artifacts, Shared Fabric UI Model, Vision Artifacts, Fabric Memory, and Signal Window 1.1.2"
   echo "[dry-run] would reconcile Tailscale :7332 → separate fcl-ingress :7333 and verify Fabric CLI wiring"
   exit 0
 fi
@@ -33,6 +33,7 @@ install -m 0644 "$ROOT/core/fabric_packet.py" "$HOME/.local/share/future-crash-l
 install -m 0644 "$ROOT/core/fabric_client.py" "$HOME/.local/share/future-crash-look/core/fabric_client.py"
 install -m 0644 "$ROOT/core/conductor.py" "$HOME/.local/share/future-crash-look/core/conductor.py"
 install -m 0644 "$ROOT/core/memory_store.py" "$HOME/.local/share/future-crash-look/core/memory_store.py"
+install -m 0644 "$ROOT/core/ui_model.py" "$HOME/.local/share/future-crash-look/core/ui_model.py"
 install -m 0755 "$ROOT/core/fcl-node" "$HOME/.local/bin/fcl-node"
 install -m 0755 "$ROOT/core/ingress.py" "$HOME/.local/share/future-crash-look/core/ingress.py"
 install -m 0755 "$ROOT/core/fcl-ingress" "$HOME/.local/bin/fcl-ingress"

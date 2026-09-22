@@ -609,9 +609,13 @@ lk media toggle
 lk media next
 lk media prev
 lk media stop
+lk media add /path/to/song.flac
+lk media play /path/to/movie.mp4
+lk media play @3090 sha256:...
+lk media info @3090 sha256:...
 ```
 
-macOS controls an already-open Music or Spotify instance through AppleScript. Linux uses MPRIS through `playerctl`. Every successful media transport command reports the resulting state/track immediately. Fast aliases: `mm` (toggle), `mn` (next), `mp` (previous).
+macOS can still control an already-open Music or Spotify instance through AppleScript, and Linux can control normal MPRIS players through `playerctl`. When LOOK owns a Fabric stream session, optional `mpv` is preferred as the playback edge and LOOK talks to its JSON IPC socket directly, so the same transport controls operate the streamed artifact. Fast aliases remain `mm` (toggle), `mn` (next), `mp` (previous).
 
 ## Versioned intelligence
 
