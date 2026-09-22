@@ -1,4 +1,11 @@
-# Future Crash + LOOK 5.4.6
+# Future Crash + LOOK 5.4.7
+
+## 5.4.7 — Media Endpoint + Dash Input Hygiene
+
+Signal's media output selector remains on the active player card. Browser handoff is now transactional: choosing **This Device / This iPhone** immediately claims the card while Safari opens the range-capable audio stream, preventing normal session polling from snapping the chooser back to the 3090. Audio proxies stream chunks as they arrive rather than buffering a whole track before playback begins.
+
+Dash now separates semantic Fabric activity from local renderer effects. Beacon/RGB/pulse frames no longer fill RECENT, ANSI arrow/mouse/scroll sequences are consumed before hotkey dispatch (notably arrow-down's `ESC [ B`), and the beacon key is rate-limited against key repeat.
+
 
 ## 5.4.6 — Endpoint Media Cleanup
 

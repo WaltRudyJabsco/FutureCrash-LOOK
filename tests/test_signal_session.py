@@ -81,3 +81,20 @@ class SignalMediaSurfaceTests(unittest.TestCase):
             state=server._media_state()
         self.assertTrue(state['available'])
         self.assertTrue(state['active'])
+
+class SignalBrowserEndpointRegressionTests(unittest.TestCase):
+    def test_browser_handoff_claims_ui_before_async_playback(self):
+        root=Path(__file__).resolve().parents[1]
+        js=(root/'signal-window/app.js').read_text()
+        marker="browserMedia={active:true,sourceNode:String(d.node||mediaNode||''),index:Number(d.index||0),queue:d.queue.slice(),state:'loading'"
+        self.assertIn(marker,js)
+        self.assertIn("if(browserMedia.active){renderMedia(browserSnapshot(),force);return}",js)
+
+    def test_signal_audio_proxy_streams_in_chunks(self):
+        root=Path(__file__).resolve().parents[1]
+        source=(root/'signal-window/server.py').read_text()
+        start=source.index('def _proxy_media_audio')
+        end=source.index('\ndef ',start+5)
+        block=source[start:end]
+        self.assertIn('r.read(256*1024)',block)
+        self.assertNotIn('r.read()',block)

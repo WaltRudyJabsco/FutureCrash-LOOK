@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Future Crash + LOOK Unified Node 5.4.6.
+"""Future Crash + LOOK Unified Node 5.4.7.
 
 A small distributed supervisor for trusted personal machines. Immediate events stay
 asynchronous; a one-second fabric pulse reconciles presence, leases and stale work.
@@ -49,7 +49,7 @@ except ImportError:
     from decision import OpenJevShadow, new_request as new_decision_request, provider_status as decision_provider_status, plan as decision_plan
 from urllib.parse import urlparse, parse_qs
 
-VERSION = "5.4.6"
+VERSION = "5.4.7"
 DEFAULT_HOST = "127.0.0.1"
 DEFAULT_PORT = 7332
 DEFAULT_INGRESS_PORT = 0
@@ -2382,7 +2382,7 @@ def _openjev_shadow(state, question, candidates, *, profile="workspace", consequ
 
 
 class API(BaseHTTPRequestHandler):
-    server_version = "FCLNode/5.4.6"
+    server_version = "FCLNode/5.4.7"
 
     def setup(self):
         self._metric_request_id = None
@@ -2502,14 +2502,16 @@ class API(BaseHTTPRequestHandler):
             req=urllib.request.Request(url,method="HEAD" if head else "GET")
             if self.headers.get("Range"): req.add_header("Range",self.headers.get("Range"))
             with urllib.request.urlopen(req,timeout=8.0) as r:
-                data=b"" if head else r.read()
                 self.send_response(getattr(r,"status",200))
                 for key in ("Content-Type","Content-Length","Accept-Ranges","Content-Range","Cache-Control"):
                     value=r.headers.get(key)
                     if value: self.send_header(key,value)
-                if not r.headers.get("Content-Length"): self.send_header("Content-Length",str(len(data)))
                 self.end_headers()
-                if data: self.wfile.write(data)
+                if not head:
+                    while True:
+                        chunk=r.read(256*1024)
+                        if not chunk: break
+                        self.wfile.write(chunk)
         except urllib.error.HTTPError as exc:
             self.send_response(exc.code); self.send_header("Content-Length","0"); self.end_headers()
         except Exception as exc:
@@ -3278,6 +3280,22 @@ def _dash_event_color(event):
     }.get(bg, (None, None))
 
 
+def _dash_event_visible(event):
+    """Only semantic work belongs in RECENT.
+
+    Beacon/light frames are renderer effects. Showing them as ordinary activity
+    makes a diagnostic animation look like work and can create apparent event
+    storms when a terminal escape sequence accidentally reaches a hotkey.
+    """
+    typ = str((event or {}).get("type") or "").lower()
+    return typ not in {"beacon", "light", "lights", "rgb", "pulse"}
+
+
+def _dash_recent_events(events, limit=5):
+    visible = [event for event in (events or []) if _dash_event_visible(event)]
+    return visible[-max(0, int(limit)):]
+
+
 def _dash_recent_line(event, local_name, width, ansi=False):
     stamp = _dash_event_stamp(event.get("ts"))
     scope = _dash_event_scope(event, local_name)
@@ -3333,7 +3351,7 @@ def _dash_render_mini(data, width=44, ansi=False):
     lines = [f"FABRIC · {name[:max(8,width-12)]}", rule,
              f"{_dash_state(local)[:18]} · {model[:max(8,width-23)]}", "", "RECENT"]
     if events:
-        for e in events[-5:]:
+        for e in _dash_recent_events(events, 5):
             # Mini favors semantic signal over verbose detail.
             _, fg = _dash_event_color(e)
             phase = str(e.get("phase") or e.get("type") or "event")[:10]
@@ -3523,7 +3541,7 @@ def _dash_render_full(data, width=92, ansi=False):
 
     lines += ["", "RECENT · OBSERVED BY THIS NODE", rule]
     if events:
-        for e in events[-6:]:
+        for e in _dash_recent_events(events, 6):
             lines.append(_dash_recent_line(e, local.get("name"), width, ansi=ansi))
     else:
         lines.append("no recent Fabric events observed here")
@@ -3558,7 +3576,7 @@ def _dash_render_compact(data, width=92, height=20, ansi=False):
     # Reserve the footer and show as much recent activity as the rectangle allows.
     recent_slots=max(1,min(5,int(height)-len(lines)-2))
     if events:
-        for e in events[-recent_slots:]: lines.append(_dash_recent_line(e,local.get("name"),width,ansi=ansi))
+        for e in _dash_recent_events(events, recent_slots): lines.append(_dash_recent_line(e,local.get("name"),width,ansi=ansi))
     else:
         lines.append("· no recent Fabric events")
     lines += [rule,_dash_controls(width)]
@@ -3632,7 +3650,7 @@ def _dash_render_wide(data, width=120, height=28, ansi=False):
     footer_rows=2
     recent_slots=max(2,int(height)-len(lines)-footer_rows)
     if events:
-        for e in events[-recent_slots:]:
+        for e in _dash_recent_events(events, recent_slots):
             lines.append(_dash_recent_line(e,local.get("name"),width,ansi=ansi))
     else:
         lines.append("· no recent Fabric events observed here")
@@ -3679,7 +3697,7 @@ def _dash_render_condensed(data, width=92, height=30, ansi=False):
     lines += ["","RECENT · OBSERVED BY THIS NODE",rule]
     recent_slots=max(2,int(height)-len(lines)-2)
     if events:
-        for e in events[-recent_slots:]:
+        for e in _dash_recent_events(events, recent_slots):
             lines.append(_dash_recent_line(e,local.get("name"),width,ansi=ansi))
     else:
         lines.append("· no recent Fabric events observed here")
@@ -3763,6 +3781,32 @@ def _dash_restart_service(host, port):
     input("Press Enter…")
 
 
+def _dash_read_key(fd):
+    """Read one dashboard command while swallowing terminal escape sequences.
+
+    Arrow-down is ESC [ B; treating its final byte as a standalone `B` used to
+    fire the beacon hotkey. Mouse wheel/drag reports have the same shape.
+    """
+    ch = sys.stdin.read(1)
+    if ch != "\x1b":
+        return ch
+    # Drain the rest of a CSI/SS3/mouse report without dispatching any byte as a
+    # command. The short quiet timeout keeps a lone Escape harmless and cheap.
+    deadline = time.monotonic() + 0.03
+    while time.monotonic() < deadline:
+        ready, _, _ = select.select([sys.stdin], [], [], 0.003)
+        if not ready:
+            break
+        part = sys.stdin.read(1)
+        if not part:
+            break
+        # ANSI CSI final bytes live in 0x40..0x7e. Mouse SGR reports may include
+        # parameters first, but end in M/m. Once final arrives the report is done.
+        if "@" <= part <= "~":
+            break
+    return None
+
+
 def _dashboard(host, port, interval=0.25):
     cache = {"_next": {}, "_errors": {}}
     if not (sys.stdin.isatty() and sys.stdout.isatty()):
@@ -3797,6 +3841,7 @@ def _dashboard(host, port, interval=0.25):
         activity_flash_until = 0.0
         last_event_seq = None
         last_draw = 0.0
+        last_beacon_hotkey = 0.0
         while True:
             _dash_fetch(host, port, cache, force=dirty)
             observed = ((cache.get("events") or {}).get("events") or [])
@@ -3808,6 +3853,8 @@ def _dashboard(host, port, interval=0.25):
                 fresh = [e for e in observed if int(e.get("seq") or 0) > last_event_seq]
                 last_event_seq = newest_seq
                 for event in reversed(fresh):
+                    if not _dash_event_visible(event):
+                        continue
                     color = _dash_event_flash(event)
                     if color:
                         activity_flash = color
@@ -3835,7 +3882,9 @@ def _dashboard(host, port, interval=0.25):
             ready, _, _ = select.select([sys.stdin], [], [], interval)
             if not ready:
                 continue
-            ch = sys.stdin.read(1)
+            ch = _dash_read_key(fd)
+            if ch is None:
+                continue
             if ch in {"q", "Q", "\x03"}:
                 return 0
             if ch == " ":
@@ -3844,9 +3893,12 @@ def _dashboard(host, port, interval=0.25):
                 mini = not mini
                 dirty = True
             elif ch in {"b", "B"}:
-                # Dashboard is a client of the daemon, not a second Fabric node.
-                # Route hotkeys through the canonical control-plane endpoint so
-                # peers and attached Signal displays see exactly what the CLI sends.
+                # One physical keypress -> one beacon. Ignore key-repeat/garbage
+                # while the previous diagnostic animation is still in flight.
+                stamp = time.monotonic()
+                if stamp - last_beacon_hotkey < 2.0:
+                    continue
+                last_beacon_hotkey = stamp
                 try:
                     http_json(_daemon_url(host, port, "/v1/beacon"),
                               {"pattern":"rgb", "lead_pulses":3}, timeout=3.0)

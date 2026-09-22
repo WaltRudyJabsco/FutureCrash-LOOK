@@ -1,3 +1,8 @@
+# 5.4.7 — Media Endpoint + Dash Input Hygiene
+
+- Signal browser endpoint handoff now claims the UI before asynchronous Safari playback and streams audio incrementally.
+- Dash filters beacon/RGB/pulse renderer effects from RECENT, consumes ANSI mouse/arrow/scroll sequences before hotkeys, and rate-limits beacon key repeat.
+
 # 5.4.6 — Endpoint Media Cleanup
 
 - Move Signal media output selection from the chat composer onto the active media card.

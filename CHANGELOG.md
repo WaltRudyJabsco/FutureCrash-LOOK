@@ -1,3 +1,13 @@
+# 5.4.7 — Media Endpoint + Dash Input Hygiene
+
+- Make Signal browser-output handoff transactional: **This Device / This iPhone** claims the card immediately while Safari starts playback, so background media polling cannot snap the selector back to the source node.
+- Stream proxied media audio incrementally through Signal and remote Fabric nodes instead of buffering an entire track before Safari receives bytes.
+- Keep browser playback failure reversible: the source node remains authoritative until browser audio starts, and the selector restores the source with a visible error if Safari rejects playback.
+- Treat beacon/RGB/pulse records as renderer effects rather than RECENT semantic work in Dash.
+- Consume ANSI cursor/mouse/scroll escape sequences as terminal input, preventing arrow-down (`ESC [ B`) and terminal gestures from becoming the `B` beacon hotkey.
+- Rate-limit the Dash beacon hotkey so key repeat cannot launch overlapping diagnostic shows.
+- Update help/docs/version surfaces and add endpoint/Dash regression coverage.
+
 # 5.4.6 — Endpoint Media Cleanup
 
 - Move Signal media output selection from the chat composer onto the active media card.

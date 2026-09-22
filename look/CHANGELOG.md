@@ -1,3 +1,10 @@
+# 5.4.7
+
+- Filter beacon/light/RGB/pulse renderer effects out of Dash RECENT.
+- Consume terminal ANSI escape sequences before single-key Dash command dispatch so scrolling/arrows cannot trigger beacon.
+- Rate-limit the beacon hotkey while a diagnostic show is in flight.
+- Harden Signal browser media handoff and stream proxied audio incrementally.
+
 # 5.4.6
 
 - Promote mpv to the normal workstation dependency set so upgrades make Macs playback-ready by default.

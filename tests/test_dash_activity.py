@@ -166,3 +166,18 @@ def test_purpose_label_is_raw_evidence_not_single_score():
     assert "RSN2/3" in label
     assert "T3/3" in label
     assert "A✓" in label
+
+
+def test_dash_renderer_effects_never_enter_recent_activity():
+    noisy={"type":"beacon","phase":"scheduled","detail":"rgb at pulse 123"}
+    useful={"type":"progress","phase":"dispatch","detail":"media.play"}
+    assert node._dash_event_visible(noisy) is False
+    assert node._dash_event_flash(noisy) is None
+    assert node._dash_recent_events([useful,noisy],5)==[useful]
+
+
+def test_dash_source_consumes_escape_sequences_before_hotkeys():
+    source=(ROOT/'core'/'node.py').read_text()
+    assert 'def _dash_read_key' in source
+    assert 'ch = _dash_read_key(fd)' in source
+    assert 'last_beacon_hotkey' in source

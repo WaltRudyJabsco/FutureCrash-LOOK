@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Signal Window 1.6.0 — browser LO with shared media, browser audio, decisions, and camera/vision attachments."""
+"""Signal Window 1.6.1 — browser LO with shared media, browser audio, decisions, and camera/vision attachments."""
 from __future__ import annotations
 
 import argparse
@@ -745,15 +745,16 @@ def _proxy_media_audio(handler,node,index,*,head=False):
         req.add_header("Range",handler.headers.get("Range"))
     try:
         with urllib.request.urlopen(req,timeout=12.0) as r:
-            data=b"" if head else r.read()
             handler.send_response(getattr(r,"status",200))
             for key in ("Content-Type","Content-Length","Accept-Ranges","Content-Range","Cache-Control"):
                 value=r.headers.get(key)
                 if value: handler.send_header(key,value)
-            if not r.headers.get("Content-Length"):
-                handler.send_header("Content-Length",str(len(data)))
             handler.end_headers()
-            if data: handler.wfile.write(data)
+            if not head:
+                while True:
+                    chunk=r.read(256*1024)
+                    if not chunk: break
+                    handler.wfile.write(chunk)
     except urllib.error.HTTPError as exc:
         handler.send_response(exc.code); handler.send_header("Content-Length","0"); handler.end_headers()
     except Exception as exc:
@@ -1076,7 +1077,7 @@ def main():
         state=f"LO NATIVE {a.profile} · "+(App.lo_cmd if App.lo_cmd else "NOT FOUND")
     else:
         p=probe_ollama(App.backend); state=("connected" if p.get("ok") else "unreachable: "+p.get("error","unknown"))
-    print(f"Signal Window 1.6.0 · http://{a.host}:{a.port} · {state} · gallery {App.gallery_dir if App.gallery_enabled else 'off'}")
+    print(f"Signal Window 1.6.1 · http://{a.host}:{a.port} · {state} · gallery {App.gallery_dir if App.gallery_enabled else 'off'}")
     ThreadingHTTPServer((a.host,a.port),App).serve_forever()
 
 if __name__=="__main__": main()
