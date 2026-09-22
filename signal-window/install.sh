@@ -22,6 +22,7 @@ elif [[ "$OS" == "Darwin" ]] && command -v launchctl >/dev/null 2>&1; then
 <key>Label</key><string>com.futurecrash.signal-window</string>
 <key>ProgramArguments</key><array><string>/usr/bin/python3</string><string>$INSTALL_DIR/server.py</string></array>
 <key>RunAtLoad</key><true/><key>KeepAlive</key><true/>
+<key>EnvironmentVariables</key><dict><key>PATH</key><string>$HOME/.local/bin:/opt/homebrew/bin:/usr/local/bin:/usr/bin:/bin</string></dict>
 <key>StandardOutPath</key><string>$INSTALL_DIR/signal-window.log</string>
 <key>StandardErrorPath</key><string>$INSTALL_DIR/signal-window.log</string>
 </dict></plist>
@@ -31,5 +32,5 @@ EOF
 else
   echo "Signal installed; start with: python3 $INSTALL_DIR/server.py"
 fi
-printf 'Signal Window 1.3.0 installed\n  app: %s\n  gallery: %s\n' "$INSTALL_DIR" "$HOME/.local/share/signal-window/gallery"
+printf 'Signal Window 1.4.0 installed\n  app: %s\n  gallery: %s\n' "$INSTALL_DIR" "$HOME/.local/share/signal-window/gallery"
 printf '  local: http://127.0.0.1:7331\n'

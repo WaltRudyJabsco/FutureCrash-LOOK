@@ -13185,9 +13185,16 @@ def _media_tool_play(query,shuffle=False):
         preview="; ".join(_media_row_label(row) for row in rows[:8])
         return _ToolResult(False,"ambiguous",f"MEDIA AMBIGUOUS · {query} · {len(rows)} matches · {preview}")
     session=media_core.new_session(rows,shuffle=bool(shuffle))
-    rc=_media_launch_session(session)
+    # Capture the edge diagnostic so browser/LO callers see the useful reason rather
+    # than a generic MEDIA PLAY FAILED receipt. Successful playback remains quiet.
+    import io, contextlib
+    edge_log=io.StringIO()
+    with contextlib.redirect_stdout(edge_log):
+        rc=_media_launch_session(session)
     if rc!=0:
-        return _ToolResult(False,"failed",f"MEDIA PLAY FAILED · {query}")
+        detail=" · ".join(line.strip() for line in edge_log.getvalue().splitlines() if line.strip())
+        suffix=f" · {detail[:500]}" if detail else ""
+        return _ToolResult(False,"failed",f"MEDIA PLAY FAILED · {query}{suffix}")
     label=query
     if kind=="title" and len(rows)==1:
         label=_media_row_label(rows[0])
@@ -13567,12 +13574,29 @@ def _media_write_m3u(queue):
 
 
 def _media_mpv_binary():
+    """Find mpv even when LOOK is invoked from a sparse service environment.
+
+    Browser/system services commonly miss Homebrew/Linuxbrew paths that interactive
+    shells add during startup. Playback capability should not depend on shell rc files.
+    """
     configured=str(os.environ.get("LOOK_MEDIA_PLAYER","")).strip()
     if configured:
         found=shutil.which(configured)
         if found: return found
-        if Path(configured).exists(): return configured
-    return shutil.which("mpv") or ""
+        if Path(configured).is_file(): return str(Path(configured).resolve())
+    found=shutil.which("mpv")
+    if found: return found
+    candidates=(
+        Path.home()/".linuxbrew/bin/mpv",
+        Path("/home/linuxbrew/.linuxbrew/bin/mpv"),
+        Path("/opt/homebrew/bin/mpv"),
+        Path("/usr/local/bin/mpv"),
+        Path("/usr/bin/mpv"),
+    )
+    for candidate in candidates:
+        if candidate.is_file() and os.access(candidate,os.X_OK):
+            return str(candidate)
+    return ""
 
 
 def _media_launch_session(session):

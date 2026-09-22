@@ -62,3 +62,10 @@ If Living AI is unavailable, Future Crash remains a direct Ollama client.
 A Fabric containing one machine is a complete Fabric, not an error state. LOOK must retain deterministic tools, local files, local memory, local media, and any locally available inference when remote nodes, Tailscale, or the Internet disappear. Remote workers are capability expansion. `lk doctor island` is the release-facing diagnostic for this invariant and intentionally probes loopback/local resources only.
 
 The cognition fallback order is deterministic rules, local decision worker when present, local generative model when appropriate, remote Fabric capability when reachable, then human clarification or a clear limitation. Tasks already known to require unavailable large capabilities should fail gracefully rather than forcing a small local model through futile work.
+
+
+## Signal camera attachment edge
+
+Signal camera capture is an edge concern, not a vision-worker special case. The browser sends the captured image to its Signal server, which materializes it as a local request resource. LO then follows the ordinary image-resource path. Fabric client staging converts image bytes into artifact references before dispatch so the cognitive packet remains small and location-independent.
+
+This preserves the core rule: interfaces may acquire bytes, artifacts own bytes, jobs refer to capabilities and artifact identity.

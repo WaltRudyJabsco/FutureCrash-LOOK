@@ -1,3 +1,13 @@
+# 5.4.4 — Signal Camera + Service-Safe Media
+
+- Add Signal 1.4.0 camera/photo attachment from the chat input using the browser's native rear-camera capture surface.
+- Treat camera photos as ordinary resources: Signal materializes bytes locally, LO selects the image path, and Fabric stages the image as an artifact for vision inference.
+- Keep the 524288-byte Fabric ingress boundary intact; camera image bytes are not embedded in work packets.
+- Make LOOK mpv discovery robust under systemd/launchd service PATHs, including Linuxbrew, Homebrew, and normal system locations.
+- Preserve the real media edge diagnostic in LO/Signal when playback fails instead of returning only `MEDIA PLAY FAILED`.
+- Add defensive PATH configuration to the Signal service edge while retaining runtime discovery/fallback.
+- Update Signal help, install banners, release/version surfaces, documentation, and tests.
+
 # 5.4.3 — Signal Media Card
 
 - Add Signal 1.3.0 live media card over LOOK's canonical MediaSession.

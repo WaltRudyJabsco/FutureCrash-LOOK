@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Signal Window 1.3.0 — a native browser body for LO, Fabric decisions, and shared media sessions."""
+"""Signal Window 1.4.0 — browser LO with shared media, decisions, and camera/vision attachments."""
 from __future__ import annotations
 
 import argparse
@@ -592,16 +592,30 @@ def lo_chat(exe, profile, prompt, cwd, timeout=LO_REQUEST_TIMEOUT):
 
 
 def materialize_files(files, root):
+    """Materialize browser resources at the edge; binary image bytes never enter FWP.
+
+    LO receives local paths. Its normal vision path then registers/stages images as
+    Fabric artifacts before inference, preserving the ingress packet size boundary.
+    """
     notes=[]
     paths=[]
     for i,f in enumerate(files[:20]):
         name=Path(str(f.get("path") or f.get("name") or f"drop-{i}")).name
         name=re.sub(r"[^A-Za-z0-9._ -]","_",name)[:120] or f"drop-{i}"
         target=root/name
+        encoding=str(f.get("encoding") or "").lower()
         content=str(f.get("content") or "")
-        target.write_text(content,encoding="utf-8",errors="replace")
+        if encoding=="base64":
+            try: raw=base64.b64decode(content,validate=True)
+            except Exception as exc: raise ValueError(f"invalid base64 attachment: {name}") from exc
+            if len(raw)>12_000_000: raise ValueError(f"attachment too large: {name}")
+            target.write_bytes(raw)
+            size=len(raw)
+        else:
+            target.write_text(content,encoding="utf-8",errors="replace")
+            size=len(content.encode("utf-8",errors="replace"))
         paths.append(str(target))
-        notes.append(f"{name} ({f.get('size',len(content))} bytes)")
+        notes.append(f"{name} ({size} bytes)")
     return paths,notes
 
 NODE_URL = os.getenv("FCL_NODE_URL", "http://127.0.0.1:7332").rstrip("/")
@@ -872,6 +886,8 @@ class App(BaseHTTPRequestHandler):
                 lease_id=lease_reply["lease"].get("id")
         try:
             n=int(self.headers.get("Content-Length","0"))
+            if n>24_000_000:
+                return self.json(413,{"error":"Signal request too large (24 MB maximum)"})
             d=json.loads(self.rfile.read(n) or b"{}")
             prompt=str(d.get("text","")).strip()
             files=d.get("files") or []
@@ -954,7 +970,7 @@ def main():
         state=f"LO NATIVE {a.profile} · "+(App.lo_cmd if App.lo_cmd else "NOT FOUND")
     else:
         p=probe_ollama(App.backend); state=("connected" if p.get("ok") else "unreachable: "+p.get("error","unknown"))
-    print(f"Signal Window 1.3.0 · http://{a.host}:{a.port} · {state} · gallery {App.gallery_dir if App.gallery_enabled else 'off'}")
+    print(f"Signal Window 1.4.0 · http://{a.host}:{a.port} · {state} · gallery {App.gallery_dir if App.gallery_enabled else 'off'}")
     ThreadingHTTPServer((a.host,a.port),App).serve_forever()
 
 if __name__=="__main__": main()

@@ -1,4 +1,12 @@
-# Future Crash + LOOK 5.4.3
+# Future Crash + LOOK 5.4.4
+
+## 5.4.4 — Signal Camera + Service-Safe Media
+
+Signal can now attach a rear-camera photo directly from an iPhone/browser with the **CAM** control beside the chat input. The capture is a normal image attachment, not a special command: take a photo, type `what am I looking at?`, and LO follows the existing vision-capability path. Signal materializes the image at the browser edge; LO/Fabric then stages image bytes as an artifact before inference, so large camera payloads do not ride inside Fabric work packets.
+
+Media playback from Signal is also hardened for service environments. LOOK now finds mpv in common Linuxbrew/Homebrew/system locations even when the Signal service lacks an interactive-shell PATH, and failed media tools return the playback edge diagnostic instead of collapsing everything to `MEDIA PLAY FAILED`.
+
+The existing 5.4.3 shared MediaSession card remains unchanged: browser, terminal LO, and `lk media` all control the same canonical playback session.
 
 ## 5.4.3 — Signal Media Card
 

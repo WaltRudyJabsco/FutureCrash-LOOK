@@ -1,6 +1,16 @@
-# Signal Window 1.3.0
+# Signal Window 1.4.0
 
-Signal is now a native browser body for LO. The server imports LOOK's reusable LO engine directly rather than spawning and scraping the terminal CLI. Browser sessions keep a bounded ephemeral conversation history, `/clear` clears that server-side state, and generated/browser-displayable artifacts remain presentation targets rather than worker-side desktop windows.
+Signal is a browser body for LO/Fabric: conversation, lightweight visual expression, shared decisions, shared media state, and now direct camera/photo input.
+
+## 1.4.0 — camera / vision attachment
+
+Tap **CAM** beside the Signal chat input on an iPhone or other browser. The browser opens its native image capture/picker; the selected photo appears as an attachment chip. Ask a normal question such as `what am I looking at?` and submit. Tapping the attachment chip removes it before sending.
+
+Camera capture is intentionally generic attachment plumbing rather than a hard-coded vision command. Signal accepts the image at the browser edge, writes it into the request workspace, and passes that local path to LO. LO's existing multimodal path chooses a vision-capable worker and Fabric stages the image as an artifact instead of embedding the raw bytes in a Fabric work packet.
+
+The file-input capture path is used rather than a permanent live camera stream, so it works well on iPhone and does not require Signal to own camera state after the photo is taken.
+
+Signal's media controller also runs correctly from sparse service environments: LOOK resolves mpv from configured PATH plus normal Linuxbrew/Homebrew/system locations.
 
 ## 1.3.0 — shared media card
 

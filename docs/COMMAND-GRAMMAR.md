@@ -1,4 +1,4 @@
-# LOOK Command Grammar — 5.4.3
+# LOOK Command Grammar — 5.4.4
 
 Generated from the canonical `_COMMANDS` registry. Short aliases are ergonomic entry points; they are not separate implementations.
 

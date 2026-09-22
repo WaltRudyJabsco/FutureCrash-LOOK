@@ -1,3 +1,9 @@
+# 5.4.4
+
+- Discover mpv reliably from background-service environments, including Linuxbrew/Homebrew paths.
+- Return concrete playback-edge diagnostics through LO media tool failures.
+- Preserve artifact-backed vision routing for browser camera/image resources.
+
 # 5.3.0 — Decision Plane
 
 - Adds renderer-neutral Fabric DecisionRequests with confidence, consequence, reversibility, deadline, preferred choice, and timeout policy.
