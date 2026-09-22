@@ -1,4 +1,4 @@
-# 5.4.1 — Canonical Decision Worker
+# 5.4.0 — Canonical Decision Worker
 
 OpenJev graduates from an experimental shadow endpoint to an optional first-class Fabric worker. The architecture remains capability-first: the Decision Plane owns authority and policy; OpenJev contributes typed judgment evidence only.
 

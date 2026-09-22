@@ -1,4 +1,12 @@
-# 5.4.1 — Canonical Decision Worker
+# 5.4.2 — Island Resilience + Workstation Editor
+
+- Add `lk doctor island`, a loopback-only single-node autonomy audit for local LOOK, Ollama, memory, media, and optional OpenJev.
+- Codify the one-node Fabric invariant: remote workers increase capability but are not a prerequisite for local LOOK/LO operation.
+- Repair Future Crash Ask/Workstation editing so the logical input buffer and cursor are authoritative; every frame redraws the fixed-width editor viewport, eliminating stale glyphs and phantom right-column deletion.
+- Document Backspace/Delete and left/right/Home/End cursor behavior in Future Crash help.
+- Synchronize README, command reference, command grammar, man page, completions, architecture, release history, and installer/version surfaces.
+
+# 5.4.0 — Canonical Decision Worker
 
 - Promote the Decision Plane into normal Fabric cognition: deterministic fast paths, learned judgment, human clarification, and graceful fallbacks share one policy path.
 - OpenJev is now an optional first-class decision worker with config, health, systemd lifecycle, installer adoption/install modes, capability discovery, and Local Labs server controls.

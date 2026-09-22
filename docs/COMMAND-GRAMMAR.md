@@ -1,4 +1,4 @@
-# LOOK Command Grammar — 4.32.0
+# LOOK Command Grammar — 5.4.2
 
 Generated from the canonical `_COMMANDS` registry. Short aliases are ergonomic entry points; they are not separate implementations.
 
@@ -38,6 +38,7 @@ Generated from the canonical `_COMMANDS` registry. Short aliases are ergonomic e
 | `lk receipts` | `[N]` | files | Inspect transaction receipts |
 | `lk system` | `` | system | System control surface |
 | `lk doctor` | `` | system | Run LOOK diagnostics |
+| `lk doctor island` | `` | system | Audit single-node offline autonomy |
 | `lk machine` | `` | system | Machine summary (alias/equivalent: `lk box`) |
 | `lk disk` | `` | system | Disk/storage inspection |
 | `lk gpu` | `` | system | GPU inspection |

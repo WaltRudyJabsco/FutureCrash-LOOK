@@ -1,3 +1,10 @@
+# 1.2.2 — Authoritative Workstation Editor
+
+- Ask and Workstation render from one logical input buffer and cursor index.
+- Backspace/delete redraws removed glyphs immediately instead of leaving stale screen columns.
+- Left/right editing and long input use a bounded horizontal viewport.
+- Help documents cursor movement and Backspace explicitly.
+
 ## 1.1.14 — Shared model contract
 
 - Follow LOOK active model live on every frame and inference.

@@ -65,7 +65,9 @@ Sound defaults off. Motion defaults subtle. Feedback is automatically silent/sta
 `lk settings` — access profile, local preferred model, Fabric routing, legacy direct Ollama host/model, web-search key, tailnet share, feedback, and profile status. `lk models` is always local; `lk ollama models` follows the selected legacy direct host.
 
 ## System
-`lk home` · `lk doctor` · `lk config` · `lk secrets` · `lk undo` · `lk uninstall` · `lk version` · `lk help`
+`lk doctor island` — loopback-only one-node autonomy audit: deterministic LOOK, local Ollama models, local memory/media, and optional local OpenJev. It does not require Tailscale or a remote Fabric node.
+
+`lk home` · `lk doctor` · `lk doctor island` · `lk config` · `lk secrets` · `lk undo` · `lk uninstall` · `lk version` · `lk help`
 
 ## File actions
 `lcp` · `lmv` · `lscp` · `lrm` · `lmk` · `mkd`

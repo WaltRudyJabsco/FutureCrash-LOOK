@@ -47,3 +47,7 @@ The controller does not become a second supervisor. It observes and invokes syst
 The controller now treats the machine as a **Local Labs Host**, not as permanently synonymous with one RTX 3090 Linux box. Discovery uses portable socket/HTTP checks where possible, macOS system/memory/disk discovery is supported, and Linux systemd lifecycle remains an OS-specific adapter rather than part of the service model. A future Apple Silicon host can therefore implement lifecycle with launchd without changing the public `server` vocabulary.
 
 Ollama reporting now separates the three remote-inference layers: local API `11434`, LOOK host-rewrite proxy `11435`, and the Tailscale publication. A published `:11435` route with a dead localhost proxy is reported explicitly.
+
+## Optional decision worker
+
+When OpenJev is installed/adopted by Future Crash + LOOK, the Local Labs controller recognizes it as the optional `openjev`/`decision` service. Use `server status openjev`, `server start openjev`, `server stop openjev`, or `server restart openjev`. Machines without it continue normally.

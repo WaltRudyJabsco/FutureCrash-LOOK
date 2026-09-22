@@ -81,7 +81,7 @@ lk why python        which python am I actually calling?
 
 Existing paths are paths. Port-range numbers are ports. Executable names are commands. Process matching is conservative. Inspection is the default; mutation is explicit.
 
-`lk doctor` checks the LOOK environment. `lk config`, `lk secrets`, `lk version`, and `lk help` expose the installation without revealing secret contents.
+`lk doctor` checks the LOOK environment. `lk doctor island` performs a loopback-only audit of what this machine can still do with remote Fabric and the Internet absent. `lk config`, `lk secrets`, `lk version`, and `lk help` expose the installation without revealing secret contents.
 
 ## Files without becoming a file manager
 
@@ -521,6 +521,7 @@ MAINTENANCE
   lk home                    LOOK home
   lk settings                 unified interactive settings
   lk doctor                  environment check
+  lk doctor island           one-node/offline autonomy audit
   lk config                  installed/state paths
   lk secrets                 secret-file status, never contents
   lk undo                    undo last safe local filesystem transaction

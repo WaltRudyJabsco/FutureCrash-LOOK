@@ -1,4 +1,16 @@
-# Future Crash + LOOK 5.3.0
+# Future Crash + LOOK 5.4.2
+
+## 5.4.2 — Island Resilience + Workstation Editor
+
+LOOK is explicitly a complete one-node system: remote Fabric adds capability but is never required for deterministic tools, local files, local memory, media, or local inference. `lk doctor island` performs a loopback-only autonomy audit and reports the local capability ladder without consulting Tailscale or remote nodes.
+
+Future Crash Workstation and Ask now render editing from one authoritative text buffer plus logical cursor index. Backspace, insertion, left/right movement, long-line viewport scrolling, and terminal redraw no longer depend on stale screen columns. The Workstation help documents the editing keys.
+
+Documentation, `lk help`, the canonical command registry, Zsh completion, man page, release history, and installer/version surfaces are synchronized with this release.
+
+## 5.4.1 — Playback Ownership + Controller Repair
+
+LOOK probes/reuses its existing mpv worker before touching the IPC socket, reaps only LOOK-owned orphan players, and makes stop/queue-clear terminate all LOOK playback workers. Explicit next-album language remains deterministic. The installer also normalizes the OpenJev-aware Local Labs `server` controller.
 
 ## 5.3.0 — Decision Plane
 

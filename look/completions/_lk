@@ -94,6 +94,10 @@ _lk() {
   fi
 
   case "$words[2]" in
+    doctor)
+      (( CURRENT == 3 )) && _values 'doctor mode' 'island:audit single-node offline autonomy'
+      return
+      ;;
     fabric)
       (( CURRENT == 3 )) && _values 'fabric action' status nodes activity pulse models http qualify services service jobs job events submit packet cancel watch dashboard dash beacon lights decisions decision decision-provider answer ask decision-shadow
       return
@@ -171,6 +175,9 @@ _lk() {
         return
       fi
       return
+      ;;
+    doctor)
+      _values 'doctor mode' 'island:audit single-node offline autonomy'
       ;;
     memory)
       (( CURRENT == 3 )) && _values 'memory action' add forget compact compile clear clear-summary clear-recent prune

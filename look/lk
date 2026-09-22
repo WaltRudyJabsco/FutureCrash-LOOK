@@ -1596,6 +1596,7 @@ DESKTOP BRIDGE
 SYSTEM
   lk home              friendly LOOK home screen
   lk doctor            check the environment
+  lk doctor island     audit one-node/offline autonomy
   lk settings [SEARCH] searchable settings control room
   lk profile           portable LOOK identity status
   lk profile backup [DEST] [--keep N]
@@ -1983,6 +1984,51 @@ def doctor():
         code=_doctor_body()
     _page_text(buf.getvalue())
     return code
+
+def doctor_island():
+    """Report what this node can still do with every remote edge absent."""
+    import json, urllib.request
+    local_base="http://127.0.0.1:11434"
+    models=[]
+    loaded=[]
+    try:
+        with urllib.request.urlopen(local_base+"/api/tags", timeout=0.8) as r:
+            models=[str(x.get("name") or x.get("model") or "") for x in json.load(r).get("models",[]) if x]
+    except Exception:
+        pass
+    try:
+        with urllib.request.urlopen(local_base+"/api/ps", timeout=0.8) as r:
+            loaded=[str(x.get("name") or x.get("model") or "") for x in json.load(r).get("models",[]) if x]
+    except Exception:
+        pass
+    openjev=False
+    try:
+        import socket
+        with socket.create_connection(("127.0.0.1",8791), timeout=0.35):
+            openjev=True
+    except Exception:
+        pass
+    rows=[
+        ("LOOK core", True, "local commands + filesystem"),
+        ("LO runtime", bool(models), (f"{len(models)} local Ollama model(s)" if models else "no local Ollama models reachable")),
+        ("warm model", bool(loaded), (", ".join(loaded[:2]) if loaded else "none; local model may cold-start")),
+        ("memory", _ensure_memory_file(), "local durable memory"),
+        ("media", bool(shutil.which("mpv") or platform.system()=="Darwin"), "local playback edge"),
+        ("OpenJev", openjev, "local decision worker" if openjev else "optional; rules/local LLM remain"),
+    ]
+    print(_c(f"LOOK {VERSION} · ISLAND", "1;36"))
+    print(_c("single-node autonomy · loopback only · remote Fabric not required", "2"))
+    print("─"*62)
+    for name,ok,detail in rows:
+        print(f"  {'✓' if ok else '·'} {name:<12} {detail}")
+    print("\nCAPABILITY LADDER")
+    print("  deterministic rules → local decision worker → local LLM")
+    print("  remote Fabric adds capability when reachable; it is not required for LOOK.")
+    if not models:
+        print("\n  Local AI is unavailable right now; deterministic LOOK still works.")
+    else:
+        print("\n  This machine can operate as a one-node Fabric with local AI.")
+    return 0 if models else 1
 
 
 def _empty_memory():
@@ -14671,6 +14717,7 @@ _COMMANDS = [
     # System
     ("lk system", "", "system", "System control surface"),
     ("lk doctor", "", "system", "Run LOOK diagnostics"),
+    ("lk doctor island", "", "system", "Audit single-node offline autonomy"),
     ("lk machine", "", "system", "Machine summary", "lk box"),
     ("lk disk", "", "system", "Disk/storage inspection"),
     ("lk gpu", "", "system", "GPU inspection"),
@@ -14840,7 +14887,8 @@ def starter_help():
   fcr              Future Crash
 
 DIRECT IS ALWAYS AVAILABLE
-  lk doctor        lk disk          lk models
+  lk doctor        lk doctor island · offline/local audit
+  lk disk          lk models
   lk reveal PATH   show path in Finder/file manager
   lk open PATH     open path in preferred/default desktop app
   lk preview PATH  preview path outside terminal
@@ -15786,7 +15834,7 @@ def main():
         return 0 if result.startswith("FILE OK") else 1
     if cmd=="dash": return _fabric_command(["dashboard"] + rest)
     if cmd in {"fabric","nodes"}: return _fabric_command((["nodes"] if cmd=="nodes" else rest))
-    if cmd=="doctor": return doctor()
+    if cmd=="doctor": return doctor_island() if rest and rest[0]=="island" else doctor()
     if cmd=="locator-test": return _locator_test()
     if cmd=="architecture-audit": return _architecture_audit()
     if cmd=="tooling-audit": return _tooling_audit()

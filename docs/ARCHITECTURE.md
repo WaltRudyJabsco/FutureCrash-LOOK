@@ -56,3 +56,9 @@ identity/memory/tool state remain separate above the lane
 ```
 
 If Living AI is unavailable, Future Crash remains a direct Ollama client.
+
+## Single-node invariant
+
+A Fabric containing one machine is a complete Fabric, not an error state. LOOK must retain deterministic tools, local files, local memory, local media, and any locally available inference when remote nodes, Tailscale, or the Internet disappear. Remote workers are capability expansion. `lk doctor island` is the release-facing diagnostic for this invariant and intentionally probes loopback/local resources only.
+
+The cognition fallback order is deterministic rules, local decision worker when present, local generative model when appropriate, remote Fabric capability when reachable, then human clarification or a clear limitation. Tasks already known to require unavailable large capabilities should fail gracefully rather than forcing a small local model through futile work.

@@ -73,7 +73,7 @@ WHITE = CSI + "38;5;255m"
 GRAY = CSI + "38;5;245m"
 DARK = CSI + "38;5;239m"
 
-VERSION = "1.2.1"
+VERSION = "1.2.2"
 GLYPHS = "0123456789ABCDEF"
 SPARKS = "▁▂▃▄▅▆▇█"
 
@@ -237,6 +237,26 @@ def safe_row(s: str, width: int) -> str:
         return s
     # For overlong rows, prefer stable geometry over preserving styling.
     return strip_ansi(s)[:width]
+
+def render_edit_line(text: str, cursor: int, width: int, prefix: str = "> ", show_cursor: bool = True) -> str:
+    """Render one authoritative editor buffer into a fixed-width viewport.
+
+    The logical cursor is an index into *text*, never a terminal column.  Redrawing
+    the complete row after each mutation avoids stale glyphs and cursor drift.
+    """
+    width=max(1, int(width))
+    cursor=max(0, min(len(text), int(cursor)))
+    marker="_" if show_cursor else ""
+    logical=prefix + text[:cursor] + marker + text[cursor:]
+    cursor_col=len(prefix) + cursor
+    if len(logical) <= width:
+        return logical + " " * (width-len(logical))
+    # Keep the logical cursor visible with a small left context.
+    start=max(0, cursor_col - max(4, width-5))
+    if start and cursor_col-start < 3:
+        start=max(0, cursor_col-3)
+    shown=logical[start:start+width]
+    return shown + " " * max(0, width-len(shown))
 
 def wrap(text: str, width: int) -> list[str]:
     words = text.replace("\r", "").split()
@@ -2259,7 +2279,11 @@ class Terminal:
             seq += os.read(self.fd, 1).decode("utf-8", "ignore")
             if len(seq) >= 6:
                 break
-        return {"\x1b[A":"UP", "\x1b[B":"DOWN", "\x1b[C":"RIGHT", "\x1b[D":"LEFT"}.get(seq, "ESC")
+        return {
+            "\x1b[A":"UP", "\x1b[B":"DOWN", "\x1b[C":"RIGHT", "\x1b[D":"LEFT",
+            "\x1b[3~":"DELETE", "\x1b[H":"HOME", "\x1b[F":"END",
+            "\x1b[1~":"HOME", "\x1b[4~":"END",
+        }.get(seq, "ESC")
 
 # ---------- UI ----------
 
@@ -3061,6 +3085,12 @@ class FutureCrash:
                 self.cursor = max(0, self.cursor - 1)
             elif key == "RIGHT":
                 self.cursor = min(len(self.input), self.cursor + 1)
+            elif key == "HOME":
+                self.cursor = 0
+            elif key == "END":
+                self.cursor = len(self.input)
+            elif key == "DELETE" and self.cursor < len(self.input):
+                self.input = self.input[:self.cursor] + self.input[self.cursor + 1:]
             elif key == "\x15":
                 self.input = ""
                 self.cursor = 0
@@ -3539,16 +3569,10 @@ class FutureCrash:
         elif not self.online:
             lines.append(RED + "ORACLE OFFLINE // input will not be discarded" + RESET)
         lines.append("")
-        prompt = "> " + self.input
-        cursor_at = 2 + self.cursor
-        shown = prompt
-        if len(shown) > usable:
-            start = max(0, cursor_at - usable + 4)
-            shown = shown[start:start + usable]
-            cursor_at -= start
+        shown = render_edit_line(self.input, self.cursor, usable, show_cursor=not self.busy)
 
         lines.append(CYAN + "┌" + "─" * (usable + 2) + "┐" + RESET)
-        lines.append(CYAN + "│ " + RESET + fit(shown, usable) + CYAN + " │" + RESET)
+        lines.append(CYAN + "│ " + RESET + shown + CYAN + " │" + RESET)
         lines.append(CYAN + "└" + "─" * (usable + 2) + "┘" + RESET)
         lines += ["", DIM + "[enter] send   [ctrl-u] clear   [esc] return" + RESET]
         pad_top = max(1, (h - len(lines)) // 3)
@@ -3675,8 +3699,9 @@ class FutureCrash:
 
         while len(frame) < h - 3:
             frame.append("")
-        prompt = "> " + self.input + ("_" if not self.busy else "")
-        frame.append(fit(prompt, w - 1))
+        # Workstation editing uses the same logical buffer/cursor viewport as Ask.
+        # Never let ANSI/terminal cursor position become editor state.
+        frame.append(render_edit_line(self.input, self.cursor, w - 1, show_cursor=not self.busy))
         if self.deferred_submit:
             frame.append(AMBER + "INTERACTIVE QUEUED // current Oracle call will finish first" + RESET)
         else:
@@ -3705,6 +3730,8 @@ class FutureCrash:
             ("WORKSTATION",
              [
                  ("enter", "send"),
+                 ("←/→ · home/end", "move editing cursor"),
+                 ("backspace/delete", "delete before/at cursor"),
                  ("ctrl-t", "Threads"),
                  ("ctrl-u", "clear current conversation; keep persistent memory"),
                  ("ctrl-k", "guarded persistent-memory erase"),
