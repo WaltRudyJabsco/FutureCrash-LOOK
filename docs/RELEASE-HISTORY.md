@@ -1,3 +1,12 @@
+# 5.4.6 — Endpoint Media Cleanup
+
+- Move Signal media output selection from the chat composer onto the active media card.
+- Add ephemeral **This Device** / **This iPhone** browser audio playback without treating browsers as full Fabric compute nodes.
+- Add range-capable Fabric media audio streaming and queue-index-preserving handoff between browser and node playback endpoints.
+- Surface concrete output availability reasons such as `mpv missing` instead of unexplained disabled nodes.
+- Promote `mpv` to a standard LOOK workstation dependency so fresh installs and upgrades automatically enable media playback on Macs and Linux nodes.
+- Update Signal help, docs, release/version surfaces, and regression coverage.
+
 # 5.4.5 — Node-Scoped Media Outputs
 
 Fabric media now models the queue/session separately from the playback endpoint. Each online node exposes a default media output and its own LOOK-owned session. Signal 1.5.0 adds an **OUT** selector, routes direct media requests and transport controls to that node, and can hand an active session to another node while preserving queue/current index.

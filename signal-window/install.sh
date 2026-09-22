@@ -32,5 +32,5 @@ EOF
 else
   echo "Signal installed; start with: python3 $INSTALL_DIR/server.py"
 fi
-printf 'Signal Window 1.5.0 installed\n  app: %s\n  gallery: %s\n' "$INSTALL_DIR" "$HOME/.local/share/signal-window/gallery"
+printf 'Signal Window 1.6.0 installed\n  app: %s\n  gallery: %s\n' "$INSTALL_DIR" "$HOME/.local/share/signal-window/gallery"
 printf '  local: http://127.0.0.1:7331\n'

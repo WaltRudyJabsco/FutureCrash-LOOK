@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Signal Window 1.5.0 — browser LO with shared media, decisions, and camera/vision attachments."""
+"""Signal Window 1.6.0 — browser LO with shared media, browser audio, decisions, and camera/vision attachments."""
 from __future__ import annotations
 
 import argparse
@@ -729,13 +729,38 @@ def _media_play(query,node=""):
     if value.get("error") and not value.get("ok"): raise RuntimeError(str(value.get("error")))
     return value
 
-def _media_move(source,target):
+def _media_move(source,target,index=None):
     source=str(source or "").strip(); target=str(target or "").strip()
     if not target: raise ValueError("target media node required")
-    value=_node_call("/v1/media/route",{"operation":"move","source":source,"node":target},timeout=95.0)
+    value=_node_call("/v1/media/route",{"operation":"move","source":source,"node":target,"index":index},timeout=95.0)
     if not isinstance(value,dict): raise RuntimeError("Fabric media move unavailable")
     if value.get("error") and not value.get("ok"): raise RuntimeError(str(value.get("error")))
     return value
+
+
+def _proxy_media_audio(handler,node,index,*,head=False):
+    query="?node="+quote(str(node or ""),safe="")+"&index="+str(int(index))
+    req=urllib.request.Request(NODE_URL+"/v1/media/audio"+query,method="HEAD" if head else "GET")
+    if handler.headers.get("Range"):
+        req.add_header("Range",handler.headers.get("Range"))
+    try:
+        with urllib.request.urlopen(req,timeout=12.0) as r:
+            data=b"" if head else r.read()
+            handler.send_response(getattr(r,"status",200))
+            for key in ("Content-Type","Content-Length","Accept-Ranges","Content-Range","Cache-Control"):
+                value=r.headers.get(key)
+                if value: handler.send_header(key,value)
+            if not r.headers.get("Content-Length"):
+                handler.send_header("Content-Length",str(len(data)))
+            handler.end_headers()
+            if data: handler.wfile.write(data)
+    except urllib.error.HTTPError as exc:
+        handler.send_response(exc.code); handler.send_header("Content-Length","0"); handler.end_headers()
+    except Exception as exc:
+        if head:
+            handler.send_response(502); handler.send_header("Content-Length","0"); handler.end_headers()
+        else:
+            handler.json(502,{"error":str(exc)})
 
 
 _PRESENTED = {}
@@ -813,6 +838,15 @@ class App(BaseHTTPRequestHandler):
     def send_bytes(self,code,data,ctype):
         self.send_response(code); self.send_header("Content-Type",ctype); self.send_header("Content-Length",str(len(data))); self.end_headers(); self.wfile.write(data)
     def json(self,code,obj): self.send_bytes(code,json.dumps(obj).encode(),"application/json; charset=utf-8")
+    def do_HEAD(self):
+        parsed=urlparse(self.path)
+        if parsed.path=="/api/media/audio":
+            q=parse_qs(parsed.query); node=str((q.get("node") or [""])[0])
+            try: index=int((q.get("index") or [0])[0] or 0)
+            except Exception: index=0
+            return _proxy_media_audio(self,node,index,head=True)
+        self.send_response(404); self.send_header("Content-Length","0"); self.end_headers()
+
     def do_GET(self):
         if self.path.startswith("/api/present/"):
             token=self.path.split("/api/present/",1)[1].split("?",1)[0]
@@ -832,6 +866,11 @@ class App(BaseHTTPRequestHandler):
                 return self.json(200,value or {"decisions":[],"count":0})
             except Exception as exc:
                 return self.json(502,{"error":str(exc),"decisions":[]})
+        if self.path.startswith("/api/media/audio"):
+            q=parse_qs(urlparse(self.path).query); node=str((q.get("node") or [""])[0])
+            try: index=int((q.get("index") or [0])[0] or 0)
+            except Exception: index=0
+            return _proxy_media_audio(self,node,index)
         if self.path.startswith("/api/media/outputs"):
             return self.json(200,_media_outputs())
         if self.path=="/api/media":
@@ -863,7 +902,7 @@ class App(BaseHTTPRequestHandler):
         if self.path=="/api/media/move":
             try:
                 n=int(self.headers.get("Content-Length","0")); d=json.loads(self.rfile.read(n) or b"{}")
-                value=_media_move(str(d.get("source") or ""),str(d.get("target") or ""))
+                value=_media_move(str(d.get("source") or ""),str(d.get("target") or ""),d.get("index"))
                 return self.json(200,value)
             except ValueError as exc:
                 return self.json(400,{"error":str(exc)})
@@ -1037,7 +1076,7 @@ def main():
         state=f"LO NATIVE {a.profile} · "+(App.lo_cmd if App.lo_cmd else "NOT FOUND")
     else:
         p=probe_ollama(App.backend); state=("connected" if p.get("ok") else "unreachable: "+p.get("error","unknown"))
-    print(f"Signal Window 1.5.0 · http://{a.host}:{a.port} · {state} · gallery {App.gallery_dir if App.gallery_enabled else 'off'}")
+    print(f"Signal Window 1.6.0 · http://{a.host}:{a.port} · {state} · gallery {App.gallery_dir if App.gallery_enabled else 'off'}")
     ThreadingHTTPServer((a.host,a.port),App).serve_forever()
 
 if __name__=="__main__": main()

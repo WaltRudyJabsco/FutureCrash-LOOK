@@ -1,4 +1,10 @@
-# Future Crash + LOOK 5.4.5
+# Future Crash + LOOK 5.4.6
+
+## 5.4.6 — Endpoint Media Cleanup
+
+Signal keeps **OUT** on the active media card instead of cluttering the chat composer. The card can hand the current session among playback-ready Fabric nodes or to an ephemeral **This Device** browser endpoint; iPhone Safari labels that endpoint **This iPhone**. Browsers remain lightweight UI/media endpoints rather than full compute nodes.
+
+`mpv` is now a standard LOOK workstation dependency. Fresh installs and upgrades install it automatically when missing, so Macs advertise usable playback after upgrade instead of appearing grey with no explanation. Disabled node choices now carry the concrete reason, such as `mpv missing`.
 
 ## 5.4.5 — Node-Scoped Media Outputs
 
@@ -1368,6 +1374,8 @@ In 5.2.17 the library view becomes Fabric-wide without becoming a media applicat
 source node                     playback node
 ───────────                     ─────────────
 file → artifact identity → HTTP Range stream → mpv/browser
+
+Signal keeps playback output selection on the active media card. Fabric nodes expose playback readiness and reasons for unavailability; an ephemeral **This Device** browser endpoint can stream the same queue without becoming a full compute node.
        sha256:...
 ```
 

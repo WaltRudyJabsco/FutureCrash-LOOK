@@ -1,6 +1,13 @@
-# Signal Window 1.5.0
+# Signal Window 1.6.0
 
-Signal is a browser body for LO/Fabric: conversation, lightweight visual expression, shared decisions, shared media state, and now direct camera/photo input.
+Signal is a browser body for LO/Fabric: conversation, lightweight visual expression, shared decisions, shared media state, browser audio endpoints, and camera/photo input.
+
+## 1.6.0 — media endpoints
+
+The chat composer is generic again: **OUT** appears only on the active media card. The chooser lists playback-ready Fabric nodes plus an ephemeral **This Device** endpoint; on iPhone Safari it is labeled **This iPhone**. Selecting the browser endpoint streams the current queue item through HTML audio, then stops the former node player only after browser playback starts.
+
+Selecting a Fabric node while browser playback is active hands the source session to that node at the browser's current queue index. The browser is an endpoint, not a full Fabric node, and disappears when the Signal browser session closes. Disabled node outputs include a concrete reason such as `mpv missing`.
+
 
 ## 1.5.0 — Fabric media outputs
 

@@ -339,7 +339,7 @@ Print a compact JSON snapshot of the canonical LOOK media session for renderer/c
 .B lk media jump INDEX
 Jump deterministically to the one-based queue item INDEX in the current LOOK media session.
 .PP
-mpv is the preferred optional playback edge. LOOK owns queue/session meaning; mpv owns decoding and rendering. Same-node queues may use direct local file access, while remote/content-addressed entries use Fabric artifact streams.
+mpv is the standard LOOK playback edge and is installed as part of the workstation dependency set. LOOK owns queue/session meaning; mpv owns decoding and rendering. Same-node queues may use direct local file access, while remote/content-addressed entries use Fabric artifact streams.
 .SH INTELLIGENCE VERSIONS
 .TP
 .B lk skills version

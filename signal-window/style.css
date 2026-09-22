@@ -88,6 +88,9 @@ main.mode-compact #activity{height:18px;line-height:17px;flex-basis:18px}
 #cameraButton:hover,#cameraButton:focus{border-color:#8fd6a2;color:#d4e5d8;outline:0}
 .chip{cursor:pointer}.image-chip{border-color:#4c7557;color:#9ed2aa;display:inline-flex;align-items:center;gap:5px}.chip-thumb{width:24px;height:24px;object-fit:cover;border:1px solid #31543a;background:#020503}
 @media(max-width:650px){#cameraButton{padding:7px 8px}}
-#mediaOutput{flex:0 0 auto;max-width:110px;font:10px/1 ui-monospace,SFMono-Regular,Menlo,Consolas,monospace;letter-spacing:.04em;color:#91c79e;background:#071009;border:1px solid #31543a;padding:6px 5px;outline:0}
-#mediaOutput:hover,#mediaOutput:focus{border-color:#8fd6a2;color:#d4e5d8}
-@media(max-width:650px){#mediaOutput{max-width:82px;padding:7px 4px}}
+
+/* v1.6 output routing lives with the media session, not the chat composer. */
+.media-output-row{display:flex;align-items:center;justify-content:center;gap:7px;margin:7px 0 3px;color:#53775d;letter-spacing:.08em}
+.media-output-select{max-width:min(78%,260px);font:inherit;color:#91c79e;background:#071009;border:1px solid #31543a;padding:4px 6px;outline:0}
+.media-output-select:hover,.media-output-select:focus{border-color:#8fd6a2;color:#d4e5d8}
+.media-output-select option:disabled{color:#58705e}

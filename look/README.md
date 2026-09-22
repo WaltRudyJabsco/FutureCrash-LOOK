@@ -632,7 +632,7 @@ lk media info @3090 sha256:...
 
 `outputs` lists node-specific playback endpoints; `on NODE` routes deterministic play/transport commands to that node while the canonical queue remains portable. `find` and `browse` use the normal LOOK filter model: display labels are never command identifiers. Type to filter immediately, Tab multi-selects, Enter/`P` plays, `Q` queues, `A` queues visible matches, and the same Fabric catalog supplies shell completion. `lk media fabric` shows the union of scanned media on online nodes; `identify` progressively promotes cheap scan rows into SHA-addressed artifacts without making every scan expensive.
 
-macOS can still control an already-open Music or Spotify instance through AppleScript, and Linux can control normal MPRIS players through `playerctl`. When LOOK owns a Fabric stream session, optional `mpv` is preferred as the playback edge and LOOK talks to its JSON IPC socket directly, so the same transport controls operate the streamed artifact. Fast aliases remain `mm` (toggle), `mn` (next), `mp` (previous).
+macOS can still control an already-open Music or Spotify instance through AppleScript, and Linux can control normal MPRIS players through `playerctl`. When LOOK owns a Fabric stream session, `mpv` is the standard playback edge and LOOK talks to its JSON IPC socket directly, so the same transport controls operate the streamed artifact. Fast aliases remain `mm` (toggle), `mn` (next), `mp` (previous).
 
 ## Versioned intelligence
 

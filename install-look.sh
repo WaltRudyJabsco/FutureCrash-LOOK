@@ -3,7 +3,7 @@ set -euo pipefail
 
 ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 
-PRODUCT_VERSION="5.4.5"
+PRODUCT_VERSION="5.4.6"
 LOOK_VERSION="4.46.0"
 FUTURE_CRASH_VERSION="1.2.2"
 
@@ -155,7 +155,7 @@ package_for() {
 
 echo
 echo "LOOK WORKSTATION"
-core=(zsh python3 git zoxide fzf fd nvim bat fortune cowsay fastfetch chafa pdftotext ttyd lsof)
+core=(zsh python3 git zoxide fzf fd nvim bat fortune cowsay fastfetch chafa pdftotext ttyd lsof mpv)
 missing=()
 for c in "${core[@]}"; do
   if have "$c"; then
@@ -228,15 +228,10 @@ fi
 echo
 echo "LOOK MEDIA"
 if have mpv; then
-  echo "  ✓ mpv · Fabric stream playback + LOOK transport control"
+  echo "  ✓ mpv · canonical local/Fabric playback edge"
 else
-  echo "  mpv is the optional playback edge for Fabric range streams; codecs stay outside LOOK."
-  if ask "  Install mpv?" Y; then
-    run brew install mpv
-    if ((!DRY)); then installed_packages+=("mpv"); fi
-  else
-    echo "  · skipped mpv (VLC/system player remains usable)"
-  fi
+  echo "  ! mpv should have been installed with the workstation dependencies"
+  echo "    media control remains available, but this node will not advertise playback until mpv is present"
 fi
 
 ZDIR="${ZSH:-$HOME/.oh-my-zsh}"

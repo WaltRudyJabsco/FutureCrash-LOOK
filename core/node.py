@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Future Crash + LOOK Unified Node 5.4.5.
+"""Future Crash + LOOK Unified Node 5.4.6.
 
 A small distributed supervisor for trusted personal machines. Immediate events stay
 asynchronous; a one-second fabric pulse reconciles presence, leases and stale work.
@@ -13,6 +13,7 @@ import sys
 import faulthandler
 import signal
 import json
+import mimetypes
 import os
 import platform
 import random
@@ -48,7 +49,7 @@ except ImportError:
     from decision import OpenJevShadow, new_request as new_decision_request, provider_status as decision_provider_status, plan as decision_plan
 from urllib.parse import urlparse, parse_qs
 
-VERSION = "5.4.5"
+VERSION = "5.4.6"
 DEFAULT_HOST = "127.0.0.1"
 DEFAULT_PORT = 7332
 DEFAULT_INGRESS_PORT = 0
@@ -2000,16 +2001,74 @@ def _local_media_full_session():
         raise ValueError("invalid media session")
     return data
 
+
+
+def _media_player_binary():
+    """Resolve mpv from normal shells and sparse service environments."""
+    found=shutil.which("mpv")
+    if found:
+        return found
+    for candidate in (
+        Path.home()/".linuxbrew/bin/mpv",
+        Path("/home/linuxbrew/.linuxbrew/bin/mpv"),
+        Path("/opt/homebrew/bin/mpv"),
+        Path("/usr/local/bin/mpv"),
+        Path("/usr/bin/mpv"),
+    ):
+        if candidate.is_file() and os.access(candidate,os.X_OK):
+            return str(candidate)
+    return ""
+
+def _local_media_audio_path(index=None):
+    """Resolve one queue item to bytes local to this node for browser playback."""
+    session=_local_media_full_session()
+    queue=session.get("queue") or []
+    if not queue:
+        raise FileNotFoundError("media queue is empty")
+    if index is None:
+        index=int(session.get("current_index") or 0)
+    index=max(0,min(int(index),len(queue)-1))
+    entry=queue[index]
+    local_name=identity()["name"]
+    candidates=[]
+    path=str(entry.get("path") or "").strip()
+    if path:
+        candidates.append(Path(path).expanduser())
+    for loc in entry.get("locations") or []:
+        if not isinstance(loc,dict):
+            continue
+        if str(loc.get("node") or "") not in {"",local_name}:
+            continue
+        raw=str(loc.get("path") or "").strip()
+        if raw:
+            candidates.append(Path(raw).expanduser())
+    for candidate in candidates:
+        try:
+            if candidate.is_file():
+                return candidate.resolve(), (mimetypes.guess_type(candidate.name)[0] or str(entry.get("media_type") or "application/octet-stream"))
+        except OSError:
+            pass
+    digest=str(entry.get("digest") or "").strip()
+    if digest:
+        meta,source=ARTIFACTS.path_for(digest)
+        return source, str(meta.get("media_type") or entry.get("media_type") or mimetypes.guess_type(source.name)[0] or "application/octet-stream")
+    raise FileNotFoundError("media bytes are not local to this playback node")
+
 def _local_media_output():
     state = _local_media_state()
+    player=_media_player_binary()
+    available=bool(state.get("available")) and bool(player)
+    reason="" if available else ("mpv missing" if not player else str(state.get("error") or "media unavailable"))
     return {
         "node": identity()["name"],
         "output_id": "default",
         "label": f"{identity()['name']} · default",
-        "available": bool(state.get("available")),
+        "available": available,
         "active": bool(state.get("active")),
         "state": str(state.get("state") or "stopped"),
-        "capabilities": ["media.playback", "media.queue", "media.control"],
+        "reason": reason,
+        "player": "mpv" if player else "",
+        "capabilities": ["media.playback", "media.queue", "media.control"] if available else ["media.queue", "media.control"],
     }
 
 
@@ -2105,16 +2164,18 @@ def _fabric_media_full_session(target=None):
     return http_json(_remote_url(snapshot,target,"/v1/media/session-full"),timeout=2.0)
 
 
-def _fabric_media_move(source,target):
+def _fabric_media_move(source,target,index=None):
     source=str(source or identity()["name"]).strip()
     target=str(target or "").strip()
     if not target:
         raise ValueError("target media node required")
-    if source==target:
-        return _fabric_media_state(target)
     session=_fabric_media_full_session(source)
     if not session.get("queue"):
         raise ValueError(f"no media session on {source}")
+    if index is not None:
+        session["current_index"]=max(0,min(int(index),len(session["queue"])-1))
+    if source==target and index is None:
+        return _fabric_media_state(target)
     result=_fabric_media_route(target,"adopt",{"session":session})
     if not result.get("ok"):
         raise RuntimeError(str(result.get("error") or "target did not accept media session"))
@@ -2321,7 +2382,7 @@ def _openjev_shadow(state, question, candidates, *, profile="workspace", consequ
 
 
 class API(BaseHTTPRequestHandler):
-    server_version = "FCLNode/5.4.5"
+    server_version = "FCLNode/5.4.6"
 
     def setup(self):
         self._metric_request_id = None
@@ -2403,8 +2464,64 @@ class API(BaseHTTPRequestHandler):
                 self.wfile.write(chunk)
                 remaining -= len(chunk)
 
+    def _serve_file_range(self, source, media_type="application/octet-stream", *, head=False):
+        source=Path(source)
+        size=source.stat().st_size
+        try:
+            start,end,partial=_parse_byte_range(self.headers.get("Range"),size)
+        except ValueError:
+            self.send_response(416); self.send_header("Content-Range",f"bytes */{size}"); self.send_header("Accept-Ranges","bytes"); self.send_header("Content-Length","0"); self.end_headers(); return
+        length=0 if size==0 else end-start+1
+        self.send_response(206 if partial else 200)
+        self.send_header("Content-Type",media_type or "application/octet-stream")
+        self.send_header("Content-Length",str(length)); self.send_header("Accept-Ranges","bytes")
+        self.send_header("Cache-Control","no-store")
+        if partial: self.send_header("Content-Range",f"bytes {start}-{end}/{size}")
+        self.end_headers()
+        if head or length<=0: return
+        with source.open("rb") as fh:
+            fh.seek(start); remaining=length
+            while remaining>0:
+                chunk=fh.read(min(1024*1024,remaining))
+                if not chunk: break
+                self.wfile.write(chunk); remaining-=len(chunk)
+
+    def _serve_media_audio(self,target,index,*,head=False):
+        target=str(target or "").strip(); local=identity()["name"]
+        if not target or target==local:
+            try:
+                source,ctype=_local_media_audio_path(index)
+                return self._serve_file_range(source,ctype,head=head)
+            except Exception as exc:
+                if head:
+                    self.send_response(404); self.send_header("Content-Length","0"); self.end_headers(); return
+                return self.sendj(404,{"error":str(exc)})
+        snapshot={"self":node_info(),"peers":PEERS.public()}
+        try:
+            url=_remote_url(snapshot,target,"/v1/media/audio?index="+str(int(index)))
+            req=urllib.request.Request(url,method="HEAD" if head else "GET")
+            if self.headers.get("Range"): req.add_header("Range",self.headers.get("Range"))
+            with urllib.request.urlopen(req,timeout=8.0) as r:
+                data=b"" if head else r.read()
+                self.send_response(getattr(r,"status",200))
+                for key in ("Content-Type","Content-Length","Accept-Ranges","Content-Range","Cache-Control"):
+                    value=r.headers.get(key)
+                    if value: self.send_header(key,value)
+                if not r.headers.get("Content-Length"): self.send_header("Content-Length",str(len(data)))
+                self.end_headers()
+                if data: self.wfile.write(data)
+        except urllib.error.HTTPError as exc:
+            self.send_response(exc.code); self.send_header("Content-Length","0"); self.end_headers()
+        except Exception as exc:
+            if head:
+                self.send_response(502); self.send_header("Content-Length","0"); self.end_headers(); return
+            self.sendj(502,{"error":str(exc)})
+
     def do_HEAD(self):
-        path = urlparse(self.path).path
+        parsed=urlparse(self.path); path=parsed.path
+        if path == "/v1/media/audio":
+            q=parse_qs(parsed.query); target=str((q.get("node") or [""])[0]); index=int((q.get("index") or [0])[0] or 0)
+            return self._serve_media_audio(target,index,head=True)
         if path.startswith("/v1/artifacts/"):
             digest = path.split("/", 3)[3]
             return self._serve_artifact(digest, head=True)
@@ -2495,6 +2612,11 @@ class API(BaseHTTPRequestHandler):
             return self.sendj(200, _local_media_catalog())
         if path == "/v1/media/fabric":
             return self.sendj(200, _fabric_media_catalog())
+        if path == "/v1/media/audio":
+            q=parse_qs(urlparse(self.path).query); target=str((q.get("node") or [""])[0])
+            try: index=int((q.get("index") or [0])[0] or 0)
+            except Exception: index=0
+            return self._serve_media_audio(target,index)
         if path == "/v1/media/output":
             return self.sendj(200, _local_media_output())
         if path == "/v1/media/outputs":
@@ -2722,7 +2844,7 @@ class API(BaseHTTPRequestHandler):
                 operation = str(d.get("operation") or "").strip()
                 payload = {k:v for k,v in d.items() if k not in {"node", "operation"}}
                 if operation=="move":
-                    return self.sendj(200,_fabric_media_move(str(d.get("source") or ""),target or str(d.get("target") or "")))
+                    return self.sendj(200,_fabric_media_move(str(d.get("source") or ""),target or str(d.get("target") or ""),d.get("index")))
                 return self.sendj(200, _fabric_media_route(target, operation, payload))
             except ValueError as exc:
                 return self.sendj(400, {"ok": False, "error": str(exc)})

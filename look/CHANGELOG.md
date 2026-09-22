@@ -1,3 +1,9 @@
+# 5.4.6
+
+- Promote mpv to the normal workstation dependency set so upgrades make Macs playback-ready by default.
+- Preserve node-scoped queue/session semantics while exposing browser-safe audio bytes through Fabric.
+- Report playback readiness separately from queue/control availability.
+
 # 5.4.5
 
 - Add node-scoped Fabric media output discovery and remote deterministic media control.
