@@ -144,6 +144,8 @@ def scan_root(root: str | Path, existing: Any = None) -> dict[str, Any]:
     library = normalize_library(existing)
     base_s = str(base)
 
+    current_rows = [row for row in library["entries"] if str(row.get("root") or "") == base_s]
+    existing_by_path = {str(row.get("path") or ""): row for row in current_rows}
     keep = [row for row in library["entries"] if str(row.get("root") or "") != base_s]
     found: list[dict[str, Any]] = []
     for dirpath, dirnames, filenames in os.walk(base):
@@ -155,7 +157,17 @@ def scan_root(root: str | Path, existing: Any = None) -> dict[str, Any]:
             if path.suffix.casefold() not in MEDIA_EXTENSIONS:
                 continue
             try:
-                found.append(entry_from_path(path, base))
+                row = entry_from_path(path, base)
+                previous = existing_by_path.get(str(row.get("path") or "")) or {}
+                # A rescan must not throw away expensive content identity. Preserve it
+                # only when the cheap filesystem fingerprint still matches.
+                if (previous.get("digest")
+                        and int(previous.get("bytes") or -1) == int(row.get("bytes") or -2)
+                        and float(previous.get("mtime") or -1) == float(row.get("mtime") or -2)):
+                    row["digest"] = previous["digest"]
+                    if previous.get("identified_at"):
+                        row["identified_at"] = previous["identified_at"]
+                found.append(row)
             except (FileNotFoundError, PermissionError, OSError):
                 continue
 
@@ -223,12 +235,68 @@ def entries_under(library: Any, directory: str | Path) -> list[dict[str, Any]]:
 
 
 def queue_entry(row: dict[str, Any]) -> dict[str, Any]:
-    allowed = ("id", "path", "node", "digest", "artist", "album", "title", "track", "disc", "format", "media_type", "bytes")
+    allowed = ("id", "path", "node", "digest", "artist", "album", "title", "track", "disc", "format", "media_type", "bytes", "locations")
     out = {key: row.get(key) for key in allowed if row.get(key) not in (None, "")}
     if not out.get("id"):
         locator = str(out.get("path") or out.get("digest") or json.dumps(out, sort_keys=True))
         out["id"] = _stable_id(locator)
     return out
+
+
+def merge_catalog_entries(rows: Iterable[dict[str, Any]], *, local_node: str = "") -> list[dict[str, Any]]:
+    """Merge an online Fabric catalog into logical media rows.
+
+    SHA identity collapses duplicate physical copies. Unidentified discoveries stay
+    node-local until their bytes have been hashed. A local location is preferred so
+    playback does not cross the network when the bytes are already here.
+    """
+    grouped: dict[str, list[dict[str, Any]]] = {}
+    for raw in rows:
+        if not isinstance(raw, dict):
+            continue
+        row = dict(raw)
+        digest = str(row.get("digest") or "").strip()
+        node = str(row.get("node") or "").strip()
+        rid = str(row.get("id") or row.get("path") or "").strip()
+        key = f"sha:{digest}" if digest else f"loc:{node}:{rid}"
+        grouped.setdefault(key, []).append(row)
+
+    merged: list[dict[str, Any]] = []
+    for copies in grouped.values():
+        copies.sort(key=lambda r: (0 if local_node and str(r.get("node") or "") == local_node else 1, entry_sort_key(r)))
+        primary = dict(copies[0])
+        locations = []
+        for row in copies:
+            locations.append({k: row.get(k) for k in ("node", "path", "id", "digest") if row.get(k) not in (None, "")})
+        primary["locations"] = locations
+        primary["copies"] = len(locations)
+        merged.append(primary)
+    return sorted(merged, key=entry_sort_key)
+
+
+def completion_candidates(rows: Iterable[dict[str, Any]], query: str = "", *, limit: int = 80) -> list[str]:
+    """Small human vocabulary for shell completion; never expose paths as titles."""
+    q = query.strip().casefold()
+    values: set[str] = set()
+    for row in rows:
+        if not isinstance(row, dict):
+            continue
+        for key in ("artist", "album", "title"):
+            value = str(row.get(key) or "").strip()
+            if value and (not q or q in value.casefold()):
+                values.add(value)
+    def rank(value: str) -> tuple[int, int, str]:
+        folded = value.casefold()
+        if not q:
+            tier = 2
+        elif folded.startswith(q):
+            tier = 0
+        elif any(part.startswith(q) for part in folded.split()):
+            tier = 1
+        else:
+            tier = 2
+        return (tier, len(value), folded)
+    return sorted(values, key=rank)[:max(1, int(limit))]
 
 
 def new_session(entries: Iterable[dict[str, Any]], *, current_index: int = 0,

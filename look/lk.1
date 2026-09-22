@@ -292,8 +292,17 @@ Play a file, directory, or indexed artist/album/title query as a LOOK-owned queu
 .B lk media queue
 Show the canonical queue around the current item.
 .TP
+.B lk media browse [QUERY]
+Open the LOOK-native Fabric media selector. Enter plays the highlighted item, Space queues it, slash refines the filter, and exact display-name retyping is unnecessary.
+.TP
 .B lk media find QUERY
-Search indexed artist, album, title, format, and path text.
+Search the online Fabric media catalog and open the same selector when interactive.
+.TP
+.B lk media fabric
+Show the union of scanned media on currently reachable Fabric nodes, including per-node scanned and SHA-identified counts.
+.TP
+.B lk media identify QUERY|PATH|--all
+Promote discovered media to SHA-256 Fabric artifact identity. Bulk --all is deliberately local to the current node.
 .TP
 .B lk media save NAME
 Save the current queue as a persistent playlist.

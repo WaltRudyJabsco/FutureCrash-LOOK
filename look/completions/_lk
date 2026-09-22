@@ -158,9 +158,17 @@ _lk() {
       return
       ;;
     media|music)
-      (( CURRENT == 3 )) && _values 'media action' status play pause toggle next prev stop queue clear scan library find artists albums save load playlists playlist repeat add stream info
-      if (( CURRENT >= 4 )) && [[ "$words[3]" == (scan|play|add|stream|info) ]]; then
+      (( CURRENT == 3 )) && _values 'media action' status browse find fabric catalog identify play pause toggle next prev stop queue clear scan library artists albums save load playlists playlist repeat add stream info
+      if (( CURRENT >= 4 )) && [[ "$words[3]" == (scan|add|stream|info) ]]; then
         _files
+        return
+      fi
+      if (( CURRENT >= 4 )) && [[ "$words[3]" == (play|find|browse|identify) ]]; then
+        local -a media_candidates
+        media_candidates=("${(@f)$(command lk media complete "$words[CURRENT]" 2>/dev/null)}")
+        (( ${#media_candidates} )) && compadd -Q -- "${media_candidates[@]}"
+        [[ "$words[3]" == (play|identify) ]] && _files
+        return
       fi
       return
       ;;

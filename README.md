@@ -1,4 +1,21 @@
-# Future Crash + LOOK 5.2.16
+# Future Crash + LOOK 5.2.17
+
+## 5.2.17 — Fabric Media Catalog + LOOK Selector
+
+Media remains a reference workload, not a product direction. `lk media find` and `lk media browse` now use a LOOK-native selector so display names never have to be retyped exactly; Enter plays the selected item, Space queues it, and filtering stays inside the selector. Fabric also publishes the union of media scanned on currently online nodes, with SHA-identified copies collapsed by content identity and shell completion drawing from the same catalog.
+
+```bash
+lk media fabric
+lk media browse
+lk media find "talking heads"
+lk media identify --all        # local node: promote discoveries to SHA identity
+lk media play tal<Tab>
+```
+
+A scan remains cheap metadata discovery. SHA-256 identity is progressive: explicit registration, streaming, or `identify` promotes a discovered path into the generic Fabric artifact catalog without making every scan an expensive hashing pass.
+
+---
+
 
 ## 5.2.16 — Media Sessions + Library Queue
 
@@ -1282,7 +1299,9 @@ Fabric now publishes a small renderer-neutral `fabric-ui-v1` state document at `
 
 Fabric artifacts can now be file-backed as well as small managed blobs. `fcl-node artifact-add PATH` hashes an existing file and records its node-local location without copying the bytes into Fabric state. The artifact endpoint supports HTTP byte ranges, so a consumer can seek through a large movie, recording, dataset, or music file without downloading it first. Nodes advertise this as `artifact.read`, `artifact.range`, and `artifact.stream`; media is only the first visible consumer.
 
-LOOK keeps playback deliberately thin. If `mpv` is available, `lk media play PATH` registers the local file and hands the Fabric stream URL to mpv; `lk media play @NODE sha256:DIGEST` consumes an artifact from another Fabric node. The historical `lk media play` with no path remains a play/pause transport control. `lk media add PATH` and `lk media info [@NODE] DIGEST` expose the underlying artifact for testing. VLC/system playback remains a fallback.
+LOOK keeps playback deliberately thin. Same-node files take the cheapest path directly to `mpv`; `lk media stream PATH` is the explicit artifact/range-stream proof, while remote SHA entries stream through Fabric. The historical `lk media play` with no path remains a play/pause transport control. `lk media add PATH` and `lk media info [@NODE] DIGEST` expose the underlying artifact for testing. VLC/system playback remains a fallback.
+
+In 5.2.17 the library view becomes Fabric-wide without becoming a media application. `/v1/media/catalog` publishes one node's cheap scan index and `/v1/media/fabric` unions online nodes. SHA-identified duplicates collapse logically while retaining their physical locations; shell completion and the LOOK media selector consume that same catalog.
 
 ```text
 source node                     playback node

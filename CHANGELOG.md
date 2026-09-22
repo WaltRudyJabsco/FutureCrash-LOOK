@@ -1,3 +1,14 @@
+# 5.2.17 — Fabric Media Catalog + LOOK Selector
+
+- Replace the awkward print-then-retype media search flow with a LOOK-native interactive selector: Enter plays, Space appends to the canonical queue, `A` plays the visible match set, `/` refines the filter, and `I` shows lightweight identity/format detail. Non-interactive output remains plain text.
+- Add a Fabric-wide media catalog assembled from currently reachable trusted nodes. `lk media fabric` reports logical items, physical scanned locations, per-node counts, and progressive SHA identification state.
+- Add generic artifact catalog endpoints (`/v1/artifacts` and `/v1/artifacts/fabric`) so SHA-addressed files have a discoverable Fabric registry beyond the media demo.
+- Add progressive media identity. Fast scans still avoid hashing; `lk media identify QUERY|PATH|--all` promotes discovered files to SHA-256 artifacts. Bulk `--all` is deliberately node-local, while a selected remote item can be identified on demand by its source node.
+- Preserve SHA identity across rescans only when size and mtime still match; changed files fall back to discovered/unidentified state rather than retaining stale content identity.
+- Merge duplicate online copies by SHA while preserving location lists and preferring a local copy for playback. Unidentified look-alikes never deduplicate merely by filename.
+- Feed zsh media completion from the same online catalog, bounded to a small candidate set of artists, albums, and titles.
+- Keep queue/session ownership in LOOK and decoding in mpv; no recommendation engine, artwork system, ratings database, or fixed media-root worldview was added.
+
 # 5.2.16 — Media Sessions + Library Queue
 
 - Add dependency-free `look/media_core.py`: the queue/library model is pure logic; playback, filesystem, terminal, and Fabric transport remain edges.

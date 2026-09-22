@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Future Crash + LOOK Unified Node 5.2.16.
+"""Future Crash + LOOK Unified Node 5.2.17.
 
 A small distributed supervisor for trusted personal machines. Immediate events stay
 asynchronous; a one-second fabric pulse reconciles presence, leases and stale work.
@@ -44,7 +44,7 @@ except ImportError:
     from ui_model import actions as ui_actions, build_ui_model
 from urllib.parse import urlparse, parse_qs
 
-VERSION = "5.2.16"
+VERSION = "5.2.17"
 DEFAULT_HOST = "127.0.0.1"
 DEFAULT_PORT = 7332
 DEFAULT_INGRESS_PORT = 0
@@ -71,6 +71,7 @@ STATE.mkdir(parents=True, exist_ok=True)
 MODEL_STATE = STATE / "model_profiles.json"
 LOOK_BENCHMARK_STATE = Path.home() / ".local/share/look/ollama_benchmarks.json"
 LOOK_MODEL_PREFS = Path.home() / ".local/share/look/ollama_models.json"
+LOOK_MEDIA_LIBRARY = Path.home() / ".local/share/look/media_library.json"
 CURATOR_STATE = STATE / "model_curator.json"
 FABRIC_DB = STATE / "fabric.sqlite3"
 ARTIFACT_ROOT = STATE / "artifacts"
@@ -83,6 +84,9 @@ IDENTITY_CACHE = {"name": socket.gethostname(), "hostname": socket.gethostname()
 ADVERTISEMENT_LOCK = threading.RLock()
 ADVERTISEMENT_CACHE = {}
 BEACON_LOCK = threading.RLock()
+MEDIA_LIBRARY_LOCK = threading.RLock()
+MEDIA_CATALOG_LOCK = threading.RLock()
+MEDIA_CATALOG_CACHE = {"at": 0.0, "data": None, "local_mtime_ns": -1}
 CURATOR_LOCK = threading.RLock()
 BENCHMARK_GUARD = {"until": 0.0, "reason": ""}
 BENCHMARK_GUARD_LOCK = threading.RLock()
@@ -303,6 +307,7 @@ def capabilities():
         "artifact.read": True,
         "artifact.range": True,
         "artifact.stream": True,
+        "artifact.catalog": True,
     }
 
 
@@ -1812,6 +1817,176 @@ def _memory_sync() -> dict:
     return {"ok": True, "count": len(union), "pulled": pulled, "pushed": pushed, "failures": failures, "merge": merged}
 
 
+def _read_media_library():
+    """Read LOOK's local media discovery index without importing the LOOK UI layer."""
+    with MEDIA_LIBRARY_LOCK:
+        try:
+            data = json.loads(LOOK_MEDIA_LIBRARY.read_text(encoding="utf-8"))
+        except (OSError, ValueError, TypeError):
+            data = {}
+    return data if isinstance(data, dict) else {}
+
+
+def _write_media_library(data):
+    LOOK_MEDIA_LIBRARY.parent.mkdir(parents=True, exist_ok=True)
+    with MEDIA_LIBRARY_LOCK:
+        tmp = LOOK_MEDIA_LIBRARY.with_suffix(".json.tmp")
+        tmp.write_text(json.dumps(data, indent=2, sort_keys=True) + "\n", encoding="utf-8")
+        try:
+            os.chmod(tmp, 0o600)
+        except OSError:
+            pass
+        tmp.replace(LOOK_MEDIA_LIBRARY)
+    with MEDIA_CATALOG_LOCK:
+        MEDIA_CATALOG_CACHE["at"] = 0.0
+        MEDIA_CATALOG_CACHE["data"] = None
+        MEDIA_CATALOG_CACHE["local_mtime_ns"] = -1
+
+
+def _local_media_catalog():
+    """Publish discovered media as catalog rows; bytes remain owned by their source node."""
+    library = _read_media_library()
+    node = identity()["name"]
+    rows = []
+    for raw in library.get("entries") or []:
+        if not isinstance(raw, dict) or not raw.get("path"):
+            continue
+        row = dict(raw)
+        row["node"] = node
+        row["identified"] = bool(str(row.get("digest") or "").startswith("sha256:"))
+        rows.append(row)
+    return {
+        "schema": "fabric-media-catalog-v1",
+        "node": node,
+        "roots": [str(x) for x in (library.get("roots") or [])],
+        "updated": float(library.get("updated") or 0.0),
+        "entries": rows,
+        "count": len(rows),
+        "identified": sum(1 for row in rows if row.get("identified")),
+    }
+
+
+def _identify_media_entry(entry_id):
+    """Promote one already-scanned local path to content-addressed Fabric identity."""
+    entry_id = str(entry_id or "").strip()
+    if not entry_id:
+        raise ValueError("media entry id required")
+    library = _read_media_library()
+    entries = library.get("entries") or []
+    selected = None
+    for row in entries:
+        if isinstance(row, dict) and str(row.get("id") or "") == entry_id:
+            selected = row
+            break
+    if selected is None:
+        raise FileNotFoundError(entry_id)
+    path = str(selected.get("path") or "")
+    meta = ARTIFACTS.register_file(path, media_type=str(selected.get("media_type") or "") or None,
+                                   name=str(selected.get("title") or Path(path).name))
+    selected["digest"] = meta["digest"]
+    selected["identified_at"] = now()
+    library["updated"] = now()
+    _write_media_library(library)
+    row = dict(selected)
+    row["node"] = identity()["name"]
+    row["identified"] = True
+    return {"ok": True, "entry": row, "artifact": _artifact_public_metadata(meta)}
+
+
+def _fabric_media_catalog(force=False):
+    """Union media discoveries from currently reachable trusted Fabric nodes."""
+    try:
+        local_mtime_ns = int(LOOK_MEDIA_LIBRARY.stat().st_mtime_ns)
+    except OSError:
+        local_mtime_ns = -1
+    with MEDIA_CATALOG_LOCK:
+        cached = MEDIA_CATALOG_CACHE.get("data")
+        age = now() - float(MEDIA_CATALOG_CACHE.get("at") or 0.0)
+        same_local = int(MEDIA_CATALOG_CACHE.get("local_mtime_ns") or -1) == local_mtime_ns
+        if cached is not None and not force and age < 3.0 and same_local:
+            return cached
+
+    local = _local_media_catalog()
+    entries = list(local.get("entries") or [])
+    nodes = [{"node": local.get("node"), "count": local.get("count", 0),
+              "identified": local.get("identified", 0), "online": True}]
+    errors = []
+    snapshot = {"self": node_info(), "peers": PEERS.public()}
+    for peer in snapshot.get("peers") or []:
+        ad = peer.get("node") or {}
+        name = ((ad.get("identity") or {}).get("name") or peer.get("name"))
+        if not name or not peer.get("dns") or not ad:
+            continue
+        try:
+            remote = http_json(_remote_url(snapshot, name, "/v1/media/catalog"), timeout=1.0)
+            remote_rows = [dict(row) for row in (remote.get("entries") or []) if isinstance(row, dict)]
+            entries.extend(remote_rows)
+            nodes.append({"node": name, "count": len(remote_rows),
+                          "identified": sum(1 for row in remote_rows if row.get("digest")), "online": True})
+        except Exception as exc:
+            errors.append({"node": name, "error": str(exc)})
+
+    result = {
+        "schema": "fabric-media-catalog-v1",
+        "generated": now(),
+        "entries": entries,
+        "nodes": nodes,
+        "locations": len(entries),
+        "identified_locations": sum(1 for row in entries if row.get("digest")),
+        "errors": errors,
+    }
+    with MEDIA_CATALOG_LOCK:
+        MEDIA_CATALOG_CACHE["at"] = now()
+        MEDIA_CATALOG_CACHE["data"] = result
+        MEDIA_CATALOG_CACHE["local_mtime_ns"] = local_mtime_ns
+    return result
+
+
+def _local_artifact_catalog():
+    node = identity()["name"]
+    rows = []
+    for meta in ARTIFACTS.list_metadata():
+        row = _artifact_public_metadata(meta)
+        row["node"] = node
+        rows.append(row)
+    return {"schema": "fabric-artifact-catalog-v1", "node": node, "artifacts": rows, "count": len(rows)}
+
+
+def _fabric_artifact_catalog():
+    local = _local_artifact_catalog()
+    by_digest = {}
+    errors = []
+    snapshot = {"self": node_info(), "peers": PEERS.public()}
+
+    def add_rows(payload, fallback_node):
+        for raw in payload.get("artifacts") or []:
+            if not isinstance(raw, dict):
+                continue
+            row = dict(raw)
+            digest = str(row.get("digest") or "")
+            if not digest:
+                continue
+            node = str(row.get("node") or fallback_node)
+            current = by_digest.setdefault(digest, {k: v for k, v in row.items() if k != "node"})
+            locations = current.setdefault("locations", [])
+            if node and node not in locations:
+                locations.append(node)
+
+    add_rows(local, str(local.get("node") or "local"))
+    for peer in snapshot.get("peers") or []:
+        ad = peer.get("node") or {}
+        name = ((ad.get("identity") or {}).get("name") or peer.get("name"))
+        if not name or not peer.get("dns") or not ad:
+            continue
+        try:
+            add_rows(http_json(_remote_url(snapshot, name, "/v1/artifacts"), timeout=1.0), name)
+        except Exception as exc:
+            errors.append({"node": name, "error": str(exc)})
+    artifacts = sorted(by_digest.values(), key=lambda row: (str(row.get("media_type") or ""), str(row.get("name") or "").casefold()))
+    return {"schema": "fabric-artifact-catalog-v1", "artifacts": artifacts,
+            "count": len(artifacts), "errors": errors, "generated": now()}
+
+
 def _artifact_public_metadata(meta):
     """Return artifact facts safe to expose to peer/browser consumers."""
     visible = {k: v for k, v in dict(meta or {}).items() if k not in {"path", "mtime_ns"}}
@@ -1870,7 +2045,7 @@ def _artifact_target_url(host, port, target, digest):
 
 
 class API(BaseHTTPRequestHandler):
-    server_version = "FCLNode/5.2.16"
+    server_version = "FCLNode/5.2.17"
 
     def setup(self):
         self._metric_request_id = None
@@ -2026,6 +2201,14 @@ class API(BaseHTTPRequestHandler):
             try: since = int((q.get("since") or [0])[0])
             except Exception: since = 0
             return self.sendj(200, {"events": FABRIC_STORE.events(since=since)})
+        if path == "/v1/media/catalog":
+            return self.sendj(200, _local_media_catalog())
+        if path == "/v1/media/fabric":
+            return self.sendj(200, _fabric_media_catalog())
+        if path == "/v1/artifacts":
+            return self.sendj(200, _local_artifact_catalog())
+        if path == "/v1/artifacts/fabric":
+            return self.sendj(200, _fabric_artifact_catalog())
         if path == "/v1/ui/state":
             db = FABRIC_STORE.health()
             worker_age = max(0.0, now() - float(WORKER_HEALTH.get("last_loop") or 0))
@@ -2182,6 +2365,13 @@ class API(BaseHTTPRequestHandler):
                         SUP.active.cancel_requested = True
             JOB_WAKE.set()
             return self.sendj(200 if ok else 404, {"ok": ok})
+        if path == "/v1/media/identify":
+            try:
+                return self.sendj(200, _identify_media_entry(d.get("id")))
+            except FileNotFoundError:
+                return self.sendj(404, {"ok": False, "error": "media entry not found"})
+            except Exception as exc:
+                return self.sendj(400, {"ok": False, "error": str(exc)})
         if path == "/v1/artifacts":
             try:
                 encoded = str(d.get("base64") or "")
@@ -3217,7 +3407,7 @@ def main():
     ap=argparse.ArgumentParser(description="Future Crash + LOOK unified node")
     ap.add_argument("command",nargs="?",default="serve",
         choices=["serve","status","nodes","activity","pulse","fabric","watch","dashboard","models","qualify","services","service",
-                 "jobs","job","submit","packet","cancel","events","http","beacon","lights","artifact-add","artifact"])
+                 "jobs","job","submit","packet","cancel","events","http","beacon","lights","artifact-add","artifact","artifacts","media-catalog","media-identify"])
     ap.add_argument("args",nargs="*")
     ap.add_argument("--node",dest="node",default=None,help="target Fabric node name")
     ap.add_argument("--json",action="store_true",help="raw JSON where a human view exists")
@@ -3278,6 +3468,34 @@ def main():
                 data=_target_get(a.host,a.port,a.node,path)
                 if a.command=="models" and not a.json: _print_models(data,a.node or "local")
                 else: print(json.dumps(data,indent=2))
+                return 0
+            if a.command=="media-catalog":
+                payload = _target_get(a.host, a.port, a.node, "/v1/media/catalog") if a.node else _daemon_get(a.host, a.port, "/v1/media/fabric")
+                if a.json:
+                    print(json.dumps(payload, indent=2))
+                else:
+                    print(f"FABRIC MEDIA · {payload.get('locations', payload.get('count',0)):,} scanned locations · {payload.get('identified_locations', payload.get('identified',0)):,} identified")
+                    for row in payload.get("nodes") or []:
+                        print(f"  {str(row.get('node') or '?'):<20} {int(row.get('count') or 0):>6,} scanned · {int(row.get('identified') or 0):>6,} SHA")
+                return 0
+            if a.command=="media-identify":
+                if not a.args: ap.error("media-identify requires ENTRY_ID")
+                result = _target_post(a.host, a.port, a.node, "/v1/media/identify", {"id": a.args[0]}, timeout=600.0)
+                if a.json:
+                    print(json.dumps(result, indent=2))
+                else:
+                    entry=result.get("entry") or {}
+                    print(f"FABRIC MEDIA · identified {entry.get('artist') or ''} {entry.get('title') or entry.get('id') or ''}".strip())
+                    print(f"  {(result.get('artifact') or {}).get('digest','?')}")
+                return 0
+            if a.command=="artifacts":
+                payload = _daemon_get(a.host, a.port, "/v1/artifacts/fabric") if not a.node else _target_get(a.host, a.port, a.node, "/v1/artifacts")
+                if a.json:
+                    print(json.dumps(payload, indent=2))
+                else:
+                    print(f"FABRIC ARTIFACTS · {int(payload.get('count') or 0):,}")
+                    for row in (payload.get("artifacts") or [])[:80]:
+                        print(f"  {str(row.get('digest') or '')[:20]:<20}  {str(row.get('media_type') or ''):<22}  {row.get('name') or '?'}")
                 return 0
             if a.command=="artifact-add":
                 if not a.args: ap.error("artifact-add requires PATH")

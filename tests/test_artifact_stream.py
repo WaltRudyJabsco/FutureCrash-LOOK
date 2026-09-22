@@ -50,6 +50,18 @@ class ArtifactStreamingTests(unittest.TestCase):
             with self.assertRaises(OSError):
                 store.path_for(meta["digest"])
 
+
+    def test_artifact_catalog_lists_metadata_without_payload_reads(self):
+        with tempfile.TemporaryDirectory() as td:
+            root = Path(td)
+            source = root / "song.flac"
+            source.write_bytes(b"catalog me")
+            store = ArtifactStore(root / "artifacts")
+            meta = store.register_file(source)
+            rows = store.list_metadata()
+            self.assertEqual([row["digest"] for row in rows], [meta["digest"]])
+            self.assertEqual(rows[0]["storage"], "external")
+
     def test_byte_range_parser(self):
         self.assertEqual(node._parse_byte_range(None, 100), (0, 99, False))
         self.assertEqual(node._parse_byte_range("bytes=10-19", 100), (10, 19, True))

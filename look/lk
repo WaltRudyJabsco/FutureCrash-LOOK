@@ -24,7 +24,7 @@ try:
 except Exception:
     readline = None
 
-VERSION="4.45.0"
+VERSION="4.45.1"
 
 LOOK_WORDMARK = r"""       ██╗      ██╗  ██╗
        ██║      ██║ ██╔╝
@@ -1500,12 +1500,16 @@ MAKE
 MEDIA
   lk player            tiny live miniplayer over LOOK MediaSession
   lk media             show current queue / state / track
-  lk media play TARGET play file, directory, or indexed library query
+  lk media browse      LOOK selector over the online Fabric catalog
+  lk media find QUERY  search + select without retyping exact names
+  lk media fabric      online-node media totals + SHA identity state
+  lk media identify QUERY|PATH|--all
+                       promote discoveries to SHA identity; --all is local
+  lk media play TARGET play file, directory, or Fabric catalog query
   lk media play TARGET --shuffle
                        construct a shuffled LOOK-owned queue
   lk media queue       inspect the canonical queue
-  lk media scan ROOT   fast dependency-free library index
-  lk media find QUERY  search artist / album / title / path
+  lk media scan ROOT   fast dependency-free local discovery index
   lk media save NAME   save current queue as a playlist
   lk media load NAME   restore + play a saved playlist
   lk media playlists   list saved playlists
@@ -7954,7 +7958,7 @@ def _run_filesystem_tool_impl(workspace, name, args, profile="workspace"):
         return f"File tool internal error: {type(exc).__name__}: {exc}"
     return f"Unknown file tool: {name}"
 
-LOOK_INFO_USER_AGENT="LOOK-Shell/4.45.0 (local text client)"
+LOOK_INFO_USER_AGENT="LOOK-Shell/4.45.1 (local text client)"
 
 def _run_filesystem_tool(workspace, name, args, profile="workspace"):
     global _FILESYSTEM_ACCESS_PROFILE
@@ -12739,11 +12743,87 @@ def _media_fabric_cli(args):
         raise RuntimeError("Fabric artifact command returned invalid JSON") from exc
 
 
+def _media_update_identity_for_path(path,digest):
+    """Attach expensive SHA identity to an existing cheap scan row."""
+    if not digest:
+        return
+    target=str(Path(path).expanduser().resolve())
+    library=_media_library()
+    changed=False
+    for row in library.get("entries") or []:
+        if str(row.get("path") or "") == target:
+            row["digest"]=str(digest)
+            row["identified_at"]=time.time()
+            changed=True
+            break
+    if changed:
+        library["updated"]=time.time()
+        _media_save_library(library)
+
+
 def _media_register(path):
     target=Path(path).expanduser().resolve()
     if not target.is_file():
         raise FileNotFoundError(target)
-    return _media_fabric_cli(["artifact-add",str(target)])
+    payload=_media_fabric_cli(["artifact-add",str(target)])
+    meta=payload.get("artifact") or {}
+    _media_update_identity_for_path(target,meta.get("digest"))
+    return payload
+
+
+def _media_fabric_catalog():
+    """One online Fabric catalog, with a local-library fallback when the node is down."""
+    try:
+        payload=_media_fabric_cli(["media-catalog"])
+        if isinstance(payload,dict):
+            return payload
+    except RuntimeError:
+        pass
+    local=_media_library()
+    node=platform.node() or "local"
+    rows=[]
+    for raw in local.get("entries") or []:
+        row=dict(raw)
+        row["node"]=node
+        row["identified"]=bool(row.get("digest"))
+        rows.append(row)
+    return {
+        "schema":"fabric-media-catalog-v1",
+        "entries":rows,
+        "nodes":[{"node":node,"count":len(rows),"identified":sum(1 for row in rows if row.get("digest")),"online":True}],
+        "locations":len(rows),
+        "identified_locations":sum(1 for row in rows if row.get("digest")),
+        "fallback":True,
+    }
+
+
+def _media_catalog_entries():
+    payload=_media_fabric_catalog()
+    nodes=payload.get("nodes") or []
+    local_node=str((nodes[0] or {}).get("node") or platform.node() or "local") if nodes else (platform.node() or "local")
+    return media_core.merge_catalog_entries(payload.get("entries") or [],local_node=local_node),payload
+
+
+def _media_identify_catalog_entry(row):
+    """Promote one discovered row to SHA identity on the node that owns its bytes."""
+    if row.get("digest"):
+        return dict(row)
+    node=str(row.get("node") or "").strip()
+    entry_id=str(row.get("id") or "").strip()
+    path=str(row.get("path") or "").strip()
+    if path and Path(path).expanduser().is_file():
+        payload=_media_register(path)
+        out=dict(row)
+        out["digest"]=(payload.get("artifact") or {}).get("digest")
+        return out
+    if node and entry_id:
+        payload=_media_fabric_cli(["media-identify","--node",node,entry_id])
+        entry=payload.get("entry") or {}
+        out=dict(row)
+        out.update(entry)
+        out["digest"]=(payload.get("artifact") or {}).get("digest") or entry.get("digest")
+        return out
+    raise RuntimeError("media item has no reachable source to identify")
 
 
 def _media_artifact(digest,node=None):
@@ -12894,6 +12974,11 @@ def _media_entry_source(entry):
         if target.is_file():
             return target.resolve().as_uri()
     digest=str(entry.get("digest") or "").strip()
+    if not digest and entry.get("node") and entry.get("id"):
+        identified=_media_identify_catalog_entry(entry)
+        digest=str(identified.get("digest") or "").strip()
+        if digest:
+            entry.update(identified)
     if digest:
         payload=_media_artifact(digest,str(entry.get("node") or "") or None)
         url=str(payload.get("stream_url") or "")
@@ -13141,7 +13226,8 @@ def _media_library_command():
     entries=library.get("entries") or []
     artists={str(x.get("artist") or "") for x in entries if x.get("artist")}
     albums={(str(x.get("artist") or ""),str(x.get("album") or "")) for x in entries if x.get("album")}
-    print(f"LOOK MEDIA LIBRARY · {len(entries):,} items · {len(artists):,} artists · {len(albums):,} albums")
+    identified=sum(1 for row in entries if row.get("digest"))
+    print(f"LOOK MEDIA LIBRARY · {len(entries):,} items · {len(artists):,} artists · {len(albums):,} albums · {identified:,} SHA")
     if not library.get("roots"):
         print("  no roots indexed · run: lk media scan /path/to/music")
     else:
@@ -13151,28 +13237,198 @@ def _media_library_command():
     return 0
 
 
+def _media_fabric_command():
+    entries,payload=_media_catalog_entries()
+    physical=int(payload.get("locations") or len(payload.get("entries") or []))
+    identified=int(payload.get("identified_locations") or sum(1 for row in payload.get("entries") or [] if row.get("digest")))
+    print(f"FABRIC MEDIA · {len(entries):,} logical items · {physical:,} scanned locations · {identified:,} SHA locations")
+    for node in payload.get("nodes") or []:
+        print(f"  {str(node.get('node') or '?'):<20} {int(node.get('count') or 0):>7,} scanned · {int(node.get('identified') or 0):>7,} SHA")
+    if payload.get("errors"):
+        print(f"  {len(payload['errors'])} node catalog error(s)")
+    if payload.get("fallback"):
+        print("  local fallback · Unified Node catalog unavailable")
+    return 0
+
+
+def _media_row_label(row):
+    artist=str(row.get("artist") or "").strip()
+    album=str(row.get("album") or "").strip()
+    title=str(row.get("title") or Path(str(row.get("path") or "media")).name).strip()
+    track=row.get("track")
+    prefix=f"{track:02d} " if isinstance(track,int) else ""
+    main=f"{artist} — {prefix}{title}" if artist else f"{prefix}{title}"
+    if album:
+        main+=f" · {album}"
+    return main
+
+
+def _media_queue_append(rows):
+    rows=[media_core.queue_entry(row) for row in rows if isinstance(row,dict)]
+    if not rows:
+        return 0
+    session=_media_sync_session() or media_core.new_session([])
+    session=media_core.normalize_session(session)
+    first_new=len(session["queue"])
+    session["queue"].extend(rows)
+    if _media_mpv_alive():
+        runtime_map=session.get("runtime_queue_indices")
+        if not isinstance(runtime_map,list):
+            runtime_map=list(range(first_new))
+        for offset,row in enumerate(rows):
+            try:
+                source=_media_entry_source(row)
+                result=_media_mpv_request(["loadfile",source,"append-play"])
+                if result and result.get("error")=="success":
+                    runtime_map.append(first_new+offset)
+            except Exception:
+                # Canonical queue still keeps the item; a later restart can retry it.
+                pass
+        session["runtime_queue_indices"]=runtime_map
+    _media_save_session(session)
+    return len(rows)
+
+
+def _media_selector(rows,title="FABRIC MEDIA",initial_query=""):
+    """LOOK-native search/select surface. Display text never becomes an identifier."""
+    rows=list(rows)
+    if not rows:
+        print("LOOK media · no matches")
+        return ("none",None)
+    if not (sys.stdin.isatty() and sys.stdout.isatty()):
+        for row in rows[:100]:
+            node=str(row.get("node") or "local")
+            state="sha" if row.get("digest") else "scan"
+            print(f"  {_media_row_label(row)}  [{node} · {state}]")
+        if len(rows)>100:
+            print(f"  … {len(rows)-100:,} more")
+        return ("listed",None)
+
+    fd=sys.stdin.fileno()
+    old=termios.tcgetattr(fd)
+    query=str(initial_query or "")
+    filtering=False
+    idx=0
+    notice=""
+    selected_ids=set()
+    action=("none",None)
+    try:
+        tty.setcbreak(fd)
+        while True:
+            terms=query.casefold().split()
+            visible=[row for row in rows if all(term in media_core._haystack(row) for term in terms)]
+            idx=max(0,min(idx,max(0,len(visible)-1)))
+            terminal=shutil.get_terminal_size((110,32))
+            height=max(10,terminal.lines)
+            width=max(56,terminal.columns)
+            usable=max(4,height-7)
+            top=max(0,min(max(0,len(visible)-usable),idx-usable+1))
+            page=visible[top:top+usable]
+            sys.stdout.write("\033[2J\033[H")
+            _title(title,f"{len(visible):,} of {len(rows):,}")
+            for n,row in enumerate(page,start=top):
+                rid=str(row.get("digest") or f"{row.get('node','')}:{row.get('id','')}")
+                mark=_c("›","1;36") if n==idx else " "
+                queued=_c("+","32") if rid in selected_ids else " "
+                node=str(row.get("node") or "local")
+                identity="◆" if row.get("digest") else "·"
+                right=f"{identity} {node}"
+                label=_media_row_label(row)
+                max_label=max(12,width-len(right)-7)
+                if len(label)>max_label:
+                    label=label[:max(1,max_label-1)]+"…"
+                print(f"{mark}{queued} {label:<{max_label}}  {_c(right,'2')}")
+            if not visible:
+                print("  no matches")
+            if filtering:
+                footer=f"{_c('FILTER','1;36')} {query}█  {_c('Enter done · Esc clear/back','2')}"
+            else:
+                footer=_c("↑↓ choose · Enter play · Space queue · A play matches · / filter · I info · Esc exit","2")
+                if query:
+                    footer+=f"  {_c('filter: '+query,'36')}"
+            if notice:
+                footer+="  "+_c(notice,"33")
+                notice=""
+            print("\n"+footer,end="",flush=True)
+            key=_read_tty_key(fd)
+            if key in {"\x03"}:
+                break
+            if key=="esc":
+                if filtering and query:
+                    query=""; idx=0; continue
+                if filtering:
+                    filtering=False; continue
+                break
+            if key in {"up","k"} and visible:
+                idx=max(0,idx-1); continue
+            if key in {"down","j"} and visible:
+                idx=min(len(visible)-1,idx+1); continue
+            if key=="pageup" and visible:
+                idx=max(0,idx-usable); continue
+            if key=="pagedown" and visible:
+                idx=min(len(visible)-1,idx+usable); continue
+            if filtering:
+                if key in {"\r","\n"}:
+                    filtering=False; continue
+                if key in {"\x7f","\b"}:
+                    if query: query=query[:-1]; idx=0
+                    continue
+                if len(key)==1 and key.isprintable():
+                    query+=key; idx=0
+                continue
+            if key=="/":
+                filtering=True; continue
+            if key in {"\r","\n"} and visible:
+                action=("play",visible[idx]); break
+            if key==" " and visible:
+                row=visible[idx]
+                rid=str(row.get("digest") or f"{row.get('node','')}:{row.get('id','')}")
+                if rid in selected_ids:
+                    notice="already queued"
+                else:
+                    _media_queue_append([row]); selected_ids.add(rid); notice="queued"
+                continue
+            if key=="A" and visible:
+                action=("play_all",list(visible)); break
+            if key in {"i","I"} and visible:
+                row=visible[idx]
+                digest=str(row.get("digest") or "unidentified")
+                notice=f"{row.get('format','?')} · {int(row.get('bytes') or 0)/1024/1024:.1f} MiB · {digest[:20]}"
+                continue
+    finally:
+        termios.tcsetattr(fd,termios.TCSADRAIN,old)
+        if sys.stdout.isatty():
+            sys.stdout.write("\n")
+    return action
+
+
 def _media_find_command(args):
-    if not args:
-        print("usage: lk media find QUERY")
-        return 2
-    query=" ".join(args)
-    rows=media_core.search_entries(_media_library(),query)
-    print(f"LOOK MEDIA FIND · {query} · {len(rows):,} match{'es' if len(rows)!=1 else ''}")
-    for row in rows[:30]:
-        artist=str(row.get("artist") or "")
-        album=str(row.get("album") or "")
-        track=row.get("track")
-        prefix=f"{track:02d} " if isinstance(track,int) else ""
-        left=" · ".join(x for x in (artist,album) if x)
-        print(f"  {left + ' · ' if left else ''}{prefix}{row.get('title') or Path(row.get('path','')).name}")
-    if len(rows)>30:
-        print(f"  … {len(rows)-30:,} more")
+    query=" ".join(args).strip()
+    entries,_=_media_catalog_entries()
+    rows=media_core.search_entries({"entries":entries},query) if query else entries
+    action,payload=_media_selector(rows,"FABRIC MEDIA FIND",query)
+    if action=="play":
+        return _media_launch_session(media_core.new_session([payload]))
+    if action=="play_all":
+        return _media_launch_session(media_core.new_session(payload))
     return 0 if rows else 1
+
+
+def _media_browse_command(args):
+    query=" ".join(args).strip()
+    entries,_=_media_catalog_entries()
+    rows=media_core.search_entries({"entries":entries},query) if query else entries
+    action,payload=_media_selector(rows,"FABRIC MEDIA",query)
+    if action=="play":
+        return _media_launch_session(media_core.new_session([payload]))
+    if action=="play_all":
+        return _media_launch_session(media_core.new_session(payload))
+    return 0
 
 
 def _media_group_command(field,args):
     query=" ".join(args).casefold().strip()
-    rows=_media_library().get("entries") or []
+    rows,_=_media_catalog_entries()
     counts={}
     for row in rows:
         value=str(row.get(field) or "").strip()
@@ -13180,10 +13436,70 @@ def _media_group_command(field,args):
             continue
         counts[value]=counts.get(value,0)+1
     label="ARTISTS" if field=="artist" else "ALBUMS"
-    print(f"LOOK MEDIA {label} · {len(counts):,}")
+    print(f"FABRIC MEDIA {label} · {len(counts):,}")
     for value,count in sorted(counts.items(),key=lambda item:item[0].casefold())[:200]:
         print(f"  {count:>4}  {value}")
     return 0
+
+
+def _media_complete_command(args):
+    query=" ".join(args).strip()
+    rows,_=_media_catalog_entries()
+    for value in media_core.completion_candidates(rows,query,limit=80):
+        print(value)
+    return 0
+
+
+def _media_identify_command(args):
+    all_items="--all" in args
+    clean=[x for x in args if x!="--all"]
+    query=" ".join(clean).strip()
+    rows,_=_media_catalog_entries()
+    if all_items:
+        # Bulk hashing is intentionally node-local. A single typo must not launch
+        # thousands of serial remote hashing requests across the Fabric.
+        rows=[dict(row) for row in (_media_library().get("entries") or [])]
+    if not all_items:
+        if not query:
+            print("usage: lk media identify QUERY|PATH|--all")
+            return 2
+        path=Path(query).expanduser()
+        if path.exists():
+            if path.is_file():
+                wanted=[row for row in rows if str(row.get("path") or "")==str(path.resolve())]
+                if not wanted:
+                    wanted=[media_core.entry_from_path(path)]
+            else:
+                wanted=[]
+                base=path.resolve()
+                for row in rows:
+                    try: Path(str(row.get("path") or "")).resolve().relative_to(base); wanted.append(row)
+                    except (ValueError,OSError): pass
+        else:
+            wanted=media_core.search_entries({"entries":rows},query)
+    else:
+        wanted=rows
+    pending=[row for row in wanted if not row.get("digest")]
+    if not wanted:
+        print("LOOK media · no matches")
+        return 1
+    if not pending:
+        print(f"FABRIC MEDIA · {len(wanted):,} item(s) already identified")
+        return 0
+    print(f"FABRIC MEDIA · identifying {len(pending):,} item(s) · SHA-256 content identity")
+    done=0; failed=0
+    for row in pending:
+        try:
+            _media_identify_catalog_entry(row)
+            done+=1
+        except Exception as exc:
+            failed+=1
+            if failed<=5:
+                print(f"  × {_media_row_label(row)} · {exc}")
+        if len(pending)>20 and (done+failed)%25==0:
+            print(f"  {done+failed:>6,}/{len(pending):,}")
+    print(f"FABRIC MEDIA · identified {done:,} · failed {failed:,}")
+    return 0 if failed==0 else 1
 
 
 def _media_resolve_targets(args):
@@ -13222,9 +13538,10 @@ def _media_resolve_targets(args):
                 raise ValueError(f"no playable media under {path}")
             return rows,shuffle
 
-    rows=media_core.resolve_query(_media_library(),text)
+    catalog,_=_media_catalog_entries()
+    rows=media_core.resolve_query({"entries":catalog},text)
     if not rows:
-        raise ValueError(f"no library match for {text!r}; run lk media find or lk media scan")
+        raise ValueError(f"no Fabric media match for {text!r}; run lk media find or lk media scan")
     return rows,shuffle
 
 
@@ -13489,7 +13806,11 @@ def media(args):
     if raw in {"stream","open"}: return _media_stream_command(args[1:])
     if raw=="scan": return _media_scan_command(args[1:])
     if raw in {"library","lib"}: return _media_library_command()
+    if raw in {"fabric","catalog"}: return _media_fabric_command()
     if raw=="find": return _media_find_command(args[1:])
+    if raw=="browse": return _media_browse_command(args[1:])
+    if raw=="identify": return _media_identify_command(args[1:])
+    if raw=="complete": return _media_complete_command(args[1:])
     if raw=="artists": return _media_group_command("artist",args[1:])
     if raw=="albums": return _media_group_command("album",args[1:])
     if raw=="queue": return _media_queue_command()
@@ -13508,7 +13829,7 @@ def media(args):
     aliases={"playpause":"toggle","previous":"prev","back":"prev"}
     action=aliases.get(raw,raw)
     if action not in {"status","play","pause","toggle","next","prev","stop"}:
-        print("usage: lk media [status|play [TARGET] [--shuffle]|pause|toggle|next|prev|stop|queue|clear]")
+        print("usage: lk media [browse|find QUERY|fabric|identify QUERY|--all|play [TARGET] [--shuffle]|pause|toggle|next|prev|stop|queue|clear]")
         print("                [scan ROOT|library|find QUERY|artists|albums|playlist ...|repeat [off|all]]")
         print("                [add PATH|stream PATH|stream @NODE DIGEST|info [@NODE] DIGEST]")
         return 2

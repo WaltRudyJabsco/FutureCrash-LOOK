@@ -1,3 +1,10 @@
+## 4.45.1 — Fabric media catalog + selector
+
+- `lk media find`/`browse` now use a native LOOK selector instead of requiring exact title retyping.
+- Add `lk media fabric`, `lk media identify`, and catalog-backed media completion.
+- Merge online catalog rows by SHA, preserve multi-node locations, and prefer local copies.
+- Preserve verified digest metadata across unchanged rescans.
+
 ## 4.45.0 — Media sessions + miniplayer
 
 - Add a dependency-free media library/session core.

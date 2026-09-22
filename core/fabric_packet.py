@@ -419,6 +419,20 @@ class ArtifactStore:
         data.setdefault("storage", "managed")  # Backward compatibility with pre-5.2.15 artifacts.
         return data
 
+    def list_metadata(self) -> list[dict[str, Any]]:
+        """List known local artifacts without touching or loading their payload bytes."""
+        rows: list[dict[str, Any]] = []
+        for meta in sorted(self.root.glob("*.json"), key=lambda p: p.name):
+            try:
+                data = json.loads(meta.read_text())
+            except (OSError, ValueError, TypeError):
+                continue
+            if not isinstance(data, dict) or not str(data.get("digest") or "").startswith("sha256:"):
+                continue
+            data.setdefault("storage", "managed")
+            rows.append(data)
+        return rows
+
     def path_for(self, digest: str) -> tuple[dict[str, Any], Path]:
         """Resolve an artifact to a local readable path without loading its bytes."""
         h = self._hex(digest)

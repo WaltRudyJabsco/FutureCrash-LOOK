@@ -608,7 +608,10 @@ lk player
 lk media
 lk media scan /srv/media/music
 lk media library
+lk media fabric
+lk media browse
 lk media find "talking heads"
+lk media identify --all
 lk media play "Remain in Light"
 lk media play /srv/media/music/Talking\ Heads --shuffle
 lk media queue
@@ -621,6 +624,8 @@ lk media stream @3090 sha256:...
 lk media add /path/to/song.flac
 lk media info @3090 sha256:...
 ```
+
+`find` and `browse` use the normal LOOK selection model: display labels are never command identifiers. Enter plays the highlighted item, Space queues it, `/` filters, and the same Fabric catalog supplies shell completion. `lk media fabric` shows the union of scanned media on online nodes; `identify` progressively promotes cheap scan rows into SHA-addressed artifacts without making every scan expensive.
 
 macOS can still control an already-open Music or Spotify instance through AppleScript, and Linux can control normal MPRIS players through `playerctl`. When LOOK owns a Fabric stream session, optional `mpv` is preferred as the playback edge and LOOK talks to its JSON IPC socket directly, so the same transport controls operate the streamed artifact. Fast aliases remain `mm` (toggle), `mn` (next), `mp` (previous).
 
