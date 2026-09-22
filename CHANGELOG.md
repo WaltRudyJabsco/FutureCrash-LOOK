@@ -1,3 +1,13 @@
+# 5.2.18 — LO Media Tools + LOOK Media Filter
+
+- Added first-class LO media tools: `media_search`, `media_play`, `media_queue`, and `media_control`.
+- Added conservative deterministic preflight for narrow local media commands so `lo play Talking Heads` cannot drift into web search.
+- Kept explicit online/video requests on the existing web-resource path.
+- Reworked `lk media find` around LOOK filter semantics with immediate filtering and Tab multi-select.
+- Added contextual uppercase selector actions: play, queue, queue visible matches, info, save playlist, and clear selection.
+- Kept exact catalog/artifact rows underneath human-readable labels.
+- Added regression coverage for LO media routing and selector semantics.
+
 # 5.2.17 — Fabric Media Catalog + LOOK Selector
 
 - Replace the awkward print-then-retype media search flow with a LOOK-native interactive selector: Enter plays, Space appends to the canonical queue, `A` plays the visible match set, `/` refines the filter, and `I` shows lightweight identity/format detail. Non-interactive output remains plain text.

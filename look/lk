@@ -6117,6 +6117,69 @@ def _temporal_context():
         "timezone, or relative dates from model knowledge or prior conversation."
     )
 
+def _lo_media_intent(prompt):
+    """Recognize narrow local-media commands before general inference/search.
+
+    This is intentionally conservative: media pronouns and explicitly-online requests
+    stay in the normal LO tool loop where resource context can resolve them correctly.
+    """
+    text=" ".join(str(prompt or "").strip().split())
+    if not text or _lo_explicit_web_scope(text):
+        return None
+    low=text.casefold().strip(" .!?")
+    if re.search(r"\b(this|that|it|these|those)\b",low):
+        return None
+
+    status_patterns=(r"^(?:what(?:'s| is) playing|now playing|what am i listening to)$",)
+    if any(re.match(pattern,low) for pattern in status_patterns):
+        return {"tool":"media_control","args":{"action":"status"}}
+    controls={
+        "pause":"pause","pause music":"pause","pause playback":"pause",
+        "resume":"play","resume music":"play","resume playback":"play",
+        "next":"next","next track":"next","next song":"next",
+        "previous":"previous","previous track":"previous","previous song":"previous",
+        "prev":"previous","stop":"stop","stop music":"stop","stop playback":"stop",
+    }
+    if low in controls:
+        return {"tool":"media_control","args":{"action":controls[low]}}
+
+    match=re.match(r"^(?:please\s+)?(play|queue|shuffle)\s+(.+?)$",text,re.I)
+    if not match:
+        return None
+    verb=match.group(1).casefold()
+    target=match.group(2).strip(" .!?")
+    if not target:
+        return None
+    if verb=="queue":
+        return {"tool":"media_queue","args":{"query":target}}
+    return {"tool":"media_play","args":{"query":target,"shuffle":verb=="shuffle"}}
+
+
+def _lo_media_direct_answer(tool_content,ok):
+    text=str(tool_content or "")
+    if ok and text.startswith("MEDIA PLAY OK"):
+        parts=[x.strip() for x in text.split("·")]
+        label=parts[2] if len(parts)>2 else "media"
+        count=parts[3] if len(parts)>3 else ""
+        return f"Playing {label}" + (f" · {count}" if count else "") + "."
+    if ok and text.startswith("MEDIA QUEUE OK"):
+        parts=[x.strip() for x in text.split("·")]
+        label=parts[2] if len(parts)>2 else "media"
+        count=parts[3] if len(parts)>3 else ""
+        return f"Queued {label}" + (f" · {count}" if count else "") + "."
+    if ok and text.startswith("MEDIA STATUS"):
+        return text.replace("MEDIA STATUS · ","",1)+"."
+    if ok and text.startswith("MEDIA CONTROL OK"):
+        action=text.split("·",2)[1].strip() if "·" in text else "done"
+        return action.capitalize()+"."
+    if "MEDIA NOT FOUND" in text:
+        query=text.split("·",1)[1].strip() if "·" in text else "that"
+        return f"I couldn't find {query} in the current Fabric media catalog."
+    if "MEDIA AMBIGUOUS" in text:
+        return "I found multiple local media matches. Use `lk media find` to pick one, or give me a more specific artist, album, or title."
+    return text or "Media action failed."
+
+
 def _lo_requires_weather(prompt):
     """Current/forecast weather is a live edge, never a model-knowledge answer."""
     text=" ".join(str(prompt or "").casefold().split())
@@ -6747,6 +6810,36 @@ def _capability_tools():
             "description":"List LOOK's persistent scheduled jobs. Read-only.",
             "parameters":{"type":"object","properties":{}}
         }},
+        {"type":"function","function":{
+            "name":"media_search",
+            "description":"Search the trusted Fabric media catalog across online nodes. Use for local music/video discovery instead of web_search or filesystem guessing. Returns exact catalog records and match grouping without playing anything.",
+            "parameters":{"type":"object","properties":{
+                "query":{"type":"string","description":"Artist, album, title, or other media text"},
+                "limit":{"type":"integer","minimum":1,"maximum":40}
+            },"required":["query"]}
+        }},
+        {"type":"function","function":{
+            "name":"media_play",
+            "description":"Play a local/Fabric media artist, album, title, path, or catalog query. This is the canonical tool for unqualified requests like 'play Talking Heads'; do not web-search first. Exact artist/album/title matches may expand to a queue.",
+            "parameters":{"type":"object","properties":{
+                "query":{"type":"string"},
+                "shuffle":{"type":"boolean"}
+            },"required":["query"]}
+        }},
+        {"type":"function","function":{
+            "name":"media_queue",
+            "description":"Add a local/Fabric media artist, album, title, or query to LOOK's canonical media queue without replacing the current queue.",
+            "parameters":{"type":"object","properties":{
+                "query":{"type":"string"}
+            },"required":["query"]}
+        }},
+        {"type":"function","function":{
+            "name":"media_control",
+            "description":"Control LOOK's current media session or inspect now-playing state. Use for pause, resume, next, previous, stop, and what-is-playing requests.",
+            "parameters":{"type":"object","properties":{
+                "action":{"type":"string","enum":["status","play","pause","toggle","next","previous","stop"]}
+            },"required":["action"]}
+        }},
     ]
 
 
@@ -6785,6 +6878,14 @@ def _run_capability_tool(name,args,workspace,profile):
             f"{j.get('id')} · {'on' if j.get('enabled',True) else 'off'} · {j.get('kind')} {j.get('spec')} · next {_when_label(j.get('next_run',0)) if j.get('next_run') else 'done'} · {j.get('prompt','')}"
             for j in rows[:40]
         )
+    if name=="media_search":
+        return _media_tool_search(args.get("query",""),args.get("limit",12))
+    if name=="media_play":
+        return _media_tool_play(args.get("query",""),shuffle=bool(args.get("shuffle",False)))
+    if name=="media_queue":
+        return _media_tool_queue(args.get("query",""))
+    if name=="media_control":
+        return _media_tool_control(args.get("action","status"))
     return f"Unknown capability tool: {name}"
 
 
@@ -6796,6 +6897,7 @@ _TOOL_POLICY = {
     "copy_path":("workspace","mutation"),"move_path":("workspace","mutation"),"remove_path":("workspace","mutation"),
     "make_directory":("workspace","mutation"),"open_url":("all","action"),
     "list_processes":("all","observation"),"listening_ports":("all","observation"),"system_snapshot":("all","observation"),
+    "media_search":("all","observation"),"media_play":("all","action"),"media_queue":("all","action"),"media_control":("all","action"),
     "run_command":("power","command"),
 }
 _PROFILE_RANK={"conservative":0,"workspace":1,"power":2,"unsafe":3}
@@ -9323,6 +9425,7 @@ def ollama_chat(force_search=False, initial_prompt=None, allow_start=True, host_
         else:
             messages.append({"role":"system","content":(
                 "RESOURCE SCOPE: unqualified open/play/find requests default to the operator's local world. "
+                "For music or media, use media_search/media_play/media_queue/media_control against the Fabric catalog before any web search or filesystem guessing. "
                 "Do not silently escalate a local miss to the public web; ask or wait for explicit online intent."
             )})
         latest_ref=_latest_resource(resource_refs,resource_archive)
@@ -9348,6 +9451,33 @@ def ollama_chat(force_search=False, initial_prompt=None, allow_start=True, host_
         messages=[m for m in messages if not (m.get("role")=="system" and str(m.get("content","")).startswith("TRUSTED TEMPORAL CONTEXT\n"))]
         messages.append({"role":"system","content":_temporal_context()})
         messages.append(user_message)
+
+        # Narrow local-media commands are deterministic capability requests, not
+        # general web/search questions. Resolve them before inference so a model
+        # cannot turn "play Talking Heads" into an internet search.
+        media_intent=None if force_search else _lo_media_intent(prompt)
+        if media_intent:
+            media_name=media_intent["tool"]
+            media_args=media_intent["args"]
+            detail=str(media_args.get("query") or media_args.get("action") or "media")
+            print(f"{_lo_label('media','35')}  {detail}")
+            with _activity("media"):
+                media_content,media_ok,_media_elapsed=_tool_transaction(
+                    media_name,media_args,
+                    lambda: _run_capability_tool(media_name,media_args,workspace,profile),
+                )
+            _lo_receipt("result",str(media_content).splitlines()[0],ok=media_ok,color="33")
+            answer=_lo_media_direct_answer(media_content,media_ok)
+            print("\n"+_lo_label("lo","35")+"\n"+_ollama_markup(answer)+"\n")
+            messages.append({"role":"assistant","content":answer})
+            if events:
+                events.emit("tool_done",tool=media_name,mode="preflight",elapsed_tool_ms=_media_elapsed,status=("ok" if media_ok else "failed"))
+                events.emit("response",text=answer)
+                events.emit("request_done",status=("ok" if media_ok else "needs_input"),rounds=0,tool_calls=1,prompt_tokens=0,output_tokens=0,load_ms=0)
+            _ai_foreground(False,"lo")
+            if one_shot:
+                return 0 if media_ok else 1
+            continue
 
         # Search mode is deliberately deterministic: search first, then answer.
         if force_search:
@@ -9761,13 +9891,19 @@ def ollama_chat(force_search=False, initial_prompt=None, allow_start=True, host_
                         with _activity("inspecting"):
                             tool_content,_ok,_elapsed=_tool_transaction(
                                 name,args,lambda: _run_system_inspection_tool(name,args))
-                    elif name in {"generate_image","schedule_prompt","schedule_list"}:
-                        label="image" if name=="generate_image" else "schedule"
-                        print(f"{_lo_label(label,'35')}  {name.replace('_',' ')}")
-                        with _activity("generating" if name=="generate_image" else "scheduling"):
+                    elif name in {"generate_image","schedule_prompt","schedule_list","media_search","media_play","media_queue","media_control"}:
+                        if name=="generate_image":
+                            label,activity="image","generating"
+                        elif name.startswith("media_"):
+                            label,activity="media","media"
+                        else:
+                            label,activity="schedule","scheduling"
+                        detail=str(args.get("query") or args.get("action") or name.replace("_"," "))
+                        print(f"{_lo_label(label,'35')}  {detail}")
+                        with _activity(activity):
                             tool_content,_ok,_elapsed=_tool_transaction(
                                 name,args,lambda: _run_capability_tool(name,args,workspace,profile))
-                        _lo_receipt("result",tool_content.splitlines()[0],ok=_ok,color="33")
+                        _lo_receipt("result",str(tool_content).splitlines()[0],ok=_ok,color="33")
                     elif name=="run_command":
                         if profile not in {"power","unsafe"}:
                             tool_content="Command execution is unavailable in this access profile."
@@ -12804,6 +12940,115 @@ def _media_catalog_entries():
     return media_core.merge_catalog_entries(payload.get("entries") or [],local_node=local_node),payload
 
 
+def _media_query_matches(query):
+    """Resolve catalog text and say whether the match is a stable human grouping."""
+    query=" ".join(str(query or "").split()).strip()
+    if not query:
+        return "none",[]
+    rows,_=_media_catalog_entries()
+    q=query.casefold()
+    exact_album=[r for r in rows if str(r.get("album") or "").casefold()==q]
+    if exact_album:
+        return "album",sorted(exact_album,key=media_core.entry_sort_key)
+    exact_artist=[r for r in rows if str(r.get("artist") or "").casefold()==q]
+    if exact_artist:
+        return "artist",sorted(exact_artist,key=media_core.entry_sort_key)
+    exact_title=[r for r in rows if str(r.get("title") or "").casefold()==q]
+    if exact_title:
+        return "title",sorted(exact_title,key=media_core.entry_sort_key)
+    fuzzy=media_core.search_entries({"entries":rows},query)
+    if len(fuzzy)==1:
+        return "item",fuzzy
+    # A partial artist spelling is still a stable grouping if every hit belongs to
+    # the same artist and the query actually occurs in that artist name.
+    artists={str(r.get("artist") or "").strip() for r in fuzzy if str(r.get("artist") or "").strip()}
+    if len(artists)==1:
+        artist=next(iter(artists))
+        if q and q in artist.casefold():
+            return "artist",sorted(fuzzy,key=media_core.entry_sort_key)
+    return "ambiguous",sorted(fuzzy,key=media_core.entry_sort_key)
+
+
+def _media_tool_search(query,limit=12):
+    query=" ".join(str(query or "").split()).strip()
+    try:
+        limit=max(1,min(40,int(limit or 12)))
+    except (TypeError,ValueError):
+        limit=12
+    kind,rows=_media_query_matches(query)
+    payload={
+        "edge":"MEDIA",
+        "operation":"search",
+        "query":query,
+        "match_kind":kind,
+        "matches":len(rows),
+        "results":[{
+            "id":row.get("digest") or row.get("id"),
+            "artist":row.get("artist") or "",
+            "album":row.get("album") or "",
+            "title":row.get("title") or "",
+            "node":row.get("node") or "",
+            "identified":bool(row.get("digest")),
+        } for row in rows[:limit]],
+    }
+    return json.dumps(payload,ensure_ascii=False)
+
+
+def _media_tool_play(query,shuffle=False):
+    query=" ".join(str(query or "").split()).strip()
+    if not query:
+        return _ToolResult(False,"needs_input","MEDIA NEEDS INPUT · what should I play?")
+    kind,rows=_media_query_matches(query)
+    if not rows:
+        return _ToolResult(False,"not_found",f"MEDIA NOT FOUND · {query}")
+    if kind=="ambiguous":
+        preview="; ".join(_media_row_label(row) for row in rows[:8])
+        return _ToolResult(False,"ambiguous",f"MEDIA AMBIGUOUS · {query} · {len(rows)} matches · {preview}")
+    session=media_core.new_session(rows,shuffle=bool(shuffle))
+    rc=_media_launch_session(session)
+    if rc!=0:
+        return _ToolResult(False,"failed",f"MEDIA PLAY FAILED · {query}")
+    label=query
+    if kind=="title" and len(rows)==1:
+        label=_media_row_label(rows[0])
+    return _ToolResult(True,"ok",f"MEDIA PLAY OK · {kind} · {label} · {len(rows)} item{'s' if len(rows)!=1 else ''}" + (" · shuffle" if shuffle else ""))
+
+
+def _media_tool_queue(query):
+    query=" ".join(str(query or "").split()).strip()
+    if not query:
+        return _ToolResult(False,"needs_input","MEDIA NEEDS INPUT · what should I queue?")
+    kind,rows=_media_query_matches(query)
+    if not rows:
+        return _ToolResult(False,"not_found",f"MEDIA NOT FOUND · {query}")
+    if kind=="ambiguous":
+        preview="; ".join(_media_row_label(row) for row in rows[:8])
+        return _ToolResult(False,"ambiguous",f"MEDIA AMBIGUOUS · {query} · {len(rows)} matches · {preview}")
+    count=_media_queue_append(rows)
+    return _ToolResult(True,"ok",f"MEDIA QUEUE OK · {kind} · {query} · {count} item{'s' if count!=1 else ''}")
+
+
+def _media_tool_control(action):
+    aliases={"resume":"play","previous":"prev"}
+    action=aliases.get(str(action or "status").casefold(),str(action or "status").casefold())
+    if action not in {"status","play","pause","toggle","next","prev","stop"}:
+        return _ToolResult(False,"invalid",f"MEDIA CONTROL INVALID · {action}")
+    if action=="status":
+        snap=_media_status_snapshot()
+        if not snap:
+            return _ToolResult(True,"ok","MEDIA STATUS · nothing playing")
+        entry=snap["entry"]
+        return _ToolResult(True,"ok",f"MEDIA STATUS · {snap['state']} · {_media_entry_label(entry)} · {snap['index']+1}/{snap['count']}")
+    result=_media_control_session(action)
+    if result is None:
+        return _ToolResult(False,"unavailable",f"MEDIA CONTROL UNAVAILABLE · {action} · no LOOK media session")
+    if result!=0:
+        return _ToolResult(False,"failed",f"MEDIA CONTROL FAILED · {action}")
+    snap=_media_status_snapshot()
+    suffix=f" · {_media_entry_label(snap['entry'])}" if snap else ""
+    return _ToolResult(True,"ok",f"MEDIA CONTROL OK · {action}{suffix}")
+
+
 def _media_identify_catalog_entry(row):
     """Promote one discovered row to SHA identity on the node that owns its bytes."""
     if row.get("digest"):
@@ -13290,7 +13535,11 @@ def _media_queue_append(rows):
 
 
 def _media_selector(rows,title="FABRIC MEDIA",initial_query=""):
-    """LOOK-native search/select surface. Display text never becomes an identifier."""
+    """LOOK filter semantics over Fabric media rows, with media-specific actions.
+
+    Navigation/filtering/selection belong to LOOK. Media contributes only actions.
+    Display labels are never identifiers; selected rows retain their catalog identity.
+    """
     rows=list(rows)
     if not rows:
         print("LOOK media · no matches")
@@ -13304,10 +13553,12 @@ def _media_selector(rows,title="FABRIC MEDIA",initial_query=""):
             print(f"  … {len(rows)-100:,} more")
         return ("listed",None)
 
+    def row_id(row):
+        return str(row.get("digest") or f"{row.get('node','')}:{row.get('id','')}:{row.get('path','')}")
+
     fd=sys.stdin.fileno()
     old=termios.tcgetattr(fd)
     query=str(initial_query or "")
-    filtering=False
     idx=0
     notice=""
     selected_ids=set()
@@ -13318,18 +13569,21 @@ def _media_selector(rows,title="FABRIC MEDIA",initial_query=""):
             terms=query.casefold().split()
             visible=[row for row in rows if all(term in media_core._haystack(row) for term in terms)]
             idx=max(0,min(idx,max(0,len(visible)-1)))
+            selected_rows=[row for row in rows if row_id(row) in selected_ids]
             terminal=shutil.get_terminal_size((110,32))
             height=max(10,terminal.lines)
             width=max(56,terminal.columns)
             usable=max(4,height-7)
             top=max(0,min(max(0,len(visible)-usable),idx-usable+1))
             page=visible[top:top+usable]
+
             sys.stdout.write("\033[2J\033[H")
-            _title(title,f"{len(visible):,} of {len(rows):,}")
+            suffix=f"{len(visible):,} of {len(rows):,} · {len(selected_rows)} selected"
+            _title(title,suffix)
             for n,row in enumerate(page,start=top):
-                rid=str(row.get("digest") or f"{row.get('node','')}:{row.get('id','')}")
-                mark=_c("›","1;36") if n==idx else " "
-                queued=_c("+","32") if rid in selected_ids else " "
+                rid=row_id(row)
+                focus=_c("›","1;36") if n==idx else " "
+                mark=_c("✓","32") if rid in selected_ids else " "
                 node=str(row.get("node") or "local")
                 identity="◆" if row.get("digest") else "·"
                 right=f"{identity} {node}"
@@ -13337,27 +13591,24 @@ def _media_selector(rows,title="FABRIC MEDIA",initial_query=""):
                 max_label=max(12,width-len(right)-7)
                 if len(label)>max_label:
                     label=label[:max(1,max_label-1)]+"…"
-                print(f"{mark}{queued} {label:<{max_label}}  {_c(right,'2')}")
+                print(f"{focus}{mark} {label:<{max_label}}  {_c(right,'2')}")
             if not visible:
                 print("  no matches")
-            if filtering:
-                footer=f"{_c('FILTER','1;36')} {query}█  {_c('Enter done · Esc clear/back','2')}"
-            else:
-                footer=_c("↑↓ choose · Enter play · Space queue · A play matches · / filter · I info · Esc exit","2")
-                if query:
-                    footer+=f"  {_c('filter: '+query,'36')}"
+
+            filter_text=f"{_c('FILTER','1;36')} {query}█" if query else f"{_c('FILTER','1;36')} █"
+            actions=_c("Tab select · Enter/P play · Q queue · A queue matches · I info · S save · C clear · Esc exit","2")
+            footer=f"{filter_text}  {actions}"
             if notice:
                 footer+="  "+_c(notice,"33")
                 notice=""
             print("\n"+footer,end="",flush=True)
+
             key=_read_tty_key(fd)
-            if key in {"\x03"}:
+            if key in {"\x03","q"} and not query:
                 break
             if key=="esc":
-                if filtering and query:
+                if query:
                     query=""; idx=0; continue
-                if filtering:
-                    filtering=False; continue
                 break
             if key in {"up","k"} and visible:
                 idx=max(0,idx-1); continue
@@ -13367,33 +13618,46 @@ def _media_selector(rows,title="FABRIC MEDIA",initial_query=""):
                 idx=max(0,idx-usable); continue
             if key=="pagedown" and visible:
                 idx=min(len(visible)-1,idx+usable); continue
-            if filtering:
-                if key in {"\r","\n"}:
-                    filtering=False; continue
-                if key in {"\x7f","\b"}:
-                    if query: query=query[:-1]; idx=0
-                    continue
-                if len(key)==1 and key.isprintable():
-                    query+=key; idx=0
-                continue
-            if key=="/":
-                filtering=True; continue
-            if key in {"\r","\n"} and visible:
-                action=("play",visible[idx]); break
-            if key==" " and visible:
-                row=visible[idx]
-                rid=str(row.get("digest") or f"{row.get('node','')}:{row.get('id','')}")
+            if key=="\t" and visible:
+                rid=row_id(visible[idx])
                 if rid in selected_ids:
-                    notice="already queued"
+                    selected_ids.remove(rid); notice="unselected"
                 else:
-                    _media_queue_append([row]); selected_ids.add(rid); notice="queued"
+                    selected_ids.add(rid); notice="selected"
+                if idx < len(visible)-1:
+                    idx+=1
+                continue
+            if key in {"\x7f","\b"}:
+                if query:
+                    query=query[:-1]; idx=0
+                continue
+
+            chosen=selected_rows or ([visible[idx]] if visible else [])
+            if key in {"\r","\n","P"} and chosen:
+                action=("play",chosen); break
+            if key=="Q" and chosen:
+                count=_media_queue_append(chosen)
+                notice=f"queued {count}"
                 continue
             if key=="A" and visible:
-                action=("play_all",list(visible)); break
-            if key in {"i","I"} and visible:
+                count=_media_queue_append(visible)
+                notice=f"queued {count} visible"
+                continue
+            if key=="C":
+                selected_ids.clear(); notice="selection cleared"
+                continue
+            if key=="S" and chosen:
+                action=("save",chosen); break
+            if key=="I" and visible:
                 row=visible[idx]
                 digest=str(row.get("digest") or "unidentified")
                 notice=f"{row.get('format','?')} · {int(row.get('bytes') or 0)/1024/1024:.1f} MiB · {digest[:20]}"
+                continue
+
+            # LOOK filter style: ordinary printable characters immediately refine
+            # the view. Uppercase letters above are reserved for contextual actions.
+            if len(key)==1 and key.isprintable() and key not in {"\t"}:
+                query+=key; idx=0
                 continue
     finally:
         termios.tcsetattr(fd,termios.TCSADRAIN,old)
@@ -13402,16 +13666,40 @@ def _media_selector(rows,title="FABRIC MEDIA",initial_query=""):
     return action
 
 
+def _media_selector_finish(action,payload):
+    """Execute selector actions after terminal raw mode has been restored."""
+    if action=="play":
+        rows=list(payload or [])
+        return _media_launch_session(media_core.new_session(rows)) if rows else 1
+    if action=="save":
+        rows=list(payload or [])
+        if not rows:
+            return 1
+        try:
+            name=input("playlist name › ").strip()
+        except (EOFError,KeyboardInterrupt):
+            print(); return 0
+        if not name:
+            return 0
+        try:
+            path=_media_playlist_path(name)
+        except ValueError as exc:
+            print(f"LOOK media · {exc}")
+            return 1
+        payload=media_core.playlist_payload(name,media_core.new_session(rows))
+        _atomic_json(path,payload)
+        print(f"LOOK PLAYLIST · saved {payload['name']} · {len(payload['queue'])} items")
+        print(f"  {path}")
+        return 0
+    return None
+
 def _media_find_command(args):
     query=" ".join(args).strip()
     entries,_=_media_catalog_entries()
     rows=media_core.search_entries({"entries":entries},query) if query else entries
     action,payload=_media_selector(rows,"FABRIC MEDIA FIND",query)
-    if action=="play":
-        return _media_launch_session(media_core.new_session([payload]))
-    if action=="play_all":
-        return _media_launch_session(media_core.new_session(payload))
-    return 0 if rows else 1
+    result=_media_selector_finish(action,payload)
+    return result if result is not None else (0 if rows else 1)
 
 
 def _media_browse_command(args):
@@ -13419,11 +13707,8 @@ def _media_browse_command(args):
     entries,_=_media_catalog_entries()
     rows=media_core.search_entries({"entries":entries},query) if query else entries
     action,payload=_media_selector(rows,"FABRIC MEDIA",query)
-    if action=="play":
-        return _media_launch_session(media_core.new_session([payload]))
-    if action=="play_all":
-        return _media_launch_session(media_core.new_session(payload))
-    return 0
+    result=_media_selector_finish(action,payload)
+    return result if result is not None else 0
 
 
 def _media_group_command(field,args):

@@ -15,8 +15,8 @@ class MediaCatalogSurfaceTests(unittest.TestCase):
     def test_look_find_uses_selector_not_exact_name_roundtrip(self):
         source = (ROOT / "look" / "lk").read_text(encoding="utf-8")
         self.assertIn('def _media_selector(', source)
-        self.assertIn('Enter play', source)
-        self.assertIn('Space queue', source)
+        self.assertIn('Enter/P play', source)
+        self.assertIn('Tab select', source)
         self.assertIn('def _media_complete_command(', source)
         self.assertIn('def _media_fabric_command(', source)
 

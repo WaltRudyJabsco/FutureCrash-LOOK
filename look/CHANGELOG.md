@@ -1,3 +1,9 @@
+# 5.2.18 — LO Media Tools + LOOK Media Filter
+
+- LO can search/play/queue/control Fabric media through purpose-built tools.
+- Local media imperatives are host-routed before general inference/search.
+- Media find/browse now follow LOOK filter behavior with Tab multi-select and uppercase contextual actions.
+
 ## 4.45.1 — Fabric media catalog + selector
 
 - `lk media find`/`browse` now use a native LOOK selector instead of requiring exact title retyping.

@@ -1,4 +1,10 @@
-# Future Crash + LOOK 5.2.17
+# Future Crash + LOOK 5.2.18
+
+## 5.2.18 — LO Media Tools + LOOK Media Filter
+
+Media becomes a first-class Fabric capability rather than a phrase LO can mistake for web search. LO now exposes deterministic `media_search`, `media_play`, `media_queue`, and `media_control` tools, and narrow local commands such as `lo play Talking Heads` are routed to the Fabric media catalog before inference. Explicit online requests still use the web path.
+
+`lk media find` now uses LOOK filter semantics: type to refine immediately, Tab to multi-select, and uppercase contextual actions (`P` play, `Q` queue, `A` queue visible matches, `I` info, `S` save selection, `C` clear). Display labels remain presentation only; actions operate on exact catalog rows/artifact identity.
 
 ## 5.2.17 — Fabric Media Catalog + LOOK Selector
 
