@@ -1514,6 +1514,8 @@ MEDIA
   lk media load NAME   restore + play a saved playlist
   lk media playlists   list saved playlists
   lk media repeat      toggle repeat-all for current queue
+  lk media state       compact JSON snapshot for UI/renderers
+  lk media jump INDEX  jump exactly to one-based queue item
   lk media stream PATH explicit Fabric byte-stream playback proof
   lk media toggle / next / prev / stop
   mm / mn / mp         fast aliases: toggle / next / previous
@@ -13206,6 +13208,37 @@ def _media_tool_queue(query):
     return _ToolResult(True,"ok",f"MEDIA QUEUE OK · {kind} · {query} · {count} item{'s' if count!=1 else ''}")
 
 
+def _media_snapshot_payload():
+    """Small renderer-neutral view of the canonical LOOK MediaSession."""
+    snap=_media_status_snapshot()
+    if not snap:
+        return {"active":False,"state":"stopped","index":0,"count":0,"entry":{},"queue":[]}
+    session=snap.get("session") or {}
+    queue=session.get("queue") or []
+    def clean(row):
+        return {
+            "artist":str(row.get("artist") or ""),
+            "album":str(row.get("album") or ""),
+            "title":str(row.get("title") or Path(str(row.get("path") or "Media")).name),
+            "id":str(row.get("digest") or row.get("id") or ""),
+            "node":str(row.get("node") or ""),
+        }
+    return {
+        "active":bool(queue) and snap.get("state") in {"playing","paused"},
+        "state":str(snap.get("state") or "stopped"),
+        "index":int(snap.get("index") or 0),
+        "count":int(snap.get("count") or 0),
+        "position":snap.get("position"),
+        "duration":snap.get("duration"),
+        "volume":snap.get("volume"),
+        "entry":clean(snap.get("entry") or {}),
+        "queue":[clean(row) for row in queue],
+        "shuffle":bool(session.get("shuffle")),
+        "repeat":str(session.get("repeat") or "off"),
+        "updated":session.get("updated"),
+    }
+
+
 def _media_tool_control(action):
     aliases={"resume":"play","previous":"prev"}
     action=aliases.get(str(action or "status").casefold(),str(action or "status").casefold())
@@ -14294,6 +14327,28 @@ def _media_control_session(action):
     return 1
 
 
+def _media_jump_index(target):
+    session=_media_sync_session() or _media_session()
+    if not session or not session.get("queue"):
+        return None
+    queue=session["queue"]
+    try: target=int(target)
+    except (TypeError,ValueError): return 2
+    if target < 0 or target >= len(queue): return 2
+    runtime_map=session.get("runtime_queue_indices") or list(range(len(queue)))
+    try: runtime_pos=runtime_map.index(target)
+    except ValueError: return 1
+    if not _media_mpv_alive():
+        session["current_index"]=target
+        return _media_launch_session(session)
+    result=_media_mpv_request(["set_property","playlist-pos",runtime_pos])
+    if not result or result.get("error")!="success": return 1
+    session["current_index"]=target
+    session["state"]="playing"
+    _media_save_session(session)
+    return 0
+
+
 def _media_repeat_command(args):
     session=_media_session()
     if not session:
@@ -14417,12 +14472,29 @@ def media(args):
         rest=args[1:]; shuffle="--shuffle" in rest
         return _media_playlist_load(" ".join(x for x in rest if x!="--shuffle"),shuffle=shuffle)
     if raw=="repeat": return _media_repeat_command(args[1:])
+    if raw in {"state","json"}:
+        print(json.dumps(_media_snapshot_payload(),ensure_ascii=False,separators=(",",":")))
+        return 0
+    if raw=="jump":
+        if len(args)!=2:
+            print("usage: lk media jump INDEX")
+            return 2
+        try: target=int(args[1])-1
+        except ValueError:
+            print("usage: lk media jump INDEX")
+            return 2
+        result=_media_jump_index(target)
+        if result is None:
+            print("LOOK media · no active queue")
+            return 1
+        if result==0: _media_control_session("status")
+        return result
     if raw=="play" and len(args)>1: return _media_play_command(args[1:])
 
     aliases={"playpause":"toggle","previous":"prev","back":"prev"}
     action=aliases.get(raw,raw)
     if action not in {"status","play","pause","toggle","next","prev","stop"}:
-        print("usage: lk media [browse|find QUERY|fabric|identify QUERY|--all|play [TARGET] [--shuffle]|pause|toggle|next|prev|stop|queue|clear]")
+        print("usage: lk media [browse|find QUERY|fabric|identify QUERY|--all|play [TARGET] [--shuffle]|pause|toggle|next|prev|stop|queue|clear|state|jump INDEX]")
         print("                [scan ROOT|library|find QUERY|artists|albums|playlist ...|repeat [off|all]]")
         print("                [add PATH|stream PATH|stream @NODE DIGEST|info [@NODE] DIGEST]")
         return 2

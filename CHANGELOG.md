@@ -1,3 +1,12 @@
+# 5.4.3 — Signal Media Card
+
+- Add Signal 1.3.0 live media card over LOOK's canonical MediaSession.
+- Auto-discover playback started from any local LOOK/LO surface; browser ownership is never required.
+- Add previous, play/pause, next, stop, expandable queue, and exact queue-item jump controls.
+- Add renderer-neutral `lk media state` JSON snapshot and deterministic `lk media jump INDEX`.
+- Keep mpv/LOOK as the sole playback owner; dismissing or closing Signal leaves playback untouched.
+- Update help, command grammar, man page, Signal docs, completions, release history, installer banners, and version surfaces.
+
 # 5.4.2 — Island Resilience + Workstation Editor
 
 - Add `lk doctor island`, a loopback-only single-node autonomy audit for local LOOK, Ollama, memory, media, and optional OpenJev.

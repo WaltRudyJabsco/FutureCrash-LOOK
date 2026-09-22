@@ -1,6 +1,12 @@
-# Signal Window 1.2.0
+# Signal Window 1.3.0
 
 Signal is now a native browser body for LO. The server imports LOOK's reusable LO engine directly rather than spawning and scraping the terminal CLI. Browser sessions keep a bounded ephemeral conversation history, `/clear` clears that server-side state, and generated/browser-displayable artifacts remain presentation targets rather than worker-side desktop windows.
+
+## 1.3.0 — shared media card
+
+Signal now discovers an active LOOK MediaSession and renders it as a compact browser card. The card is only a control/view surface: LOOK owns queue/session meaning and mpv owns decoding/playback. Starting music in a terminal therefore appears in Signal automatically, and browser controls mutate the same session. Dismiss hides the card without stopping playback; `/player` restores it.
+
+Controls include previous, play/pause, next, stop, an expandable queue, and exact queue-item selection. The backend uses `lk media state` and deterministic media transport commands; it does not create a second browser audio player.
 
 Small browser body for LO/LOOK with a persistent 256×256 graphics surface.
 

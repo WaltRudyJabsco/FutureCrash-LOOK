@@ -620,6 +620,8 @@ lk media save Driving
 lk media load Driving
 lk media playlists
 lk media repeat all
+lk media state                 # compact JSON session snapshot
+lk media jump 4                # play queue item 4 exactly
 lk media stream /path/to/movie.mp4
 lk media stream @3090 sha256:...
 lk media add /path/to/song.flac

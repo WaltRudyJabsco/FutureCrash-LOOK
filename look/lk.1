@@ -324,6 +324,12 @@ Explicitly register PATH as a Fabric artifact and play its byte-range stream. Re
 .TP
 .B lk media toggle / next / prev / stop
 Control the LOOK-owned media session. When no LOOK session exists, supported system-player control remains available.
+.TP
+.B lk media state
+Print a compact JSON snapshot of the canonical LOOK media session for renderer/control surfaces.
+.TP
+.B lk media jump INDEX
+Jump deterministically to the one-based queue item INDEX in the current LOOK media session.
 .PP
 mpv is the preferred optional playback edge. LOOK owns queue/session meaning; mpv owns decoding and rendering. Same-node queues may use direct local file access, while remote/content-addressed entries use Fabric artifact streams.
 .SH INTELLIGENCE VERSIONS

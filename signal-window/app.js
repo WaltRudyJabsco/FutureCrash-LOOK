@@ -1,6 +1,6 @@
 const N=256;
 const main=document.querySelector('main'),A=document.querySelector('#ambient'),a=A.getContext('2d'),C=document.querySelector('#signal'),c=C.getContext('2d');
-const log=document.querySelector('#log'),form=document.querySelector('#form'),input=document.querySelector('#input'),drops=document.querySelector('#drops'),decisionPanel=document.querySelector('#decisionPanel'),statusEl=document.querySelector('#status'),activity=document.querySelector('#activity'),activityText=document.querySelector('#activityText'),fabricLight=document.querySelector('#fabricLight');
+const log=document.querySelector('#log'),form=document.querySelector('#form'),input=document.querySelector('#input'),drops=document.querySelector('#drops'),decisionPanel=document.querySelector('#decisionPanel'),mediaPanel=document.querySelector('#mediaPanel'),statusEl=document.querySelector('#status'),activity=document.querySelector('#activity'),activityText=document.querySelector('#activityText'),fabricLight=document.querySelector('#fabricLight');
 const signalSession=localStorage.getItem('signal-session')||crypto.randomUUID();
 localStorage.setItem('signal-session',signalSession);
 a.imageSmoothingEnabled=c.imageSmoothingEnabled=false;
@@ -94,10 +94,11 @@ async function fileObj(file,path=file.name){let content='';if(file.size<1_000_00
 async function walk(entry,prefix=''){if(entry.isFile)return new Promise(r=>entry.file(async f=>r([await fileObj(f,prefix+f.name)])));if(entry.isDirectory){const rd=entry.createReader(),out=[];while(true){const b=await new Promise(r=>rd.readEntries(r));if(!b.length)break;for(const e of b)out.push(...await walk(e,prefix+entry.name+'/'))}return out}return[]}
 addEventListener('dragover',e=>{e.preventDefault();document.body.classList.add('drag')});addEventListener('dragleave',()=>document.body.classList.remove('drag'));addEventListener('drop',async e=>{e.preventDefault();document.body.classList.remove('drag');const out=[];for(const item of e.dataTransfer.items||[]){const en=item.webkitGetAsEntry?.();if(en)out.push(...await walk(en));else{const f=item.getAsFile?.();if(f)out.push(await fileObj(f))}}files=out.slice(0,20);chips();input.focus()});
 form.addEventListener('submit',async e=>{e.preventDefault();const text=input.value.trim();if(!text&&!files.length)return;line('user','› '+(text||`[${files.length} dropped item${files.length===1?'':'s'}]`));input.value='';const sent=files;files=[];chips();
- if(/^\/(help|lk)$/i.test(text)){line('assistant','Signal commands: /help · /clear · /status · /gallery. Everything else goes to LO.');return}
+ if(/^\/(help|lk)$/i.test(text)){line('assistant','Signal commands: /help · /clear · /status · /gallery · /player. Everything else goes to LO.');return}
  if(/^\/clear$/i.test(text)){log.innerHTML='';c.clearRect(0,0,N,N);art.born=0;fetch('/api/session/clear',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({session:signalSession})}).catch(()=>{});event('CLEARED');return}
  if(/^\/status$/i.test(text)){status();line('system',statusEl.title||statusEl.textContent);return}
  if(/^\/gallery$/i.test(text)){try{const d=await(await fetch('/api/status')).json();line('system','Gallery: '+(d.gallery||'disabled'))}catch{line('system','Gallery unavailable')}return}
+ if(/^\/player$/i.test(text)){mediaDismissed=false;await pollMedia(true);return}
  energy=.65;event('LO REQUEST',true);
  try{const r=await fetch('/api/chat',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({text,files:sent,visual:false,session:signalSession})});const d=await r.json();if(!r.ok||d.error)throw Error(d.error||r.statusText);if(d.text)line('assistant',d.text);if(Array.isArray(d.lo_events) && d.lo_events.length){
    for(const e of d.lo_events){
@@ -121,8 +122,40 @@ form.addEventListener('submit',async e=>{e.preventDefault();const text=input.val
    if(vk==='draw'){const src=vd.visual.scene_source||'unknown',kind=vd.visual.fallback_kind||'';event(vd.visual.fallback?`SIGNAL FALLBACK · ${kind||src}`:`SIGNAL RESPONSE · ${src}`);draw(vd.signal)}
    else if(vk==='error')event('SIGNAL ERROR · '+(vd.visual.error||'UNKNOWN'));
  }).catch(err=>event('SIGNAL ERROR · '+err.message))}
- event('READY');energy=Math.max(.25,energy*.65)}
+ event('READY');pollMedia(true);energy=Math.max(.25,energy*.65)}
  catch(err){event('ERROR · '+err.message);line('error','! '+err.message);energy=.15}});
+
+let mediaDismissed=false,mediaExpanded=false,lastMediaKey='';
+function mediaTime(v){v=Number(v);if(!Number.isFinite(v)||v<0)return '--:--';v=Math.floor(v);return v>=3600?`${Math.floor(v/3600)}:${String(Math.floor(v%3600/60)).padStart(2,'0')}:${String(v%60).padStart(2,'0')}`:`${Math.floor(v/60)}:${String(v%60).padStart(2,'0')}`}
+function mediaButton(label,title,action,index=null){const b=document.createElement('button');b.type='button';b.className='media-button';b.textContent=label;b.title=title;b.onclick=()=>mediaControl(action,index);return b}
+function renderMedia(d,force=false){
+ const queue=Array.isArray(d?.queue)?d.queue:[],active=Boolean(d?.active),entry=d?.entry||{};
+ const key=[d?.state,d?.index,d?.count,entry.artist,entry.album,entry.title,].join('|');
+ if(key!==lastMediaKey){if(active)mediaDismissed=false;lastMediaKey=key}
+ if(!d?.available||!queue.length||(!active&&d?.state==='stopped')||mediaDismissed){mediaPanel.hidden=true;mediaPanel.innerHTML='';return}
+ mediaPanel.hidden=false;mediaPanel.innerHTML='';
+ const head=document.createElement('div');head.className='media-head';
+ const tag=document.createElement('span');tag.textContent='NOW PLAYING';
+ const state=document.createElement('span');state.className='media-state';state.textContent=String(d.state||'').toUpperCase();head.append(tag,state);
+ const title=document.createElement('div');title.className='media-title';title.textContent=entry.title||'Media';
+ const artist=document.createElement('div');artist.className='media-artist';artist.textContent=[entry.artist,entry.album].filter(Boolean).join(' · ');
+ const progress=document.createElement('div');progress.className='media-progress';
+ const ratio=(Number(d.duration)>0)?Math.max(0,Math.min(1,Number(d.position||0)/Number(d.duration))):0;
+ const bar=document.createElement('div');bar.className='media-progress-bar';const fill=document.createElement('i');fill.style.width=(ratio*100).toFixed(1)+'%';bar.append(fill);
+ const clock=document.createElement('span');clock.textContent=`${mediaTime(d.position)} / ${mediaTime(d.duration)}`;progress.append(bar,clock);
+ const controls=document.createElement('div');controls.className='media-controls';
+ controls.append(mediaButton('◀◀','Previous','prev'),mediaButton(d.state==='paused'?'▶':'❚❚',d.state==='paused'?'Play':'Pause','toggle'),mediaButton('▶▶','Next','next'));
+ const meta=document.createElement('div');meta.className='media-meta';meta.textContent=`queue ${d.count||queue.length} tracks · ${Number(d.index||0)+1}/${d.count||queue.length}`;
+ const actions=document.createElement('div');actions.className='media-actions';
+ const q=document.createElement('button');q.type='button';q.className='media-link';q.textContent=mediaExpanded?'Hide queue':'Queue';q.onclick=()=>{mediaExpanded=!mediaExpanded;renderMedia(d,true)};
+ const stop=mediaButton('Stop','Stop playback','stop');stop.classList.add('media-link');
+ const dismiss=document.createElement('button');dismiss.type='button';dismiss.className='media-link';dismiss.textContent='Dismiss';dismiss.onclick=()=>{mediaDismissed=true;mediaPanel.hidden=true};actions.append(q,stop,dismiss);
+ mediaPanel.append(head,title,artist,progress,controls,meta,actions);
+ if(mediaExpanded){const list=document.createElement('div');list.className='media-queue';queue.forEach((row,i)=>{const b=document.createElement('button');b.type='button';b.className='media-queue-row'+(i===Number(d.index)?' current':'');b.onclick=()=>mediaControl('jump',i);const n=document.createElement('span');n.textContent=String(i+1).padStart(2,'0');const t=document.createElement('span');t.textContent=[row.artist,row.title].filter(Boolean).join(' — ')||'Media';b.append(n,t);list.append(b)});mediaPanel.append(list)}
+}
+async function mediaControl(action,index=null){try{event('MEDIA · '+action.toUpperCase(),true);const r=await fetch('/api/media/control',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({action,index})});const d=await r.json();if(!r.ok||d.error)throw Error(d.error||r.statusText);mediaDismissed=false;renderMedia(d,true);event('MEDIA · '+action.toUpperCase())}catch(err){event('MEDIA ERROR · '+err.message)}}
+async function pollMedia(force=false){try{const r=await fetch('/api/media',{cache:'no-store'});if(!r.ok)return;renderMedia(await r.json(),force)}catch{}}
+setInterval(()=>pollMedia(false),1000);pollMedia(false);
 
 let activeDecisionKey='';
 function renderDecision(d){

@@ -1,4 +1,15 @@
-# Future Crash + LOOK 5.4.2
+# Future Crash + LOOK 5.4.3
+
+## 5.4.3 — Signal Media Card
+
+Signal can now render the canonical LOOK MediaSession as a compact live browser control surface. Start playback from LO, the terminal, or Signal itself and the card appears automatically with now-playing metadata, progress, previous/play-pause/next, stop, queue count, an expandable queue, and direct queue-item jumps. Closing or dismissing the card never owns or terminates playback; it is another renderer over the same LOOK/mpv session.
+
+```bash
+lo play talking heads
+# Open Signal: the shared player card appears automatically.
+```
+
+Signal 1.3.0 also exposes `/player` to rediscover a dismissed active session. The browser polls lightweight media state and sends deterministic transport commands back through LOOK; no second browser-specific playback engine exists.
 
 ## 5.4.2 — Island Resilience + Workstation Editor
 

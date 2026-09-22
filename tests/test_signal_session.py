@@ -1,5 +1,6 @@
 import importlib.util
 import unittest
+import unittest.mock
 from pathlib import Path
 
 SERVER=Path(__file__).resolve().parents[1]/'signal-window'/'server.py'
@@ -58,3 +59,25 @@ class SignalSceneGuardTests(unittest.TestCase):
         texts=[op[4] for op in scene['ops'] if op and op[0]=='text']
         self.assertTrue(any('63 F' in t for t in texts))
         self.assertTrue(any('H 68' in t and 'L 53' in t for t in texts))
+
+class SignalMediaSurfaceTests(unittest.TestCase):
+    def test_signal_has_shared_media_card(self):
+        root=Path(__file__).resolve().parents[1]
+        html=(root/'signal-window/index.html').read_text()
+        js=(root/'signal-window/app.js').read_text()
+        server_text=(root/'signal-window/server.py').read_text()
+        self.assertIn('id="mediaPanel"',html)
+        self.assertIn("/api/media",js)
+        self.assertIn("/api/media/control",js)
+        self.assertIn("pollMedia",js)
+        self.assertIn("renderMedia",js)
+        self.assertIn('self.path=="/api/media"',server_text)
+        self.assertIn('self.path=="/api/media/control"',server_text)
+
+    def test_media_state_normalizes_available_flag(self):
+        fake=type('CP',(),{'returncode':0,'stdout':'{"active":true,"state":"playing","queue":[],"entry":{}}','stderr':''})()
+        with unittest.mock.patch.object(server,'_lk_path',return_value='/tmp/lk'), \
+             unittest.mock.patch.object(server.subprocess,'run',return_value=fake):
+            state=server._media_state()
+        self.assertTrue(state['available'])
+        self.assertTrue(state['active'])

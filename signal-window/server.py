@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Signal Window 1.2.0 — a native browser body for LO and Fabric decisions."""
+"""Signal Window 1.3.0 — a native browser body for LO, Fabric decisions, and shared media sessions."""
 from __future__ import annotations
 
 import argparse
@@ -643,6 +643,48 @@ def node_release(lease_id, status="ok", detail=""):
     })
 
 
+def _lk_path():
+    """Resolve the installed LOOK command, with source-tree fallback for development."""
+    env=str(os.getenv("SIGNAL_LK") or "").strip()
+    candidates=[env, shutil.which("lk"), str(Path.home()/".local/bin/lk"), str(Path.home()/".local/share/look/lk"), str(ROOT.parent/"look"/"lk")]
+    for raw in candidates:
+        if not raw: continue
+        p=Path(raw).expanduser()
+        if p.is_file(): return str(p.resolve())
+    return ""
+
+def _media_state():
+    lk=_lk_path()
+    if not lk: return {"available":False,"active":False,"state":"unavailable","queue":[]}
+    try:
+        cp=subprocess.run([lk,"media","state"],capture_output=True,text=True,timeout=1.4,env={**os.environ,"NO_COLOR":"1"})
+        if cp.returncode:
+            return {"available":False,"active":False,"state":"unavailable","queue":[],"error":(cp.stderr or cp.stdout).strip()[:300]}
+        data=json.loads((cp.stdout or "{}").strip() or "{}")
+        if not isinstance(data,dict): raise ValueError("invalid media state")
+        data["available"]=True
+        return data
+    except Exception as exc:
+        return {"available":False,"active":False,"state":"unavailable","queue":[],"error":str(exc)}
+
+def _media_control(action, index=None):
+    lk=_lk_path()
+    if not lk: raise RuntimeError("LOOK media command unavailable")
+    allowed={"play","pause","toggle","next","prev","stop"}
+    if action=="jump":
+        try: human_index=int(index)+1
+        except (TypeError,ValueError): raise ValueError("invalid queue index")
+        argv=[lk,"media","jump",str(human_index)]
+    elif action in allowed:
+        argv=[lk,"media",action]
+    else:
+        raise ValueError("invalid media action")
+    cp=subprocess.run(argv,capture_output=True,text=True,timeout=4.0,env={**os.environ,"NO_COLOR":"1"})
+    if cp.returncode:
+        raise RuntimeError((cp.stderr or cp.stdout or f"media {action} failed").strip()[:500])
+    return _media_state()
+
+
 _PRESENTED = {}
 _PRESENT_LOCK = threading.Lock()
 _PRESENT_TTL = 3600
@@ -737,6 +779,8 @@ class App(BaseHTTPRequestHandler):
                 return self.json(200,value or {"decisions":[],"count":0})
             except Exception as exc:
                 return self.json(502,{"error":str(exc),"decisions":[]})
+        if self.path=="/api/media":
+            return self.json(200,_media_state())
         if self.path=="/api/status":
             lo_engine=_lo_engine_path()
             lo_ok=bool(lo_engine)
@@ -755,6 +799,15 @@ class App(BaseHTTPRequestHandler):
                     "node":d.get("node"),"id":d.get("id"),"selected":d.get("selected"),"source":"signal"
                 },timeout=3.0)
                 return self.json(200,value or {"ok":True})
+            except Exception as exc:
+                return self.json(502,{"error":str(exc)})
+        if self.path=="/api/media/control":
+            try:
+                n=int(self.headers.get("Content-Length","0")); d=json.loads(self.rfile.read(n) or b"{}")
+                value=_media_control(str(d.get("action") or ""),d.get("index"))
+                return self.json(200,value)
+            except ValueError as exc:
+                return self.json(400,{"error":str(exc)})
             except Exception as exc:
                 return self.json(502,{"error":str(exc)})
         if self.path=="/api/session/clear":
@@ -901,7 +954,7 @@ def main():
         state=f"LO NATIVE {a.profile} · "+(App.lo_cmd if App.lo_cmd else "NOT FOUND")
     else:
         p=probe_ollama(App.backend); state=("connected" if p.get("ok") else "unreachable: "+p.get("error","unknown"))
-    print(f"Signal Window 1.2.0 · http://{a.host}:{a.port} · {state} · gallery {App.gallery_dir if App.gallery_enabled else 'off'}")
+    print(f"Signal Window 1.3.0 · http://{a.host}:{a.port} · {state} · gallery {App.gallery_dir if App.gallery_enabled else 'off'}")
     ThreadingHTTPServer((a.host,a.port),App).serve_forever()
 
 if __name__=="__main__": main()

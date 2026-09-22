@@ -1,4 +1,4 @@
-# LOOK Command Grammar — 5.4.2
+# LOOK Command Grammar — 5.4.3
 
 Generated from the canonical `_COMMANDS` registry. Short aliases are ergonomic entry points; they are not separate implementations.
 
@@ -87,7 +87,7 @@ Generated from the canonical `_COMMANDS` registry. Short aliases are ergonomic e
 | `lk clean` | `` | system | Conservative maintenance surface |
 | `lk web` | `[...]` | ai | Web-search key/status |
 | `lk budget` | `[...]` | ai | LO context/token budget |
-| `lk media` | `[...]` | media | Media controls (alias/equivalent: `lk music`) |
+| `lk media` | `[...]` | media | Media controls (alias/equivalent: `lk music`); `state` exposes renderer JSON and `jump INDEX` selects an exact queue row |
 | `mm` | `` | media | Toggle media playback (alias/equivalent: `lk media toggle`) |
 | `mn` | `` | media | Next media item (alias/equivalent: `lk media next`) |
 | `mp` | `` | media | Previous media item (alias/equivalent: `lk media prev`) |
