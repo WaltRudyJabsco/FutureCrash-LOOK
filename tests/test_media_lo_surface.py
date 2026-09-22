@@ -18,6 +18,19 @@ class MediaLOSurfaceTests(unittest.TestCase):
         self.assertIn('media_intent=None if force_search else _lo_media_intent(prompt)', self.source)
         self.assertIn('cannot turn "play Talking Heads" into an internet search', self.source)
 
+    def test_media_ordinals_and_single_worker_reuse_are_present(self):
+        self.assertIn('"play first track":"first"', self.source)
+        self.assertIn('"play first song on album":"first_album"', self.source)
+        self.assertIn('def _media_jump_ordinal(action):', self.source)
+        self.assertIn('["loadlist",str(MEDIA_QUEUE_FILE),"replace"]', self.source)
+
+    def test_selector_queue_is_canonical_only(self):
+        start=self.source.index('def _media_queue_append(rows):')
+        end=self.source.index('def _media_selector(', start)
+        body=self.source[start:end]
+        self.assertNotIn('_media_entry_source(row)', body)
+        self.assertNotIn('["loadfile"', body)
+
     def test_media_selector_uses_look_multiselect_semantics(self):
         self.assertIn('if key=="\\t" and visible:', self.source)
         self.assertIn('Tab select · Enter/P play · Q queue · A queue matches', self.source)

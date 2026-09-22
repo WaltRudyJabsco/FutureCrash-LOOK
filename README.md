@@ -1,6 +1,6 @@
-# Future Crash + LOOK 5.2.18
+# Future Crash + LOOK 5.2.19
 
-## 5.2.18 — LO Media Tools + LOOK Media Filter
+## 5.2.19 — Media Session Reliability
 
 Media becomes a first-class Fabric capability rather than a phrase LO can mistake for web search. LO now exposes deterministic `media_search`, `media_play`, `media_queue`, and `media_control` tools, and narrow local commands such as `lo play Talking Heads` are routed to the Fabric media catalog before inference. Explicit online requests still use the web path.
 

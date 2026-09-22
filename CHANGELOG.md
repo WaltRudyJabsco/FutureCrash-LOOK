@@ -1,3 +1,10 @@
+# 5.2.19 — Media Session Reliability
+
+- Reuse the LOOK-owned mpv process for ordinary play requests instead of spawning overlapping players.
+- Add deterministic first/last/first-on-album media controls for LO.
+- Make selector queue mutation canonical-only so Q returns immediately without stream resolution or player I/O.
+- Preserve MediaSession as the owner of queue state; mpv remains a playback worker.
+
 # 5.2.18 — LO Media Tools + LOOK Media Filter
 
 - Added first-class LO media tools: `media_search`, `media_play`, `media_queue`, and `media_control`.

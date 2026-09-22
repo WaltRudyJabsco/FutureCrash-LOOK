@@ -6133,6 +6133,16 @@ def _lo_media_intent(prompt):
     status_patterns=(r"^(?:what(?:'s| is) playing|now playing|what am i listening to)$",)
     if any(re.match(pattern,low) for pattern in status_patterns):
         return {"tool":"media_control","args":{"action":"status"}}
+    ordinal_controls={
+        "play first track":"first","play first song":"first","first track":"first","first song":"first",
+        "play first track on album":"first_album","play first song on album":"first_album",
+        "play first track on the album":"first_album","play first song on the album":"first_album",
+        "start album over":"first_album","restart album":"first_album",
+        "play last track":"last","play last song":"last","last track":"last","last song":"last",
+    }
+    if low in ordinal_controls:
+        return {"tool":"media_control","args":{"action":ordinal_controls[low]}}
+
     controls={
         "pause":"pause","pause music":"pause","pause playback":"pause",
         "resume":"play","resume music":"play","resume playback":"play",
@@ -13031,7 +13041,7 @@ def _media_tool_queue(query):
 def _media_tool_control(action):
     aliases={"resume":"play","previous":"prev"}
     action=aliases.get(str(action or "status").casefold(),str(action or "status").casefold())
-    if action not in {"status","play","pause","toggle","next","prev","stop"}:
+    if action not in {"status","play","pause","toggle","next","prev","stop","first","last","first_album"}:
         return _ToolResult(False,"invalid",f"MEDIA CONTROL INVALID · {action}")
     if action=="status":
         snap=_media_status_snapshot()
@@ -13039,7 +13049,10 @@ def _media_tool_control(action):
             return _ToolResult(True,"ok","MEDIA STATUS · nothing playing")
         entry=snap["entry"]
         return _ToolResult(True,"ok",f"MEDIA STATUS · {snap['state']} · {_media_entry_label(entry)} · {snap['index']+1}/{snap['count']}")
-    result=_media_control_session(action)
+    if action in {"first","last","first_album"}:
+        result=_media_jump_ordinal(action)
+    else:
+        result=_media_control_session(action)
     if result is None:
         return _ToolResult(False,"unavailable",f"MEDIA CONTROL UNAVAILABLE · {action} · no LOOK media session")
     if result!=0:
@@ -13047,6 +13060,39 @@ def _media_tool_control(action):
     snap=_media_status_snapshot()
     suffix=f" · {_media_entry_label(snap['entry'])}" if snap else ""
     return _ToolResult(True,"ok",f"MEDIA CONTROL OK · {action}{suffix}")
+
+
+def _media_jump_ordinal(action):
+    """Move within the canonical queue without asking a model to interpret ordinals."""
+    session=_media_sync_session() or _media_session()
+    if not session or not session.get("queue"):
+        return None
+    queue=session["queue"]
+    current=max(0,min(int(session.get("current_index") or 0),len(queue)-1))
+    if action=="first":
+        target=0
+    elif action=="last":
+        target=len(queue)-1
+    else:
+        album=str(queue[current].get("album") or "").strip().casefold()
+        if not album:
+            return 1
+        matches=[i for i,row in enumerate(queue) if str(row.get("album") or "").strip().casefold()==album]
+        if not matches:
+            return 1
+        target=matches[0]
+    runtime_map=session.get("runtime_queue_indices") or list(range(len(queue)))
+    try:
+        runtime_pos=runtime_map.index(target)
+    except ValueError:
+        return 1
+    result=_media_mpv_request(["set_property","playlist-pos",runtime_pos])
+    if not result or result.get("error")!="success":
+        return 1
+    session["current_index"]=target
+    session["state"]="playing"
+    _media_save_session(session)
+    return 0
 
 
 def _media_identify_catalog_entry(row):
@@ -13301,6 +13347,21 @@ def _media_launch_session(session):
     else:
         idx=next((i for i,qidx in enumerate(index_map) if qidx>wanted),0)
     session["runtime_queue_indices"]=index_map
+
+    # One LOOK playback worker per output. Reuse the owned mpv process instead of
+    # opening another window for every play request. The MediaSession remains canonical.
+    if _media_mpv_alive():
+        loaded=_media_mpv_request(["loadlist",str(MEDIA_QUEUE_FILE),"replace"])
+        if loaded and loaded.get("error")=="success":
+            _media_mpv_request(["set_property","playlist-pos",idx])
+            _media_mpv_request(["set_property","pause",False])
+            session["player"]="mpv"
+            session["state"]="playing"
+            session["current_index"]=index_map[idx]
+            _media_save_session(session)
+            print(f"LOOK media · queue → existing mpv · {len(queue)} item{'s' if len(queue)!=1 else ''}")
+            return 0
+
     cmd=[
         mpv,
         f"--input-ipc-server={MEDIA_IPC_FILE}",
@@ -13514,22 +13575,9 @@ def _media_queue_append(rows):
         return 0
     session=_media_sync_session() or media_core.new_session([])
     session=media_core.normalize_session(session)
-    first_new=len(session["queue"])
     session["queue"].extend(rows)
-    if _media_mpv_alive():
-        runtime_map=session.get("runtime_queue_indices")
-        if not isinstance(runtime_map,list):
-            runtime_map=list(range(first_new))
-        for offset,row in enumerate(rows):
-            try:
-                source=_media_entry_source(row)
-                result=_media_mpv_request(["loadfile",source,"append-play"])
-                if result and result.get("error")=="success":
-                    runtime_map.append(first_new+offset)
-            except Exception:
-                # Canonical queue still keeps the item; a later restart can retry it.
-                pass
-        session["runtime_queue_indices"]=runtime_map
+    # Queue mutation must be instant and side-effect free for interactive selectors.
+    # Do not resolve remote streams or synchronize mpv here; playback reconciles lazily.
     _media_save_session(session)
     return len(rows)
 
