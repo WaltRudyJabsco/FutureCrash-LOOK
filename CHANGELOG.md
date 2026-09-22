@@ -1,3 +1,12 @@
+# 5.4.5 — Node-Scoped Media Outputs
+
+- Split Fabric media session meaning from node-specific playback output. Each reachable node advertises a default `media.playback` / queue / control endpoint.
+- Add routed media state/control/play APIs and session handoff between nodes; moving output preserves queue/current index and stops the old playback worker only after the target accepts the session.
+- Add Signal **OUT** chooser, per-node queue/player state, deterministic selected-node `play ...` routing, and shared controls against the selected output.
+- Add `lk media outputs` and `lk media on NODE ...` deterministic operator surfaces.
+- Fix iPhone camera prompt selection: `what am I looking at?` is real preselected composer text, so Return accepts it and typing replaces it.
+- Update help, completion, man page, command/reference docs, installer/version surfaces, and tests.
+
 # 5.4.4 — Signal Camera + Service-Safe Media
 
 - Add Signal 1.4.0 camera/photo attachment from the chat input using the browser's native rear-camera capture surface.

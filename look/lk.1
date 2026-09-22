@@ -303,6 +303,14 @@ Search the online Fabric media catalog and open the same selector when interacti
 .TP
 .B lk media fabric
 Show the union of scanned media on currently reachable Fabric nodes, including per-node scanned and SHA-identified counts.
+
+.TP
+.B lk media outputs
+List reachable Fabric playback endpoints. Each node owns its local player/output session.
+
+.TP
+.B lk media on NODE play TARGET
+Start TARGET on NODE rather than the current machine. Transport forms include toggle, next, prev, stop, and state.
 .TP
 .B lk media identify QUERY|PATH|--all
 Promote discovered media to SHA-256 Fabric artifact identity. Bulk --all is deliberately local to the current node.

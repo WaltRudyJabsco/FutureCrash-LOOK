@@ -1,3 +1,10 @@
+# 5.4.5
+
+- Add node-scoped Fabric media output discovery and remote deterministic media control.
+- Add full MediaSession export/adopt path used for queue-preserving output handoff.
+- Add `lk media outputs` and `lk media on NODE ...`.
+- Document node-scoped sessions and Signal output routing.
+
 # 5.4.4
 
 - Discover mpv reliably from background-service environments, including Linuxbrew/Homebrew paths.

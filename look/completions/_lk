@@ -162,7 +162,7 @@ _lk() {
       return
       ;;
     media|music)
-      (( CURRENT == 3 )) && _values 'media action' status browse find fabric catalog identify play pause toggle next prev stop queue clear scan library artists albums save load playlists playlist repeat state jump add stream info
+      (( CURRENT == 3 )) && _values 'media action' status browse find fabric catalog outputs on identify play pause toggle next prev stop queue clear scan library artists albums save load playlists playlist repeat state jump add stream info
       if (( CURRENT >= 4 )) && [[ "$words[3]" == (scan|add|stream|info) ]]; then
         _files
         return

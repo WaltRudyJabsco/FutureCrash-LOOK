@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Signal Window 1.4.0 — browser LO with shared media, decisions, and camera/vision attachments."""
+"""Signal Window 1.5.0 — browser LO with shared media, decisions, and camera/vision attachments."""
 from __future__ import annotations
 
 import argparse
@@ -22,7 +22,7 @@ import urllib.error
 import urllib.request
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
-from urllib.parse import urlparse, urlunparse
+from urllib.parse import urlparse, urlunparse, quote, parse_qs
 
 ROOT = Path(__file__).resolve().parent
 LO_REQUEST_TIMEOUT = 180.0
@@ -667,21 +667,45 @@ def _lk_path():
         if p.is_file(): return str(p.resolve())
     return ""
 
-def _media_state():
+def _media_outputs():
+    value=_node_get("/v1/media/outputs",timeout=2.0)
+    if isinstance(value,dict) and isinstance(value.get("outputs"),list):
+        return value
+    local=_media_state("")
+    node=str(local.get("node") or "local")
+    return {"schema":"fabric-media-outputs-v1","outputs":[{"node":node,"output_id":"default","label":f"{node} · default","available":bool(local.get("available")),"active":bool(local.get("active")),"state":local.get("state") or "stopped"}],"count":1}
+
+def _media_state(node=""):
+    node=str(node or "").strip()
+    if node:
+        value=_node_get("/v1/media/session?node="+quote(node,safe=""),timeout=1.8)
+        if isinstance(value,dict): return value
+        return {"available":False,"active":False,"state":"unavailable","queue":[],"node":node,"error":"media node unavailable"}
+    else:
+        value=_node_get("/v1/media/session",timeout=1.8)
+        if isinstance(value,dict): return value
+    # Node daemon absent: retain the historical local CLI fallback.
     lk=_lk_path()
-    if not lk: return {"available":False,"active":False,"state":"unavailable","queue":[]}
+    if not lk: return {"available":False,"active":False,"state":"unavailable","queue":[],"node":node}
     try:
         cp=subprocess.run([lk,"media","state"],capture_output=True,text=True,timeout=1.4,env={**os.environ,"NO_COLOR":"1"})
         if cp.returncode:
-            return {"available":False,"active":False,"state":"unavailable","queue":[],"error":(cp.stderr or cp.stdout).strip()[:300]}
+            return {"available":False,"active":False,"state":"unavailable","queue":[],"node":node,"error":(cp.stderr or cp.stdout).strip()[:300]}
         data=json.loads((cp.stdout or "{}").strip() or "{}")
         if not isinstance(data,dict): raise ValueError("invalid media state")
         data["available"]=True
         return data
     except Exception as exc:
-        return {"available":False,"active":False,"state":"unavailable","queue":[],"error":str(exc)}
+        return {"available":False,"active":False,"state":"unavailable","queue":[],"node":node,"error":str(exc)}
 
-def _media_control(action, index=None):
+def _media_control(action, index=None, node=""):
+    payload={"node":str(node or "").strip(),"operation":"control","action":str(action or "")}
+    if index is not None: payload["index"]=index
+    value=_node_call("/v1/media/route",payload,timeout=8.0)
+    if isinstance(value,dict):
+        if value.get("error") and not value.get("ok"): raise RuntimeError(str(value.get("error")))
+        return value
+    # Last-resort local compatibility if the node service is not present.
     lk=_lk_path()
     if not lk: raise RuntimeError("LOOK media command unavailable")
     allowed={"play","pause","toggle","next","prev","stop"}
@@ -694,9 +718,24 @@ def _media_control(action, index=None):
     else:
         raise ValueError("invalid media action")
     cp=subprocess.run(argv,capture_output=True,text=True,timeout=4.0,env={**os.environ,"NO_COLOR":"1"})
-    if cp.returncode:
-        raise RuntimeError((cp.stderr or cp.stdout or f"media {action} failed").strip()[:500])
-    return _media_state()
+    if cp.returncode: raise RuntimeError((cp.stderr or cp.stdout or f"media {action} failed").strip()[:500])
+    return _media_state(node)
+
+def _media_play(query,node=""):
+    query=" ".join(str(query or "").split()).strip()
+    if not query: raise ValueError("media play query required")
+    value=_node_call("/v1/media/route",{"node":str(node or "").strip(),"operation":"play","query":query},timeout=55.0)
+    if not isinstance(value,dict): raise RuntimeError("Fabric media route unavailable")
+    if value.get("error") and not value.get("ok"): raise RuntimeError(str(value.get("error")))
+    return value
+
+def _media_move(source,target):
+    source=str(source or "").strip(); target=str(target or "").strip()
+    if not target: raise ValueError("target media node required")
+    value=_node_call("/v1/media/route",{"operation":"move","source":source,"node":target},timeout=95.0)
+    if not isinstance(value,dict): raise RuntimeError("Fabric media move unavailable")
+    if value.get("error") and not value.get("ok"): raise RuntimeError(str(value.get("error")))
+    return value
 
 
 _PRESENTED = {}
@@ -793,8 +832,14 @@ class App(BaseHTTPRequestHandler):
                 return self.json(200,value or {"decisions":[],"count":0})
             except Exception as exc:
                 return self.json(502,{"error":str(exc),"decisions":[]})
+        if self.path.startswith("/api/media/outputs"):
+            return self.json(200,_media_outputs())
         if self.path=="/api/media":
             return self.json(200,_media_state())
+        if self.path.startswith("/api/media?"):
+            q=parse_qs(urlparse(self.path).query)
+            node=str((q.get("node") or [""])[0])
+            return self.json(200,_media_state(node))
         if self.path=="/api/status":
             lo_engine=_lo_engine_path()
             lo_ok=bool(lo_engine)
@@ -815,10 +860,19 @@ class App(BaseHTTPRequestHandler):
                 return self.json(200,value or {"ok":True})
             except Exception as exc:
                 return self.json(502,{"error":str(exc)})
+        if self.path=="/api/media/move":
+            try:
+                n=int(self.headers.get("Content-Length","0")); d=json.loads(self.rfile.read(n) or b"{}")
+                value=_media_move(str(d.get("source") or ""),str(d.get("target") or ""))
+                return self.json(200,value)
+            except ValueError as exc:
+                return self.json(400,{"error":str(exc)})
+            except Exception as exc:
+                return self.json(502,{"error":str(exc)})
         if self.path=="/api/media/control":
             try:
                 n=int(self.headers.get("Content-Length","0")); d=json.loads(self.rfile.read(n) or b"{}")
-                value=_media_control(str(d.get("action") or ""),d.get("index"))
+                value=_media_control(str(d.get("action") or ""),d.get("index"),str(d.get("node") or ""))
                 return self.json(200,value)
             except ValueError as exc:
                 return self.json(400,{"error":str(exc)})
@@ -895,6 +949,19 @@ class App(BaseHTTPRequestHandler):
             if not prompt and not files:
                 return self.json(400,{"error":"empty message"})
 
+            # Direct bounded media requests are deterministic and may target any
+            # reachable Fabric playback node. Everything else remains normal LO.
+            media_node=str(d.get("media_node") or "").strip()
+            direct=re.fullmatch(r"(?:please\s+)?play\s+(.+?)\s*",prompt,flags=re.I) if not files else None
+            if direct and direct.group(1).strip().casefold() not in {"pause","next","previous","prev"}:
+                query=direct.group(1).strip()
+                state=_media_play(query,media_node)
+                target=str(state.get("node") or media_node or "local")
+                text=f"Playing {query} on {target}."
+                session_id=str(d.get("session") or "").strip()[:120]
+                _session_append(session_id,prompt,text)
+                return self.json(200,{"text":text,"signal":None,"visual":{"kind":"nochange"},"mode":self.mode,"model":"deterministic-media","endpoint":"fabric","resolution":"media.playback","lo_events":[{"event":"media_play","tool":"media.play","node":target}],"files":[],"artifacts":[],"media":state})
+
             with tempfile.TemporaryDirectory(prefix="signal-drop-") as td:
                 paths,notes=materialize_files(files,Path(td))
                 file_note=""
@@ -970,7 +1037,7 @@ def main():
         state=f"LO NATIVE {a.profile} · "+(App.lo_cmd if App.lo_cmd else "NOT FOUND")
     else:
         p=probe_ollama(App.backend); state=("connected" if p.get("ok") else "unreachable: "+p.get("error","unknown"))
-    print(f"Signal Window 1.4.0 · http://{a.host}:{a.port} · {state} · gallery {App.gallery_dir if App.gallery_enabled else 'off'}")
+    print(f"Signal Window 1.5.0 · http://{a.host}:{a.port} · {state} · gallery {App.gallery_dir if App.gallery_enabled else 'off'}")
     ThreadingHTTPServer((a.host,a.port),App).serve_forever()
 
 if __name__=="__main__": main()

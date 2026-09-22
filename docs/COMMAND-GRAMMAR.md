@@ -1,4 +1,4 @@
-# LOOK Command Grammar — 5.4.4
+# LOOK Command Grammar — 5.4.5
 
 Generated from the canonical `_COMMANDS` registry. Short aliases are ergonomic entry points; they are not separate implementations.
 
@@ -130,3 +130,7 @@ Current renderer keys to audit across normal, filter, selected, and marked state
 ## Audit rule
 
 `lk` and every explicit LOOK view mode are interactive on a TTY regardless of whether the directory fits on one screen. Output size controls scrolling, not capability.
+
+## Node-scoped media output
+
+`lk media outputs` discovers reachable playback endpoints. `lk media on NODE play TARGET` and transport variants route to one node-specific MediaSession/output. Signal uses the same routing surface; changing output can hand the queue/current index to another node.

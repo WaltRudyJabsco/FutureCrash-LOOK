@@ -92,7 +92,7 @@ Extensionless ambiguous names prompt for `[d]irectory` or `[f]ile`. The ambiguit
 `lk <Tab>` completes LOOK commands contextually. `lmk <Tab>` completes explicit mode flags and existing parent directories for a new path. `lk ollama`, `lk memory`, and `lk skills` expose their subcommands; `lk ollama host` includes saved host names. `lo` completes access flags and `@host` choices, then leaves prompt text unconstrained.
 
 ## Media
-`lk player` · `lk media` · `lk media browse [QUERY]` · `lk media find QUERY` · `lk media fabric` · `lk media identify QUERY|PATH|--all` · `lk media play TARGET [--shuffle]` · `lk media queue` · `lk media scan ROOT` · `lk media library` · `lk media artists` · `lk media albums` · `lk media save NAME` · `lk media load NAME` · `lk media playlists` · `lk media repeat [off|all]` · `lk media state` · `lk media jump INDEX` · `lk media stream PATH` · `lk media add PATH` · `lk media info [@NODE] DIGEST`
+`lk player` · `lk media` · `lk media browse [QUERY]` · `lk media find QUERY` · `lk media fabric` · `lk media outputs` · `lk media on NODE play TARGET|toggle|next|prev|stop|state` · `lk media identify QUERY|PATH|--all` · `lk media play TARGET [--shuffle]` · `lk media queue` · `lk media scan ROOT` · `lk media library` · `lk media artists` · `lk media albums` · `lk media save NAME` · `lk media load NAME` · `lk media playlists` · `lk media repeat [off|all]` · `lk media state` · `lk media jump INDEX` · `lk media stream PATH` · `lk media add PATH` · `lk media info [@NODE] DIGEST`
 
 Every successful transport action reports the resulting player state/track. macOS controls an already-open Music or Spotify instance; Linux uses MPRIS via `playerctl`.
 
@@ -102,6 +102,8 @@ Every successful transport action reports the resulting player state/track. macO
 `lk skills update [FILE]` refreshes Bundled craft from the built-in pack or a compatible external pack while preserving Learned craft.
 
 Memory JSON uses schema version 1.
+
+Node-scoped playback: `lk media outputs` lists reachable Fabric playback endpoints. `lk media on NODE play TARGET` starts a queue on that node; transport/state actions use the same form. Each node owns its local mpv/output session while Fabric keeps queue identity portable between outputs.
 
 ## Fast media aliases
 `mm` → `lk media toggle` · `mn` → `lk media next` · `mp` → `lk media prev`

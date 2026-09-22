@@ -1,6 +1,12 @@
-# Signal Window 1.4.0
+# Signal Window 1.5.0
 
 Signal is a browser body for LO/Fabric: conversation, lightweight visual expression, shared decisions, shared media state, and now direct camera/photo input.
+
+## 1.5.0 — Fabric media outputs
+
+Signal now separates the browser controller from the playback machine. The **OUT** chooser lists reachable Fabric media outputs; direct `play ...` requests and media controls route to the selected node. Switching output during active playback hands the canonical queue/current index to the new node before stopping the old one.
+
+Camera capture now places `what am I looking at?` into the composer as selected text. Return sends it as-is; typing replaces it.
 
 ## 1.4.0 — camera / vision attachment
 

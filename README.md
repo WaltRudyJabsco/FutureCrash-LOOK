@@ -1,4 +1,20 @@
-# Future Crash + LOOK 5.4.4
+# Future Crash + LOOK 5.4.5
+
+## 5.4.5 — Node-Scoped Media Outputs
+
+Media playback is now explicitly **session + output** rather than one accidental machine-global player. Every reachable Fabric node advertises a default `media.playback` endpoint, Signal has a compact **OUT** chooser, and direct requests such as `play talking heads` are routed to the selected node. Each node keeps its own LOOK MediaSession/queue and local playback worker.
+
+Changing Signal's output while a session is active moves the canonical queue/current index to the target node, starts playback there, and then stops the source node. Queue entries remain Fabric references; remote bytes are streamed/identified through the existing artifact layer rather than copied into Signal.
+
+New deterministic surfaces:
+
+```text
+lk media outputs
+lk media on M4-Air play "Talking Heads"
+lk media on 3090 next
+```
+
+The camera composer also gets the small iPhone fix: after accepting a photo, `what am I looking at?` is now real selected input text rather than placeholder text. Press Return to accept it immediately, or simply type to replace the whole selected prompt.
 
 ## 5.4.4 — Signal Camera + Service-Safe Media
 

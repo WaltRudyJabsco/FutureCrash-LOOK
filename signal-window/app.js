@@ -1,6 +1,6 @@
 const N=256;
 const main=document.querySelector('main'),A=document.querySelector('#ambient'),a=A.getContext('2d'),C=document.querySelector('#signal'),c=C.getContext('2d');
-const log=document.querySelector('#log'),form=document.querySelector('#form'),input=document.querySelector('#input'),drops=document.querySelector('#drops'),decisionPanel=document.querySelector('#decisionPanel'),mediaPanel=document.querySelector('#mediaPanel'),statusEl=document.querySelector('#status'),activity=document.querySelector('#activity'),activityText=document.querySelector('#activityText'),fabricLight=document.querySelector('#fabricLight'),cameraButton=document.querySelector('#cameraButton'),cameraInput=document.querySelector('#cameraInput');
+const log=document.querySelector('#log'),form=document.querySelector('#form'),input=document.querySelector('#input'),drops=document.querySelector('#drops'),decisionPanel=document.querySelector('#decisionPanel'),mediaPanel=document.querySelector('#mediaPanel'),statusEl=document.querySelector('#status'),activity=document.querySelector('#activity'),activityText=document.querySelector('#activityText'),fabricLight=document.querySelector('#fabricLight'),cameraButton=document.querySelector('#cameraButton'),cameraInput=document.querySelector('#cameraInput'),mediaOutput=document.querySelector('#mediaOutput');
 const signalSession=localStorage.getItem('signal-session')||crypto.randomUUID();
 localStorage.setItem('signal-session',signalSession);
 a.imageSmoothingEnabled=c.imageSmoothingEnabled=false;
@@ -97,16 +97,16 @@ async function fileObj(file,path=file.name){
 }
 async function walk(entry,prefix=''){if(entry.isFile)return new Promise(r=>entry.file(async f=>r([await fileObj(f,prefix+f.name)])));if(entry.isDirectory){const rd=entry.createReader(),out=[];while(true){const b=await new Promise(r=>rd.readEntries(r));if(!b.length)break;for(const e of b)out.push(...await walk(e,prefix+entry.name+'/'))}return out}return[]}
 cameraButton?.addEventListener('click',()=>cameraInput?.click());
-cameraInput?.addEventListener('change',async()=>{const f=cameraInput.files?.[0];if(!f)return;try{const obj=await fileObj(f,f.name||`signal-camera-${Date.now()}.jpg`);files.push(obj);files=files.slice(-20);chips();event('CAMERA · PHOTO ATTACHED');if(!input.value.trim())input.placeholder='what am I looking at?';input.focus()}catch(err){event('CAMERA ERROR · '+err.message)}finally{cameraInput.value=''}});
+cameraInput?.addEventListener('change',async()=>{const f=cameraInput.files?.[0];if(!f)return;try{const obj=await fileObj(f,f.name||`signal-camera-${Date.now()}.jpg`);files.push(obj);files=files.slice(-20);chips();event('CAMERA · PHOTO ATTACHED');if(!input.value.trim()){input.value='what am I looking at?';input.focus();input.select()}else input.focus()}catch(err){event('CAMERA ERROR · '+err.message)}finally{cameraInput.value=''}});
 addEventListener('dragover',e=>{e.preventDefault();document.body.classList.add('drag')});addEventListener('dragleave',()=>document.body.classList.remove('drag'));addEventListener('drop',async e=>{e.preventDefault();document.body.classList.remove('drag');const out=[];for(const item of e.dataTransfer.items||[]){const en=item.webkitGetAsEntry?.();if(en)out.push(...await walk(en));else{const f=item.getAsFile?.();if(f)out.push(await fileObj(f))}}files=out.slice(0,20);chips();input.focus()});
 form.addEventListener('submit',async e=>{e.preventDefault();const text=input.value.trim();if(!text&&!files.length)return;line('user','› '+(text||`[${files.length} dropped item${files.length===1?'':'s'}]`));input.value='';input.placeholder='say something · drop files';const sent=files;files=[];chips();
- if(/^\/(help|lk)$/i.test(text)){line('assistant','Signal commands: /help · /clear · /status · /gallery · /player. CAM attaches an iPhone/rear-camera photo; then ask LO normally. Everything else goes to LO.');return}
+ if(/^\/(help|lk)$/i.test(text)){line('assistant','Signal commands: /help · /clear · /status · /gallery · /player. OUT selects the Fabric playback node. CAM attaches an iPhone/rear-camera photo; Return accepts the prefilled vision prompt or typing replaces it. Everything else goes to LO.');return}
  if(/^\/clear$/i.test(text)){log.innerHTML='';c.clearRect(0,0,N,N);art.born=0;fetch('/api/session/clear',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({session:signalSession})}).catch(()=>{});event('CLEARED');return}
  if(/^\/status$/i.test(text)){status();line('system',statusEl.title||statusEl.textContent);return}
  if(/^\/gallery$/i.test(text)){try{const d=await(await fetch('/api/status')).json();line('system','Gallery: '+(d.gallery||'disabled'))}catch{line('system','Gallery unavailable')}return}
  if(/^\/player$/i.test(text)){mediaDismissed=false;await pollMedia(true);return}
  energy=.65;event('LO REQUEST',true);
- try{const r=await fetch('/api/chat',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({text,files:sent,visual:false,session:signalSession})});const d=await r.json();if(!r.ok||d.error)throw Error(d.error||r.statusText);if(d.text)line('assistant',d.text);if(Array.isArray(d.lo_events) && d.lo_events.length){
+ try{const r=await fetch('/api/chat',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({text,files:sent,visual:false,session:signalSession,media_node:mediaNode})});const d=await r.json();if(!r.ok||d.error)throw Error(d.error||r.statusText);if(d.text)line('assistant',d.text);if(Array.isArray(d.lo_events) && d.lo_events.length){
    for(const e of d.lo_events){
      const raw=String(e.event||'');
      const name=raw.replaceAll('_',' ');
@@ -131,10 +131,14 @@ form.addEventListener('submit',async e=>{e.preventDefault();const text=input.val
  event('READY');pollMedia(true);energy=Math.max(.25,energy*.65)}
  catch(err){event('ERROR · '+err.message);line('error','! '+err.message);energy=.15}});
 
+let mediaNode=localStorage.getItem('signal.media.node')||'',mediaOutputs=[],lastMediaState=null;
+async function pollMediaOutputs(){try{const r=await fetch('/api/media/outputs',{cache:'no-store'});if(!r.ok)return;const d=await r.json();mediaOutputs=Array.isArray(d.outputs)?d.outputs:[];const previous=mediaNode;mediaOutput.innerHTML='';for(const row of mediaOutputs){const o=document.createElement('option');o.value=String(row.node||'');o.textContent=String(row.node||'local')+(row.active?' ●':'');o.disabled=row.available===false;mediaOutput.append(o)}if(!mediaNode||!mediaOutputs.some(x=>String(x.node||'')===mediaNode)){mediaNode=String(mediaOutputs[0]?.node||'')}mediaOutput.value=mediaNode;if(previous!==mediaNode&&mediaNode)localStorage.setItem('signal.media.node',mediaNode)}catch{}}
+mediaOutput?.addEventListener('change',async()=>{const previous=mediaNode,next=String(mediaOutput.value||'');if(!next||next===previous)return;try{if(lastMediaState?.active&&String(lastMediaState.node||previous)===previous){event(`MEDIA · MOVE ${previous} → ${next}`,true);const r=await fetch('/api/media/move',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({source:previous,target:next})});const d=await r.json();if(!r.ok||d.error)throw Error(d.error||r.statusText);lastMediaState=d;event(`MEDIA · MOVED → ${next}`)}mediaNode=next;localStorage.setItem('signal.media.node',mediaNode);mediaDismissed=false;await pollMedia(true)}catch(err){mediaOutput.value=previous;event('MEDIA MOVE ERROR · '+err.message)}});
 let mediaDismissed=false,mediaExpanded=false,lastMediaKey='';
 function mediaTime(v){v=Number(v);if(!Number.isFinite(v)||v<0)return '--:--';v=Math.floor(v);return v>=3600?`${Math.floor(v/3600)}:${String(Math.floor(v%3600/60)).padStart(2,'0')}:${String(v%60).padStart(2,'0')}`:`${Math.floor(v/60)}:${String(v%60).padStart(2,'0')}`}
 function mediaButton(label,title,action,index=null){const b=document.createElement('button');b.type='button';b.className='media-button';b.textContent=label;b.title=title;b.onclick=()=>mediaControl(action,index);return b}
 function renderMedia(d,force=false){
+ lastMediaState=d||null;
  const queue=Array.isArray(d?.queue)?d.queue:[],active=Boolean(d?.active),entry=d?.entry||{};
  const key=[d?.state,d?.index,d?.count,entry.artist,entry.album,entry.title,].join('|');
  if(key!==lastMediaKey){if(active)mediaDismissed=false;lastMediaKey=key}
@@ -151,7 +155,7 @@ function renderMedia(d,force=false){
  const clock=document.createElement('span');clock.textContent=`${mediaTime(d.position)} / ${mediaTime(d.duration)}`;progress.append(bar,clock);
  const controls=document.createElement('div');controls.className='media-controls';
  controls.append(mediaButton('◀◀','Previous','prev'),mediaButton(d.state==='paused'?'▶':'❚❚',d.state==='paused'?'Play':'Pause','toggle'),mediaButton('▶▶','Next','next'));
- const meta=document.createElement('div');meta.className='media-meta';meta.textContent=`queue ${d.count||queue.length} tracks · ${Number(d.index||0)+1}/${d.count||queue.length}`;
+ const meta=document.createElement('div');meta.className='media-meta';meta.textContent=`${d.node||mediaNode||'local'} · queue ${d.count||queue.length} tracks · ${Number(d.index||0)+1}/${d.count||queue.length}`;
  const actions=document.createElement('div');actions.className='media-actions';
  const q=document.createElement('button');q.type='button';q.className='media-link';q.textContent=mediaExpanded?'Hide queue':'Queue';q.onclick=()=>{mediaExpanded=!mediaExpanded;renderMedia(d,true)};
  const stop=mediaButton('Stop','Stop playback','stop');stop.classList.add('media-link');
@@ -159,9 +163,11 @@ function renderMedia(d,force=false){
  mediaPanel.append(head,title,artist,progress,controls,meta,actions);
  if(mediaExpanded){const list=document.createElement('div');list.className='media-queue';queue.forEach((row,i)=>{const b=document.createElement('button');b.type='button';b.className='media-queue-row'+(i===Number(d.index)?' current':'');b.onclick=()=>mediaControl('jump',i);const n=document.createElement('span');n.textContent=String(i+1).padStart(2,'0');const t=document.createElement('span');t.textContent=[row.artist,row.title].filter(Boolean).join(' — ')||'Media';b.append(n,t);list.append(b)});mediaPanel.append(list)}
 }
-async function mediaControl(action,index=null){try{event('MEDIA · '+action.toUpperCase(),true);const r=await fetch('/api/media/control',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({action,index})});const d=await r.json();if(!r.ok||d.error)throw Error(d.error||r.statusText);mediaDismissed=false;renderMedia(d,true);event('MEDIA · '+action.toUpperCase())}catch(err){event('MEDIA ERROR · '+err.message)}}
-async function pollMedia(force=false){try{const r=await fetch('/api/media',{cache:'no-store'});if(!r.ok)return;renderMedia(await r.json(),force)}catch{}}
-setInterval(()=>pollMedia(false),1000);pollMedia(false);
+async function mediaControl(action,index=null){try{event('MEDIA · '+action.toUpperCase(),true);const r=await fetch('/api/media/control',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({action,index,node:mediaNode})});const d=await r.json();if(!r.ok||d.error)throw Error(d.error||r.statusText);mediaDismissed=false;renderMedia(d,true);event('MEDIA · '+action.toUpperCase())}catch(err){event('MEDIA ERROR · '+err.message)}}
+async function pollMedia(force=false){try{const r=await fetch('/api/media?node='+encodeURIComponent(mediaNode||''),{cache:'no-store'});if(!r.ok)return;renderMedia(await r.json(),force)}catch{}}
+setInterval(()=>pollMedia(false),1000);
+pollMediaOutputs().then(()=>pollMedia(true));
+setInterval(pollMediaOutputs,8000);
 
 let activeDecisionKey='';
 function renderDecision(d){

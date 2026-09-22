@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Future Crash + LOOK Unified Node 5.4.4.
+"""Future Crash + LOOK Unified Node 5.4.5.
 
 A small distributed supervisor for trusted personal machines. Immediate events stay
 asynchronous; a one-second fabric pulse reconciles presence, leases and stale work.
@@ -48,7 +48,7 @@ except ImportError:
     from decision import OpenJevShadow, new_request as new_decision_request, provider_status as decision_provider_status, plan as decision_plan
 from urllib.parse import urlparse, parse_qs
 
-VERSION = "5.4.4"
+VERSION = "5.4.5"
 DEFAULT_HOST = "127.0.0.1"
 DEFAULT_PORT = 7332
 DEFAULT_INGRESS_PORT = 0
@@ -1953,6 +1953,179 @@ def _fabric_media_catalog(force=False):
     return result
 
 
+
+def _look_command():
+    """Resolve LOOK from a daemon/service environment without shell startup files."""
+    env = str(os.getenv("FCL_LOOK") or "").strip()
+    candidates = [env, shutil.which("lk"), str(Path.home()/".local/bin/lk"), str(Path.home()/".local/share/look/lk")]
+    for raw in candidates:
+        if not raw:
+            continue
+        path = Path(raw).expanduser()
+        if path.is_file() and os.access(path, os.X_OK):
+            return str(path.resolve())
+    return ""
+
+
+def _local_media_state():
+    """Read this node's LOOK-owned media session through the public CLI surface."""
+    lk = _look_command()
+    if not lk:
+        return {"available": False, "active": False, "state": "unavailable", "queue": [], "node": identity()["name"], "error": "LOOK command unavailable"}
+    try:
+        cp = subprocess.run([lk, "media", "state"], capture_output=True, text=True, timeout=2.0, env={**os.environ, "NO_COLOR": "1"})
+        if cp.returncode:
+            raise RuntimeError((cp.stderr or cp.stdout or "media state failed").strip())
+        data = json.loads((cp.stdout or "{}").strip() or "{}")
+        if not isinstance(data, dict):
+            raise ValueError("invalid media state")
+        data["available"] = True
+        data["node"] = identity()["name"]
+        data["output_id"] = "default"
+        return data
+    except Exception as exc:
+        return {"available": False, "active": False, "state": "unavailable", "queue": [], "node": identity()["name"], "output_id": "default", "error": str(exc)[:500]}
+
+
+
+def _local_media_full_session():
+    lk=_look_command()
+    if not lk:
+        raise RuntimeError("LOOK command unavailable")
+    cp=subprocess.run([lk,"media","session-json"],capture_output=True,text=True,timeout=2.5,env={**os.environ,"NO_COLOR":"1"})
+    if cp.returncode:
+        raise RuntimeError((cp.stderr or cp.stdout or "media session export failed").strip())
+    data=json.loads((cp.stdout or "{}").strip() or "{}")
+    if not isinstance(data,dict):
+        raise ValueError("invalid media session")
+    return data
+
+def _local_media_output():
+    state = _local_media_state()
+    return {
+        "node": identity()["name"],
+        "output_id": "default",
+        "label": f"{identity()['name']} · default",
+        "available": bool(state.get("available")),
+        "active": bool(state.get("active")),
+        "state": str(state.get("state") or "stopped"),
+        "capabilities": ["media.playback", "media.queue", "media.control"],
+    }
+
+
+def _local_media_route(operation, payload):
+    """Execute one bounded media operation on this node only."""
+    lk = _look_command()
+    if not lk:
+        raise RuntimeError("LOOK command unavailable")
+    operation = str(operation or "").casefold()
+    if operation == "play":
+        query = " ".join(str(payload.get("query") or "").split()).strip()
+        if not query:
+            raise ValueError("media play query required")
+        argv = [lk, "media", "play", query]
+        if bool(payload.get("shuffle")):
+            argv.append("--shuffle")
+    elif operation == "control":
+        action = str(payload.get("action") or "").casefold()
+        aliases = {"previous": "prev", "resume": "play"}
+        action = aliases.get(action, action)
+        if action == "jump":
+            try:
+                index = int(payload.get("index")) + 1
+            except (TypeError, ValueError):
+                raise ValueError("invalid queue index")
+            argv = [lk, "media", "jump", str(index)]
+        elif action in {"play", "pause", "toggle", "next", "prev", "stop"}:
+            argv = [lk, "media", action]
+        else:
+            raise ValueError("invalid media control")
+    elif operation == "adopt":
+        session=payload.get("session")
+        if not isinstance(session,dict) or not session.get("queue"):
+            raise ValueError("media session required")
+        argv=[lk,"media","adopt","-"]
+    else:
+        raise ValueError("invalid media operation")
+    cp = subprocess.run(argv, input=(json.dumps(session) if operation=="adopt" else None), capture_output=True, text=True, timeout=90.0, env={**os.environ, "NO_COLOR": "1"})
+    if cp.returncode:
+        raise RuntimeError((cp.stderr or cp.stdout or f"media {operation} failed").strip()[:1000])
+    state = _local_media_state()
+    state["ok"] = True
+    state["message"] = (cp.stdout or "").strip()[-1000:]
+    return state
+
+
+def _fabric_media_outputs():
+    """Discover one default playback endpoint per reachable Fabric node."""
+    local = _local_media_output()
+    outputs = [local]
+    errors = []
+    snapshot = {"self": node_info(), "peers": PEERS.public()}
+    for peer in snapshot.get("peers") or []:
+        ad = peer.get("node") or {}
+        name = ((ad.get("identity") or {}).get("name") or peer.get("name"))
+        if not name or not peer.get("dns") or not ad:
+            continue
+        try:
+            remote = http_json(_remote_url(snapshot, name, "/v1/media/output"), timeout=.8)
+            if isinstance(remote, dict):
+                outputs.append(remote)
+        except Exception as exc:
+            errors.append({"node": name, "error": str(exc)})
+    return {"schema": "fabric-media-outputs-v1", "generated": now(), "outputs": outputs, "count": len(outputs), "errors": errors}
+
+
+def _fabric_media_state(target=None):
+    target = str(target or "").strip()
+    local_name = identity()["name"]
+    if not target or target == local_name:
+        return _local_media_state()
+    snapshot = {"self": node_info(), "peers": PEERS.public()}
+    return http_json(_remote_url(snapshot, target, "/v1/media/state"), timeout=1.4)
+
+
+def _fabric_media_route(target, operation, payload):
+    target = str(target or "").strip()
+    local_name = identity()["name"]
+    if not target or target == local_name:
+        return _local_media_route(operation, payload)
+    snapshot = {"self": node_info(), "peers": PEERS.public()}
+    body = dict(payload or {})
+    body["operation"] = operation
+    return http_json(_remote_url(snapshot, target, "/v1/media/route"), body, timeout=50.0)
+
+
+def _fabric_media_full_session(target=None):
+    target=str(target or "").strip()
+    local_name=identity()["name"]
+    if not target or target==local_name:
+        return _local_media_full_session()
+    snapshot={"self":node_info(),"peers":PEERS.public()}
+    return http_json(_remote_url(snapshot,target,"/v1/media/session-full"),timeout=2.0)
+
+
+def _fabric_media_move(source,target):
+    source=str(source or identity()["name"]).strip()
+    target=str(target or "").strip()
+    if not target:
+        raise ValueError("target media node required")
+    if source==target:
+        return _fabric_media_state(target)
+    session=_fabric_media_full_session(source)
+    if not session.get("queue"):
+        raise ValueError(f"no media session on {source}")
+    result=_fabric_media_route(target,"adopt",{"session":session})
+    if not result.get("ok"):
+        raise RuntimeError(str(result.get("error") or "target did not accept media session"))
+    try:
+        _fabric_media_route(source,"control",{"action":"stop"})
+    except Exception:
+        pass
+    result["moved_from"]=source
+    result["moved_to"]=target
+    return result
+
 def _local_artifact_catalog():
     node = identity()["name"]
     rows = []
@@ -2148,7 +2321,7 @@ def _openjev_shadow(state, question, candidates, *, profile="workspace", consequ
 
 
 class API(BaseHTTPRequestHandler):
-    server_version = "FCLNode/5.4.4"
+    server_version = "FCLNode/5.4.5"
 
     def setup(self):
         self._metric_request_id = None
@@ -2322,6 +2495,24 @@ class API(BaseHTTPRequestHandler):
             return self.sendj(200, _local_media_catalog())
         if path == "/v1/media/fabric":
             return self.sendj(200, _fabric_media_catalog())
+        if path == "/v1/media/output":
+            return self.sendj(200, _local_media_output())
+        if path == "/v1/media/outputs":
+            return self.sendj(200, _fabric_media_outputs())
+        if path == "/v1/media/state":
+            return self.sendj(200, _local_media_state())
+        if path == "/v1/media/session-full":
+            try:
+                return self.sendj(200, _local_media_full_session())
+            except Exception as exc:
+                return self.sendj(502, {"error":str(exc)})
+        if path == "/v1/media/session":
+            q = parse_qs(urlparse(self.path).query)
+            target = str((q.get("node") or [""])[0])
+            try:
+                return self.sendj(200, _fabric_media_state(target))
+            except Exception as exc:
+                return self.sendj(502, {"available": False, "active": False, "state": "unavailable", "queue": [], "node": target, "error": str(exc)})
         if path == "/v1/artifacts":
             return self.sendj(200, _local_artifact_catalog())
         if path == "/v1/artifacts/fabric":
@@ -2525,6 +2716,18 @@ class API(BaseHTTPRequestHandler):
                         SUP.active.cancel_requested = True
             JOB_WAKE.set()
             return self.sendj(200 if ok else 404, {"ok": ok})
+        if path == "/v1/media/route":
+            try:
+                target = str(d.get("node") or "").strip()
+                operation = str(d.get("operation") or "").strip()
+                payload = {k:v for k,v in d.items() if k not in {"node", "operation"}}
+                if operation=="move":
+                    return self.sendj(200,_fabric_media_move(str(d.get("source") or ""),target or str(d.get("target") or "")))
+                return self.sendj(200, _fabric_media_route(target, operation, payload))
+            except ValueError as exc:
+                return self.sendj(400, {"ok": False, "error": str(exc)})
+            except Exception as exc:
+                return self.sendj(502, {"ok": False, "error": str(exc)})
         if path == "/v1/media/identify":
             try:
                 return self.sendj(200, _identify_media_entry(d.get("id")))
@@ -3621,7 +3824,7 @@ def main():
     ap.add_argument("command",nargs="?",default="serve",
         choices=["serve","status","nodes","activity","pulse","fabric","watch","dashboard","models","qualify","services","service",
                  "jobs","job","submit","packet","cancel","events","http","beacon","lights","artifact-add","artifact","artifacts","media-catalog","media-identify",
-                 "decisions","decision","answer","ask","decision-shadow","decision-provider"])
+                 "decisions","decision","answer","ask","decision-shadow","decision-provider","media-outputs","media-state","media-play","media-control"])
     ap.add_argument("args",nargs="*")
     ap.add_argument("--node",dest="node",default=None,help="target Fabric node name")
     ap.add_argument("--json",action="store_true",help="raw JSON where a human view exists")
@@ -3682,6 +3885,34 @@ def main():
                 data=_target_get(a.host,a.port,a.node,path)
                 if a.command=="models" and not a.json: _print_models(data,a.node or "local")
                 else: print(json.dumps(data,indent=2))
+                return 0
+            if a.command=="media-outputs":
+                payload = _daemon_get(a.host, a.port, "/v1/media/outputs")
+                if a.json:
+                    print(json.dumps(payload, indent=2))
+                else:
+                    print(f"FABRIC MEDIA OUTPUTS · {int(payload.get('count') or 0)}")
+                    for row in payload.get("outputs") or []:
+                        mark="●" if row.get("available") else "○"
+                        active=" · "+str(row.get("state") or "") if row.get("active") else ""
+                        print(f"  {mark} {str(row.get('node') or '?'):<20} {str(row.get('output_id') or 'default')}{active}")
+                return 0
+            if a.command=="media-state":
+                payload = _target_get(a.host, a.port, a.node, "/v1/media/state") if a.node else _daemon_get(a.host, a.port, "/v1/media/state")
+                print(json.dumps(payload, indent=2) if a.json else json.dumps(payload, ensure_ascii=False))
+                return 0
+            if a.command=="media-play":
+                if not a.args: ap.error("media-play requires QUERY")
+                payload = _daemon_post(a.host, a.port, "/v1/media/route", {"node":a.node or "","operation":"play","query":" ".join(a.args)})
+                print(json.dumps(payload, indent=2) if a.json else (payload.get("message") or f"MEDIA PLAY · {payload.get('node') or a.node or 'local'}"))
+                return 0
+            if a.command=="media-control":
+                if not a.args: ap.error("media-control requires ACTION")
+                payload={"node":a.node or "","operation":"control","action":a.args[0]}
+                if a.args[0]=="jump" and len(a.args)>1:
+                    payload["index"]=max(0,int(a.args[1])-1)
+                result=_daemon_post(a.host,a.port,"/v1/media/route",payload)
+                print(json.dumps(result, indent=2) if a.json else (result.get("message") or f"MEDIA {a.args[0]} · {result.get('node') or a.node or 'local'}"))
                 return 0
             if a.command=="media-catalog":
                 payload = _target_get(a.host, a.port, a.node, "/v1/media/catalog") if a.node else _daemon_get(a.host, a.port, "/v1/media/fabric")
