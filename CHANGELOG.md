@@ -1,3 +1,9 @@
+# 5.4.9 — Stable Safari Output Picker
+
+- Keep Signal OUT selector DOM-stable while native Safari picker is active.
+- Media polling continues observing state but cannot redraw the picker out from under iOS.
+- Change commits normally; blur performs one reconciliation render.
+
 # 5.4.8 — Media Output State Repair
 
 - Replace competing Signal media-output state with one authoritative target: `browser` or `node:<id>`.

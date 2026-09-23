@@ -1,6 +1,6 @@
-# Future Crash + LOOK 5.4.8
+# Future Crash + LOOK 5.4.9
 
-## 5.4.8 — Media Output State Repair
+## 5.4.9 — Stable Safari Output Picker
 
 Signal media output now has exactly one authoritative target: either `browser` for the current Signal tab or `node:<id>` for a Fabric playback node. Polling observes that target but never chooses it. iOS output handoff no longer rebuilds the native selector while Safari is dismissing its picker, and a node with LOOK + mpv advertises playback capability even before it has a local media session.
 

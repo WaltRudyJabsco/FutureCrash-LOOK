@@ -1,3 +1,9 @@
+# 5.4.9 — Stable Safari Output Picker
+
+- Keep Signal OUT selector DOM-stable while native Safari picker is active.
+- Media polling continues observing state but cannot redraw the picker out from under iOS.
+- Change commits normally; blur performs one reconciliation render.
+
 # 5.4.8 — Media Output State Repair
 
 Signal now has one authoritative media-output target. Browser endpoints are ephemeral per-tab targets; Fabric nodes are `node:<id>` targets. Polling can refresh state but cannot overwrite the selected output.
