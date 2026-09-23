@@ -21,7 +21,12 @@ import time
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from urllib.parse import urlsplit
 
-VERSION = "5.7.2"
+try:
+    from .fabric_identity import FabricIdentity
+except ImportError:
+    from fabric_identity import FabricIdentity
+
+VERSION = "6.0.0"
 DEFAULT_HOST = "127.0.0.1"
 DEFAULT_PORT = 7333
 DEFAULT_BACKEND_HOST = "127.0.0.1"
@@ -119,6 +124,7 @@ class Metrics:
 
 
 METRICS = Metrics()
+FABRIC_IDENTITY = FabricIdentity()
 
 
 class GuardServer(ThreadingHTTPServer):
@@ -167,7 +173,7 @@ class GuardServer(ThreadingHTTPServer):
 
 
 class Handler(BaseHTTPRequestHandler):
-    server_version = "FCLIngress/5.7.2"
+    server_version = "FCLIngress/6.0.0"
     protocol_version = "HTTP/1.0"  # response EOF is the stream boundary; no keep-alive pool.
 
     def log_message(self, *args):
@@ -182,6 +188,14 @@ class Handler(BaseHTTPRequestHandler):
         self.end_headers()
         self.wfile.write(body)
 
+    def _authorized(self, path):
+        if path in {"/health","/v1/health","/v1/identity","/v1/advertisement","/v1/identity/pair"}:
+            return True
+        node_id=str(self.headers.get("X-Fabric-Node") or "")
+        auth=str(self.headers.get("Authorization") or "")
+        token=auth[7:].strip() if auth.startswith("Bearer ") else ""
+        return FABRIC_IDENTITY.verify_peer(node_id,token)
+
     def _relay(self):
         parsed = urlsplit(self.path)
         path = parsed.path
@@ -189,6 +203,9 @@ class Handler(BaseHTTPRequestHandler):
             return self._send_json(200, {"ok": True, "ingress": METRICS.public()})
         if not (path == "/health" or path == "/v1/health" or path.startswith("/v1/")):
             return self._send_json(404, {"error": "not found"})
+        if not self._authorized(path):
+            METRICS.on_reject()
+            return self._send_json(401,{"ok":False,"error":"unpaired or unauthorized Fabric peer","pair":"lk fabric pair-code"})
 
         METRICS.on_start(self.command, path)
         stream_slot = False

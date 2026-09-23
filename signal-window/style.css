@@ -99,3 +99,9 @@ main.mode-compact #activity{height:18px;line-height:17px;flex-basis:18px}
 .media-output-choice{font:inherit;font-size:.78em;color:#7fae89;background:#071009;border:1px solid #294b32;padding:4px 7px;cursor:pointer}
 .media-output-choice.selected{color:#d4e5d8;border-color:#8fd6a2}
 .media-output-choice:disabled{opacity:.45;cursor:default}
+
+
+/* v1.8 accountless Fabric endpoint authorization. */
+#authGate{position:fixed;inset:0;z-index:50;display:grid;place-items:center;background:#020503f2;padding:18px}
+#authGate[hidden]{display:none}.auth-card{width:min(520px,94vw);border:1px solid #31543a;background:#071009;padding:24px;box-shadow:0 20px 80px #000}
+.auth-kicker{font-size:10px;letter-spacing:.18em;color:#5c8867}.auth-title{font-size:20px;color:#d4e5d8;margin:6px 0 14px}.auth-copy,.auth-note{font-size:12px;line-height:1.5;color:#6f9478}.auth-code{font-size:34px;letter-spacing:.16em;color:#8fd6a2;margin:18px 0 10px}.auth-command{font-size:12px;color:#d0dfd4;border:1px solid #1d3825;padding:9px;margin-bottom:12px}.auth-note b{color:#91c79e;font-weight:normal}

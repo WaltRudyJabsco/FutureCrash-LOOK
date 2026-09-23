@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Future Crash + LOOK Unified Node 5.9.0.
+"""Future Crash + LOOK Unified Node 6.0.0.
 
 A small distributed supervisor for trusted personal machines. Immediate events stay
 asynchronous; a one-second fabric pulse reconciles presence, leases and stale work.
@@ -53,8 +53,12 @@ try:
     from .fabric_identity import FabricIdentity, join_pairing
 except ImportError:
     from fabric_identity import FabricIdentity, join_pairing
+try:
+    from .endpoint_auth import EndpointAuth
+except ImportError:
+    from endpoint_auth import EndpointAuth
 
-VERSION = "5.9.0"
+VERSION = "6.0.0"
 DEFAULT_HOST = "127.0.0.1"
 DEFAULT_PORT = 7332
 DEFAULT_INGRESS_PORT = 0
@@ -87,6 +91,7 @@ CURATOR_STATE = STATE / "model_curator.json"
 FABRIC_DB = STATE / "fabric.sqlite3"
 ARTIFACT_ROOT = STATE / "artifacts"
 FABRIC_IDENTITY = FabricIdentity()
+ENDPOINT_AUTH = EndpointAuth()
 FABRIC_STORE = FabricStore(FABRIC_DB)
 ARTIFACTS = ArtifactStore(ARTIFACT_ROOT)
 FABRIC_MEMORY = FabricMemory()
@@ -152,8 +157,13 @@ def binary(name: str) -> str | None:
 
 def http_json(url: str, data=None, timeout: float = 2.0):
     body = None if data is None else json.dumps(data).encode()
-    req = urllib.request.Request(url, data=body,
-        headers={"Content-Type": "application/json", "Connection": "close", "User-Agent": f"FCLNode/{VERSION}"} if body else {"Connection": "close", "User-Agent": f"FCLNode/{VERSION}"})
+    headers={"Connection":"close","User-Agent":f"FCLNode/{VERSION}"}
+    if body: headers["Content-Type"]="application/json"
+    # Local calls stay local. Remote Fabric calls carry the credential minted at pairing.
+    host=(urllib.parse.urlparse(url).hostname or "").casefold()
+    if host not in {"127.0.0.1","localhost","::1"}:
+        headers.update(FABRIC_IDENTITY.auth_headers_for_url(url))
+    req = urllib.request.Request(url, data=body, headers=headers)
     with urllib.request.urlopen(req, timeout=timeout) as r:
         return json.loads(r.read() or b"{}")
 
@@ -2570,7 +2580,7 @@ def _openjev_shadow(state, question, candidates, *, profile="workspace", consequ
 
 
 class API(BaseHTTPRequestHandler):
-    server_version = "FCLNode/5.9.0"
+    server_version = "FCLNode/6.0.0"
 
     def setup(self):
         self._metric_request_id = None
@@ -2610,6 +2620,21 @@ class API(BaseHTTPRequestHandler):
             return json.loads(self.rfile.read(int(self.headers.get("Content-Length", "0"))) or b"{}")
         except Exception:
             return {}
+
+    def _authorized_ingress(self, path):
+        # The loopback control plane is already protected by host boundaries.
+        # Any remotely reachable ingress route must prove paired Fabric trust.
+        if getattr(self.server, "plane", "local") == "local":
+            return True
+        if path in {"/health","/v1/health","/v1/identity","/v1/advertisement","/v1/identity/pair"}:
+            return True
+        node_id=str(self.headers.get("X-Fabric-Node") or "")
+        auth=str(self.headers.get("Authorization") or "")
+        token=auth[7:].strip() if auth.startswith("Bearer ") else ""
+        if FABRIC_IDENTITY.verify_peer(node_id,token):
+            return True
+        self.sendj(401,{"ok":False,"error":"unpaired or unauthorized Fabric peer","pair":"lk fabric pair-code"})
+        return False
 
     def _serve_artifact(self, digest, *, head=False):
         try:
@@ -2709,6 +2734,7 @@ class API(BaseHTTPRequestHandler):
 
     def do_HEAD(self):
         parsed=urlparse(self.path); path=parsed.path
+        if not self._authorized_ingress(path): return
         if path == "/v1/media/audio":
             q=parse_qs(parsed.query); target=str((q.get("node") or [""])[0]); index=int((q.get("index") or [0])[0] or 0)
             return self._serve_media_audio(target,index,head=True)
@@ -2721,6 +2747,7 @@ class API(BaseHTTPRequestHandler):
 
     def do_GET(self):
         path = urlparse(self.path).path
+        if not self._authorized_ingress(path): return
         if path in ("/health", "/v1/health"):
             db = FABRIC_STORE.health()
             worker_age = max(0.0, now() - float(WORKER_HEALTH.get("last_loop") or 0))
@@ -2750,7 +2777,7 @@ class API(BaseHTTPRequestHandler):
         if path == "/v1/identity/trust":
             if getattr(self.server, "plane", "local") != "local":
                 return self.sendj(403, {"error":"trust store is local-only"})
-            return self.sendj(200, FABRIC_IDENTITY.trusted())
+            return self.sendj(200, FABRIC_IDENTITY.trusted(public=True))
         if path in ("/node", "/v1/node", "/v1/status"):
             return self.sendj(200, node_info())
         if path == "/v1/advertisement":
@@ -2892,11 +2919,13 @@ class API(BaseHTTPRequestHandler):
 
     def do_POST(self):
         path = urlparse(self.path).path
+        if not self._authorized_ingress(path): return
         d = self.body()
         if path == "/v1/identity/pair":
             try:
                 peer=d.get("identity") if isinstance(d,dict) else None
-                accepted=FABRIC_IDENTITY.accept_pairing(str(d.get("code") or ""), peer)
+                accepted=FABRIC_IDENTITY.accept_pairing(str(d.get("code") or ""), peer,
+                    auth_token=str(d.get("auth_token") or ""), peer_endpoint=str(d.get("endpoint") or "") or None)
                 me=identity()
                 public={k:me.get(k) for k in ("node_id","fingerprint","algorithm","public_key","name","hostname") if me.get(k)}
                 FABRIC_STORE.event(None,"identity","paired",accepted.get("node_id"),node=identity()["name"],
@@ -4232,7 +4261,7 @@ def main():
     ap.add_argument("command",nargs="?",default="serve",
         choices=["serve","status","nodes","activity","pulse","fabric","watch","dashboard","models","qualify","services","service",
                  "jobs","job","submit","packet","cancel","events","http","beacon","lights","artifact-add","artifact","artifacts","file-catalog","file-find","media-catalog","media-identify",
-                 "decisions","decision","answer","ask","decision-shadow","decision-provider","identity","trust","untrust","pair-code","pair","media-outputs","media-state","media-play","media-control"])
+                 "decisions","decision","answer","ask","decision-shadow","decision-provider","identity","trust","untrust","pair-code","pair","endpoints","endpoint-code","allow","revoke-endpoint","media-outputs","media-state","media-play","media-control"])
     ap.add_argument("args",nargs="*")
     ap.add_argument("--node",dest="node",default=None,help="target Fabric node name")
     ap.add_argument("--json",action="store_true",help="raw JSON where a human view exists")
@@ -4299,11 +4328,11 @@ def main():
                     print("  key          ssh-ed25519 · local private key never leaves this machine")
                 return 0
             if a.command=="trust":
-                data=FABRIC_IDENTITY.trusted(); rows=list((data.get("nodes") or {}).values())
+                data=FABRIC_IDENTITY.trusted(public=True); rows=list((data.get("nodes") or {}).values())
                 if a.json: print(json.dumps(data,indent=2)); return 0
                 print(f"FABRIC TRUST · {len(rows)} node{'s' if len(rows)!=1 else ''}")
                 for row in sorted(rows,key=lambda x:(str(x.get('name') or ''),str(x.get('node_id') or ''))):
-                    print(f"  {str(row.get('name') or '?'):<20.20} {row.get('node_id','')}  {row.get('fingerprint','')}")
+                    print(f"  {str(row.get('name') or '?'):<20.20} {row.get('node_id','')}  {row.get('fingerprint','')}  {'AUTH' if row.get('authorized') else 'RE-PAIR'}")
                 return 0
             if a.command=="untrust":
                 if not a.args: ap.error("untrust requires NODE_ID")
@@ -4313,24 +4342,70 @@ def main():
                 ts=tailscale_self(); supplied=a.args[0] if a.args else ""
                 endpoint=supplied.rstrip("/") if supplied else (f"https://{ts.get('dns')}:7332" if ts.get('dns') else "")
                 if not endpoint:
-                    ap.error("pair-code needs an endpoint URL when Tailscale DNS is unavailable")
+                    ap.error("pair-code needs an endpoint URL when no reachable address can be inferred")
                 invite=FABRIC_IDENTITY.start_pairing(endpoint,name=identity().get("name") or "",hostname=socket.gethostname())
                 if a.json: print(json.dumps(invite,indent=2)); return 0
+                short=(ts.get("dns") or "").split(".",1)[0] or invite['identity']['name']
                 print(f"FABRIC PAIR · {invite['identity']['name']} · invitation open for 5 minutes")
                 print(f"  code  {invite['code']}")
-                print(f"  URL   {invite['endpoint']}")
-                print(f"  join  lk fabric pair '{invite['uri']}'")
+                print(f"  on the other node:  lk fabric pair {short} {invite['code']}")
+                print(f"  endpoint            {invite['endpoint']}")
                 qr=shutil.which("qrencode")
                 if qr and sys.stdout.isatty():
-                    try: subprocess.run([qr,"-t","ANSIUTF8",invite["uri"]],timeout=2,check=False)
+                    print("  scan instead:")
+                    try: subprocess.run([qr,"-t","ANSIUTF8",f"FCL PAIR\n{short}\n{invite['code']}\n{invite['endpoint']}"],timeout=2,check=False)
                     except Exception: pass
                 return 0
             if a.command=="pair":
-                if not a.args: ap.error("pair requires an fcl://pair URI or ENDPOINT CODE")
+                if not a.args: ap.error("pair requires NODE CODE, ENDPOINT CODE, or an fcl://pair URI")
                 target=a.args[0]; code=a.args[1] if len(a.args)>1 else None
-                result=join_pairing(FABRIC_IDENTITY,target,code,name=identity().get("name") or "",hostname=socket.gethostname())
+                if not target.startswith(("http://","https://","fcl://")):
+                    wanted=target.casefold(); hit=None
+                    for row in peer_rows():
+                        names={str(row.get("name") or "").casefold(),str(row.get("dns") or "").casefold(),str(row.get("dns") or "").split(".",1)[0].casefold()}
+                        if wanted in names and row.get("dns"): hit=row; break
+                    if not hit: ap.error(f"cannot resolve Fabric peer {target!r}; use its endpoint URL")
+                    target=f"https://{hit['dns']}:7332"
+                ts=tailscale_self(); local_endpoint=(f"https://{ts.get('dns')}:7332" if ts.get('dns') else None)
+                result=join_pairing(FABRIC_IDENTITY,target,code,name=identity().get("name") or "",hostname=socket.gethostname(),local_endpoint=local_endpoint)
                 peer=result["peer"]
                 print(f"FABRIC PAIR · trusted {peer.get('name') or peer.get('node_id')} · {peer.get('fingerprint')}")
+                return 0
+            if a.command=="endpoints":
+                data=ENDPOINT_AUTH.list()
+                if a.json: print(json.dumps(data,indent=2)); return 0
+                print(f"FABRIC ENDPOINTS · {len(data['trusted'])} trusted · {len(data['sessions'])} temporary · {len(data['pending'])} pending")
+                for row in data['pending']:
+                    print(f"  PENDING  {row.get('code')}  {str(row.get('user_agent') or 'browser')[:54]}")
+                for row in data['trusted']:
+                    print(f"  TRUSTED  {row.get('endpoint_id')}  {row.get('label') or 'Browser'}")
+                for row in data['sessions']:
+                    print(f"  ONCE     {row.get('endpoint_id')}  {row.get('label') or 'Browser'}")
+                return 0
+            if a.command=="allow":
+                if not a.args: ap.error("allow requires the six-digit endpoint code [once|trust]")
+                mode=a.args[1] if len(a.args)>1 else "once"
+                row=ENDPOINT_AUTH.allow(a.args[0],mode)
+                print(f"FABRIC ENDPOINT · {row.get('code')} approved · {mode}")
+                return 0
+            if a.command=="revoke-endpoint":
+                if not a.args: ap.error("revoke-endpoint requires ENDPOINT_ID")
+                ok=ENDPOINT_AUTH.revoke(a.args[0]); print("FABRIC ENDPOINT · revoked" if ok else "FABRIC ENDPOINT · not found")
+                return 0 if ok else 1
+            if a.command=="endpoint-code":
+                ts=tailscale_self(); supplied=a.args[0] if a.args else os.getenv("FCL_SIGNAL_URL","")
+                url=supplied.rstrip("/") if supplied else (f"https://{ts.get('dns')}:7331" if ts.get('dns') else "")
+                mode=a.args[1] if len(a.args)>1 else "trust"
+                if not url: ap.error("endpoint-code needs the externally reachable Signal URL")
+                invite=ENDPOINT_AUTH.create_invite(url,mode=mode)
+                if a.json: print(json.dumps(invite,indent=2)); return 0
+                print(f"FABRIC ENDPOINT · {mode} invitation · expires in 5 minutes")
+                print(f"  URL  {invite['url']}")
+                qr=shutil.which("qrencode")
+                if qr and sys.stdout.isatty():
+                    print("  scan with iPhone camera:")
+                    try: subprocess.run([qr,"-t","ANSIUTF8",invite["url"]],timeout=2,check=False)
+                    except Exception: pass
                 return 0
             path={"status":"/v1/node","activity":"/v1/activity","pulse":"/v1/pulse","models":"/v1/models","services":"/v1/services","http":"/v1/http"}.get(a.command)
             if path:

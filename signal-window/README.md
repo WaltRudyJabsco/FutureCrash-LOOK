@@ -1,6 +1,8 @@
-# Signal Window 1.7.0
+# Signal Window 1.8.0
 
-## 1.7.0 — explicit media endpoints
+## 1.8.0 — Fabric endpoint authorization
+
+Signal is now an accountless Fabric endpoint rather than an implicitly trusted web page. New browsers receive a six-digit pending code; approve with `lk fabric allow CODE once` or `lk fabric allow CODE trust`. Trusted machines can also mint a one-use QR invitation with `lk fabric endpoint-code URL`. Credentials are scoped, revocable, HttpOnly cookies.
 
 OUT is rendered as stable endpoint buttons. `This iPhone`/`This Device` is handled entirely by browser audio; Fabric nodes use node handoff. Cross-node playback streams source media through Fabric rather than adopting another machine's filesystem paths.
 

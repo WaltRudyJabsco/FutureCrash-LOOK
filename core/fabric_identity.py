@@ -1,8 +1,8 @@
 #!/usr/bin/env python3
-"""Accountless Fabric node identity, trust store, and one-time pairing.
+"""Accountless Fabric node identity, trust, pairing, and peer authorization.
 
-Identity is local and transport-independent. Tailscale/LAN may carry pairing traffic,
-but neither supplies the node's identity or trust decision.
+Fabric identity is transport-independent. Tailscale/LAN may carry packets, but
+Fabric owns who a peer is and whether that peer is authorized.
 """
 from __future__ import annotations
 
@@ -21,10 +21,11 @@ import urllib.parse
 import urllib.request
 from pathlib import Path
 
-SCHEMA = "fabric-identity-v1"
-PAIR_SCHEMA = "fabric-pair-v1"
+SCHEMA = "fabric-identity-v2"
+PAIR_SCHEMA = "fabric-pair-v2"
 PAIR_TTL_SECONDS = 300
-PAIR_CODE_BYTES = 10  # 80 bits; short enough to type, strong enough for a 5-minute invitation.
+PAIR_MAX_ATTEMPTS = 8
+AUTH_TOKEN_BYTES = 32
 
 
 def _now() -> float:
@@ -59,7 +60,6 @@ def _public_key_parts(text: str) -> tuple[str, str]:
     parts = str(text or "").strip().split()
     if len(parts) < 2 or parts[0] != "ssh-ed25519":
         raise ValueError("Fabric identity requires an ssh-ed25519 public key")
-    # Validate encoding so malformed trust records cannot become identities.
     base64.b64decode(parts[1].encode("ascii"), validate=True)
     return parts[0], parts[1]
 
@@ -81,13 +81,29 @@ def public_identity(public_key: str, *, name: str = "", hostname: str = "") -> d
     }
 
 
-def format_pair_code(raw: bytes | None = None) -> str:
-    token = base64.b32encode(raw or secrets.token_bytes(PAIR_CODE_BYTES)).decode("ascii").rstrip("=")
-    return "-".join(token[i:i+4] for i in range(0, len(token), 4))
+def format_pair_code() -> str:
+    # Eight decimal digits are comfortable to read/message while a five-minute,
+    # one-use invitation plus attempt limiting keeps the online guessing surface small.
+    return f"{secrets.randbelow(100_000_000):08d}"
 
 
 def normalize_pair_code(code: str) -> str:
-    return "".join(ch for ch in str(code or "").upper() if ch.isalnum())
+    return "".join(ch for ch in str(code or "") if ch.isdigit())
+
+
+def _new_auth_token() -> str:
+    return secrets.token_urlsafe(AUTH_TOKEN_BYTES)
+
+
+def _token_hash(token: str) -> str:
+    return hashlib.sha256(str(token or "").encode("utf-8")).hexdigest()
+
+
+def _host(value: str) -> str:
+    try:
+        return (urllib.parse.urlparse(value).hostname or "").casefold()
+    except Exception:
+        return ""
 
 
 class FabricIdentity:
@@ -114,9 +130,6 @@ class FabricIdentity:
                 if proc.returncode:
                     raise RuntimeError((proc.stderr or proc.stdout or "ssh-keygen failed").strip())
             else:
-                # OpenSSL is the dependency-light fallback used on minimal Unix installs.
-                # Convert its standard Ed25519 SubjectPublicKeyInfo into OpenSSH public form
-                # so node IDs stay identical regardless of which key generator was present.
                 openssl = shutil.which("openssl")
                 if not openssl:
                     raise RuntimeError("ssh-keygen or openssl is required to create a Fabric identity")
@@ -144,12 +157,21 @@ class FabricIdentity:
             self.ensure()
         return public_identity(self.public_key.read_text(encoding="utf-8"), name=name, hostname=hostname)
 
-    def trusted(self) -> dict:
+    def trusted(self, *, public: bool = False) -> dict:
         data = _load_json(self.trust_path, {"schema": SCHEMA, "nodes": {}})
         nodes = data.get("nodes") if isinstance(data.get("nodes"), dict) else {}
-        return {"schema": SCHEMA, "nodes": nodes}
+        if not public:
+            return {"schema": SCHEMA, "nodes": nodes}
+        clean = {}
+        for node_id, row in nodes.items():
+            if not isinstance(row, dict):
+                continue
+            clean[node_id] = {k:v for k,v in row.items() if k not in {"auth_token","auth_token_hash"}}
+            clean[node_id]["authorized"] = bool(row.get("auth_token_hash"))
+        return {"schema": SCHEMA, "nodes": clean}
 
-    def trust(self, peer: dict, *, source: str = "pairing") -> dict:
+    def trust(self, peer: dict, *, source: str = "pairing", auth_token: str | None = None,
+              endpoint: str | None = None) -> dict:
         if not isinstance(peer, dict):
             raise ValueError("peer identity must be an object")
         canonical = public_identity(
@@ -161,9 +183,19 @@ class FabricIdentity:
         if claimed and claimed != canonical["node_id"]:
             raise ValueError("peer node_id does not match its public key")
         data = self.trusted()
+        prior = dict((data.get("nodes") or {}).get(canonical["node_id"]) or {})
         record = dict(canonical)
-        record.update({"trusted_at": _now(), "source": str(source or "pairing")})
-        data["nodes"][canonical["node_id"]] = record
+        record.update({"trusted_at": prior.get("trusted_at") or _now(), "updated_at": _now(), "source": str(source or "pairing")})
+        token = str(auth_token or prior.get("auth_token") or "")
+        if token:
+            record["auth_token"] = token
+            record["auth_token_hash"] = _token_hash(token)
+        if endpoint:
+            record["endpoint"] = str(endpoint).rstrip("/")
+        elif prior.get("endpoint"):
+            record["endpoint"] = prior["endpoint"]
+        data["schema"] = SCHEMA
+        data.setdefault("nodes", {})[canonical["node_id"]] = record
         _atomic_json(self.trust_path, data)
         return record
 
@@ -173,6 +205,34 @@ class FabricIdentity:
         if removed:
             _atomic_json(self.trust_path, data)
         return removed
+
+    def verify_peer(self, node_id: str, token: str) -> bool:
+        row = (self.trusted().get("nodes") or {}).get(str(node_id or "")) or {}
+        expected = str(row.get("auth_token_hash") or "")
+        if not expected or not token:
+            return False
+        return secrets.compare_digest(expected, _token_hash(token))
+
+    def auth_headers_for_url(self, url: str) -> dict:
+        target = _host(url)
+        if not target:
+            return {}
+        me = self.ensure()
+        for row in (self.trusted().get("nodes") or {}).values():
+            if not isinstance(row, dict):
+                continue
+            token = str(row.get("auth_token") or "")
+            if not token:
+                continue
+            candidates = {
+                _host(str(row.get("endpoint") or "")),
+                str(row.get("hostname") or "").casefold(),
+                str(row.get("name") or "").casefold(),
+            }
+            candidates.discard("")
+            if target in candidates or any(target.split(".",1)[0] == c.split(".",1)[0] for c in candidates):
+                return {"X-Fabric-Node": me["node_id"], "Authorization": "Bearer " + token}
+        return {}
 
     def start_pairing(self, endpoint: str, *, name: str = "", hostname: str = "", ttl: int = PAIR_TTL_SECONDS) -> dict:
         me = self.ensure()
@@ -186,26 +246,34 @@ class FabricIdentity:
         state = {
             "schema": PAIR_SCHEMA,
             "code_hash": hashlib.sha256(normalize_pair_code(code).encode("ascii")).hexdigest(),
-            "created": _now(), "expires": expires, "endpoint": endpoint,
+            "created": _now(), "expires": expires, "endpoint": endpoint, "attempts": 0,
         }
         _atomic_json(self.pair_path, state)
-        query = urllib.parse.urlencode({"v": "1", "url": endpoint, "code": code, "node": me["node_id"]})
+        query = urllib.parse.urlencode({"v": "2", "url": endpoint, "code": code, "node": me["node_id"]})
         return {"schema": PAIR_SCHEMA, "identity": me, "code": code, "endpoint": endpoint,
                 "expires": expires, "uri": "fcl://pair?" + query}
 
-    def accept_pairing(self, code: str, peer: dict) -> dict:
+    def accept_pairing(self, code: str, peer: dict, *, auth_token: str, peer_endpoint: str | None = None) -> dict:
         state = _load_json(self.pair_path, {})
-        if state.get("schema") != PAIR_SCHEMA:
+        if state.get("schema") not in {PAIR_SCHEMA, "fabric-pair-v1"}:
             raise ValueError("no pairing invitation is open")
         if float(state.get("expires") or 0) < _now():
             try: self.pair_path.unlink()
             except OSError: pass
             raise ValueError("pairing invitation expired")
+        attempts = int(state.get("attempts") or 0)
+        if attempts >= PAIR_MAX_ATTEMPTS:
+            try: self.pair_path.unlink()
+            except OSError: pass
+            raise ValueError("pairing invitation locked after too many attempts")
         supplied = hashlib.sha256(normalize_pair_code(code).encode("ascii")).hexdigest()
         if not secrets.compare_digest(str(state.get("code_hash") or ""), supplied):
+            state["attempts"] = attempts + 1
+            _atomic_json(self.pair_path, state)
             raise ValueError("pairing code is invalid")
-        record = self.trust(peer, source="pairing")
-        # Invitations are one-use capabilities. Consume before answering success.
+        if len(str(auth_token or "")) < 32:
+            raise ValueError("pairing authorization token is invalid")
+        record = self.trust(peer, source="pairing", auth_token=auth_token, endpoint=peer_endpoint)
         try: self.pair_path.unlink()
         except OSError: pass
         return record
@@ -214,7 +282,8 @@ class FabricIdentity:
         state = _load_json(self.pair_path, {})
         if not state or float(state.get("expires") or 0) < _now():
             return {"open": False}
-        return {"open": True, "endpoint": state.get("endpoint"), "expires": state.get("expires")}
+        return {"open": True, "endpoint": state.get("endpoint"), "expires": state.get("expires"),
+                "attempts": int(state.get("attempts") or 0)}
 
 
 def parse_pair_target(value: str, code: str | None = None) -> tuple[str, str]:
@@ -231,13 +300,17 @@ def parse_pair_target(value: str, code: str | None = None) -> tuple[str, str]:
     return value.rstrip("/"), str(code)
 
 
-def join_pairing(local: FabricIdentity, target: str, code: str | None = None, *, name: str = "", hostname: str = "", timeout: float = 6.0) -> dict:
+def join_pairing(local: FabricIdentity, target: str, code: str | None = None, *, name: str = "", hostname: str = "",
+                 local_endpoint: str | None = None, timeout: float = 6.0) -> dict:
     endpoint, pair_code = parse_pair_target(target, code)
     me = local.ensure()
     if name or hostname:
         me = local.public(name=name, hostname=hostname)
-    body = json.dumps({"schema": PAIR_SCHEMA, "code": pair_code, "identity": me}, separators=(",", ":")).encode()
-    req = urllib.request.Request(endpoint + "/v1/identity/pair", data=body, headers={"Content-Type": "application/json"}, method="POST")
+    token = _new_auth_token()
+    body = json.dumps({"schema": PAIR_SCHEMA, "code": pair_code, "identity": me,
+                       "auth_token": token, "endpoint": str(local_endpoint or "")}, separators=(",", ":")).encode()
+    req = urllib.request.Request(endpoint + "/v1/identity/pair", data=body,
+                                 headers={"Content-Type": "application/json"}, method="POST")
     try:
         with urllib.request.urlopen(req, timeout=timeout) as response:
             result = json.loads(response.read() or b"{}")
@@ -246,7 +319,7 @@ def join_pairing(local: FabricIdentity, target: str, code: str | None = None, *,
     remote = result.get("identity") if isinstance(result, dict) else None
     if not isinstance(remote, dict):
         raise RuntimeError(str((result or {}).get("error") or "pairing response had no identity"))
-    stored = local.trust(remote, source="pairing")
+    stored = local.trust(remote, source="pairing", auth_token=token, endpoint=endpoint)
     return {"ok": True, "peer": stored, "remote": remote}
 
 
@@ -259,4 +332,4 @@ if __name__ == "__main__":
     if a.command in {"init", "show"}:
         print(json.dumps(store.ensure(), indent=2))
     else:
-        print(json.dumps(store.trusted(), indent=2))
+        print(json.dumps(store.trusted(public=True), indent=2))

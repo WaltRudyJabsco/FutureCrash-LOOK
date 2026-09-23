@@ -1,3 +1,14 @@
+# 6.0.0 — Fabric Authorization
+
+- Enforce paired-node authorization on remotely reachable Fabric API routes.
+- Mint reciprocal high-entropy peer credentials during pairing; keep public discovery/health/pairing routes minimal.
+- Replace awkward copy/paste-first pairing with eight-digit one-use codes and `lk fabric pair NODE CODE`; keep QR transport optional.
+- Add attempt limiting to pairing invitations.
+- Add Signal Window 1.8.0 browser endpoint authorization with six-digit pending codes.
+- Add `lk fabric endpoints`, `allow`, `revoke-endpoint`, and `endpoint-code`.
+- Support allow-once, trust-device, revocation, one-use QR invitations, scoped endpoint credentials, and HttpOnly cookies.
+- Preserve Tailscale as an optional transport rather than an identity/authorization provider.
+
 # 5.9.0 — Fabric Identity
 
 - Add a transport-independent Ed25519 identity to every Fabric node.

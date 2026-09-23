@@ -1,7 +1,7 @@
 <!doctype html>
 <html><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
 <title>Signal</title><link rel="stylesheet" href="style.css"></head>
-<body><main>
+<body><div id="authGate" hidden><div class="auth-card"><div class="auth-kicker">FABRIC ENDPOINT</div><div class="auth-title">Authorization required</div><div class="auth-copy">Approve this browser from a trusted machine:</div><div id="authCode" class="auth-code">······</div><div class="auth-command">lk fabric allow <span id="authCodeInline">CODE</span> trust</div><div class="auth-note">or use <b>once</b> for a temporary session · waiting for approval…</div></div></div><main>
 <section class="face"><div class="label"><span>SIGNAL · 256²</span><span id="status">…</span></div>
 <div class="screen"><canvas id="ambient" width="256" height="256"></canvas><canvas id="signal" width="256" height="256"></canvas><div id="fabricLight" aria-hidden="true"></div><div class="scan"></div></div></section>
 <section class="terminal"><div id="log"></div><div id="drops"></div>

@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Signal Window 1.7.0 — browser LO with shared media, browser audio, decisions, and camera/vision attachments."""
+"""Signal Window 1.8.0 — accountless authorized Fabric browser endpoint."""
 from __future__ import annotations
 
 import argparse
@@ -15,6 +15,7 @@ import shutil
 import signal
 import subprocess
 import tempfile
+import sys
 import threading
 import secrets
 import time
@@ -26,6 +27,13 @@ from urllib.parse import urlparse, urlunparse, quote, parse_qs
 
 ROOT = Path(__file__).resolve().parent
 LO_REQUEST_TIMEOUT = 180.0
+CORE_DIR = Path.home()/".local/share/future-crash-look/core"
+if not (CORE_DIR/"endpoint_auth.py").exists(): CORE_DIR = ROOT.parent/"core"
+if str(CORE_DIR) not in sys.path: sys.path.insert(0,str(CORE_DIR))
+from endpoint_auth import EndpointAuth
+ENDPOINT_AUTH = EndpointAuth()
+ENDPOINT_COOKIE = "fcl_endpoint"
+PENDING_COOKIE = "fcl_pending"
 
 SURFACE_CONTRACT = r"""
 Return ONLY compact JSON for Signal's persistent 256x256 graphics world, or {} when no visual is useful.
@@ -844,11 +852,55 @@ class App(BaseHTTPRequestHandler):
     lo_timeout=LO_REQUEST_TIMEOUT
     request_lock=threading.Lock()
     def log_message(self,fmt,*args): pass
-    def send_bytes(self,code,data,ctype):
-        self.send_response(code); self.send_header("Content-Type",ctype); self.send_header("Content-Length",str(len(data))); self.end_headers(); self.wfile.write(data)
-    def json(self,code,obj): self.send_bytes(code,json.dumps(obj).encode(),"application/json; charset=utf-8")
+    def send_bytes(self,code,data,ctype,headers=None):
+        self.send_response(code); self.send_header("Content-Type",ctype); self.send_header("Content-Length",str(len(data)))
+        for k,v in (headers or []): self.send_header(k,v)
+        self.end_headers(); self.wfile.write(data)
+    def json(self,code,obj,headers=None): self.send_bytes(code,json.dumps(obj).encode(),"application/json; charset=utf-8",headers)
+    def _cookie(self,name):
+        raw=str(self.headers.get("Cookie") or "")
+        for bit in raw.split(";"):
+            if "=" in bit:
+                k,v=bit.strip().split("=",1)
+                if k==name: return v
+        return ""
+    def _secure_cookie(self):
+        host=str(self.headers.get("Host") or "").split(":",1)[0].casefold()
+        proto=str(self.headers.get("X-Forwarded-Proto") or "").casefold()
+        return proto=="https" or host.endswith(".ts.net")
+    def _set_cookie(self,name,value,max_age):
+        bits=[f"{name}={value}","Path=/","HttpOnly","SameSite=Strict",f"Max-Age={int(max_age)}"]
+        if self._secure_cookie(): bits.append("Secure")
+        return ("Set-Cookie","; ".join(bits))
+    def _endpoint(self):
+        return ENDPOINT_AUTH.verify(self._cookie(ENDPOINT_COOKIE))
+    def _require_endpoint(self,scope="signal.view"):
+        ep=self._endpoint()
+        if not ep:
+            self.json(401,{"ok":False,"error":"Fabric endpoint authorization required"}); return None
+        scopes=set(ep.get("scopes") or [])
+        if scope and scope not in scopes:
+            self.json(403,{"ok":False,"error":f"Fabric endpoint lacks scope: {scope}"}); return None
+        return ep
+    def _auth_status(self):
+        ep=self._endpoint()
+        if ep: return self.json(200,{"authorized":True,"endpoint":ep})
+        pending=self._cookie(PENDING_COOKIE)
+        if pending:
+            row=ENDPOINT_AUTH.pending_status(pending)
+            if row and row.get("approved"):
+                issued=ENDPOINT_AUTH.redeem_pending(pending,label=str(self.headers.get("User-Agent") or "Browser")[:80])
+                if issued:
+                    headers=[self._set_cookie(ENDPOINT_COOKIE,issued["token"],31536000 if issued.get("mode")=="trust" else 43200),
+                             self._set_cookie(PENDING_COOKIE,"",0)]
+                    return self.json(200,{"authorized":True,"endpoint":{k:v for k,v in issued.items() if k!="token"}},headers)
+            if row: return self.json(200,{"authorized":False,"pending":{k:v for k,v in row.items() if k!="id"}})
+        row=ENDPOINT_AUTH.request(user_agent=str(self.headers.get("User-Agent") or ""),remote=str(self.client_address[0]))
+        return self.json(200,{"authorized":False,"pending":{k:v for k,v in row.items() if k!="id"}},
+                         [self._set_cookie(PENDING_COOKIE,row["id"],300)])
     def do_HEAD(self):
         parsed=urlparse(self.path)
+        if parsed.path.startswith("/api/") and not self._require_endpoint("media.output"): return
         if parsed.path=="/api/media/audio":
             q=parse_qs(parsed.query); node=str((q.get("node") or [""])[0])
             try: index=int((q.get("index") or [0])[0] or 0)
@@ -857,6 +909,17 @@ class App(BaseHTTPRequestHandler):
         self.send_response(404); self.send_header("Content-Length","0"); self.end_headers()
 
     def do_GET(self):
+        parsed=urlparse(self.path); path=parsed.path
+        if path=="/api/auth/status": return self._auth_status()
+        if path in ("/",""):
+            invite=str((parse_qs(parsed.query).get("fcl_invite") or [""])[0])
+            if invite:
+                issued=ENDPOINT_AUTH.redeem_invite(invite,label=str(self.headers.get("User-Agent") or "Browser")[:80])
+                if not issued: return self.json(403,{"error":"endpoint invitation expired or invalid"})
+                self.send_response(303); self.send_header("Location","/"); self.send_header(*self._set_cookie(ENDPOINT_COOKIE,issued["token"],31536000 if issued.get("mode")=="trust" else 43200)); self.end_headers(); return
+        if path.startswith("/api/"):
+            scope="media.output" if path.startswith("/api/media") else "signal.view"
+            if not self._require_endpoint(scope): return
         if self.path.startswith("/api/present/"):
             token=self.path.split("/api/present/",1)[1].split("?",1)[0]
             p=_present_get(token)
@@ -899,6 +962,12 @@ class App(BaseHTTPRequestHandler):
         if path not in ("index.html","app.js","style.css"): return self.json(404,{"error":"not found"})
         p=ROOT/path; self.send_bytes(200,p.read_bytes(),mimetypes.guess_type(p.name)[0] or "application/octet-stream")
     def do_POST(self):
+        if self.path.startswith("/api/"):
+            if self.path.startswith("/api/media"): scope="media.output"
+            elif self.path=="/api/fabric/decisions/answer": scope="decisions.answer"
+            elif self.path=="/api/chat": scope="lo.use"
+            else: scope="signal.view"
+            if not self._require_endpoint(scope): return
         if self.path=="/api/fabric/decisions/answer":
             try:
                 n=int(self.headers.get("Content-Length","0")); d=json.loads(self.rfile.read(n) or b"{}")
@@ -1085,7 +1154,7 @@ def main():
         state=f"LO NATIVE {a.profile} · "+(App.lo_cmd if App.lo_cmd else "NOT FOUND")
     else:
         p=probe_ollama(App.backend); state=("connected" if p.get("ok") else "unreachable: "+p.get("error","unknown"))
-    print(f"Signal Window 1.7.0 · http://{a.host}:{a.port} · {state} · gallery {App.gallery_dir if App.gallery_enabled else 'off'}")
+    print(f"Signal Window 1.8.0 · http://{a.host}:{a.port} · {state} · gallery {App.gallery_dir if App.gallery_enabled else 'off'}")
     ThreadingHTTPServer((a.host,a.port),App).serve_forever()
 
 if __name__=="__main__": main()

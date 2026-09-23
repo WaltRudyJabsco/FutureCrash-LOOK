@@ -140,3 +140,19 @@ The broker coordinates `lo bg`, memory maintenance, and skill reflection. Intera
 ### Content search (5.7)
 
 The file catalog incrementally extracts bounded text from common text/source/config files, HTML, DOCX, EPUB, and text-bearing PDFs into SQLite FTS5. `lk find` searches names, paths, and indexed contents locally or across Fabric. Results include a short content snippet when FTS matched. Indexing performs no OCR, embeddings, model calls, or hashing.
+
+## Fabric identity and endpoint authorization
+
+`lk fabric identity` — show this node's stable Fabric identity and fingerprint.
+
+`lk fabric pair-code [URL]` — open a five-minute, one-use node pairing invitation. The primary path is the short eight-digit code: on the other machine run `lk fabric pair NODE CODE`. If `qrencode` is installed, LOOK also renders a QR courier containing the node/code/endpoint.
+
+`lk fabric trust` — list trusted nodes. `AUTH` means the peer has a 6.0 authorization credential; `RE-PAIR` means an older trust record must be paired again.
+
+`lk fabric endpoints` — list pending, temporary, and trusted browser endpoints.
+
+`lk fabric allow CODE once|trust` — approve a six-digit browser request temporarily or as a trusted device.
+
+`lk fabric endpoint-code URL [once|trust]` — mint a one-use Signal/browser invitation; with `qrencode`, scan it directly with an iPhone camera.
+
+`lk fabric revoke-endpoint ENDPOINT_ID` — revoke a browser endpoint credential.

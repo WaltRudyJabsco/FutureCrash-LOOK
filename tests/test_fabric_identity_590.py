@@ -34,11 +34,11 @@ def test_pairing_invitation_is_one_use(tmp_path):
     endpoint, code=parse_pair_target(invite['uri'])
     assert endpoint=='https://fabric.example:7332'
     assert normalize_pair_code(code)==normalize_pair_code(invite['code'])
-    accepted=host.accept_pairing(code, joiner.ensure())
+    accepted=host.accept_pairing(code, joiner.ensure(), auth_token='x'*48, peer_endpoint='https://joiner.example:7332')
     assert accepted['node_id']==joiner.ensure()['node_id']
     assert joiner.ensure()['node_id'] in host.trusted()['nodes']
     try:
-        host.accept_pairing(code, joiner.ensure())
+        host.accept_pairing(code, joiner.ensure(), auth_token='x'*48)
     except ValueError as exc:
         assert 'no pairing invitation' in str(exc)
     else:

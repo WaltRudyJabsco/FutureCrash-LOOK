@@ -1,13 +1,13 @@
 #!/usr/bin/env bash
 set -euo pipefail
 ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
-echo "Future Crash + LOOK 5.9.0 · Fabric Identity"
+echo "Future Crash + LOOK 6.0.0 · Fabric Authorization"
 echo "────────────────────────────────────────"
 
 # Refuse a mixed bundle before mutating the machine. A unified release must move
 # LOOK and the node together.
 EXPECTED_RELEASE="$(tr -d '[:space:]' < "$ROOT/VERSION")"
-[[ "$EXPECTED_RELEASE" == "5.9.0" ]] || { echo "BUNDLE ERROR: expected release 5.9.0, found $EXPECTED_RELEASE"; exit 4; }
+[[ "$EXPECTED_RELEASE" == "6.0.0" ]] || { echo "BUNDLE ERROR: expected release 6.0.0, found $EXPECTED_RELEASE"; exit 4; }
 grep -q 'def _fabric_command' "$ROOT/look/lk" || { echo "BUNDLE ERROR: LOOK source has no Fabric command"; exit 4; }
 grep -q 'choices=.*serve.*fabric' "$ROOT/core/node.py" || { echo "BUNDLE ERROR: node source has no Fabric CLI"; exit 4; }
 
@@ -28,7 +28,7 @@ case "$OPENJEV_MODE" in off|auto|adopt|install) ;; *) echo "BUNDLE ERROR: invali
 ((UNINSTALL)) && exit 0
 if ((DRY_RUN)); then
   echo
-  echo "[dry-run] would install/restart Unified Node 5.9.0 with accountless Fabric Identity, trust/pairing, Fabric SearXNG discovery/search, canonical Decision Plane, optional OpenJev worker, Fabric Content Search, Fabric Media Catalog, Streaming Artifacts, Fabric Memory, and Signal Window 1.7.0"
+  echo "[dry-run] would install/restart Unified Node 6.0.0 with enforced Fabric peer authorization, accountless browser endpoint pairing, Fabric SearXNG discovery/search, Decision Plane, Content Search, Media, Artifacts, Memory, and Signal Window 1.8.0"
   echo "[dry-run] OpenJev mode: $OPENJEV_MODE (auto adopts an existing worker; absence is non-fatal)"
   echo "[dry-run] would reconcile Tailscale :7332 → separate fcl-ingress :7333 and verify Fabric CLI wiring"
   exit 0
@@ -39,6 +39,7 @@ install -m 0755 "$ROOT/core/node.py" "$HOME/.local/share/future-crash-look/core/
 install -m 0644 "$ROOT/core/fabric_packet.py" "$HOME/.local/share/future-crash-look/core/fabric_packet.py"
 install -m 0644 "$ROOT/core/fabric_client.py" "$HOME/.local/share/future-crash-look/core/fabric_client.py"
 install -m 0644 "$ROOT/core/fabric_identity.py" "$HOME/.local/share/future-crash-look/core/fabric_identity.py"
+install -m 0644 "$ROOT/core/endpoint_auth.py" "$HOME/.local/share/future-crash-look/core/endpoint_auth.py"
 install -m 0644 "$ROOT/core/conductor.py" "$HOME/.local/share/future-crash-look/core/conductor.py"
 install -m 0644 "$ROOT/core/decision.py" "$HOME/.local/share/future-crash-look/core/decision.py"
 install -m 0644 "$ROOT/core/memory_store.py" "$HOME/.local/share/future-crash-look/core/memory_store.py"
@@ -250,6 +251,9 @@ fi
 if ! cmp -s "$ROOT/core/fabric_identity.py" "$HOME/.local/share/future-crash-look/core/fabric_identity.py"; then
   echo "INSTALL ERROR: Fabric identity core differs from release" >&2; exit 8
 fi
+if ! cmp -s "$ROOT/core/endpoint_auth.py" "$HOME/.local/share/future-crash-look/core/endpoint_auth.py"; then
+  echo "INSTALL ERROR: endpoint authorization core differs from release" >&2; exit 8
+fi
 if ! cmp -s "$ROOT/core/conductor.py" "$HOME/.local/share/future-crash-look/core/conductor.py"; then
   echo "INSTALL ERROR: installed conductor differs from release" >&2; exit 8
 fi
@@ -261,10 +265,11 @@ if ! cmp -s "$ROOT/core/decision.py" "$HOME/.local/share/future-crash-look/core/
 fi
 if ! PYTHONPATH="$HOME/.local/share/future-crash-look/core" python3 - <<'PY_RUNTIME' >/dev/null 2>&1
 import conductor, fabric_client, memory_store, decision
-import fabric_identity
+import fabric_identity, endpoint_auth
 assert conductor.classify("ping").tier == "reflex"
 assert callable(fabric_client.stream_infer)
 assert callable(fabric_identity.public_identity)
+assert callable(endpoint_auth.EndpointAuth)
 assert decision.plan(profile="power", confidence=.7).timeout_action == "continue"
 PY_RUNTIME
 then

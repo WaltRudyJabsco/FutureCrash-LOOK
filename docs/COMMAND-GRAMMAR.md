@@ -149,3 +149,21 @@ fcl-node file-catalog [--node NODE] [--json]
 ### Content-search behavior
 
 `lk scan [ROOT]` incrementally indexes bounded deterministic text for supported documents. `lk find QUERY` combines metadata and FTS5 content results; remote nodes execute their own search and return bounded matches rather than transferring the index. Unsupported, oversized, image-only, or unextractable files remain metadata-searchable.
+
+## Fabric authorization grammar (6.0)
+
+Fabric commands remain explicit CLI grammar rather than natural-language parsing:
+
+```text
+lk fabric pair-code [URL]
+lk fabric pair NODE CODE
+lk fabric pair ENDPOINT CODE
+lk fabric trust
+lk fabric untrust NODE_ID
+lk fabric endpoints
+lk fabric allow CODE [once|trust]
+lk fabric endpoint-code URL [once|trust]
+lk fabric revoke-endpoint ENDPOINT_ID
+```
+
+Node pairing codes are one-use and time-bounded. Browser endpoint codes identify a pending request and must be approved from a trusted local machine. Long-lived browser credentials are stored as HttpOnly cookies and can be revoked independently of node trust.

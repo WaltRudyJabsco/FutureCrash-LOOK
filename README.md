@@ -229,6 +229,35 @@ Future Crash + LOOK tries to stay boring underneath:
 - observable Linux/macOS primitives rather than hidden infrastructure;
 - no account should be required merely to make the core system useful.
 
+## Accountless pairing and endpoints
+
+Pair two nodes without copying a long URI:
+
+```sh
+# machine A
+lk fabric pair-code
+
+# machine B
+lk fabric pair 3090 12345678
+```
+
+A new Signal browser shows a six-digit authorization code. Approve it locally:
+
+```sh
+lk fabric endpoints
+lk fabric allow 482193 once
+lk fabric allow 482193 trust
+lk fabric revoke-endpoint ep-...
+```
+
+For an iPhone, a trusted machine can mint a one-use browser invitation and render a QR when `qrencode` is available:
+
+```sh
+lk fabric endpoint-code https://signal.example trust
+```
+
+The browser receives a scoped HttpOnly credential; no Future Crash account, password, or third-party identity provider is involved.
+
 ## Documentation
 
 Detailed command help lives in the installed tools and focused docs rather than at the top of this README:
@@ -244,8 +273,8 @@ See `docs/COMMAND-GRAMMAR.md`, `look/docs/COMMANDS.md`, and `docs/RELEASE-HISTOR
 
 ## Release
 
-Current release: **5.9.0 — Fabric Identity**.
+Current release: **6.0.0 — Fabric Authorization**.
 
-Every node now has a transport-independent Ed25519 identity, stable public-key-derived node ID, local trust store, and one-use pairing flow. Tailscale remains an optional transport rather than the source of identity; endpoint authorization and signed/scoped request enforcement are the next layer.
+Fabric identity now enforces trust on remotely reachable node APIs, and Signal/Safari is an explicitly authorized Fabric endpoint rather than an implicitly trusted browser. Node pairing uses short one-use numeric codes, paired peers receive reciprocal bearer credentials, and browser endpoints can be approved once, trusted persistently, revoked, or joined by a one-use QR invitation. Tailscale remains only a transport; Fabric now owns identity and authorization.
 
 Future Crash + LOOK remains an open, local-first project: **Fabric turns your computers and devices into one personal computer; LOOK is how you use it.**
