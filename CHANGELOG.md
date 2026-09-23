@@ -1,3 +1,9 @@
+# 6.1.2 — Fabric Endpoint Route Repair
+
+- Fix endpoint approval/revocation HTTP handlers accidentally registered in `GET` instead of `POST`.
+- Restore `lk fabric allow CODE once|trust` locally and through Fabric-wide routing.
+- Keep the 6.1.1 CLI fallback for mixed resident-process upgrade windows.
+
 # 6.1.1 — Fabric Edge Repair
 
 - Make Fabric endpoint approval resilient to a stale local node: the CLI can locate and approve a pending browser code across trusted peers when the local aggregate route returns 404.

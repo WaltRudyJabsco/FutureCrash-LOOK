@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Future Crash + LOOK Unified Node 6.1.1.
+"""Future Crash + LOOK Unified Node 6.1.2.
 
 A small distributed supervisor for trusted personal machines. Immediate events stay
 asynchronous; a one-second fabric pulse reconciles presence, leases and stale work.
@@ -58,7 +58,7 @@ try:
 except ImportError:
     from endpoint_auth import EndpointAuth
 
-VERSION = "6.1.1"
+VERSION = "6.1.2"
 DEFAULT_HOST = "127.0.0.1"
 DEFAULT_PORT = 7332
 DEFAULT_INGRESS_PORT = 0
@@ -2676,7 +2676,7 @@ def _openjev_shadow(state, question, candidates, *, profile="workspace", consequ
 
 
 class API(BaseHTTPRequestHandler):
-    server_version = "FCLNode/6.1.1"
+    server_version = "FCLNode/6.1.2"
 
     def setup(self):
         self._metric_request_id = None
@@ -2899,28 +2899,6 @@ class API(BaseHTTPRequestHandler):
             if status.get("reachable") and status.get("state") == "configured": status["state"]="ready"
             elif status.get("enabled") and not status.get("reachable"): status["state"]="down"
             return self.sendj(200,status)
-        if path == "/v1/endpoints/fabric/allow":
-            if getattr(self.server,"plane","local") != "local":
-                return self.sendj(403,{"error":"Fabric endpoint management is local-control only"})
-            try:
-                result=_endpoint_allow_fabric(str(d.get("code") or ""),str(d.get("mode") or "once"))
-                return self.sendj(200,{"ok":True,**result})
-            except ValueError as exc:
-                return self.sendj(404,{"ok":False,"error":str(exc)})
-        if path == "/v1/endpoints/fabric/revoke":
-            if getattr(self.server,"plane","local") != "local":
-                return self.sendj(403,{"error":"Fabric endpoint management is local-control only"})
-            result=_endpoint_revoke_fabric(str(d.get("endpoint_id") or ""))
-            return self.sendj(200 if result.get("ok") else 404,result)
-        if path == "/v1/endpoints/allow":
-            try:
-                row=ENDPOINT_AUTH.allow(str(d.get("code") or ""),str(d.get("mode") or "once"))
-                return self.sendj(200,{"ok":True,"endpoint":row,"node":identity()["name"]})
-            except ValueError as exc:
-                return self.sendj(404,{"ok":False,"error":str(exc)})
-        if path == "/v1/endpoints/revoke":
-            ok=ENDPOINT_AUTH.revoke(str(d.get("endpoint_id") or ""))
-            return self.sendj(200 if ok else 404,{"ok":ok,"node":identity()["name"],"error":None if ok else "endpoint not found"})
         if path == "/v1/decisions":
             return self.sendj(200, {"decisions": FABRIC_STORE.decisions(pending_only=True), "node": identity()["name"]})
         if path == "/v1/decisions/fabric":
@@ -3045,6 +3023,28 @@ class API(BaseHTTPRequestHandler):
         path = urlparse(self.path).path
         if not self._authorized_ingress(path): return
         d = self.body()
+        if path == "/v1/endpoints/fabric/allow":
+            if getattr(self.server,"plane","local") != "local":
+                return self.sendj(403,{"error":"Fabric endpoint management is local-control only"})
+            try:
+                result=_endpoint_allow_fabric(str(d.get("code") or ""),str(d.get("mode") or "once"))
+                return self.sendj(200,{"ok":True,**result})
+            except ValueError as exc:
+                return self.sendj(404,{"ok":False,"error":str(exc)})
+        if path == "/v1/endpoints/fabric/revoke":
+            if getattr(self.server,"plane","local") != "local":
+                return self.sendj(403,{"error":"Fabric endpoint management is local-control only"})
+            result=_endpoint_revoke_fabric(str(d.get("endpoint_id") or ""))
+            return self.sendj(200 if result.get("ok") else 404,result)
+        if path == "/v1/endpoints/allow":
+            try:
+                row=ENDPOINT_AUTH.allow(str(d.get("code") or ""),str(d.get("mode") or "once"))
+                return self.sendj(200,{"ok":True,"endpoint":row,"node":identity()["name"]})
+            except ValueError as exc:
+                return self.sendj(404,{"ok":False,"error":str(exc)})
+        if path == "/v1/endpoints/revoke":
+            ok=ENDPOINT_AUTH.revoke(str(d.get("endpoint_id") or ""))
+            return self.sendj(200 if ok else 404,{"ok":ok,"node":identity()["name"],"error":None if ok else "endpoint not found"})
         if path == "/v1/identity/pair":
             try:
                 peer=d.get("identity") if isinstance(d,dict) else None
