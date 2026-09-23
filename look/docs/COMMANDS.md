@@ -132,3 +132,7 @@ Clear positive/negative conversational feedback may trigger background reflectio
 `lk ai status` · `lk ai start` · `lk ai stop` · `lk ai wake` — inspect/control the resident background coordinator.
 
 The broker coordinates `lo bg`, memory maintenance, and skill reflection. Interactive LO turns have foreground priority.
+
+## Fabric File Catalog
+
+`lk scan [ROOT]` refreshes cheap metadata only (path, name, extension, size, modified time). A bare scan catalogs the user home with conservative exclusions. `lk catalog` shows local coverage. `lk find QUERY` searches the reachable Fabric catalog and falls back to the local catalog offline; examples: `lk find Portland schools pdf`, `lk find python yesterday`, `lk find largest zip`.

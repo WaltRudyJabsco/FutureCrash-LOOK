@@ -11,6 +11,7 @@ _LOOK_MODULE_DIR=Path(__file__).resolve().parent
 if str(_LOOK_MODULE_DIR) not in sys.path:
     sys.path.insert(0,str(_LOOK_MODULE_DIR))
 import media_core
+import file_catalog
 
 try:
     import readline
@@ -24,7 +25,7 @@ try:
 except Exception:
     readline = None
 
-VERSION="4.46.0"
+VERSION="4.47.0"
 
 LOOK_WORDMARK = r"""       ██╗      ██╗  ██╗
        ██║      ██║ ██╔╝
@@ -57,6 +58,7 @@ MEDIA_LIBRARY_FILE=STATE_DIR/"media_library.json"
 MEDIA_PLAYLIST_DIR=STATE_DIR/"media_playlists"
 MEDIA_QUEUE_FILE=STATE_DIR/"media_queue.m3u8"
 MEDIA_IPC_FILE=STATE_DIR/"media.sock"
+FILE_CATALOG_DB=STATE_DIR/"file_catalog.sqlite3"
 _SESSION_PATH_GRANTS=[]
 _ONCE_PATH_GRANTS=[]
 _FILESYSTEM_ACCESS_PROFILE="workspace"
@@ -1489,6 +1491,13 @@ MEMORY + CRAFT
   lk skills state      show reinforcement confidence and feedback hits
                        auto-learning runs in workspace/power/unsafe; conservative never writes skills
                        natural praise/criticism may trigger conservative background reflection
+
+FILES + CATALOG
+  lk scan             refresh cheap metadata catalog for your home
+  lk scan ROOT        add/refresh an explicit root
+  lk catalog          show local catalog coverage
+  lk find QUERY       plain-language metadata search across online Fabric
+                       falls back to local catalog in Island Mode
 
 MAKE
   lmk FILE.ext         create an empty file · undoable
@@ -4758,6 +4767,19 @@ def _tool_search_files(workspace,query,path="."):
             for likely in (HOME/"Movies",HOME/"Downloads",HOME/"Desktop",HOME/"Documents"):
                 if time.monotonic()>=started+1.0: break
                 add(_scan_locate_root(likely,strong,workspace,2,4000,started+1.0))
+        if not rows or max(r[0] for r in rows)<120:
+            _locator_event("LOOK catalog","metadata index",started)
+            try:
+                catalog_rows=file_catalog.search(FILE_CATALOG_DB,query,limit=80)
+            except Exception:
+                catalog_rows=[]
+            scored=[]
+            for item in catalog_rows:
+                p=Path(str(item.get("path") or ""))
+                if p.exists():
+                    hit=_score_locate_candidate(p,strong,workspace)
+                    if hit: scored.append(hit)
+            add(scored)
         if not rows or max(r[0] for r in rows)<120:
             backend="Spotlight" if sys.platform=="darwin" else ("plocate/locate" if (shutil.which("plocate") or shutil.which("locate")) else "unavailable")
             _locator_event("OS index",backend,started)
@@ -8233,7 +8255,7 @@ def _run_filesystem_tool_impl(workspace, name, args, profile="workspace"):
         return f"File tool internal error: {type(exc).__name__}: {exc}"
     return f"Unknown file tool: {name}"
 
-LOOK_INFO_USER_AGENT="LOOK-Shell/4.46.0 (local text client)"
+LOOK_INFO_USER_AGENT="LOOK-Shell/4.47.0 (local text client)"
 
 def _run_filesystem_tool(workspace, name, args, profile="workspace"):
     global _FILESYSTEM_ACCESS_PROFILE
@@ -14859,6 +14881,66 @@ def _surface_config():
                 print(f"  {p} · {'present' if p.exists() else 'not present'} · contents hidden")
             _surface_run(show_secrets)
 
+
+def _file_scan_command(args):
+    explicit=bool(args)
+    root=Path(" ".join(args)).expanduser() if explicit else HOME
+    started=time.monotonic()
+    try:
+        result=file_catalog.scan(FILE_CATALOG_DB,root,default_home=not explicit)
+    except (OSError,NotADirectoryError) as exc:
+        print(f"LOOK scan · {exc}"); return 1
+    print(f"LOOK FILE CATALOG · {result['count']:,} files · {result['seconds']:.2f}s")
+    print(f"  root  {result['root']}")
+    print(f"  index {FILE_CATALOG_DB}")
+    if result['skipped']: print(f"  skipped {result['skipped']:,} inaccessible/excluded directories or entries")
+    print("  metadata only · no file contents read or hashed")
+    return 0
+
+
+def _file_catalog_command():
+    st=file_catalog.status(FILE_CATALOG_DB)
+    print(f"LOOK FILE CATALOG · {st['count']:,} files")
+    if not st['roots']:
+        print("  empty · run: lk scan")
+    for row in st['roots']:
+        age=max(0,time.time()-float(row['scanned']))
+        print(f"  {int(row['count']):>8,}  {row['root']} · {age/60:.0f}m ago")
+    print(f"  index {FILE_CATALOG_DB}")
+    return 0
+
+
+def _file_find_command(args):
+    if not args:
+        print("usage: lk find QUERY")
+        return 2
+    query=" ".join(args).strip()
+    source="local"
+    try:
+        payload=_media_fabric_cli(["file-find",query])
+        rows=payload.get("entries") or []
+        source="Fabric"
+    except RuntimeError:
+        rows=file_catalog.search(FILE_CATALOG_DB,query)
+    if not rows:
+        st=file_catalog.status(FILE_CATALOG_DB)
+        print(f"LOOK FIND · no matches · {query}")
+        if not st['count']: print("  catalog empty · run: lk scan")
+        return 1
+    print(f"LOOK FIND · {len(rows)} match{'es' if len(rows)!=1 else ''} · {query} · {source}")
+    for row in rows:
+        stamp=datetime.fromtimestamp(float(row['mtime'])).strftime('%Y-%m-%d %H:%M')
+        size=int(row['bytes']); units=('B','K','M','G','T'); n=float(size); u=units[0]
+        for u in units:
+            if n<1024 or u==units[-1]: break
+            n/=1024
+        human=f"{n:.0f}{u}" if u in {'B','K'} else f"{n:.1f}{u}"
+        node=str(row.get('node') or '')
+        prefix=(node+' · ') if source=='Fabric' and node else ''
+        print(f"  {stamp}  {human:>7}  {prefix}{row['path']}")
+    return 0
+
+
 # Canonical human-facing command grammar. Aliases are entry points, not separate implementations.
 # Keep internal worker commands out of this registry.
 _COMMANDS = [
@@ -14888,6 +14970,9 @@ _COMMANDS = [
     ("mkd", "<PATH>", "files", "Make directory"),
     ("lrm", "<PATH...>", "files", "Remove through LOOK"),
     ("lk match", "<TEXT>", "files", "Match/find filesystem content"),
+    ("lk scan", "[ROOT]", "files", "Refresh lightweight local file catalog"),
+    ("lk find", "<QUERY>", "files", "Search catalog with plain-language metadata terms"),
+    ("lk catalog", "", "files", "Inspect local file catalog"),
     ("lk open", "<PATH>", "files", "Open in desktop application"),
     ("lk preview", "<PATH>", "files", "Preview outside terminal"),
     ("lk reveal", "<PATH>", "files", "Reveal in Finder/file manager"),
@@ -15080,6 +15165,7 @@ DIRECT IS ALWAYS AVAILABLE
   lk apps          desktop-app preferences
   lk shortcuts     inspect/set polite shell shortcut policy
   lk access        manage LO filesystem grants
+  lk scan / find   lightweight Fabric file catalog + search
   lk personality  lk thinking      lk tailscale
   lk <file>        lk port 3000     lk process NAME
   filer: mark paths, then L to hand them to LO as context
@@ -15965,6 +16051,9 @@ def main():
     if cmd in {"schedule","scheduler"}: return schedule_command(rest)
     if cmd=="apps": return _apps_command(rest)
     if cmd=="shortcuts": return _shortcuts_command(rest)
+    if cmd=="scan": return _file_scan_command(rest)
+    if cmd=="find": return _file_find_command(rest)
+    if cmd=="catalog": return _file_catalog_command()
     if cmd=="match": return _match_command(rest)
     if cmd in {"translate","translation"}: return _translate_command(rest)
     if cmd=="access": return _access_command(rest)

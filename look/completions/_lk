@@ -52,6 +52,9 @@ _lk() {
     'why:explain command resolution'
     'ollama:Ollama models/hosts/search/access'
     'media:media library/session/transport'
+    'scan:refresh lightweight file catalog'
+    'find:search local/Fabric file catalog'
+    'catalog:inspect local file catalog'
     'player:live LOOK miniplayer'
     'memory:LO user memory'
     'forget:forget matching user memory'
@@ -94,6 +97,10 @@ _lk() {
   fi
 
   case "$words[2]" in
+    scan)
+      _files
+      return
+      ;;
     doctor)
       (( CURRENT == 3 )) && _values 'doctor mode' 'island:audit single-node offline autonomy'
       return

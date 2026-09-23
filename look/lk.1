@@ -283,6 +283,15 @@ Historical installers predating this guard cannot be retroactively protected.
 .B lk player
 Open the tiny live LOOK miniplayer for the current MediaSession. Closing it does not stop playback.
 .TP
+.B lk scan [ROOT]
+Build or refresh the lightweight ordinary-file metadata catalog. With no ROOT, scan the user home with conservative cache/build/hidden-directory exclusions. File contents are not read or hashed.
+.TP
+.B lk catalog
+Show local file-catalog coverage and indexed roots.
+.TP
+.B lk find QUERY
+Search cataloged filenames and paths using lightweight natural-language metadata terms. Uses the reachable Fabric union when available and falls back to the local catalog offline.
+.TP
 .B lk media
 Show the current LOOK media session, state, track, progress, and queue position.
 .TP

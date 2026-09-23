@@ -1,0 +1,119 @@
+"""LOOK local file catalog: cheap metadata first, content understanding later."""
+from __future__ import annotations
+import os, sqlite3, time, re
+from pathlib import Path
+
+SCHEMA_VERSION=1
+SKIP_NAMES={'.git','.svn','.hg','node_modules','__pycache__','.cache','Caches','cache','.Trash','.npm','.cargo','target','DerivedData'}
+SKIP_PREFIXES=('/proc','/sys','/dev','/run','/private/var/folders')
+TYPE_WORDS={'pdf':'.pdf','zip':'.zip','python':'.py','markdown':'.md','text':'.txt','document':None,'image':None,'audio':None,'video':None}
+GROUP_EXTS={
+ 'document':{'.pdf','.doc','.docx','.odt','.rtf','.txt','.md','.pages'},
+ 'image':{'.jpg','.jpeg','.png','.gif','.webp','.heic','.tif','.tiff','.svg'},
+ 'audio':{'.mp3','.m4a','.aac','.flac','.wav','.ogg','.opus'},
+ 'video':{'.mp4','.m4v','.mov','.mkv','.webm','.avi'},
+}
+
+def connect(path):
+    path=Path(path); path.parent.mkdir(parents=True,exist_ok=True)
+    db=sqlite3.connect(path)
+    db.execute('PRAGMA journal_mode=WAL'); db.execute('PRAGMA synchronous=NORMAL')
+    db.execute('''CREATE TABLE IF NOT EXISTS files(
+      path TEXT PRIMARY KEY, root TEXT NOT NULL, name TEXT NOT NULL, ext TEXT NOT NULL,
+      bytes INTEGER NOT NULL, mtime REAL NOT NULL, inode INTEGER, mode INTEGER, scanned REAL NOT NULL)''')
+    db.execute('CREATE INDEX IF NOT EXISTS files_name ON files(name COLLATE NOCASE)')
+    db.execute('CREATE INDEX IF NOT EXISTS files_ext ON files(ext)')
+    db.execute('CREATE INDEX IF NOT EXISTS files_mtime ON files(mtime DESC)')
+    db.execute('CREATE INDEX IF NOT EXISTS files_root ON files(root)')
+    db.execute('CREATE TABLE IF NOT EXISTS roots(root TEXT PRIMARY KEY, scanned REAL NOT NULL, count INTEGER NOT NULL)')
+    db.execute(f'PRAGMA user_version={SCHEMA_VERSION}')
+    return db
+
+def _skip_dir(path,name,default_home=False):
+    s=str(path)
+    if any(s==p or s.startswith(p+'/') for p in SKIP_PREFIXES): return True
+    if name in SKIP_NAMES: return True
+    if default_home and name.startswith('.'): return True
+    return False
+
+def scan(db_path,root=None,default_home=False):
+    base=Path(root or Path.home()).expanduser().resolve()
+    if not base.is_dir(): raise NotADirectoryError(base)
+    db=connect(db_path); started=time.monotonic(); stamp=time.time(); count=0; skipped=0
+    batch=[]
+    for dirpath,dirnames,filenames in os.walk(base,followlinks=False):
+        here=Path(dirpath)
+        kept=[]
+        for d in dirnames:
+            if _skip_dir(here/d,d,default_home): skipped+=1
+            else: kept.append(d)
+        dirnames[:]=kept
+        for name in filenames:
+            if default_home and name.startswith('.'): continue
+            p=here/name
+            try:
+                st=p.stat()
+                if not p.is_file(): continue
+            except (OSError,PermissionError): skipped+=1; continue
+            batch.append((str(p),str(base),name,p.suffix.casefold(),int(st.st_size),float(st.st_mtime),int(st.st_ino),int(st.st_mode),stamp)); count+=1
+            if len(batch)>=1000:
+                db.executemany('INSERT OR REPLACE INTO files VALUES(?,?,?,?,?,?,?,?,?)',batch); batch.clear()
+    if batch: db.executemany('INSERT OR REPLACE INTO files VALUES(?,?,?,?,?,?,?,?,?)',batch)
+    # Anything from an older scan of this exact root disappeared.
+    db.execute('DELETE FROM files WHERE root=? AND scanned<?',(str(base),stamp))
+    db.execute('INSERT OR REPLACE INTO roots VALUES(?,?,?)',(str(base),stamp,count)); db.commit(); db.close()
+    return {'root':str(base),'count':count,'skipped':skipped,'seconds':time.monotonic()-started}
+
+def _terms(query):
+    return re.findall(r'[\w.+-]+',query.casefold())
+
+def search(db_path,query,limit=80):
+    db=connect(db_path); terms=_terms(query); now=time.time(); where=[]; params=[]; extset=None
+    # Cheap natural-language intent extraction. Remaining words become filename/path terms.
+    remaining=[]
+    for t in terms:
+        if t in TYPE_WORDS:
+            ext=TYPE_WORDS[t]
+            extset={ext} if ext else GROUP_EXTS.get(t)
+        elif t in {'file','files','find','show','me','the','a','an','my','that','named','called','about'}: pass
+        elif t in {'today','yesterday','recent','recently'}: pass
+        else: remaining.append(t)
+    if 'today' in terms: where.append('mtime>=?'); params.append(now-86400)
+    elif 'yesterday' in terms: where.append('mtime>=?'); params.append(now-172800)
+    elif 'recent' in terms or 'recently' in terms: where.append('mtime>=?'); params.append(now-14*86400)
+    if extset:
+        qs=','.join('?' for _ in extset); where.append(f'ext IN ({qs})'); params.extend(sorted(extset))
+    for t in remaining:
+        where.append('(name LIKE ? OR path LIKE ?)'); like=f'%{t}%'; params.extend((like,like))
+    sql='SELECT path,name,ext,bytes,mtime,root FROM files'
+    if where: sql+=' WHERE '+' AND '.join(where)
+    order='bytes DESC' if any(x in terms for x in ('big','biggest','large','largest')) else 'mtime DESC'
+    sql+=f' ORDER BY {order} LIMIT ?'; params.append(int(limit))
+    rows=[dict(zip(('path','name','ext','bytes','mtime','root'),r)) for r in db.execute(sql,params)]
+    db.close(); return rows
+
+def status(db_path):
+    db=connect(db_path)
+    total=db.execute('SELECT COUNT(*) FROM files').fetchone()[0]
+    roots=[{'root':r,'scanned':s,'count':c} for r,s,c in db.execute('SELECT root,scanned,count FROM roots ORDER BY root')]
+    db.close(); return {'count':total,'roots':roots}
+
+def search_rows(rows,query,limit=80):
+    terms=_terms(query); now=time.time(); extset=None; remaining=[]
+    for t in terms:
+        if t in TYPE_WORDS:
+            ext=TYPE_WORDS[t]; extset={ext} if ext else GROUP_EXTS.get(t)
+        elif t in {'file','files','find','show','me','the','a','an','my','that','named','called','about'}: pass
+        elif t in {'today','yesterday','recent','recently','big','biggest','large','largest'}: pass
+        else: remaining.append(t)
+    out=[]
+    for row in rows:
+        ext=str(row.get('ext') or '').casefold(); mtime=float(row.get('mtime') or 0)
+        if extset and ext not in extset: continue
+        if 'today' in terms and mtime<now-86400: continue
+        if 'yesterday' in terms and mtime<now-172800: continue
+        if ('recent' in terms or 'recently' in terms) and mtime<now-14*86400: continue
+        hay=(str(row.get('name') or '')+' '+str(row.get('path') or '')).casefold()
+        if all(t in hay for t in remaining): out.append(dict(row))
+    key=(lambda r:int(r.get('bytes') or 0)) if any(x in terms for x in ('big','biggest','large','largest')) else (lambda r:float(r.get('mtime') or 0))
+    return sorted(out,key=key,reverse=True)[:int(limit)]

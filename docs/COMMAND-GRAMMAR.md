@@ -1,4 +1,4 @@
-# LOOK Command Grammar — 5.5.0
+# LOOK Command Grammar — 5.6.0
 
 Generated from the canonical `_COMMANDS` registry. Short aliases are ergonomic entry points; they are not separate implementations.
 
@@ -134,3 +134,14 @@ Current renderer keys to audit across normal, filter, selected, and marked state
 ## Node-scoped media output
 
 `lk media outputs` discovers reachable playback endpoints. `lk media on NODE play TARGET` and transport variants route to one node-specific MediaSession/output. Signal uses the same routing surface; changing output can hand the queue/current index to another node.
+
+## File catalog
+
+```text
+lk scan [ROOT]
+lk catalog
+lk find QUERY
+fcl-node file-catalog [--node NODE] [--json]
+```
+
+`scan` is metadata-only. A bare scan uses the home directory with conservative exclusions. `find` prefers the reachable Fabric union and falls back locally; cataloging never grants access or transfers bytes.

@@ -3,8 +3,8 @@ set -euo pipefail
 
 ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 
-PRODUCT_VERSION="5.5.0"
-LOOK_VERSION="4.46.0"
+PRODUCT_VERSION="5.6.0"
+LOOK_VERSION="4.47.0"
 FUTURE_CRASH_VERSION="1.2.2"
 
 DRY=0
@@ -288,6 +288,7 @@ run cp "$ROOT/look/look_renderer.py" "$HOME/.local/share/look/look_renderer.py"
 run cp "$ROOT/look/look_ai.py" "$HOME/.local/share/look/look_ai.py"
 run cp "$ROOT/look/lo_engine.py" "$HOME/.local/share/look/lo_engine.py"
 run cp "$ROOT/look/media_core.py" "$HOME/.local/share/look/media_core.py"
+run cp "$ROOT/look/file_catalog.py" "$HOME/.local/share/look/file_catalog.py"
 run cp "$ROOT/look/comfy_bootstrap.py" "$HOME/.local/share/look/comfy_bootstrap.py"
 run chmod +x "$HOME/.local/share/look/look_ai.py" "$HOME/.local/share/look/comfy_bootstrap.py"
 run mkdir -p "$HOME/.local/share/look/workflows"

@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Future Crash + LOOK Unified Node 5.5.0.
+"""Future Crash + LOOK Unified Node 5.6.0.
 
 A small distributed supervisor for trusted personal machines. Immediate events stay
 asynchronous; a one-second fabric pulse reconciles presence, leases and stale work.
@@ -19,6 +19,7 @@ import platform
 import random
 import re
 import select
+import sqlite3
 import shutil
 import socket
 import subprocess
@@ -49,7 +50,7 @@ except ImportError:
     from decision import OpenJevShadow, new_request as new_decision_request, provider_status as decision_provider_status, plan as decision_plan
 from urllib.parse import urlparse, parse_qs
 
-VERSION = "5.5.0"
+VERSION = "5.6.0"
 DEFAULT_HOST = "127.0.0.1"
 DEFAULT_PORT = 7332
 DEFAULT_INGRESS_PORT = 0
@@ -77,6 +78,7 @@ MODEL_STATE = STATE / "model_profiles.json"
 LOOK_BENCHMARK_STATE = Path.home() / ".local/share/look/ollama_benchmarks.json"
 LOOK_MODEL_PREFS = Path.home() / ".local/share/look/ollama_models.json"
 LOOK_MEDIA_LIBRARY = Path.home() / ".local/share/look/media_library.json"
+LOOK_FILE_CATALOG = Path.home() / ".local/share/look/file_catalog.sqlite3"
 CURATOR_STATE = STATE / "model_curator.json"
 FABRIC_DB = STATE / "fabric.sqlite3"
 ARTIFACT_ROOT = STATE / "artifacts"
@@ -313,6 +315,7 @@ def capabilities():
         "artifact.range": True,
         "artifact.stream": True,
         "artifact.catalog": True,
+        "file.catalog": LOOK_FILE_CATALOG.exists(),
         # Human clarification is a Fabric capability, not a terminal-only prompt.
         "decision.request": True,
         "decision.answer": True,
@@ -1829,6 +1832,78 @@ def _memory_sync() -> dict:
     return {"ok": True, "count": len(union), "pulled": pulled, "pushed": pushed, "failures": failures, "merge": merged}
 
 
+
+def _local_file_catalog():
+    """Publish catalog coverage, never the whole path database over the network."""
+    node=identity()["name"]
+    if not LOOK_FILE_CATALOG.exists():
+        return {"schema":"fabric-file-catalog-v1","node":node,"roots":[],"count":0}
+    try:
+        db=sqlite3.connect(f"file:{LOOK_FILE_CATALOG}?mode=ro",uri=True,timeout=.25)
+        roots=[{"root":r,"scanned":st,"count":c} for r,st,c in db.execute("SELECT root,scanned,count FROM roots ORDER BY root")]
+        count=db.execute("SELECT COUNT(*) FROM files").fetchone()[0]; db.close()
+        return {"schema":"fabric-file-catalog-v1","node":node,"roots":roots,"count":count}
+    except (sqlite3.Error,OSError) as exc:
+        return {"schema":"fabric-file-catalog-v1","node":node,"roots":[],"count":0,"error":str(exc)}
+
+
+def _file_search_terms(query):
+    return re.findall(r"[\\w.+-]+",str(query or "").casefold())
+
+
+def _local_file_search(query,limit=80):
+    """Bounded metadata search; network cost scales with answers, not catalog size."""
+    if not LOOK_FILE_CATALOG.exists(): return {"schema":"fabric-file-search-v1","node":identity()["name"],"entries":[],"count":0}
+    terms=_file_search_terms(query); weak={"find","file","files","show","me","the","a","an","my","that","named","called","about"}
+    type_ext={"pdf":".pdf","zip":".zip","python":".py","markdown":".md","text":".txt"}; ext=None; words=[]
+    for t in terms:
+        if t in type_ext: ext=type_ext[t]
+        elif t in weak or t in {"today","yesterday","recent","recently","big","biggest","large","largest"}: pass
+        else: words.append(t)
+    try:
+        db=sqlite3.connect(f"file:{LOOK_FILE_CATALOG}?mode=ro",uri=True,timeout=.5); where=[]; params=[]
+        if ext: where.append("ext=?"); params.append(ext)
+        current=now()
+        if "today" in terms: where.append("mtime>=?"); params.append(current-86400)
+        elif "yesterday" in terms: where.append("mtime>=?"); params.append(current-172800)
+        elif "recent" in terms or "recently" in terms: where.append("mtime>=?"); params.append(current-14*86400)
+        for word in words: where.append("(name LIKE ? OR path LIKE ?)"); params.extend((f"%{word}%",f"%{word}%"))
+        sql="SELECT path,name,ext,bytes,mtime,root FROM files"+(" WHERE "+" AND ".join(where) if where else "")
+        sql+=(" ORDER BY bytes DESC" if any(t in terms for t in ("big","biggest","large","largest")) else " ORDER BY mtime DESC")+" LIMIT ?"; params.append(int(limit))
+        node=identity()["name"]; entries=[dict(zip(("path","name","ext","bytes","mtime","root"),row),node=node) for row in db.execute(sql,params)]; db.close()
+        return {"schema":"fabric-file-search-v1","node":node,"query":query,"entries":entries,"count":len(entries)}
+    except (sqlite3.Error,OSError) as exc:
+        return {"schema":"fabric-file-search-v1","node":identity()["name"],"query":query,"entries":[],"count":0,"error":str(exc)}
+
+
+def _fabric_file_catalog():
+    local=_local_file_catalog(); nodes=[{"node":local.get("node"),"count":local.get("count",0),"online":True}]; errors=[]
+    snapshot={"self":node_info(),"peers":PEERS.public()}
+    for peer in snapshot.get("peers") or []:
+        ad=peer.get("node") or {}; name=((ad.get("identity") or {}).get("name") or peer.get("name"))
+        if not name or not peer.get("dns") or not ad: continue
+        try:
+            remote=http_json(_remote_url(snapshot,name,"/v1/files/catalog"),timeout=1.0)
+            nodes.append({"node":name,"count":int(remote.get("count") or 0),"online":True})
+        except Exception as exc: errors.append({"node":name,"error":str(exc)})
+    return {"schema":"fabric-file-catalog-v1","generated":now(),"nodes":nodes,"locations":sum(int(x.get("count") or 0) for x in nodes),"errors":errors}
+
+
+def _fabric_file_search(query,limit=80):
+    local=_local_file_search(query,limit); entries=list(local.get("entries") or []); errors=[]
+    snapshot={"self":node_info(),"peers":PEERS.public()}; encoded=urllib.parse.quote(str(query or ""))
+    for peer in snapshot.get("peers") or []:
+        ad=peer.get("node") or {}; name=((ad.get("identity") or {}).get("name") or peer.get("name"))
+        if not name or not peer.get("dns") or not ad: continue
+        try:
+            remote=http_json(_remote_url(snapshot,name,f"/v1/files/search?q={encoded}&limit={int(limit)}"),timeout=1.2)
+            entries.extend(dict(x) for x in (remote.get("entries") or []) if isinstance(x,dict))
+        except Exception as exc: errors.append({"node":name,"error":str(exc)})
+    terms=_file_search_terms(query); key=(lambda x:int(x.get("bytes") or 0)) if any(t in terms for t in ("big","biggest","large","largest")) else (lambda x:float(x.get("mtime") or 0))
+    entries=sorted(entries,key=key,reverse=True)[:int(limit)]
+    return {"schema":"fabric-file-search-v1","generated":now(),"query":query,"entries":entries,"count":len(entries),"errors":errors}
+
+
 def _read_media_library():
     """Read LOOK's local media discovery index without importing the LOOK UI layer."""
     with MEDIA_LIBRARY_LOCK:
@@ -2404,7 +2479,7 @@ def _openjev_shadow(state, question, candidates, *, profile="workspace", consequ
 
 
 class API(BaseHTTPRequestHandler):
-    server_version = "FCLNode/5.5.0"
+    server_version = "FCLNode/5.6.0"
 
     def setup(self):
         self._metric_request_id = None
@@ -2632,6 +2707,18 @@ class API(BaseHTTPRequestHandler):
             try: since = int((q.get("since") or [0])[0])
             except Exception: since = 0
             return self.sendj(200, {"events": FABRIC_STORE.events(since=since)})
+        if path == "/v1/files/catalog":
+            return self.sendj(200, _local_file_catalog())
+        if path == "/v1/files/search":
+            q=parse_qs(urlparse(self.path).query); query=str((q.get("q") or [""])[0]);
+            try: limit=max(1,min(200,int((q.get("limit") or [80])[0])))
+            except Exception: limit=80
+            return self.sendj(200, _local_file_search(query,limit))
+        if path == "/v1/files/find":
+            q=parse_qs(urlparse(self.path).query); query=str((q.get("q") or [""])[0]);
+            return self.sendj(200, _fabric_file_search(query,80))
+        if path == "/v1/files/fabric":
+            return self.sendj(200, _fabric_file_catalog())
         if path == "/v1/media/catalog":
             return self.sendj(200, _local_media_catalog())
         if path == "/v1/media/fabric":
@@ -4019,7 +4106,7 @@ def main():
     ap=argparse.ArgumentParser(description="Future Crash + LOOK unified node")
     ap.add_argument("command",nargs="?",default="serve",
         choices=["serve","status","nodes","activity","pulse","fabric","watch","dashboard","models","qualify","services","service",
-                 "jobs","job","submit","packet","cancel","events","http","beacon","lights","artifact-add","artifact","artifacts","media-catalog","media-identify",
+                 "jobs","job","submit","packet","cancel","events","http","beacon","lights","artifact-add","artifact","artifacts","file-catalog","file-find","media-catalog","media-identify",
                  "decisions","decision","answer","ask","decision-shadow","decision-provider","media-outputs","media-state","media-play","media-control"])
     ap.add_argument("args",nargs="*")
     ap.add_argument("--node",dest="node",default=None,help="target Fabric node name")
@@ -4109,6 +4196,21 @@ def main():
                     payload["index"]=max(0,int(a.args[1])-1)
                 result=_daemon_post(a.host,a.port,"/v1/media/route",payload)
                 print(json.dumps(result, indent=2) if a.json else (result.get("message") or f"MEDIA {a.args[0]} · {result.get('node') or a.node or 'local'}"))
+                return 0
+            if a.command=="file-find":
+                if not a.args: ap.error("file-find requires QUERY")
+                query=" ".join(a.args); payload=_daemon_get(a.host,a.port,"/v1/files/find?q="+urllib.parse.quote(query))
+                if a.json: print(json.dumps(payload,indent=2))
+                else:
+                    print(f"FABRIC FIND · {int(payload.get('count') or 0)} · {query}")
+                    for row in payload.get("entries") or []: print(f"  {str(row.get('node') or '?'):<18} {row.get('path') or '?'}")
+                return 0
+            if a.command=="file-catalog":
+                payload = _target_get(a.host,a.port,a.node,"/v1/files/catalog") if a.node else _daemon_get(a.host,a.port,"/v1/files/fabric")
+                if a.json: print(json.dumps(payload,indent=2))
+                else:
+                    print(f"FABRIC FILES · {int(payload.get('locations',payload.get('count',0))):,} cataloged locations")
+                    for row in payload.get("nodes") or []: print(f"  {str(row.get('node') or '?'):<20} {int(row.get('count') or 0):>9,} files")
                 return 0
             if a.command=="media-catalog":
                 payload = _target_get(a.host, a.port, a.node, "/v1/media/catalog") if a.node else _daemon_get(a.host, a.port, "/v1/media/fabric")

@@ -727,3 +727,14 @@ Memory is historical context, not queued intent. LO must never resume an older r
 `lk feedback` controls finite motion and optional local synthesized sound. `lk sound` toggles sound quickly. Feedback is suppressed outside a TTY.
 
 See `../docs/STATE-ARCHITECTURE.md`, `../docs/PROFILE.md`, and `../docs/FEEDBACK.md`.
+
+### Fabric file catalog
+
+```text
+lk scan                         # sensible home scan; metadata only
+lk scan /srv                    # add/refresh an explicit root
+lk catalog                      # local catalog coverage
+lk find "Portland schools pdf" # Fabric-wide when online, local when isolated
+```
+
+Discovery is intentionally cheap: LOOK does not read, hash, embed, or transfer file contents during a scan. Catalog policy does not change filesystem access policy.
