@@ -5754,11 +5754,45 @@ def _tool_preview_path(workspace,path):
     return _preview_host_path(target)
 
 
+def _resolve_action_target(args):
+    """Resolve one LK argument; multiple arguments remain literal CLI grammar."""
+    target=Path(" ".join(args)).expanduser()
+    if target.exists() or len(args)!=1:
+        return target, []
+    phrase=args[0].strip()
+    try:
+        matches=file_catalog.resolve_paths(FILE_CATALOG_DB,phrase)
+    except (OSError,sqlite3.Error):
+        matches=[]
+    # Never launch a stale catalog entry.
+    matches=[m for m in matches if Path(m["path"]).exists()]
+    if len(matches)==1:
+        return Path(matches[0]["path"]), matches
+    if matches:
+        best=matches[0]
+        # A unique exact-basename match is deterministic even if weaker path matches exist.
+        tied=[m for m in matches if m.get("score")==best.get("score")]
+        if best.get("score",0)>=1000 and len(tied)==1:
+            return Path(best["path"]), matches
+    return target, matches
+
+
+def _print_resolution_ambiguity(verb,phrase,matches):
+    print(f"LOOK {verb.upper()} · ambiguous target · {phrase}")
+    for row in matches[:8]:
+        suffix="/" if row.get("kind")=="directory" else ""
+        print(f"  {row['path']}{suffix}")
+    print(f'  quote/refine the phrase or use an exact path')
+
+
 def open_command(args,preview=False):
     if not args:
         print(f"usage: lk {'preview' if preview else 'open'} PATH")
         return 2
-    target=Path(" ".join(args)).expanduser()
+    target,matches=_resolve_action_target(args)
+    if matches and not target.exists():
+        _print_resolution_ambiguity('preview' if preview else 'open',args[0],matches)
+        return 1
     result=_preview_host_path(target) if preview else _open_host_path(target)
     print(_action_result(result))
     ok=result.startswith("PREVIEW OK" if preview else "OPEN OK")
@@ -5769,7 +5803,10 @@ def reveal_command(args):
     if not args:
         print("usage: lk reveal PATH")
         return 2
-    target=Path(" ".join(args)).expanduser()
+    target,matches=_resolve_action_target(args)
+    if matches and not target.exists():
+        _print_resolution_ambiguity('reveal',args[0],matches)
+        return 1
     result=_reveal_host_path(target)
     print(_action_result(result))
     return 0 if result.startswith("REVEAL OK") else 1
@@ -14899,15 +14936,13 @@ def _file_scan_command(args):
     print(f"  root  {result['root']}")
     print(f"  index {FILE_CATALOG_DB}")
     if result['skipped']: print(f"  skipped {result['skipped']:,} inaccessible/excluded directories or entries")
-    ci=int(result.get('content_indexed') or 0)
-    print(f"  content {ci:,} changed documents indexed · deterministic extraction only")
-    print("  no OCR · no embeddings · no model calls · no hashing")
+    print("  metadata only · no file contents read or hashed")
     return 0
 
 
 def _file_catalog_command():
     st=file_catalog.status(FILE_CATALOG_DB)
-    print(f"LOOK FILE CATALOG · {st['count']:,} files · {int(st.get('content_count') or 0):,} searchable contents")
+    print(f"LOOK FILE CATALOG · {st['count']:,} files")
     if not st['roots']:
         print("  empty · run: lk scan")
     for row in st['roots']:
@@ -14928,7 +14963,7 @@ def _file_find_command(args):
         rows=payload.get("entries") or []
         source="Fabric"
     except RuntimeError:
-        rows=file_catalog.combined_search(FILE_CATALOG_DB,query)
+        rows=file_catalog.search(FILE_CATALOG_DB,query)
     if not rows:
         st=file_catalog.status(FILE_CATALOG_DB)
         print(f"LOOK FIND · no matches · {query}")
@@ -14944,10 +14979,7 @@ def _file_find_command(args):
         human=f"{n:.0f}{u}" if u in {'B','K'} else f"{n:.1f}{u}"
         node=str(row.get('node') or '')
         prefix=(node+' · ') if source=='Fabric' and node else ''
-        kind=str(row.get('match') or 'name')
-        print(f"  {stamp}  {human:>7}  {prefix}{row['path']}  [{kind}]")
-        snippet=str(row.get('snippet') or '').replace('\n',' ').strip()
-        if snippet: print(f"                       {snippet[:180]}")
+        print(f"  {stamp}  {human:>7}  {prefix}{row['path']}")
     return 0
 
 

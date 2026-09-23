@@ -1,13 +1,13 @@
 #!/usr/bin/env bash
 set -euo pipefail
 ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
-echo "Future Crash + LOOK 5.7.0 · Fabric Content Search"
+echo "Future Crash + LOOK 5.6.2 · Fabric File Catalog"
 echo "────────────────────────────────────────"
 
 # Refuse a mixed bundle before mutating the machine. A unified release must move
 # LOOK and the node together.
 EXPECTED_RELEASE="$(tr -d '[:space:]' < "$ROOT/VERSION")"
-[[ "$EXPECTED_RELEASE" == "5.7.0" ]] || { echo "BUNDLE ERROR: expected release 5.7.0, found $EXPECTED_RELEASE"; exit 4; }
+[[ "$EXPECTED_RELEASE" == "5.6.2" ]] || { echo "BUNDLE ERROR: expected release 5.6.2, found $EXPECTED_RELEASE"; exit 4; }
 grep -q 'def _fabric_command' "$ROOT/look/lk" || { echo "BUNDLE ERROR: LOOK source has no Fabric command"; exit 4; }
 grep -q 'choices=.*serve.*fabric' "$ROOT/core/node.py" || { echo "BUNDLE ERROR: node source has no Fabric CLI"; exit 4; }
 
@@ -28,7 +28,7 @@ case "$OPENJEV_MODE" in off|auto|adopt|install) ;; *) echo "BUNDLE ERROR: invali
 ((UNINSTALL)) && exit 0
 if ((DRY_RUN)); then
   echo
-  echo "[dry-run] would install/restart Unified Node 5.7.0, canonical Decision Plane, optional OpenJev worker, Fabric Content Search, Fabric Media Catalog, Streaming Artifacts, Fabric Memory, and Signal Window 1.7.0"
+  echo "[dry-run] would install/restart Unified Node 5.6.2, canonical Decision Plane, optional OpenJev worker, Fabric File Catalog, Fabric Media Catalog, Streaming Artifacts, Fabric Memory, and Signal Window 1.7.0"
   echo "[dry-run] OpenJev mode: $OPENJEV_MODE (auto adopts an existing worker; absence is non-fatal)"
   echo "[dry-run] would reconcile Tailscale :7332 → separate fcl-ingress :7333 and verify Fabric CLI wiring"
   exit 0
@@ -257,10 +257,12 @@ fi
 echo
 echo "Unified node installed and verified · release $EXPECTED_RELEASE"
 
-# Reconcile the local catalog in the background. Scans are single-writer and
-# content extraction is incremental, so upgrades can safely seed new index layers.
-( nohup "$HOME/.local/bin/lk" scan >"$HOME/.local/share/look/file-scan.log" 2>&1 & ) || true
-echo "  file/content catalog reconciliation started in background"
+# Seed the cheap metadata catalog once without making installation wait on a large home directory.
+# Subsequent `lk scan` calls are explicit and incremental at the filesystem level.
+if [[ ! -e "$HOME/.local/share/look/file_catalog.sqlite3" ]]; then
+  ( nohup "$HOME/.local/bin/lk" scan >"$HOME/.local/share/look/file-scan.log" 2>&1 & ) || true
+  echo "  file catalog initial scan started in background"
+fi
 
 echo "  fcl-node fabric     # human view of the compute fabric"
 echo "  fcl-node models     # model capability advertisements"
