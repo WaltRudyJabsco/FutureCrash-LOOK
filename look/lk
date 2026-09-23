@@ -14890,6 +14890,11 @@ def _file_scan_command(args):
         result=file_catalog.scan(FILE_CATALOG_DB,root,default_home=not explicit)
     except (OSError,NotADirectoryError) as exc:
         print(f"LOOK scan · {exc}"); return 1
+    if result.get('busy'):
+        print("LOOK FILE CATALOG · scan already running")
+        print(f"  root  {result['root']}")
+        print("  searches remain available while the catalog refreshes")
+        return 0
     print(f"LOOK FILE CATALOG · {result['count']:,} files · {result['seconds']:.2f}s")
     print(f"  root  {result['root']}")
     print(f"  index {FILE_CATALOG_DB}")

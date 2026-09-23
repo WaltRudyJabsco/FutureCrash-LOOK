@@ -1,3 +1,7 @@
+# 5.6.1 — File Catalog Concurrency Repair
+
+SQLite/WAL concurrency repair for automatic and manual catalog scans.
+
 # 5.6.0 — Fabric File Catalog
 
 LOOK now maintains a lightweight SQLite metadata catalog for ordinary files, extending the media-catalog lesson to the rest of the filesystem. `lk scan [ROOT]` records paths, names, extensions, sizes and modification times without reading or hashing file contents; a bare `lk scan` uses the home directory with conservative cache/build/hidden-directory exclusions. `lk catalog` reports local coverage and `lk find QUERY` accepts useful plain-language metadata terms such as `pdf`, `recent`, `yesterday`, and `largest`.

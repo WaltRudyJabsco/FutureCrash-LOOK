@@ -1,4 +1,4 @@
-# 5.6.0 — Fabric File Catalog
+# 5.6.1 — Fabric File Catalog
 
 LOOK now maintains a lightweight SQLite metadata catalog for ordinary files, extending the media-catalog lesson to the rest of the filesystem. `lk scan [ROOT]` records paths, names, extensions, sizes and modification times without reading or hashing file contents; a bare `lk scan` uses the home directory with conservative cache/build/hidden-directory exclusions. `lk catalog` reports local coverage and `lk find QUERY` accepts useful plain-language metadata terms such as `pdf`, `recent`, `yesterday`, and `largest`.
 
@@ -6,7 +6,7 @@ Each Unified Node publishes its local catalog through `/v1/files/catalog`; `/v1/
 
 Fresh installs seed the first home metadata scan in the background. Expensive identity, content extraction, FTS and semantic understanding remain deliberately deferred layers rather than costs paid during discovery.
 
-# Future Crash + LOOK 5.6.0
+# Future Crash + LOOK 5.6.1
 
 ## 5.5.0 — Media Endpoint Handoff
 

@@ -1,6 +1,7 @@
 """LOOK local file catalog: cheap metadata first, content understanding later."""
 from __future__ import annotations
-import os, sqlite3, time, re
+import os, sqlite3, time, re, contextlib
+import fcntl
 from pathlib import Path
 
 SCHEMA_VERSION=1
@@ -16,7 +17,9 @@ GROUP_EXTS={
 
 def connect(path):
     path=Path(path); path.parent.mkdir(parents=True,exist_ok=True)
-    db=sqlite3.connect(path)
+    # Catalog readers should tolerate a scanner holding SQLite's writer lock.
+    db=sqlite3.connect(path, timeout=30.0)
+    db.execute('PRAGMA busy_timeout=30000')
     db.execute('PRAGMA journal_mode=WAL'); db.execute('PRAGMA synchronous=NORMAL')
     db.execute('''CREATE TABLE IF NOT EXISTS files(
       path TEXT PRIMARY KEY, root TEXT NOT NULL, name TEXT NOT NULL, ext TEXT NOT NULL,
@@ -26,7 +29,12 @@ def connect(path):
     db.execute('CREATE INDEX IF NOT EXISTS files_mtime ON files(mtime DESC)')
     db.execute('CREATE INDEX IF NOT EXISTS files_root ON files(root)')
     db.execute('CREATE TABLE IF NOT EXISTS roots(root TEXT PRIMARY KEY, scanned REAL NOT NULL, count INTEGER NOT NULL)')
-    db.execute(f'PRAGMA user_version={SCHEMA_VERSION}')
+    # user_version is a migration marker, not connection setup. Writing it on
+    # every open creates needless writer contention with background scans.
+    current=int(db.execute('PRAGMA user_version').fetchone()[0])
+    if current < SCHEMA_VERSION:
+        db.execute(f'PRAGMA user_version={SCHEMA_VERSION}')
+        db.commit()
     return db
 
 def _skip_dir(path,name,default_home=False):
@@ -36,9 +44,33 @@ def _skip_dir(path,name,default_home=False):
     if default_home and name.startswith('.'): return True
     return False
 
+@contextlib.contextmanager
+def _scan_lock(db_path):
+    """One crawler per catalog; readers remain free under SQLite WAL."""
+    lock_path=Path(str(db_path)+'.scan.lock')
+    lock_path.parent.mkdir(parents=True,exist_ok=True)
+    handle=open(lock_path,'a+')
+    try:
+        try:
+            fcntl.flock(handle.fileno(),fcntl.LOCK_EX|fcntl.LOCK_NB)
+        except BlockingIOError:
+            yield False
+            return
+        yield True
+    finally:
+        try: fcntl.flock(handle.fileno(),fcntl.LOCK_UN)
+        except OSError: pass
+        handle.close()
+
 def scan(db_path,root=None,default_home=False):
     base=Path(root or Path.home()).expanduser().resolve()
     if not base.is_dir(): raise NotADirectoryError(base)
+    with _scan_lock(db_path) as acquired:
+        if not acquired:
+            return {'root':str(base),'count':0,'skipped':0,'seconds':0.0,'busy':True}
+        return _scan_locked(db_path,base,default_home)
+
+def _scan_locked(db_path,base,default_home=False):
     db=connect(db_path); started=time.monotonic(); stamp=time.time(); count=0; skipped=0
     batch=[]
     for dirpath,dirnames,filenames in os.walk(base,followlinks=False):
