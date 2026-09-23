@@ -1,4 +1,4 @@
-# LOOK Command Grammar — 5.6.1
+# LOOK Command Grammar — 5.7.0
 
 Generated from the canonical `_COMMANDS` registry. Short aliases are ergonomic entry points; they are not separate implementations.
 
@@ -145,3 +145,7 @@ fcl-node file-catalog [--node NODE] [--json]
 ```
 
 `scan` is metadata-only. A bare scan uses the home directory with conservative exclusions. `find` prefers the reachable Fabric union and falls back locally; cataloging never grants access or transfers bytes.
+
+### Content-search behavior
+
+`lk scan [ROOT]` incrementally indexes bounded deterministic text for supported documents. `lk find QUERY` combines metadata and FTS5 content results; remote nodes execute their own search and return bounded matches rather than transferring the index. Unsupported, oversized, image-only, or unextractable files remain metadata-searchable.

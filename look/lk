@@ -25,7 +25,7 @@ try:
 except Exception:
     readline = None
 
-VERSION="4.47.0"
+VERSION="4.48.0"
 
 LOOK_WORDMARK = r"""       ██╗      ██╗  ██╗
        ██║      ██║ ██╔╝
@@ -8255,7 +8255,7 @@ def _run_filesystem_tool_impl(workspace, name, args, profile="workspace"):
         return f"File tool internal error: {type(exc).__name__}: {exc}"
     return f"Unknown file tool: {name}"
 
-LOOK_INFO_USER_AGENT="LOOK-Shell/4.47.0 (local text client)"
+LOOK_INFO_USER_AGENT="LOOK-Shell/4.48.0 (local text client)"
 
 def _run_filesystem_tool(workspace, name, args, profile="workspace"):
     global _FILESYSTEM_ACCESS_PROFILE
@@ -14899,13 +14899,15 @@ def _file_scan_command(args):
     print(f"  root  {result['root']}")
     print(f"  index {FILE_CATALOG_DB}")
     if result['skipped']: print(f"  skipped {result['skipped']:,} inaccessible/excluded directories or entries")
-    print("  metadata only · no file contents read or hashed")
+    ci=int(result.get('content_indexed') or 0)
+    print(f"  content {ci:,} changed documents indexed · deterministic extraction only")
+    print("  no OCR · no embeddings · no model calls · no hashing")
     return 0
 
 
 def _file_catalog_command():
     st=file_catalog.status(FILE_CATALOG_DB)
-    print(f"LOOK FILE CATALOG · {st['count']:,} files")
+    print(f"LOOK FILE CATALOG · {st['count']:,} files · {int(st.get('content_count') or 0):,} searchable contents")
     if not st['roots']:
         print("  empty · run: lk scan")
     for row in st['roots']:
@@ -14926,7 +14928,7 @@ def _file_find_command(args):
         rows=payload.get("entries") or []
         source="Fabric"
     except RuntimeError:
-        rows=file_catalog.search(FILE_CATALOG_DB,query)
+        rows=file_catalog.combined_search(FILE_CATALOG_DB,query)
     if not rows:
         st=file_catalog.status(FILE_CATALOG_DB)
         print(f"LOOK FIND · no matches · {query}")
@@ -14942,7 +14944,10 @@ def _file_find_command(args):
         human=f"{n:.0f}{u}" if u in {'B','K'} else f"{n:.1f}{u}"
         node=str(row.get('node') or '')
         prefix=(node+' · ') if source=='Fabric' and node else ''
-        print(f"  {stamp}  {human:>7}  {prefix}{row['path']}")
+        kind=str(row.get('match') or 'name')
+        print(f"  {stamp}  {human:>7}  {prefix}{row['path']}  [{kind}]")
+        snippet=str(row.get('snippet') or '').replace('\n',' ').strip()
+        if snippet: print(f"                       {snippet[:180]}")
     return 0
 
 

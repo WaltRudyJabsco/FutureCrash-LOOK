@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Future Crash + LOOK Unified Node 5.6.1.
+"""Future Crash + LOOK Unified Node 5.7.0.
 
 A small distributed supervisor for trusted personal machines. Immediate events stay
 asynchronous; a one-second fabric pulse reconciles presence, leases and stale work.
@@ -50,7 +50,7 @@ except ImportError:
     from decision import OpenJevShadow, new_request as new_decision_request, provider_status as decision_provider_status, plan as decision_plan
 from urllib.parse import urlparse, parse_qs
 
-VERSION = "5.6.1"
+VERSION = "5.7.0"
 DEFAULT_HOST = "127.0.0.1"
 DEFAULT_PORT = 7332
 DEFAULT_INGRESS_PORT = 0
@@ -1852,16 +1852,29 @@ def _file_search_terms(query):
 
 
 def _local_file_search(query,limit=80):
-    """Bounded metadata search; network cost scales with answers, not catalog size."""
-    if not LOOK_FILE_CATALOG.exists(): return {"schema":"fabric-file-search-v1","node":identity()["name"],"entries":[],"count":0}
-    terms=_file_search_terms(query); weak={"find","file","files","show","me","the","a","an","my","that","named","called","about"}
+    """Bounded local metadata + FTS5 search; file contents never cross the network."""
+    if not LOOK_FILE_CATALOG.exists(): return {"schema":"fabric-file-search-v2","node":identity()["name"],"entries":[],"count":0}
+    terms=_file_search_terms(query); weak={"where","was","that","thing","i","wrote","write","find","file","files","show","me","the","a","an","my","named","called","about","something","with","of","to","in","on","for","and","or","is","it"}
     type_ext={"pdf":".pdf","zip":".zip","python":".py","markdown":".md","text":".txt"}; ext=None; words=[]
     for t in terms:
         if t in type_ext: ext=type_ext[t]
         elif t in weak or t in {"today","yesterday","recent","recently","big","biggest","large","largest"}: pass
         else: words.append(t)
     try:
-        db=sqlite3.connect(f"file:{LOOK_FILE_CATALOG}?mode=ro",uri=True,timeout=.5); where=[]; params=[]
+        db=sqlite3.connect(f"file:{LOOK_FILE_CATALOG}?mode=ro",uri=True,timeout=.5); db.execute("PRAGMA busy_timeout=500")
+        node=identity()["name"]; merged={}
+        # Content first. OR gives natural-language recall; BM25 promotes files matching several useful words.
+        if words:
+            fts=" OR ".join('"'+w.replace('"','')+'"' for w in words[:16])
+            try:
+                sql="SELECT f.path,fi.name,fi.ext,fi.bytes,fi.mtime,fi.root,bm25(content_fts),snippet(content_fts,1,'[',']',' … ',18) FROM content_fts f JOIN files fi ON fi.path=f.path WHERE content_fts MATCH ?"
+                fparams=[fts]
+                if ext: sql+=" AND fi.ext=?"; fparams.append(ext)
+                sql+=" ORDER BY bm25(content_fts) LIMIT ?"; fparams.append(int(limit))
+                for row in db.execute(sql,fparams):
+                    item=dict(zip(("path","name","ext","bytes","mtime","root","rank","snippet"),row),node=node,match="content"); merged[item["path"]]=item
+            except sqlite3.OperationalError: pass
+        where=[]; params=[]
         if ext: where.append("ext=?"); params.append(ext)
         current=now()
         if "today" in terms: where.append("mtime>=?"); params.append(current-86400)
@@ -1870,10 +1883,16 @@ def _local_file_search(query,limit=80):
         for word in words: where.append("(name LIKE ? OR path LIKE ?)"); params.extend((f"%{word}%",f"%{word}%"))
         sql="SELECT path,name,ext,bytes,mtime,root FROM files"+(" WHERE "+" AND ".join(where) if where else "")
         sql+=(" ORDER BY bytes DESC" if any(t in terms for t in ("big","biggest","large","largest")) else " ORDER BY mtime DESC")+" LIMIT ?"; params.append(int(limit))
-        node=identity()["name"]; entries=[dict(zip(("path","name","ext","bytes","mtime","root"),row),node=node) for row in db.execute(sql,params)]; db.close()
-        return {"schema":"fabric-file-search-v1","node":node,"query":query,"entries":entries,"count":len(entries)}
+        for row in db.execute(sql,params):
+            item=dict(zip(("path","name","ext","bytes","mtime","root"),row),node=node)
+            if item["path"] in merged: merged[item["path"]]["match"]="name+content"
+            else: item["match"]="name"; merged[item["path"]]=item
+        db.close()
+        def score(x): return (0,float(x.get("rank") or 0),-float(x.get("mtime") or 0)) if "rank" in x else (1,0,-float(x.get("mtime") or 0))
+        entries=sorted(merged.values(),key=score)[:int(limit)]
+        return {"schema":"fabric-file-search-v2","node":node,"query":query,"entries":entries,"count":len(entries)}
     except (sqlite3.Error,OSError) as exc:
-        return {"schema":"fabric-file-search-v1","node":identity()["name"],"query":query,"entries":[],"count":0,"error":str(exc)}
+        return {"schema":"fabric-file-search-v2","node":identity()["name"],"query":query,"entries":[],"count":0,"error":str(exc)}
 
 
 def _fabric_file_catalog():
@@ -2479,7 +2498,7 @@ def _openjev_shadow(state, question, candidates, *, profile="workspace", consequ
 
 
 class API(BaseHTTPRequestHandler):
-    server_version = "FCLNode/5.6.1"
+    server_version = "FCLNode/5.7.0"
 
     def setup(self):
         self._metric_request_id = None

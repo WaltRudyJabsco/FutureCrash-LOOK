@@ -136,3 +136,7 @@ The broker coordinates `lo bg`, memory maintenance, and skill reflection. Intera
 ## Fabric File Catalog
 
 `lk scan [ROOT]` refreshes cheap metadata only (path, name, extension, size, modified time). A bare scan catalogs the user home with conservative exclusions. `lk catalog` shows local coverage. `lk find QUERY` searches the reachable Fabric catalog and falls back to the local catalog offline; examples: `lk find Portland schools pdf`, `lk find python yesterday`, `lk find largest zip`.
+
+### Content search (5.7)
+
+The file catalog incrementally extracts bounded text from common text/source/config files, HTML, DOCX, EPUB, and text-bearing PDFs into SQLite FTS5. `lk find` searches names, paths, and indexed contents locally or across Fabric. Results include a short content snippet when FTS matched. Indexing performs no OCR, embeddings, model calls, or hashing.

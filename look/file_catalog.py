@@ -1,10 +1,13 @@
 """LOOK local file catalog: cheap metadata first, content understanding later."""
 from __future__ import annotations
-import os, sqlite3, time, re, contextlib
+import os, sqlite3, time, re, contextlib, subprocess, shutil, zipfile, html.parser
 import fcntl
 from pathlib import Path
 
-SCHEMA_VERSION=1
+SCHEMA_VERSION=2
+CONTENT_MAX_FILE_BYTES=4*1024*1024
+CONTENT_MAX_CHARS=256*1024
+CONTENT_EXTS={'.txt','.md','.markdown','.py','.js','.ts','.tsx','.jsx','.css','.json','.yaml','.yml','.toml','.ini','.cfg','.sh','.zsh','.html','.htm','.docx','.pdf','.epub'}
 SKIP_NAMES={'.git','.svn','.hg','node_modules','__pycache__','.cache','Caches','cache','.Trash','.npm','.cargo','target','DerivedData'}
 SKIP_PREFIXES=('/proc','/sys','/dev','/run','/private/var/folders')
 TYPE_WORDS={'pdf':'.pdf','zip':'.zip','python':'.py','markdown':'.md','text':'.txt','document':None,'image':None,'audio':None,'video':None}
@@ -29,6 +32,11 @@ def connect(path):
     db.execute('CREATE INDEX IF NOT EXISTS files_mtime ON files(mtime DESC)')
     db.execute('CREATE INDEX IF NOT EXISTS files_root ON files(root)')
     db.execute('CREATE TABLE IF NOT EXISTS roots(root TEXT PRIMARY KEY, scanned REAL NOT NULL, count INTEGER NOT NULL)')
+    db.execute("CREATE TABLE IF NOT EXISTS content_state(path TEXT PRIMARY KEY, mtime REAL NOT NULL, bytes INTEGER NOT NULL, kind TEXT NOT NULL, chars INTEGER NOT NULL, indexed REAL NOT NULL, error TEXT NOT NULL DEFAULT '')")
+    try:
+        db.execute("CREATE VIRTUAL TABLE IF NOT EXISTS content_fts USING fts5(path UNINDEXED, body, tokenize='unicode61')")
+    except sqlite3.OperationalError:
+        pass
     # user_version is a migration marker, not connection setup. Writing it on
     # every open creates needless writer contention with background scans.
     current=int(db.execute('PRAGMA user_version').fetchone()[0])
@@ -43,6 +51,60 @@ def _skip_dir(path,name,default_home=False):
     if name in SKIP_NAMES: return True
     if default_home and name.startswith('.'): return True
     return False
+
+class _HTMLText(html.parser.HTMLParser):
+    def __init__(self): super().__init__(); self.parts=[]; self.skip=0
+    def handle_starttag(self,tag,attrs):
+        if tag in {"script","style","noscript"}: self.skip+=1
+    def handle_endtag(self,tag):
+        if tag in {"script","style","noscript"} and self.skip: self.skip-=1
+    def handle_data(self,data):
+        if not self.skip and data.strip(): self.parts.append(data)
+
+def _html_text(raw):
+    parser=_HTMLText(); parser.feed(raw); return "\n".join(parser.parts)
+
+def _extract_text(path,ext):
+    """Cheap deterministic extraction only. Never OCR and never invoke a model."""
+    try:
+        if ext in {'.txt','.md','.markdown','.py','.js','.ts','.tsx','.jsx','.css','.json','.yaml','.yml','.toml','.ini','.cfg','.sh','.zsh'}:
+            text=path.read_text(encoding='utf-8',errors='replace')
+        elif ext in {'.html','.htm'}:
+            text=_html_text(path.read_text(encoding='utf-8',errors='replace'))
+        elif ext=='.docx':
+            import xml.etree.ElementTree as ET
+            with zipfile.ZipFile(path) as z: raw=z.read('word/document.xml')
+            root=ET.fromstring(raw); ns='{http://schemas.openxmlformats.org/wordprocessingml/2006/main}'
+            text='\n'.join(''.join(n.text or '' for n in para.iter(ns+'t')) for para in root.iter(ns+'p'))
+        elif ext=='.epub':
+            parts=[]
+            with zipfile.ZipFile(path) as z:
+                for name in sorted(z.namelist()):
+                    if name.casefold().endswith(('.xhtml','.html','.htm')):
+                        parts.append(_html_text(z.read(name).decode('utf-8','replace')))
+            text='\n'.join(parts)
+        elif ext=='.pdf':
+            exe=shutil.which('pdftotext')
+            if not exe: return None,'pdftotext unavailable'
+            run=subprocess.run([exe,'-q',str(path),'-'],capture_output=True,text=True,timeout=12)
+            if run.returncode: return None,'pdftotext failed'
+            text=run.stdout
+        else: return None,'unsupported'
+        text='\n'.join(line.rstrip() for line in text.replace('\x00',' ').splitlines()).strip()
+        return text[:CONTENT_MAX_CHARS],''
+    except Exception as exc:
+        return None,str(exc)[:160]
+
+def _index_content(db,path,ext,size,mtime,stamp):
+    if ext not in CONTENT_EXTS or size>CONTENT_MAX_FILE_BYTES: return False
+    old=db.execute('SELECT mtime,bytes FROM content_state WHERE path=?',(str(path),)).fetchone()
+    if old and float(old[0])==float(mtime) and int(old[1])==int(size): return False
+    text,error=_extract_text(path,ext)
+    try: db.execute('DELETE FROM content_fts WHERE path=?',(str(path),))
+    except sqlite3.OperationalError: return False
+    if text: db.execute('INSERT INTO content_fts(path,body) VALUES(?,?)',(str(path),text))
+    db.execute('INSERT OR REPLACE INTO content_state(path,mtime,bytes,kind,chars,indexed,error) VALUES(?,?,?,?,?,?,?)',(str(path),mtime,size,ext,len(text or ''),stamp,error))
+    return bool(text)
 
 @contextlib.contextmanager
 def _scan_lock(db_path):
@@ -71,7 +133,7 @@ def scan(db_path,root=None,default_home=False):
         return _scan_locked(db_path,base,default_home)
 
 def _scan_locked(db_path,base,default_home=False):
-    db=connect(db_path); started=time.monotonic(); stamp=time.time(); count=0; skipped=0
+    db=connect(db_path); started=time.monotonic(); stamp=time.time(); count=0; skipped=0; content_indexed=0
     batch=[]
     for dirpath,dirnames,filenames in os.walk(base,followlinks=False):
         here=Path(dirpath)
@@ -87,14 +149,21 @@ def _scan_locked(db_path,base,default_home=False):
                 st=p.stat()
                 if not p.is_file(): continue
             except (OSError,PermissionError): skipped+=1; continue
-            batch.append((str(p),str(base),name,p.suffix.casefold(),int(st.st_size),float(st.st_mtime),int(st.st_ino),int(st.st_mode),stamp)); count+=1
+            ext=p.suffix.casefold(); size=int(st.st_size); mtime=float(st.st_mtime)
+            batch.append((str(p),str(base),name,ext,size,mtime,int(st.st_ino),int(st.st_mode),stamp)); count+=1
+            if _index_content(db,p,ext,size,mtime,stamp): content_indexed+=1
             if len(batch)>=1000:
                 db.executemany('INSERT OR REPLACE INTO files VALUES(?,?,?,?,?,?,?,?,?)',batch); batch.clear()
     if batch: db.executemany('INSERT OR REPLACE INTO files VALUES(?,?,?,?,?,?,?,?,?)',batch)
     # Anything from an older scan of this exact root disappeared.
+    stale=[r[0] for r in db.execute('SELECT path FROM files WHERE root=? AND scanned<?',(str(base),stamp))]
+    for old_path in stale:
+        try: db.execute('DELETE FROM content_fts WHERE path=?',(old_path,))
+        except sqlite3.OperationalError: pass
+        db.execute('DELETE FROM content_state WHERE path=?',(old_path,))
     db.execute('DELETE FROM files WHERE root=? AND scanned<?',(str(base),stamp))
     db.execute('INSERT OR REPLACE INTO roots VALUES(?,?,?)',(str(base),stamp,count)); db.commit(); db.close()
-    return {'root':str(base),'count':count,'skipped':skipped,'seconds':time.monotonic()-started}
+    return {'root':str(base),'count':count,'skipped':skipped,'content_indexed':content_indexed,'seconds':time.monotonic()-started}
 
 def _terms(query):
     return re.findall(r'[\w.+-]+',query.casefold())
@@ -124,11 +193,38 @@ def search(db_path,query,limit=80):
     rows=[dict(zip(('path','name','ext','bytes','mtime','root'),r)) for r in db.execute(sql,params)]
     db.close(); return rows
 
+def content_search(db_path,query,limit=80):
+    db=connect(db_path); terms=_terms(query)
+    stop={'where','was','that','thing','i','wrote','write','about','find','show','me','the','a','an','my','file','files','document','documents','something','with','of','to','in','on','for','and','or','is','it'}
+    words=[t for t in terms if t not in stop and t not in TYPE_WORDS and len(t)>1]
+    if not words: db.close(); return []
+    fts=' OR '.join('"'+w.replace('"','')+'"' for w in words[:16])
+    try:
+        ext_filter=next((TYPE_WORDS[t] for t in terms if t in TYPE_WORDS and TYPE_WORDS[t]),None)
+        sql="SELECT f.path,fi.name,fi.ext,fi.bytes,fi.mtime,fi.root,bm25(content_fts),snippet(content_fts,1,'[',']',' … ',18) FROM content_fts f JOIN files fi ON fi.path=f.path WHERE content_fts MATCH ?"
+        params=[fts]
+        if ext_filter: sql+=" AND fi.ext=?"; params.append(ext_filter)
+        sql+=" ORDER BY bm25(content_fts) LIMIT ?"; params.append(int(limit))
+        rows=[dict(zip(('path','name','ext','bytes','mtime','root','rank','snippet'),r),match='content') for r in db.execute(sql,params)]
+    except sqlite3.OperationalError: rows=[]
+    db.close(); return rows
+
+def combined_search(db_path,query,limit=80):
+    meta=search(db_path,query,limit); content=content_search(db_path,query,limit); merged={}
+    for row in content: merged[row['path']]=row
+    for row in meta:
+        if row['path'] in merged: merged[row['path']]['match']='name+content'
+        else: row=dict(row); row['match']='name'; merged[row['path']]=row
+    def score(row):
+        return (0,float(row.get('rank') or 0),-float(row.get('mtime') or 0)) if 'rank' in row else (1,0,-float(row.get('mtime') or 0))
+    return sorted(merged.values(),key=score)[:int(limit)]
+
 def status(db_path):
     db=connect(db_path)
     total=db.execute('SELECT COUNT(*) FROM files').fetchone()[0]
+    content=db.execute('SELECT COUNT(*) FROM content_state WHERE chars>0').fetchone()[0]
     roots=[{'root':r,'scanned':s,'count':c} for r,s,c in db.execute('SELECT root,scanned,count FROM roots ORDER BY root')]
-    db.close(); return {'count':total,'roots':roots}
+    db.close(); return {'count':total,'content_count':content,'roots':roots}
 
 def search_rows(rows,query,limit=80):
     terms=_terms(query); now=time.time(); extset=None; remaining=[]
