@@ -1,3 +1,11 @@
+## 6.1.5 — Media Stream Edge Repair
+
+- Stop resolving playable queue entries by shelling out to `fcl-node artifact` once per track. Identified media now receives a stable loopback media-proxy URL immediately.
+- Add `/v1/media/artifact` to the Unified Node. The local node owns Fabric credentials, pinned TLS, Tailcat/Tailscale fallback, Range forwarding, and remote retries while mpv/Safari see a normal HTTP stream.
+- Preserve lazy content identity: local filesystem bytes still win; only nonlocal/unavailable paths use the artifact proxy.
+- Make JSON CLI decoding tolerant of bounded startup chatter and include the offending tail in diagnostics instead of returning the opaque `invalid JSON` error.
+- Add regression coverage for proxy routing and for keeping authenticated peer URLs out of player queues.
+
 ## 6.1.4 — Media Resolver Repair
 
 - Repair media playback from merged Fabric catalog rows: queue resolution now checks every physical location for local bytes before promoting a remote copy to content identity.

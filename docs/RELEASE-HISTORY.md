@@ -1,3 +1,7 @@
+# Future Crash + LOOK 6.1.5 — Media Stream Edge Repair
+
+Playback now terminates Fabric networking at the local Unified Node. Queue entries never hand peer credentials or Tailcat certificate requirements to mpv or Safari: identified media is exposed through a loopback range-capable proxy, which performs authenticated peer fetches and transport fallback internally. This also removes the per-track `fcl-node artifact --json` subprocess path that surfaced as `Fabric artifact command returned invalid JSON`.
+
 # Future Crash + LOOK 6.1.0 — Tailcat Direct Transport
 
 Endpoint approval/revocation now follows the pending browser to the node that actually hosts it. Tailcat adds direct pinned-TLS node transport on reachable IP paths, preferred ahead of Tailscale, while Tailscale remains the fallback and bootstrap route. Existing 6.0 pairings can learn Tailcat metadata without re-pairing.

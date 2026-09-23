@@ -13157,11 +13157,25 @@ def _media_fabric_cli(args):
         raise RuntimeError("Unified Node is not installed")
     p=subprocess.run([exe,*args,"--json"],capture_output=True,text=True,timeout=600)
     if p.returncode!=0:
-        raise RuntimeError((p.stderr or p.stdout or "Fabric artifact command failed").strip())
+        raise RuntimeError((p.stderr or p.stdout or "Fabric command failed").strip())
+    raw=(p.stdout or "").strip()
     try:
-        return json.loads(p.stdout)
-    except ValueError as exc:
-        raise RuntimeError("Fabric artifact command returned invalid JSON") from exc
+        return json.loads(raw)
+    except ValueError:
+        # CLI helpers should emit pure JSON, but shell/service startup chatter must
+        # never make media unusable. Accept one complete JSON value at the tail.
+        decoder=json.JSONDecoder()
+        for offset,ch in reversed(list(enumerate(raw))):
+            if ch not in "{[":
+                continue
+            try:
+                value,end=decoder.raw_decode(raw[offset:])
+            except ValueError:
+                continue
+            if not raw[offset+end:].strip():
+                return value
+        detail=raw[-240:].replace("\n"," · ") if raw else "empty stdout"
+        raise RuntimeError(f"Fabric command returned invalid JSON · {detail}")
 
 
 def _media_update_identity_for_path(path,digest):
@@ -13697,10 +13711,13 @@ def _media_entry_source(entry):
                     entry.update(identified)
                     break
     if digest:
-        payload=_media_artifact(digest,source_node or None)
-        url=str(payload.get("stream_url") or "")
-        if url:
-            return url
+        # Keep Fabric credentials and TLS pinning inside the local node. mpv and
+        # browser players receive an ordinary loopback stream and never need to
+        # understand peer authentication or Tailcat certificates.
+        params={"digest":digest}
+        if source_node:
+            params["node"]=source_node
+        return "http://127.0.0.1:7332/v1/media/artifact?"+urllib.parse.urlencode(params)
     raise FileNotFoundError(primary_path or digest or "media queue entry")
 
 

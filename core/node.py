@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Future Crash + LOOK Unified Node 6.1.4.
+"""Future Crash + LOOK Unified Node 6.1.5.
 
 A small distributed supervisor for trusted personal machines. Immediate events stay
 asynchronous; a one-second fabric pulse reconciles presence, leases and stale work.
@@ -58,7 +58,7 @@ try:
 except ImportError:
     from endpoint_auth import EndpointAuth
 
-VERSION = "6.1.4"
+VERSION = "6.1.5"
 DEFAULT_HOST = "127.0.0.1"
 DEFAULT_PORT = 7332
 DEFAULT_INGRESS_PORT = 0
@@ -2694,7 +2694,7 @@ def _openjev_shadow(state, question, candidates, *, profile="workspace", consequ
 
 
 class API(BaseHTTPRequestHandler):
-    server_version = "FCLNode/6.1.4"
+    server_version = "FCLNode/6.1.5"
 
     def setup(self):
         self._metric_request_id = None
@@ -2813,6 +2813,54 @@ class API(BaseHTTPRequestHandler):
                 if not chunk: break
                 self.wfile.write(chunk); remaining-=len(chunk)
 
+    def _serve_media_artifact(self,target,digest,*,head=False):
+        """Expose one artifact through the local control plane.
+
+        Players receive a boring loopback URL. This node owns Fabric auth, pinned
+        TLS, Tailcat/Tailscale fallback, Range forwarding, and remote retries.
+        """
+        target=str(target or "").strip(); digest=str(digest or "").strip(); local=identity()["name"]
+        if not digest:
+            if head:
+                self.send_response(400); self.send_header("Content-Length","0"); self.end_headers(); return
+            return self.sendj(400,{"error":"artifact digest required"})
+        if not target or target==local:
+            return self._serve_artifact(digest,head=head)
+        snapshot={"self":node_info(),"peers":PEERS.public()}
+        try:
+            peer=_peer_for_target(snapshot,target); last_exc=None
+            for base in _peer_bases(peer):
+                url=base+"/v1/artifacts/"+urllib.parse.quote(digest,safe=":")
+                headers=FABRIC_IDENTITY.auth_headers_for_url(url)
+                if self.headers.get("Range"):
+                    headers["Range"]=self.headers.get("Range")
+                req=urllib.request.Request(url,headers=headers,method="HEAD" if head else "GET")
+                context=FABRIC_IDENTITY.ssl_context_for_url(url) if url.lower().startswith("https://") else None
+                try:
+                    kwargs={"timeout":8.0}
+                    if context is not None: kwargs["context"]=context
+                    with urllib.request.urlopen(req,**kwargs) as r:
+                        self.send_response(getattr(r,"status",200))
+                        for key in ("Content-Type","Content-Length","Accept-Ranges","Content-Range","Cache-Control","X-Fabric-Digest"):
+                            value=r.headers.get(key)
+                            if value: self.send_header(key,value)
+                        self.end_headers()
+                        if not head:
+                            while True:
+                                chunk=r.read(256*1024)
+                                if not chunk: break
+                                self.wfile.write(chunk)
+                        return
+                except Exception as exc:
+                    last_exc=exc
+            raise RuntimeError(f"artifact transport failed: {last_exc}")
+        except urllib.error.HTTPError as exc:
+            self.send_response(exc.code); self.send_header("Content-Length","0"); self.end_headers()
+        except Exception as exc:
+            if head:
+                self.send_response(502); self.send_header("Content-Length","0"); self.end_headers(); return
+            self.sendj(502,{"error":str(exc)})
+
     def _serve_media_audio(self,target,index,*,head=False):
         target=str(target or "").strip(); local=identity()["name"]
         if not target or target==local:
@@ -2863,6 +2911,9 @@ class API(BaseHTTPRequestHandler):
         if path == "/v1/media/audio":
             q=parse_qs(parsed.query); target=str((q.get("node") or [""])[0]); index=int((q.get("index") or [0])[0] or 0)
             return self._serve_media_audio(target,index,head=True)
+        if path == "/v1/media/artifact":
+            q=parse_qs(parsed.query); target=str((q.get("node") or [""])[0]); digest=str((q.get("digest") or [""])[0])
+            return self._serve_media_artifact(target,digest,head=True)
         if path.startswith("/v1/artifacts/"):
             digest = path.split("/", 3)[3]
             return self._serve_artifact(digest, head=True)
@@ -2998,6 +3049,9 @@ class API(BaseHTTPRequestHandler):
             try: index=int((q.get("index") or [0])[0] or 0)
             except Exception: index=0
             return self._serve_media_audio(target,index)
+        if path == "/v1/media/artifact":
+            q=parse_qs(urlparse(self.path).query); target=str((q.get("node") or [""])[0]); digest=str((q.get("digest") or [""])[0])
+            return self._serve_media_artifact(target,digest)
         if path == "/v1/media/output":
             return self.sendj(200, _local_media_output())
         if path == "/v1/media/outputs":
