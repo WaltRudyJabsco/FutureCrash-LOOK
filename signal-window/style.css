@@ -94,3 +94,8 @@ main.mode-compact #activity{height:18px;line-height:17px;flex-basis:18px}
 .media-output-select{max-width:min(78%,260px);font:inherit;color:#91c79e;background:#071009;border:1px solid #31543a;padding:4px 6px;outline:0}
 .media-output-select:hover,.media-output-select:focus{border-color:#8fd6a2;color:#d4e5d8}
 .media-output-select option:disabled{color:#58705e}
+/* 1.7: explicit endpoint buttons avoid native-picker lifecycle ambiguity on iOS. */
+.media-output-menu{display:flex;flex-wrap:wrap;justify-content:center;gap:5px;max-width:100%}
+.media-output-choice{font:inherit;font-size:.78em;color:#7fae89;background:#071009;border:1px solid #294b32;padding:4px 7px;cursor:pointer}
+.media-output-choice.selected{color:#d4e5d8;border-color:#8fd6a2}
+.media-output-choice:disabled{opacity:.45;cursor:default}

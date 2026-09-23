@@ -17,11 +17,12 @@ def test_signal_output_selector_lives_on_media_card_and_routes_media():
     js=(ROOT/'signal-window/app.js').read_text()
     server=(ROOT/'signal-window/server.py').read_text()
     assert 'id="mediaOutput"' not in html
-    assert "className='media-output-select'" in js
+    assert "className='media-output-menu'" in js
+    assert "className='media-output-choice'" in js
     assert "thisDeviceLabel()" in js
-    assert "self.value='browser'" in js
+    assert "target:'browser'" in js
     assert "let selectedMediaOutput=" in js
-    assert "o.value=nodeTarget(row.node)" in js
+    assert "target:nodeTarget(row.node)" in js
     assert '/api/media/outputs' in js
     assert '/api/media/move' in js
     assert '/api/media/audio' in js

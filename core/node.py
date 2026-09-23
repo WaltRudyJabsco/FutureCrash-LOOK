@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Future Crash + LOOK Unified Node 5.4.9.
+"""Future Crash + LOOK Unified Node 5.5.0.
 
 A small distributed supervisor for trusted personal machines. Immediate events stay
 asynchronous; a one-second fabric pulse reconciles presence, leases and stale work.
@@ -49,7 +49,7 @@ except ImportError:
     from decision import OpenJevShadow, new_request as new_decision_request, provider_status as decision_provider_status, plan as decision_plan
 from urllib.parse import urlparse, parse_qs
 
-VERSION = "5.4.9"
+VERSION = "5.5.0"
 DEFAULT_HOST = "127.0.0.1"
 DEFAULT_PORT = 7332
 DEFAULT_INGRESS_PORT = 0
@@ -2168,24 +2168,43 @@ def _fabric_media_full_session(target=None):
 
 
 def _fabric_media_move(source,target,index=None):
+    """Move a logical session while keeping media bytes on their source node.
+
+    A queue exported by one node contains local filesystem paths. Those paths are
+    meaningless on another Mac/Linux node. For a cross-node handoff we rewrite
+    each queue entry to the source node's range-capable media endpoint; mpv then
+    streams the same bytes over Fabric without copying the library first.
+    """
     source=str(source or identity()["name"]).strip()
     target=str(target or "").strip()
     if not target:
         raise ValueError("target media node required")
     session=_fabric_media_full_session(source)
-    if not session.get("queue"):
+    queue=session.get("queue") or []
+    if not queue:
         raise ValueError(f"no media session on {source}")
     if index is not None:
-        session["current_index"]=max(0,min(int(index),len(session["queue"])-1))
+        session["current_index"]=max(0,min(int(index),len(queue)-1))
     if source==target and index is None:
         return _fabric_media_state(target)
+    if source!=target:
+        snapshot={"self":node_info(),"peers":PEERS.public()}
+        streamed=[]
+        for i,row in enumerate(queue):
+            item=dict(row)
+            item["source_path"]=str(item.get("path") or "")
+            item["path"]=_remote_url(snapshot,source,"/v1/media/audio?index="+str(i))
+            item["node"]=source
+            streamed.append(item)
+        session=dict(session); session["queue"]=streamed
+        session["stream_source_node"]=source
     result=_fabric_media_route(target,"adopt",{"session":session})
     if not result.get("ok"):
         raise RuntimeError(str(result.get("error") or "target did not accept media session"))
     try:
         _fabric_media_route(source,"control",{"action":"stop"})
     except Exception:
-        pass
+        result["source_stop_warning"]=True
     result["moved_from"]=source
     result["moved_to"]=target
     return result
@@ -2385,7 +2404,7 @@ def _openjev_shadow(state, question, candidates, *, profile="workspace", consequ
 
 
 class API(BaseHTTPRequestHandler):
-    server_version = "FCLNode/5.4.9"
+    server_version = "FCLNode/5.5.0"
 
     def setup(self):
         self._metric_request_id = None

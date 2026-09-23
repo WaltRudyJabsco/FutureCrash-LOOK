@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Signal Window 1.6.3 — browser LO with shared media, browser audio, decisions, and camera/vision attachments."""
+"""Signal Window 1.7.0 — browser LO with shared media, browser audio, decisions, and camera/vision attachments."""
 from __future__ import annotations
 
 import argparse
@@ -621,13 +621,21 @@ def materialize_files(files, root):
 NODE_URL = os.getenv("FCL_NODE_URL", "http://127.0.0.1:7332").rstrip("/")
 
 def _node_call(path, payload=None, timeout=.6):
-    """Best-effort edge: Signal keeps working even when the node is absent."""
+    """Best-effort node edge, preserving structured HTTP failures for callers."""
     try:
         data=None if payload is None else json.dumps(payload).encode()
         req=urllib.request.Request(NODE_URL+path,data=data,
             headers={"Content-Type":"application/json"} if data else {})
         with urllib.request.urlopen(req,timeout=timeout) as r:
             return json.loads(r.read() or b"{}")
+    except urllib.error.HTTPError as exc:
+        try:
+            body=json.loads(exc.read() or b"{}")
+            if isinstance(body,dict):
+                body.setdefault("ok",False); body.setdefault("status",exc.code); return body
+        except Exception:
+            pass
+        return {"ok":False,"status":exc.code,"error":str(exc.reason or exc)}
     except Exception:
         return None
 
@@ -1077,7 +1085,7 @@ def main():
         state=f"LO NATIVE {a.profile} · "+(App.lo_cmd if App.lo_cmd else "NOT FOUND")
     else:
         p=probe_ollama(App.backend); state=("connected" if p.get("ok") else "unreachable: "+p.get("error","unknown"))
-    print(f"Signal Window 1.6.3 · http://{a.host}:{a.port} · {state} · gallery {App.gallery_dir if App.gallery_enabled else 'off'}")
+    print(f"Signal Window 1.7.0 · http://{a.host}:{a.port} · {state} · gallery {App.gallery_dir if App.gallery_enabled else 'off'}")
     ThreadingHTTPServer((a.host,a.port),App).serve_forever()
 
 if __name__=="__main__": main()

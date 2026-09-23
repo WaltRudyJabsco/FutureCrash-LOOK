@@ -1,4 +1,9 @@
-# Future Crash + LOOK 5.4.9
+# Future Crash + LOOK 5.5.0
+
+## 5.5.0 — Media Endpoint Handoff
+
+Signal media output routing is now explicit: browser playback is a local browser endpoint and never enters Fabric media-move dispatch, while node-to-node handoff uses the Fabric route. Cross-node queues are rewritten to range-capable source-node stream URLs so a Mac can play a 3090 library without sharing `/srv` paths or copying the track first. Signal uses stable endpoint buttons rather than an iOS native select picker, and node HTTP errors preserve their real diagnostic instead of collapsing to `Fabric media move unavailable`.
+
 
 ## 5.4.9 — Stable Safari Output Picker
 

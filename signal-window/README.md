@@ -1,4 +1,9 @@
-# Signal Window 1.6.3
+# Signal Window 1.7.0
+
+## 1.7.0 — explicit media endpoints
+
+OUT is rendered as stable endpoint buttons. `This iPhone`/`This Device` is handled entirely by browser audio; Fabric nodes use node handoff. Cross-node playback streams source media through Fabric rather than adopting another machine's filesystem paths.
+
 
 Signal is a browser body for LO/Fabric: conversation, lightweight visual expression, shared decisions, shared media state, browser audio endpoints, and camera/photo input.
 

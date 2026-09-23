@@ -13558,6 +13558,11 @@ def _media_entry_source(entry):
     """
     path=str(entry.get("path") or "").strip()
     if path:
+        # Cross-node handoff deliberately stores a range-capable Fabric HTTP URL
+        # in the queue. mpv can consume it directly; never reinterpret it as a
+        # local filesystem path on the receiving machine.
+        if path.startswith(("http://","https://")):
+            return path
         target=Path(path).expanduser()
         if target.is_file():
             return target.resolve().as_uri()
