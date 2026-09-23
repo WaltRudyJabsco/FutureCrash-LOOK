@@ -1,4 +1,4 @@
-# 6.1.2 — Fabric Endpoint Route Repair
+# 6.1.3 — Fabric Endpoint Route Repair
 
 This is a surgical repair to 6.1.1. The endpoint approval and revocation handlers existed, but were placed in the Unified Node GET dispatcher while the CLI correctly sent POST requests. The result was an unconditional HTTP 404 even on the Signal host.
 

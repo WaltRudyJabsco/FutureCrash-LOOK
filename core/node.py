@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Future Crash + LOOK Unified Node 6.1.2.
+"""Future Crash + LOOK Unified Node 6.1.3.
 
 A small distributed supervisor for trusted personal machines. Immediate events stay
 asynchronous; a one-second fabric pulse reconciles presence, leases and stale work.
@@ -58,7 +58,7 @@ try:
 except ImportError:
     from endpoint_auth import EndpointAuth
 
-VERSION = "6.1.2"
+VERSION = "6.1.3"
 DEFAULT_HOST = "127.0.0.1"
 DEFAULT_PORT = 7332
 DEFAULT_INGRESS_PORT = 0
@@ -2593,7 +2593,19 @@ def _endpoint_allow_fabric(code, mode="once"):
         approved=ENDPOINT_AUTH.allow(code,mode)
     else:
         snapshot={"self":node_info(),"peers":PEERS.public()}
-        approved=http_json(_remote_url(snapshot,node,"/v1/endpoints/allow"),{"code":str(code),"mode":str(mode)},timeout=3.0).get("endpoint") or {}
+        # A peer may advertise both Tailcat and Tailscale. Endpoint approval is a
+        # control operation, so a transient direct-transport failure must fall back
+        # rather than strand a browser pairing request.
+        peer=_peer_for_target(snapshot,node)
+        last_exc=None; response=None
+        for base in _peer_bases(peer):
+            try:
+                response=http_json(base+"/v1/endpoints/allow",{"code":str(code),"mode":str(mode)},timeout=3.0)
+                break
+            except Exception as exc:
+                last_exc=exc
+        if response is None: raise RuntimeError(f"endpoint approval transport failed: {last_exc}")
+        approved=response.get("endpoint") or {}
     return {"node":node,"endpoint":approved,"errors":data.get("errors") or []}
 
 
@@ -2610,7 +2622,13 @@ def _endpoint_revoke_fabric(endpoint_id):
     if node in {"local",local}: ok=ENDPOINT_AUTH.revoke(wanted)
     else:
         snapshot={"self":node_info(),"peers":PEERS.public()}
-        ok=bool(http_json(_remote_url(snapshot,node,"/v1/endpoints/revoke"),{"endpoint_id":wanted},timeout=3.0).get("ok"))
+        peer=_peer_for_target(snapshot,node); last_exc=None; response=None
+        for base in _peer_bases(peer):
+            try:
+                response=http_json(base+"/v1/endpoints/revoke",{"endpoint_id":wanted},timeout=3.0); break
+            except Exception as exc: last_exc=exc
+        if response is None: raise RuntimeError(f"endpoint revoke transport failed: {last_exc}")
+        ok=bool(response.get("ok"))
     return {"ok":ok,"node":node}
 
 def _fabric_decisions():
@@ -2676,7 +2694,7 @@ def _openjev_shadow(state, question, candidates, *, profile="workspace", consequ
 
 
 class API(BaseHTTPRequestHandler):
-    server_version = "FCLNode/6.1.2"
+    server_version = "FCLNode/6.1.3"
 
     def setup(self):
         self._metric_request_id = None
@@ -2807,20 +2825,31 @@ class API(BaseHTTPRequestHandler):
                 return self.sendj(404,{"error":str(exc)})
         snapshot={"self":node_info(),"peers":PEERS.public()}
         try:
-            url=_remote_url(snapshot,target,"/v1/media/audio?index="+str(int(index)))
-            req=urllib.request.Request(url,method="HEAD" if head else "GET")
-            if self.headers.get("Range"): req.add_header("Range",self.headers.get("Range"))
-            with urllib.request.urlopen(req,timeout=8.0) as r:
-                self.send_response(getattr(r,"status",200))
-                for key in ("Content-Type","Content-Length","Accept-Ranges","Content-Range","Cache-Control"):
-                    value=r.headers.get(key)
-                    if value: self.send_header(key,value)
-                self.end_headers()
-                if not head:
-                    while True:
-                        chunk=r.read(256*1024)
-                        if not chunk: break
-                        self.wfile.write(chunk)
+            peer=_peer_for_target(snapshot,target); last_exc=None
+            for base in _peer_bases(peer):
+                url=base+"/v1/media/audio?index="+str(int(index))
+                headers=FABRIC_IDENTITY.auth_headers_for_url(url)
+                if self.headers.get("Range"): headers["Range"]=self.headers.get("Range")
+                req=urllib.request.Request(url,headers=headers,method="HEAD" if head else "GET")
+                context=FABRIC_IDENTITY.ssl_context_for_url(url) if url.lower().startswith("https://") else None
+                try:
+                    kwargs={"timeout":8.0}
+                    if context is not None: kwargs["context"]=context
+                    with urllib.request.urlopen(req,**kwargs) as r:
+                        self.send_response(getattr(r,"status",200))
+                        for key in ("Content-Type","Content-Length","Accept-Ranges","Content-Range","Cache-Control"):
+                            value=r.headers.get(key)
+                            if value: self.send_header(key,value)
+                        self.end_headers()
+                        if not head:
+                            while True:
+                                chunk=r.read(256*1024)
+                                if not chunk: break
+                                self.wfile.write(chunk)
+                        return
+                except Exception as exc:
+                    last_exc=exc
+            raise RuntimeError(f"media transport failed: {last_exc}")
         except urllib.error.HTTPError as exc:
             self.send_response(exc.code); self.send_header("Content-Length","0"); self.end_headers()
         except Exception as exc:
@@ -3336,6 +3365,27 @@ def print_fabric_snapshot(snapshot):
             # The normal Fabric view is about Future Crash nodes, not every phone on
             # the tailnet. Raw `nodes` JSON still exposes discovery diagnostics.
             continue
+
+
+def _peer_bases(peer):
+    """Ordered usable transports for a peer: active/direct first, then fallbacks."""
+    out=[]
+    if peer.get("url"): out.append(str(peer["url"]).rstrip("/"))
+    for value in peer.get("tailcat_endpoints") or []:
+        value=str(value).rstrip("/")
+        if value and value not in out: out.append(value)
+    if peer.get("dns"):
+        value=f"https://{peer['dns']}:7332"
+        if value not in out: out.append(value)
+    return out
+
+
+def _peer_for_target(snapshot,target):
+    needle=str(target or "").casefold()
+    for peer in snapshot.get("peers") or []:
+        names={str(peer.get("name") or "").casefold(),str((peer.get("node") or {}).get("identity",{}).get("name") or "").casefold()}
+        if needle in names: return peer
+    raise RuntimeError(f"Fabric node not found: {target}")
 
 
 def _peer_base(peer):

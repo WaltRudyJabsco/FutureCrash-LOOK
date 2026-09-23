@@ -1,4 +1,10 @@
-# 6.1.2 — Fabric Endpoint Route Repair
+## 6.1.3 — Tailcat Edge Repair
+
+- Retry peer transports for endpoint approval/revoke when direct Tailcat fails.
+- Restore authenticated remote browser audio across Fabric authorization.
+- Add HEAD and streaming handling for media audio through ingress/Tailcat.
+
+# 6.1.3 — Fabric Endpoint Route Repair
 
 - Fix endpoint approval/revocation HTTP handlers accidentally registered in `GET` instead of `POST`.
 - Restore `lk fabric allow CODE once|trust` locally and through Fabric-wide routing.

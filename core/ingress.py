@@ -26,7 +26,7 @@ try:
 except ImportError:
     from fabric_identity import FabricIdentity
 
-VERSION = "6.1.0"
+VERSION = "6.1.3"
 DEFAULT_HOST = "127.0.0.1"
 DEFAULT_PORT = 7333
 DEFAULT_BACKEND_HOST = "127.0.0.1"
@@ -173,7 +173,7 @@ class GuardServer(ThreadingHTTPServer):
 
 
 class Handler(BaseHTTPRequestHandler):
-    server_version = "FCLIngress/6.1.0"
+    server_version = "FCLIngress/6.1.3"
     protocol_version = "HTTP/1.0"  # response EOF is the stream boundary; no keep-alive pool.
 
     def log_message(self, *args):
@@ -211,7 +211,9 @@ class Handler(BaseHTTPRequestHandler):
         stream_slot = False
         conn = None
         try:
-            is_stream = path == "/v1/infer/stream"
+            # Audio is a byte stream too. Buffering an entire track in the ingress
+            # defeats Range playback and can consume large amounts of RAM.
+            is_stream = path in {"/v1/infer/stream", "/v1/media/audio"}
             if is_stream:
                 stream_slot = self.server.stream_slots.acquire(blocking=False)
                 if not stream_slot:
@@ -249,12 +251,13 @@ class Handler(BaseHTTPRequestHandler):
 
             if is_stream:
                 self.end_headers()
-                while True:
-                    chunk = upstream.read(8192)
-                    if not chunk:
-                        break
-                    self.wfile.write(chunk)
-                    self.wfile.flush()
+                if self.command != "HEAD":
+                    while True:
+                        chunk = upstream.read(64 * 1024)
+                        if not chunk:
+                            break
+                        self.wfile.write(chunk)
+                        self.wfile.flush()
             else:
                 data = upstream.read()
                 self.send_header("Content-Length", str(len(data)))
@@ -280,6 +283,7 @@ class Handler(BaseHTTPRequestHandler):
             METRICS.on_finish()
 
     do_GET = _relay
+    do_HEAD = _relay
     do_POST = _relay
 
 
