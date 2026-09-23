@@ -1391,14 +1391,28 @@ class HostTools:
     def __init__(self):
         self.session_grants = set()
         self.ollama_api_key = os.environ.get("OLLAMA_API_KEY", "").strip()
+        self.searxng_url = os.environ.get("FCL_SEARXNG_URL", "http://127.0.0.1:8888").rstrip("/")
+
+    @staticmethod
+    def _port_ready(host, port):
+        try:
+            with socket.create_connection((host, port), timeout=.08):
+                return True
+        except OSError:
+            return False
 
     @property
     def web_ready(self):
-        return bool(self.ollama_api_key)
+        # The local node can route to a remote Fabric search provider, so node
+        # reachability is enough to attempt accountless search before API fallback.
+        return self._port_ready("127.0.0.1", 7332) or self._port_ready("127.0.0.1", 8888) or bool(self.ollama_api_key)
 
     @property
     def web_status(self):
-        return "READY" if self.web_ready else "NO KEY"
+        if self._port_ready("127.0.0.1", 8888): return "SEARXNG"
+        if self._port_ready("127.0.0.1", 7332): return "FABRIC"
+        if self.ollama_api_key: return "OLLAMA"
+        return "OFFLINE"
 
     @staticmethod
     def expand_path(value):
@@ -1561,27 +1575,38 @@ class HostTools:
                 query = str(request.get("query", "")).strip()
                 if not query:
                     return False, "WEB SEARCH REQUIRES A QUERY"
-                if not self.web_ready:
-                    return False, "WEB SEARCH UNAVAILABLE: OLLAMA_API_KEY is not present in this process environment"
-
-                payload = json.dumps({"query": query}).encode("utf-8")
-                req = urllib.request.Request(
-                    "https://ollama.com/api/web_search",
-                    data=payload,
-                    headers={
-                        "Authorization": f"Bearer {self.ollama_api_key}",
-                        "Content-Type": "application/json",
-                    },
-                    method="POST",
-                )
-                with urllib.request.urlopen(req, timeout=20) as response:
-                    data = json.loads(response.read().decode("utf-8", errors="replace"))
+                data = None
+                provider = ""
+                encoded = urllib.parse.urlencode({"q": query, "limit": 8})
+                # Prefer the Fabric edge: it uses local SearXNG when present and can
+                # route to a peer that advertises web.search. No account is required.
+                try:
+                    with urllib.request.urlopen("http://127.0.0.1:7332/v1/web/search?" + encoded, timeout=12) as response:
+                        candidate=json.loads(response.read().decode("utf-8", errors="replace"))
+                    if isinstance(candidate,dict) and not candidate.get("error"):
+                        data=candidate; provider=str(candidate.get("provider") or "fabric")
+                except Exception:
+                    pass
+                if data is None:
+                    try:
+                        with urllib.request.urlopen(self.searxng_url + "/search?" + urllib.parse.urlencode({"q":query,"format":"json"}), timeout=12) as response:
+                            candidate=json.loads(response.read().decode("utf-8", errors="replace"))
+                        if isinstance(candidate,dict): data=candidate; provider="searxng"
+                    except Exception:
+                        pass
+                if data is None and self.ollama_api_key:
+                    payload = json.dumps({"query": query}).encode("utf-8")
+                    req = urllib.request.Request("https://ollama.com/api/web_search",data=payload,headers={"Authorization": f"Bearer {self.ollama_api_key}","Content-Type": "application/json"},method="POST")
+                    with urllib.request.urlopen(req, timeout=20) as response:
+                        data=json.loads(response.read().decode("utf-8", errors="replace")); provider="ollama"
+                if data is None:
+                    return False, "WEB SEARCH UNAVAILABLE: no Fabric/local SearXNG provider and no optional Ollama API key"
 
                 results = data.get("results", []) if isinstance(data, dict) else []
                 if not results:
                     return True, f"WEB SEARCH: {query}\n(no results)"
 
-                lines = [f"WEB SEARCH: {query}"]
+                lines = [f"WEB SEARCH: {query} · {provider.upper()}"]
                 for i, item in enumerate(results[:8], 1):
                     title = str(item.get("title", "")).strip()
                     url = str(item.get("url", "")).strip()
@@ -3750,7 +3775,7 @@ class FutureCrash:
             ("CONCEPTS",
              [
                  ("MEMORY", "one rolling long memory + eight recent Workstation exchanges"),
-                 ("WEB", "Ollama hosted web search when OLLAMA_API_KEY is available"),
+                 ("WEB", "Fabric/local SearXNG first; optional Ollama API fallback"),
                  ("FILES", "permissioned host actions with verified HOST RECEIPTS"),
                  ("SIGNAL", "shared expressive drawing surface + render feedback + tiny animation"),
                  ("MODEL WAKE", "model-only recurring Thread action for Signal art, notes, moods, etc."),

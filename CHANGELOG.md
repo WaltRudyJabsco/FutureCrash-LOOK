@@ -1,3 +1,11 @@
+# 5.8.0 — Accountless Web Search
+
+- Prefer Fabric/local SearXNG for generic web search; Ollama hosted search is optional fallback.
+- Advertise `web.search` from nodes with a healthy local SearXNG edge.
+- Route LO search through Fabric without requiring an Ollama account/API key.
+- Rewrite README around the current architecture and reuse existing screenshots.
+- Protect Dash on narrow terminal geometries.
+
 ## 5.7.2 — Find Retrieval Repair
 
 - Fixed Unified Node query tokenization so Fabric file searches use real lexical terms instead of degrading into newest-file listings.

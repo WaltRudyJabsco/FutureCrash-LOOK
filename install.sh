@@ -1,13 +1,13 @@
 #!/usr/bin/env bash
 set -euo pipefail
 ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
-echo "Future Crash + LOOK 5.7.2 · Find Retrieval Repair"
+echo "Future Crash + LOOK 5.8.0 · Accountless Web Search"
 echo "────────────────────────────────────────"
 
 # Refuse a mixed bundle before mutating the machine. A unified release must move
 # LOOK and the node together.
 EXPECTED_RELEASE="$(tr -d '[:space:]' < "$ROOT/VERSION")"
-[[ "$EXPECTED_RELEASE" == "5.7.2" ]] || { echo "BUNDLE ERROR: expected release 5.7.2, found $EXPECTED_RELEASE"; exit 4; }
+[[ "$EXPECTED_RELEASE" == "5.8.0" ]] || { echo "BUNDLE ERROR: expected release 5.8.0, found $EXPECTED_RELEASE"; exit 4; }
 grep -q 'def _fabric_command' "$ROOT/look/lk" || { echo "BUNDLE ERROR: LOOK source has no Fabric command"; exit 4; }
 grep -q 'choices=.*serve.*fabric' "$ROOT/core/node.py" || { echo "BUNDLE ERROR: node source has no Fabric CLI"; exit 4; }
 
@@ -28,7 +28,7 @@ case "$OPENJEV_MODE" in off|auto|adopt|install) ;; *) echo "BUNDLE ERROR: invali
 ((UNINSTALL)) && exit 0
 if ((DRY_RUN)); then
   echo
-  echo "[dry-run] would install/restart Unified Node 5.7.2, canonical Decision Plane, optional OpenJev worker, Fabric Content Search, Fabric Media Catalog, Streaming Artifacts, Fabric Memory, and Signal Window 1.7.0"
+  echo "[dry-run] would install/restart Unified Node 5.8.0 with Fabric SearXNG discovery/search, canonical Decision Plane, optional OpenJev worker, Fabric Content Search, Fabric Media Catalog, Streaming Artifacts, Fabric Memory, and Signal Window 1.7.0"
   echo "[dry-run] OpenJev mode: $OPENJEV_MODE (auto adopts an existing worker; absence is non-fatal)"
   echo "[dry-run] would reconcile Tailscale :7332 → separate fcl-ingress :7333 and verify Fabric CLI wiring"
   exit 0
@@ -59,6 +59,19 @@ if [[ "$SERVER_PRESENT" == "1" ]]; then
   install -m 0755 "$ROOT/local-labs-host/server.py" "$HOME/.local/share/local-labs-host/server.py"
   [[ -d "$HOME/.local/share/3090-server" ]] && install -m 0755 "$ROOT/local-labs-host/server.py" "$HOME/.local/share/3090-server/server.py"
   ln -sfn "$HOME/.local/share/local-labs-host/server.py" "$HOME/.local/bin/server"
+  if python3 - <<'PY_SEARX' >/dev/null 2>&1
+import socket
+s=socket.socket(); s.settimeout(.15)
+try: s.connect(("127.0.0.1",8888)); ok=True
+except OSError: ok=False
+finally: s.close()
+raise SystemExit(0 if ok else 1)
+PY_SEARX
+  then
+    echo "  Web search: local SearXNG detected · Fabric web.search will advertise it"
+  else
+    echo "  Web search: accountless SearXNG available via: server install searxng"
+  fi
 fi
 
 # Signal is an interface over the same node. Its installer owns platform service edges.

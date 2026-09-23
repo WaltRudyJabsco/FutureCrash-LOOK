@@ -1,3 +1,7 @@
+# 5.8.0 — Accountless Web Search
+
+SearXNG becomes the preferred Fabric web-search capability; hosted Ollama search remains optional. README and narrow Dash layout are refreshed.
+
 ## 5.7.1 — Smart Resolver
 
 Fabric Content Search plus catalog-backed deterministic target resolution for open/preview/reveal.

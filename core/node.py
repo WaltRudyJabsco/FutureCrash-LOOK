@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Future Crash + LOOK Unified Node 5.7.2.
+"""Future Crash + LOOK Unified Node 5.8.0.
 
 A small distributed supervisor for trusted personal machines. Immediate events stay
 asynchronous; a one-second fabric pulse reconciles presence, leases and stale work.
@@ -50,7 +50,7 @@ except ImportError:
     from decision import OpenJevShadow, new_request as new_decision_request, provider_status as decision_provider_status, plan as decision_plan
 from urllib.parse import urlparse, parse_qs
 
-VERSION = "5.7.2"
+VERSION = "5.8.0"
 DEFAULT_HOST = "127.0.0.1"
 DEFAULT_PORT = 7332
 DEFAULT_INGRESS_PORT = 0
@@ -316,6 +316,10 @@ def capabilities():
         "artifact.stream": True,
         "artifact.catalog": True,
         "file.catalog": LOOK_FILE_CATALOG.exists(),
+        # Web search is a capability, not an account. A node advertises it only
+        # when its local SearXNG JSON edge is reachable. Fabric may route clients
+        # here from machines that have no search service of their own.
+        "web.search": probe("127.0.0.1", 8888),
         # Human clarification is a Fabric capability, not a terminal-only prompt.
         "decision.request": True,
         "decision.answer": True,
@@ -1930,6 +1934,51 @@ def _fabric_file_search(query,limit=80):
     return {"schema":"fabric-file-search-v1","generated":now(),"query":query,"entries":entries,"count":len(entries),"errors":errors}
 
 
+
+def _local_web_search(query, limit=8):
+    """Search this node's self-hosted SearXNG edge; never forwards to a peer."""
+    query=str(query or "").strip()
+    limit=max(1,min(int(limit or 8),20))
+    node=identity()["name"]
+    if not query:
+        return {"schema":"fabric-web-search-v1","node":node,"provider":"searxng","query":query,"results":[],"count":0,"error":"query required"}
+    params=urllib.parse.urlencode({"q":query,"format":"json"})
+    try:
+        with urllib.request.urlopen("http://127.0.0.1:8888/search?"+params,timeout=8) as response:
+            data=json.loads(response.read(2*1024*1024) or b"{}")
+        results=[]
+        for item in (data.get("results") or [])[:limit]:
+            if not isinstance(item,dict): continue
+            results.append({"title":str(item.get("title") or "").strip(),
+                            "url":str(item.get("url") or "").strip(),
+                            "content":" ".join(str(item.get("content") or "").split())[:1600]})
+        return {"schema":"fabric-web-search-v1","node":node,"provider":"searxng","query":query,"results":results,"count":len(results)}
+    except Exception as exc:
+        return {"schema":"fabric-web-search-v1","node":node,"provider":"searxng","query":query,"results":[],"count":0,"error":str(exc)}
+
+
+def _fabric_web_search(query, limit=8):
+    """Use the nearest available accountless search capability in the Fabric."""
+    local=_local_web_search(query,limit)
+    if not local.get("error"):
+        return local
+    snapshot={"self":node_info(),"peers":PEERS.public()}
+    encoded=urllib.parse.quote(str(query or ""))
+    errors=[{"node":local.get("node"),"error":local.get("error")}]
+    for peer in snapshot.get("peers") or []:
+        ad=peer.get("node") or {}; caps=ad.get("capabilities") or {}
+        name=((ad.get("identity") or {}).get("name") or peer.get("name"))
+        if not name or not peer.get("dns") or not caps.get("web.search"): continue
+        try:
+            remote=http_json(_remote_url(snapshot,name,f"/v1/web/search/local?q={encoded}&limit={int(limit)}"),timeout=9.0)
+            if not remote.get("error"):
+                remote["via"]="fabric"
+                return remote
+            errors.append({"node":name,"error":remote.get("error")})
+        except Exception as exc:
+            errors.append({"node":name,"error":str(exc)})
+    return {"schema":"fabric-web-search-v1","query":query,"results":[],"count":0,"provider":"none","errors":errors,"error":"no reachable Fabric SearXNG provider"}
+
 def _read_media_library():
     """Read LOOK's local media discovery index without importing the LOOK UI layer."""
     with MEDIA_LIBRARY_LOCK:
@@ -2505,7 +2554,7 @@ def _openjev_shadow(state, question, candidates, *, profile="workspace", consequ
 
 
 class API(BaseHTTPRequestHandler):
-    server_version = "FCLNode/5.7.2"
+    server_version = "FCLNode/5.8.0"
 
     def setup(self):
         self._metric_request_id = None
@@ -2733,6 +2782,18 @@ class API(BaseHTTPRequestHandler):
             try: since = int((q.get("since") or [0])[0])
             except Exception: since = 0
             return self.sendj(200, {"events": FABRIC_STORE.events(since=since)})
+        if path == "/v1/web/search/local":
+            q=parse_qs(urlparse(self.path).query); query=str((q.get("q") or [""])[0])
+            try: limit=max(1,min(20,int((q.get("limit") or [8])[0])))
+            except Exception: limit=8
+            result=_local_web_search(query,limit)
+            return self.sendj(200 if not result.get("error") else 503,result)
+        if path == "/v1/web/search":
+            q=parse_qs(urlparse(self.path).query); query=str((q.get("q") or [""])[0])
+            try: limit=max(1,min(20,int((q.get("limit") or [8])[0])))
+            except Exception: limit=8
+            result=_fabric_web_search(query,limit)
+            return self.sendj(200 if not result.get("error") else 503,result)
         if path == "/v1/files/catalog":
             return self.sendj(200, _local_file_catalog())
         if path == "/v1/files/search":
@@ -3693,7 +3754,7 @@ def _dash_summary_rows(data):
 
 def _dash_render_compact(data, width=92, height=20, ansi=False):
     """Short-window dashboard: protect identity, workers, RECENT and controls."""
-    width=max(54,min(int(width or 92),132)); rule="─"*width
+    width=max(30,min(int(width or 92),132)); rule="─"*width
     snap=data.get("nodes") or {}; local=snap.get("self") or {}; rows=_dash_summary_rows(data)
     events=(data.get("events") or {}).get("events") or []; jobs=(data.get("jobs") or {}).get("jobs") or []
     active=[j for j in jobs if str(j.get("status") or "") not in {"ok","done","failed","cancelled","canceled"}]
@@ -3855,6 +3916,8 @@ def _dash_render(data, width=92, height=None, ansi=False, mini=False):
 
     # Wide/short is its own geometry.  Use the width instead of punishing a
     # landscape Mac simply because it has fewer terminal rows than a portrait pane.
+    if width < 64:
+        return _dash_render_compact(data,width,height,ansi=ansi)
     if width >= 104 and height >= 19:
         return _dash_render_wide(data,width,height,ansi=ansi)
     if height >= 18:
