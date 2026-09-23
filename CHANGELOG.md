@@ -1,3 +1,12 @@
+## 6.1.4 — Media Resolver Repair
+
+- Repair media playback from merged Fabric catalog rows: queue resolution now checks every physical location for local bytes before promoting a remote copy to content identity.
+- Preserve transport-neutral queues while resolving remote media lazily through Fabric streams.
+- Show the first concrete resolver failures when an entire queue is unplayable instead of only `no playable queue entries`.
+- Normalize a leading conversational `the` for artist matching, so `play the talking heads` resolves the `Talking Heads` artist grouping.
+- Treat an explicit `lk ...` line entered inside LO as an argv-safe LOOK command using the current TTY; it no longer falls through to model inference and Fabric authorization.
+- Add regression coverage for article-normalized artist resolution, merged-location playback, failure diagnostics, and LO command passthrough.
+
 ## 6.1.3 — Tailcat Edge Repair
 
 - Retry peer transports for endpoint approval/revoke when direct Tailcat fails.

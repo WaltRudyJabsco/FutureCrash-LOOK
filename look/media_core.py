@@ -204,6 +204,12 @@ def search_entries(library: Any, query: str) -> list[dict[str, Any]]:
     return [row for row in rows if all(token in _haystack(row) for token in tokens)]
 
 
+def _artist_key(value: str) -> str:
+    """Normalize conversational artist names without changing stored metadata."""
+    key = " ".join(str(value or "").casefold().split())
+    return key[4:] if key.startswith("the ") else key
+
+
 def resolve_query(library: Any, query: str) -> list[dict[str, Any]]:
     """Resolve human media text with useful album/artist/title grouping before fuzzy rows."""
     rows = normalize_library(library)["entries"]
@@ -213,7 +219,8 @@ def resolve_query(library: Any, query: str) -> list[dict[str, Any]]:
     exact_album = [r for r in rows if str(r.get("album") or "").casefold() == q]
     if exact_album:
         return sorted(exact_album, key=entry_sort_key)
-    exact_artist = [r for r in rows if str(r.get("artist") or "").casefold() == q]
+    artist_q = _artist_key(query)
+    exact_artist = [r for r in rows if _artist_key(str(r.get("artist") or "")) == artist_q]
     if exact_artist:
         return sorted(exact_artist, key=entry_sort_key)
     exact_title = [r for r in rows if str(r.get("title") or "").casefold() == q]

@@ -9568,6 +9568,23 @@ def ollama_chat(force_search=False, initial_prompt=None, allow_start=True, host_
         if not prompt:
             continue
 
+        # An explicit `lk ...` line is an operator command, not language for the model.
+        # Execute it argv-safe with the current TTY so interactive LOOK surfaces work
+        # inside LO without consuming inference or Fabric model authorization.
+        if prompt == "lk" or prompt.startswith("lk "):
+            try:
+                argv=shlex.split(prompt)[1:]
+                if argv and argv[0] != "lo":
+                    exe=shutil.which("lk") or str(Path(__file__).resolve())
+                    subprocess.run([exe,*argv])
+                elif argv:
+                    print("LO · nested `lk lo` is disabled")
+                else:
+                    print("LO · give lk a command")
+            except (ValueError,OSError) as exc:
+                print(f"LO · lk command failed: {exc}")
+            continue
+
         # Hard turn boundary: handles/conversation persist; retry/evidence authority does not.
         turn_id += 1
         turn_document_reanchors = 0
@@ -13218,7 +13235,8 @@ def _media_query_matches(query):
     exact_album=[r for r in rows if str(r.get("album") or "").casefold()==q]
     if exact_album:
         return "album",sorted(exact_album,key=media_core.entry_sort_key)
-    exact_artist=[r for r in rows if str(r.get("artist") or "").casefold()==q]
+    artist_q=media_core._artist_key(query)
+    exact_artist=[r for r in rows if media_core._artist_key(str(r.get("artist") or ""))==artist_q]
     if exact_artist:
         return "artist",sorted(exact_artist,key=media_core.entry_sort_key)
     exact_title=[r for r in rows if str(r.get("title") or "").casefold()==q]
@@ -13232,7 +13250,7 @@ def _media_query_matches(query):
     artists={str(r.get("artist") or "").strip() for r in fuzzy if str(r.get("artist") or "").strip()}
     if len(artists)==1:
         artist=next(iter(artists))
-        if q and q in artist.casefold():
+        if artist_q and (artist_q in media_core._artist_key(artist) or media_core._artist_key(artist) in artist_q):
             return "artist",sorted(fuzzy,key=media_core.entry_sort_key)
     return "ambiguous",sorted(fuzzy,key=media_core.entry_sort_key)
 
@@ -13636,33 +13654,54 @@ def _media_status_snapshot():
 
 
 def _media_entry_source(entry):
-    """Resolve one queue entry at the player edge.
+    """Resolve one queue entry at the player edge from its Fabric locations.
 
-    Same-node files stay local; remote/content-addressed entries use Fabric streams.
-    This keeps the queue independent of transport while avoiding pointless loopback I/O.
+    Local bytes win. Remote bytes are promoted to content identity lazily and then
+    exposed through a Fabric stream. Queue entries therefore stay transport-neutral.
     """
-    path=str(entry.get("path") or "").strip()
-    if path:
-        # Cross-node handoff deliberately stores a range-capable Fabric HTTP URL
-        # in the queue. mpv can consume it directly; never reinterpret it as a
-        # local filesystem path on the receiving machine.
+    candidates=[]
+    primary_path=str(entry.get("path") or "").strip()
+    if primary_path:
+        candidates.append((str(entry.get("node") or ""),primary_path,str(entry.get("id") or ""),str(entry.get("digest") or "")))
+    for loc in entry.get("locations") or []:
+        if not isinstance(loc,dict):
+            continue
+        item=(str(loc.get("node") or ""),str(loc.get("path") or "").strip(),str(loc.get("id") or ""),str(loc.get("digest") or ""))
+        if item not in candidates:
+            candidates.append(item)
+
+    # A merged catalog's primary copy is not guaranteed to be local to this process.
+    # Check every physical location before paying the remote/hash cost.
+    for _node,path,_entry_id,_digest in candidates:
+        if not path:
+            continue
         if path.startswith(("http://","https://")):
             return path
         target=Path(path).expanduser()
         if target.is_file():
             return target.resolve().as_uri()
+
     digest=str(entry.get("digest") or "").strip()
-    if not digest and entry.get("node") and entry.get("id"):
-        identified=_media_identify_catalog_entry(entry)
-        digest=str(identified.get("digest") or "").strip()
-        if digest:
-            entry.update(identified)
+    source_node=str(entry.get("node") or "").strip()
+    if not digest:
+        # Prefer a concrete reachable catalog location when the merged row itself
+        # happens to carry stale/nonlocal primary metadata.
+        for node,path,entry_id,loc_digest in candidates:
+            if loc_digest:
+                digest=loc_digest; source_node=node or source_node; break
+            if node and entry_id:
+                identified=_media_identify_catalog_entry({**entry,"node":node,"id":entry_id,"path":path})
+                digest=str(identified.get("digest") or "").strip()
+                if digest:
+                    source_node=node
+                    entry.update(identified)
+                    break
     if digest:
-        payload=_media_artifact(digest,str(entry.get("node") or "") or None)
+        payload=_media_artifact(digest,source_node or None)
         url=str(payload.get("stream_url") or "")
         if url:
             return url
-    raise FileNotFoundError(path or digest or "media queue entry")
+    raise FileNotFoundError(primary_path or digest or "media queue entry")
 
 
 def _media_write_m3u(queue):
@@ -13737,6 +13776,10 @@ def _media_launch_session(session):
     playable,missing,index_map=_media_write_m3u(queue)
     if not playable:
         print("LOOK media · no playable queue entries")
+        for label,error in missing[:5]:
+            print(f"  × {label} · {error}")
+        if len(missing)>5:
+            print(f"  … {len(missing)-5} more")
         return 1
     if missing:
         # Missing entries are skipped at the edge, but canonical queue remains untouched
