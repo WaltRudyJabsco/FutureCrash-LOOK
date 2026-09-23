@@ -8,13 +8,35 @@ from __future__ import annotations
 import base64, json, time, urllib.request, urllib.error, uuid
 
 from conductor import classify as _classify_work, last_user_text as _last_user_text
+try:
+    from .fabric_identity import FabricIdentity
+except ImportError:
+    from fabric_identity import FabricIdentity
+
+FABRIC_IDENTITY = FabricIdentity()
 
 DEFAULT_NODE = "http://127.0.0.1:7332"
 
+def _open(req, *, url, timeout=5.0):
+    """Open a Fabric URL with the authorization and TLS pin for that peer.
+
+    Loopback remains credential-free. Remote Tailcat/Tailscale edges carry the
+    paired node credential; Tailcat additionally uses the certificate learned at
+    pairing. Keeping this here prevents every application from reimplementing auth.
+    """
+    kwargs={"timeout":timeout}
+    context=FABRIC_IDENTITY.ssl_context_for_url(url) if str(url).lower().startswith("https://") else None
+    if context is not None:
+        kwargs["context"]=context
+    return urllib.request.urlopen(req, **kwargs)
+
+
 def _json(url, payload=None, timeout=5.0):
     data = None if payload is None else json.dumps(payload).encode()
-    req = urllib.request.Request(url, data=data, headers={"Content-Type":"application/json"})
-    with urllib.request.urlopen(req, timeout=timeout) as r:
+    headers={"Content-Type":"application/json"}
+    headers.update(FABRIC_IDENTITY.auth_headers_for_url(url))
+    req = urllib.request.Request(url, data=data, headers=headers)
+    with _open(req,url=url,timeout=timeout) as r:
         return json.loads(r.read().decode("utf-8","replace"))
 
 def _nodes(base):
@@ -38,6 +60,34 @@ def _find_target(snapshot, target):
         if name == target:
             return dns,ad
     return None,{}
+
+
+def _peer_row(snapshot, target):
+    wanted=str(target or "").casefold()
+    for peer in snapshot.get("peers") or []:
+        ad=peer.get("node") or {}
+        names={str(peer.get("name") or "").casefold(),
+               str((ad.get("identity") or {}).get("name") or "").casefold()}
+        if wanted in names:
+            return peer
+    return {}
+
+
+def _endpoint_base(snapshot, target, dns, local_base):
+    me=snapshot.get("self") or {}
+    me_name=str(me.get("name") or ((me.get("identity") or {}).get("name")) or "").casefold()
+    if str(target or "").casefold()==me_name:
+        return local_base.rstrip('/')
+    peer=_peer_row(snapshot,target)
+    if peer.get("url"):
+        return str(peer["url"]).rstrip('/')
+    for value in peer.get("tailcat_endpoints") or []:
+        value=str(value or "").rstrip('/')
+        if value:
+            return value
+    if dns:
+        return f"https://{dns}:7332"
+    return local_base.rstrip('/')
 
 
 def _model_expected_ms(model, tier="balanced"):
@@ -152,7 +202,7 @@ def infer(messages, *, model=None, requires=None, latency=False, priority="inter
     # Submit work to the selected worker. delivery.target is descriptive/provenance;
     # transport placement must be real rather than relying on the origin node to
     # interpret a remote target later.
-    pollbase=(f"https://{dns}:7332" if dns else base.rstrip('/'))
+    pollbase=_endpoint_base(snap,target,dns,base)
     submit=_json(pollbase+"/v1/jobs",{"packet":packet},timeout=6.0)
     job=(submit.get("job") or {}); jid=job.get("id") or packet.get("id")
     deadline=time.monotonic()+timeout+8
@@ -242,7 +292,7 @@ def stream_infer(payload, *, requires=None, priority="interactive", timeout=180,
                     preferred=((ad.get("inference") or {}).get("preferred_model"))
                     names={m.get("name") for m in eligible}
                     chosen=preferred if preferred in names else max(eligible,key=lambda m:int(m.get("size") or 0)).get("name")
-                return target,dns,chosen
+                return target,dns,chosen,snap
         _,target,dns,eligible=_choose_from_snapshot(snap,model=model,requires=reqs,latency=(tier=="reflex"),exclude=tried,tier=tier)
         ad=_ad_for_target(base,target,snapshot=snap)
         chosen=model
@@ -250,7 +300,7 @@ def stream_infer(payload, *, requires=None, priority="interactive", timeout=180,
             preferred=((ad.get("inference") or {}).get("preferred_model"))
             names={m.get("name") for m in eligible}
             chosen=preferred if preferred in names else max(eligible,key=lambda m:int(m.get("size") or 0)).get("name")
-        return target,dns,chosen
+        return target,dns,chosen,snap
 
     last_error=None
     attempt_no=0
@@ -267,7 +317,7 @@ def stream_infer(payload, *, requires=None, priority="interactive", timeout=180,
             attempt_no=0
             time.sleep(busy_retry_seconds)
         try:
-            target,dns,chosen=select(prefer_route=(attempt_no==0 and busy_grace_deadline is None))
+            target,dns,chosen,snap=select(prefer_route=(attempt_no==0 and busy_grace_deadline is None))
         except (urllib.error.URLError, TimeoutError, socket.timeout) as exc:
             # Route discovery is control-plane work. A transient slow /v1/nodes
             # response should not leak a raw urllib timeout into LO.
@@ -290,7 +340,7 @@ def stream_infer(payload, *, requires=None, priority="interactive", timeout=180,
         # routing time from prompt-evaluation/TTFT in LO telemetry instead of
         # making the first model frame look like a ten-second routing decision.
         yield {"_fabric_meta":"route", "_fabric_node":target, "_fabric_model":chosen}
-        endpoint_base=(f"https://{dns}:7332" if dns else base.rstrip('/'))
+        endpoint_base=_endpoint_base(snap,target,dns,base)
         staged_messages,_staged=_stage_image_artifacts(payload, endpoint_base) if any(
             bool(m.get("images")) for m in payload.get("messages",[]) if isinstance(m,dict)
         ) else (payload.get("messages") or [],[])
@@ -308,11 +358,13 @@ def stream_infer(payload, *, requires=None, priority="interactive", timeout=180,
           "delivery":{"target":target},"provenance":{},"extensions":{"futurecrash":{"owner":owner,"work_class":tier}},
         }
         endpoint=endpoint_base+"/v1/infer/stream"
+        headers={"Content-Type":"application/json"}
+        headers.update(FABRIC_IDENTITY.auth_headers_for_url(endpoint))
         req=urllib.request.Request(endpoint,data=json.dumps({"packet":packet}).encode(),
-                                   headers={"Content-Type":"application/json"},method="POST")
+                                   headers=headers,method="POST")
         emitted=False
         try:
-            with urllib.request.urlopen(req,timeout=timeout) as response:
+            with _open(req,url=endpoint,timeout=timeout) as response:
                 node=response.headers.get("X-Fabric-Node") or target
                 for raw in response:
                     if not raw.strip():

@@ -1,3 +1,11 @@
+## 6.1.6 — Fabric Client Authorization
+
+- Teach the shared `fabric_client` to attach paired node authorization to every remote Fabric JSON and streaming inference request.
+- Reuse the active Tailcat transport URL and pinned TLS context selected by the Unified Node instead of rebuilding remote inference URLs from Tailscale DNS alone.
+- Apply the same authenticated transport path to artifact staging for vision requests.
+- Preserve exact generated-image paths in Signal replies so follow-up browser requests retain a usable artifact reference.
+- Update release-runtime coverage now that `fabric_client` formally depends on the installed Fabric identity module.
+
 ## 6.1.5 — Media Stream Edge Repair
 
 - Stop resolving playable queue entries by shelling out to `fcl-node artifact` once per track. Identified media now receives a stable loopback media-proxy URL immediately.

@@ -423,7 +423,8 @@ def native_lo_chat(profile,prompt,cwd,selected_paths,history):
         "Do not invent telemetry such as latency, lock state, noise floor, or interference. "
         "Current weather must use the canonical weather tool. Generated files/images are artifacts for the browser to present, not windows to open on the compute worker. "
         "In this interface, 'Signal', 'Signal image', 'Signal view', or 'signal scene' mean the lightweight 256x256 Signal canvas, not image generation. "
-        "Do not call generate_image merely because the user mentions Signal. Only use Comfy/image generation when the user explicitly asks to draw, generate, render, make a picture, illustration, artwork, or photo outside the Signal canvas."
+        "Do not call generate_image merely because the user mentions Signal. Only use Comfy/image generation when the user explicitly asks to draw, generate, render, make a picture, illustration, artwork, or photo outside the Signal canvas. "
+        "When generate_image succeeds, preserve the exact saved path from the tool result in the final answer; this gives the browser conversation a durable artifact reference for follow-up requests such as where is it, show it, or open it."
     )
     result=engine.chat_once(
         prompt,profile=profile,workspace=cwd,selected_paths=selected_paths,

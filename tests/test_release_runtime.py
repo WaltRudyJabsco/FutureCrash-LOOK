@@ -29,6 +29,7 @@ class ReleaseRuntimeTests(unittest.TestCase):
             dest=Path(td)
             shutil.copy2(ROOT/"core/conductor.py", dest/"conductor.py")
             shutil.copy2(ROOT/"core/fabric_client.py", dest/"fabric_client.py")
+            shutil.copy2(ROOT/"core/fabric_identity.py", dest/"fabric_identity.py")
             env=dict(os.environ)
             env["PYTHONPATH"]=str(dest)
             subprocess.run([sys.executable,"-c",
