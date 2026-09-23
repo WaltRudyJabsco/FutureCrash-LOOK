@@ -1,4 +1,14 @@
-# 5.6.2 — Fabric File Catalog
+# 5.7.1 — Fabric Content Search + Smart Resolver
+
+The ordinary-file catalog now has a deliberately boring second layer: bounded deterministic text extraction plus SQLite FTS5. `lk scan` still owns discovery, but changed supported documents are now text-indexed incrementally; unchanged documents are not re-read. No embeddings, OCR, model calls, or hashing are part of indexing.
+
+Supported content sources are plain text/Markdown, source and common config formats, HTML, DOCX, EPUB, and text-bearing PDFs. HTML/script noise is stripped, DOCX/EPUB use their standard ZIP/XML/HTML containers, and PDF extraction uses the already-installed Poppler `pdftotext` edge. Files over 4 MiB are left metadata-only and extracted text is capped at 256 KiB per file.
+
+`lk find` now combines filename/path matches with FTS5 content matches and shows a short evidence snippet. Natural queries such as `lk find "where was that thing I wrote about GDP countermeasure happiness"` work without embeddings. Fabric search remains data-local: every node searches its own SQLite database and returns only bounded matches/snippets, never its full text index.
+
+This establishes the cheap content layer for later artifact identity, data-local job placement, and optional semantic search without making those expensive mechanisms prerequisites.
+
+# 5.6.1 — Fabric File Catalog
 
 LOOK now maintains a lightweight SQLite metadata catalog for ordinary files, extending the media-catalog lesson to the rest of the filesystem. `lk scan [ROOT]` records paths, names, extensions, sizes and modification times without reading or hashing file contents; a bare `lk scan` uses the home directory with conservative cache/build/hidden-directory exclusions. `lk catalog` reports local coverage and `lk find QUERY` accepts useful plain-language metadata terms such as `pdf`, `recent`, `yesterday`, and `largest`.
 
@@ -6,7 +16,7 @@ Each Unified Node publishes its local catalog through `/v1/files/catalog`; `/v1/
 
 Fresh installs seed the first home metadata scan in the background. Expensive identity, content extraction, FTS and semantic understanding remain deliberately deferred layers rather than costs paid during discovery.
 
-# Future Crash + LOOK 5.6.2
+# Future Crash + LOOK 5.7.1
 
 ## 5.5.0 — Media Endpoint Handoff
 
