@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Future Crash + LOOK Unified Node 5.4.7.
+"""Future Crash + LOOK Unified Node 5.4.8.
 
 A small distributed supervisor for trusted personal machines. Immediate events stay
 asynchronous; a one-second fabric pulse reconciles presence, leases and stale work.
@@ -49,7 +49,7 @@ except ImportError:
     from decision import OpenJevShadow, new_request as new_decision_request, provider_status as decision_provider_status, plan as decision_plan
 from urllib.parse import urlparse, parse_qs
 
-VERSION = "5.4.7"
+VERSION = "5.4.8"
 DEFAULT_HOST = "127.0.0.1"
 DEFAULT_PORT = 7332
 DEFAULT_INGRESS_PORT = 0
@@ -2057,8 +2057,11 @@ def _local_media_audio_path(index=None):
 def _local_media_output():
     state = _local_media_state()
     player=_media_player_binary()
-    available=bool(state.get("available")) and bool(player)
-    reason="" if available else ("mpv missing" if not player else str(state.get("error") or "media unavailable"))
+    # Output availability means this node can ACCEPT a media session. An empty
+    # or not-yet-created local session is not a playback failure.
+    look_cmd=_look_command()
+    available=bool(player) and bool(look_cmd)
+    reason="" if available else ("mpv missing" if not player else "LOOK command unavailable")
     return {
         "node": identity()["name"],
         "output_id": "default",
@@ -2382,7 +2385,7 @@ def _openjev_shadow(state, question, candidates, *, profile="workspace", consequ
 
 
 class API(BaseHTTPRequestHandler):
-    server_version = "FCLNode/5.4.7"
+    server_version = "FCLNode/5.4.8"
 
     def setup(self):
         self._metric_request_id = None

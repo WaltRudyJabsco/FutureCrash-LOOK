@@ -1,3 +1,12 @@
+# 5.4.8 — Media Output State Repair
+
+- Replace competing Signal media-output state with one authoritative target: `browser` or `node:<id>`.
+- Suspend media polling during browser handoff; polling observes state and never chooses the output.
+- Avoid rebuilding the native iOS `<select>` during its `change` event while Safari dismisses the picker.
+- Commit browser playback before stopping the source node; source-stop failure becomes a warning rather than rolling back into duplicate playback.
+- Treat node playback availability as a capability (LOOK + mpv), not as the existence of an already-active local media session. Freshly upgraded Macs can therefore advertise as valid outputs before playing anything.
+- Keep node option values namespaced so `This Device` and a Fabric node can never both represent the same selected value.
+
 # 5.4.7 — Media Endpoint + Dash Input Hygiene
 
 - Make Signal browser-output handoff transactional: **This Device / This iPhone** claims the card immediately while Safari starts playback, so background media polling cannot snap the selector back to the source node.

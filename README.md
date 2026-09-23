@@ -1,6 +1,8 @@
-# Future Crash + LOOK 5.4.7
+# Future Crash + LOOK 5.4.8
 
-## 5.4.7 — Media Endpoint + Dash Input Hygiene
+## 5.4.8 — Media Output State Repair
+
+Signal media output now has exactly one authoritative target: either `browser` for the current Signal tab or `node:<id>` for a Fabric playback node. Polling observes that target but never chooses it. iOS output handoff no longer rebuilds the native selector while Safari is dismissing its picker, and a node with LOOK + mpv advertises playback capability even before it has a local media session.
 
 Signal's media output selector remains on the active player card. Browser handoff is now transactional: choosing **This Device / This iPhone** immediately claims the card while Safari opens the range-capable audio stream, preventing normal session polling from snapping the chooser back to the 3090. Audio proxies stream chunks as they arrive rather than buffering a whole track before playback begins.
 

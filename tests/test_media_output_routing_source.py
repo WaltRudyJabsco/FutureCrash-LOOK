@@ -19,7 +19,9 @@ def test_signal_output_selector_lives_on_media_card_and_routes_media():
     assert 'id="mediaOutput"' not in html
     assert "className='media-output-select'" in js
     assert "thisDeviceLabel()" in js
-    assert "value='__browser__'" in js
+    assert "self.value='browser'" in js
+    assert "let selectedMediaOutput=" in js
+    assert "o.value=nodeTarget(row.node)" in js
     assert '/api/media/outputs' in js
     assert '/api/media/move' in js
     assert '/api/media/audio' in js
@@ -50,3 +52,12 @@ def test_installer_treats_mpv_as_workstation_dependency():
     core_line=next(line for line in text.splitlines() if line.startswith('core=('))
     assert 'mpv' in core_line
     assert 'Install mpv?' not in text
+
+
+def test_output_availability_is_capability_not_session_state():
+    text=(ROOT/'core/node.py').read_text()
+    start=text.index('def _local_media_output')
+    end=text.index('\ndef ',start+5)
+    block=text[start:end]
+    assert 'available=bool(player) and bool(look_cmd)' in block
+    assert 'bool(state.get("available")) and bool(player)' not in block

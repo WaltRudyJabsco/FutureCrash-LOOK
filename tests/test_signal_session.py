@@ -86,9 +86,10 @@ class SignalBrowserEndpointRegressionTests(unittest.TestCase):
     def test_browser_handoff_claims_ui_before_async_playback(self):
         root=Path(__file__).resolve().parents[1]
         js=(root/'signal-window/app.js').read_text()
-        marker="browserMedia={active:true,sourceNode:String(d.node||mediaNode||''),index:Number(d.index||0),queue:d.queue.slice(),state:'loading'"
-        self.assertIn(marker,js)
-        self.assertIn("if(browserMedia.active){renderMedia(browserSnapshot(),force);return}",js)
+        self.assertIn("selectedMediaOutput='browser';mediaHandoff=true",js)
+        self.assertIn("if(mediaHandoff)return;if(selectedMediaOutput==='browser')",js)
+        self.assertIn("mediaHandoff=false;selectedMediaOutput=previous",js)
+        self.assertNotIn("renderMedia(browserSnapshot(),true);event(`MEDIA · MOVE ${source}",js)
 
     def test_signal_audio_proxy_streams_in_chunks(self):
         root=Path(__file__).resolve().parents[1]
