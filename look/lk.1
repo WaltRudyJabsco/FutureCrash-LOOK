@@ -349,6 +349,32 @@ Print a compact JSON snapshot of the canonical LOOK media session for renderer/c
 Jump deterministically to the one-based queue item INDEX in the current LOOK media session.
 .PP
 mpv is the standard LOOK playback edge and is installed as part of the workstation dependency set. LOOK owns queue/session meaning; mpv owns decoding and rendering. Same-node queues may use direct local file access, while remote/content-addressed entries use Fabric artifact streams.
+
+.SH FABRIC IDENTITY, ENDPOINTS, AND TRANSPORT
+.TP
+.B lk fabric identity
+Show the stable Fabric node identity and fingerprint.
+.TP
+.B lk fabric pair-code
+Open a five-minute, one-use node pairing invitation.
+.TP
+.B lk fabric pair NODE CODE
+Pair with a reachable node using the short numeric invitation code. Pairing mints reciprocal Fabric authorization credentials.
+.TP
+.B lk fabric transport
+Show Tailcat direct-TLS endpoints and the active route to reachable peers. Tailcat is preferred when directly reachable; Tailscale is retained as fallback/bootstrap transport.
+.TP
+.B lk fabric endpoints
+Aggregate pending, temporary, and trusted browser endpoints across reachable trusted nodes.
+.TP
+.B lk fabric allow CODE once|trust
+Approve a browser authorization request on whichever reachable Fabric node owns that pending code.
+.TP
+.B lk fabric revoke-endpoint ENDPOINT_ID
+Revoke the endpoint on the Fabric node that owns it.
+.PP
+Tailcat phase 1 listens on TCP 7443 with a node-local TLS certificate pinned through Fabric trust. It does not yet provide NAT traversal, relays, or browser exposure; those remain separate reachability layers.
+
 .SH INTELLIGENCE VERSIONS
 .TP
 .B lk skills version

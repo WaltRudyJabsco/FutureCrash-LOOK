@@ -155,13 +155,13 @@ A trusted node can open a one-use five-minute invitation:
 lk fabric pair-code
 ```
 
-When Tailscale HTTPS is available, LOOK can advertise that reachable endpoint automatically. Otherwise supply the URL explicitly. The invitation prints both a strong short code and an `fcl://pair` URI; if `qrencode` is installed it also renders a terminal QR code. On the joining node:
+When Tailscale HTTPS is available, LOOK can infer the reachable bootstrap endpoint automatically. The invitation prints an eight-digit, five-minute, one-use code and a simple join command; if `qrencode` is installed it also renders a human-readable QR courier. On the joining node:
 
 ```sh
-lk fabric pair 'fcl://pair?...'
-# or
-lk fabric pair https://existing-node.example:7332 ABCD-EFGH-IJKL-MNOP
+lk fabric pair 3090 48219371
 ```
+
+Pairing is still bilateral in 6.1: a direct M4↔M3 relationship needs its own pairing even if both machines are already paired with the 3090. Fabric-wide membership sponsorship is a separate trust-topology problem, not part of Tailcat transport.
 
 The nodes exchange public identities, validate the node ID against the public key, record one another in their local trust stores, and consume the invitation. No Fabric account, email address, central identity server, or Tailscale identity is involved.
 
@@ -169,10 +169,16 @@ The nodes exchange public identities, validate the node ID against the public ke
 identity       Fabric Ed25519 keypair + stable node ID
 trust          local Fabric trust store
 discovery      capabilities and reachable peers
-transport      localhost / LAN / Tailscale / future Tailcat
+transport      localhost / Tailcat / Tailscale fallback
 ```
 
-This release establishes identity and pairing **without yet using the trust store as a hard network firewall**. Existing Fabric installations continue to interoperate during migration. Endpoint authorization and signed/scoped request enforcement come next; only after those are solid does Tailcat need to replace any transport role.
+Remote Fabric APIs now enforce paired node authorization. **Tailcat** is the preferred native node-to-node transport when a paired peer is directly reachable: it serves the guarded Fabric API over TLS on port `7443`, pins the peer certificate learned through Fabric trust, and falls back to Tailscale when direct reachability is unavailable. It does not yet attempt NAT traversal or relay traffic; those are later transport layers, not identity work.
+
+Inspect the active path with:
+
+```sh
+lk fabric transport
+```
 
 ## Media and browser endpoints
 
@@ -241,7 +247,7 @@ lk fabric pair-code
 lk fabric pair 3090 12345678
 ```
 
-A new Signal browser shows a six-digit authorization code. Approve it locally:
+A new Signal browser shows a six-digit authorization code. Approve it from **any reachable trusted Fabric node**; LOOK locates the node that owns the pending browser request and performs the approval there:
 
 ```sh
 lk fabric endpoints
@@ -273,8 +279,8 @@ See `docs/COMMAND-GRAMMAR.md`, `look/docs/COMMANDS.md`, and `docs/RELEASE-HISTOR
 
 ## Release
 
-Current release: **6.0.0 — Fabric Authorization**.
+Current release: **6.1.0 — Tailcat Direct Transport**.
 
-Fabric identity now enforces trust on remotely reachable node APIs, and Signal/Safari is an explicitly authorized Fabric endpoint rather than an implicitly trusted browser. Node pairing uses short one-use numeric codes, paired peers receive reciprocal bearer credentials, and browser endpoints can be approved once, trusted persistently, revoked, or joined by a one-use QR invitation. Tailscale remains only a transport; Fabric now owns identity and authorization.
+Browser endpoint management is now Fabric-wide: `lk fabric endpoints`, `allow`, and `revoke-endpoint` work from any reachable trusted node rather than only the Signal host. Tailcat adds direct certificate-pinned TLS transport between paired nodes on reachable LAN/IP paths and is preferred automatically; Tailscale remains a fallback for reachability and bootstrap rather than the definition of Fabric networking. Existing 6.0 pairings learn Tailcat metadata from authenticated peer identity and do not require another re-pair.
 
 Future Crash + LOOK remains an open, local-first project: **Fabric turns your computers and devices into one personal computer; LOOK is how you use it.**

@@ -1,3 +1,13 @@
+# 6.1.0 — Tailcat Direct Transport
+
+- Make browser endpoint management Fabric-wide: list, approve, and revoke from any reachable trusted node.
+- Add Tailcat phase 1: direct certificate-pinned TLS Fabric transport on port 7443.
+- Prefer Tailcat for paired peers and fall back to Tailscale when direct reachability is unavailable.
+- Preserve the existing node authorization credential over both transports.
+- Let existing 6.0 trust records learn Tailcat transport metadata from matching trusted peer identities without another re-pair.
+- Add `lk fabric transport` diagnostics.
+- Keep NAT traversal, relay, and browser remote reachability out of Tailcat phase 1.
+
 # 6.0.0 — Fabric Authorization
 
 - Enforce paired-node authorization on remotely reachable Fabric API routes.

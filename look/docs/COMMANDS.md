@@ -149,10 +149,12 @@ The file catalog incrementally extracts bounded text from common text/source/con
 
 `lk fabric trust` — list trusted nodes. `AUTH` means the peer has a 6.0 authorization credential; `RE-PAIR` means an older trust record must be paired again.
 
-`lk fabric endpoints` — list pending, temporary, and trusted browser endpoints.
+`lk fabric transport` — show local Tailcat endpoints and the active transport selected for reachable peers. Tailcat direct TLS is preferred; Tailscale is fallback.
 
-`lk fabric allow CODE once|trust` — approve a six-digit browser request temporarily or as a trusted device.
+`lk fabric endpoints` — list pending, temporary, and trusted browser endpoints across the reachable Fabric, grouped by the node that owns them.
+
+`lk fabric allow CODE once|trust` — approve a six-digit browser request temporarily or as a trusted device. The command searches reachable trusted nodes and applies the approval on the node hosting that browser.
 
 `lk fabric endpoint-code URL [once|trust]` — mint a one-use Signal/browser invitation; with `qrencode`, scan it directly with an iPhone camera.
 
-`lk fabric revoke-endpoint ENDPOINT_ID` — revoke a browser endpoint credential.
+`lk fabric revoke-endpoint ENDPOINT_ID` — revoke a browser endpoint credential wherever it lives in the reachable Fabric.

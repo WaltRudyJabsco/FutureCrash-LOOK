@@ -1,13 +1,13 @@
 #!/usr/bin/env bash
 set -euo pipefail
 ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
-echo "Future Crash + LOOK 6.0.0 · Fabric Authorization"
+echo "Future Crash + LOOK 6.1.0 · Tailcat Direct Transport"
 echo "────────────────────────────────────────"
 
 # Refuse a mixed bundle before mutating the machine. A unified release must move
 # LOOK and the node together.
 EXPECTED_RELEASE="$(tr -d '[:space:]' < "$ROOT/VERSION")"
-[[ "$EXPECTED_RELEASE" == "6.0.0" ]] || { echo "BUNDLE ERROR: expected release 6.0.0, found $EXPECTED_RELEASE"; exit 4; }
+[[ "$EXPECTED_RELEASE" == "6.1.0" ]] || { echo "BUNDLE ERROR: expected release 6.1.0, found $EXPECTED_RELEASE"; exit 4; }
 grep -q 'def _fabric_command' "$ROOT/look/lk" || { echo "BUNDLE ERROR: LOOK source has no Fabric command"; exit 4; }
 grep -q 'choices=.*serve.*fabric' "$ROOT/core/node.py" || { echo "BUNDLE ERROR: node source has no Fabric CLI"; exit 4; }
 
@@ -28,9 +28,9 @@ case "$OPENJEV_MODE" in off|auto|adopt|install) ;; *) echo "BUNDLE ERROR: invali
 ((UNINSTALL)) && exit 0
 if ((DRY_RUN)); then
   echo
-  echo "[dry-run] would install/restart Unified Node 6.0.0 with enforced Fabric peer authorization, accountless browser endpoint pairing, Fabric SearXNG discovery/search, Decision Plane, Content Search, Media, Artifacts, Memory, and Signal Window 1.8.0"
+  echo "[dry-run] would install/restart Unified Node 6.1.0 with Fabric-wide endpoint management, Tailcat direct TLS transport, enforced Fabric peer authorization, accountless browser endpoint pairing, Fabric SearXNG discovery/search, Decision Plane, Content Search, Media, Artifacts, Memory, and Signal Window 1.8.0"
   echo "[dry-run] OpenJev mode: $OPENJEV_MODE (auto adopts an existing worker; absence is non-fatal)"
-  echo "[dry-run] would reconcile Tailscale :7332 → separate fcl-ingress :7333 and verify Fabric CLI wiring"
+  echo "[dry-run] would initialize Tailcat :7443 as preferred direct encrypted transport, keep Tailscale :7332 → fcl-ingress :7333 as fallback, and verify Fabric CLI wiring"
   exit 0
 fi
 
@@ -47,6 +47,8 @@ install -m 0644 "$ROOT/core/ui_model.py" "$HOME/.local/share/future-crash-look/c
 install -m 0755 "$ROOT/core/fcl-node" "$HOME/.local/bin/fcl-node"
 install -m 0755 "$ROOT/core/ingress.py" "$HOME/.local/share/future-crash-look/core/ingress.py"
 install -m 0755 "$ROOT/core/fcl-ingress" "$HOME/.local/bin/fcl-ingress"
+install -m 0755 "$ROOT/core/tailcat.py" "$HOME/.local/share/future-crash-look/core/tailcat.py"
+install -m 0755 "$ROOT/core/fcl-tailcat" "$HOME/.local/bin/fcl-tailcat"
 install -m 0644 "$ROOT/VERSION" "$HOME/.local/share/future-crash-look/RELEASE"
 # Create the machine's Fabric keypair once. It is independent of Tailscale and
 # survives normal upgrades; private key material never leaves this host.
@@ -55,6 +57,18 @@ if command -v ssh-keygen >/dev/null 2>&1 || command -v openssl >/dev/null 2>&1; 
   echo "  Fabric identity: ready · accountless ed25519 node identity"
 else
   echo "  Fabric identity: no Ed25519 key generator found · install OpenSSH client or OpenSSL"
+fi
+
+TAILCAT_READY=0
+if command -v openssl >/dev/null 2>&1; then
+  if PYTHONPATH="$HOME/.local/share/future-crash-look/core${PYTHONPATH:+:$PYTHONPATH}" "$HOME/.local/bin/fcl-tailcat" init >/dev/null 2>&1; then
+    TAILCAT_READY=1
+    echo "  Tailcat: native TLS identity ready · direct Fabric transport on :7443"
+  else
+    echo "  Tailcat: TLS initialization failed · Tailscale/LAN fallback remains available"
+  fi
+else
+  echo "  Tailcat: openssl unavailable · native TLS transport disabled; Tailscale fallback remains available"
 fi
 
 # Keep the optional Local Labs server controller in lockstep when this machine uses it.
@@ -144,9 +158,11 @@ if [[ "$OS" == "Linux" ]] && command -v systemctl >/dev/null 2>&1; then
   mkdir -p "$HOME/.config/systemd/user"
   install -m 0644 "$ROOT/core/future-crash-look-node.service" "$HOME/.config/systemd/user/future-crash-look-node.service"
   install -m 0644 "$ROOT/core/future-crash-look-ingress.service" "$HOME/.config/systemd/user/future-crash-look-ingress.service"
+  install -m 0644 "$ROOT/core/future-crash-look-tailcat.service" "$HOME/.config/systemd/user/future-crash-look-tailcat.service"
   install -m 0644 "$ROOT/core/future-crash-look-openjev.service" "$HOME/.config/systemd/user/future-crash-look-openjev.service"
   systemctl --user daemon-reload
   systemctl --user enable future-crash-look-node.service future-crash-look-ingress.service >/dev/null 2>&1 || true
+  if (( TAILCAT_READY )); then systemctl --user enable future-crash-look-tailcat.service >/dev/null 2>&1 || true; else systemctl --user disable --now future-crash-look-tailcat.service >/dev/null 2>&1 || true; fi
   if (( OPENJEV_READY )); then
     systemctl --user enable future-crash-look-openjev.service >/dev/null 2>&1 || true
     if python3 - <<'PY_JEV' >/dev/null 2>&1
@@ -171,14 +187,18 @@ PY_JEV
   fi
   systemctl --user restart future-crash-look-node.service || systemctl --user start future-crash-look-node.service || true
   systemctl --user restart future-crash-look-ingress.service || systemctl --user start future-crash-look-ingress.service || true
+  if (( TAILCAT_READY )); then systemctl --user restart future-crash-look-tailcat.service || systemctl --user start future-crash-look-tailcat.service || true; fi
 elif [[ "$OS" == "Darwin" ]] && command -v launchctl >/dev/null 2>&1; then
   mkdir -p "$HOME/Library/LaunchAgents"
   sed "s|__HOME__|$HOME|g" "$ROOT/core/com.futurecrash.look.node.plist" > "$HOME/Library/LaunchAgents/com.futurecrash.look.node.plist"
   sed "s|__HOME__|$HOME|g" "$ROOT/core/com.futurecrash.look.ingress.plist" > "$HOME/Library/LaunchAgents/com.futurecrash.look.ingress.plist"
+  if (( TAILCAT_READY )); then sed "s|__HOME__|$HOME|g" "$ROOT/core/com.futurecrash.look.tailcat.plist" > "$HOME/Library/LaunchAgents/com.futurecrash.look.tailcat.plist"; fi
   launchctl bootout "gui/$(id -u)/com.futurecrash.look.ingress" >/dev/null 2>&1 || true
+  launchctl bootout "gui/$(id -u)/com.futurecrash.look.tailcat" >/dev/null 2>&1 || true
   launchctl bootout "gui/$(id -u)/com.futurecrash.look.node" >/dev/null 2>&1 || true
   launchctl bootstrap "gui/$(id -u)" "$HOME/Library/LaunchAgents/com.futurecrash.look.node.plist" || true
   launchctl bootstrap "gui/$(id -u)" "$HOME/Library/LaunchAgents/com.futurecrash.look.ingress.plist" || true
+  if (( TAILCAT_READY )); then launchctl bootstrap "gui/$(id -u)" "$HOME/Library/LaunchAgents/com.futurecrash.look.tailcat.plist" || true; fi
 else
   echo "Node installed; start with: fcl-node serve"
 fi
@@ -245,6 +265,9 @@ if ! cmp -s "$ROOT/core/ingress.py" "$HOME/.local/share/future-crash-look/core/i
   echo "INSTALL ERROR: installed ingress guard does not match this checkout" >&2
   exit 5
 fi
+if ! cmp -s "$ROOT/core/tailcat.py" "$HOME/.local/share/future-crash-look/core/tailcat.py"; then
+  echo "INSTALL ERROR: installed Tailcat transport differs from release" >&2; exit 8
+fi
 if ! cmp -s "$ROOT/core/fabric_client.py" "$HOME/.local/share/future-crash-look/core/fabric_client.py"; then
   echo "INSTALL ERROR: Fabric client differs from release" >&2; exit 8
 fi
@@ -265,11 +288,12 @@ if ! cmp -s "$ROOT/core/decision.py" "$HOME/.local/share/future-crash-look/core/
 fi
 if ! PYTHONPATH="$HOME/.local/share/future-crash-look/core" python3 - <<'PY_RUNTIME' >/dev/null 2>&1
 import conductor, fabric_client, memory_store, decision
-import fabric_identity, endpoint_auth
+import fabric_identity, endpoint_auth, tailcat
 assert conductor.classify("ping").tier == "reflex"
 assert callable(fabric_client.stream_infer)
 assert callable(fabric_identity.public_identity)
 assert callable(endpoint_auth.EndpointAuth)
+assert callable(tailcat.ensure_identity)
 assert decision.plan(profile="power", confidence=.7).timeout_action == "continue"
 PY_RUNTIME
 then
@@ -295,6 +319,7 @@ echo "Unified node installed and verified · release $EXPECTED_RELEASE"
 echo "  file/content catalog reconciliation started in background"
 
 echo "  fcl-node identity   # stable Fabric node identity"
+echo "  fcl-tailcat show    # native encrypted transport endpoints"
 echo "  fcl-node pair-code  # open a one-use pairing invitation"
 echo "  fcl-node fabric     # human view of the compute fabric"
 echo "  fcl-node models     # model capability advertisements"

@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Future Crash + LOOK Unified Node 6.0.0.
+"""Future Crash + LOOK Unified Node 6.1.0.
 
 A small distributed supervisor for trusted personal machines. Immediate events stay
 asynchronous; a one-second fabric pulse reconciles presence, leases and stale work.
@@ -58,7 +58,7 @@ try:
 except ImportError:
     from endpoint_auth import EndpointAuth
 
-VERSION = "6.0.0"
+VERSION = "6.1.0"
 DEFAULT_HOST = "127.0.0.1"
 DEFAULT_PORT = 7332
 DEFAULT_INGRESS_PORT = 0
@@ -164,7 +164,10 @@ def http_json(url: str, data=None, timeout: float = 2.0):
     if host not in {"127.0.0.1","localhost","::1"}:
         headers.update(FABRIC_IDENTITY.auth_headers_for_url(url))
     req = urllib.request.Request(url, data=body, headers=headers)
-    with urllib.request.urlopen(req, timeout=timeout) as r:
+    context = FABRIC_IDENTITY.ssl_context_for_url(url) if url.lower().startswith("https://") else None
+    kwargs={"timeout":timeout}
+    if context is not None: kwargs["context"]=context
+    with urllib.request.urlopen(req, **kwargs) as r:
         return json.loads(r.read() or b"{}")
 
 
@@ -304,6 +307,8 @@ def refresh_identity():
         value["name"] = name
         value["hostname"] = hostname
         value["tailscale"] = ts
+        transports=FABRIC_IDENTITY.local_transports()
+        if transports: value["transports"]=transports
     except Exception as exc:
         value["identity_error"] = str(exc)[:240]
     with IDENTITY_LOCK:
@@ -328,6 +333,7 @@ def capabilities():
         # `lo` executable exists in a service's PATH.
         "lo": bool(binary("lo") or lk),
         "tailscale": bool(binary("tailscale")),
+        "tailcat": bool(FABRIC_IDENTITY.local_transports().get("tailcat")),
         "ollama": probe("127.0.0.1", 11434),
         "signal": probe("127.0.0.1", 7331),
         "node": True,
@@ -717,25 +723,38 @@ MODELS = ModelRegistry()
 
 
 def peer_rows():
+    """Return transport candidates for trusted Fabric peers.
+
+    Tailcat candidates come from the trust store learned during pairing. Tailscale
+    remains a discovery/fallback source, but is no longer required for peer rows.
+    """
+    merged={}
+    # Native Tailcat transport learned during pairing.
+    for node_id,row in (FABRIC_IDENTITY.trusted(public=True).get("nodes") or {}).items():
+        if not isinstance(row,dict): continue
+        tc=((row.get("transports") or {}).get("tailcat") or {}) if isinstance(row.get("transports"),dict) else {}
+        endpoints=[str(x).rstrip('/') for x in (tc.get("endpoints") or []) if str(x).startswith('https://')]
+        name=str(row.get("name") or row.get("hostname") or node_id)
+        key=name.casefold()
+        merged[key]={"name":name,"dns":"","ips":[],"online":True,"node_id":node_id,
+                     "tailcat_endpoints":endpoints,"tailcat_cert_sha256":tc.get("cert_sha256"),
+                     "trusted":bool(row.get("authorized")),"transport":"tailcat" if endpoints else "trusted"}
+
     ts = binary("tailscale")
-    if not ts:
-        return []
-    p = run(ts, "status", "--json", timeout=2)
-    if not p or p.returncode:
-        return []
-    try:
-        d = json.loads(p.stdout)
-    except Exception:
-        return []
-    result = []
-    for peer in (d.get("Peer") or {}).values():
-        dns = (peer.get("DNSName") or "").rstrip(".")
-        ips = peer.get("TailscaleIPs") or []
-        # DNS labels are tailnet-unique and avoid generic hostnames such as
-        # "localhost" appearing as duplicate peers in the fabric view.
-        name = (dns.split(".", 1)[0] if dns else "") or peer.get("HostName") or (ips[0] if ips else "peer")
-        result.append({"name": name, "dns": dns, "ips": ips, "online": bool(peer.get("Online"))})
-    return sorted(result, key=lambda x: (not x["online"], x["name"].lower()))
+    if ts:
+        p = run(ts, "status", "--json", timeout=2)
+        if p and not p.returncode:
+            try: d=json.loads(p.stdout)
+            except Exception: d={}
+            for peer in (d.get("Peer") or {}).values():
+                dns=(peer.get("DNSName") or "").rstrip(".")
+                ips=peer.get("TailscaleIPs") or []
+                name=(dns.split(".",1)[0] if dns else "") or peer.get("HostName") or (ips[0] if ips else "peer")
+                key=str(name).casefold()
+                row=merged.get(key,{"name":name,"tailcat_endpoints":[],"trusted":False})
+                row.update({"dns":dns,"ips":ips,"online":bool(peer.get("Online")),"tailscale":True})
+                merged[key]=row
+    return sorted(merged.values(), key=lambda x:(not x.get("online",True),str(x.get("name") or "").lower()))
 
 
 class PeerRegistry:
@@ -747,41 +766,53 @@ class PeerRegistry:
         self.state = {}
 
     def refresh(self):
-        rows = peer_rows()
-        t = now()
-        enriched = []
+        rows=peer_rows(); t=now(); enriched=[]
         for p in rows:
-            key = p.get("dns") or p.get("name")
-            prior = dict(self.state.get(key) or {})
-            q = dict(p)
-            q["node"] = prior.get("node")
-            q["node_seen_at"] = prior.get("node_seen_at")
-            q["node_error"] = prior.get("error")
-            next_due = float(prior.get("next_due") or 0)
-            if p["online"] and p["dns"] and t >= next_due:
-                try:
-                    ad = http_json(f"https://{p['dns']}:7332/v1/advertisement", timeout=.7)
-                    q["node"] = ad
-                    q["node_seen_at"] = t
-                    q["node_error"] = None
-                    prior.update(node=ad, node_seen_at=t, error=None, failures=0,
-                                 next_due=t + PEER_NODE_REFRESH_SECONDS + random.uniform(0, 3.0))
-                except Exception as exc:
-                    failures = int(prior.get("failures") or 0) + 1
-                    known = bool(prior.get("node"))
-                    base = PEER_NODE_REFRESH_SECONDS if known else PEER_UNKNOWN_BACKOFF_SECONDS
-                    backoff = min(PEER_FAILURE_BACKOFF_MAX_SECONDS, base * (2 ** min(failures - 1, 3)))
-                    prior.update(error=str(exc), failures=failures,
-                                 next_due=t + backoff + random.uniform(0, 5.0))
-                    q["node_error"] = str(exc)
-            elif not p["online"]:
-                prior["next_due"] = t + PEER_UNKNOWN_BACKOFF_SECONDS
-            self.state[key] = prior
-            enriched.append(q)
-        live_keys = {p.get("dns") or p.get("name") for p in rows}
-        self.state = {k:v for k,v in self.state.items() if k in live_keys}
-        with self.lock:
-            self.rows, self.last_refresh = enriched, t
+            key=p.get("node_id") or p.get("dns") or p.get("name")
+            prior=dict(self.state.get(key) or {})
+            q=dict(p); q["node"]=prior.get("node"); q["node_seen_at"]=prior.get("node_seen_at"); q["node_error"]=prior.get("error")
+            next_due=float(prior.get("next_due") or 0)
+            candidates=[]
+            # Native direct TLS is preferred. Each endpoint is certificate-pinned
+            # by FabricIdentity using material learned during pairing.
+            for base in p.get("tailcat_endpoints") or []:
+                candidates.append(("tailcat",str(base).rstrip('/')))
+            if p.get("online") and p.get("dns"):
+                candidates.append(("tailscale",f"https://{p['dns']}:7332"))
+            if candidates and t >= next_due:
+                last_exc=None; success=None
+                for transport,base in candidates:
+                    try:
+                        ad=http_json(base+"/v1/advertisement",timeout=.75)
+                        success=(transport,base,ad); break
+                    except Exception as exc:
+                        last_exc=exc
+                if success:
+                    transport,base,ad=success
+                    q.update(node=ad,node_seen_at=t,node_error=None,url=base,active_transport=transport)
+                    # A successfully contacted trusted peer may publish new transport
+                    # metadata after an upgrade. Bind it to the already-known Fabric
+                    # public identity so 6.0 pairings learn Tailcat without re-pairing.
+                    ident=ad.get("identity") if isinstance(ad,dict) else None
+                    if isinstance(ident,dict) and ident.get("node_id") in (FABRIC_IDENTITY.trusted().get("nodes") or {}) and ident.get("transports"):
+                        try: FABRIC_IDENTITY.trust(ident,source="transport-refresh")
+                        except Exception: pass
+                    prior.update(node=ad,node_seen_at=t,error=None,failures=0,url=base,active_transport=transport,
+                                 next_due=t+PEER_NODE_REFRESH_SECONDS+random.uniform(0,3.0))
+                else:
+                    failures=int(prior.get("failures") or 0)+1; known=bool(prior.get("node"))
+                    base_delay=PEER_NODE_REFRESH_SECONDS if known else PEER_UNKNOWN_BACKOFF_SECONDS
+                    backoff=min(PEER_FAILURE_BACKOFF_MAX_SECONDS,base_delay*(2**min(failures-1,3)))
+                    err=str(last_exc or "no reachable transport")
+                    prior.update(error=err,failures=failures,next_due=t+backoff+random.uniform(0,5.0))
+                    q["node_error"]=err
+                    if prior.get("url"): q["url"]=prior.get("url"); q["active_transport"]=prior.get("active_transport")
+            elif prior.get("url"):
+                q["url"]=prior.get("url"); q["active_transport"]=prior.get("active_transport")
+            self.state[key]=prior; enriched.append(q)
+        live_keys={p.get("node_id") or p.get("dns") or p.get("name") for p in rows}
+        self.state={k:v for k,v in self.state.items() if k in live_keys}
+        with self.lock: self.rows,self.last_refresh=enriched,t
 
     def public(self):
         with self.lock:
@@ -1937,7 +1968,7 @@ def _fabric_file_catalog():
     snapshot={"self":node_info(),"peers":PEERS.public()}
     for peer in snapshot.get("peers") or []:
         ad=peer.get("node") or {}; name=((ad.get("identity") or {}).get("name") or peer.get("name"))
-        if not name or not peer.get("dns") or not ad: continue
+        if not name or not (peer.get("url") or peer.get("tailcat_endpoints") or peer.get("dns")) or not ad: continue
         try:
             remote=http_json(_remote_url(snapshot,name,"/v1/files/catalog"),timeout=1.0)
             nodes.append({"node":name,"count":int(remote.get("count") or 0),"online":True})
@@ -1950,7 +1981,7 @@ def _fabric_file_search(query,limit=80):
     snapshot={"self":node_info(),"peers":PEERS.public()}; encoded=urllib.parse.quote(str(query or ""))
     for peer in snapshot.get("peers") or []:
         ad=peer.get("node") or {}; name=((ad.get("identity") or {}).get("name") or peer.get("name"))
-        if not name or not peer.get("dns") or not ad: continue
+        if not name or not (peer.get("url") or peer.get("tailcat_endpoints") or peer.get("dns")) or not ad: continue
         try:
             remote=http_json(_remote_url(snapshot,name,f"/v1/files/search?q={encoded}&limit={int(limit)}"),timeout=1.2)
             entries.extend(dict(x) for x in (remote.get("entries") or []) if isinstance(x,dict))
@@ -1994,7 +2025,7 @@ def _fabric_web_search(query, limit=8):
     for peer in snapshot.get("peers") or []:
         ad=peer.get("node") or {}; caps=ad.get("capabilities") or {}
         name=((ad.get("identity") or {}).get("name") or peer.get("name"))
-        if not name or not peer.get("dns") or not caps.get("web.search"): continue
+        if not name or not (peer.get("url") or peer.get("tailcat_endpoints") or peer.get("dns")) or not caps.get("web.search"): continue
         try:
             remote=http_json(_remote_url(snapshot,name,f"/v1/web/search/local?q={encoded}&limit={int(limit)}"),timeout=9.0)
             if not remote.get("error"):
@@ -2103,7 +2134,7 @@ def _fabric_media_catalog(force=False):
     for peer in snapshot.get("peers") or []:
         ad = peer.get("node") or {}
         name = ((ad.get("identity") or {}).get("name") or peer.get("name"))
-        if not name or not peer.get("dns") or not ad:
+        if not name or not (peer.get("url") or peer.get("tailcat_endpoints") or peer.get("dns")) or not ad:
             continue
         try:
             remote = http_json(_remote_url(snapshot, name, "/v1/media/catalog"), timeout=1.0)
@@ -2303,7 +2334,7 @@ def _fabric_media_outputs():
     for peer in snapshot.get("peers") or []:
         ad = peer.get("node") or {}
         name = ((ad.get("identity") or {}).get("name") or peer.get("name"))
-        if not name or not peer.get("dns") or not ad:
+        if not name or not (peer.get("url") or peer.get("tailcat_endpoints") or peer.get("dns")) or not ad:
             continue
         try:
             remote = http_json(_remote_url(snapshot, name, "/v1/media/output"), timeout=.8)
@@ -2419,7 +2450,7 @@ def _fabric_artifact_catalog():
     for peer in snapshot.get("peers") or []:
         ad = peer.get("node") or {}
         name = ((ad.get("identity") or {}).get("name") or peer.get("name"))
-        if not name or not peer.get("dns") or not ad:
+        if not name or not (peer.get("url") or peer.get("tailcat_endpoints") or peer.get("dns")) or not ad:
             continue
         try:
             add_rows(http_json(_remote_url(snapshot, name, "/v1/artifacts"), timeout=1.0), name)
@@ -2517,6 +2548,71 @@ def _decision_resolve(did, selected, *, source="human"):
     return {"decision":decision,"continuation":_decision_apply(decision,selected,source=source)}
 
 
+
+def _local_endpoints_payload():
+    data=ENDPOINT_AUTH.list()
+    data["node"]=identity()["name"]
+    return data
+
+
+def _fabric_endpoints():
+    """Aggregate browser endpoint state without centralizing endpoint secrets."""
+    rows=[]; errors=[]
+    local=_local_endpoints_payload(); rows.append(local)
+    snapshot={"self":node_info(),"peers":PEERS.public()}
+    for peer in snapshot.get("peers") or []:
+        ad=peer.get("node") or {}; name=((ad.get("identity") or {}).get("name") or peer.get("name"))
+        base=_peer_base(peer)
+        if not name or not ad or not base: continue
+        try:
+            remote=http_json(base+"/v1/endpoints",timeout=1.5)
+            remote["node"]=name; rows.append(remote)
+        except Exception as exc:
+            errors.append({"node":name,"error":str(exc)})
+    return {"schema":"fabric-endpoints-v2","nodes":rows,"errors":errors}
+
+
+def _endpoint_find_pending(code):
+    code=str(code or "").strip(); matches=[]
+    data=_fabric_endpoints()
+    for node in data.get("nodes") or []:
+        for row in node.get("pending") or []:
+            if str(row.get("code") or "") == code:
+                matches.append((str(node.get("node") or "local"),row))
+    return matches,data
+
+
+def _endpoint_allow_fabric(code, mode="once"):
+    matches,data=_endpoint_find_pending(code)
+    if not matches:
+        raise ValueError("endpoint code not found or expired anywhere in the reachable Fabric")
+    if len(matches)>1:
+        raise ValueError("endpoint code is ambiguous across Fabric nodes; wait for one to expire and retry")
+    node,row=matches[0]; local=identity()["name"]
+    if node in {"local",local}:
+        approved=ENDPOINT_AUTH.allow(code,mode)
+    else:
+        snapshot={"self":node_info(),"peers":PEERS.public()}
+        approved=http_json(_remote_url(snapshot,node,"/v1/endpoints/allow"),{"code":str(code),"mode":str(mode)},timeout=3.0).get("endpoint") or {}
+    return {"node":node,"endpoint":approved,"errors":data.get("errors") or []}
+
+
+def _endpoint_revoke_fabric(endpoint_id):
+    wanted=str(endpoint_id or ""); data=_fabric_endpoints(); matches=[]
+    for node in data.get("nodes") or []:
+        for bucket in ("trusted","sessions"):
+            for row in node.get(bucket) or []:
+                if str(row.get("endpoint_id") or "") == wanted:
+                    matches.append(str(node.get("node") or "local"))
+    if not matches: return {"ok":False,"error":"endpoint not found anywhere in the reachable Fabric"}
+    if len(matches)>1: return {"ok":False,"error":"endpoint id is ambiguous across Fabric nodes"}
+    node=matches[0]; local=identity()["name"]
+    if node in {"local",local}: ok=ENDPOINT_AUTH.revoke(wanted)
+    else:
+        snapshot={"self":node_info(),"peers":PEERS.public()}
+        ok=bool(http_json(_remote_url(snapshot,node,"/v1/endpoints/revoke"),{"endpoint_id":wanted},timeout=3.0).get("ok"))
+    return {"ok":ok,"node":node}
+
 def _fabric_decisions():
     """Aggregate pending decision requests from reachable trusted Fabric nodes."""
     local_name=identity()["name"]
@@ -2527,7 +2623,7 @@ def _fabric_decisions():
     for peer in snapshot.get("peers") or []:
         ad=peer.get("node") or {}
         name=((ad.get("identity") or {}).get("name") or peer.get("name"))
-        if not name or not peer.get("dns") or not ad:
+        if not name or not (peer.get("url") or peer.get("tailcat_endpoints") or peer.get("dns")) or not ad:
             continue
         try:
             remote=http_json(_remote_url(snapshot,name,"/v1/decisions"),timeout=.8)
@@ -2580,7 +2676,7 @@ def _openjev_shadow(state, question, candidates, *, profile="workspace", consequ
 
 
 class API(BaseHTTPRequestHandler):
-    server_version = "FCLNode/6.0.0"
+    server_version = "FCLNode/6.1.0"
 
     def setup(self):
         self._metric_request_id = None
@@ -2769,6 +2865,12 @@ class API(BaseHTTPRequestHandler):
             return self.sendj(200, {"listeners": {name: meter.public() for name, meter in HTTP_METRICS.items()},
                                     "local_port": DEFAULT_PORT, "ingress_port": 7333,
                                     "ingress_guard": ingress_guard})
+        if path == "/v1/endpoints/fabric":
+            if getattr(self.server,"plane","local") != "local":
+                return self.sendj(403,{"error":"Fabric endpoint aggregation is local-control only"})
+            return self.sendj(200,_fabric_endpoints())
+        if path == "/v1/endpoints":
+            return self.sendj(200, _local_endpoints_payload())
         if path == "/v1/identity":
             ident = identity()
             return self.sendj(200, {"schema":"fabric-identity-v1", "identity": {
@@ -2797,6 +2899,28 @@ class API(BaseHTTPRequestHandler):
             if status.get("reachable") and status.get("state") == "configured": status["state"]="ready"
             elif status.get("enabled") and not status.get("reachable"): status["state"]="down"
             return self.sendj(200,status)
+        if path == "/v1/endpoints/fabric/allow":
+            if getattr(self.server,"plane","local") != "local":
+                return self.sendj(403,{"error":"Fabric endpoint management is local-control only"})
+            try:
+                result=_endpoint_allow_fabric(str(d.get("code") or ""),str(d.get("mode") or "once"))
+                return self.sendj(200,{"ok":True,**result})
+            except ValueError as exc:
+                return self.sendj(404,{"ok":False,"error":str(exc)})
+        if path == "/v1/endpoints/fabric/revoke":
+            if getattr(self.server,"plane","local") != "local":
+                return self.sendj(403,{"error":"Fabric endpoint management is local-control only"})
+            result=_endpoint_revoke_fabric(str(d.get("endpoint_id") or ""))
+            return self.sendj(200 if result.get("ok") else 404,result)
+        if path == "/v1/endpoints/allow":
+            try:
+                row=ENDPOINT_AUTH.allow(str(d.get("code") or ""),str(d.get("mode") or "once"))
+                return self.sendj(200,{"ok":True,"endpoint":row,"node":identity()["name"]})
+            except ValueError as exc:
+                return self.sendj(404,{"ok":False,"error":str(exc)})
+        if path == "/v1/endpoints/revoke":
+            ok=ENDPOINT_AUTH.revoke(str(d.get("endpoint_id") or ""))
+            return self.sendj(200 if ok else 404,{"ok":ok,"node":identity()["name"],"error":None if ok else "endpoint not found"})
         if path == "/v1/decisions":
             return self.sendj(200, {"decisions": FABRIC_STORE.decisions(pending_only=True), "node": identity()["name"]})
         if path == "/v1/decisions/fabric":
@@ -2927,7 +3051,9 @@ class API(BaseHTTPRequestHandler):
                 accepted=FABRIC_IDENTITY.accept_pairing(str(d.get("code") or ""), peer,
                     auth_token=str(d.get("auth_token") or ""), peer_endpoint=str(d.get("endpoint") or "") or None)
                 me=identity()
-                public={k:me.get(k) for k in ("node_id","fingerprint","algorithm","public_key","name","hostname") if me.get(k)}
+                public={k:me.get(k) for k in ("node_id","fingerprint","algorithm","public_key","name","hostname","transports") if me.get(k)}
+                local_transports=FABRIC_IDENTITY.local_transports()
+                if local_transports: public["transports"]=local_transports
                 FABRIC_STORE.event(None,"identity","paired",accepted.get("node_id"),node=identity()["name"],
                     data={"peer":accepted.get("name"),"node_id":accepted.get("node_id"),"fingerprint":accepted.get("fingerprint")})
                 return self.sendj(201,{"ok":True,"schema":"fabric-pair-v1","identity":public})
@@ -3184,6 +3310,16 @@ def print_fabric_snapshot(snapshot):
             continue
 
 
+def _peer_base(peer):
+    if peer.get("url"):
+        return str(peer["url"]).rstrip("/")
+    if peer.get("tailcat_endpoints"):
+        return str(peer["tailcat_endpoints"][0]).rstrip("/")
+    if peer.get("dns"):
+        return f"https://{peer['dns']}:7332"
+    return ""
+
+
 def _remote_url(snapshot, target, path):
     local=(snapshot.get("self") or {}).get("name")
     if target in {None, "", "local", local}:
@@ -3191,8 +3327,13 @@ def _remote_url(snapshot, target, path):
     needle=str(target).lower()
     for peer in snapshot.get("peers") or []:
         names={str(peer.get("name") or "").lower(), str((peer.get("node") or {}).get("identity",{}).get("name") or "").lower()}
-        if needle in names and peer.get("node") and peer.get("dns"):
-            return f"https://{peer['dns']}:7332{path}"
+        if needle in names and peer.get("node"):
+            if peer.get("url"):
+                return str(peer["url"]).rstrip("/")+path
+            if peer.get("tailcat_endpoints"):
+                return str(peer["tailcat_endpoints"][0]).rstrip("/")+path
+            if peer.get("dns"):
+                return f"https://{peer['dns']}:7332{path}"
     raise RuntimeError(f"Fabric node not found or not advertising: {target}")
 
 
@@ -3250,8 +3391,8 @@ def _watch(host,port,interval=1.0):
             snap=_daemon_get(host,port,"/v1/nodes")
             sources=[("local",_daemon_url(host,port,""))]
             for peer in snap.get("peers") or []:
-                if peer.get("node") and peer.get("dns"):
-                    sources.append((peer.get("name") or "peer",f"https://{peer['dns']}:7332"))
+                if peer.get("node") and _peer_base(peer):
+                    sources.append((peer.get("name") or "peer",_peer_base(peer)))
             tnow = now()
             for name,base in sources:
                 remote = base.startswith("https://")
@@ -4261,7 +4402,7 @@ def main():
     ap.add_argument("command",nargs="?",default="serve",
         choices=["serve","status","nodes","activity","pulse","fabric","watch","dashboard","models","qualify","services","service",
                  "jobs","job","submit","packet","cancel","events","http","beacon","lights","artifact-add","artifact","artifacts","file-catalog","file-find","media-catalog","media-identify",
-                 "decisions","decision","answer","ask","decision-shadow","decision-provider","identity","trust","untrust","pair-code","pair","endpoints","endpoint-code","allow","revoke-endpoint","media-outputs","media-state","media-play","media-control"])
+                 "decisions","decision","answer","ask","decision-shadow","decision-provider","identity","trust","untrust","pair-code","pair","transport","endpoints","endpoint-code","allow","revoke-endpoint","media-outputs","media-state","media-play","media-control"])
     ap.add_argument("args",nargs="*")
     ap.add_argument("--node",dest="node",default=None,help="target Fabric node name")
     ap.add_argument("--json",action="store_true",help="raw JSON where a human view exists")
@@ -4371,27 +4512,58 @@ def main():
                 peer=result["peer"]
                 print(f"FABRIC PAIR · trusted {peer.get('name') or peer.get('node_id')} · {peer.get('fingerprint')}")
                 return 0
+            if a.command=="transport":
+                snap=_daemon_get(a.host,a.port,"/v1/nodes")
+                tc=(FABRIC_IDENTITY.local_transports().get("tailcat") or {})
+                if a.json:
+                    print(json.dumps({"tailcat":tc,"peers":snap.get("peers") or []},indent=2)); return 0
+                print("FABRIC TRANSPORT")
+                if tc.get("endpoints"):
+                    print("  local  TAILCAT  "+", ".join(tc.get("endpoints") or []))
+                else:
+                    print("  local  TAILCAT  unavailable")
+                for peer in snap.get("peers") or []:
+                    if not peer.get("node"): continue
+                    active=str(peer.get("active_transport") or ("tailscale" if peer.get("dns") else "unreachable")).upper()
+                    base=_peer_base(peer) or "—"
+                    print(f"  {str(peer.get('name') or '?'):<18} {active:<10} {base}")
+                print("  policy  Tailcat direct TLS first · Tailscale fallback")
+                return 0
             if a.command=="endpoints":
-                data=ENDPOINT_AUTH.list()
+                data=_daemon_get(a.host,a.port,"/v1/endpoints/fabric")
                 if a.json: print(json.dumps(data,indent=2)); return 0
-                print(f"FABRIC ENDPOINTS · {len(data['trusted'])} trusted · {len(data['sessions'])} temporary · {len(data['pending'])} pending")
-                for row in data['pending']:
-                    print(f"  PENDING  {row.get('code')}  {str(row.get('user_agent') or 'browser')[:54]}")
-                for row in data['trusted']:
-                    print(f"  TRUSTED  {row.get('endpoint_id')}  {row.get('label') or 'Browser'}")
-                for row in data['sessions']:
-                    print(f"  ONCE     {row.get('endpoint_id')}  {row.get('label') or 'Browser'}")
+                totals={"trusted":0,"sessions":0,"pending":0}
+                for node in data.get("nodes") or []:
+                    for key in totals: totals[key]+=len(node.get(key) or [])
+                print(f"FABRIC ENDPOINTS · {totals['trusted']} trusted · {totals['sessions']} temporary · {totals['pending']} pending")
+                for node in data.get("nodes") or []:
+                    rows=sum((len(node.get(k) or []) for k in ("pending","trusted","sessions")),0)
+                    if not rows: continue
+                    print(f"  {str(node.get('node') or 'local')}:")
+                    for row in node.get('pending') or []:
+                        print(f"    PENDING  {row.get('code')}  {str(row.get('user_agent') or 'browser')[:54]}")
+                    for row in node.get('trusted') or []:
+                        print(f"    TRUSTED  {row.get('endpoint_id')}  {row.get('label') or 'Browser'}")
+                    for row in node.get('sessions') or []:
+                        print(f"    ONCE     {row.get('endpoint_id')}  {row.get('label') or 'Browser'}")
+                for err in data.get("errors") or []:
+                    print(f"  ! {err.get('node')} · {err.get('error')}")
                 return 0
             if a.command=="allow":
                 if not a.args: ap.error("allow requires the six-digit endpoint code [once|trust]")
                 mode=a.args[1] if len(a.args)>1 else "once"
-                row=ENDPOINT_AUTH.allow(a.args[0],mode)
-                print(f"FABRIC ENDPOINT · {row.get('code')} approved · {mode}")
+                result=_daemon_post(a.host,a.port,"/v1/endpoints/fabric/allow",{"code":a.args[0],"mode":mode}); row=result.get("endpoint") or {}
+                print(f"FABRIC ENDPOINT · {row.get('code') or a.args[0]} approved on {result.get('node')} · {mode}")
                 return 0
             if a.command=="revoke-endpoint":
                 if not a.args: ap.error("revoke-endpoint requires ENDPOINT_ID")
-                ok=ENDPOINT_AUTH.revoke(a.args[0]); print("FABRIC ENDPOINT · revoked" if ok else "FABRIC ENDPOINT · not found")
-                return 0 if ok else 1
+                try:
+                    result=_daemon_post(a.host,a.port,"/v1/endpoints/fabric/revoke",{"endpoint_id":a.args[0]})
+                except RuntimeError as exc:
+                    print(f"FABRIC ENDPOINT · {exc}"); return 1
+                if result.get("ok"):
+                    print(f"FABRIC ENDPOINT · revoked on {result.get('node')}"); return 0
+                print(f"FABRIC ENDPOINT · {result.get('error') or 'not found'}"); return 1
             if a.command=="endpoint-code":
                 ts=tailscale_self(); supplied=a.args[0] if a.args else os.getenv("FCL_SIGNAL_URL","")
                 url=supplied.rstrip("/") if supplied else (f"https://{ts.get('dns')}:7331" if ts.get('dns') else "")

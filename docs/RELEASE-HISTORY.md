@@ -1,3 +1,7 @@
+# Future Crash + LOOK 6.1.0 — Tailcat Direct Transport
+
+Endpoint approval/revocation now follows the pending browser to the node that actually hosts it. Tailcat adds direct pinned-TLS node transport on reachable IP paths, preferred ahead of Tailscale, while Tailscale remains the fallback and bootstrap route. Existing 6.0 pairings can learn Tailcat metadata without re-pairing.
+
 # Future Crash + LOOK 6.0.0 — Fabric Authorization
 
 6.0.0 is the trust-boundary release. Fabric identity is no longer descriptive metadata: remotely reachable node APIs now require credentials minted by pairing. Public health/identity/advertisement and the one-use pairing route remain reachable so a new node can discover and join; the local loopback control plane remains local.

@@ -13,6 +13,7 @@ import os
 import secrets
 import shutil
 import socket
+import ssl
 import struct
 import subprocess
 import tempfile
@@ -106,6 +107,15 @@ def _host(value: str) -> str:
         return ""
 
 
+def _tailcat_advertisement() -> dict:
+    path = Path.home() / ".config/future-crash-look/tailcat/advertisement.json"
+    try:
+        data=json.loads(path.read_text(encoding="utf-8"))
+        return data if isinstance(data,dict) else {}
+    except Exception:
+        return {}
+
+
 class FabricIdentity:
     def __init__(self, root: Path | None = None):
         self.root = Path(root or (Path.home() / ".config/future-crash-look/identity"))
@@ -186,6 +196,9 @@ class FabricIdentity:
         prior = dict((data.get("nodes") or {}).get(canonical["node_id"]) or {})
         record = dict(canonical)
         record.update({"trusted_at": prior.get("trusted_at") or _now(), "updated_at": _now(), "source": str(source or "pairing")})
+        transports = peer.get("transports") if isinstance(peer.get("transports"),dict) else prior.get("transports")
+        if isinstance(transports,dict) and transports:
+            record["transports"] = transports
         token = str(auth_token or prior.get("auth_token") or "")
         if token:
             record["auth_token"] = token
@@ -214,25 +227,44 @@ class FabricIdentity:
         return secrets.compare_digest(expected, _token_hash(token))
 
     def auth_headers_for_url(self, url: str) -> dict:
-        target = _host(url)
-        if not target:
-            return {}
-        me = self.ensure()
+        row=self._matching_trust_row(url)
+        token=str((row or {}).get("auth_token") or "")
+        if not token: return {}
+        me=self.ensure()
+        return {"X-Fabric-Node":me["node_id"],"Authorization":"Bearer "+token}
+
+    def _matching_trust_row(self, url: str) -> dict | None:
+        target=_host(url)
+        if not target: return None
         for row in (self.trusted().get("nodes") or {}).values():
-            if not isinstance(row, dict):
-                continue
-            token = str(row.get("auth_token") or "")
-            if not token:
-                continue
-            candidates = {
-                _host(str(row.get("endpoint") or "")),
-                str(row.get("hostname") or "").casefold(),
-                str(row.get("name") or "").casefold(),
-            }
+            if not isinstance(row,dict): continue
+            candidates={_host(str(row.get("endpoint") or "")), str(row.get("hostname") or "").casefold(), str(row.get("name") or "").casefold()}
+            tc=((row.get("transports") or {}).get("tailcat") or {}) if isinstance(row.get("transports"),dict) else {}
+            for ep in tc.get("endpoints") or []:
+                candidates.add(_host(str(ep)))
             candidates.discard("")
             if target in candidates or any(target.split(".",1)[0] == c.split(".",1)[0] for c in candidates):
-                return {"X-Fabric-Node": me["node_id"], "Authorization": "Bearer " + token}
-        return {}
+                return row
+        return None
+
+    def ssl_context_for_url(self, url: str):
+        row=self._matching_trust_row(url)
+        if not row: return None
+        tc=((row.get("transports") or {}).get("tailcat") or {}) if isinstance(row.get("transports"),dict) else {}
+        cert=str(tc.get("cert_pem") or "")
+        endpoints=[str(x) for x in (tc.get("endpoints") or [])]
+        target=_host(url)
+        if not cert or target not in {_host(x) for x in endpoints}:
+            return None
+        ctx=ssl.create_default_context(cadata=cert)
+        # Exact pinned certificate learned during authenticated pairing is the
+        # identity check; its CN intentionally does not depend on DHCP addresses.
+        ctx.check_hostname=False
+        return ctx
+
+    def local_transports(self) -> dict:
+        tc=_tailcat_advertisement()
+        return {"tailcat":tc} if tc else {}
 
     def start_pairing(self, endpoint: str, *, name: str = "", hostname: str = "", ttl: int = PAIR_TTL_SECONDS) -> dict:
         me = self.ensure()
@@ -306,6 +338,8 @@ def join_pairing(local: FabricIdentity, target: str, code: str | None = None, *,
     me = local.ensure()
     if name or hostname:
         me = local.public(name=name, hostname=hostname)
+    transports=local.local_transports()
+    if transports: me["transports"]=transports
     token = _new_auth_token()
     body = json.dumps({"schema": PAIR_SCHEMA, "code": pair_code, "identity": me,
                        "auth_token": token, "endpoint": str(local_endpoint or "")}, separators=(",", ":")).encode()

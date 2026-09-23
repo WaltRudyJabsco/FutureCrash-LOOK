@@ -106,7 +106,7 @@ _lk() {
       return
       ;;
     fabric)
-      (( CURRENT == 3 )) && _values 'fabric action' status nodes activity pulse models http qualify services service jobs job events submit packet cancel watch dashboard dash beacon lights decisions decision decision-provider answer ask decision-shadow identity trust untrust pair-code pair endpoints endpoint-code allow revoke-endpoint
+      (( CURRENT == 3 )) && _values 'fabric action' status nodes activity pulse models http qualify services service jobs job events submit packet cancel watch dashboard dash beacon lights decisions decision decision-provider answer ask decision-shadow identity trust untrust pair-code pair transport endpoints endpoint-code allow revoke-endpoint
       return
       ;;
     ollama)
