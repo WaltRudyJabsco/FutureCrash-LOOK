@@ -1,3 +1,10 @@
+# 6.1.1 — Fabric Edge Repair
+
+- Make Fabric endpoint approval resilient to a stale local node: the CLI can locate and approve a pending browser code across trusted peers when the local aggregate route returns 404.
+- Mark Tailscale-only unpaired peers as `TAILSCALE*` in `lk fabric transport`, distinguishing discovery/fallback from a directly paired Tailcat relationship.
+- Add `lk comfy unload` to release ComfyUI models and CUDA cache without stopping the service.
+- Default LOOK-driven image generation to unload Comfy models after completion; configure with `lk comfy auto-unload on|off`.
+
 # 6.1.0 — Tailcat Direct Transport
 
 - Make browser endpoint management Fabric-wide: list, approve, and revoke from any reachable trusted node.

@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Future Crash + LOOK Unified Node 6.1.0.
+"""Future Crash + LOOK Unified Node 6.1.1.
 
 A small distributed supervisor for trusted personal machines. Immediate events stay
 asynchronous; a one-second fabric pulse reconciles presence, leases and stale work.
@@ -58,7 +58,7 @@ try:
 except ImportError:
     from endpoint_auth import EndpointAuth
 
-VERSION = "6.1.0"
+VERSION = "6.1.1"
 DEFAULT_HOST = "127.0.0.1"
 DEFAULT_PORT = 7332
 DEFAULT_INGRESS_PORT = 0
@@ -2676,7 +2676,7 @@ def _openjev_shadow(state, question, candidates, *, profile="workspace", consequ
 
 
 class API(BaseHTTPRequestHandler):
-    server_version = "FCLNode/6.1.0"
+    server_version = "FCLNode/6.1.1"
 
     def setup(self):
         self._metric_request_id = None
@@ -3276,6 +3276,34 @@ def _daemon_post(host: str, port: int, path: str, payload):
         return http_json(_daemon_url(host, port, path), payload, timeout=35.0)
     except Exception as exc:
         raise RuntimeError(f"Unified Node request failed at {host}:{port}: {exc}") from exc
+
+
+def _endpoint_allow_cli_fallback(host, port, code, mode):
+    """6.1 migration fallback: route an endpoint approval from the CLI itself.
+
+    This also makes endpoint management resilient when LOOK has upgraded before the
+    resident node process has restarted onto the Fabric-wide endpoint routes.
+    """
+    snapshot=_daemon_get(host,port,"/v1/nodes")
+    local_name=str((snapshot.get("self") or {}).get("name") or identity().get("name") or "local")
+    candidates=[("local",_daemon_url(host,port,""))]
+    for peer in snapshot.get("peers") or []:
+        ad=peer.get("node") or {}; name=((ad.get("identity") or {}).get("name") or peer.get("name"))
+        base=_peer_base(peer)
+        if name and base: candidates.append((str(name),base))
+    found=[]
+    for name,base in candidates:
+        try:
+            data=http_json(base+"/v1/endpoints",timeout=2.0)
+        except Exception:
+            continue
+        if any(str(row.get("code") or "")==str(code) for row in (data.get("pending") or [])):
+            found.append((name,base))
+    if not found: raise RuntimeError("endpoint code not found or expired anywhere in the reachable Fabric")
+    if len(found)>1: raise RuntimeError("endpoint code is ambiguous across Fabric nodes")
+    name,base=found[0]
+    result=http_json(base+"/v1/endpoints/allow",{"code":str(code),"mode":str(mode)},timeout=4.0)
+    return {"ok":True,"node":name,"endpoint":result.get("endpoint") or {}}
 
 
 def print_fabric_snapshot(snapshot):
@@ -4525,9 +4553,12 @@ def main():
                 for peer in snap.get("peers") or []:
                     if not peer.get("node"): continue
                     active=str(peer.get("active_transport") or ("tailscale" if peer.get("dns") else "unreachable")).upper()
+                    if active=="TAILSCALE" and not peer.get("trusted"):
+                        active="TAILSCALE*"
                     base=_peer_base(peer) or "—"
                     print(f"  {str(peer.get('name') or '?'):<18} {active:<10} {base}")
                 print("  policy  Tailcat direct TLS first · Tailscale fallback")
+                print("          * TAILSCALE* = discovered transport only; peer is not directly paired/trusted")
                 return 0
             if a.command=="endpoints":
                 data=_daemon_get(a.host,a.port,"/v1/endpoints/fabric")
@@ -4552,7 +4583,15 @@ def main():
             if a.command=="allow":
                 if not a.args: ap.error("allow requires the six-digit endpoint code [once|trust]")
                 mode=a.args[1] if len(a.args)>1 else "once"
-                result=_daemon_post(a.host,a.port,"/v1/endpoints/fabric/allow",{"code":a.args[0],"mode":mode}); row=result.get("endpoint") or {}
+                try:
+                    result=_daemon_post(a.host,a.port,"/v1/endpoints/fabric/allow",{"code":a.args[0],"mode":mode})
+                except RuntimeError as exc:
+                    # A 6.1.0 install could leave an older resident node answering
+                    # localhost briefly. Route from the CLI rather than making the
+                    # human discover which node owns the browser code.
+                    if "404" not in str(exc): raise
+                    result=_endpoint_allow_cli_fallback(a.host,a.port,a.args[0],mode)
+                row=result.get("endpoint") or {}
                 print(f"FABRIC ENDPOINT · {row.get('code') or a.args[0]} approved on {result.get('node')} · {mode}")
                 return 0
             if a.command=="revoke-endpoint":

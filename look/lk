@@ -1576,7 +1576,7 @@ VISION + GENERATIVE MEDIA
   lk share            share all configured/running LOOK services over Tailscale
   lk services         inspect/configure/share local services
   lk comfy            status for optional/managed ComfyUI
-  lk comfy start|stop|restart
+  lk comfy start|stop|restart|unload
                        manage LOOK-installed ComfyUI process
   lk comfy discover   scan home + mounted drives for old Comfy/A1111 model libraries
   lk comfy bootstrap  rerun managed GPU install/model setup
@@ -7518,6 +7518,7 @@ def _load_comfy_config():
         "workflow":"",
         "output_dir":str(HOME/"Pictures"/"LOOK"),
         "auto_preview":True,
+        "auto_unload":True,
         "install_path":"",
         "python":"",
     }
@@ -7784,6 +7785,20 @@ def _comfy_replace_placeholders(obj,prompt,negative,seed):
     return obj
 
 
+def _comfy_unload(host=None):
+    """Ask ComfyUI to release loaded models/torch cache while keeping its API alive."""
+    import urllib.request
+    host=str(host or _load_comfy_config()["host"]).rstrip("/")
+    payload=json.dumps({"unload_models":True,"free_memory":True}).encode("utf-8")
+    req=urllib.request.Request(host+"/free",data=payload,headers={"Content-Type":"application/json"},method="POST")
+    try:
+        with urllib.request.urlopen(req,timeout=8) as response:
+            response.read()
+        return True,"models unloaded · service remains ready"
+    except Exception as exc:
+        return False,f"VRAM release failed: {exc}"
+
+
 def _comfy_generate(prompt,negative="",seed=None,open_result=True):
     import urllib.request, urllib.parse, random
     cfg=_load_comfy_config()
@@ -7841,7 +7856,11 @@ def _comfy_generate(prompt,negative="",seed=None,open_result=True):
                         preview_receipt=_preview_host_path(saved[0])
                         if str(preview_receipt).startswith("PREVIEW OK"):
                             _mark_generated_preview(saved[0])
-                    return True,f"{len(saved)} image(s) · "+", ".join(str(p) for p in saved)
+                    result=f"{len(saved)} image(s) · "+", ".join(str(p) for p in saved)
+                    if bool(cfg.get("auto_unload",True)):
+                        released,msg=_comfy_unload(host)
+                        result += f" · {'VRAM released' if released else msg}"
+                    return True,result
             status=item.get("status") or {}
             if status.get("completed") is True and not outputs:
                 return False,"Comfy completed without image output."
@@ -7949,6 +7968,8 @@ def comfy_command(args):
     if action=="restart":
         _comfy_stop()
         ok,msg=_comfy_start(); print(f"LOOK Comfy · {msg}"); return 0 if ok else 1
+    if action in {"unload","free"}:
+        ok,msg=_comfy_unload(cfg.get("host")); print(f"LOOK Comfy · {msg}"); return 0 if ok else 1
     if action in {"status","list"}:
         ok,stats=_comfy_probe(cfg["host"])
         roots,model_roots=_discover_comfy_paths()
@@ -7963,6 +7984,7 @@ def comfy_command(args):
             print(f"               {workflow_path}")
         print(f"  output       {cfg.get('output_dir')}")
         print(f"  auto-preview {'on' if cfg.get('auto_preview',True) else 'off'}")
+        print(f"  auto-unload  {'on' if cfg.get('auto_unload',True) else 'off'} · release models after LOOK generation")
         print(f"  installs     {len(roots)} found")
         for root in roots[:4]: print(f"    {root}")
         print(f"  model files  {len(models)} found in known Comfy model folders")
@@ -7986,7 +8008,10 @@ def comfy_command(args):
     if action=="preview" and len(args)>=2 and args[1].casefold() in {"on","off"}:
         cfg["auto_preview"]=args[1].casefold()=="on"; _save_comfy_config(cfg)
         print(f"LOOK Comfy · auto-preview · {'on' if cfg['auto_preview'] else 'off'}"); return 0
-    print("usage: lk comfy [status|repair|start|stop|restart|discover|bootstrap|host URL|workflow PATH|output PATH|preview on|off]")
+    if action=="auto-unload" and len(args)>=2 and args[1].casefold() in {"on","off"}:
+        cfg["auto_unload"]=args[1].casefold()=="on"; _save_comfy_config(cfg)
+        print(f"LOOK Comfy · auto-unload · {'on' if cfg['auto_unload'] else 'off'}"); return 0
+    print("usage: lk comfy [status|repair|start|stop|restart|unload|discover|bootstrap|host URL|workflow PATH|output PATH|preview on|off|auto-unload on|off]")
     return 2
 
 
