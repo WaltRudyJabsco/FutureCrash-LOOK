@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Future Crash + LOOK Unified Node 5.8.0.
+"""Future Crash + LOOK Unified Node 5.9.0.
 
 A small distributed supervisor for trusted personal machines. Immediate events stay
 asynchronous; a one-second fabric pulse reconciles presence, leases and stale work.
@@ -49,8 +49,12 @@ try:
 except ImportError:
     from decision import OpenJevShadow, new_request as new_decision_request, provider_status as decision_provider_status, plan as decision_plan
 from urllib.parse import urlparse, parse_qs
+try:
+    from .fabric_identity import FabricIdentity, join_pairing
+except ImportError:
+    from fabric_identity import FabricIdentity, join_pairing
 
-VERSION = "5.8.0"
+VERSION = "5.9.0"
 DEFAULT_HOST = "127.0.0.1"
 DEFAULT_PORT = 7332
 DEFAULT_INGRESS_PORT = 0
@@ -82,12 +86,13 @@ LOOK_FILE_CATALOG = Path.home() / ".local/share/look/file_catalog.sqlite3"
 CURATOR_STATE = STATE / "model_curator.json"
 FABRIC_DB = STATE / "fabric.sqlite3"
 ARTIFACT_ROOT = STATE / "artifacts"
+FABRIC_IDENTITY = FabricIdentity()
 FABRIC_STORE = FabricStore(FABRIC_DB)
 ARTIFACTS = ArtifactStore(ARTIFACT_ROOT)
 FABRIC_MEMORY = FabricMemory()
 WORKER_HEALTH = {"alive": False, "last_loop": 0.0, "last_error": None, "errors": 0}
 IDENTITY_LOCK = threading.RLock()
-IDENTITY_CACHE = {"name": socket.gethostname(), "hostname": socket.gethostname(), "tailscale": {}}
+IDENTITY_CACHE = {"name": socket.gethostname(), "hostname": socket.gethostname(), "tailscale": {}, "node_id": "", "fingerprint": ""}
 ADVERTISEMENT_LOCK = threading.RLock()
 ADVERTISEMENT_CACHE = {}
 BEACON_LOCK = threading.RLock()
@@ -278,10 +283,19 @@ def tailscale_self():
 
 
 def refresh_identity():
-    """Refresh slow Tailscale identity off the request path."""
+    """Refresh transport hints while keeping Fabric identity transport-independent."""
     ts = tailscale_self()
-    name = ((ts.get("dns") or "").split(".", 1)[0] or ts.get("hostname") or socket.gethostname())
-    value = {"name": name, "hostname": socket.gethostname(), "tailscale": ts}
+    hostname = socket.gethostname()
+    name = ((ts.get("dns") or "").split(".", 1)[0] or ts.get("hostname") or hostname)
+    value = {"name": name, "hostname": hostname, "tailscale": ts}
+    try:
+        value.update(FABRIC_IDENTITY.public(name=name, hostname=hostname))
+        # Friendly name and hostname remain mutable labels; node_id is the stable identity.
+        value["name"] = name
+        value["hostname"] = hostname
+        value["tailscale"] = ts
+    except Exception as exc:
+        value["identity_error"] = str(exc)[:240]
     with IDENTITY_LOCK:
         IDENTITY_CACHE.clear()
         IDENTITY_CACHE.update(value)
@@ -824,7 +838,9 @@ def advertisement():
 
 def node_info():
     ad = advertisement()
-    return {"name": ad["identity"]["name"], "hostname": ad["identity"]["hostname"],
+    ident=ad["identity"]
+    return {"name": ident["name"], "hostname": ident["hostname"],
+            "node_id": ident.get("node_id"), "fingerprint": ident.get("fingerprint"),
             "version": VERSION, "platform": ad["platform"]["system"],
             "architecture": ad["platform"]["architecture"],
             "pulse": ad["pulse"], "capabilities": ad["capabilities"],
@@ -2554,7 +2570,7 @@ def _openjev_shadow(state, question, candidates, *, profile="workspace", consequ
 
 
 class API(BaseHTTPRequestHandler):
-    server_version = "FCLNode/5.8.0"
+    server_version = "FCLNode/5.9.0"
 
     def setup(self):
         self._metric_request_id = None
@@ -2726,6 +2742,15 @@ class API(BaseHTTPRequestHandler):
             return self.sendj(200, {"listeners": {name: meter.public() for name, meter in HTTP_METRICS.items()},
                                     "local_port": DEFAULT_PORT, "ingress_port": 7333,
                                     "ingress_guard": ingress_guard})
+        if path == "/v1/identity":
+            ident = identity()
+            return self.sendj(200, {"schema":"fabric-identity-v1", "identity": {
+                k: ident.get(k) for k in ("node_id","fingerprint","algorithm","public_key","name","hostname") if ident.get(k)
+            }})
+        if path == "/v1/identity/trust":
+            if getattr(self.server, "plane", "local") != "local":
+                return self.sendj(403, {"error":"trust store is local-only"})
+            return self.sendj(200, FABRIC_IDENTITY.trusted())
         if path in ("/node", "/v1/node", "/v1/status"):
             return self.sendj(200, node_info())
         if path == "/v1/advertisement":
@@ -2868,6 +2893,17 @@ class API(BaseHTTPRequestHandler):
     def do_POST(self):
         path = urlparse(self.path).path
         d = self.body()
+        if path == "/v1/identity/pair":
+            try:
+                peer=d.get("identity") if isinstance(d,dict) else None
+                accepted=FABRIC_IDENTITY.accept_pairing(str(d.get("code") or ""), peer)
+                me=identity()
+                public={k:me.get(k) for k in ("node_id","fingerprint","algorithm","public_key","name","hostname") if me.get(k)}
+                FABRIC_STORE.event(None,"identity","paired",accepted.get("node_id"),node=identity()["name"],
+                    data={"peer":accepted.get("name"),"node_id":accepted.get("node_id"),"fingerprint":accepted.get("fingerprint")})
+                return self.sendj(201,{"ok":True,"schema":"fabric-pair-v1","identity":public})
+            except (ValueError,RuntimeError) as exc:
+                return self.sendj(403,{"ok":False,"error":str(exc)})
         if path == "/v1/decisions":
             try:
                 req=new_decision_request(
@@ -4196,7 +4232,7 @@ def main():
     ap.add_argument("command",nargs="?",default="serve",
         choices=["serve","status","nodes","activity","pulse","fabric","watch","dashboard","models","qualify","services","service",
                  "jobs","job","submit","packet","cancel","events","http","beacon","lights","artifact-add","artifact","artifacts","file-catalog","file-find","media-catalog","media-identify",
-                 "decisions","decision","answer","ask","decision-shadow","decision-provider","media-outputs","media-state","media-play","media-control"])
+                 "decisions","decision","answer","ask","decision-shadow","decision-provider","identity","trust","untrust","pair-code","pair","media-outputs","media-state","media-play","media-control"])
     ap.add_argument("args",nargs="*")
     ap.add_argument("--node",dest="node",default=None,help="target Fabric node name")
     ap.add_argument("--json",action="store_true",help="raw JSON where a human view exists")
@@ -4252,6 +4288,50 @@ def main():
                     return 0
             if a.command=="fabric": print_fabric_snapshot(_daemon_get(a.host,a.port,"/v1/nodes")); return 0
             if a.command=="nodes": print(json.dumps(_daemon_get(a.host,a.port,"/v1/nodes"),indent=2)); return 0
+            if a.command=="identity":
+                me=FABRIC_IDENTITY.ensure(); live=identity()
+                me["name"]=live.get("name") or me.get("name"); me["hostname"]=live.get("hostname") or me.get("hostname")
+                if a.json: print(json.dumps(me,indent=2))
+                else:
+                    print(f"FABRIC IDENTITY · {me['name']}")
+                    print(f"  node id      {me['node_id']}")
+                    print(f"  fingerprint  {me['fingerprint']}")
+                    print("  key          ssh-ed25519 · local private key never leaves this machine")
+                return 0
+            if a.command=="trust":
+                data=FABRIC_IDENTITY.trusted(); rows=list((data.get("nodes") or {}).values())
+                if a.json: print(json.dumps(data,indent=2)); return 0
+                print(f"FABRIC TRUST · {len(rows)} node{'s' if len(rows)!=1 else ''}")
+                for row in sorted(rows,key=lambda x:(str(x.get('name') or ''),str(x.get('node_id') or ''))):
+                    print(f"  {str(row.get('name') or '?'):<20.20} {row.get('node_id','')}  {row.get('fingerprint','')}")
+                return 0
+            if a.command=="untrust":
+                if not a.args: ap.error("untrust requires NODE_ID")
+                ok=FABRIC_IDENTITY.untrust(a.args[0]); print("FABRIC TRUST · removed" if ok else "FABRIC TRUST · node not found")
+                return 0 if ok else 1
+            if a.command=="pair-code":
+                ts=tailscale_self(); supplied=a.args[0] if a.args else ""
+                endpoint=supplied.rstrip("/") if supplied else (f"https://{ts.get('dns')}:7332" if ts.get('dns') else "")
+                if not endpoint:
+                    ap.error("pair-code needs an endpoint URL when Tailscale DNS is unavailable")
+                invite=FABRIC_IDENTITY.start_pairing(endpoint,name=identity().get("name") or "",hostname=socket.gethostname())
+                if a.json: print(json.dumps(invite,indent=2)); return 0
+                print(f"FABRIC PAIR · {invite['identity']['name']} · invitation open for 5 minutes")
+                print(f"  code  {invite['code']}")
+                print(f"  URL   {invite['endpoint']}")
+                print(f"  join  lk fabric pair '{invite['uri']}'")
+                qr=shutil.which("qrencode")
+                if qr and sys.stdout.isatty():
+                    try: subprocess.run([qr,"-t","ANSIUTF8",invite["uri"]],timeout=2,check=False)
+                    except Exception: pass
+                return 0
+            if a.command=="pair":
+                if not a.args: ap.error("pair requires an fcl://pair URI or ENDPOINT CODE")
+                target=a.args[0]; code=a.args[1] if len(a.args)>1 else None
+                result=join_pairing(FABRIC_IDENTITY,target,code,name=identity().get("name") or "",hostname=socket.gethostname())
+                peer=result["peer"]
+                print(f"FABRIC PAIR · trusted {peer.get('name') or peer.get('node_id')} · {peer.get('fingerprint')}")
+                return 0
             path={"status":"/v1/node","activity":"/v1/activity","pulse":"/v1/pulse","models":"/v1/models","services":"/v1/services","http":"/v1/http"}.get(a.command)
             if path:
                 data=_target_get(a.host,a.port,a.node,path)

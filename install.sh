@@ -1,13 +1,13 @@
 #!/usr/bin/env bash
 set -euo pipefail
 ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
-echo "Future Crash + LOOK 5.8.0 · Accountless Web Search"
+echo "Future Crash + LOOK 5.9.0 · Fabric Identity"
 echo "────────────────────────────────────────"
 
 # Refuse a mixed bundle before mutating the machine. A unified release must move
 # LOOK and the node together.
 EXPECTED_RELEASE="$(tr -d '[:space:]' < "$ROOT/VERSION")"
-[[ "$EXPECTED_RELEASE" == "5.8.0" ]] || { echo "BUNDLE ERROR: expected release 5.8.0, found $EXPECTED_RELEASE"; exit 4; }
+[[ "$EXPECTED_RELEASE" == "5.9.0" ]] || { echo "BUNDLE ERROR: expected release 5.9.0, found $EXPECTED_RELEASE"; exit 4; }
 grep -q 'def _fabric_command' "$ROOT/look/lk" || { echo "BUNDLE ERROR: LOOK source has no Fabric command"; exit 4; }
 grep -q 'choices=.*serve.*fabric' "$ROOT/core/node.py" || { echo "BUNDLE ERROR: node source has no Fabric CLI"; exit 4; }
 
@@ -28,7 +28,7 @@ case "$OPENJEV_MODE" in off|auto|adopt|install) ;; *) echo "BUNDLE ERROR: invali
 ((UNINSTALL)) && exit 0
 if ((DRY_RUN)); then
   echo
-  echo "[dry-run] would install/restart Unified Node 5.8.0 with Fabric SearXNG discovery/search, canonical Decision Plane, optional OpenJev worker, Fabric Content Search, Fabric Media Catalog, Streaming Artifacts, Fabric Memory, and Signal Window 1.7.0"
+  echo "[dry-run] would install/restart Unified Node 5.9.0 with accountless Fabric Identity, trust/pairing, Fabric SearXNG discovery/search, canonical Decision Plane, optional OpenJev worker, Fabric Content Search, Fabric Media Catalog, Streaming Artifacts, Fabric Memory, and Signal Window 1.7.0"
   echo "[dry-run] OpenJev mode: $OPENJEV_MODE (auto adopts an existing worker; absence is non-fatal)"
   echo "[dry-run] would reconcile Tailscale :7332 → separate fcl-ingress :7333 and verify Fabric CLI wiring"
   exit 0
@@ -38,6 +38,7 @@ mkdir -p "$HOME/.local/share/future-crash-look/core" "$HOME/.local/bin"
 install -m 0755 "$ROOT/core/node.py" "$HOME/.local/share/future-crash-look/core/node.py"
 install -m 0644 "$ROOT/core/fabric_packet.py" "$HOME/.local/share/future-crash-look/core/fabric_packet.py"
 install -m 0644 "$ROOT/core/fabric_client.py" "$HOME/.local/share/future-crash-look/core/fabric_client.py"
+install -m 0644 "$ROOT/core/fabric_identity.py" "$HOME/.local/share/future-crash-look/core/fabric_identity.py"
 install -m 0644 "$ROOT/core/conductor.py" "$HOME/.local/share/future-crash-look/core/conductor.py"
 install -m 0644 "$ROOT/core/decision.py" "$HOME/.local/share/future-crash-look/core/decision.py"
 install -m 0644 "$ROOT/core/memory_store.py" "$HOME/.local/share/future-crash-look/core/memory_store.py"
@@ -46,6 +47,14 @@ install -m 0755 "$ROOT/core/fcl-node" "$HOME/.local/bin/fcl-node"
 install -m 0755 "$ROOT/core/ingress.py" "$HOME/.local/share/future-crash-look/core/ingress.py"
 install -m 0755 "$ROOT/core/fcl-ingress" "$HOME/.local/bin/fcl-ingress"
 install -m 0644 "$ROOT/VERSION" "$HOME/.local/share/future-crash-look/RELEASE"
+# Create the machine's Fabric keypair once. It is independent of Tailscale and
+# survives normal upgrades; private key material never leaves this host.
+if command -v ssh-keygen >/dev/null 2>&1 || command -v openssl >/dev/null 2>&1; then
+  PYTHONPATH="$HOME/.local/share/future-crash-look/core${PYTHONPATH:+:$PYTHONPATH}" python3 -m fabric_identity init >/dev/null
+  echo "  Fabric identity: ready · accountless ed25519 node identity"
+else
+  echo "  Fabric identity: no Ed25519 key generator found · install OpenSSH client or OpenSSL"
+fi
 
 # Keep the optional Local Labs server controller in lockstep when this machine uses it.
 # Upgrade both legacy and canonical locations if present, then normalize ~/.local/bin/server
@@ -238,6 +247,9 @@ fi
 if ! cmp -s "$ROOT/core/fabric_client.py" "$HOME/.local/share/future-crash-look/core/fabric_client.py"; then
   echo "INSTALL ERROR: Fabric client differs from release" >&2; exit 8
 fi
+if ! cmp -s "$ROOT/core/fabric_identity.py" "$HOME/.local/share/future-crash-look/core/fabric_identity.py"; then
+  echo "INSTALL ERROR: Fabric identity core differs from release" >&2; exit 8
+fi
 if ! cmp -s "$ROOT/core/conductor.py" "$HOME/.local/share/future-crash-look/core/conductor.py"; then
   echo "INSTALL ERROR: installed conductor differs from release" >&2; exit 8
 fi
@@ -249,8 +261,10 @@ if ! cmp -s "$ROOT/core/decision.py" "$HOME/.local/share/future-crash-look/core/
 fi
 if ! PYTHONPATH="$HOME/.local/share/future-crash-look/core" python3 - <<'PY_RUNTIME' >/dev/null 2>&1
 import conductor, fabric_client, memory_store, decision
+import fabric_identity
 assert conductor.classify("ping").tier == "reflex"
 assert callable(fabric_client.stream_infer)
+assert callable(fabric_identity.public_identity)
 assert decision.plan(profile="power", confidence=.7).timeout_action == "continue"
 PY_RUNTIME
 then
@@ -275,6 +289,8 @@ echo "Unified node installed and verified · release $EXPECTED_RELEASE"
 ( nohup "$HOME/.local/bin/lk" scan >"$HOME/.local/share/look/file-scan.log" 2>&1 & ) || true
 echo "  file/content catalog reconciliation started in background"
 
+echo "  fcl-node identity   # stable Fabric node identity"
+echo "  fcl-node pair-code  # open a one-use pairing invitation"
 echo "  fcl-node fabric     # human view of the compute fabric"
 echo "  fcl-node models     # model capability advertisements"
 echo "  fcl-node pulse      # shared heartbeat"

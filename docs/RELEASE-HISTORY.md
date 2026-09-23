@@ -1,3 +1,9 @@
+# 5.9.0 — Fabric Identity
+
+Fabric identity is now owned by Fabric rather than inferred from transport. Each node creates a local Ed25519 keypair, derives a stable node ID/fingerprint from the public key, and keeps a local trust store. `lk fabric pair-code` opens a one-use five-minute invitation; another node can join with the printed `fcl://pair` URI or endpoint plus short code. Tailscale/LAN are only ways to carry the pairing exchange.
+
+This release records trust without enforcing it on all existing API traffic, avoiding a flag-day break across mixed-version personal Fabrics. Scoped request authorization and browser endpoint pairing are the next layer.
+
 # 5.8.0 — Accountless Web Search
 
 SearXNG becomes the preferred Fabric web-search capability; hosted Ollama search remains optional. README and narrow Dash layout are refreshed.

@@ -140,18 +140,39 @@ Fabric is an extension of a machine, not a dependency of it. Local files, local 
 lk doctor island
 ```
 
-## Networking today, identity tomorrow
+## Fabric identity and accountless pairing
 
-Current multi-machine transport can use Tailscale, but Tailscale is not intended to define Fabric identity. The architecture keeps these concepts separate:
+Every node now owns a local **Ed25519 Fabric identity**. The stable node ID and human-readable fingerprint are derived from its public key; the private key stays on that machine. Tailscale names and IP addresses are transport hints, not identity.
 
-```text
-identity       who is this node?
-trust          what is it allowed to do?
-discovery      what capabilities are available?
-transport      how can packets reach it?
+```sh
+lk fabric identity
+lk fabric trust
 ```
 
-Today Tailscale is an excellent optional transport. The next architectural step is native Fabric identity and pairing so a Fabric can establish trust without requiring a third-party account; transport can then remain Tailscale, LAN, or another encrypted route independently.
+A trusted node can open a one-use five-minute invitation:
+
+```sh
+lk fabric pair-code
+```
+
+When Tailscale HTTPS is available, LOOK can advertise that reachable endpoint automatically. Otherwise supply the URL explicitly. The invitation prints both a strong short code and an `fcl://pair` URI; if `qrencode` is installed it also renders a terminal QR code. On the joining node:
+
+```sh
+lk fabric pair 'fcl://pair?...'
+# or
+lk fabric pair https://existing-node.example:7332 ABCD-EFGH-IJKL-MNOP
+```
+
+The nodes exchange public identities, validate the node ID against the public key, record one another in their local trust stores, and consume the invitation. No Fabric account, email address, central identity server, or Tailscale identity is involved.
+
+```text
+identity       Fabric Ed25519 keypair + stable node ID
+trust          local Fabric trust store
+discovery      capabilities and reachable peers
+transport      localhost / LAN / Tailscale / future Tailcat
+```
+
+This release establishes identity and pairing **without yet using the trust store as a hard network firewall**. Existing Fabric installations continue to interoperate during migration. Endpoint authorization and signed/scoped request enforcement come next; only after those are solid does Tailcat need to replace any transport role.
 
 ## Media and browser endpoints
 
@@ -223,8 +244,8 @@ See `docs/COMMAND-GRAMMAR.md`, `look/docs/COMMANDS.md`, and `docs/RELEASE-HISTOR
 
 ## Release
 
-Current release: **5.8.0 — Accountless Web Search**.
+Current release: **5.9.0 — Fabric Identity**.
 
-SearXNG is now the preferred generic web-search capability, discoverable through Fabric; hosted Ollama search is an optional fallback. The README has been rebuilt around the current system rather than accumulated release notes, and Dash now protects narrow terminal layouts instead of forcing medium-width geometry.
+Every node now has a transport-independent Ed25519 identity, stable public-key-derived node ID, local trust store, and one-use pairing flow. Tailscale remains an optional transport rather than the source of identity; endpoint authorization and signed/scoped request enforcement are the next layer.
 
 Future Crash + LOOK remains an open, local-first project: **Fabric turns your computers and devices into one personal computer; LOOK is how you use it.**

@@ -1,3 +1,13 @@
+# 5.9.0 — Fabric Identity
+
+- Add a transport-independent Ed25519 identity to every Fabric node.
+- Derive a stable `fcl-...` node ID and human-readable fingerprint from the public key.
+- Add a local trust store with `lk fabric identity`, `lk fabric trust`, and `lk fabric untrust`.
+- Add one-use, five-minute pairing invitations with strong short codes and `fcl://pair` URIs.
+- Render a terminal QR code when optional `qrencode` is available; pairing itself has no QR dependency.
+- Pairing exchanges and validates public identities over the currently reachable transport; Tailscale may carry the request but no longer defines Fabric identity.
+- Keep trust non-enforcing for this migration release so existing Fabric nodes continue to interoperate; signed/scoped authorization is the next phase.
+
 # 5.8.0 — Accountless Web Search
 
 - Prefer Fabric/local SearXNG for generic web search; Ollama hosted search is optional fallback.
