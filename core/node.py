@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Future Crash + LOOK Unified Node 5.7.1.
+"""Future Crash + LOOK Unified Node 5.7.2.
 
 A small distributed supervisor for trusted personal machines. Immediate events stay
 asynchronous; a one-second fabric pulse reconciles presence, leases and stale work.
@@ -50,7 +50,7 @@ except ImportError:
     from decision import OpenJevShadow, new_request as new_decision_request, provider_status as decision_provider_status, plan as decision_plan
 from urllib.parse import urlparse, parse_qs
 
-VERSION = "5.7.1"
+VERSION = "5.7.2"
 DEFAULT_HOST = "127.0.0.1"
 DEFAULT_PORT = 7332
 DEFAULT_INGRESS_PORT = 0
@@ -1848,7 +1848,7 @@ def _local_file_catalog():
 
 
 def _file_search_terms(query):
-    return re.findall(r"[\\w.+-]+",str(query or "").casefold())
+    return re.findall(r"[\w.+-]+",str(query or "").casefold())
 
 
 def _local_file_search(query,limit=80):
@@ -1881,6 +1881,13 @@ def _local_file_search(query,limit=80):
         elif "yesterday" in terms: where.append("mtime>=?"); params.append(current-172800)
         elif "recent" in terms or "recently" in terms: where.append("mtime>=?"); params.append(current-14*86400)
         for word in words: where.append("(name LIKE ? OR path LIKE ?)"); params.extend((f"%{word}%",f"%{word}%"))
+        metadata_intent=bool(ext or any(t in terms for t in ("today","yesterday","recent","recently","big","biggest","large","largest")))
+        # A lexical query that normalizes to no useful terms is not a request for
+        # the newest catalog rows. Empty predicates are valid only for explicit
+        # metadata intents such as "recent" or "biggest".
+        if not words and not metadata_intent:
+            db.close()
+            return {"schema":"fabric-file-search-v2","node":node,"query":query,"entries":[],"count":0}
         sql="SELECT path,name,ext,bytes,mtime,root FROM files"+(" WHERE "+" AND ".join(where) if where else "")
         sql+=(" ORDER BY bytes DESC" if any(t in terms for t in ("big","biggest","large","largest")) else " ORDER BY mtime DESC")+" LIMIT ?"; params.append(int(limit))
         for row in db.execute(sql,params):
@@ -2498,7 +2505,7 @@ def _openjev_shadow(state, question, candidates, *, profile="workspace", consequ
 
 
 class API(BaseHTTPRequestHandler):
-    server_version = "FCLNode/5.7.1"
+    server_version = "FCLNode/5.7.2"
 
     def setup(self):
         self._metric_request_id = None

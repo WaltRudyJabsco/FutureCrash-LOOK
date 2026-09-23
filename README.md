@@ -1,4 +1,4 @@
-# 5.7.1 — Fabric Content Search + Smart Resolver
+# 5.7.2 — Find Retrieval Repair
 
 The ordinary-file catalog now has a deliberately boring second layer: bounded deterministic text extraction plus SQLite FTS5. `lk scan` still owns discovery, but changed supported documents are now text-indexed incrementally; unchanged documents are not re-read. No embeddings, OCR, model calls, or hashing are part of indexing.
 
@@ -16,7 +16,7 @@ Each Unified Node publishes its local catalog through `/v1/files/catalog`; `/v1/
 
 Fresh installs seed the first home metadata scan in the background. Expensive identity, content extraction, FTS and semantic understanding remain deliberately deferred layers rather than costs paid during discovery.
 
-# Future Crash + LOOK 5.7.1
+# Future Crash + LOOK 5.7.2
 
 ## 5.5.0 — Media Endpoint Handoff
 

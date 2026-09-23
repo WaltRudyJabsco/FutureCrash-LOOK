@@ -1,3 +1,10 @@
+## 5.7.2 — Find Retrieval Repair
+
+- Fixed Unified Node query tokenization so Fabric file searches use real lexical terms instead of degrading into newest-file listings.
+- Plain lexical misses now return zero results; unconstrained catalog listings remain available only for explicit metadata intents such as `recent` or `biggest`.
+- `lk find` now opens an interactive paged result chooser on a TTY, with filtering, navigation, snippet preview, and path copy.
+- Accepting a locally reachable result hands it to the normal LOOK file view, where existing preview/mark/copy/move/remove/LO actions apply. Remote/unmounted Fabric results remain safe and are never treated as local paths.
+
 ## 5.7.1 — Smart Resolver
 
 - Preserves 5.7.0 Fabric Content Search and adds deterministic catalog-backed target resolution for open/preview/reveal.

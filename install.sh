@@ -1,13 +1,13 @@
 #!/usr/bin/env bash
 set -euo pipefail
 ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
-echo "Future Crash + LOOK 5.7.1 · Fabric Content Search"
+echo "Future Crash + LOOK 5.7.2 · Find Retrieval Repair"
 echo "────────────────────────────────────────"
 
 # Refuse a mixed bundle before mutating the machine. A unified release must move
 # LOOK and the node together.
 EXPECTED_RELEASE="$(tr -d '[:space:]' < "$ROOT/VERSION")"
-[[ "$EXPECTED_RELEASE" == "5.7.1" ]] || { echo "BUNDLE ERROR: expected release 5.7.1, found $EXPECTED_RELEASE"; exit 4; }
+[[ "$EXPECTED_RELEASE" == "5.7.2" ]] || { echo "BUNDLE ERROR: expected release 5.7.2, found $EXPECTED_RELEASE"; exit 4; }
 grep -q 'def _fabric_command' "$ROOT/look/lk" || { echo "BUNDLE ERROR: LOOK source has no Fabric command"; exit 4; }
 grep -q 'choices=.*serve.*fabric' "$ROOT/core/node.py" || { echo "BUNDLE ERROR: node source has no Fabric CLI"; exit 4; }
 
@@ -28,7 +28,7 @@ case "$OPENJEV_MODE" in off|auto|adopt|install) ;; *) echo "BUNDLE ERROR: invali
 ((UNINSTALL)) && exit 0
 if ((DRY_RUN)); then
   echo
-  echo "[dry-run] would install/restart Unified Node 5.7.1, canonical Decision Plane, optional OpenJev worker, Fabric Content Search, Fabric Media Catalog, Streaming Artifacts, Fabric Memory, and Signal Window 1.7.0"
+  echo "[dry-run] would install/restart Unified Node 5.7.2, canonical Decision Plane, optional OpenJev worker, Fabric Content Search, Fabric Media Catalog, Streaming Artifacts, Fabric Memory, and Signal Window 1.7.0"
   echo "[dry-run] OpenJev mode: $OPENJEV_MODE (auto adopts an existing worker; absence is non-fatal)"
   echo "[dry-run] would reconcile Tailscale :7332 → separate fcl-ingress :7333 and verify Fabric CLI wiring"
   exit 0

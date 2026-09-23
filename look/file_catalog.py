@@ -186,6 +186,9 @@ def search(db_path,query,limit=80):
         qs=','.join('?' for _ in extset); where.append(f'ext IN ({qs})'); params.extend(sorted(extset))
     for t in remaining:
         where.append('(name LIKE ? OR path LIKE ?)'); like=f'%{t}%'; params.extend((like,like))
+    metadata_intent=bool(extset or any(t in terms for t in ('today','yesterday','recent','recently','big','biggest','large','largest')))
+    if not remaining and not metadata_intent:
+        db.close(); return []
     sql='SELECT path,name,ext,bytes,mtime,root FROM files'
     if where: sql+=' WHERE '+' AND '.join(where)
     order='bytes DESC' if any(x in terms for x in ('big','biggest','large','largest')) else 'mtime DESC'

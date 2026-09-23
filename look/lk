@@ -14955,6 +14955,89 @@ def _file_catalog_command():
     return 0
 
 
+def _file_find_lines(rows,query,source):
+    lines=[f"LOOK FIND · {len(rows)} match{'es' if len(rows)!=1 else ''} · {query} · {source}"]
+    for row in rows:
+        stamp=datetime.fromtimestamp(float(row['mtime'])).strftime('%Y-%m-%d %H:%M')
+        size=int(row['bytes']); units=('B','K','M','G','T'); n=float(size); u=units[0]
+        for u in units:
+            if n<1024 or u==units[-1]: break
+            n/=1024
+        human=f"{n:.0f}{u}" if u in {'B','K'} else f"{n:.1f}{u}"
+        node=str(row.get('node') or '')
+        prefix=(node+' · ') if source=='Fabric' and node else ''
+        kind=str(row.get('match') or 'name')
+        lines.append(f"  {stamp}  {human:>7}  {prefix}{row['path']}  [{kind}]")
+        snippet=str(row.get('snippet') or '').replace('\n',' ').strip()
+        if snippet: lines.append(f"                       {snippet[:180]}")
+    return lines
+
+
+def _file_find_selector(rows,query,source):
+    """Interactive result view. Search discovers; normal LOOK owns file actions."""
+    if not (sys.stdin.isatty() and sys.stdout.isatty()):
+        return _page_text('\n'.join(_file_find_lines(rows,query,source))+'\n')
+    fd=sys.stdin.fileno(); old=termios.tcgetattr(fd); idx=0; filter_text=''; notice=''
+    try:
+        tty.setcbreak(fd)
+        while True:
+            terms=filter_text.casefold().split()
+            visible=[r for r in rows if all(t in f"{r.get('path','')} {r.get('snippet','')} {r.get('node','')} {r.get('match','')}".casefold() for t in terms)]
+            idx=min(idx,max(0,len(visible)-1))
+            term=shutil.get_terminal_size((110,32)); usable=max(4,term.lines-6); width=max(60,term.columns)
+            top=max(0,min(max(0,len(visible)-usable),idx-usable+1)); page=visible[top:top+usable]
+            sys.stdout.write("\033[2J\033[H")
+            print(f"LOOK FIND · {len(visible)} of {len(rows)} · {query} · {source}")
+            print("─"*min(width,110))
+            for n,row in enumerate(page,start=top):
+                mark=_c('›','1;36') if n==idx else ' '
+                node=str(row.get('node') or '')
+                kind=str(row.get('match') or 'name')
+                path=str(row.get('path') or '')
+                label=(f"{node} · " if source=='Fabric' and node else '')+path
+                room=max(18,width-len(kind)-7)
+                if len(label)>room: label='…'+label[-(room-1):]
+                print(f"{mark} {label:<{room}}  {_c('['+kind+']','2')}")
+                snippet=str(row.get('snippet') or '').replace('\n',' ').strip()
+                if snippet and n==idx:
+                    print("    "+_c(snippet[:max(20,width-6)],'2'))
+            if not visible: print('  no matches')
+            footer=f"{_c('FILTER','1;36')} {filter_text}█  {_c('type refine · ↑↓ choose · Enter accept · Y copy path · Esc clear/back · q quit','2')}"
+            if notice: footer+='  '+_c(notice,'33'); notice=''
+            print('\n'+footer,end='',flush=True)
+            key=_read_tty_key(fd)
+            if key in {'q','Q','\x03'}: return 0
+            if key=='esc':
+                if filter_text: filter_text=''; idx=0; continue
+                return 0
+            if key in {'up','k'} and visible: idx=max(0,idx-1); continue
+            if key in {'down','j'} and visible: idx=min(len(visible)-1,idx+1); continue
+            if key=='pageup' and visible: idx=max(0,idx-usable); continue
+            if key=='pagedown' and visible: idx=min(len(visible)-1,idx+usable); continue
+            if key in {'y','Y'} and visible:
+                notice='copied path' if _copy_value(visible[idx]['path']) else 'clipboard unavailable'; continue
+            if key in {'\r','\n','right'} and visible:
+                row=visible[idx]; path=Path(str(row.get('path') or '')).expanduser()
+                if not path.exists():
+                    node=str(row.get('node') or 'remote')
+                    notice=f"remote/unmounted result on {node} · path copied with Y"
+                    continue
+                # Leave raw mode before handing the accepted result to the normal
+                # LOOK file view. That view supplies preview, mark/copy/move/remove,
+                # LO context, open-with, path copy, and directory navigation.
+                termios.tcsetattr(fd,termios.TCSADRAIN,old)
+                parent=path if path.is_dir() else path.parent
+                return render([str(parent),'--mode','smart','--interactive','--select',str(path)])
+            if key in {'\x7f','\b'}:
+                if filter_text: filter_text=filter_text[:-1]; idx=0
+                continue
+            if len(key)==1 and key.isprintable(): filter_text+=key; idx=0
+    finally:
+        try: termios.tcsetattr(fd,termios.TCSADRAIN,old)
+        except termios.error: pass
+        if sys.stdout.isatty(): print()
+
+
 def _file_find_command(args):
     if not args:
         print("usage: lk find QUERY")
@@ -14972,21 +15055,7 @@ def _file_find_command(args):
         print(f"LOOK FIND · no matches · {query}")
         if not st['count']: print("  catalog empty · run: lk scan")
         return 1
-    print(f"LOOK FIND · {len(rows)} match{'es' if len(rows)!=1 else ''} · {query} · {source}")
-    for row in rows:
-        stamp=datetime.fromtimestamp(float(row['mtime'])).strftime('%Y-%m-%d %H:%M')
-        size=int(row['bytes']); units=('B','K','M','G','T'); n=float(size); u=units[0]
-        for u in units:
-            if n<1024 or u==units[-1]: break
-            n/=1024
-        human=f"{n:.0f}{u}" if u in {'B','K'} else f"{n:.1f}{u}"
-        node=str(row.get('node') or '')
-        prefix=(node+' · ') if source=='Fabric' and node else ''
-        kind=str(row.get('match') or 'name')
-        print(f"  {stamp}  {human:>7}  {prefix}{row['path']}  [{kind}]")
-        snippet=str(row.get('snippet') or '').replace('\n',' ').strip()
-        if snippet: print(f"                       {snippet[:180]}")
-    return 0
+    return _file_find_selector(rows,query,source)
 
 
 # Canonical human-facing command grammar. Aliases are entry points, not separate implementations.
