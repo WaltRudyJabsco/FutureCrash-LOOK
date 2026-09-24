@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Future Crash + LOOK Unified Node 6.1.15.
+"""Future Crash + LOOK Unified Node 6.1.18.
 
 A small distributed supervisor for trusted personal machines. Immediate events stay
 asynchronous; a one-second fabric pulse reconciles presence, leases and stale work.
@@ -58,8 +58,8 @@ try:
 except ImportError:
     from endpoint_auth import EndpointAuth
 
-VERSION = "6.1.15"
-RELEASE_NAME = "Home Field"
+VERSION = "6.1.18"
+RELEASE_NAME = "Lights Out"
 DEFAULT_HOST = "127.0.0.1"
 DEFAULT_PORT = 7332
 DEFAULT_INGRESS_PORT = 0
@@ -2721,7 +2721,7 @@ def _openjev_shadow(state, question, candidates, *, profile="workspace", consequ
 
 
 class API(BaseHTTPRequestHandler):
-    server_version = "FCLNode/6.1.15"
+    server_version = "FCLNode/6.1.18"
 
     def setup(self):
         self._metric_request_id = None
@@ -4631,6 +4631,7 @@ def main():
     ap.add_argument("--ingress-port",type=int,default=DEFAULT_INGRESS_PORT,
                     help="legacy in-process ingress listener; 0 disables (default; use fcl-ingress)")
     ap.add_argument("--version",action="version",version=f"Future Crash + LOOK node {VERSION} · {RELEASE_NAME}")
+    ap.add_argument("--version-number",action="version",version=VERSION)
     a=ap.parse_args()
     if a.command != "serve":
         try:
