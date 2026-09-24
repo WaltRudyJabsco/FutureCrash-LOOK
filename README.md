@@ -279,7 +279,7 @@ See `docs/COMMAND-GRAMMAR.md`, `look/docs/COMMANDS.md`, and `docs/RELEASE-HISTOR
 
 ## Release
 
-Current release: **6.1.8 — Media Player Edge Diagnostics**.
+Current release: **6.1.9 — Media Root Repair**.
 
 Browser endpoint management is now Fabric-wide: `lk fabric endpoints`, `allow`, and `revoke-endpoint` work from any reachable trusted node rather than only the Signal host. Tailcat adds direct certificate-pinned TLS transport between paired nodes on reachable LAN/IP paths and is preferred automatically; Tailscale remains a fallback for reachability and bootstrap rather than the definition of Fabric networking. Existing 6.0 pairings learn Tailcat metadata from authenticated peer identity and do not require another re-pair.
 

@@ -13514,7 +13514,7 @@ def _media_mpv_request(command):
     """Send one command to the LOOK-owned mpv session, if one is alive."""
     if not hasattr(socket,"AF_UNIX") or not MEDIA_IPC_FILE.exists():
         return None
-    request={"command":list(command),"request_id":uuid.uuid4().hex[:8]}
+    request={"command":list(command),"request_id":int(time.time_ns() & 0x7fffffff)}
     try:
         with socket.socket(socket.AF_UNIX,socket.SOCK_STREAM) as sock:
             sock.settimeout(.6)
@@ -13668,12 +13668,18 @@ def _media_status_snapshot():
     }
 
 
-def _media_entry_source(entry):
-    """Resolve a queue entry without turning ordinary playback into artifact work.
+def _media_local_node_names():
+    """Names that unambiguously refer to this machine for media routing."""
+    names={"local","localhost","127.0.0.1",platform.node(),socket.gethostname()}
+    return {str(name).strip().casefold() for name in names if str(name).strip()}
 
-    Local files are handed straight to mpv. A scanned remote/local catalog id is
-    exposed through the loopback Unified Node media proxy, which owns Fabric auth,
-    TLS pinning and transport fallback. SHA artifacts remain a later/explicit path.
+
+def _media_entry_source(entry):
+    """Resolve a queue entry without disguising stale local paths as streams.
+
+    Local catalog rows must resolve to real local files. Only rows owned by another
+    Fabric node are routed through the loopback media proxy. This keeps a moved or
+    unmounted disk visible as catalog state instead of making mpv fail on a fake URL.
     """
     candidates=[]
     primary_path=str(entry.get("path") or "").strip()
@@ -13690,11 +13696,20 @@ def _media_entry_source(entry):
         target=Path(path).expanduser()
         if target.is_file(): return str(target.resolve())
 
-    # The catalog id is already enough identity for playback. Route it through the
-    # local node instead of spawning fcl-node --json or hashing the file first.
-    for node,_path,entry_id,_digest in candidates:
+    local_names=_media_local_node_names()
+    stale_local=[]
+    for node,path,entry_id,_digest in candidates:
+        if node and str(node).casefold() in local_names:
+            if path:
+                stale_local.append(path)
+            continue
         if node and entry_id:
             return "http://127.0.0.1:7332/v1/media/item?"+urllib.parse.urlencode({"node":node,"id":entry_id})
+
+    if stale_local:
+        raise FileNotFoundError(
+            "stale local catalog path: "+stale_local[0]+" · rescan or relocate the media root"
+        )
 
     digest=str(entry.get("digest") or "").strip()
     source_node=str(entry.get("node") or "").strip()
@@ -14034,9 +14049,47 @@ def _media_info_command(args):
     return 0
 
 
+def _media_relocate_root(old_root,new_root):
+    """Explicitly replace one indexed root, then scan its new filesystem location."""
+    library=_media_library()
+    old=str(Path(old_root).expanduser())
+    old_resolved=str(Path(old).resolve()) if Path(old).exists() else old
+    known=list(library.get("roots") or [])
+    match=next((r for r in known if r==old or r==old_resolved),None)
+    if not match:
+        raise ValueError(f"media root is not indexed: {old_root}")
+    target=Path(new_root).expanduser().resolve()
+    if not target.is_dir():
+        raise NotADirectoryError(target)
+    # Remove the dead root first so a relocation cannot leave duplicate logical rows.
+    library["entries"]=[row for row in library.get("entries") or [] if str(row.get("root") or "")!=match]
+    library["roots"]=[r for r in known if r!=match]
+    return media_core.scan_root(target,library),match,str(target)
+
+
 def _media_scan_command(args):
+    if args and args[0] in {"--relocate","--move-root"}:
+        if len(args)<3:
+            print("usage: lk media scan --relocate OLD_ROOT NEW_ROOT")
+            return 2
+        old_root=args[1]
+        new_root=" ".join(args[2:])
+        started=time.monotonic()
+        try:
+            library,old_base,new_base=_media_relocate_root(old_root,new_root)
+        except (OSError,ValueError,NotADirectoryError) as exc:
+            print(f"LOOK media · {exc}")
+            return 1
+        _media_save_library(library)
+        count=sum(1 for row in library["entries"] if row.get("root")==new_base)
+        print(f"LOOK MEDIA ROOT RELOCATED · {count:,} items · {time.monotonic()-started:.2f}s")
+        print(f"  from  {old_base}")
+        print(f"  to    {new_base}")
+        print(f"  index {MEDIA_LIBRARY_FILE}")
+        return 0
     if not args:
         print("usage: lk media scan ROOT")
+        print("       lk media scan --relocate OLD_ROOT NEW_ROOT")
         return 2
     root=Path(" ".join(args)).expanduser()
     started=time.monotonic()
@@ -14798,7 +14851,7 @@ def media(args):
     action=aliases.get(raw,raw)
     if action not in {"status","play","pause","toggle","next","prev","stop"}:
         print("usage: lk media [browse|find QUERY|fabric|outputs|on NODE play TARGET|identify QUERY|--all|play [TARGET] [--shuffle]|pause|toggle|next|prev|stop|queue|doctor|clear|state|jump INDEX]")
-        print("                [scan ROOT|library|find QUERY|artists|albums|playlist ...|repeat [off|all]]")
+        print("                [scan ROOT|scan --relocate OLD_ROOT NEW_ROOT|library|find QUERY|artists|albums|playlist ...|repeat [off|all]]")
         print("                [add PATH|stream PATH|stream @NODE DIGEST|info [@NODE] DIGEST]")
         return 2
 

@@ -1,4 +1,10 @@
-## 6.1.8 — Media Player Edge Diagnostics
+# Changelog
+
+## 6.1.9 — Media Root Repair
+- Refuse to proxy stale local media rows through localhost; missing local files are now reported as stale catalog paths.
+- Add `lk media scan --relocate OLD_ROOT NEW_ROOT` to replace a moved/mounted media root without leaving duplicate stale entries.
+- Use integer mpv IPC request IDs, removing the mpv 0.41 deprecation warning.
+
 
 - Keep local media as native filesystem paths at the mpv edge instead of converting them to `file://` URIs.
 - Capture the owned mpv worker log at `~/.local/share/look/media_mpv.log` rather than discarding decoder/player errors.
