@@ -25,7 +25,7 @@ try:
 except ImportError:
     from ingress import GuardServer, Handler, watchdog
 
-VERSION = "6.1.14"
+VERSION = "6.1.15"
 DEFAULT_HOST = "0.0.0.0"
 DEFAULT_PORT = 7443
 DEFAULT_BACKEND_HOST = "127.0.0.1"

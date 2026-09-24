@@ -14493,6 +14493,22 @@ def _media_resolve_targets(args):
     return rows,shuffle
 
 
+def _media_prepare_command(args):
+    """Resolve a media request into a logical queue without touching any player.
+
+    Browser endpoints use this to keep catalog/source work on a Fabric node while
+    preserving playback ownership on the originating endpoint.
+    """
+    try:
+        rows,shuffle=_media_resolve_targets(args)
+    except (RuntimeError,ValueError,FileNotFoundError,OSError) as exc:
+        print(json.dumps({"ok":False,"error":str(exc)},ensure_ascii=False,separators=(",",":")))
+        return 1
+    session=media_core.new_session(rows,shuffle=shuffle)
+    print(json.dumps({"ok":True,"session":session},ensure_ascii=False,separators=(",",":")))
+    return 0
+
+
 def _media_play_command(args):
     try:
         rows,shuffle=_media_resolve_targets(args)
@@ -14879,6 +14895,7 @@ def media(args):
             return 1
         if result==0: _media_control_session("status")
         return result
+    if raw=="prepare" and len(args)>1: return _media_prepare_command(args[1:])
     if raw=="play" and len(args)>1: return _media_play_command(args[1:])
 
     aliases={"playpause":"toggle","previous":"prev","back":"prev"}

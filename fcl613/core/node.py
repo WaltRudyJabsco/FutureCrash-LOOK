@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Future Crash + LOOK Unified Node 6.1.14.
+"""Future Crash + LOOK Unified Node 6.1.16.
 
 A small distributed supervisor for trusted personal machines. Immediate events stay
 asynchronous; a one-second fabric pulse reconciles presence, leases and stale work.
@@ -58,7 +58,8 @@ try:
 except ImportError:
     from endpoint_auth import EndpointAuth
 
-VERSION = "6.1.14"
+VERSION = "6.1.16"
+RELEASE_NAME = "Name Tag"
 DEFAULT_HOST = "127.0.0.1"
 DEFAULT_PORT = 7332
 DEFAULT_INGRESS_PORT = 0
@@ -842,6 +843,7 @@ def _build_advertisement():
     return {
         "protocol": 1,
         "version": VERSION,
+        "release_name": RELEASE_NAME,
         "runtime": {"ok": database_ok and worker_ok,
                     "database": database_ok, "job_worker": worker_ok,
                     "job_worker_error": WORKER_HEALTH.get("last_error")},
@@ -882,7 +884,7 @@ def node_info():
     ident=ad["identity"]
     return {"name": ident["name"], "hostname": ident["hostname"],
             "node_id": ident.get("node_id"), "fingerprint": ident.get("fingerprint"),
-            "version": VERSION, "platform": ad["platform"]["system"],
+            "version": VERSION, "release_name": RELEASE_NAME, "platform": ad["platform"]["system"],
             "architecture": ad["platform"]["architecture"],
             "pulse": ad["pulse"], "capabilities": ad["capabilities"],
             "inference": ad["inference"], "supervisor": ad["supervisor"]}
@@ -2302,11 +2304,11 @@ def _local_media_route(operation, payload):
     if not lk:
         raise RuntimeError("LOOK command unavailable")
     operation = str(operation or "").casefold()
-    if operation == "play":
+    if operation in {"play", "prepare"}:
         query = " ".join(str(payload.get("query") or "").split()).strip()
         if not query:
-            raise ValueError("media play query required")
-        argv = [lk, "media", "play", query]
+            raise ValueError("media query required")
+        argv = [lk, "media", "prepare" if operation == "prepare" else "play", query]
         if bool(payload.get("shuffle")):
             argv.append("--shuffle")
     elif operation == "control":
@@ -2333,6 +2335,17 @@ def _local_media_route(operation, payload):
     cp = subprocess.run(argv, input=(json.dumps(session) if operation=="adopt" else None), capture_output=True, text=True, timeout=90.0, env={**os.environ, "NO_COLOR": "1"})
     if cp.returncode:
         raise RuntimeError((cp.stderr or cp.stdout or f"media {operation} failed").strip()[:1000])
+    if operation == "prepare":
+        try:
+            prepared=json.loads((cp.stdout or "{}").strip() or "{}")
+        except json.JSONDecodeError as exc:
+            raise RuntimeError("invalid prepared media session") from exc
+        session=prepared.get("session") or {}
+        if not session.get("queue"):
+            raise RuntimeError(str(prepared.get("error") or "prepared media queue is empty"))
+        return {"ok":True,"node":identity()["name"],"state":"prepared","active":False,
+                "index":int(session.get("current_index") or 0),"queue":session.get("queue") or [],
+                "count":len(session.get("queue") or [])}
     state = _local_media_state()
     state["ok"] = True
     state["message"] = (cp.stdout or "").strip()[-1000:]
@@ -2708,7 +2721,7 @@ def _openjev_shadow(state, question, candidates, *, profile="workspace", consequ
 
 
 class API(BaseHTTPRequestHandler):
-    server_version = "FCLNode/6.1.14"
+    server_version = "FCLNode/6.1.16"
 
     def setup(self):
         self._metric_request_id = None
@@ -4045,7 +4058,7 @@ def _dash_render_full(data, width=92, ansi=False):
     if beacon:
         lines.append(f"FABRIC BEACON · {str(beacon['color']).upper()} · pulse {beacon['pulse']} · from {beacon.get('origin') or 'fabric'}")
         lines.append(rule)
-    lines.append(f"FABRIC  {local.get('name','local')} · node {local.get('version','?')} · {live} node{'s' if live != 1 else ''}")
+    lines.append(f"FABRIC  {local.get('name','local')} · node {local.get('version','?')} · {local.get('release_name','')} · {live} node{'s' if live != 1 else ''}")
 
     warnings = []
     if not health.get("ok", False):
@@ -4230,7 +4243,7 @@ def _dash_render_wide(data, width=120, height=28, ansi=False):
            f"fabric {len(rows)}/{len(rows)} receipts●")
 
     lines=[f"FUTURE CRASH + LOOK · FABRIC DASH   {time.strftime('%Y-%m-%d %I:%M:%S %p %Z')}",rule,
-           f"FABRIC  {local.get('name','local')} · node {local.get('version','?')} · {len(rows)} node{'s' if len(rows)!=1 else ''} · health {'ok' if health.get('ok') else 'degraded'}",
+           f"FABRIC  {local.get('name','local')} · node {local.get('version','?')} · {local.get('release_name','')} · {len(rows)} node{'s' if len(rows)!=1 else ''} · health {'ok' if health.get('ok') else 'degraded'}",
            "", "NODES / MODELS", rule]
 
     node_w=22 if width>=124 else 18
@@ -4276,7 +4289,7 @@ def _dash_render_condensed(data, width=92, height=30, ansi=False):
     active=[j for j in jobs if str(j.get("status") or "") not in {"ok","done","failed","cancelled","canceled"}]
     pending_decisions=_dash_pending_decisions(data)
     lines=[f"FUTURE CRASH + LOOK · FABRIC DASH   {time.strftime('%Y-%m-%d %I:%M:%S %p %Z')}",rule,
-           f"FABRIC  {local.get('name','local')} · node {local.get('version','?')} · {len(rows)} node{'s' if len(rows)!=1 else ''} · health {'ok' if health.get('ok') else 'degraded'}","",
+           f"FABRIC  {local.get('name','local')} · node {local.get('version','?')} · {local.get('release_name','')} · {len(rows)} node{'s' if len(rows)!=1 else ''} · health {'ok' if health.get('ok') else 'degraded'}","",
            "NODES / MODELS",rule]
     for name,node in rows:
         lines.append(f"{str(name):<22.22} {_dash_state(node):<14.14} {_dash_model(node)[:max(16,width-39)]}")
@@ -4617,7 +4630,8 @@ def main():
     ap.add_argument("--host",default=DEFAULT_HOST); ap.add_argument("--port",type=int,default=DEFAULT_PORT)
     ap.add_argument("--ingress-port",type=int,default=DEFAULT_INGRESS_PORT,
                     help="legacy in-process ingress listener; 0 disables (default; use fcl-ingress)")
-    ap.add_argument("--version",action="version",version=f"Future Crash + LOOK node {VERSION}")
+    ap.add_argument("--version",action="version",version=f"Future Crash + LOOK node {VERSION} · {RELEASE_NAME}")
+    ap.add_argument("--version-number",action="version",version=VERSION)
     a=ap.parse_args()
     if a.command != "serve":
         try:
@@ -5063,7 +5077,7 @@ def main():
                                         name="fabric-ingress",daemon=True)
         ingress_thread.start()
     ingress_note=f" · ingress {a.host}:{a.ingress_port}" if ingress else ""
-    print(f"Future Crash + LOOK node {VERSION} · local http://{a.host}:{a.port}{ingress_note} · pulse {PULSE_SECONDS:g}s",flush=True)
+    print(f"Future Crash + LOOK node {VERSION} · {RELEASE_NAME} · local http://{a.host}:{a.port}{ingress_note} · pulse {PULSE_SECONDS:g}s",flush=True)
     try: srv.serve_forever(poll_interval=.2)
     except KeyboardInterrupt: pass
     finally:

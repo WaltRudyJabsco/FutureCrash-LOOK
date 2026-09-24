@@ -1,13 +1,13 @@
 #!/usr/bin/env bash
 set -euo pipefail
 ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
-echo "Future Crash + LOOK 6.1.14 · Unified Installer Repair"
+echo "Future Crash + LOOK 6.1.16 · Name Tag"
 echo "────────────────────────────────────────"
 
 # Refuse a mixed bundle before mutating the machine. A unified release must move
 # LOOK and the node together.
 EXPECTED_RELEASE="$(tr -d '[:space:]' < "$ROOT/VERSION")"
-[[ "$EXPECTED_RELEASE" == "6.1.14" ]] || { echo "BUNDLE ERROR: expected release 6.1.14, found $EXPECTED_RELEASE"; exit 4; }
+[[ "$EXPECTED_RELEASE" == "6.1.16" ]] || { echo "BUNDLE ERROR: expected release 6.1.15, found $EXPECTED_RELEASE"; exit 4; }
 grep -q 'def _fabric_command' "$ROOT/look/lk" || { echo "BUNDLE ERROR: LOOK source has no Fabric command"; exit 4; }
 grep -q 'choices=.*serve.*fabric' "$ROOT/core/node.py" || { echo "BUNDLE ERROR: node source has no Fabric CLI"; exit 4; }
 
@@ -28,7 +28,7 @@ FCL_UNIFIED_INSTALL_CHILD=1 "$ROOT/install-look.sh" "$@"
 ((UNINSTALL)) && exit 0
 if ((DRY_RUN)); then
   echo
-  echo "[dry-run] would install/restart Unified Node 6.1.14 with Fabric-wide endpoint management, Tailcat direct TLS transport, enforced Fabric peer authorization, accountless browser endpoint pairing, Fabric SearXNG discovery/search, Decision Plane, Content Search, Media, Artifacts, Memory, and Signal Window 1.8.1"
+  echo "[dry-run] would install/restart Unified Node 6.1.15 with Fabric-wide endpoint management, Tailcat direct TLS transport, enforced Fabric peer authorization, accountless browser endpoint pairing, Fabric SearXNG discovery/search, Decision Plane, Content Search, Media, Artifacts, Memory, and Signal Window 1.8.1"
   echo "[dry-run] OpenJev mode: $OPENJEV_MODE (auto adopts an existing worker; absence is non-fatal)"
   echo "[dry-run] would initialize Tailcat :7443 as preferred direct encrypted transport, keep Tailscale :7332 → fcl-ingress :7333 as fallback, and verify Fabric CLI wiring"
   exit 0
@@ -280,7 +280,7 @@ except Exception:
 PY_NODE_VERSION
 }
 
-CLI_NODE_VERSION="$("$HOME/.local/bin/fcl-node" --version 2>/dev/null | awk '{print $NF}' || true)"
+CLI_NODE_VERSION="$("$HOME/.local/bin/fcl-node" --version-number 2>/dev/null || true)"
 if [[ "$CLI_NODE_VERSION" != "$EXPECTED_RELEASE" ]]; then
   echo "INSTALL ERROR: installed fcl-node reports '${CLI_NODE_VERSION:-unavailable}', expected $EXPECTED_RELEASE" >&2
   exit 5

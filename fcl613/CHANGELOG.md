@@ -1,3 +1,11 @@
+# Future Crash + LOOK 6.1.15 — Home Field
+
+- Browser media commands now distinguish **origin endpoint**, **catalog/source node**, and **output target**.
+- `This Device` is a true local output: a play request prepares a queue on the Fabric media source without ever launching that source node's player.
+- Browser playback streams prepared entries by stable media ID, so it no longer depends on or mutates the source node's active queue.
+- Explicit OUT selection still supports remote control (`play ... on 3090` / node target).
+- Media receipts carry the authorized browser endpoint identity and explicit output target, laying the request-envelope foundation for capability routing and service failover.
+
 # 6.1.14 — Unified Installer Repair
 
 - Fixed the split installer regression that allowed LOOK/media to update while the resident Fabric node remained on an older release.

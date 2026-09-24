@@ -3,11 +3,11 @@ from pathlib import Path
 ROOT=Path(__file__).resolve().parents[1]
 
 def test_release_versions_are_synchronized():
-    assert (ROOT/'VERSION').read_text().strip()=='6.1.14'
-    assert (ROOT/'look/VERSION').read_text().strip()=='6.1.14'
+    assert (ROOT/'VERSION').read_text().strip()=='6.1.15'
+    assert (ROOT/'look/VERSION').read_text().strip()=='6.1.15'
     for rel in ('core/node.py','core/tailcat.py','core/ingress.py'):
         text=(ROOT/rel).read_text()
-        assert '6.1.14' in text
+        assert '6.1.15' in text
         assert '6.1.8' not in text
 
 def test_signal_browser_is_default_media_endpoint():
@@ -21,5 +21,5 @@ def test_signal_browser_is_default_media_endpoint():
 def test_signal_server_distinguishes_source_node_from_browser_output():
     py=(ROOT/'signal-window/server.py').read_text()
     assert 'media_endpoint=str(d.get("media_endpoint") or "").strip()' in py
-    assert 'if media_endpoint=="browser"' in py
+    assert 'browser_target=(media_endpoint=="browser" or not media_endpoint)' in py
     assert 'Playing {query} on this device.' in py
