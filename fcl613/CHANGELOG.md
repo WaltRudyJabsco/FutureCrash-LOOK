@@ -1,3 +1,10 @@
+# 6.1.14 — Unified Installer Repair
+
+- Fixed the split installer regression that allowed LOOK/media to update while the resident Fabric node remained on an older release.
+- `install-look.sh` now delegates direct invocations to the top-level unified installer; the unified installer marks its internal LOOK phase to avoid recursion.
+- `install-look.sh` now derives the product release from the bundle `VERSION` file instead of carrying an independent hard-coded version.
+- Unified install still verifies the installed and live node versions before completing.
+
 # 6.1.13 — Transactional Node Upgrade
 
 - Stops the managed Unified Node before replacing runtime source.

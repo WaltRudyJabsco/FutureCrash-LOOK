@@ -3,7 +3,15 @@ set -euo pipefail
 
 ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 
-PRODUCT_VERSION="6.1.12"
+# install-look.sh remains a compatibility entry point, but Future Crash + LOOK is
+# one product. Direct invocations must not create a split install where LOOK is
+# updated while the resident Fabric node is left behind. The unified installer
+# sets FCL_UNIFIED_INSTALL_CHILD=1 when it calls back into this LOOK phase.
+if [[ "${FCL_UNIFIED_INSTALL_CHILD:-0}" != "1" && -x "$ROOT/install.sh" ]]; then
+  exec "$ROOT/install.sh" "$@"
+fi
+
+PRODUCT_VERSION="$(tr -d '[:space:]' < "$ROOT/VERSION")"
 LOOK_VERSION="4.51.5"
 FUTURE_CRASH_VERSION="1.2.2"
 
