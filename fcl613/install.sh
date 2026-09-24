@@ -1,13 +1,13 @@
 #!/usr/bin/env bash
 set -euo pipefail
 ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
-echo "Future Crash + LOOK 6.1.16 · Name Tag"
+echo "Future Crash + LOOK 6.1.17 · Safe Harbor"
 echo "────────────────────────────────────────"
 
 # Refuse a mixed bundle before mutating the machine. A unified release must move
 # LOOK and the node together.
 EXPECTED_RELEASE="$(tr -d '[:space:]' < "$ROOT/VERSION")"
-[[ "$EXPECTED_RELEASE" == "6.1.16" ]] || { echo "BUNDLE ERROR: expected release 6.1.15, found $EXPECTED_RELEASE"; exit 4; }
+[[ "$EXPECTED_RELEASE" == "6.1.17" ]] || { echo "BUNDLE ERROR: expected release 6.1.17, found $EXPECTED_RELEASE"; exit 4; }
 grep -q 'def _fabric_command' "$ROOT/look/lk" || { echo "BUNDLE ERROR: LOOK source has no Fabric command"; exit 4; }
 grep -q 'choices=.*serve.*fabric' "$ROOT/core/node.py" || { echo "BUNDLE ERROR: node source has no Fabric CLI"; exit 4; }
 
@@ -28,11 +28,32 @@ FCL_UNIFIED_INSTALL_CHILD=1 "$ROOT/install-look.sh" "$@"
 ((UNINSTALL)) && exit 0
 if ((DRY_RUN)); then
   echo
-  echo "[dry-run] would install/restart Unified Node 6.1.15 with Fabric-wide endpoint management, Tailcat direct TLS transport, enforced Fabric peer authorization, accountless browser endpoint pairing, Fabric SearXNG discovery/search, Decision Plane, Content Search, Media, Artifacts, Memory, and Signal Window 1.8.1"
+  echo "[dry-run] would install/restart Unified Node 6.1.17 · Safe Harbor with Fabric-wide endpoint management, Tailcat direct TLS transport, enforced Fabric peer authorization, accountless browser endpoint pairing, Fabric SearXNG discovery/search, Decision Plane, Content Search, Media, Artifacts, Memory, and Signal Window 1.8.1"
   echo "[dry-run] OpenJev mode: $OPENJEV_MODE (auto adopts an existing worker; absence is non-fatal)"
   echo "[dry-run] would initialize Tailcat :7443 as preferred direct encrypted transport, keep Tailscale :7332 → fcl-ingress :7333 as fallback, and verify Fabric CLI wiring"
   exit 0
 fi
+
+# Restore a healthy managed node if an upgrade aborts after stopping it.
+NODE_WAS_RUNNING=0; NODE_STOPPED_BY_INSTALLER=0; INSTALL_COMPLETE=0
+if [[ "$(uname -s)" == "Linux" ]] && command -v systemctl >/dev/null 2>&1; then
+  systemctl --user is-active --quiet future-crash-look-node.service && NODE_WAS_RUNNING=1 || true
+elif [[ "$(uname -s)" == "Darwin" ]] && command -v launchctl >/dev/null 2>&1; then
+  launchctl print "gui/$(id -u)/com.futurecrash.look.node" >/dev/null 2>&1 && NODE_WAS_RUNNING=1 || true
+fi
+restore_node_on_failure() {
+  local status=$?
+  if (( status != 0 && INSTALL_COMPLETE == 0 && NODE_WAS_RUNNING == 1 && NODE_STOPPED_BY_INSTALLER == 1 )); then
+    echo "  install failed · restoring previously running Unified Node" >&2
+    if [[ "$(uname -s)" == "Linux" ]] && command -v systemctl >/dev/null 2>&1; then
+      systemctl --user start future-crash-look-node.service >/dev/null 2>&1 || true
+    elif [[ "$(uname -s)" == "Darwin" ]] && command -v launchctl >/dev/null 2>&1; then
+      launchctl bootstrap "gui/$(id -u)" "$HOME/Library/LaunchAgents/com.futurecrash.look.node.plist" >/dev/null 2>&1 || true
+    fi
+  fi
+  return "$status"
+}
+trap restore_node_on_failure EXIT
 
 # Upgrade the resident node transactionally. Stop the service before replacing
 # its Python source; otherwise systemd Restart=on-failure can race the installer
@@ -42,8 +63,10 @@ retire_resident_node() {
   os="$(uname -s)"
   if [[ "$os" == "Linux" ]] && command -v systemctl >/dev/null 2>&1; then
     systemctl --user stop future-crash-look-node.service >/dev/null 2>&1 || true
+    (( NODE_WAS_RUNNING == 1 )) && NODE_STOPPED_BY_INSTALLER=1
   elif [[ "$os" == "Darwin" ]] && command -v launchctl >/dev/null 2>&1; then
     launchctl bootout "gui/$(id -u)/com.futurecrash.look.node" >/dev/null 2>&1 || true
+    (( NODE_WAS_RUNNING == 1 )) && NODE_STOPPED_BY_INSTALLER=1
   fi
 
   # Retire only this user's known Future Crash node interpreters. This also
@@ -59,24 +82,22 @@ retire_resident_node() {
     done < <(pgrep -f 'future-crash-look/core/node.py|/.local/bin/fcl-node serve' 2>/dev/null || true)
   fi
 
-  # Give the old interpreter a bounded moment to release localhost :7332.
+  # Test the exact local endpoint. Tailscale legitimately owns :7332 on its
+  # tailnet addresses, and bind() can be fooled by socket teardown state.
   for _ in {1..25}; do
-    if python3 - <<'PY_PORT_FREE' >/dev/null 2>&1
+    if ! python3 - <<'PY_LOCAL_NODE' >/dev/null 2>&1
 import socket
 s=socket.socket(); s.settimeout(.1)
-try: s.bind(("127.0.0.1",7332)); ok=True
-except OSError: ok=False
+try: s.connect(("127.0.0.1",7332)); listening=True
+except OSError: listening=False
 finally: s.close()
-raise SystemExit(0 if ok else 1)
-PY_PORT_FREE
-    then
-      return 0
-    fi
+raise SystemExit(0 if listening else 1)
+PY_LOCAL_NODE
+    then return 0; fi
     sleep 0.1
   done
-
-  echo "INSTALL ERROR: localhost :7332 is still occupied after stopping the managed Future Crash node" >&2
-  if command -v lsof >/dev/null 2>&1; then lsof -nP -iTCP:7332 -sTCP:LISTEN >&2 || true; fi
+  echo "INSTALL ERROR: 127.0.0.1:7332 is still answering after stopping the managed Future Crash node" >&2
+  if command -v ss >/dev/null 2>&1; then ss -ltnp 2>/dev/null | grep -E '127\.0\.0\.1:7332([[:space:]]|$)' >&2 || true; fi
   return 1
 }
 
@@ -399,3 +420,7 @@ echo "  fcl-node activity   # supervisor truth"
 echo "  fcl-node http       # local + guarded-ingress HTTP pressure"
 echo "  fcl-node nodes      # peers + node advertisements"
 echo "  fcl-node jobs       # durable Fabric work ledger"
+
+# All verification completed; failure recovery is no longer needed.
+INSTALL_COMPLETE=1
+trap - EXIT

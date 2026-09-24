@@ -1,3 +1,9 @@
+# Future Crash + LOOK 6.1.17 — Safe Harbor
+
+- Installer shutdown verification probes only `127.0.0.1:7332`; Tailscale may legitimately listen on :7332 on tailnet addresses.
+- Uses an exact localhost connect test instead of bind(), avoiding socket-teardown false positives.
+- Failed upgrades restore a managed Unified Node that was running when installation began.
+
 # Future Crash + LOOK 6.1.15 — Home Field
 
 - Browser media commands now distinguish **origin endpoint**, **catalog/source node**, and **output target**.
