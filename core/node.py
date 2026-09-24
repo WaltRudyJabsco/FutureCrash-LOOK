@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Future Crash + LOOK Unified Node 6.1.7.
+"""Future Crash + LOOK Unified Node 6.1.8.
 
 A small distributed supervisor for trusted personal machines. Immediate events stay
 asynchronous; a one-second fabric pulse reconciles presence, leases and stale work.
@@ -58,7 +58,7 @@ try:
 except ImportError:
     from endpoint_auth import EndpointAuth
 
-VERSION = "6.1.7"
+VERSION = "6.1.8"
 DEFAULT_HOST = "127.0.0.1"
 DEFAULT_PORT = 7332
 DEFAULT_INGRESS_PORT = 0
@@ -2708,7 +2708,7 @@ def _openjev_shadow(state, question, candidates, *, profile="workspace", consequ
 
 
 class API(BaseHTTPRequestHandler):
-    server_version = "FCLNode/6.1.7"
+    server_version = "FCLNode/6.1.8"
 
     def setup(self):
         self._metric_request_id = None

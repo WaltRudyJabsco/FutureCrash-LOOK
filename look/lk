@@ -58,6 +58,7 @@ MEDIA_LIBRARY_FILE=STATE_DIR/"media_library.json"
 MEDIA_PLAYLIST_DIR=STATE_DIR/"media_playlists"
 MEDIA_QUEUE_FILE=STATE_DIR/"media_queue.m3u8"
 MEDIA_IPC_FILE=STATE_DIR/"media.sock"
+MEDIA_MPV_LOG=STATE_DIR/"media_mpv.log"
 FILE_CATALOG_DB=STATE_DIR/"file_catalog.sqlite3"
 _SESSION_PATH_GRANTS=[]
 _ONCE_PATH_GRANTS=[]
@@ -13687,7 +13688,7 @@ def _media_entry_source(entry):
         if not path: continue
         if path.startswith(("http://","https://")): return path
         target=Path(path).expanduser()
-        if target.is_file(): return target.resolve().as_uri()
+        if target.is_file(): return str(target.resolve())
 
     # The catalog id is already enough identity for playback. Route it through the
     # local node instead of spawning fcl-node --json or hashing the file first.
@@ -13752,6 +13753,64 @@ def _media_mpv_binary():
     return ""
 
 
+def _media_tail_player_log(limit=12):
+    try:
+        lines=MEDIA_MPV_LOG.read_text(encoding="utf-8",errors="replace").splitlines()
+    except OSError:
+        return []
+    return lines[-max(1,int(limit)):]
+
+
+def _media_doctor():
+    """Small deterministic probe for the player edge and current queue source."""
+    mpv=_media_mpv_binary()
+    print("LOOK MEDIA DOCTOR")
+    print(f"  mpv       {mpv or 'missing'}")
+    if mpv:
+        try:
+            cp=subprocess.run([mpv,"--version"],capture_output=True,text=True,timeout=3)
+            first=(cp.stdout or cp.stderr or "").splitlines()[:1]
+            if first: print(f"  version   {first[0]}")
+        except Exception as exc:
+            print(f"  version   error · {exc}")
+    session=_media_session() or {}
+    queue=session.get("queue") or []
+    print(f"  queue     {len(queue)} item{'s' if len(queue)!=1 else ''}")
+    if queue:
+        idx=max(0,min(int(session.get("current_index") or 0),len(queue)-1))
+        row=queue[idx]
+        print(f"  item      {idx+1}/{len(queue)} · {_media_entry_label(row)}")
+        try:
+            source=_media_entry_source(row)
+            print(f"  source    {source}")
+            local=Path(source).expanduser() if not str(source).startswith(("http://","https://")) else None
+            if local is not None:
+                try:
+                    st=local.stat(); print(f"  bytes     {st.st_size:,}")
+                except OSError as exc:
+                    print(f"  bytes     unavailable · {exc}")
+            if mpv:
+                probe=[mpv,"--no-config","--no-terminal","--ao=null","--vo=null","--length=0.25",source]
+                try:
+                    cp=subprocess.run(probe,capture_output=True,text=True,timeout=6)
+                    print(f"  decode    {'ok' if cp.returncode==0 else 'failed'} · exit {cp.returncode}")
+                    detail=(cp.stderr or cp.stdout or "").strip().splitlines()[-4:]
+                    for line in detail:
+                        print(f"            {line[:180]}")
+                except subprocess.TimeoutExpired:
+                    print("  decode    timeout after 6s")
+                except Exception as exc:
+                    print(f"  decode    error · {exc}")
+        except Exception as exc:
+            print(f"  source    error · {exc}")
+    log=_media_tail_player_log(8)
+    if log:
+        print("  last mpv log:")
+        for line in log:
+            print(f"    {line[:180]}")
+    return 0
+
+
 def _media_launch_session(session):
     """Mirror LOOK's canonical queue into mpv and start at the requested item."""
     session=media_core.normalize_session(session)
@@ -13813,11 +13872,17 @@ def _media_launch_session(session):
     try: MEDIA_IPC_FILE.unlink(missing_ok=True)
     except OSError: pass
 
+    try:
+        MEDIA_MPV_LOG.parent.mkdir(parents=True,exist_ok=True)
+        MEDIA_MPV_LOG.write_text("",encoding="utf-8")
+    except OSError:
+        pass
     cmd=[
         mpv,
         f"--input-ipc-server={MEDIA_IPC_FILE}",
         "--no-terminal",
         "--idle=yes",
+        f"--log-file={MEDIA_MPV_LOG}",
         f"--playlist={MEDIA_QUEUE_FILE}",
         f"--playlist-start={idx}",
     ]
@@ -13855,7 +13920,7 @@ def _media_launch_stream(url,source="",session=None):
         _media_stop_owned_mpvs()
         try: MEDIA_IPC_FILE.unlink(missing_ok=True)
         except OSError: pass
-        cmd=[mpv,f"--input-ipc-server={MEDIA_IPC_FILE}","--no-terminal","--idle=yes",url]
+        cmd=[mpv,f"--input-ipc-server={MEDIA_IPC_FILE}","--no-terminal","--idle=yes",f"--log-file={MEDIA_MPV_LOG}",url]
         proc=subprocess.Popen(cmd,stdin=subprocess.DEVNULL,stdout=subprocess.DEVNULL,stderr=subprocess.DEVNULL)
         if session is None:
             session=media_core.new_session([{"title":source or "Fabric media","digest":"stream"}])
@@ -14691,6 +14756,7 @@ def media(args):
     if raw=="artists": return _media_group_command("artist",args[1:])
     if raw=="albums": return _media_group_command("album",args[1:])
     if raw=="queue": return _media_queue_command()
+    if raw in {"doctor","diagnose","debug"}: return _media_doctor()
     if raw=="clear": return _media_clear_command()
     if raw in {"playlist","playlists"}: return _media_playlist_command(args[1:] if raw=="playlist" else ["list"])
     if raw=="save":
@@ -14731,7 +14797,7 @@ def media(args):
     aliases={"playpause":"toggle","previous":"prev","back":"prev"}
     action=aliases.get(raw,raw)
     if action not in {"status","play","pause","toggle","next","prev","stop"}:
-        print("usage: lk media [browse|find QUERY|fabric|outputs|on NODE play TARGET|identify QUERY|--all|play [TARGET] [--shuffle]|pause|toggle|next|prev|stop|queue|clear|state|jump INDEX]")
+        print("usage: lk media [browse|find QUERY|fabric|outputs|on NODE play TARGET|identify QUERY|--all|play [TARGET] [--shuffle]|pause|toggle|next|prev|stop|queue|doctor|clear|state|jump INDEX]")
         print("                [scan ROOT|library|find QUERY|artists|albums|playlist ...|repeat [off|all]]")
         print("                [add PATH|stream PATH|stream @NODE DIGEST|info [@NODE] DIGEST]")
         return 2

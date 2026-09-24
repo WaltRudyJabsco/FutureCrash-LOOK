@@ -1,3 +1,10 @@
+## 6.1.8 — Media Player Edge Diagnostics
+
+- Keep local media as native filesystem paths at the mpv edge instead of converting them to `file://` URIs.
+- Capture the owned mpv worker log at `~/.local/share/look/media_mpv.log` rather than discarding decoder/player errors.
+- Add `lk media doctor` (aliases: `diagnose`, `debug`) to show mpv/version, current source, byte size, a short decode probe, and recent player log.
+- Preserve normal queue/session behavior; this release targets the observed 0:00 rapid-skip failure at the actual player/decoder edge.
+
 ## 6.1.7 — Media + Signal Repair
 
 - Make ordinary media playback use stable catalog owner/id streaming through the loopback Unified Node instead of nested `fcl-node --json` identification.
