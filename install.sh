@@ -1,13 +1,13 @@
 #!/usr/bin/env bash
 set -euo pipefail
 ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
-echo "Future Crash + LOOK 6.1.10 · Media Mount Race Repair"
+echo "Future Crash + LOOK 6.1.15 · Home Field"
 echo "────────────────────────────────────────"
 
 # Refuse a mixed bundle before mutating the machine. A unified release must move
 # LOOK and the node together.
 EXPECTED_RELEASE="$(tr -d '[:space:]' < "$ROOT/VERSION")"
-[[ "$EXPECTED_RELEASE" == "6.1.10" ]] || { echo "BUNDLE ERROR: expected release 6.1.9, found $EXPECTED_RELEASE"; exit 4; }
+[[ "$EXPECTED_RELEASE" == "6.1.15" ]] || { echo "BUNDLE ERROR: expected release 6.1.15, found $EXPECTED_RELEASE"; exit 4; }
 grep -q 'def _fabric_command' "$ROOT/look/lk" || { echo "BUNDLE ERROR: LOOK source has no Fabric command"; exit 4; }
 grep -q 'choices=.*serve.*fabric' "$ROOT/core/node.py" || { echo "BUNDLE ERROR: node source has no Fabric CLI"; exit 4; }
 
@@ -24,15 +24,63 @@ for a in "$@"; do
 done
 case "$OPENJEV_MODE" in off|auto|adopt|install) ;; *) echo "BUNDLE ERROR: invalid --openjev mode: $OPENJEV_MODE"; exit 4;; esac
 
-"$ROOT/install-look.sh" "$@"
+FCL_UNIFIED_INSTALL_CHILD=1 "$ROOT/install-look.sh" "$@"
 ((UNINSTALL)) && exit 0
 if ((DRY_RUN)); then
   echo
-  echo "[dry-run] would install/restart Unified Node 6.1.10 with Fabric-wide endpoint management, Tailcat direct TLS transport, enforced Fabric peer authorization, accountless browser endpoint pairing, Fabric SearXNG discovery/search, Decision Plane, Content Search, Media, Artifacts, Memory, and Signal Window 1.8.1"
+  echo "[dry-run] would install/restart Unified Node 6.1.15 with Fabric-wide endpoint management, Tailcat direct TLS transport, enforced Fabric peer authorization, accountless browser endpoint pairing, Fabric SearXNG discovery/search, Decision Plane, Content Search, Media, Artifacts, Memory, and Signal Window 1.8.1"
   echo "[dry-run] OpenJev mode: $OPENJEV_MODE (auto adopts an existing worker; absence is non-fatal)"
   echo "[dry-run] would initialize Tailcat :7443 as preferred direct encrypted transport, keep Tailscale :7332 → fcl-ingress :7333 as fallback, and verify Fabric CLI wiring"
   exit 0
 fi
+
+# Upgrade the resident node transactionally. Stop the service before replacing
+# its Python source; otherwise systemd Restart=on-failure can race the installer
+# and leave an old interpreter owning :7332 even though the files on disk are new.
+retire_resident_node() {
+  local os pid args owner
+  os="$(uname -s)"
+  if [[ "$os" == "Linux" ]] && command -v systemctl >/dev/null 2>&1; then
+    systemctl --user stop future-crash-look-node.service >/dev/null 2>&1 || true
+  elif [[ "$os" == "Darwin" ]] && command -v launchctl >/dev/null 2>&1; then
+    launchctl bootout "gui/$(id -u)/com.futurecrash.look.node" >/dev/null 2>&1 || true
+  fi
+
+  # Retire only this user's known Future Crash node interpreters. This also
+  # catches pre-systemd/manual launches from older releases.
+  if command -v pgrep >/dev/null 2>&1; then
+    while read -r pid; do
+      [[ -n "$pid" && "$pid" != "$$" ]] || continue
+      owner="$(ps -p "$pid" -o uid= 2>/dev/null | tr -d ' ' || true)"
+      args="$(ps -p "$pid" -o args= 2>/dev/null || true)"
+      if [[ "$owner" == "$(id -u)" && ( "$args" == *"future-crash-look/core/node.py"* || "$args" == *"/.local/bin/fcl-node serve"* ) ]]; then
+        kill "$pid" >/dev/null 2>&1 || true
+      fi
+    done < <(pgrep -f 'future-crash-look/core/node.py|/.local/bin/fcl-node serve' 2>/dev/null || true)
+  fi
+
+  # Give the old interpreter a bounded moment to release localhost :7332.
+  for _ in {1..25}; do
+    if python3 - <<'PY_PORT_FREE' >/dev/null 2>&1
+import socket
+s=socket.socket(); s.settimeout(.1)
+try: s.bind(("127.0.0.1",7332)); ok=True
+except OSError: ok=False
+finally: s.close()
+raise SystemExit(0 if ok else 1)
+PY_PORT_FREE
+    then
+      return 0
+    fi
+    sleep 0.1
+  done
+
+  echo "INSTALL ERROR: localhost :7332 is still occupied after stopping the managed Future Crash node" >&2
+  if command -v lsof >/dev/null 2>&1; then lsof -nP -iTCP:7332 -sTCP:LISTEN >&2 || true; fi
+  return 1
+}
+
+retire_resident_node
 
 mkdir -p "$HOME/.local/share/future-crash-look/core" "$HOME/.local/bin"
 install -m 0755 "$ROOT/core/node.py" "$HOME/.local/share/future-crash-look/core/node.py"
@@ -218,15 +266,38 @@ if command -v tailscale >/dev/null 2>&1; then
   fi
 fi
 
-# Give the platform service manager a moment to publish the fresh daemon before
-# verifying the LOOK→Fabric path. This is a bounded startup wait, not a fixed sleep.
+# Verify the live daemon, not merely the files on disk. Upgrade lifecycle above
+# guarantees that no previous Future Crash interpreter survives source replacement.
+live_node_version() {
+  python3 - <<'PY_NODE_VERSION' 2>/dev/null || true
+import json, urllib.request
+try:
+    with urllib.request.urlopen("http://127.0.0.1:7332/v1/health", timeout=.35) as r:
+        d=json.loads(r.read() or b"{}")
+    print(str(d.get("version") or ""))
+except Exception:
+    pass
+PY_NODE_VERSION
+}
+
+CLI_NODE_VERSION="$("$HOME/.local/bin/fcl-node" --version 2>/dev/null | awk '{print $NF}' || true)"
+if [[ "$CLI_NODE_VERSION" != "$EXPECTED_RELEASE" ]]; then
+  echo "INSTALL ERROR: installed fcl-node reports '${CLI_NODE_VERSION:-unavailable}', expected $EXPECTED_RELEASE" >&2
+  exit 5
+fi
+
+# A release is ready only when the process actually answering :7332 reports this
+# exact release. This closes the old 'new files / old daemon' split-brain hole.
 NODE_READY=0
-for _ in {1..25}; do
-  if "$HOME/.local/bin/fcl-node" pulse >/dev/null 2>&1; then NODE_READY=1; break; fi
+for _ in {1..40}; do
+  CURRENT_NODE_VERSION="$(live_node_version)"
+  if [[ "$CURRENT_NODE_VERSION" == "$EXPECTED_RELEASE" ]]; then NODE_READY=1; break; fi
   sleep 0.2
 done
 if (( ! NODE_READY )); then
-  echo "INSTALL ERROR: Unified Node did not become ready on local :7332" >&2
+  echo "INSTALL ERROR: live Unified Node version '${CURRENT_NODE_VERSION:-unavailable}' does not match installed $EXPECTED_RELEASE" >&2
+  echo "  inspect: systemctl --user status future-crash-look-node.service --no-pager" >&2
+  echo "  inspect: lsof -nP -iTCP:7332 -sTCP:LISTEN" >&2
   exit 5
 fi
 if ! python3 - <<'PY_CHECK' >/dev/null 2>&1

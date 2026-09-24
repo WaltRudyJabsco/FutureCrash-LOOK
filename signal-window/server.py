@@ -740,10 +740,11 @@ def _media_control(action, index=None, node=""):
     if cp.returncode: raise RuntimeError((cp.stderr or cp.stdout or f"media {action} failed").strip()[:500])
     return _media_state(node)
 
-def _media_play(query,node=""):
+def _media_play(query,node="",prepare=False):
     query=" ".join(str(query or "").split()).strip()
     if not query: raise ValueError("media play query required")
-    value=_node_call("/v1/media/route",{"node":str(node or "").strip(),"operation":"play","query":query},timeout=55.0)
+    operation="prepare" if prepare else "play"
+    value=_node_call("/v1/media/route",{"node":str(node or "").strip(),"operation":operation,"query":query},timeout=55.0)
     if not isinstance(value,dict): raise RuntimeError("Fabric media route unavailable")
     if value.get("error") and not value.get("ok"): raise RuntimeError(str(value.get("error")))
     return value
@@ -757,9 +758,14 @@ def _media_move(source,target,index=None):
     return value
 
 
-def _proxy_media_audio(handler,node,index,*,head=False):
-    query="?node="+quote(str(node or ""),safe="")+"&index="+str(int(index))
-    req=urllib.request.Request(NODE_URL+"/v1/media/audio"+query,method="HEAD" if head else "GET")
+def _proxy_media_audio(handler,node,index=0,*,item_id="",head=False):
+    if item_id:
+        query="?node="+quote(str(node or ""),safe="")+"&id="+quote(str(item_id),safe="")
+        path="/v1/media/item"
+    else:
+        query="?node="+quote(str(node or ""),safe="")+"&index="+str(int(index))
+        path="/v1/media/audio"
+    req=urllib.request.Request(NODE_URL+path+query,method="HEAD" if head else "GET")
     if handler.headers.get("Range"):
         req.add_header("Range",handler.headers.get("Range"))
     try:
@@ -905,10 +911,10 @@ class App(BaseHTTPRequestHandler):
         parsed=urlparse(self.path)
         if parsed.path.startswith("/api/") and not self._require_endpoint("media.output"): return
         if parsed.path=="/api/media/audio":
-            q=parse_qs(parsed.query); node=str((q.get("node") or [""])[0])
+            q=parse_qs(parsed.query); node=str((q.get("node") or [""])[0]); item_id=str((q.get("id") or [""])[0])
             try: index=int((q.get("index") or [0])[0] or 0)
             except Exception: index=0
-            return _proxy_media_audio(self,node,index,head=True)
+            return _proxy_media_audio(self,node,index,item_id=item_id,head=True)
         self.send_response(404); self.send_header("Content-Length","0"); self.end_headers()
 
     def do_GET(self):
@@ -942,10 +948,10 @@ class App(BaseHTTPRequestHandler):
             except Exception as exc:
                 return self.json(502,{"error":str(exc),"decisions":[]})
         if self.path.startswith("/api/media/audio"):
-            q=parse_qs(urlparse(self.path).query); node=str((q.get("node") or [""])[0])
+            q=parse_qs(urlparse(self.path).query); node=str((q.get("node") or [""])[0]); item_id=str((q.get("id") or [""])[0])
             try: index=int((q.get("index") or [0])[0] or 0)
             except Exception: index=0
-            return _proxy_media_audio(self,node,index)
+            return _proxy_media_audio(self,node,index,item_id=item_id)
         if self.path.startswith("/api/media/outputs"):
             return self.json(200,_media_outputs())
         if self.path=="/api/media":
@@ -1072,12 +1078,20 @@ class App(BaseHTTPRequestHandler):
             # Direct bounded media requests are deterministic and may target any
             # reachable Fabric playback node. Everything else remains normal LO.
             media_node=str(d.get("media_node") or "").strip()
+            media_endpoint=str(d.get("media_endpoint") or "").strip()
             direct=re.fullmatch(r"(?:please\s+)?play\s+(.+?)\s*",prompt,flags=re.I) if not files else None
             if direct and direct.group(1).strip().casefold() not in {"pause","next","previous","prev"}:
                 query=direct.group(1).strip()
-                state=_media_play(query,media_node)
+                # Browser endpoints still need a Fabric node to resolve the catalog
+                # and expose range-capable bytes, but that node is a source/stager,
+                # not the default speaker. The browser consumes the returned queue.
+                browser_target=(media_endpoint=="browser" or not media_endpoint)
+                state=_media_play(query,media_node,prepare=browser_target)
                 target=str(state.get("node") or media_node or "local")
-                text=f"Playing {query} on {target}."
+                origin=self._endpoint() or {}
+                state["origin_endpoint"]={"endpoint_id":origin.get("endpoint_id"),"label":origin.get("label")}
+                state["output_target"]="browser" if browser_target else media_endpoint
+                text=f"Playing {query} on this device." if browser_target else f"Playing {query} on {target}."
                 session_id=str(d.get("session") or "").strip()[:120]
                 _session_append(session_id,prompt,text)
                 return self.json(200,{"text":text,"signal":None,"visual":{"kind":"nochange"},"mode":self.mode,"model":"deterministic-media","endpoint":"fabric","resolution":"media.playback","lo_events":[{"event":"media_play","tool":"media.play","node":target}],"files":[],"artifacts":[],"media":state})

@@ -1,3 +1,24 @@
+# Future Crash + LOOK 6.1.15 — Home Field
+
+- Browser media commands now distinguish **origin endpoint**, **catalog/source node**, and **output target**.
+- `This Device` is a true local output: a play request prepares a queue on the Fabric media source without ever launching that source node's player.
+- Browser playback streams prepared entries by stable media ID, so it no longer depends on or mutates the source node's active queue.
+- Explicit OUT selection still supports remote control (`play ... on 3090` / node target).
+- Media receipts carry the authorized browser endpoint identity and explicit output target, laying the request-envelope foundation for capability routing and service failover.
+
+# 6.1.14 — Unified Installer Repair
+
+- Fixed the split installer regression that allowed LOOK/media to update while the resident Fabric node remained on an older release.
+- `install-look.sh` now delegates direct invocations to the top-level unified installer; the unified installer marks its internal LOOK phase to avoid recursion.
+- `install-look.sh` now derives the product release from the bundle `VERSION` file instead of carrying an independent hard-coded version.
+- Unified install still verifies the installed and live node versions before completing.
+
+# 6.1.13 — Transactional Node Upgrade
+
+- Stops the managed Unified Node before replacing runtime source.
+- Retires user-owned legacy node interpreters before install and proves localhost :7332 is free.
+- Verifies both installed CLI and live API report the exact release before install succeeds.
+
 # Changelog
 
 ## 6.1.10 — Media Mount Race Repair

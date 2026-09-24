@@ -110,7 +110,14 @@ form.addEventListener('submit',async e=>{e.preventDefault();if(!endpointAuthoriz
  if(/^\/gallery$/i.test(text)){try{const d=await(await fetch('/api/status')).json();line('system','Gallery: '+(d.gallery||'disabled'))}catch{line('system','Gallery unavailable')}return}
  if(/^\/player$/i.test(text)){mediaDismissed=false;await pollMedia(true);return}
  energy=.65;event('LO REQUEST',true);
- try{const r=await fetch('/api/chat',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({text,files:sent,visual:false,session:signalSession,media_node:mediaNode})});const d=await r.json();if(!r.ok||d.error)throw Error(d.error||r.statusText);if(d.text)line('assistant',d.text);if(Array.isArray(d.lo_events) && d.lo_events.length){
+ try{const r=await fetch('/api/chat',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({text,files:sent,visual:false,session:signalSession,media_node:mediaNode,media_endpoint:selectedMediaOutput})});const d=await r.json();if(!r.ok||d.error)throw Error(d.error||r.statusText);
+ if(d.media&&selectedMediaOutput==='browser'&&Array.isArray(d.media.queue)&&d.media.queue.length){
+   const source=String(d.media.node||mediaNode||'');
+   browserMedia={active:false,sourceNode:source,index:Number(d.media.index||0),queue:d.media.queue.slice(),state:'loading',position:0,duration:0};
+   mediaDismissed=false;await browserPlayIndex(browserMedia.index);
+   if(source){fetch('/api/media/control',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({action:'stop',node:source})}).then(x=>{if(!x.ok)event('MEDIA WARNING · source stop failed')}).catch(()=>event('MEDIA WARNING · source stop failed'))}
+ }
+ if(d.text)line('assistant',d.text);if(Array.isArray(d.lo_events) && d.lo_events.length){
    for(const e of d.lo_events){
      const raw=String(e.event||'');
      const name=raw.replaceAll('_',' ');
@@ -135,24 +142,26 @@ form.addEventListener('submit',async e=>{e.preventDefault();if(!endpointAuthoriz
  event('READY');pollMedia(true);energy=Math.max(.25,energy*.65)}
  catch(err){event('ERROR · '+err.message);line('error','! '+err.message);energy=.15}});
 
-let mediaNode=localStorage.getItem('signal.media.node')||'',mediaOutputs=[],lastMediaState=null,nodeMediaState=null;
+let mediaNode='',mediaOutputs=[],lastMediaState=null,nodeMediaState=null;
 const browserAudio=new Audio();browserAudio.preload='metadata';
 let browserMedia={active:false,sourceNode:'',index:0,queue:[],state:'stopped',position:0,duration:0};
-let selectedMediaOutput=mediaNode?`node:${mediaNode}`:'',mediaHandoff=false,mediaPickerActive=false;
+let selectedMediaOutput='browser',mediaHandoff=false,mediaPickerActive=false;
 function thisDeviceLabel(){return /iPhone/i.test(navigator.userAgent)?'This iPhone':/iPad/i.test(navigator.userAgent)?'This iPad':'This Device'}
 function nodeTarget(node){return `node:${String(node||'')}`}
 function targetNode(target){return String(target||'').startsWith('node:')?String(target).slice(5):''}
 async function pollMediaOutputs(){try{const r=await fetch('/api/media/outputs',{cache:'no-store'});if(!r.ok)return;const d=await r.json();mediaOutputs=Array.isArray(d.outputs)?d.outputs:[];
+ // Browser endpoints belong to themselves by default. A Fabric node becomes the
+ // output only after the user explicitly chooses it in OUT for this page session.
  if(selectedMediaOutput==='browser')return;
  const selected=targetNode(selectedMediaOutput)||mediaNode;
  if(selected&&mediaOutputs.some(x=>String(x.node||'')===selected)){mediaNode=selected;selectedMediaOutput=nodeTarget(selected);return}
- const preferred=mediaOutputs.find(x=>x.available!==false)||mediaOutputs[0];mediaNode=String(preferred?.node||'');selectedMediaOutput=mediaNode?nodeTarget(mediaNode):'';if(mediaNode)localStorage.setItem('signal.media.node',mediaNode)
+ selectedMediaOutput='browser';mediaNode=''
 }catch{}}
 let mediaDismissed=false,mediaExpanded=false,lastMediaKey='';
 function mediaTime(v){v=Number(v);if(!Number.isFinite(v)||v<0)return '--:--';v=Math.floor(v);return v>=3600?`${Math.floor(v/3600)}:${String(Math.floor(v%3600/60)).padStart(2,'0')}:${String(v%60).padStart(2,'0')}`:`${Math.floor(v/60)}:${String(v%60).padStart(2,'0')}`}
 function mediaButton(label,title,action,index=null){const b=document.createElement('button');b.type='button';b.className='media-button';b.textContent=label;b.title=title;b.onclick=()=>mediaControl(action,index);return b}
 function browserSnapshot(){const queue=browserMedia.queue||[],index=Math.max(0,Math.min(browserMedia.index,Math.max(0,queue.length-1)));return{available:true,active:browserMedia.active,state:browserMedia.state,index,count:queue.length,queue,entry:queue[index]||{},position:browserAudio.currentTime||0,duration:browserAudio.duration||0,node:'browser',output_id:'browser'}}
-async function browserPlayIndex(index){const queue=browserMedia.queue||[];if(!queue.length)throw Error('browser queue is empty');index=Math.max(0,Math.min(Number(index)||0,queue.length-1));browserMedia.index=index;browserAudio.src=`/api/media/audio?node=${encodeURIComponent(browserMedia.sourceNode)}&index=${index}&t=${Date.now()}`;browserAudio.load();await browserAudio.play();browserMedia.active=true;browserMedia.state='playing';renderMedia(browserSnapshot(),true)}
+async function browserPlayIndex(index){const queue=browserMedia.queue||[];if(!queue.length)throw Error('browser queue is empty');index=Math.max(0,Math.min(Number(index)||0,queue.length-1));browserMedia.index=index;const entry=queue[index]||{};const itemId=String(entry.id||entry.digest||'');browserAudio.src=`/api/media/audio?node=${encodeURIComponent(browserMedia.sourceNode)}&id=${encodeURIComponent(itemId)}&index=${index}&t=${Date.now()}`;browserAudio.load();await browserAudio.play();browserMedia.active=true;browserMedia.state='playing';renderMedia(browserSnapshot(),true)}
 async function selectMediaOutput(next,selectEl){const previous=selectedMediaOutput;if(!next||next===previous)return;const sourceState=nodeMediaState;
  try{
   if(next==='browser'){
@@ -170,11 +179,11 @@ async function selectMediaOutput(next,selectEl){const previous=selectedMediaOutp
   if(selectedMediaOutput==='browser'){
    event(`MEDIA · MOVE ${thisDeviceLabel()} → ${nextNode}`,true);
    const r=await fetch('/api/media/move',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({source:browserMedia.sourceNode,target:nextNode,index:browserMedia.index})});const d=await r.json();if(!r.ok||d.error)throw Error(d.error||r.statusText);
-   browserAudio.pause();browserAudio.removeAttribute('src');browserAudio.load();browserMedia.active=false;browserMedia.state='stopped';mediaNode=nextNode;selectedMediaOutput=next;localStorage.setItem('signal.media.node',mediaNode);nodeMediaState=d;event(`MEDIA · MOVED → ${nextNode}`);renderMedia(d,true);return
+   browserAudio.pause();browserAudio.removeAttribute('src');browserAudio.load();browserMedia.active=false;browserMedia.state='stopped';mediaNode=nextNode;selectedMediaOutput=next;nodeMediaState=d;event(`MEDIA · MOVED → ${nextNode}`);renderMedia(d,true);return
   }
   const source=targetNode(previous)||mediaNode;
   if(sourceState?.active&&source&&source!==nextNode){event(`MEDIA · MOVE ${source} → ${nextNode}`,true);const r=await fetch('/api/media/move',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({source,target:nextNode,index:sourceState.index})});const d=await r.json();if(!r.ok||d.error)throw Error(d.error||r.statusText);nodeMediaState=d;event(`MEDIA · MOVED → ${nextNode}`)}
-  mediaNode=nextNode;selectedMediaOutput=next;localStorage.setItem('signal.media.node',mediaNode);mediaDismissed=false;await pollMedia(true)
+  mediaNode=nextNode;selectedMediaOutput=next;mediaDismissed=false;await pollMedia(true)
  }catch(err){mediaHandoff=false;selectedMediaOutput=previous;if(next==='browser'){browserAudio.pause();browserMedia.active=false;browserMedia.state='stopped'}event('MEDIA MOVE ERROR · '+err.message);renderMedia(previous==='browser'?browserSnapshot():(nodeMediaState||lastMediaState),true)}}
 function renderMedia(d,force=false){
  lastMediaState=d||null;if(selectedMediaOutput!=='browser'&&d?.node&&d.node!=='browser')nodeMediaState=d;
