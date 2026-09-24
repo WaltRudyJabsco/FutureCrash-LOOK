@@ -1,10 +1,10 @@
 """LOOK local file catalog: cheap metadata first, content understanding later."""
 from __future__ import annotations
-import os, sqlite3, time, re, contextlib, subprocess, shutil, zipfile, html.parser
+import os, sqlite3, time, re, contextlib, subprocess, shutil, zipfile, html.parser, hashlib
 import fcntl
 from pathlib import Path
 
-SCHEMA_VERSION=2
+SCHEMA_VERSION=3
 CONTENT_MAX_FILE_BYTES=4*1024*1024
 CONTENT_MAX_CHARS=256*1024
 CONTENT_EXTS={'.txt','.md','.markdown','.py','.js','.ts','.tsx','.jsx','.css','.json','.yaml','.yml','.toml','.ini','.cfg','.sh','.zsh','.html','.htm','.docx','.pdf','.epub'}
@@ -32,7 +32,12 @@ def connect(path):
     db.execute('CREATE INDEX IF NOT EXISTS files_mtime ON files(mtime DESC)')
     db.execute('CREATE INDEX IF NOT EXISTS files_root ON files(root)')
     db.execute('CREATE TABLE IF NOT EXISTS roots(root TEXT PRIMARY KEY, scanned REAL NOT NULL, count INTEGER NOT NULL)')
-    db.execute("CREATE TABLE IF NOT EXISTS content_state(path TEXT PRIMARY KEY, mtime REAL NOT NULL, bytes INTEGER NOT NULL, kind TEXT NOT NULL, chars INTEGER NOT NULL, indexed REAL NOT NULL, error TEXT NOT NULL DEFAULT '')")
+    db.execute("CREATE TABLE IF NOT EXISTS content_state(path TEXT PRIMARY KEY, mtime REAL NOT NULL, bytes INTEGER NOT NULL, kind TEXT NOT NULL, chars INTEGER NOT NULL, indexed REAL NOT NULL, error TEXT NOT NULL DEFAULT '', digest TEXT NOT NULL DEFAULT '')")
+    # v3 adds content identity for the small files we already read for FTS. This
+    # collapses synchronized copies in the Fabric view without hashing large files.
+    cols={row[1] for row in db.execute('PRAGMA table_info(content_state)')}
+    if 'digest' not in cols:
+        db.execute("ALTER TABLE content_state ADD COLUMN digest TEXT NOT NULL DEFAULT ''")
     try:
         db.execute("CREATE VIRTUAL TABLE IF NOT EXISTS content_fts USING fts5(path UNINDEXED, body, tokenize='unicode61')")
     except sqlite3.OperationalError:
@@ -100,10 +105,16 @@ def _index_content(db,path,ext,size,mtime,stamp):
     old=db.execute('SELECT mtime,bytes FROM content_state WHERE path=?',(str(path),)).fetchone()
     if old and float(old[0])==float(mtime) and int(old[1])==int(size): return False
     text,error=_extract_text(path,ext)
+    # CONTENT_MAX_FILE_BYTES bounds this read. Exact identity is worth computing
+    # here because extraction already paid the filesystem I/O cost.
+    try:
+        digest='sha256:'+hashlib.sha256(path.read_bytes()).hexdigest()
+    except (OSError,PermissionError):
+        digest=''
     try: db.execute('DELETE FROM content_fts WHERE path=?',(str(path),))
     except sqlite3.OperationalError: return False
     if text: db.execute('INSERT INTO content_fts(path,body) VALUES(?,?)',(str(path),text))
-    db.execute('INSERT OR REPLACE INTO content_state(path,mtime,bytes,kind,chars,indexed,error) VALUES(?,?,?,?,?,?,?)',(str(path),mtime,size,ext,len(text or ''),stamp,error))
+    db.execute('INSERT OR REPLACE INTO content_state(path,mtime,bytes,kind,chars,indexed,error,digest) VALUES(?,?,?,?,?,?,?,?)',(str(path),mtime,size,ext,len(text or ''),stamp,error,digest))
     return bool(text)
 
 @contextlib.contextmanager

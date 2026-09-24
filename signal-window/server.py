@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Signal Window 1.8.1 — accountless authorized Fabric browser endpoint."""
+"""Signal Window 1.9.0 — accountless authorized Fabric browser endpoint."""
 from __future__ import annotations
 
 import argparse
@@ -758,6 +758,30 @@ def _media_move(source,target,index=None):
     return value
 
 
+def _proxy_artifact(handler,node,digest,*,head=False):
+    """Browser-safe gateway to Fabric's generic content-addressed range stream."""
+    query="?target="+quote(str(node or ""),safe="")+"&digest="+quote(str(digest or ""),safe=":")
+    req=urllib.request.Request(NODE_URL+"/v1/media/artifact"+query,method="HEAD" if head else "GET")
+    if handler.headers.get("Range"): req.add_header("Range",handler.headers.get("Range"))
+    try:
+        with urllib.request.urlopen(req,timeout=12.0) as r:
+            handler.send_response(getattr(r,"status",200))
+            for key in ("Content-Type","Content-Length","Accept-Ranges","Content-Range","Cache-Control","X-Fabric-Digest"):
+                value=r.headers.get(key)
+                if value: handler.send_header(key,value)
+            handler.end_headers()
+            if not head:
+                while True:
+                    chunk=r.read(256*1024)
+                    if not chunk: break
+                    handler.wfile.write(chunk)
+    except urllib.error.HTTPError as exc:
+        handler.send_response(exc.code); handler.send_header("Content-Length","0"); handler.end_headers()
+    except Exception as exc:
+        if head:
+            handler.send_response(502); handler.send_header("Content-Length","0"); handler.end_headers()
+        else: handler.json(502,{"error":str(exc)})
+
 def _proxy_media_audio(handler,node,index=0,*,item_id="",head=False):
     if item_id:
         query="?node="+quote(str(node or ""),safe="")+"&id="+quote(str(item_id),safe="")
@@ -910,6 +934,9 @@ class App(BaseHTTPRequestHandler):
     def do_HEAD(self):
         parsed=urlparse(self.path)
         if parsed.path.startswith("/api/") and not self._require_endpoint("media.output"): return
+        if parsed.path=="/api/artifact":
+            q=parse_qs(parsed.query); node=str((q.get("node") or [""])[0]); digest=str((q.get("digest") or [""])[0])
+            return _proxy_artifact(self,node,digest,head=True)
         if parsed.path=="/api/media/audio":
             q=parse_qs(parsed.query); node=str((q.get("node") or [""])[0]); item_id=str((q.get("id") or [""])[0])
             try: index=int((q.get("index") or [0])[0] or 0)
@@ -947,6 +974,9 @@ class App(BaseHTTPRequestHandler):
                 return self.json(200,value or {"decisions":[],"count":0})
             except Exception as exc:
                 return self.json(502,{"error":str(exc),"decisions":[]})
+        if self.path.startswith("/api/artifact"):
+            q=parse_qs(urlparse(self.path).query); node=str((q.get("node") or [""])[0]); digest=str((q.get("digest") or [""])[0])
+            return _proxy_artifact(self,node,digest)
         if self.path.startswith("/api/media/audio"):
             q=parse_qs(urlparse(self.path).query); node=str((q.get("node") or [""])[0]); item_id=str((q.get("id") or [""])[0])
             try: index=int((q.get("index") or [0])[0] or 0)
@@ -1171,7 +1201,7 @@ def main():
         state=f"LO NATIVE {a.profile} · "+(App.lo_cmd if App.lo_cmd else "NOT FOUND")
     else:
         p=probe_ollama(App.backend); state=("connected" if p.get("ok") else "unreachable: "+p.get("error","unknown"))
-    print(f"Signal Window 1.8.1 · http://{a.host}:{a.port} · {state} · gallery {App.gallery_dir if App.gallery_enabled else 'off'}")
+    print(f"Signal Window 1.9.0 · http://{a.host}:{a.port} · {state} · gallery {App.gallery_dir if App.gallery_enabled else 'off'}")
     ThreadingHTTPServer((a.host,a.port),App).serve_forever()
 
 if __name__=="__main__": main()

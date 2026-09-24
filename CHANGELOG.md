@@ -1,3 +1,10 @@
+# 6.1.19 — No Fixed Address
+
+- Content identity is now distinct from physical file location.
+- Duplicate-aware Fabric search groups identical indexed documents and reports all copies as locations.
+- Signal Window 1.9.0 adds endpoint-local video playback over ranged Fabric streams.
+- Identified media uses generic content-addressed artifact transport; large/unidentified media stays lazy.
+
 # Future Crash + LOOK 6.1.18 — Lights Out
 
 - Removed the installer pre-start localhost :7332 ownership gate. systemd/launchd own node lifecycle.

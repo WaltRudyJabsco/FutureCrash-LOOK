@@ -1,4 +1,9 @@
-# Signal Window 1.8.0
+# Signal Window 1.9.0
+
+## 1.9.0 — Endpoint video
+
+- Browser endpoints play video locally with the same Fabric media queue/output model as audio.
+- Identified media uses generic content-addressed range streaming; source-node media IDs remain the lazy fallback.
 
 ## 1.8.0 — Fabric endpoint authorization
 

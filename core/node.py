@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Future Crash + LOOK Unified Node 6.1.18.
+"""Future Crash + LOOK Unified Node 6.1.19.
 
 A small distributed supervisor for trusted personal machines. Immediate events stay
 asynchronous; a one-second fabric pulse reconciles presence, leases and stale work.
@@ -58,8 +58,8 @@ try:
 except ImportError:
     from endpoint_auth import EndpointAuth
 
-VERSION = "6.1.18"
-RELEASE_NAME = "Lights Out"
+VERSION = "6.1.19"
+RELEASE_NAME = "No Fixed Address"
 DEFAULT_HOST = "127.0.0.1"
 DEFAULT_PORT = 7332
 DEFAULT_INGRESS_PORT = 0
@@ -1930,20 +1930,20 @@ def _local_file_search(query,limit=80):
         if words:
             fts=" OR ".join('"'+w.replace('"','')+'"' for w in words[:16])
             try:
-                sql="SELECT f.path,fi.name,fi.ext,fi.bytes,fi.mtime,fi.root,bm25(content_fts),snippet(content_fts,1,'[',']',' … ',18) FROM content_fts f JOIN files fi ON fi.path=f.path WHERE content_fts MATCH ?"
+                sql="SELECT f.path,fi.name,fi.ext,fi.bytes,fi.mtime,fi.root,bm25(content_fts),snippet(content_fts,1,'[',']',' … ',18),COALESCE(cs.digest,'') FROM content_fts f JOIN files fi ON fi.path=f.path LEFT JOIN content_state cs ON cs.path=fi.path WHERE content_fts MATCH ?"
                 fparams=[fts]
                 if ext: sql+=" AND fi.ext=?"; fparams.append(ext)
                 sql+=" ORDER BY bm25(content_fts) LIMIT ?"; fparams.append(int(limit))
                 for row in db.execute(sql,fparams):
-                    item=dict(zip(("path","name","ext","bytes","mtime","root","rank","snippet"),row),node=node,match="content"); merged[item["path"]]=item
+                    item=dict(zip(("path","name","ext","bytes","mtime","root","rank","snippet","digest"),row),node=node,match="content"); merged[item["path"]]=item
             except sqlite3.OperationalError: pass
         where=[]; params=[]
-        if ext: where.append("ext=?"); params.append(ext)
+        if ext: where.append("files.ext=?"); params.append(ext)
         current=now()
-        if "today" in terms: where.append("mtime>=?"); params.append(current-86400)
-        elif "yesterday" in terms: where.append("mtime>=?"); params.append(current-172800)
-        elif "recent" in terms or "recently" in terms: where.append("mtime>=?"); params.append(current-14*86400)
-        for word in words: where.append("(name LIKE ? OR path LIKE ?)"); params.extend((f"%{word}%",f"%{word}%"))
+        if "today" in terms: where.append("files.mtime>=?"); params.append(current-86400)
+        elif "yesterday" in terms: where.append("files.mtime>=?"); params.append(current-172800)
+        elif "recent" in terms or "recently" in terms: where.append("files.mtime>=?"); params.append(current-14*86400)
+        for word in words: where.append("(files.name LIKE ? OR files.path LIKE ?)"); params.extend((f"%{word}%",f"%{word}%"))
         metadata_intent=bool(ext or any(t in terms for t in ("today","yesterday","recent","recently","big","biggest","large","largest")))
         # A lexical query that normalizes to no useful terms is not a request for
         # the newest catalog rows. Empty predicates are valid only for explicit
@@ -1951,10 +1951,10 @@ def _local_file_search(query,limit=80):
         if not words and not metadata_intent:
             db.close()
             return {"schema":"fabric-file-search-v2","node":node,"query":query,"entries":[],"count":0}
-        sql="SELECT path,name,ext,bytes,mtime,root FROM files"+(" WHERE "+" AND ".join(where) if where else "")
-        sql+=(" ORDER BY bytes DESC" if any(t in terms for t in ("big","biggest","large","largest")) else " ORDER BY mtime DESC")+" LIMIT ?"; params.append(int(limit))
+        sql="SELECT files.path,files.name,files.ext,files.bytes,files.mtime,files.root,COALESCE(content_state.digest,'') FROM files LEFT JOIN content_state ON content_state.path=files.path"+(" WHERE "+" AND ".join(where) if where else "")
+        sql+=(" ORDER BY files.bytes DESC" if any(t in terms for t in ("big","biggest","large","largest")) else " ORDER BY files.mtime DESC")+" LIMIT ?"; params.append(int(limit))
         for row in db.execute(sql,params):
-            item=dict(zip(("path","name","ext","bytes","mtime","root"),row),node=node)
+            item=dict(zip(("path","name","ext","bytes","mtime","root","digest"),row),node=node)
             if item["path"] in merged: merged[item["path"]]["match"]="name+content"
             else: item["match"]="name"; merged[item["path"]]=item
         db.close()
@@ -1989,8 +1989,23 @@ def _fabric_file_search(query,limit=80):
             entries.extend(dict(x) for x in (remote.get("entries") or []) if isinstance(x,dict))
         except Exception as exc: errors.append({"node":name,"error":str(exc)})
     terms=_file_search_terms(query); key=(lambda x:int(x.get("bytes") or 0)) if any(t in terms for t in ("big","biggest","large","largest")) else (lambda x:float(x.get("mtime") or 0))
-    entries=sorted(entries,key=key,reverse=True)[:int(limit)]
-    return {"schema":"fabric-file-search-v1","generated":now(),"query":query,"entries":entries,"count":len(entries),"errors":errors}
+    # Content identity, not pathname, defines one logical Fabric object. Keep all
+    # physical copies as locations so nothing on disk is deduplicated or mutated.
+    grouped={}
+    for raw in entries:
+        row=dict(raw); digest=str(row.get("digest") or "").strip(); node=str(row.get("node") or "")
+        identity_key=("sha:"+digest) if digest else ("loc:"+node+":"+str(row.get("path") or ""))
+        grouped.setdefault(identity_key,[]).append(row)
+    logical=[]
+    for copies in grouped.values():
+        copies.sort(key=lambda x:(-float(x.get("mtime") or 0),str(x.get("node") or ""),str(x.get("path") or "")))
+        primary=dict(copies[0])
+        primary["locations"]=[{k:r.get(k) for k in ("node","path","root","mtime","bytes") if r.get(k) not in (None,"")} for r in copies]
+        primary["copies"]=len(copies)
+        if primary.get("digest"): primary["object_id"]=primary["digest"]
+        logical.append(primary)
+    logical=sorted(logical,key=key,reverse=True)[:int(limit)]
+    return {"schema":"fabric-file-search-v3","generated":now(),"query":query,"entries":logical,"count":len(logical),"locations":sum(int(x.get("copies") or 1) for x in logical),"errors":errors}
 
 
 
@@ -2721,7 +2736,7 @@ def _openjev_shadow(state, question, candidates, *, profile="workspace", consequ
 
 
 class API(BaseHTTPRequestHandler):
-    server_version = "FCLNode/6.1.18"
+    server_version = "FCLNode/6.1.19"
 
     def setup(self):
         self._metric_request_id = None
