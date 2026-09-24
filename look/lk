@@ -13668,57 +13668,40 @@ def _media_status_snapshot():
 
 
 def _media_entry_source(entry):
-    """Resolve one queue entry at the player edge from its Fabric locations.
+    """Resolve a queue entry without turning ordinary playback into artifact work.
 
-    Local bytes win. Remote bytes are promoted to content identity lazily and then
-    exposed through a Fabric stream. Queue entries therefore stay transport-neutral.
+    Local files are handed straight to mpv. A scanned remote/local catalog id is
+    exposed through the loopback Unified Node media proxy, which owns Fabric auth,
+    TLS pinning and transport fallback. SHA artifacts remain a later/explicit path.
     """
     candidates=[]
     primary_path=str(entry.get("path") or "").strip()
     if primary_path:
         candidates.append((str(entry.get("node") or ""),primary_path,str(entry.get("id") or ""),str(entry.get("digest") or "")))
     for loc in entry.get("locations") or []:
-        if not isinstance(loc,dict):
-            continue
+        if not isinstance(loc,dict): continue
         item=(str(loc.get("node") or ""),str(loc.get("path") or "").strip(),str(loc.get("id") or ""),str(loc.get("digest") or ""))
-        if item not in candidates:
-            candidates.append(item)
+        if item not in candidates: candidates.append(item)
 
-    # A merged catalog's primary copy is not guaranteed to be local to this process.
-    # Check every physical location before paying the remote/hash cost.
     for _node,path,_entry_id,_digest in candidates:
-        if not path:
-            continue
-        if path.startswith(("http://","https://")):
-            return path
+        if not path: continue
+        if path.startswith(("http://","https://")): return path
         target=Path(path).expanduser()
-        if target.is_file():
-            return target.resolve().as_uri()
+        if target.is_file(): return target.resolve().as_uri()
+
+    # The catalog id is already enough identity for playback. Route it through the
+    # local node instead of spawning fcl-node --json or hashing the file first.
+    for node,_path,entry_id,_digest in candidates:
+        if node and entry_id:
+            return "http://127.0.0.1:7332/v1/media/item?"+urllib.parse.urlencode({"node":node,"id":entry_id})
 
     digest=str(entry.get("digest") or "").strip()
     source_node=str(entry.get("node") or "").strip()
-    if not digest:
-        # Prefer a concrete reachable catalog location when the merged row itself
-        # happens to carry stale/nonlocal primary metadata.
-        for node,path,entry_id,loc_digest in candidates:
-            if loc_digest:
-                digest=loc_digest; source_node=node or source_node; break
-            if node and entry_id:
-                identified=_media_identify_catalog_entry({**entry,"node":node,"id":entry_id,"path":path})
-                digest=str(identified.get("digest") or "").strip()
-                if digest:
-                    source_node=node
-                    entry.update(identified)
-                    break
     if digest:
-        # Keep Fabric credentials and TLS pinning inside the local node. mpv and
-        # browser players receive an ordinary loopback stream and never need to
-        # understand peer authentication or Tailcat certificates.
         params={"digest":digest}
-        if source_node:
-            params["node"]=source_node
+        if source_node: params["node"]=source_node
         return "http://127.0.0.1:7332/v1/media/artifact?"+urllib.parse.urlencode(params)
-    raise FileNotFoundError(primary_path or digest or "media queue entry")
+    raise FileNotFoundError(primary_path or "media queue entry has no path, catalog id, or digest")
 
 
 def _media_write_m3u(queue):

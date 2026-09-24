@@ -183,7 +183,7 @@ function renderMedia(d,force=false){
  // the card/select until Safari finishes the interaction.
  if(mediaPickerActive)return;
  const queue=Array.isArray(d?.queue)?d.queue:[],active=Boolean(d?.active),entry=d?.entry||{};const key=[selectedMediaOutput,d?.state,d?.index,d?.count,entry.artist,entry.album,entry.title].join('|');if(key!==lastMediaKey){if(active)mediaDismissed=false;lastMediaKey=key}
- if(!d?.available||!queue.length||(!active&&d?.state==='stopped')||mediaDismissed){mediaPanel.hidden=true;mediaPanel.innerHTML='';return}
+ if(!d?.available||!queue.length||mediaDismissed){mediaPanel.hidden=true;mediaPanel.innerHTML='';return}
  mediaPanel.hidden=false;mediaPanel.innerHTML='';
  const head=document.createElement('div');head.className='media-head';const tag=document.createElement('span');tag.textContent='NOW PLAYING';const state=document.createElement('span');state.className='media-state';state.textContent=String(d.state||'').toUpperCase();head.append(tag,state);
  const title=document.createElement('div');title.className='media-title';title.textContent=entry.title||'Media';const artist=document.createElement('div');artist.className='media-artist';artist.textContent=[entry.artist,entry.album].filter(Boolean).join(' · ');

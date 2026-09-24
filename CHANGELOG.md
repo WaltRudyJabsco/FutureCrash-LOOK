@@ -1,3 +1,12 @@
+## 6.1.7 — Media + Signal Repair
+
+- Make ordinary media playback use stable catalog owner/id streaming through the loopback Unified Node instead of nested `fcl-node --json` identification.
+- Add `/v1/media/item` GET/HEAD with Range support and authenticated Tailcat/Tailscale proxying for remote owners.
+- Keep SHA/artifact promotion explicit; listening to a scanned file no longer requires hashing it first.
+- Keep the Signal player card visible for a stopped-but-populated queue so `/player` is an inspector instead of a momentary flash.
+- Stop Signal from drawing filler after routine media/control confirmations; generic visual fallback now abstains instead of emitting the recurring mountain-like micro-signal.
+- Tell the visual reflex never to use generic mountain/sun/landscape motifs as filler.
+
 ## 6.1.6 — Fabric Client Authorization
 
 - Teach the shared `fabric_client` to attach paired node authorization to every remote Fabric JSON and streaming inference request.

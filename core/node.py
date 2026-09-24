@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Future Crash + LOOK Unified Node 6.1.6.
+"""Future Crash + LOOK Unified Node 6.1.7.
 
 A small distributed supervisor for trusted personal machines. Immediate events stay
 asynchronous; a one-second fabric pulse reconciles presence, leases and stale work.
@@ -58,7 +58,7 @@ try:
 except ImportError:
     from endpoint_auth import EndpointAuth
 
-VERSION = "6.1.6"
+VERSION = "6.1.7"
 DEFAULT_HOST = "127.0.0.1"
 DEFAULT_PORT = 7332
 DEFAULT_INGRESS_PORT = 0
@@ -2085,6 +2085,20 @@ def _local_media_catalog():
     }
 
 
+def _local_media_entry(entry_id):
+    """Return one scanned local media row by stable catalog id without hashing it."""
+    entry_id=str(entry_id or "").strip()
+    if not entry_id:
+        raise ValueError("media entry id required")
+    for row in (_read_media_library().get("entries") or []):
+        if isinstance(row,dict) and str(row.get("id") or "") == entry_id:
+            path=Path(str(row.get("path") or "")).expanduser()
+            if not path.is_file():
+                raise FileNotFoundError(str(path))
+            return dict(row),path
+    raise FileNotFoundError(entry_id)
+
+
 def _identify_media_entry(entry_id):
     """Promote one already-scanned local path to content-addressed Fabric identity."""
     entry_id = str(entry_id or "").strip()
@@ -2694,7 +2708,7 @@ def _openjev_shadow(state, question, candidates, *, profile="workspace", consequ
 
 
 class API(BaseHTTPRequestHandler):
-    server_version = "FCLNode/6.1.6"
+    server_version = "FCLNode/6.1.7"
 
     def setup(self):
         self._metric_request_id = None
@@ -2813,6 +2827,61 @@ class API(BaseHTTPRequestHandler):
                 if not chunk: break
                 self.wfile.write(chunk); remaining-=len(chunk)
 
+    def _serve_media_item(self,target,entry_id,*,head=False):
+        """Serve one catalog item by owner+entry id without requiring SHA promotion.
+
+        This is the ordinary playback path. Hashing remains an explicit identity/artifact
+        operation rather than a prerequisite for listening to already-scanned music.
+        """
+        target=str(target or "").strip(); entry_id=str(entry_id or "").strip(); local=identity()["name"]
+        if not entry_id:
+            if head:
+                self.send_response(400); self.send_header("Content-Length","0"); self.end_headers(); return
+            return self.sendj(400,{"error":"media entry id required"})
+        if not target or target==local:
+            try:
+                row,source=_local_media_entry(entry_id)
+                ctype=str(row.get("media_type") or mimetypes.guess_type(str(source))[0] or "application/octet-stream")
+                return self._serve_file_range(source,ctype,head=head)
+            except Exception as exc:
+                if head:
+                    self.send_response(404); self.send_header("Content-Length","0"); self.end_headers(); return
+                return self.sendj(404,{"error":str(exc)})
+        snapshot={"self":node_info(),"peers":PEERS.public()}
+        try:
+            peer=_peer_for_target(snapshot,target); last_exc=None
+            for base in _peer_bases(peer):
+                url=base+"/v1/media/item?id="+urllib.parse.quote(entry_id,safe="")
+                headers=FABRIC_IDENTITY.auth_headers_for_url(url)
+                if self.headers.get("Range"): headers["Range"]=self.headers.get("Range")
+                req=urllib.request.Request(url,headers=headers,method="HEAD" if head else "GET")
+                context=FABRIC_IDENTITY.ssl_context_for_url(url) if url.lower().startswith("https://") else None
+                try:
+                    kwargs={"timeout":8.0}
+                    if context is not None: kwargs["context"]=context
+                    with urllib.request.urlopen(req,**kwargs) as r:
+                        self.send_response(getattr(r,"status",200))
+                        for key in ("Content-Type","Content-Length","Accept-Ranges","Content-Range","Cache-Control"):
+                            value=r.headers.get(key)
+                            if value: self.send_header(key,value)
+                        self.end_headers()
+                        if not head:
+                            while True:
+                                chunk=r.read(256*1024)
+                                if not chunk: break
+                                self.wfile.write(chunk)
+                        return
+                except Exception as exc:
+                    last_exc=exc
+            raise RuntimeError(f"media item transport failed: {last_exc}")
+        except urllib.error.HTTPError as exc:
+            self.send_response(exc.code); self.send_header("Content-Length","0"); self.end_headers()
+        except Exception as exc:
+            if head:
+                self.send_response(502); self.send_header("Content-Length","0"); self.end_headers(); return
+            self.sendj(502,{"error":str(exc)})
+
+
     def _serve_media_artifact(self,target,digest,*,head=False):
         """Expose one artifact through the local control plane.
 
@@ -2908,6 +2977,9 @@ class API(BaseHTTPRequestHandler):
     def do_HEAD(self):
         parsed=urlparse(self.path); path=parsed.path
         if not self._authorized_ingress(path): return
+        if path == "/v1/media/item":
+            q=parse_qs(parsed.query); target=str((q.get("node") or [""])[0]); entry_id=str((q.get("id") or [""])[0])
+            return self._serve_media_item(target,entry_id,head=True)
         if path == "/v1/media/audio":
             q=parse_qs(parsed.query); target=str((q.get("node") or [""])[0]); index=int((q.get("index") or [0])[0] or 0)
             return self._serve_media_audio(target,index,head=True)
@@ -3044,6 +3116,9 @@ class API(BaseHTTPRequestHandler):
             return self.sendj(200, _local_media_catalog())
         if path == "/v1/media/fabric":
             return self.sendj(200, _fabric_media_catalog())
+        if path == "/v1/media/item":
+            q=parse_qs(urlparse(self.path).query); target=str((q.get("node") or [""])[0]); entry_id=str((q.get("id") or [""])[0])
+            return self._serve_media_item(target,entry_id)
         if path == "/v1/media/audio":
             q=parse_qs(urlparse(self.path).query); target=str((q.get("node") or [""])[0])
             try: index=int((q.get("index") or [0])[0] or 0)
