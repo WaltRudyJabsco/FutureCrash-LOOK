@@ -6348,6 +6348,16 @@ def _lo_media_decision_to_intent(choice,entry,judged=None):
     return None
 
 
+def _intent_normalizer_module():
+    # Keep English normalization shared across terminal LO and browser Signal.
+    candidates=[Path.home()/".local/share/future-crash-look/core", ROOT.parent/"core"]
+    for path in candidates:
+        if (path/"intent_normalizer.py").exists() and str(path) not in sys.path:
+            sys.path.insert(0,str(path))
+    import intent_normalizer
+    return intent_normalizer
+
+
 def _lo_media_intent(prompt):
     """Compatibility entry: workspace policy for direct callers/tests."""
     return _lo_media_intent_profile(prompt,"workspace")
@@ -6378,6 +6388,12 @@ def _lo_media_intent_profile(prompt,profile="workspace"):
         "prev":"previous","stop":"stop","stop music":"stop","stop playback":"stop",
     }
     if low in controls: return {"tool":"media_control","args":{"action":controls[low]}}
+    try:
+        normalized=_intent_normalizer_module().media_tool(_intent_normalizer_module().normalize(text))
+    except Exception:
+        normalized=None
+    if normalized:
+        return normalized
     judged=_lo_media_decision_intent(text,profile)
     if judged: return judged
     if re.search(r"\b(this|that|it|these|those)\b",low): return None
@@ -7054,11 +7070,15 @@ def _capability_tools():
         }},
         {"type":"function","function":{
             "name":"media_play",
-            "description":"Play a local/Fabric media artist, album, title, path, or catalog query. This is the canonical tool for unqualified requests like 'play Talking Heads'; do not web-search first. Exact artist/album/title matches may expand to a queue.",
+            "description":"Play local/Fabric media by exact query or structured selector. English selectors such as any/random movie belong in kind/selection rather than the query string.",
             "parameters":{"type":"object","properties":{
                 "query":{"type":"string"},
+                "kind":{"type":"string","enum":["audio","video"]},
+                "artist":{"type":"string"},
+                "selection":{"type":"string","enum":["all","random"]},
+                "limit":{"type":"integer","minimum":1,"maximum":100},
                 "shuffle":{"type":"boolean"}
-            },"required":["query"]}
+            }}
         }},
         {"type":"function","function":{
             "name":"media_queue",
@@ -7115,7 +7135,9 @@ def _run_capability_tool(name,args,workspace,profile):
     if name=="media_search":
         return _media_tool_search(args.get("query",""),args.get("limit",12))
     if name=="media_play":
-        return _media_tool_play(args.get("query",""),shuffle=bool(args.get("shuffle",False)))
+        return _media_tool_play(args.get("query",""),shuffle=bool(args.get("shuffle",False)),
+                                kind=args.get("kind",""),artist=args.get("artist",""),
+                                selection=args.get("selection",""),limit=args.get("limit",0))
     if name=="media_queue":
         return _media_tool_queue(args.get("query",""))
     if name=="media_control":
@@ -13295,16 +13317,27 @@ def _media_tool_search(query,limit=12):
     return json.dumps(payload,ensure_ascii=False)
 
 
-def _media_tool_play(query,shuffle=False):
+def _media_tool_play(query,shuffle=False,kind="",artist="",selection="",limit=0):
     query=" ".join(str(query or "").split()).strip()
-    if not query:
+    kind_filter=str(kind or "").casefold()
+    artist=" ".join(str(artist or "").split()).strip()
+    selection=str(selection or "").casefold()
+    if query:
+        match_kind,rows=_media_query_matches(query)
+    elif kind_filter or artist or selection:
+        catalog,_=_media_catalog_entries()
+        try: wanted_limit=max(0,min(100,int(limit or 0)))
+        except (TypeError,ValueError): wanted_limit=0
+        rows=media_core.select_entries({"entries":catalog},kind=kind_filter,artist=artist,selection=selection or "all",limit=wanted_limit)
+        match_kind="selector"
+    else:
         return _ToolResult(False,"needs_input","MEDIA NEEDS INPUT · what should I play?")
-    kind,rows=_media_query_matches(query)
+    label=query or (artist if artist else ("any "+kind_filter if kind_filter else "media"))
     if not rows:
-        return _ToolResult(False,"not_found",f"MEDIA NOT FOUND · {query}")
-    if kind=="ambiguous":
+        return _ToolResult(False,"not_found",f"MEDIA NOT FOUND · {label}")
+    if match_kind=="ambiguous":
         preview="; ".join(_media_row_label(row) for row in rows[:8])
-        return _ToolResult(False,"ambiguous",f"MEDIA AMBIGUOUS · {query} · {len(rows)} matches · {preview}")
+        return _ToolResult(False,"ambiguous",f"MEDIA AMBIGUOUS · {label} · {len(rows)} matches · {preview}")
     session=media_core.new_session(rows,shuffle=bool(shuffle))
     # Capture the edge diagnostic so browser/LO callers see the useful reason rather
     # than a generic MEDIA PLAY FAILED receipt. Successful playback remains quiet.
@@ -13316,10 +13349,9 @@ def _media_tool_play(query,shuffle=False):
         detail=" · ".join(line.strip() for line in edge_log.getvalue().splitlines() if line.strip())
         suffix=f" · {detail[:500]}" if detail else ""
         return _ToolResult(False,"failed",f"MEDIA PLAY FAILED · {query}{suffix}")
-    label=query
-    if kind=="title" and len(rows)==1:
+    if match_kind=="title" and len(rows)==1:
         label=_media_row_label(rows[0])
-    return _ToolResult(True,"ok",f"MEDIA PLAY OK · {kind} · {label} · {len(rows)} item{'s' if len(rows)!=1 else ''}" + (" · shuffle" if shuffle else ""))
+    return _ToolResult(True,"ok",f"MEDIA PLAY OK · {match_kind} · {label} · {len(rows)} item{'s' if len(rows)!=1 else ''}" + (" · shuffle" if shuffle else ""))
 
 
 def _media_tool_queue(query):
@@ -14451,13 +14483,31 @@ def _media_identify_command(args):
 
 
 def _media_resolve_targets(args):
-    shuffle=False
-    clean=[]
-    for arg in args:
-        if arg=="--shuffle": shuffle=True
-        else: clean.append(arg)
+    shuffle=False; kind=""; selection=""; artist=""; limit=0
+    clean=[]; i=0
+    while i<len(args):
+        arg=args[i]
+        if arg=="--shuffle": shuffle=True; i+=1; continue
+        if arg in {"--kind","--selection","--artist","--limit"}:
+            if i+1>=len(args): raise ValueError(f"{arg} requires a value")
+            value=str(args[i+1]); i+=2
+            if arg=="--kind": kind=value.casefold()
+            elif arg=="--selection": selection=value.casefold()
+            elif arg=="--artist": artist=value
+            else:
+                try: limit=max(0,min(100,int(value)))
+                except ValueError: raise ValueError("--limit requires an integer")
+            continue
+        clean.append(arg); i+=1
+    if not clean and (kind or selection or artist):
+        catalog,_=_media_catalog_entries()
+        rows=media_core.select_entries({"entries":catalog},kind=kind,artist=artist,selection=selection or "all",limit=limit)
+        if not rows:
+            label=artist or ("any "+kind if kind else "media")
+            raise ValueError(f"no Fabric media match for {label!r}; run lk media find or lk media scan")
+        return rows,shuffle
     if not clean:
-        raise ValueError("play requires a file, directory, library query, or artifact")
+        raise ValueError("play requires a file, directory, library query, artifact, or structured selector")
 
     if clean[0].startswith("@"):
         if len(clean)<2 or not clean[1].startswith("sha256:"):

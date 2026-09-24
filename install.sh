@@ -1,13 +1,13 @@
 #!/usr/bin/env bash
 set -euo pipefail
 ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
-echo "Future Crash + LOOK 6.1.19 · No Fixed Address"
+echo "Future Crash + LOOK 6.2.0 · Common Tongue"
 echo "────────────────────────────────────────"
 
 # Refuse a mixed bundle before mutating the machine. A unified release must move
 # LOOK and the node together.
 EXPECTED_RELEASE="$(tr -d '[:space:]' < "$ROOT/VERSION")"
-[[ "$EXPECTED_RELEASE" == "6.1.19" ]] || { echo "BUNDLE ERROR: expected release 6.1.19, found $EXPECTED_RELEASE"; exit 4; }
+[[ "$EXPECTED_RELEASE" == "6.2.0" ]] || { echo "BUNDLE ERROR: expected release 6.2.0, found $EXPECTED_RELEASE"; exit 4; }
 grep -q 'def _fabric_command' "$ROOT/look/lk" || { echo "BUNDLE ERROR: LOOK source has no Fabric command"; exit 4; }
 grep -q 'choices=.*serve.*fabric' "$ROOT/core/node.py" || { echo "BUNDLE ERROR: node source has no Fabric CLI"; exit 4; }
 
@@ -28,7 +28,7 @@ FCL_UNIFIED_INSTALL_CHILD=1 "$ROOT/install-look.sh" "$@"
 ((UNINSTALL)) && exit 0
 if ((DRY_RUN)); then
   echo
-  echo "[dry-run] would install/restart Unified Node 6.1.19 · No Fixed Address with Fabric-wide endpoint management, Tailcat direct TLS transport, enforced Fabric peer authorization, accountless browser endpoint pairing, Fabric SearXNG discovery/search, Decision Plane, Content Search, Media, Artifacts, Memory, and Signal Window 1.9.0"
+  echo "[dry-run] would install/restart Unified Node 6.2.0 · Common Tongue with Fabric-wide endpoint management, Tailcat direct TLS transport, enforced Fabric peer authorization, accountless browser endpoint pairing, Fabric SearXNG discovery/search, Decision Plane, Content Search, Media, Artifacts, Memory, and Signal Window 1.10.0"
   echo "[dry-run] OpenJev mode: $OPENJEV_MODE (auto adopts an existing worker; absence is non-fatal)"
   echo "[dry-run] would initialize Tailcat :7443 as preferred direct encrypted transport, keep Tailscale :7332 → fcl-ingress :7333 as fallback, and verify Fabric CLI wiring"
   exit 0
@@ -75,6 +75,7 @@ install -m 0644 "$ROOT/core/fabric_packet.py" "$HOME/.local/share/future-crash-l
 install -m 0644 "$ROOT/core/fabric_client.py" "$HOME/.local/share/future-crash-look/core/fabric_client.py"
 install -m 0644 "$ROOT/core/fabric_identity.py" "$HOME/.local/share/future-crash-look/core/fabric_identity.py"
 install -m 0644 "$ROOT/core/endpoint_auth.py" "$HOME/.local/share/future-crash-look/core/endpoint_auth.py"
+install -m 0644 "$ROOT/core/intent_normalizer.py" "$HOME/.local/share/future-crash-look/core/intent_normalizer.py"
 install -m 0644 "$ROOT/core/conductor.py" "$HOME/.local/share/future-crash-look/core/conductor.py"
 install -m 0644 "$ROOT/core/decision.py" "$HOME/.local/share/future-crash-look/core/decision.py"
 install -m 0644 "$ROOT/core/memory_store.py" "$HOME/.local/share/future-crash-look/core/memory_store.py"
@@ -335,6 +336,9 @@ fi
 if ! cmp -s "$ROOT/core/endpoint_auth.py" "$HOME/.local/share/future-crash-look/core/endpoint_auth.py"; then
   echo "INSTALL ERROR: endpoint authorization core differs from release" >&2; exit 8
 fi
+if ! cmp -s "$ROOT/core/intent_normalizer.py" "$HOME/.local/share/future-crash-look/core/intent_normalizer.py"; then
+  echo "INSTALL ERROR: intent normalizer differs from release" >&2; exit 8
+fi
 if ! cmp -s "$ROOT/core/conductor.py" "$HOME/.local/share/future-crash-look/core/conductor.py"; then
   echo "INSTALL ERROR: installed conductor differs from release" >&2; exit 8
 fi
@@ -346,11 +350,12 @@ if ! cmp -s "$ROOT/core/decision.py" "$HOME/.local/share/future-crash-look/core/
 fi
 if ! PYTHONPATH="$HOME/.local/share/future-crash-look/core" python3 - <<'PY_RUNTIME' >/dev/null 2>&1
 import conductor, fabric_client, memory_store, decision
-import fabric_identity, endpoint_auth, tailcat
+import fabric_identity, endpoint_auth, intent_normalizer, tailcat
 assert conductor.classify("ping").tier == "reflex"
 assert callable(fabric_client.stream_infer)
 assert callable(fabric_identity.public_identity)
 assert callable(endpoint_auth.EndpointAuth)
+assert intent_normalizer.normalize("play any movie")["kind"] == "video"
 assert callable(tailcat.ensure_identity)
 assert decision.plan(profile="power", confidence=.7).timeout_action == "continue"
 PY_RUNTIME

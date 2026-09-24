@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Future Crash + LOOK Unified Node 6.1.19.
+"""Future Crash + LOOK Unified Node 6.2.0.
 
 A small distributed supervisor for trusted personal machines. Immediate events stay
 asynchronous; a one-second fabric pulse reconciles presence, leases and stale work.
@@ -58,8 +58,8 @@ try:
 except ImportError:
     from endpoint_auth import EndpointAuth
 
-VERSION = "6.1.19"
-RELEASE_NAME = "No Fixed Address"
+VERSION = "6.2.0"
+RELEASE_NAME = "Common Tongue"
 DEFAULT_HOST = "127.0.0.1"
 DEFAULT_PORT = 7332
 DEFAULT_INGRESS_PORT = 0
@@ -2321,9 +2321,18 @@ def _local_media_route(operation, payload):
     operation = str(operation or "").casefold()
     if operation in {"play", "prepare"}:
         query = " ".join(str(payload.get("query") or "").split()).strip()
-        if not query:
-            raise ValueError("media query required")
-        argv = [lk, "media", "prepare" if operation == "prepare" else "play", query]
+        kind = str(payload.get("kind") or "").strip().casefold()
+        artist = " ".join(str(payload.get("artist") or "").split()).strip()
+        selection = str(payload.get("selection") or "").strip().casefold()
+        limit = payload.get("limit")
+        if not query and not (kind or artist or selection):
+            raise ValueError("media query or selector required")
+        argv = [lk, "media", "prepare" if operation == "prepare" else "play"]
+        if query: argv.append(query)
+        if kind: argv.extend(["--kind",kind])
+        if artist: argv.extend(["--artist",artist])
+        if selection: argv.extend(["--selection",selection])
+        if limit not in (None, "", 0, "0"): argv.extend(["--limit",str(limit)])
         if bool(payload.get("shuffle")):
             argv.append("--shuffle")
     elif operation == "control":
@@ -2736,7 +2745,7 @@ def _openjev_shadow(state, question, candidates, *, profile="workspace", consequ
 
 
 class API(BaseHTTPRequestHandler):
-    server_version = "FCLNode/6.1.19"
+    server_version = "FCLNode/6.2.0"
 
     def setup(self):
         self._metric_request_id = None

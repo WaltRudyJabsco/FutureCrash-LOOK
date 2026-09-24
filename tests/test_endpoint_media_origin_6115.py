@@ -4,7 +4,7 @@ ROOT=Path(__file__).resolve().parents[1]
 def test_browser_play_prepares_without_starting_source_player():
     py=(ROOT/'signal-window/server.py').read_text()
     assert 'operation="prepare" if prepare else "play"' in py
-    assert 'state=_media_play(query,media_node,prepare=browser_target)' in py
+    assert 'state=_media_play(query,media_node,prepare=browser_target,intent=normalized)' in py
     assert 'state["output_target"]="browser" if browser_target else media_endpoint' in py
 
 def test_prepared_queue_is_non_mutating():

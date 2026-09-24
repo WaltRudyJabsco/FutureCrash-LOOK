@@ -15,3 +15,10 @@ def test_install_look_reads_bundle_version():
     text = (ROOT / "install-look.sh").read_text()
     assert 'PRODUCT_VERSION="$(tr -d' in text
     assert '6.1.12' not in text
+
+
+def test_installer_carries_shared_intent_normalizer():
+    root=Path(__file__).resolve().parents[1]
+    text=(root/'install.sh').read_text()
+    assert 'core/intent_normalizer.py' in text
+    assert 'import fabric_identity, endpoint_auth, intent_normalizer, tailcat' in text

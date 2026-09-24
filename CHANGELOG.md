@@ -1,3 +1,12 @@
+# 6.2.0 — Common Tongue
+
+- Added shared `fabric-intent-v1` deterministic normalization for obvious media commands.
+- `play any movie`, `play a movie`, `play some music`, and `play something by ARTIST` now produce structured selectors rather than literal catalog queries.
+- Signal Window 1.10.0 and terminal LO share the same intent normalizer.
+- Media core now supports kind/artist/selection/limit selectors independently of natural language.
+- Existing exact artist/album/title resolution remains unchanged.
+- Kept transcoding out of this release; endpoint codec compatibility remains a separate capability concern.
+
 # 6.1.19 — No Fixed Address
 
 - Content identity is now distinct from physical file location.

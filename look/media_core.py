@@ -229,6 +229,25 @@ def resolve_query(library: Any, query: str) -> list[dict[str, Any]]:
     return sorted(search_entries(library, query), key=entry_sort_key)
 
 
+def select_entries(library: Any, *, kind: str = "", artist: str = "", selection: str = "all", limit: int = 0, seed: int | None = None) -> list[dict[str, Any]]:
+    """Select media structurally without treating English selectors as catalog text."""
+    rows = list(normalize_library(library)["entries"])
+    kind = str(kind or "").casefold()
+    if kind in {"audio", "video"}:
+        rows = [r for r in rows if str(r.get("media_type") or "").casefold().startswith(kind + "/")]
+    artist_key = _artist_key(artist)
+    if artist_key:
+        rows = [r for r in rows if _artist_key(str(r.get("artist") or "")) == artist_key]
+    rows = sorted(rows, key=entry_sort_key)
+    selection = str(selection or "all").casefold()
+    if selection == "random" and rows:
+        rng = random.Random(seed)
+        rng.shuffle(rows)
+    if limit:
+        rows = rows[:max(0, int(limit))]
+    return rows
+
+
 def entries_under(library: Any, directory: str | Path) -> list[dict[str, Any]]:
     base = Path(directory).expanduser().resolve()
     out: list[dict[str, Any]] = []
