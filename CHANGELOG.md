@@ -1,5 +1,10 @@
 # Changelog
 
+## 6.1.10 — Media Mount Race Repair
+- Preflight local media once per queue with a bounded sub-second retry window before resolving tracks.
+- Keep local catalog entries local; transient filesystem/mount visibility can no longer turn an otherwise healthy album into a rapid 0:00 failure.
+- Avoid per-track waiting: a genuinely unavailable 60-track volume costs about one second total, then fails clearly.
+
 ## 6.1.9 — Media Root Repair
 - Refuse to proxy stale local media rows through localhost; missing local files are now reported as stale catalog paths.
 - Add `lk media scan --relocate OLD_ROOT NEW_ROOT` to replace a moved/mounted media root without leaving duplicate stale entries.

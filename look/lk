@@ -13720,8 +13720,42 @@ def _media_entry_source(entry):
     raise FileNotFoundError(primary_path or "media queue entry has no path, catalog id, or digest")
 
 
+def _media_wait_for_local_queue(queue, attempts=4):
+    """Give automounted local media one bounded chance to become readable.
+
+    Desktop/removable volumes can briefly disappear at the exact instant playback is
+    requested even though the mount is healthy a fraction of a second later. Probe
+    once per queue, not once per track, so a missing 60-song album costs about one
+    second rather than a minute. Remote-only queues return immediately.
+    """
+    local_names=_media_local_node_names()
+    paths=[]
+    for entry in queue:
+        candidates=[entry]
+        candidates.extend(loc for loc in (entry.get("locations") or []) if isinstance(loc,dict))
+        for loc in candidates:
+            node=str(loc.get("node") or entry.get("node") or "").strip().casefold()
+            path=str(loc.get("path") or "").strip()
+            if not path or path.startswith(("http://","https://")):
+                continue
+            if not node or node in local_names:
+                paths.append(Path(path).expanduser())
+    if not paths:
+        return False
+
+    delays=(0.0,0.12,0.28,0.55)
+    tries=max(1,min(int(attempts),len(delays)))
+    for attempt in range(tries):
+        if attempt:
+            time.sleep(delays[attempt])
+        if any(path.is_file() for path in paths):
+            return True
+    return False
+
+
 def _media_write_m3u(queue):
     MEDIA_QUEUE_FILE.parent.mkdir(parents=True,exist_ok=True)
+    _media_wait_for_local_queue(queue)
     lines=["#EXTM3U"]
     playable=[]
     missing=[]
