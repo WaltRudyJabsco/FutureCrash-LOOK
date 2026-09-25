@@ -1,3 +1,9 @@
+## 6.4.4 — LOOK Games
+
+- Added `lk games` WOPR recreation channel with Tic-Tac-Toe, Checkers, Chess, Backgammon, and GTNW.
+- Board games support 0p/1p/2p and share stop/restart/help controls.
+- Preserved `lk ttt` and `lk gtnw` aliases.
+
 ## 6.4.3 — Searchlight
 
 - Forced current-information turns now fail at the search edge explicitly and fall back to local SearXNG before any optional hosted provider.

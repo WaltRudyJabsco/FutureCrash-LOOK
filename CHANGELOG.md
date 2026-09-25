@@ -1,3 +1,10 @@
+# 6.4.4 · Shall We Play
+
+- Added LOOK Games: Tic-Tac-Toe, Checkers, Chess, Backgammon, and GTNW under one WOPR recreation channel.
+- Added shared 0p/1p/2p mode grammar and common stop/restart/help controls.
+- Preserved `lk ttt` and `lk gtnw` aliases.
+- Games are lightweight and dependency-free; GTNW remains a 0-player simulation.
+
 # 6.4.3 · Searchlight
 
 - Repair Albert → LO → live-search failure handling and add direct SearXNG fallback.

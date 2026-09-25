@@ -12,6 +12,7 @@ if str(_LOOK_MODULE_DIR) not in sys.path:
     sys.path.insert(0,str(_LOOK_MODULE_DIR))
 import media_core
 import file_catalog
+import games as look_games
 
 try:
     import readline
@@ -8632,7 +8633,7 @@ def _direct_searxng_search(query, limit=8):
     params=urllib.parse.urlencode({"q":query,"format":"json"})
     request=urllib.request.Request(base+"/search?"+params,headers={
         "Accept":"application/json",
-        "User-Agent":"Future-Crash-Fabric/6.4.3",
+        "User-Agent":"Future-Crash-Fabric/6.4.4",
     })
     with urllib.request.urlopen(request,timeout=12) as response:
         data=json.load(response)
@@ -15653,9 +15654,14 @@ _COMMANDS = [
     ("mp", "", "media", "Previous media item", "lk media prev"),
     ("lk jobs", "", "ai", "Inspect background LO jobs"),
     ("lk events", "[...]", "ai", "Inspect LO event stream"),
-    ("lk games", "", "meta", "Game availability"),
-    ("lk ttt", "", "meta", "Tic-Tac-Toe easter egg"),
-    ("lk gtnw", "", "meta", "Global Thermonuclear War easter egg"),
+    ("lk games", "[GAME] [0p|1p|2p]", "meta", "WOPR recreation channel"),
+    ("lk games ttt", "[0p|1p|2p]", "meta", "Tic-Tac-Toe"),
+    ("lk games checkers", "[0p|1p|2p]", "meta", "Checkers"),
+    ("lk games chess", "[0p|1p|2p]", "meta", "Chess"),
+    ("lk games backgammon", "[0p|1p|2p]", "meta", "Backgammon"),
+    ("lk games gtnw", "", "meta", "Global Thermonuclear War"),
+    ("lk ttt", "[0p|1p|2p]", "meta", "Tic-Tac-Toe alias"),
+    ("lk gtnw", "", "meta", "Global Thermonuclear War alias"),
     # Config/meta
     ("lk settings", "[SEARCH]", "config", "Unified settings"),
     ("lk config", "", "config", "Configuration surface"),
@@ -16666,9 +16672,9 @@ def main():
         print("LOOK · Albert · "+url); return 0
     if cmd=="_ollama-share-proxy": return _ollama_share_proxy()
     modes={"detail":"detail","dirs":"dirs","files":"files","tree":"tree","recent":"recent","size":"size"}
-    if cmd=="games": print("No games installed."); return 0
-    if cmd=="ttt": return game_ttt()
-    if cmd=="gtnw": return game_gtnw()
+    if cmd=="games": return look_games.run(rest, gtnw_runner=game_gtnw)
+    if cmd=="ttt": return look_games.run(["ttt",*rest], gtnw_runner=game_gtnw)
+    if cmd=="gtnw": return look_games.run(["gtnw",*(rest or ["0p"])], gtnw_runner=game_gtnw)
     if cmd in ("help","-h","--help"):
         if rest and rest[0]=="all": return help_screen()
         return starter_help()
