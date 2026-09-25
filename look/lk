@@ -13927,6 +13927,20 @@ def _media_queue_has_video(queue):
     return False
 
 
+def _media_reuse_needs_visible_restart(wants_video):
+    """Restart our player when a headless/audio session must become visible video.
+
+    mpv can reuse one IPC-owned worker for ordinary queue changes, but a process
+    born as an audio-only session may remain headless on macOS even after a video
+    source is loaded. Treat presentation class as process state, not just media
+    metadata, and relaunch only when crossing audio/headless -> video.
+    """
+    if not wants_video:
+        return False
+    current=_media_session() or {}
+    return str(current.get("presentation") or "audio").casefold() != "video"
+
+
 def _media_launch_session(session):
     """Mirror LOOK's canonical queue into mpv and start at the requested item."""
     session=media_core.normalize_session(session)
@@ -13968,19 +13982,22 @@ def _media_launch_session(session):
         idx=next((i for i,qidx in enumerate(index_map) if qidx>wanted),0)
     session["runtime_queue_indices"]=index_map
 
-    # One LOOK playback worker per output. Reuse the owned mpv process instead of
-    # opening another window for every play request. The MediaSession remains canonical.
+    # One LOOK playback worker per output. Reuse it unless the request changes
+    # presentation class from audio/headless to visible video. That transition is
+    # relaunched so macOS cannot keep a formerly audio-only mpv hidden.
+    queue_video=_media_queue_has_video(queue)
     if _media_mpv_alive():
-        loaded=_media_mpv_request(["loadlist",str(MEDIA_QUEUE_FILE),"replace"])
-        if loaded and loaded.get("error")=="success":
-            _media_mpv_request(["set_property","playlist-pos",idx])
-            _media_mpv_request(["set_property","pause",False])
-            session["player"]="mpv"
-            session["state"]="playing"
-            session["current_index"]=index_map[idx]
-            _media_save_session(session)
-            print(f"LOOK media · queue → existing mpv · {len(queue)} item{'s' if len(queue)!=1 else ''}")
-            return 0
+        if not _media_reuse_needs_visible_restart(queue_video):
+            loaded=_media_mpv_request(["loadlist",str(MEDIA_QUEUE_FILE),"replace"])
+            if loaded and loaded.get("error")=="success":
+                _media_mpv_request(["set_property","playlist-pos",idx])
+                _media_mpv_request(["set_property","pause",False])
+                session["player"]="mpv"
+                session["state"]="playing"
+                session["current_index"]=index_map[idx]
+                _media_save_session(session)
+                print(f"LOOK media · queue → existing mpv · {len(queue)} item{'s' if len(queue)!=1 else ''}")
+                return 0
 
     # No reachable IPC owner remains. Reap only processes bearing LOOK's exact
     # IPC marker, then replace the stale socket pathname and launch one worker.
@@ -14005,7 +14022,7 @@ def _media_launch_session(session):
         f"--playlist={MEDIA_QUEUE_FILE}",
         f"--playlist-start={idx}",
     ]
-    if _media_queue_has_video(queue):
+    if queue_video:
         cmd.extend(["--video=yes","--force-window=yes"])
     if session.get("repeat")=="all":
         cmd.append("--loop-playlist=inf")
@@ -14027,24 +14044,25 @@ def _media_launch_session(session):
 
 def _media_launch_stream(url,source="",session=None):
     """Launch one Fabric byte stream using a mature media engine."""
+    stream_video=_media_queue_has_video((session or {}).get("queue") or [])
     mpv=_media_mpv_binary()
     if mpv:
         if _media_mpv_alive():
-            loaded=_media_mpv_request(["loadfile",url,"replace"])
-            if loaded and loaded.get("error")=="success":
-                _media_mpv_request(["set_property","pause",False])
-                if session is None:
-                    session=media_core.new_session([{"title":source or "Fabric media","digest":"stream"}])
-                session["url"]=url; session["source"]=source; session["started"]=time.time()
-                session["player"]="mpv"; session["state"]="playing"
-                _media_save_session(session)
-                print(f"LOOK media · Fabric stream → existing mpv" + (f" · {source}" if source else ""))
-                return 0
+            if not _media_reuse_needs_visible_restart(stream_video):
+                loaded=_media_mpv_request(["loadfile",url,"replace"])
+                if loaded and loaded.get("error")=="success":
+                    _media_mpv_request(["set_property","pause",False])
+                    if session is None:
+                        session=media_core.new_session([{"title":source or "Fabric media","digest":"stream"}])
+                    session["url"]=url; session["source"]=source; session["started"]=time.time()
+                    session["player"]="mpv"; session["state"]="playing"
+                    _media_save_session(session)
+                    print(f"LOOK media · Fabric stream → existing mpv" + (f" · {source}" if source else ""))
+                    return 0
         _media_stop_owned_mpvs()
         try: MEDIA_IPC_FILE.unlink(missing_ok=True)
         except OSError: pass
         cmd=[mpv,"--no-config",f"--input-ipc-server={MEDIA_IPC_FILE}","--no-terminal","--idle=yes",f"--log-file={MEDIA_MPV_LOG}"]
-        stream_video=_media_queue_has_video((session or {}).get("queue") or [])
         if stream_video: cmd.extend(["--video=yes","--force-window=yes"])
         cmd.append(url)
         proc=subprocess.Popen(cmd,stdin=subprocess.DEVNULL,stdout=subprocess.DEVNULL,stderr=subprocess.DEVNULL)

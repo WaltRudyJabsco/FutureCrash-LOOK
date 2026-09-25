@@ -1,3 +1,10 @@
+## 6.3.7 — Window Seat
+
+- Fixed native video presentation when a LOOK-owned mpv already exists as an audio/headless session.
+- Audio → video is now treated as a presentation-class transition: LOOK relaunches its owned mpv with explicit `--video=yes --force-window=yes` rather than reusing a hidden audio worker.
+- Audio → audio and video → video continue to reuse the existing mpv IPC session.
+- Regression coverage includes the `classics` → `arts` sequence that exposed the bug on macOS.
+
 ## 6.3.6 — Clean Feed
 - Classic Arts Showcase now prefers a direct HLS feed for native playback instead of opening the whole website. Albert uses the direct stream when the browser supports HLS and falls back to a fitted official-page embed.
 - Albert video folds now contain the entire frame, add an expand/contract view, and scale website fallbacks into the fold instead of cropping their top-left corner.
