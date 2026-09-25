@@ -1,3 +1,13 @@
+# 6.6.0 · ONE BRAIN
+
+- Adds `core/cognition.py`, a shared DecisionPlane used by LOOK, Signal, Albert, and machine clients.
+- Adds a canonical Fabric Action Registry with dotted action IDs, risk/effect metadata, and `/v1/actions`.
+- Adds fuzzy low-cost intent routing with typo tolerance; OpenJev is used only to break genuinely ambiguous bounded routes.
+- Narrows model tool schemas before inference so strong web/media/files/speech/games/system intents cannot wander into unrelated tool families.
+- Adds explicit Goal and dependency Plan objects plus turn-level satisfaction verification based on real tool receipts.
+- Exposes `/v1/cognition/route`, `lo_engine.analyze_request()`, `action_registry()`, and `resolve_name()` for all surfaces.
+- Installer now installs and verifies the cognition core as part of the unified release contract.
+
 # 6.5.0 · LAST MILE
 
 - Browser endpoints now have a reusable effect runtime with explicit queued/delivered/received/waiting/started/ended/error receipts.

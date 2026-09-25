@@ -4,10 +4,10 @@ ROOT=Path(__file__).resolve().parents[1]
 
 
 def test_release_is_paper_brain():
-    assert (ROOT/'VERSION').read_text().strip() == '6.5.0'
+    assert (ROOT/'VERSION').read_text().strip() == '6.6.0'
     node=(ROOT/'core/node.py').read_text()
-    assert 'VERSION = "6.5.0"' in node
-    assert 'RELEASE_NAME = "LAST MILE"' in node
+    assert 'VERSION = "6.6.0"' in node
+    assert 'RELEASE_NAME = "ONE BRAIN"' in node
 
 
 def test_albert_beacon_and_continuing_fold_ui():
@@ -36,7 +36,7 @@ def test_albert_uses_shared_router_for_live_search():
     server=(ROOT/'albert/server.py').read_text()
     assert 'def route_intent(prompt: str)' in engine
     assert 'def _lo_requires_live_web(prompt):' in core
-    assert 'turn_intent=_lo_intent_family(prompt)' in core
+    assert 'turn_route=_lo_cognition_route(prompt,use_openjev=True)' in core
     assert 'turn_force_search=bool(force_search or turn_intent=="web_current")' in core
     assert 'force_search=False' in server
     assert 'shared_intent=_load_lo_engine().route_intent(q)' in server

@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Future Crash + LOOK Unified Node 6.5.0.
+"""Future Crash + LOOK Unified Node 6.6.0.
 
 A small distributed supervisor for trusted personal machines. Immediate events stay
 asynchronous; a one-second fabric pulse reconciles presence, leases and stale work.
@@ -48,6 +48,10 @@ try:
     from .decision import OpenJevShadow, new_request as new_decision_request, provider_status as decision_provider_status, plan as decision_plan
 except ImportError:
     from decision import OpenJevShadow, new_request as new_decision_request, provider_status as decision_provider_status, plan as decision_plan
+try:
+    from .cognition import public_registry as cognition_actions, analyze as cognition_analyze
+except ImportError:
+    from cognition import public_registry as cognition_actions, analyze as cognition_analyze
 from urllib.parse import urlparse, parse_qs
 try:
     from .fabric_identity import FabricIdentity, join_pairing
@@ -58,8 +62,8 @@ try:
 except ImportError:
     from endpoint_auth import EndpointAuth
 
-VERSION = "6.5.0"
-RELEASE_NAME = "LAST MILE"
+VERSION = "6.6.0"
+RELEASE_NAME = "ONE BRAIN"
 DEFAULT_HOST = "127.0.0.1"
 DEFAULT_PORT = 7332
 DEFAULT_INGRESS_PORT = 0
@@ -482,6 +486,10 @@ def capabilities():
         "decision.shadow": True,
         "decision.choice": probe("127.0.0.1", 8791),
         "decision.openjev": probe("127.0.0.1", 8791),
+        # 6.6 shared cognition vocabulary. Surfaces consume this same registry
+        # rather than inventing their own tool/intention maps.
+        "cognition.route": True,
+        "action.registry": True,
     }
 
 
@@ -2191,7 +2199,7 @@ def _local_web_search(query, limit=8):
     base=os.environ.get("FCL_SEARXNG_URL","http://127.0.0.1:8888").rstrip("/")
     request=urllib.request.Request(base+"/search?"+params,headers={
         "Accept":"application/json",
-        "User-Agent":"Future-Crash-Fabric/6.5.0",
+        "User-Agent":"Future-Crash-Fabric/6.6.0",
     })
     try:
         with urllib.request.urlopen(request,timeout=8) as response:
@@ -2925,7 +2933,7 @@ def _openjev_shadow(state, question, candidates, *, profile="workspace", consequ
 
 
 class API(BaseHTTPRequestHandler):
-    server_version = "FCLNode/6.5.0"
+    server_version = "FCLNode/6.6.0"
 
     def setup(self):
         self._metric_request_id = None
@@ -3262,6 +3270,11 @@ class API(BaseHTTPRequestHandler):
             return self.sendj(200, capabilities())
         if path == "/v1/models":
             return self.sendj(200, {"models": MODELS.discover()})
+        if path == "/v1/actions":
+            return self.sendj(200,{"schema":"fabric-actions-v1","actions":cognition_actions()})
+        if path == "/v1/cognition/route":
+            q=parse_qs(urlparse(self.path).query); text=str((q.get("q") or [""])[0])
+            return self.sendj(200,{"schema":"fabric-cognition-route-v1","route":cognition_analyze(text,use_openjev=False).public()})
         if path == "/v1/decisions/provider":
             status=decision_provider_status()
             status["reachable"]=bool(probe("127.0.0.1",8791)) if status.get("enabled") else False

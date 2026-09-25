@@ -1,15 +1,15 @@
 #!/usr/bin/env bash
 set -euo pipefail
 ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
-echo "Future Crash + LOOK 6.5.0 · LAST MILE"
+echo "Future Crash + LOOK 6.6.0 · ONE BRAIN"
 echo "────────────────────────────────────────"
 
 # Refuse a mixed bundle before mutating the machine. A unified release must move
 # LOOK and the node together.
 EXPECTED_RELEASE="$(tr -d '[:space:]' < "$ROOT/VERSION")"
-[[ "$EXPECTED_RELEASE" == "6.5.0" ]] || { echo "BUNDLE ERROR: expected release 6.5.0, found $EXPECTED_RELEASE"; exit 4; }
+[[ "$EXPECTED_RELEASE" == "6.6.0" ]] || { echo "BUNDLE ERROR: expected release 6.6.0, found $EXPECTED_RELEASE"; exit 4; }
 echo "BUNDLE SOURCE  $ROOT"
-echo "BUNDLE RELEASE $EXPECTED_RELEASE · LAST MILE"
+echo "BUNDLE RELEASE $EXPECTED_RELEASE · ONE BRAIN"
 for vf in "$ROOT/look/VERSION" "$ROOT/albert/VERSION" "$ROOT/future-crash/VERSION"; do
   component_version="$(tr -d '[:space:]' < "$vf")"
   [[ "$component_version" == "$EXPECTED_RELEASE" ]] || { echo "BUNDLE ERROR: $vf reports $component_version, expected $EXPECTED_RELEASE"; exit 4; }
@@ -49,7 +49,7 @@ FCL_UNIFIED_INSTALL_CHILD=1 "$ROOT/install-look.sh" "$@"
 ((UNINSTALL)) && exit 0
 if ((DRY_RUN)); then
   echo
-  echo "[dry-run] would install/restart Unified Node 6.5.0 · LAST MILE with Fabric-wide endpoint management, Tailcat direct TLS transport, enforced Fabric peer authorization, accountless browser endpoint pairing, Fabric SearXNG discovery/search, Decision Plane, Content Search, Media, Artifacts, Memory, and Signal Window 1.10.5"
+  echo "[dry-run] would install/restart Unified Node 6.6.0 · ONE BRAIN with shared ONE BRAIN cognition routing, bounded Action Registry, OpenJev-assisted ambiguity resolution, explicit Goal/Plan verification, Fabric-wide endpoint management, SearXNG, Media, Artifacts, Memory, and Signal Window 1.10.5"
   echo "[dry-run] OpenJev mode: $OPENJEV_MODE (auto adopts an existing worker; absence is non-fatal)"
   echo "[dry-run] would initialize Tailcat :7443 as preferred direct encrypted transport, keep Tailscale :7332 → fcl-ingress :7333 as fallback, and verify Fabric CLI wiring"
   exit 0
@@ -99,6 +99,7 @@ install -m 0644 "$ROOT/core/endpoint_auth.py" "$HOME/.local/share/future-crash-l
 install -m 0644 "$ROOT/core/intent_normalizer.py" "$HOME/.local/share/future-crash-look/core/intent_normalizer.py"
 install -m 0644 "$ROOT/core/conductor.py" "$HOME/.local/share/future-crash-look/core/conductor.py"
 install -m 0644 "$ROOT/core/decision.py" "$HOME/.local/share/future-crash-look/core/decision.py"
+install -m 0644 "$ROOT/core/cognition.py" "$HOME/.local/share/future-crash-look/core/cognition.py"
 install -m 0644 "$ROOT/core/memory_store.py" "$HOME/.local/share/future-crash-look/core/memory_store.py"
 install -m 0644 "$ROOT/core/ui_model.py" "$HOME/.local/share/future-crash-look/core/ui_model.py"
 install -m 0755 "$ROOT/core/fcl-node" "$HOME/.local/bin/fcl-node"
@@ -388,8 +389,11 @@ fi
 if ! cmp -s "$ROOT/core/decision.py" "$HOME/.local/share/future-crash-look/core/decision.py"; then
   echo "INSTALL ERROR: installed Fabric decision plane differs from release" >&2; exit 8
 fi
+if ! cmp -s "$ROOT/core/cognition.py" "$HOME/.local/share/future-crash-look/core/cognition.py"; then
+  echo "INSTALL ERROR: installed Fabric cognition core differs from release" >&2; exit 8
+fi
 if ! PYTHONPATH="$HOME/.local/share/future-crash-look/core" python3 - <<'PY_RUNTIME' >/dev/null 2>&1
-import conductor, fabric_client, memory_store, decision
+import conductor, fabric_client, memory_store, decision, cognition
 import fabric_identity, endpoint_auth, intent_normalizer, tailcat
 assert conductor.classify("ping").tier == "reflex"
 assert callable(fabric_client.stream_infer)
@@ -398,6 +402,8 @@ assert callable(endpoint_auth.EndpointAuth)
 assert intent_normalizer.normalize("play any movie")["kind"] == "video"
 assert callable(tailcat.ensure_identity)
 assert decision.plan(profile="power", confidence=.7).timeout_action == "continue"
+assert cognition.analyze("headlienes", use_openjev=False).primary == "web"
+assert any(row["id"] == "audio.speak" for row in cognition.public_registry())
 PY_RUNTIME
 then
   echo "INSTALL ERROR: installed Fabric runtime modules do not import together" >&2

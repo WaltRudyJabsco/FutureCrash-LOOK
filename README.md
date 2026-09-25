@@ -1,6 +1,10 @@
-# Future Crash + LOOK 6.5.0 · LAST MILE
-
 # Future Crash + LOOK
+
+## 6.6 · ONE BRAIN
+
+LOOK, Signal, and Albert now enter the same cognition plane. Natural language is resolved fuzzily, but execution remains exact: a shared DecisionPlane selects a bounded capability neighborhood, OpenJev may break close low-risk ambiguity, and the model only sees tools relevant to the resolved family. Every turn can expose an explicit Goal/Plan/verification envelope without exposing model chain-of-thought.
+
+Fabric now publishes its machine-readable action vocabulary at `GET /v1/actions` and its bounded routing analysis at `GET /v1/cognition/route?q=...`.
 
 **One personal computer made from the machines you already own.**
 

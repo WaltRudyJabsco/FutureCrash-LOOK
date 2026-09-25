@@ -14,7 +14,7 @@ def test_cli_delegates_browser_speech_resolution_to_resident_daemon():
 
 
 def test_release_6411_contract():
-    assert (ROOT/'VERSION').read_text().strip()=='6.5.0'
+    assert (ROOT/'VERSION').read_text().strip()=='6.6.0'
     node=(ROOT/'core/node.py').read_text()
-    assert 'VERSION = "6.5.0"' in node
-    assert 'RELEASE_NAME = "LAST MILE"' in node
+    assert 'VERSION = "6.6.0"' in node
+    assert 'RELEASE_NAME = "ONE BRAIN"' in node

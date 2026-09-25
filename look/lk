@@ -6362,6 +6362,67 @@ def _intent_normalizer_module():
     return intent_normalizer
 
 
+def _cognition_module():
+    # One cognition vocabulary for terminal LO, Signal, Albert, and future surfaces.
+    candidates=[Path.home()/".local/share/future-crash-look/core", ROOT.parent/"core"]
+    for path in candidates:
+        if (path/"cognition.py").exists() and str(path) not in sys.path:
+            sys.path.insert(0,str(path))
+    import cognition
+    return cognition
+
+
+def _lo_cognition_route(prompt,use_openjev=True):
+    """Return the shared bounded route while preserving exact host reflexes."""
+    # Exact deterministic edges remain authoritative. Cognition adds fuzziness and
+    # tool neighborhoods; it never weakens the hard weather/game/media contracts.
+    if _lo_game_intent(prompt):
+        family="games"
+    elif _lo_requires_weather(prompt):
+        family="weather"
+    elif _lo_requires_live_web(prompt):
+        family="web"
+    elif _lo_media_intent_profile(prompt,"workspace"):
+        family="media"
+    else:
+        family=None
+    try:
+        route=_cognition_module().analyze(prompt,use_openjev=use_openjev)
+        if family and route.primary!=family:
+            route.primary=family
+            if family not in route.families: route.families.insert(0,family)
+            neighbors=_cognition_module().FAMILY_NEIGHBORS.get(family,{family})
+            route.allowed_tools=sorted(set(route.allowed_tools) | {name for f in neighbors for name in _cognition_module().FAMILY_TOOLS.get(f,set())})
+            route.confidence=max(route.confidence,.995)
+            route.source="rules"
+            route.reason="authoritative host reflex"
+        return route
+    except Exception:
+        class _Route:
+            primary=family or "general"; families=[family or "general"]; confidence=.5; margin=.5
+            source="fallback"; reason="cognition module unavailable"; allowed_tools=[]; needs_clarification=False
+            def public(self): return {"primary":self.primary,"families":self.families,"confidence":self.confidence,"margin":self.margin,"source":self.source,"reason":self.reason,"allowed_tools":self.allowed_tools,"needs_clarification":self.needs_clarification}
+        return _Route()
+
+
+def _lo_goal(prompt,route):
+    try: return _cognition_module().new_goal(prompt,route)
+    except Exception: return None
+
+
+def _lo_tools_for_route(profile,route):
+    """Fuzzy discovery, exact execution: expose only the useful tool neighborhood."""
+    tools=_lo_tools(profile)
+    allowed=set(getattr(route,"allowed_tools",[]) or [])
+    if not allowed or getattr(route,"primary","general")=="general" or getattr(route,"needs_clarification",False):
+        return tools
+    # web_search is appended separately because availability is dynamic.
+    allowed.discard("web_search")
+    narrowed=[t for t in tools if t.get("function",{}).get("name","") in allowed]
+    # Never hand the model an empty schema because a new family has not yet been registered.
+    return narrowed or tools
+
+
 def _lo_media_intent(prompt):
     """Compatibility entry: workspace policy for direct callers/tests."""
     return _lo_media_intent_profile(prompt,"workspace")
@@ -6453,14 +6514,9 @@ def _lo_requires_live_web(prompt):
 
 
 def _lo_intent_family(prompt):
-    """Shared front-door routing hint used by LOOK, Signal, and Albert."""
-    if _lo_game_intent(prompt): return "games"
-    if _lo_requires_weather(prompt): return "weather"
-    if _lo_requires_live_web(prompt): return "web_current"
-    if _lo_media_intent_profile(prompt,"workspace"): return "media"
-    low=str(prompt or "").casefold()
-    if re.search(r"\b(file|folder|directory|workspace|codebase|project files?|this folder|search files?)\b",low): return "files"
-    return "general"
+    """Compatibility label over the shared 6.6 cognition route."""
+    route=_lo_cognition_route(prompt,use_openjev=False)
+    return "web_current" if route.primary=="web" else route.primary
 
 
 def _lo_game_direct_answer(tool_content,ok):
@@ -8734,7 +8790,7 @@ def _direct_searxng_search(query, limit=8):
     params=urllib.parse.urlencode({"q":query,"format":"json"})
     request=urllib.request.Request(base+"/search?"+params,headers={
         "Accept":"application/json",
-        "User-Agent":"Future-Crash-Fabric/6.5.0",
+        "User-Agent":"Future-Crash-Fabric/6.6.0",
     })
     with urllib.request.urlopen(request,timeout=12) as response:
         data=json.load(response)
@@ -9777,9 +9833,15 @@ def ollama_chat(force_search=False, initial_prompt=None, allow_start=True, host_
 
         # Shared host routing runs before any surface or model gets to improvise.
         # This is the same gate for terminal LOOK, Signal, and Albert.
-        turn_intent=_lo_intent_family(prompt)
+        turn_route=_lo_cognition_route(prompt,use_openjev=True)
+        turn_intent="web_current" if turn_route.primary=="web" else turn_route.primary
         turn_force_search=bool(force_search or turn_intent=="web_current")
-        if events: events.emit("intent_routed",family=turn_intent,forced_search=turn_force_search)
+        turn_goal=_lo_goal(prompt,turn_route)
+        if events:
+            events.emit("intent_routed",family=turn_intent,families=list(turn_route.families),confidence=turn_route.confidence,margin=turn_route.margin,source=turn_route.source,forced_search=turn_force_search)
+            if turn_goal:
+                events.emit("goal_started",**turn_goal.public())
+                events.emit("plan_created",goal_id=turn_goal.id,steps=list(turn_goal.steps))
 
         # An explicit `lk ...` line is an operator command, not language for the model.
         # Execute it argv-safe with the current TTY so interactive LOOK surfaces work
@@ -9804,6 +9866,7 @@ def ollama_chat(force_search=False, initial_prompt=None, allow_start=True, host_
         turn_tool_retry = False
         turn_evidence = []
         turn_proposed_action = None
+        turn_successful_tools=set()
 
         # Terminal drag/drop becomes first-class resource context. Finder and most Linux
         # terminals paste escaped/quoted paths into the input line; normalize them here.
@@ -9951,9 +10014,13 @@ def ollama_chat(force_search=False, initial_prompt=None, allow_start=True, host_
             answer=_lo_game_direct_answer(game_content,game_ok)
             print("\n"+_lo_label("lo","35")+"\n"+_ollama_markup(answer)+"\n")
             messages.append({"role":"assistant","content":answer})
+            if game_ok: turn_successful_tools.add(game_name)
             if events:
                 events.emit("tool_done",tool=game_name,mode="preflight",elapsed_tool_ms=_game_elapsed,status=("ok" if game_ok else "failed"))
                 events.emit("response",text=answer)
+                if turn_goal:
+                    assessment=_cognition_module().assess(turn_goal,successful_tools=list(turn_successful_tools),final_text=answer)
+                    events.emit("goal_verified",goal_id=turn_goal.id,**assessment)
                 events.emit("request_done",status=("ok" if game_ok else "error"),rounds=0,tool_calls=1,prompt_tokens=0,output_tokens=0,load_ms=0)
             _ai_foreground(False,"lo")
             if one_shot: return 0 if game_ok else 1
@@ -9987,9 +10054,13 @@ def ollama_chat(force_search=False, initial_prompt=None, allow_start=True, host_
             answer=_lo_media_direct_answer(media_content,media_ok)
             print("\n"+_lo_label("lo","35")+"\n"+_ollama_markup(answer)+"\n")
             messages.append({"role":"assistant","content":answer})
+            if media_ok: turn_successful_tools.add(media_name)
             if events:
                 events.emit("tool_done",tool=media_name,mode="preflight",elapsed_tool_ms=_media_elapsed,status=("ok" if media_ok else "failed"))
                 events.emit("response",text=answer)
+                if turn_goal:
+                    assessment=_cognition_module().assess(turn_goal,successful_tools=list(turn_successful_tools),final_text=answer)
+                    events.emit("goal_verified",goal_id=turn_goal.id,**assessment)
                 events.emit("request_done",status=("ok" if media_ok else "needs_input"),rounds=0,tool_calls=1,prompt_tokens=0,output_tokens=0,load_ms=0)
             _ai_foreground(False,"lo")
             if one_shot:
@@ -10216,10 +10287,12 @@ def ollama_chat(force_search=False, initial_prompt=None, allow_start=True, host_
                 payload_obj["think"]=runtime["think"]
             tools=[]
             if supports_tools and not host_repair_final and not weather_text_fast_path:
-                tools = _lo_tools(profile)
-                if has_web and not turn_force_search:
+                tools = _lo_tools_for_route(profile,turn_route)
+                route_allowed=set(getattr(turn_route,"allowed_tools",[]) or [])
+                if has_web and not turn_force_search and (not route_allowed or "web_search" in route_allowed):
                     tools.append(web_tool)
                 payload_obj["tools"] = tools
+                if events: events.emit("tools_scoped",family=turn_intent,tools=[t.get("function",{}).get("name","") for t in tools])
 
             try:
                 aggregate={"role":"assistant","content":"","thinking":"","tool_calls":[]}
@@ -10376,6 +10449,7 @@ def ollama_chat(force_search=False, initial_prompt=None, allow_start=True, host_
                         last_external_result=str(tool_content)
                         if ok:
                             external_action_succeeded=True
+                            turn_successful_tools.add(name)
                             last_action=_lo_action_from_tool(name,args,tool_content)
                     elif name == "web_search":
                         if not has_web or turn_force_search:
@@ -10402,6 +10476,7 @@ def ollama_chat(force_search=False, initial_prompt=None, allow_start=True, host_
                             last_external_result=str(tool_content)
                             if _external_action_succeeded(name,tool_content):
                                 external_action_succeeded=True
+                        if ok: turn_successful_tools.add(name)
                         action_state=_lo_action_from_tool(name,args,tool_content)
                         if action_state:
                             last_action=action_state
@@ -10416,6 +10491,7 @@ def ollama_chat(force_search=False, initial_prompt=None, allow_start=True, host_
                         with _activity("inspecting"):
                             tool_content,_ok,_elapsed=_tool_transaction(
                                 name,args,lambda: _run_system_inspection_tool(name,args))
+                        if _ok: turn_successful_tools.add(name)
                     elif name in {"generate_image","schedule_prompt","schedule_list","game_action","audio_speak","media_search","media_play","media_queue","media_control"}:
                         if name=="generate_image":
                             label,activity="image","generating"
@@ -10430,6 +10506,7 @@ def ollama_chat(force_search=False, initial_prompt=None, allow_start=True, host_
                         with _activity(activity):
                             tool_content,_ok,_elapsed=_tool_transaction(
                                 name,args,lambda: _run_capability_tool(name,args,workspace,profile))
+                        if _ok: turn_successful_tools.add(name)
                         _lo_receipt("result",str(tool_content).splitlines()[0],ok=_ok,color="33")
                     elif name=="run_command":
                         if profile not in {"power","unsafe"}:
@@ -10603,6 +10680,12 @@ def ollama_chat(force_search=False, initial_prompt=None, allow_start=True, host_
                 print("\n"+_lo_label("lo","35")+"\n"+_c("(no final response)","2")+"\n")
             if events:
                 events.emit("response", text=final)
+                if turn_goal:
+                    try:
+                        assessment=_cognition_module().assess(turn_goal,successful_tools=list(turn_successful_tools),final_text=final)
+                        events.emit("goal_verified",goal_id=turn_goal.id,**assessment)
+                    except Exception:
+                        pass
                 events.emit("request_done", status="ok", rounds=task_rounds, tool_calls=task_tool_calls,
                             prompt_tokens=task_prompt_tokens, output_tokens=task_eval_tokens,
                             load_ms=int(task_load_s*1000))

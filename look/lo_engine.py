@@ -96,6 +96,30 @@ def route_intent(prompt: str) -> str:
     return str(fn(prompt) if callable(fn) else "general")
 
 
+def analyze_request(prompt: str) -> dict:
+    """Expose the same bounded cognition route used by terminal LO."""
+    core=_load_core()
+    fn=getattr(core,"_lo_cognition_route",None)
+    if not callable(fn):
+        return {"primary":route_intent(prompt),"families":[route_intent(prompt)],"confidence":0.5,"margin":0.0,"source":"compat","allowed_tools":[],"needs_clarification":False}
+    route=fn(prompt)
+    return route.public() if hasattr(route,"public") else dict(route)
+
+
+def action_registry() -> list[dict]:
+    """Machine-readable shared action vocabulary for every presentation surface."""
+    core=_load_core()
+    mod=getattr(core,"_cognition_module",lambda:None)()
+    return list(mod.public_registry()) if mod and hasattr(mod,"public_registry") else []
+
+
+def resolve_name(query: str, candidates: list[dict]) -> dict:
+    """Fuzzy referent resolution without granting execution authority."""
+    core=_load_core(); mod=getattr(core,"_cognition_module",lambda:None)()
+    if not mod: return {"status":"no_match","confidence":0.0}
+    return mod.resolve_name(query,candidates)
+
+
 def available() -> bool:
     try:
         _load_core()
@@ -144,11 +168,23 @@ def chat_once(prompt: str, *, profile='workspace', workspace=None, selected_path
     response=''
     error=''
     receipts=[]
+    route=None
+    goal=None
+    satisfaction=None
+    plan=None
     for row in events.rows:
         if row.get('event')=='response' and str(row.get('text') or '').strip():
             response=str(row['text']).strip()
         elif row.get('event')=='source_receipt':
             receipts.append({k:row.get(k) for k in ('edge','source','confidence','as_of','retrieved_at','source_url') if row.get(k) is not None})
+        elif row.get('event')=='intent_routed':
+            route={k:row.get(k) for k in ('family','families','confidence','margin','source','forced_search') if row.get(k) is not None}
+        elif row.get('event')=='goal_started':
+            goal={k:v for k,v in row.items() if k not in {'event','seq'}}
+        elif row.get('event')=='plan_created':
+            plan={k:v for k,v in row.items() if k not in {'event','seq'}}
+        elif row.get('event')=='goal_verified':
+            satisfaction={k:v for k,v in row.items() if k not in {'event','seq'}}
         elif row.get('event')=='error':
             error=str(row.get('error') or row.get('message') or 'LO request failed')
     if int(rc or 0) != 0 and not error:
@@ -162,4 +198,5 @@ def chat_once(prompt: str, *, profile='workspace', workspace=None, selected_path
     # than accidentally presenting model synthesis as sourced fact.
     provenance = receipts[-1] if receipts else {'edge':'MODEL','source':'model','confidence':'INFERRED'}
     return {'text':response,'events':events.rows,'returncode':int(rc or 0),
-            'persona':str(persona or ''),'receipts':receipts,'provenance':provenance}
+            'persona':str(persona or ''),'receipts':receipts,'provenance':provenance,
+            'route':route,'goal':goal,'plan':plan,'satisfaction':satisfaction}
