@@ -1014,6 +1014,17 @@ class App(BaseHTTPRequestHandler):
             elif self.path=="/api/chat": scope="lo.use"
             else: scope="signal.view"
             if not self._require_endpoint(scope): return
+        if self.path=="/api/endpoint/poll":
+            try:
+                n=int(self.headers.get("Content-Length","0")); d=json.loads(self.rfile.read(n) or b"{}")
+                ep=self._endpoint() or {}
+                label=str(d.get("label") or ep.get("label") or "Browser")[:80]
+                caps=d.get("capabilities") or ["display.output","audio.output","audio.speak","media.play","input.text"]
+                _node_call("/v1/endpoints/presence",{"endpoint_id":ep.get("endpoint_id"),"label":label,"capabilities":caps,"surface":"signal","metadata":d.get("metadata") or {}},timeout=1.5)
+                value=_node_call("/v1/endpoints/poll",{"endpoint_id":ep.get("endpoint_id")},timeout=1.5) or {"actions":[]}
+                return self.json(200,value)
+            except Exception as exc:
+                return self.json(502,{"ok":False,"error":str(exc),"actions":[]})
         if self.path=="/api/fabric/decisions/answer":
             try:
                 n=int(self.headers.get("Content-Length","0")); d=json.loads(self.rfile.read(n) or b"{}")

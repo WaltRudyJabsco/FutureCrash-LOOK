@@ -5,6 +5,25 @@ const authGate=document.querySelector('#authGate'),authCode=document.querySelect
 let endpointAuthorized=false;
 async function pollEndpointAuth(){try{const r=await fetch('/api/auth/status',{cache:'no-store'}),d=await r.json();if(d.authorized){endpointAuthorized=true;authGate.hidden=true;form?.removeAttribute('aria-disabled');return}endpointAuthorized=false;authGate.hidden=false;const code=String(d.pending?.code||'------');authCode.textContent=code;authCodeInline.textContent=code;form?.setAttribute('aria-disabled','true')}catch{authGate.hidden=false}setTimeout(pollEndpointAuth,1500)}
 pollEndpointAuth();
+function browserEndpointLabel(){
+  const saved=localStorage.getItem('fabric-endpoint-label');if(saved)return saved;
+  const ua=navigator.userAgent||'';
+  if((/iPad/i.test(ua))||(/Macintosh/i.test(ua)&&navigator.maxTouchPoints>1))return 'iPad';
+  if(/iPhone/i.test(ua))return 'iPhone';
+  if(/Android/i.test(ua))return 'Android browser';
+  if(/Macintosh|Mac OS/i.test(ua))return 'Mac browser';
+  return 'Browser';
+}
+function browserSpeak(payload){
+  const text=String(payload?.text||'').trim();if(!text||!('speechSynthesis'in window))return;
+  try{const u=new SpeechSynthesisUtterance(text);if(payload?.voice_profile==='wopr'){u.rate=.82;u.pitch=.55}else{u.rate=.96;u.pitch=1}speechSynthesis.cancel();speechSynthesis.speak(u);event('FABRIC SPEAK · '+browserEndpointLabel())}catch(err){event('FABRIC SPEAK ERROR · '+err.message)}
+}
+async function pollEndpointActions(){
+  if(!endpointAuthorized){setTimeout(pollEndpointActions,1500);return}
+  try{const r=await fetch('/api/endpoint/poll',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({label:browserEndpointLabel(),capabilities:['display.output','audio.output','audio.speak','media.play','input.text'],metadata:{device:browserEndpointLabel(),platform:navigator.platform||''}})});const d=await r.json();for(const a of (d.actions||[])){if(a.action==='audio.speak')browserSpeak(a.payload||{})}}catch{}
+  setTimeout(pollEndpointActions,1400);
+}
+pollEndpointActions();
 const signalSession=localStorage.getItem('signal-session')||crypto.randomUUID();
 localStorage.setItem('signal-session',signalSession);
 a.imageSmoothingEnabled=c.imageSmoothingEnabled=false;

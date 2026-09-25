@@ -8,7 +8,7 @@ def test_service_binary_discovery_includes_linuxbrew():
     assert 'Path.home()/".linuxbrew/bin"/name' in src
 
 def test_sound_check_release_contract():
-    assert (ROOT/'VERSION').read_text().strip() == '6.4.8'
+    assert (ROOT/'VERSION').read_text().strip() == '6.4.9'
     node=(ROOT/'core/node.py').read_text()
-    assert 'VERSION = "6.4.8"' in node
-    assert 'RELEASE_NAME = "SOUND CHECK"' in node
+    assert 'VERSION = "6.4.9"' in node
+    assert 'RELEASE_NAME = "BROWSER VOICE"' in node

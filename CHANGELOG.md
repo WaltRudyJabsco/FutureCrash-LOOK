@@ -1,3 +1,10 @@
+## 6.4.9 — BROWSER VOICE
+
+- Browser sessions are first-class Fabric effect endpoints with live presence and capability advertisement.
+- Authorized Albert and Signal browsers can receive `audio.speak` actions and synthesize speech locally.
+- `lk fabric speak @ipad ...` can resolve an active browser endpoint when no full node matches.
+- Albert now uses the shared accountless Fabric endpoint authorization gate before cognition/effect actions.
+
 ## 6.4.8 — SOUND CHECK
 
 - Fixed Fabric speech under Linux systemd by teaching canonical service binary discovery about Linuxbrew (`/home/linuxbrew/.linuxbrew/bin` and `~/.linuxbrew/bin`). Interactive WOPR voice and `/v1/audio/speak` now resolve the same eSpeak NG/SoX binaries.

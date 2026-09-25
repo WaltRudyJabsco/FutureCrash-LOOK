@@ -1,12 +1,18 @@
 #!/usr/bin/env python3
 """Albert 5: quiet browser surface for the local Future Crash Fabric."""
 from __future__ import annotations
-import json, mimetypes, os, urllib.request, urllib.error, importlib.util, threading, time, hashlib, re
+import json, mimetypes, os, urllib.request, urllib.error, importlib.util, threading, time, hashlib, re, sys
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
 from urllib.parse import urlparse, unquote
 
 ROOT=Path(__file__).resolve().parent
+CORE_DIR=ROOT.parent/"core"
+if str(CORE_DIR) not in sys.path: sys.path.insert(0,str(CORE_DIR))
+from endpoint_auth import EndpointAuth
+ENDPOINT_AUTH=EndpointAuth()
+ENDPOINT_COOKIE="fcl_endpoint"
+PENDING_COOKIE="fcl_pending"
 ARTIFACT_DIR=Path.home()/".local/share/future-crash-look/albert-artifacts"
 ARTIFACT_DIR.mkdir(parents=True,exist_ok=True)
 HOST=os.environ.get("ALBERT_HOST","127.0.0.1")
@@ -216,24 +222,64 @@ def action(text, session="", context=None):
         }
 
 class Handler(BaseHTTPRequestHandler):
-    server_version='Albert/1.2.2'
+    server_version='Albert/1.2.3'
     def log_message(self,*_): pass
-    def send_json(self,code,obj):
-        raw=json.dumps(obj,ensure_ascii=False).encode(); self.send_response(code); self.send_header('Content-Type','application/json; charset=utf-8'); self.send_header('Content-Length',str(len(raw))); self.end_headers(); self.wfile.write(raw)
+    def send_json(self,code,obj,headers=None):
+        raw=json.dumps(obj,ensure_ascii=False).encode(); self.send_response(code); self.send_header('Content-Type','application/json; charset=utf-8'); self.send_header('Content-Length',str(len(raw)));
+        for k,v in (headers or []): self.send_header(k,v)
+        self.end_headers(); self.wfile.write(raw)
+    def _cookie(self,name):
+        raw=str(self.headers.get("Cookie") or "")
+        for bit in raw.split(";"):
+            if "=" in bit:
+                k,v=bit.strip().split("=",1)
+                if k==name:return v
+        return ""
+    def _secure_cookie(self):
+        host=str(self.headers.get("Host") or "").split(":",1)[0].casefold(); proto=str(self.headers.get("X-Forwarded-Proto") or "").casefold()
+        return proto=="https" or host.endswith(".ts.net")
+    def _set_cookie(self,name,value,max_age):
+        bits=[f"{name}={value}","Path=/","HttpOnly","SameSite=Strict",f"Max-Age={int(max_age)}"]
+        if self._secure_cookie():bits.append("Secure")
+        return ("Set-Cookie","; ".join(bits))
+    def _endpoint(self): return ENDPOINT_AUTH.verify(self._cookie(ENDPOINT_COOKIE))
+    def _require_endpoint(self,scope="lo.use"):
+        ep=self._endpoint()
+        if not ep: self.send_json(401,{"ok":False,"error":"Fabric endpoint authorization required"}); return None
+        if scope and scope not in set(ep.get("scopes") or []): self.send_json(403,{"ok":False,"error":f"Fabric endpoint lacks scope: {scope}"}); return None
+        return ep
+    def _auth_status(self):
+        ep=self._endpoint()
+        if ep:return self.send_json(200,{"authorized":True,"endpoint":ep})
+        pending=self._cookie(PENDING_COOKIE)
+        if pending:
+            row=ENDPOINT_AUTH.pending_status(pending)
+            if row and row.get("approved"):
+                issued=ENDPOINT_AUTH.redeem_pending(pending,label=str(self.headers.get("User-Agent") or "Browser")[:80])
+                if issued:
+                    return self.send_json(200,{"authorized":True,"endpoint":{k:v for k,v in issued.items() if k!="token"}},[self._set_cookie(ENDPOINT_COOKIE,issued["token"],31536000 if issued.get("mode")=="trust" else 43200),self._set_cookie(PENDING_COOKIE,"",0)])
+            if row:return self.send_json(200,{"authorized":False,"pending":{k:v for k,v in row.items() if k!="id"}})
+        row=ENDPOINT_AUTH.request(user_agent=str(self.headers.get("User-Agent") or ""),remote=str(self.client_address[0]))
+        return self.send_json(200,{"authorized":False,"pending":{k:v for k,v in row.items() if k!="id"}},[self._set_cookie(PENDING_COOKIE,row["id"],300)])
     def do_GET(self):
         path=urlparse(self.path).path
-        if path in {'/health','/v1/health'}: return self.send_json(200,{"ok":True,"surface":"albert","version":"1.2.2","fabric":NODE})
+        if path=='/api/auth/status': return self._auth_status()
+        if path in {'/health','/v1/health'}: return self.send_json(200,{"ok":True,"surface":"albert","version":"1.2.3","fabric":NODE})
         if path in {'/v1/actions','/api/capabilities'}:
+            if not self._require_endpoint('lo.use'): return
             try: caps=node_json('/v1/capabilities')
             except Exception: caps={}
             return self.send_json(200,{"schema":"fabric-action-registry-v1","surface":"albert","tools":TOOLS,"node_capabilities":caps})
         if path=='/api/fabric':
+            if not self._require_endpoint('lo.use'): return
             try: return self.send_json(200,{"ok":True,"nodes":node_json('/v1/nodes'),"capabilities":node_json('/v1/capabilities')})
             except Exception as exc: return self.send_json(503,{"ok":False,"error":str(exc)})
         if path=='/v1/lights':
+            if not self._require_endpoint('lo.use'): return
             try: return self.send_json(200,node_json('/v1/lights'))
             except Exception as exc: return self.send_json(503,{"pulse":0,"light":None,"error":str(exc)})
         if path.startswith('/v1/artifacts/'):
+            if not self._require_endpoint('lo.use'): return
             aid=re.sub(r'[^a-f0-9]','',path.rsplit('/',1)[-1].lower())[:64]
             matches=list(ARTIFACT_DIR.glob(aid+'*')) if aid else []
             if not matches: return self.send_error(404)
@@ -246,6 +292,18 @@ class Handler(BaseHTTPRequestHandler):
         data=target.read_bytes(); self.send_response(200); self.send_header('Content-Type',mimetypes.guess_type(target.name)[0] or 'application/octet-stream'); self.send_header('Cache-Control','no-cache'); self.send_header('Content-Length',str(len(data))); self.end_headers(); self.wfile.write(data)
     def do_POST(self):
         path=urlparse(self.path).path
+        if path=='/api/endpoint/poll':
+            ep=self._require_endpoint('lo.use')
+            if not ep:return
+            try:
+                n=int(self.headers.get('Content-Length') or 0); d=json.loads(self.rfile.read(min(n,65536)) or b'{}')
+                label=str(d.get('label') or ep.get('label') or 'Browser')[:80]
+                caps=d.get('capabilities') or ['display.output','audio.output','audio.speak','media.play','input.text']
+                node_json('/v1/endpoints/presence',{'endpoint_id':ep.get('endpoint_id'),'label':label,'capabilities':caps,'surface':'albert','metadata':d.get('metadata') or {}},timeout=1.5)
+                value=node_json('/v1/endpoints/poll',{'endpoint_id':ep.get('endpoint_id')},timeout=1.5)
+                return self.send_json(200,value or {'actions':[]})
+            except Exception as exc:return self.send_json(502,{'ok':False,'error':str(exc),'actions':[]})
+        if path in {'/v1/artifacts','/v1/actions'} and not self._require_endpoint('lo.use'): return
         if path=='/v1/artifacts':
             try:
                 n=int(self.headers.get('Content-Length') or 0)

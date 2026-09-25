@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Future Crash + LOOK Unified Node 6.4.8.
+"""Future Crash + LOOK Unified Node 6.4.9.
 
 A small distributed supervisor for trusted personal machines. Immediate events stay
 asynchronous; a one-second fabric pulse reconciles presence, leases and stale work.
@@ -58,8 +58,8 @@ try:
 except ImportError:
     from endpoint_auth import EndpointAuth
 
-VERSION = "6.4.8"
-RELEASE_NAME = "SOUND CHECK"
+VERSION = "6.4.9"
+RELEASE_NAME = "BROWSER VOICE"
 DEFAULT_HOST = "127.0.0.1"
 DEFAULT_PORT = 7332
 DEFAULT_INGRESS_PORT = 0
@@ -109,6 +109,83 @@ CURATOR_LOCK = threading.RLock()
 BENCHMARK_GUARD = {"until": 0.0, "reason": ""}
 BENCHMARK_GUARD_LOCK = threading.RLock()
 BEACON_SEEN = set()
+
+BROWSER_ENDPOINT_LOCK = threading.RLock()
+BROWSER_ENDPOINT_TTL = 20.0
+BROWSER_ACTION_TTL = 90.0
+BROWSER_ENDPOINTS = {}
+BROWSER_ACTIONS = {}
+
+def _browser_prune(now=None):
+    now=time.time() if now is None else float(now)
+    with BROWSER_ENDPOINT_LOCK:
+        for eid,row in list(BROWSER_ENDPOINTS.items()):
+            if now-float(row.get("last_seen") or 0) > BROWSER_ENDPOINT_TTL:
+                BROWSER_ENDPOINTS.pop(eid,None)
+        for eid,rows in list(BROWSER_ACTIONS.items()):
+            kept=[r for r in rows if now-float(r.get("created") or 0) <= BROWSER_ACTION_TTL]
+            if kept: BROWSER_ACTIONS[eid]=kept
+            else: BROWSER_ACTIONS.pop(eid,None)
+
+def _browser_presence(endpoint_id, label, capabilities, surface="browser", metadata=None):
+    eid=str(endpoint_id or "").strip()
+    if not eid: raise ValueError("endpoint_id required")
+    auth=ENDPOINT_AUTH.list()
+    known={str(r.get("endpoint_id") or "") for k in ("trusted","sessions") for r in auth.get(k) or []}
+    if eid not in known: raise PermissionError("browser endpoint is not authorized")
+    caps=sorted({str(x) for x in (capabilities or []) if str(x).strip()})
+    row={"endpoint_id":eid,"label":str(label or "Browser")[:80],"capabilities":caps,"surface":str(surface or "browser")[:32],
+         "last_seen":time.time(),"metadata":dict(metadata or {})}
+    with BROWSER_ENDPOINT_LOCK: BROWSER_ENDPOINTS[eid]=row
+    _browser_prune()
+    return dict(row)
+
+def _browser_active():
+    _browser_prune()
+    with BROWSER_ENDPOINT_LOCK: return [dict(x) for x in BROWSER_ENDPOINTS.values()]
+
+def _browser_queue(endpoint_id, action, payload):
+    eid=str(endpoint_id or "").strip(); action=str(action or "").strip()
+    active={r["endpoint_id"]:r for r in _browser_active()}
+    row=active.get(eid)
+    if not row: raise ValueError("browser endpoint is offline")
+    if action not in set(row.get("capabilities") or []): raise ValueError(f"browser endpoint lacks capability: {action}")
+    item={"id":"ba-"+uuid.uuid4().hex[:12],"action":action,"payload":dict(payload or {}),"created":time.time()}
+    with BROWSER_ENDPOINT_LOCK: BROWSER_ACTIONS.setdefault(eid,[]).append(item)
+    return item
+
+def _browser_poll(endpoint_id):
+    eid=str(endpoint_id or "").strip(); _browser_prune()
+    with BROWSER_ENDPOINT_LOCK:
+        rows=list(BROWSER_ACTIONS.pop(eid,[]))
+    return rows
+
+def _endpoint_match(target, row):
+    want=str(target or "").casefold().strip().lstrip("@")
+    if not want: return False
+    vals=[row.get("endpoint_id"),row.get("label"),row.get("surface"),(row.get("metadata") or {}).get("device")]
+    vals=[str(v or "").casefold() for v in vals]
+    return any(want==v or (len(want)>=4 and want in v) for v in vals if v)
+
+def _endpoint_dispatch_fabric(target, action, payload):
+    data=_fabric_endpoints(); matches=[]
+    for node in data.get("nodes") or []:
+        for row in node.get("active") or []:
+            if _endpoint_match(target,row): matches.append((str(node.get("node") or "local"),row))
+    if not matches: raise ValueError(f"no active browser endpoint matches {target!r}")
+    if len(matches)>1: raise ValueError(f"browser endpoint target {target!r} is ambiguous")
+    owner,row=matches[0]; local=identity()["name"]
+    body={"endpoint_id":row["endpoint_id"],"action":action,"payload":dict(payload or {})}
+    if owner in {"local",local}: item=_browser_queue(row["endpoint_id"],action,payload)
+    else:
+        snap={"self":node_info(),"peers":PEERS.public()}; peer=_peer_for_target(snap,owner); response=None; last=None
+        for base in _peer_bases(peer):
+            try: response=http_json(base+"/v1/endpoints/dispatch",body,timeout=3.0); break
+            except Exception as exc: last=exc
+        if response is None: raise RuntimeError(f"browser endpoint dispatch failed: {last}")
+        item=response.get("queued") or {}
+    return {"ok":True,"node":owner,"endpoint":row,"queued":item,"engine":"browser"}
+
 BEACON_PATTERNS = {
     "rgb": ("red", "green", "blue", "white"),
     "pulse": ("white", "off", "white"),
@@ -2084,7 +2161,7 @@ def _local_web_search(query, limit=8):
     base=os.environ.get("FCL_SEARXNG_URL","http://127.0.0.1:8888").rstrip("/")
     request=urllib.request.Request(base+"/search?"+params,headers={
         "Accept":"application/json",
-        "User-Agent":"Future-Crash-Fabric/6.4.8",
+        "User-Agent":"Future-Crash-Fabric/6.4.9",
     })
     try:
         with urllib.request.urlopen(request,timeout=8) as response:
@@ -2675,6 +2752,7 @@ def _decision_resolve(did, selected, *, source="human"):
 def _local_endpoints_payload():
     data=ENDPOINT_AUTH.list()
     data["node"]=identity()["name"]
+    data["active"]=_browser_active()
     return data
 
 
@@ -2817,7 +2895,7 @@ def _openjev_shadow(state, question, candidates, *, profile="workspace", consequ
 
 
 class API(BaseHTTPRequestHandler):
-    server_version = "FCLNode/6.4.8"
+    server_version = "FCLNode/6.4.9"
 
     def setup(self):
         self._metric_request_id = None
@@ -3396,6 +3474,20 @@ class API(BaseHTTPRequestHandler):
                     lease_pulses=int(d.get("lease_pulses") or 8), stopped=bool(d.get("stopped"))))
             except ValueError as exc:
                 return self.sendj(400, {"ok": False, "error": str(exc)})
+        if path == "/v1/endpoints/presence":
+            try:
+                row=_browser_presence(str(d.get("endpoint_id") or ""),str(d.get("label") or "Browser"),d.get("capabilities") or [],str(d.get("surface") or "browser"),d.get("metadata") or {})
+                return self.sendj(200,{"ok":True,"endpoint":row})
+            except PermissionError as exc: return self.sendj(403,{"ok":False,"error":str(exc)})
+            except ValueError as exc: return self.sendj(400,{"ok":False,"error":str(exc)})
+        if path == "/v1/endpoints/poll":
+            try: return self.sendj(200,{"ok":True,"actions":_browser_poll(str(d.get("endpoint_id") or ""))})
+            except Exception as exc: return self.sendj(400,{"ok":False,"error":str(exc)})
+        if path == "/v1/endpoints/dispatch":
+            try:
+                item=_browser_queue(str(d.get("endpoint_id") or ""),str(d.get("action") or ""),d.get("payload") or {})
+                return self.sendj(200,{"ok":True,"queued":item})
+            except ValueError as exc: return self.sendj(409,{"ok":False,"error":str(exc)})
         if path == "/v1/audio/speak":
             try:
                 return self.sendj(200, _audio_speak_local(str(d.get("text") or ""), str(d.get("voice_profile") or "default")))
@@ -4860,10 +4952,10 @@ def main():
             if a.command=="endpoints":
                 data=_daemon_get(a.host,a.port,"/v1/endpoints/fabric")
                 if a.json: print(json.dumps(data,indent=2)); return 0
-                totals={"trusted":0,"sessions":0,"pending":0}
+                totals={"trusted":0,"sessions":0,"pending":0,"active":0}
                 for node in data.get("nodes") or []:
                     for key in totals: totals[key]+=len(node.get(key) or [])
-                print(f"FABRIC ENDPOINTS · {totals['trusted']} trusted · {totals['sessions']} temporary · {totals['pending']} pending")
+                print(f"FABRIC ENDPOINTS · {totals['active']} active · {totals['trusted']} trusted · {totals['sessions']} temporary · {totals['pending']} pending")
                 for node in data.get("nodes") or []:
                     rows=sum((len(node.get(k) or []) for k in ("pending","trusted","sessions")),0)
                     if not rows: continue
@@ -4874,6 +4966,9 @@ def main():
                         print(f"    TRUSTED  {row.get('endpoint_id')}  {row.get('label') or 'Browser'}")
                     for row in node.get('sessions') or []:
                         print(f"    ONCE     {row.get('endpoint_id')}  {row.get('label') or 'Browser'}")
+                    for row in node.get('active') or []:
+                        caps=','.join(row.get('capabilities') or [])
+                        print(f"    ACTIVE   {row.get('endpoint_id')}  {row.get('label') or 'Browser'} · {row.get('surface') or 'browser'} · {caps}")
                 for err in data.get("errors") or []:
                     print(f"  ! {err.get('node')} · {err.get('error')}")
                 return 0
@@ -4924,9 +5019,18 @@ def main():
             if a.command=="speak":
                 if not a.args: ap.error("speak requires TEXT")
                 payload={"text":" ".join(a.args),"voice_profile":a.voice_profile}
-                result=_target_post(a.host,a.port,a.node,"/v1/audio/speak",payload,timeout=4.0)
+                if a.node:
+                    try:
+                        result=_target_post(a.host,a.port,a.node,"/v1/audio/speak",payload,timeout=4.0)
+                    except Exception as node_exc:
+                        try: result=_endpoint_dispatch_fabric(a.node,"audio.speak",payload)
+                        except Exception as endpoint_exc: raise RuntimeError(f"target {a.node!r} is neither a reachable node nor active browser endpoint: {endpoint_exc}") from node_exc
+                else:
+                    result=_target_post(a.host,a.port,None,"/v1/audio/speak",payload,timeout=4.0)
                 if a.json: print(json.dumps(result,indent=2))
-                else: print(f"FABRIC SPEAK · {result.get('node') or a.node or 'local'} · {result.get('engine') or '?'}")
+                else:
+                    target=((result.get("endpoint") or {}).get("label") or result.get('node') or a.node or 'local')
+                    print(f"FABRIC SPEAK · {target} · {result.get('engine') or '?'}")
                 return 0
             if a.command=="media-outputs":
                 payload = _daemon_get(a.host, a.port, "/v1/media/outputs")
