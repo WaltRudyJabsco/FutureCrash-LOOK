@@ -14846,6 +14846,24 @@ def _media_player_line(text,width):
     return text+" "*(width-len(text))
 
 
+def _media_player_visualizer(entry,state,width):
+    """Small playback activity visualizer; mpv IPC does not expose decoded PCM."""
+    if _media_queue_has_video([entry]):
+        return ""
+    count=max(10,min(28,width-5))
+    if str(state).lower() not in {"playing","play"}:
+        return "EQ  "+("▁"*count)
+    seed=int(hashlib.sha256(_media_entry_label(entry).encode("utf-8","ignore")).hexdigest()[:8],16)
+    t=time.monotonic()
+    glyphs="▁▂▃▄▅▆▇█"
+    bars=[]
+    for i in range(count):
+        # Deliberately a playback visualizer, not fabricated spectrum telemetry.
+        wave=abs(math.sin(t*(2.1+(i%5)*.17)+i*1.31+(seed%19))*math.cos(t*.83+i*.47))
+        bars.append(glyphs[min(len(glyphs)-1,int(wave*len(glyphs)))])
+    return "EQ  "+"".join(bars)
+
+
 def _media_player_render():
     snap=_media_status_snapshot()
     width=max(42,min(88,shutil.get_terminal_size((72,24)).columns-2))
@@ -14869,10 +14887,11 @@ def _media_player_render():
         footer=(f"Queue {snap['index']+1}/{len(queue)}  ·  "
                 f"Shuffle {'on' if snap['session'].get('shuffle') else 'off'}  ·  "
                 f"Repeat {snap['session'].get('repeat','off')}")
+        eq=_media_player_visualizer(entry,snap["state"],inner)
         body=[
             _media_player_line(f"{artist} — {title}" if artist else title,inner),
             _media_player_line(album,inner),
-            _media_player_line("",inner),
+            _media_player_line(eq,inner) if eq else _media_player_line("",inner),
             _media_player_line(f"{bar}  {_media_time(pos)} / {_media_time(duration)}",inner),
             _media_player_line(f"{state}  ·  {footer}",inner),
             _media_player_line("",inner),

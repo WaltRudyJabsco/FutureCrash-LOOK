@@ -1,3 +1,10 @@
+## 6.3.3 — Alive
+
+- Albert now loads the shared native LO engine directly instead of calling Signal's paired-browser `/api/chat` endpoint. Signal can be closed; Albert cognition remains available as long as LOOK/LO is installed.
+- Albert keeps its own bounded session history so follow-ups retain context through the shared cognition plane.
+- Albert audio folds gain a small live EQ: a real Web Audio analyser for safe local/same-origin audio, with a playback-synchronized fallback for cross-origin streams. Video folds deliberately remain clean.
+- `lk player` gains a small audio-only playback visualizer. It never appears for video and is explicitly presentation, not fabricated frequency telemetry.
+
 ## 6.3.2 — One Brain
 
 - Albert no longer terminates unknown requests with a fake “understood” cognition receipt.

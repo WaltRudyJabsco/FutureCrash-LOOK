@@ -19,13 +19,26 @@ def test_albert_paper_is_semantic_not_app_shell():
         assert f"f.type==='{kind}'" in s
     assert 'ask, act, paste, or drop' in s
 
-def test_albert_632_uses_shared_cognition_and_session():
+def test_albert_633_uses_native_shared_cognition_and_session():
     server=(ROOT/'albert/server.py').read_text()
     html=(ROOT/'albert/index.html').read_text()
-    assert 'ALBERT_COGNITION_URL' in server
-    assert 'http://127.0.0.1:7331/api/chat' in server
-    assert 'cognition_json(q, session=session)' in server
-    assert 'understood' in server and 'cognition_json(q, session=session)' in server
+    assert 'ALBERT_COGNITION_URL' not in server
+    assert '127.0.0.1:7331/api/chat' not in server
+    assert '_load_lo_engine()' in server
+    assert 'engine.chat_once(' in server
+    assert '_session_history(sid)' in server and '_session_append(sid,text,answer)' in server
     assert 'ALBERT_SESSION' in html
     assert "localStorage.getItem('albert-session')" in html
     assert "Fabric cognition is unavailable. I will not invent a result." in html
+
+def test_audio_visualizers_are_audio_only():
+    html=(ROOT/'albert/index.html').read_text()
+    lk=(ROOT/'look/lk').read_text()
+    assert 'class="audio-eq"' in html
+    assert 'data-eq=' in html
+    assert 'createAnalyser()' in html
+    video_line=next(line for line in html.splitlines() if "f.type==='video'" in line)
+    assert 'audio-eq' not in video_line
+    assert 'def _media_player_visualizer' in lk
+    assert '_media_queue_has_video([entry])' in lk
+    assert 'mpv IPC does not expose decoded PCM' in lk

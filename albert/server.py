@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 """Albert 5: quiet browser surface for the local Future Crash Fabric."""
 from __future__ import annotations
-import json, mimetypes, os, urllib.request, urllib.error
+import json, mimetypes, os, urllib.request, urllib.error, importlib.util, threading, time
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
 from urllib.parse import urlparse
@@ -10,9 +10,61 @@ ROOT=Path(__file__).resolve().parent
 HOST=os.environ.get("ALBERT_HOST","127.0.0.1")
 PORT=int(os.environ.get("ALBERT_PORT","7330"))
 NODE=os.environ.get("FABRIC_NODE_URL","http://127.0.0.1:7332").rstrip("/")
-COGNITION=os.environ.get("ALBERT_COGNITION_URL","http://127.0.0.1:7331/api/chat")
 ALL_CLASSICAL="https://allclassical.streamguys1.com/ac128kmp3"
 CLASSIC_ARTS="https://www.classicartsshowcase.org/watch-classic-arts-showcase/"
+
+_LO_ENGINE=None
+_LO_LOCK=threading.Lock()
+_SESSIONS={}
+_SESSION_LOCK=threading.Lock()
+_SESSION_TTL=6*3600
+
+def _lo_engine_path():
+    candidates=[
+        Path.home()/".local/share/look/lo_engine.py",
+        ROOT.parent/"look/lo_engine.py",
+    ]
+    for path in candidates:
+        if path.is_file():
+            return path
+    raise RuntimeError("shared LO engine not installed")
+
+def _load_lo_engine():
+    global _LO_ENGINE
+    with _LO_LOCK:
+        if _LO_ENGINE is not None:
+            return _LO_ENGINE
+        path=_lo_engine_path()
+        spec=importlib.util.spec_from_file_location("albert_shared_lo_engine",path)
+        if spec is None or spec.loader is None:
+            raise RuntimeError(f"cannot load shared LO engine: {path}")
+        module=importlib.util.module_from_spec(spec)
+        spec.loader.exec_module(module)
+        _LO_ENGINE=module
+        return module
+
+def _session_history(session_id):
+    if not session_id:
+        return []
+    now=time.time()
+    with _SESSION_LOCK:
+        for key,(stamp,_rows) in list(_SESSIONS.items()):
+            if now-stamp > _SESSION_TTL:
+                _SESSIONS.pop(key,None)
+        row=_SESSIONS.get(session_id)
+        return list(row[1]) if row else []
+
+def _session_append(session_id,user_text,assistant_text):
+    if not session_id:
+        return
+    with _SESSION_LOCK:
+        rows=list(_SESSIONS.get(session_id,(0,[]))[1])
+        if user_text:
+            rows.append({"role":"user","content":str(user_text)[:12000]})
+        if assistant_text:
+            rows.append({"role":"assistant","content":str(assistant_text)[:12000]})
+        _SESSIONS[session_id]=(time.time(),rows[-12:])
+
 TOOLS=[
  {"name":"media.play","does":"Play or prepare media","risk":"local_effect"},
  {"name":"media.control","does":"Control the selected media output","risk":"local_effect"},
@@ -32,20 +84,26 @@ def node_json(path, payload=None, timeout=1.25):
     with urllib.request.urlopen(req,timeout=timeout) as r: return json.loads(r.read().decode())
 
 def cognition_json(text, session=""):
-    """Use the shared LO cognition/tool plane; Albert only owns presentation."""
-    payload={
-        "text": text,
-        "visual": False,
-        "session": session or "albert",
-        "media_endpoint": "browser",
-    }
-    req=urllib.request.Request(
-        COGNITION,
-        data=json.dumps(payload).encode(),
-        headers={"Content-Type":"application/json"},
+    """Run the same native LO engine used by Signal, without crossing Signal auth."""
+    sid=(session or "albert")[:120]
+    engine=_load_lo_engine()
+    result=engine.chat_once(
+        text,
+        profile="workspace",
+        workspace=str(Path.home()),
+        history=_session_history(sid),
+        interface_context=(
+            "INTERFACE: Albert quiet paper browser surface. Answer normally and truthfully. "
+            "Use deterministic tools for current facts such as weather. Return concise prose suitable for a fold. "
+            "Albert owns presentation; do not claim a UI action happened unless the tool result says it happened. "
+            "Effects are local by default and compute may float across Fabric."
+        ),
     )
-    with urllib.request.urlopen(req, timeout=180) as r:
-        return json.loads(r.read().decode())
+    answer=str(result.get("text") or "").strip()
+    if not answer:
+        raise RuntimeError("shared LO engine returned no answer")
+    _session_append(sid,text,answer)
+    return {"text":answer,"lo_events":list(result.get("events") or []),"provenance":result.get("provenance")}
 
 def action(text, session=""):
     q=" ".join(str(text or "").strip().split()); low=q.casefold().strip(" .!?")
@@ -110,17 +168,17 @@ def action(text, session=""):
             "badge":"offline",
             "kind":"things",
             "text":"I can’t reach the shared cognition/tool plane right now, so I’m not going to pretend this request was completed.",
-            "pipeline":{"cognition":COGNITION,"error":str(exc)},
+            "pipeline":{"cognition":"shared native LO engine","error":str(exc)},
         }
 
 class Handler(BaseHTTPRequestHandler):
-    server_version='Albert/1.0.1'
+    server_version='Albert/1.0.2'
     def log_message(self,*_): pass
     def send_json(self,code,obj):
         raw=json.dumps(obj,ensure_ascii=False).encode(); self.send_response(code); self.send_header('Content-Type','application/json; charset=utf-8'); self.send_header('Content-Length',str(len(raw))); self.end_headers(); self.wfile.write(raw)
     def do_GET(self):
         path=urlparse(self.path).path
-        if path in {'/health','/v1/health'}: return self.send_json(200,{"ok":True,"surface":"albert","version":"1.0.1","fabric":NODE})
+        if path in {'/health','/v1/health'}: return self.send_json(200,{"ok":True,"surface":"albert","version":"1.0.2","fabric":NODE})
         if path in {'/v1/actions','/api/capabilities'}:
             try: caps=node_json('/v1/capabilities')
             except Exception: caps={}
@@ -142,5 +200,5 @@ class Handler(BaseHTTPRequestHandler):
         except Exception as exc: return self.send_json(400,{"ok":False,"error":str(exc)})
 
 if __name__=='__main__':
-    print(f'Albert 5 · http://{HOST}:{PORT} · Fabric {NODE} · cognition {COGNITION}',flush=True)
+    print(f'Albert 5 · http://{HOST}:{PORT} · Fabric {NODE} · cognition native LO',flush=True)
     ThreadingHTTPServer((HOST,PORT),Handler).serve_forever()
