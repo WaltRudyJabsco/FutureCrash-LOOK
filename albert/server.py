@@ -188,24 +188,34 @@ def action(text, session="", context=None):
             "pipeline":pipeline,
         }
     except Exception as exc:
+        detail=" ".join(str(exc).split())[:360]
+        low=detail.casefold()
+        if "search" in low or "searx" in low:
+            meta="Live search unavailable"; badge="search offline"
+            message="I can reach LO, but the live web-search edge failed for this request. Nothing was invented."
+        elif "fabric inference" in low or "inference" in low or "model" in low:
+            meta="Inference unavailable"; badge="brain offline"
+            message="Albert reached the cognition engine, but no inference worker completed this request."
+        elif "lo engine" in low or "look core" in low or "not installed" in low:
+            meta="LO engine unavailable"; badge="engine offline"
+            message="Albert is running, but its installed LO engine could not be loaded."
+        else:
+            meta="Cognition request failed"; badge="not completed"
+            message="Albert reached the cognition path, but this request did not complete. Nothing was invented."
         return {
-            "type":"answer",
-            "title":"Albert",
-            "meta":"Fabric cognition unavailable",
-            "badge":"offline",
-            "kind":"things",
-            "text":"I can’t reach the shared cognition/tool plane right now, so I’m not going to pretend this request was completed.",
-            "pipeline":{"cognition":"shared native LO engine","error":str(exc)},
+            "type":"answer", "title":"Albert", "meta":meta, "badge":badge, "kind":"things",
+            "text":message,
+            "pipeline":{"cognition":"shared native LO engine","error":detail},
         }
 
 class Handler(BaseHTTPRequestHandler):
-    server_version='Albert/1.2.0'
+    server_version='Albert/1.2.1'
     def log_message(self,*_): pass
     def send_json(self,code,obj):
         raw=json.dumps(obj,ensure_ascii=False).encode(); self.send_response(code); self.send_header('Content-Type','application/json; charset=utf-8'); self.send_header('Content-Length',str(len(raw))); self.end_headers(); self.wfile.write(raw)
     def do_GET(self):
         path=urlparse(self.path).path
-        if path in {'/health','/v1/health'}: return self.send_json(200,{"ok":True,"surface":"albert","version":"1.2.0","fabric":NODE})
+        if path in {'/health','/v1/health'}: return self.send_json(200,{"ok":True,"surface":"albert","version":"1.2.1","fabric":NODE})
         if path in {'/v1/actions','/api/capabilities'}:
             try: caps=node_json('/v1/capabilities')
             except Exception: caps={}

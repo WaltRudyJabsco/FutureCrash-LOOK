@@ -1,3 +1,7 @@
+## 6.4.3 — Searchlight
+
+- Forced current-information turns now fail at the search edge explicitly and fall back to local SearXNG before any optional hosted provider.
+
 ## 6.4.2 — Clean Paper
 
 - Albert joins Fabric beacon/disco light shows through the local node light state.

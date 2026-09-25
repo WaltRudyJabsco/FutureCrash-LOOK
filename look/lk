@@ -8615,16 +8615,57 @@ def _fabric_web_search(query, limit=8):
         raise RuntimeError(str(data.get("error")))
     return data
 
+def _direct_searxng_search(query, limit=8):
+    """Use this machine's SearXNG directly when the node search edge is unhealthy.
+
+    The node route remains canonical because it can float to another Fabric provider.
+    This local fallback keeps a transient/control-plane problem from making LO blind on
+    a machine that plainly has a working accountless search service.
+    """
+    import json
+    import urllib.parse
+    import urllib.request
+    base=os.environ.get("FCL_SEARXNG_URL","http://127.0.0.1:8888").rstrip("/")
+    query=str(query or "").strip()
+    if not query:
+        raise RuntimeError("web search query required")
+    params=urllib.parse.urlencode({"q":query,"format":"json"})
+    request=urllib.request.Request(base+"/search?"+params,headers={
+        "Accept":"application/json",
+        "User-Agent":"Future-Crash-Fabric/6.4.3",
+    })
+    with urllib.request.urlopen(request,timeout=12) as response:
+        data=json.load(response)
+    rows=[]
+    for item in (data.get("results") or [])[:max(1,min(int(limit or 8),20))]:
+        if not isinstance(item,dict):
+            continue
+        rows.append({
+            "title":str(item.get("title") or "").strip(),
+            "url":str(item.get("url") or "").strip(),
+            "content":" ".join(str(item.get("content") or "").split())[:1600],
+        })
+    return {"schema":"fabric-web-search-v1","provider":"searxng-direct",
+            "query":query,"results":rows,"count":len(rows)}
+
+
 def _search_web(query):
-    """Prefer our accountless Fabric search; hosted Ollama is only a fallback."""
-    fabric_error=None
+    """Prefer Fabric search, then local SearXNG, then the optional hosted edge."""
+    errors=[]
     try:
         return _fabric_web_search(query)
     except Exception as exc:
-        fabric_error=exc
+        errors.append(f"fabric: {exc}")
+    try:
+        return _direct_searxng_search(query)
+    except Exception as exc:
+        errors.append(f"local searxng: {exc}")
     if os.environ.get("OLLAMA_API_KEY"):
-        return _ollama_web_search(query)
-    raise RuntimeError(f"Fabric web search unavailable: {fabric_error}")
+        try:
+            return _ollama_web_search(query)
+        except Exception as exc:
+            errors.append(f"hosted: {exc}")
+    raise RuntimeError("web search unavailable · "+" · ".join(errors))
 
 
 def _ollama_web_search(query):
@@ -9851,8 +9892,16 @@ def ollama_chat(force_search=False, initial_prompt=None, allow_start=True, host_
                 continue
             except Exception as exc:
                 _ai_foreground(False,"lo")
+                if events:
+                    events.emit("error", stage="search", error=str(exc), error_type=type(exc).__name__)
+                    events.emit("request_done", status="error", rounds=0, tool_calls=1,
+                                prompt_tokens=0, output_tokens=0, load_ms=0)
                 print(f"search › {exc}\n")
                 messages.pop()
+                # Machine callers must get a real failed turn here. Falling back to
+                # input() made Albert report the entire cognition plane as offline.
+                if one_shot:
+                    return 1
                 continue
 
         # Normal mode exposes tools to the model, but explicit mutations are also

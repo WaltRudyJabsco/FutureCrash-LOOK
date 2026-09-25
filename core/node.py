@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Future Crash + LOOK Unified Node 6.4.2.
+"""Future Crash + LOOK Unified Node 6.4.3.
 
 A small distributed supervisor for trusted personal machines. Immediate events stay
 asynchronous; a one-second fabric pulse reconciles presence, leases and stale work.
@@ -58,8 +58,8 @@ try:
 except ImportError:
     from endpoint_auth import EndpointAuth
 
-VERSION = "6.4.2"
-RELEASE_NAME = "Clean Paper"
+VERSION = "6.4.3"
+RELEASE_NAME = "Searchlight"
 DEFAULT_HOST = "127.0.0.1"
 DEFAULT_PORT = 7332
 DEFAULT_INGRESS_PORT = 0
@@ -2030,8 +2030,13 @@ def _local_web_search(query, limit=8):
     if not query:
         return {"schema":"fabric-web-search-v1","node":node,"provider":"searxng","query":query,"results":[],"count":0,"error":"query required"}
     params=urllib.parse.urlencode({"q":query,"format":"json"})
+    base=os.environ.get("FCL_SEARXNG_URL","http://127.0.0.1:8888").rstrip("/")
+    request=urllib.request.Request(base+"/search?"+params,headers={
+        "Accept":"application/json",
+        "User-Agent":"Future-Crash-Fabric/6.4.3",
+    })
     try:
-        with urllib.request.urlopen("http://127.0.0.1:8888/search?"+params,timeout=8) as response:
+        with urllib.request.urlopen(request,timeout=8) as response:
             data=json.loads(response.read(2*1024*1024) or b"{}")
         results=[]
         for item in (data.get("results") or [])[:limit]:
@@ -2761,7 +2766,7 @@ def _openjev_shadow(state, question, candidates, *, profile="workspace", consequ
 
 
 class API(BaseHTTPRequestHandler):
-    server_version = "FCLNode/6.4.2"
+    server_version = "FCLNode/6.4.3"
 
     def setup(self):
         self._metric_request_id = None

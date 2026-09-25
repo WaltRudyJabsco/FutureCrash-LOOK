@@ -1,3 +1,8 @@
+# 6.4.3 · Searchlight
+
+- Repair Albert → LO → live-search failure handling and add direct SearXNG fallback.
+- Preserve truthful stage-specific failures instead of generic cognition-offline paper.
+
 ## 6.4.2 — Clean Paper
 
 - Current-information cognition now searches through Fabric SearXNG first; hosted Ollama search is fallback-only.

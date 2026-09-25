@@ -299,6 +299,6 @@ lk albert ipad     # open the tailnet URL here
 On an iPad connected to the same tailnet, open the URL printed by `lk albert url` in Safari.
 
 
-## Albert cognition surface (6.4.2)
+## Albert cognition surface (6.4.3)
 
 Albert is a first-class Fabric UI: synchronized beacon/disco presence, continuing answer-fold conversations, and artifact-aware paste/drop input. Pasted images and files are registered locally and supplied to the shared LO engine by reference rather than embedded into inference packets. Current-news/headline requests are routed through live search/tool evidence when available.
