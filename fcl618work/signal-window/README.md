@@ -1,6 +1,13 @@
-# Signal Window 1.10.1
+# Signal Window 1.10.3
 
-## 1.10.1 — Endpoint video
+## 1.10.3 — Playability hints
+
+- Media queues carry conservative playability hints without requiring a library rescan.
+- Explicitly protected `.m4p` media fails before generic browser playback and points to another item or native output.
+- Decode/unsupported browser failures preserve the actual runtime diagnosis and offer the cheap native/alternate-item fallback.
+- Container hints never claim that `.m4v`, `.mp4`, or other ordinary files are DRM-free or codec-compatible.
+
+## 1.10.2 — Endpoint video
 
 - Browser endpoints play video locally with the same Fabric media queue/output model as audio.
 - Identified media uses generic content-addressed range streaming; source-node media IDs remain the lazy fallback.

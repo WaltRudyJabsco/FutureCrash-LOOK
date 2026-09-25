@@ -6389,11 +6389,16 @@ def _lo_media_intent_profile(prompt,profile="workspace"):
     }
     if low in controls: return {"tool":"media_control","args":{"action":controls[low]}}
     try:
-        normalized=_intent_normalizer_module().media_tool(_intent_normalizer_module().normalize(text))
+        normalizer=_intent_normalizer_module()
+        resolution=normalizer.resolve(text)
+        normalized=normalizer.media_tool(resolution.get("intent") if resolution.get("status")=="resolved" else None)
     except Exception:
+        resolution={"status":"no_match"}
         normalized=None
     if normalized:
         return normalized
+    if resolution.get("status")=="clarify":
+        return None
     judged=_lo_media_decision_intent(text,profile)
     if judged: return judged
     if re.search(r"\b(this|that|it|these|those)\b",low): return None

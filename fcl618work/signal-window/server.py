@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Signal Window 1.10.1 — accountless authorized Fabric browser endpoint."""
+"""Signal Window 1.10.3 — accountless authorized Fabric browser endpoint."""
 from __future__ import annotations
 
 import argparse
@@ -1215,7 +1215,7 @@ def main():
         state=f"LO NATIVE {a.profile} · "+(App.lo_cmd if App.lo_cmd else "NOT FOUND")
     else:
         p=probe_ollama(App.backend); state=("connected" if p.get("ok") else "unreachable: "+p.get("error","unknown"))
-    print(f"Signal Window 1.10.1 · http://{a.host}:{a.port} · {state} · gallery {App.gallery_dir if App.gallery_enabled else 'off'}")
+    print(f"Signal Window 1.10.3 · http://{a.host}:{a.port} · {state} · gallery {App.gallery_dir if App.gallery_enabled else 'off'}")
     ThreadingHTTPServer((a.host,a.port),App).serve_forever()
 
 if __name__=="__main__": main()

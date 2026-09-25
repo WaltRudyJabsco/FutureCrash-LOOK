@@ -1,3 +1,20 @@
+# 6.2.3 — Know Your Limits
+
+- Terminal LO and Signal now consume the same `resolved / clarify / no_match` intent contract; selector phrases no longer depend on surface-specific parsing.
+- Prompt decoration such as LOOK's visible `›` glyph is stripped at the natural-language edge, so pasted transcripts normalize identically to typed commands.
+- Media queue entries gain conservative playability hints lazily, including for pre-6.2.3 catalogs; no full media rescan is required.
+- `.m4p` is marked explicitly protected/restricted. Ordinary `.m4v`/`.mp4` files remain browser candidates rather than being falsely classified as DRM-free or guaranteed playable.
+- Signal refuses explicit protected browser media before `play()` and makes decode/unsupported failures actionable: try another item or a native output.
+- Signal Window 1.10.3.
+- 262 tests pass.
+
+# 6.2.2 — Stay Attached
+
+- Signal Window 1.10.2 keeps the active browser `<video>` element continuously attached while its media card rerenders.
+- Fixes Chromium `play() request was interrupted by a call to pause()` caused by Signal removing and reinserting its own playing video during UI refresh.
+- Adds a regression that makes DOM attachment part of the browser-video lifecycle contract.
+- Keeps the 6.2.1 cheap-failure intent and media diagnostics unchanged.
+
 # 6.2.1 — Cheap Failure
 
 - Fix LOOK/LO `lk` crash caused by a missing `shlex` import.

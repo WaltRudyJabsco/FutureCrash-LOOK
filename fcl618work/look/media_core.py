@@ -34,6 +34,26 @@ _TRACK_PREFIX = re.compile(r"^\s*(\d{1,3})(?:\s*[-._)]\s*|\s+)(.+?)\s*$")
 _DISC_PREFIX = re.compile(r"^\s*(\d)[-_.](\d{1,3})(?:\s*[-._)]\s*|\s+)(.+?)\s*$")
 _SAFE_NAME = re.compile(r"[^A-Za-z0-9._ -]+")
 
+_BROWSER_CANDIDATE_FORMATS = {"mp4", "m4v", "mov", "webm", "mp3", "m4a", "aac", "wav", "ogg", "opus", "flac"}
+_NATIVE_PREFERRED_FORMATS = {"avi", "mkv", "wmv", "flv", "vob", "mts", "m2ts", "ts"}
+
+def media_playability(format_name: str, media_type: str = "") -> dict[str, str]:
+    """Cheap catalog hint; runtime playback remains authoritative.
+
+    Do not infer DRM or codecs from a filename. We only mark protection where
+    the container extension itself is explicit (.m4p); everything else is a
+    presentation hint, not a promise that a browser can decode the streams.
+    """
+    fmt = str(format_name or "").casefold().lstrip(".")
+    kind = str(media_type or "").casefold()
+    if fmt == "m4p":
+        return {"status": "protected_or_restricted", "reason": "protected-media container"}
+    if fmt in _BROWSER_CANDIDATE_FORMATS:
+        return {"status": "browser_candidate", "reason": "container commonly supported; codec/authorization still runtime-dependent"}
+    if fmt in _NATIVE_PREFERRED_FORMATS or kind.startswith(("audio/", "video/")):
+        return {"status": "native_preferred", "reason": "generic native player is safer than assuming browser support"}
+    return {"status": "unknown", "reason": "insufficient catalog evidence"}
+
 
 def _now() -> float:
     return time.time()
@@ -110,6 +130,7 @@ def entry_from_path(path: str | Path, root: str | Path | None = None) -> dict[st
         "disc": disc,
         "format": target.suffix.casefold().lstrip("."),
         "media_type": _media_type(target),
+        "playability": media_playability(target.suffix.casefold().lstrip("."), _media_type(target)),
         "bytes": stat.st_size,
         "mtime": stat.st_mtime,
     }
@@ -261,8 +282,10 @@ def entries_under(library: Any, directory: str | Path) -> list[dict[str, Any]]:
 
 
 def queue_entry(row: dict[str, Any]) -> dict[str, Any]:
-    allowed = ("id", "path", "node", "digest", "artist", "album", "title", "track", "disc", "format", "media_type", "bytes", "locations")
+    allowed = ("id", "path", "node", "digest", "artist", "album", "title", "track", "disc", "format", "media_type", "playability", "bytes", "locations")
     out = {key: row.get(key) for key in allowed if row.get(key) not in (None, "")}
+    if not out.get("playability"):
+        out["playability"] = media_playability(str(out.get("format") or ""), str(out.get("media_type") or ""))
     if not out.get("id"):
         locator = str(out.get("path") or out.get("digest") or json.dumps(out, sort_keys=True))
         out["id"] = _stable_id(locator)

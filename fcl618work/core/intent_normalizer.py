@@ -19,7 +19,10 @@ _MEDIA_KIND = {
 
 
 def _clean(value: str) -> str:
-    return " ".join(str(value or "").strip().split())
+    text = " ".join(str(value or "").strip().split())
+    # Terminal transcripts sometimes carry LOOK's visible prompt glyph when a
+    # command is pasted back into LO. Treat it as presentation, not language.
+    return re.sub(r"^[›>]+\s*", "", text)
 
 
 def _intent(action: str, **fields: Any) -> dict[str, Any]:
