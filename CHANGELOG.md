@@ -1,3 +1,17 @@
+# 6.2.2 — Stay Attached
+
+- Signal Window 1.10.2 keeps the active browser `<video>` element continuously attached while its media card rerenders.
+- Fixes Chromium `play() request was interrupted by a call to pause()` caused by Signal removing and reinserting its own playing video during UI refresh.
+- Adds a regression that makes DOM attachment part of the browser-video lifecycle contract.
+- Keeps the 6.2.1 cheap-failure intent and media diagnostics unchanged.
+
+# 6.2.1 — Cheap Failure
+
+- Fix LOOK/LO `lk` crash caused by a missing `shlex` import.
+- Add explicit deterministic intent outcomes: `resolved`, `clarify`, and `no_match`; deictic requests such as `play that movie` now ask rather than becoming fake filenames.
+- Harden Signal browser media startup: mount the presentation before play, suppress stale/aborted play promises, preserve source playback unless the browser actually starts, and distinguish aborted/network/decode/unsupported media failures.
+- Signal Window 1.10.1 includes the browser media lifecycle repair.
+
 # 6.2.0 — Common Tongue
 
 - Added shared `fabric-intent-v1` deterministic normalization for obvious media commands.

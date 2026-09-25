@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-import os, platform, re, select, shutil, subprocess, sys, termios, tty, threading, time, hashlib, json, uuid, signal, tempfile, wave, math, struct, zipfile, socket
+import os, platform, re, select, shutil, subprocess, sys, termios, tty, threading, time, hashlib, json, uuid, signal, tempfile, wave, math, struct, zipfile, socket, shlex
 from datetime import datetime
 import http.client
 import urllib.request, urllib.parse, urllib.error

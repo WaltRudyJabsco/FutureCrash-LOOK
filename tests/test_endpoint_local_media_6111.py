@@ -3,11 +3,11 @@ from pathlib import Path
 ROOT=Path(__file__).resolve().parents[1]
 
 def test_release_versions_are_synchronized():
-    assert (ROOT/'VERSION').read_text().strip()=='6.2.0'
-    assert (ROOT/'look/VERSION').read_text().strip()=='6.2.0'
+    assert (ROOT/'VERSION').read_text().strip()=='6.2.2'
+    assert (ROOT/'look/VERSION').read_text().strip()=='6.2.2'
     for rel in ('core/node.py','core/tailcat.py','core/ingress.py'):
         text=(ROOT/rel).read_text()
-        assert '6.2.0' in text
+        assert '6.2.2' in text
         assert '6.1.8' not in text
 
 def test_signal_browser_is_default_media_endpoint():

@@ -77,6 +77,25 @@ def normalize(prompt: str) -> dict[str, Any] | None:
     return None
 
 
+def resolve(prompt: str) -> dict[str, Any]:
+    """Classify the cheap edge decision without pretending ambiguity is failure.
+
+    `resolved` means the deterministic layer owns the request. `clarify` means a
+    deictic request needs conversational/catalog context. `no_match` means the
+    cheap layer declines it so LO can reason about it.
+    """
+    text = _clean(prompt)
+    low = text.casefold().strip(" .!?")
+    # Deictic targets need context. Catch them before the generic "play X" rule
+    # can accidentally turn "that movie" into a literal catalog filename.
+    if re.fullmatch(r"(?:please\s+)?(?:play|put\s+on|open|show)\s+(?:this|that|it|these|those)(?:\s+(?:movie|video|song|track|file|document))?", low):
+        return {"status": "clarify", "reason": "referent_required"}
+    intent = normalize(text)
+    if intent is not None:
+        return {"status": "resolved", "intent": intent}
+    return {"status": "no_match"}
+
+
 def media_tool(intent: dict[str, Any] | None) -> dict[str, Any] | None:
     """Translate normalized media intent into LOOK's existing tool contract."""
     if not isinstance(intent, dict):

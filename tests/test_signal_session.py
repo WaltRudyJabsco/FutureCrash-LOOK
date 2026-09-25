@@ -91,6 +91,14 @@ class SignalBrowserEndpointRegressionTests(unittest.TestCase):
         self.assertIn("mediaHandoff=false;selectedMediaOutput=previous",js)
         self.assertNotIn("renderMedia(browserSnapshot(),true);event(`MEDIA · MOVE ${source}",js)
 
+    def test_video_survives_media_card_rerender(self):
+        root=Path(__file__).resolve().parents[1]
+        js=(root/'signal-window/app.js').read_text()
+        block=js[js.index('function renderMedia'):js.index('async function mediaControl')]
+        self.assertIn("const keepVideo=selectedMediaOutput==='browser'",block)
+        self.assertIn("if(keepVideo){for(const child of [...mediaPanel.children])if(child!==browserVideo)child.remove()}",block)
+        self.assertIn("if(keepVideo){mediaPanel.insertBefore(head,browserVideo)",block)
+
     def test_signal_audio_proxy_streams_in_chunks(self):
         root=Path(__file__).resolve().parents[1]
         source=(root/'signal-window/server.py').read_text()

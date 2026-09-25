@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Signal Window 1.10.0 — accountless authorized Fabric browser endpoint."""
+"""Signal Window 1.10.2 — accountless authorized Fabric browser endpoint."""
 from __future__ import annotations
 
 import argparse
@@ -31,7 +31,7 @@ CORE_DIR = Path.home()/".local/share/future-crash-look/core"
 if not (CORE_DIR/"endpoint_auth.py").exists(): CORE_DIR = ROOT.parent/"core"
 if str(CORE_DIR) not in sys.path: sys.path.insert(0,str(CORE_DIR))
 from endpoint_auth import EndpointAuth
-from intent_normalizer import normalize as normalize_intent
+from intent_normalizer import resolve as resolve_intent
 ENDPOINT_AUTH = EndpointAuth()
 ENDPOINT_COOKIE = "fcl_endpoint"
 PENDING_COOKIE = "fcl_pending"
@@ -1116,7 +1116,13 @@ class App(BaseHTTPRequestHandler):
             # edge. Fabric receives selectors, never fake filenames like "any movie".
             media_node=str(d.get("media_node") or "").strip()
             media_endpoint=str(d.get("media_endpoint") or "").strip()
-            normalized=normalize_intent(prompt) if not files else None
+            intent_resolution=resolve_intent(prompt) if not files else {"status":"no_match"}
+            if intent_resolution.get("status")=="clarify":
+                text="Which one do you mean?"
+                session_id=str(d.get("session") or "").strip()[:120]
+                _session_append(session_id,prompt,text)
+                return self.json(200,{"text":text,"signal":None,"visual":{"kind":"nochange"},"mode":self.mode,"model":"deterministic-clarify","endpoint":"fabric","resolution":"clarify","intent_resolution":intent_resolution,"lo_events":[{"event":"intent_clarify","reason":intent_resolution.get("reason")}],"files":[],"artifacts":[]})
+            normalized=intent_resolution.get("intent") if intent_resolution.get("status")=="resolved" else None
             if isinstance(normalized,dict) and normalized.get("action")=="media.play":
                 query=str(normalized.get("query") or "").strip()
                 browser_target=(media_endpoint=="browser" or not media_endpoint)
@@ -1209,7 +1215,7 @@ def main():
         state=f"LO NATIVE {a.profile} · "+(App.lo_cmd if App.lo_cmd else "NOT FOUND")
     else:
         p=probe_ollama(App.backend); state=("connected" if p.get("ok") else "unreachable: "+p.get("error","unknown"))
-    print(f"Signal Window 1.10.0 · http://{a.host}:{a.port} · {state} · gallery {App.gallery_dir if App.gallery_enabled else 'off'}")
+    print(f"Signal Window 1.10.2 · http://{a.host}:{a.port} · {state} · gallery {App.gallery_dir if App.gallery_enabled else 'off'}")
     ThreadingHTTPServer((a.host,a.port),App).serve_forever()
 
 if __name__=="__main__": main()
