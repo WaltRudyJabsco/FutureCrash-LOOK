@@ -12,6 +12,7 @@ PORT=int(os.environ.get("ALBERT_PORT","7330"))
 NODE=os.environ.get("FABRIC_NODE_URL","http://127.0.0.1:7332").rstrip("/")
 ALL_CLASSICAL="https://allclassical.streamguys1.com/ac128kmp3"
 CLASSIC_ARTS="https://www.classicartsshowcase.org/watch-classic-arts-showcase/"
+CLASSIC_ARTS_STREAM="https://classicarts.global.ssl.fastly.net/live/cas/master_3000k.m3u8"
 
 _LO_ENGINE=None
 _LO_LOCK=threading.Lock()
@@ -110,7 +111,7 @@ def action(text, session=""):
     if low in {"classics","classical","classical music","play classics","play classical","put on classical music"} or "all classical" in low:
         return {"type":"audio","title":"All Classical Radio","subtitle":"Portland · live","meta":"media.play · this endpoint","badge":"live","kind":"things","src":ALL_CLASSICAL,"note":"Fabric built-in · classics","pipeline":{"intent":"media.play","selector":"stream:all-classical","target":"origin endpoint","effect":"local"}}
     if low in {"arts","showcase","play arts"} or "classic arts" in low or "arts showcase" in low:
-        return {"type":"video","title":"Classic Arts Showcase","meta":"media.play · this endpoint","badge":"live","kind":"things","embed":CLASSIC_ARTS,"external":CLASSIC_ARTS,"text":"24-hour classic arts stream via the official web feed.","pipeline":{"intent":"media.play","selector":"stream:classic-arts-showcase","target":"origin endpoint","fallback":"official feed"}}
+        return {"type":"video","title":"Classic Arts Showcase","meta":"media.play · this endpoint","badge":"live","kind":"things","src":CLASSIC_ARTS_STREAM,"embed":CLASSIC_ARTS,"external":CLASSIC_ARTS,"text":"24-hour classic arts stream. Direct HLS when this browser supports it; fitted official-page fallback otherwise.","pipeline":{"intent":"media.play","selector":"stream:classic-arts-showcase","target":"origin endpoint","preferred":"direct HLS","fallback":"official feed"}}
     if low in {"fabric","nodes","show nodes","what nodes are online"}:
         try:
             data=node_json('/v1/nodes'); peers=data.get('peers') or []

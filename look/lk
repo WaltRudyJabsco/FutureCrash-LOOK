@@ -14992,10 +14992,11 @@ def media(args):
         session=media_core.new_session([{"title":"All Classical Radio","artist":"KQAC · Portland","path":url,"media_type":"audio/mpeg","kind":"audio","source_kind":"stream"}])
         return _media_launch_stream(url,"All Classical Radio",session=session)
     if raw in {"arts","showcase","classic-arts"}:
-        url="https://www.classicartsshowcase.org/watch-classic-arts-showcase/"
-        result=_tool_open_url(url)
-        print("LOOK media · Classic Arts Showcase → "+url)
-        return 0 if result.startswith("URL OPEN OK") else 1
+        # Prefer the clean HLS feed. mpv handles HLS natively; the ordinary
+        # stream launcher retains VLC as the configured/fallback player path.
+        url="https://classicarts.global.ssl.fastly.net/live/cas/master_3000k.m3u8"
+        session=media_core.new_session([{"title":"Classic Arts Showcase","artist":"Classic Arts Showcase","path":url,"media_type":"application/vnd.apple.mpegurl","kind":"video","source_kind":"stream"}])
+        return _media_launch_stream(url,"Classic Arts Showcase",session=session)
     if raw=="add": return _media_add_command(args[1:])
     if raw=="info": return _media_info_command(args[1:])
     if raw in {"stream","open"}: return _media_stream_command(args[1:])

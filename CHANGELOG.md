@@ -1,3 +1,7 @@
+## 6.3.6 — Clean Feed
+- Classic Arts Showcase now prefers a direct HLS feed for native playback instead of opening the whole website. Albert uses the direct stream when the browser supports HLS and falls back to a fitted official-page embed.
+- Albert video folds now contain the entire frame, add an expand/contract view, and scale website fallbacks into the fold instead of cropping their top-left corner.
+
 ## 6.3.5 — Dead Means Dead
 
 - Albert explicitly tears down audio/video/EQ contexts before folds are dismissed or DOM is rebuilt. Saved items remain inert snapshots until reopened on paper.
