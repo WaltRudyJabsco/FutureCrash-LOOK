@@ -304,7 +304,7 @@ On an iPad connected to the same tailnet, open the URL printed by `lk albert url
 Albert is a first-class Fabric UI: synchronized beacon/disco presence, continuing answer-fold conversations, and artifact-aware paste/drop input. Pasted images and files are registered locally and supplied to the shared LO engine by reference rather than embedded into inference packets. Current-news/headline requests are routed through live search/tool evidence when available.
 
 
-## LOOK Games (6.4.5)
+## LOOK Games (6.4.6 · FALKEN)
 
 `lk games` opens the WOPR recreation channel. Board games support `0p`, `1p`, and `2p`: `lk games chess 1p`, `lk games checkers 0p`, `lk games backgammon 2p`, and `lk games ttt 1p`. `lk games gtnw` keeps the Global Thermonuclear War simulation. The old `lk ttt` and `lk gtnw` commands remain aliases.
 
@@ -314,3 +314,8 @@ Albert is a first-class Fabric UI: synchronized beacon/disco presence, continuin
 `lk games` deliberately reports `No games installed.` The hidden doorway is a named simulation such as `lk games chess` or `lk games gtnw`. On first interactive entry the WOPR recreation channel accepts `JOSHUA` at `LOGON:`; named games then show the simulation selector and player-count chooser. `lk games chess 0p` remains a direct shortcut.
 
 Albert, Signal, and terminal LOOK now share the same host-owned intent gate for obvious game and current-news requests before inference. Surface code controls presentation; it no longer decides whether `gtnw` means a game or whether `headlines` means live web search.
+
+
+## LOOK Games — WOPR recreation channel
+
+`lk games` performs the theatrical `LOGON: JOSHUA` ritual, then denies that games are installed. Named simulations (`lk games ttt`, `checkers`, `chess`, `backgammon`, `gtnw`) enter the WOPR selector. Board games support 0p/1p/2p and return to the selector with `q`; `s` stops. WOPR speech is lightweight and offline: macOS uses `say`/Zarvox, Linux uses `espeak-ng` with SoX when available. Set `LOOK_GAMES_VOICE=0` to mute it.

@@ -1,8 +1,10 @@
-## 6.4.5 — JOSHUA
+## 6.4.6 — FALKEN
 
-- Shared LO front-door router for games/current-news intent.
-- `lk games` again denies that games exist; named simulations reveal the WOPR selector.
-- One-time `JOSHUA` LOGON provisioning and in-terminal player selection.
+- LOOK Games board polish: checkerboard-backed chess/checkers with edge coordinates and a real backgammon board with round checkers, bar, points, dice, and borne-off counts.
+- `q`/Esc returns board games to the WOPR simulation menu; `s` remains a true stop. GTNW keeps its own exit semantics.
+- The WOPR `LOGON: JOSHUA` ritual now appears on every game entrance, including bare `lk games`, which still deadpans `NO GAMES INSTALLED.` afterward.
+- Lightweight WOPR voice: macOS uses the built-in Zarvox `say` voice; Linux uses `espeak-ng` with SoX processing when available. Set `LOOK_GAMES_VOICE=0` to mute it.
+- Workstation dependencies now include SoX everywhere and `espeak-ng` on Linux.
 
 ## 6.4.4 — LOOK Games
 

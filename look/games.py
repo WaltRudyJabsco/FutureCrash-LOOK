@@ -11,6 +11,8 @@ import os
 import random
 import re
 import select
+import shutil
+import subprocess
 import sys
 import termios
 import time
@@ -27,6 +29,9 @@ DIM="\033[38;5;31m"
 WHITE="\033[1;38;5;255m"
 RED="\033[38;5;196m"
 YELLOW="\033[38;5;220m"
+BG_LIGHT="\033[48;5;238m"
+BG_DARK="\033[48;5;234m"
+MENU_RETURN=10
 
 
 def _clear() -> str:
@@ -98,8 +103,36 @@ def chrome(title:str, mode:str, turn:str="", status:str="") -> list[str]:
 
 
 def footer(mode:str) -> str:
-    if mode=="0p": return DIM+"space pause/resume   s stop   r restart   h help   q/esc exit"+RESET
-    return DIM+"s stop   r restart   h help   q/esc exit"+RESET
+    if mode=="0p": return DIM+"space pause/resume   s stop   r restart   h help   q/esc menu"+RESET
+    return DIM+"s stop   r restart   h help   q/esc menu"+RESET
+
+
+def wopr_say(text:str) -> bool:
+    """Speak one sparse WOPR line without making games depend on a neural TTS stack."""
+    if os.environ.get("LOOK_GAMES_VOICE", "1").casefold() in {"0","off","false","no"}:
+        return False
+    clean=" ".join(str(text).split())
+    if not clean: return False
+    try:
+        if sys.platform=="darwin":
+            say=shutil.which("say")
+            if not say: return False
+            subprocess.Popen([say,"-v","Zarvox","-r","135",clean],stdout=subprocess.DEVNULL,stderr=subprocess.DEVNULL,start_new_session=True)
+            return True
+        if sys.platform.startswith("linux"):
+            speak=shutil.which("espeak-ng")
+            if not speak: return False
+            play=shutil.which("play")
+            if play:
+                src=subprocess.Popen([speak,"--stdout","-s","132","-p","28","-v","en-us",clean],stdout=subprocess.PIPE,stderr=subprocess.DEVNULL,start_new_session=True)
+                subprocess.Popen([play,"-q","-t","wav","-","pitch","-180","chorus","0.6","0.8","45","0.35","0.25","2"],stdin=src.stdout,stdout=subprocess.DEVNULL,stderr=subprocess.DEVNULL,start_new_session=True)
+                if src.stdout: src.stdout.close()
+            else:
+                subprocess.Popen([speak,"-s","132","-p","28","-v","en-us",clean],stdout=subprocess.DEVNULL,stderr=subprocess.DEVNULL,start_new_session=True)
+            return True
+    except OSError:
+        return False
+    return False
 
 
 def help_screen(fd:int, title:str, text:Iterable[str]):
@@ -163,15 +196,17 @@ def play_ttt(mode="1p"):
             render_ttt(board,mode,turn,notice)
             if result:
                 notice="DRAW." if result=="D" else f"{result} WINS."
-                render_ttt(board,mode,turn,notice+"  r restart · q exit")
+                render_ttt(board,mode,turn,notice+"  r restart · q menu")
                 k=read_key(fd)
                 if k=="r": board=[""]*9; turn="X"; notice=""; continue
-                if k in {"q","s","esc"}: return 0
+                if k in {"q","esc"}: return MENU_RETURN
+                if k=="s": return 0
                 continue
             ai_turn=(mode=="0p") or (mode=="1p" and turn=="O")
             if ai_turn:
                 key=read_key(fd,0.35)
-                if key in {"q","s","esc"}: return 0
+                if key in {"q","esc"}: return MENU_RETURN
+                if key=="s": return 0
                 if key=="r": board=[""]*9; turn="X"; continue
                 if key==" ": paused=not paused; notice="PAUSED" if paused else ""
                 if key=="h": help_screen(fd,"Tic-Tac-Toe",["Choose 1-9.","0p lets both computers play.","Perfect minimax. No advantage discovered."])
@@ -180,7 +215,8 @@ def play_ttt(mode="1p"):
                 if move is not None: board[move]=turn; turn="O" if turn=="X" else "X"
                 continue
             raw=read_line(fd,"move 1-9 > ")
-            if raw in {"q","s"}: return 0
+            if raw=="q": return MENU_RETURN
+            if raw=="s": return 0
             if raw=="r": board=[""]*9; turn="X"; continue
             if raw=="h": help_screen(fd,"Tic-Tac-Toe",["Choose 1-9.","X moves first.","s stops; r restarts."]); continue
             if raw.isdigit() and 1<=int(raw)<=9 and not board[int(raw)-1]:
@@ -345,14 +381,21 @@ def chess_ai(board, who:str, depth:int=2):
 
 def render_chess(board, mode, who, status=""):
     glyph={"K":"K","Q":"Q","R":"R","B":"B","N":"N","P":"P","k":"k","q":"q","r":"r","b":"b","n":"n","p":"p"}
-    lines=[]
+    lines=["      a  b  c  d  e  f  g  h"]
     for y in range(7,-1,-1):
         row=[]
         for x in range(8):
-            p=board[sq(x,y)] or "."
-            row.append((BRIGHT if p.isupper() else CYAN)+glyph.get(p,p)+RESET if p!="." else DIM+"·"+RESET)
-        lines.append(f" {y+1}   "+"  ".join(row))
-    lines += ["", "     a  b  c  d  e  f  g  h", "", footer(mode)]
+            p=board[sq(x,y)] or " "
+            bg=BG_LIGHT if (x+y)%2==0 else BG_DARK
+            if p.strip():
+                fg=BRIGHT if p.isupper() else CYAN
+                cell=bg+fg+" "+glyph.get(p,p)+" "+RESET
+            else:
+                mark="·" if (x+y)%2==0 else " "
+                cell=bg+DIM+" "+mark+" "+RESET
+            row.append(cell)
+        lines.append(f" {y+1}   "+"".join(row)+f"  {y+1}")
+    lines += ["      a  b  c  d  e  f  g  h", "", footer(mode)]
     sys.stdout.write("\n".join(chrome("Chess",mode,"WHITE" if who=="W" else "BLACK",status)+lines)); sys.stdout.flush()
 
 
@@ -363,16 +406,18 @@ def play_chess(mode="1p"):
             moves=chess_moves(board,who)
             if not moves:
                 status=("CHECKMATE. "+("BLACK WINS." if who=="W" else "WHITE WINS.")) if chess_in_check(board,who) else "STALEMATE."
-                render_chess(board,mode,who,status+"  r restart · q exit")
+                render_chess(board,mode,who,status+"  r restart · q menu")
                 k=read_key(fd)
                 if k=="r": board=chess_initial(); who="W"; status=""; continue
-                if k in {"q","s","esc"}: return 0
+                if k in {"q","esc"}: return MENU_RETURN
+                if k=="s": return 0
                 continue
             render_chess(board,mode,who,status)
             ai_turn=(mode=="0p") or (mode=="1p" and who=="B")
             if ai_turn:
                 key=read_key(fd,0.30)
-                if key in {"q","s","esc"}: return 0
+                if key in {"q","esc"}: return MENU_RETURN
+                if key=="s": return 0
                 if key=="r": board=chess_initial(); who="W"; continue
                 if key==" ": paused=not paused; status="PAUSED" if paused else ""
                 if key=="h": help_screen(fd,"Chess",["Enter moves as e2e4 or e7e8q.","Compact engine: normal moves, captures, promotion, check/checkmate.","Castling and en passant are intentionally omitted."])
@@ -381,7 +426,8 @@ def play_chess(mode="1p"):
                 if m: status=f"{coord(m[0])} → {coord(m[1])}"; board=chess_apply(board,m); who="B" if who=="W" else "W"
                 continue
             raw=read_line(fd,"move (e2e4) > ")
-            if raw in {"q","s"}: return 0
+            if raw=="q": return MENU_RETURN
+            if raw=="s": return 0
             if raw=="r": board=chess_initial(); who="W"; status=""; continue
             if raw=="h": help_screen(fd,"Chess",["Enter moves as e2e4 or e7e8q.","White moves first.","Castling/en passant omitted to keep the Easter egg tiny."]); continue
             compact=re.sub(r"[^a-h1-8qrbn]","",raw.lower())
@@ -480,16 +526,23 @@ def checkers_ai(board, who, depth=3):
 
 
 def render_checkers(board, mode, who, status=""):
-    lines=[]
+    lines=["      a  b  c  d  e  f  g  h"]
     for y in range(7,-1,-1):
         row=[]
         for x in range(8):
             p=board[sq(x,y)]
-            if p: ch=(BRIGHT if p.lower()=="w" else RED)+("●" if p.islower() else "◆")+RESET
-            else: ch=DIM+("·" if (x+y)%2 else " ")+RESET
-            row.append(ch)
-        lines.append(f" {y+1}   "+"  ".join(row))
-    lines += ["", "     a  b  c  d  e  f  g  h", "", footer(mode)]
+            bg=BG_LIGHT if (x+y)%2==0 else BG_DARK
+            if p:
+                if p.lower()=="w": piece="◎" if p.isupper() else "○"
+                else: piece="◉" if p.isupper() else "●"
+                fg=BRIGHT if p.lower()=="w" else RED
+                cell=bg+fg+" "+piece+" "+RESET
+            else:
+                mark="·" if (x+y)%2==0 else " "
+                cell=bg+DIM+" "+mark+" "+RESET
+            row.append(cell)
+        lines.append(f" {y+1}   "+"".join(row)+f"  {y+1}")
+    lines += ["      a  b  c  d  e  f  g  h", "", footer(mode)]
     sys.stdout.write("\n".join(chrome("Checkers",mode,"WHITE" if who=="W" else "BLACK",status)+lines)); sys.stdout.flush()
 
 
@@ -499,26 +552,29 @@ def play_checkers(mode="1p"):
         while True:
             moves=checkers_moves(board,who)
             if not moves:
-                status=("BLACK WINS." if who=="W" else "WHITE WINS.")+"  r restart · q exit"
+                status=("BLACK WINS." if who=="W" else "WHITE WINS.")+"  r restart · q menu"
                 render_checkers(board,mode,who,status); k=read_key(fd)
                 if k=="r": board=checkers_initial(); who="W"; status=""; continue
-                if k in {"q","s","esc"}: return 0
+                if k in {"q","esc"}: return MENU_RETURN
+                if k=="s": return 0
                 continue
             render_checkers(board,mode,who,status)
             ai_turn=(mode=="0p") or (mode=="1p" and who=="B")
             if ai_turn:
                 key=read_key(fd,0.28)
-                if key in {"q","s","esc"}: return 0
+                if key in {"q","esc"}: return MENU_RETURN
+                if key=="s": return 0
                 if key=="r": board=checkers_initial(); who="W"; continue
                 if key==" ": paused=not paused; status="PAUSED" if paused else ""
-                if key=="h": help_screen(fd,"Checkers",["Enter paths like b2a3 or c3e5g7.","Captures are mandatory; multiple jumps stay in one move.","◆ is a king."])
+                if key=="h": help_screen(fd,"Checkers",["Enter paths like b2a3 or c3e5g7.","Captures are mandatory; multiple jumps stay in one move.","◎/◉ are kings."])
                 if paused: continue
                 pick=checkers_ai(board,who,3)
                 if pick:
                     path,board=pick; status=" → ".join(coord(i) for i in path); who="B" if who=="W" else "W"
                 continue
             raw=read_line(fd,"move (b2a3) > ")
-            if raw in {"q","s"}: return 0
+            if raw=="q": return MENU_RETURN
+            if raw=="s": return 0
             if raw=="r": board=checkers_initial(); who="W"; status=""; continue
             if raw=="h": help_screen(fd,"Checkers",["Enter b2a3 or a capture chain c3e5g7.","Captures are mandatory.","s stops; r restarts."]); continue
             coords=re.findall(r"[a-h][1-8]",raw.lower()); path=[parse_sq(c) for c in coords]
@@ -610,16 +666,39 @@ def bg_ai_source(g,who,die):
 
 
 def render_bg(g,mode,who,dice,status=""):
-    # Dense but readable point ledger; avoids pretending a Unicode board is clearer.
-    top=[]; bottom=[]
-    def tok(i):
-        v=g.points[i]
-        return f"W{v}" if v>0 else (f"B{-v}" if v<0 else "--")
-    for i in range(24,12,-1): top.append(f"{i:>2}:{tok(i):<3}")
-    for i in range(12,0,-1): bottom.append(f"{i:>2}:{tok(i):<3}")
-    lines=[" "+"  ".join(top),"", " "+"  ".join(bottom),"",
-           f" BAR  W:{g.bar_w} B:{g.bar_b}      OFF  W:{g.off_w} B:{g.off_b}",
-           f" DICE {' '.join(str(d) for d in dice) if dice else '—'}", "", footer(mode)]
+    # A real board silhouette: point numbers, two homes, center bar, and round checkers.
+    top=list(range(13,19))+list(range(19,25))
+    bottom=list(range(12,6,-1))+list(range(6,0,-1))
+    def piece_for(point:int):
+        v=g.points[point]
+        if v>0: return BRIGHT+"○"+RESET, v
+        if v<0: return CYAN+"●"+RESET, -v
+        return " ", 0
+    def stack_row(points, level:int, top_half:bool):
+        cells=[]
+        for idx,point in enumerate(points):
+            piece,count=piece_for(point)
+            if count>5 and level==4:
+                token=YELLOW+str(count)+RESET
+            elif count>level:
+                token=piece
+            else:
+                token=(DIM+("▽" if top_half else "△")+RESET) if level==4 else " "
+            cells.append(" "+token+" ")
+        return "".join(cells[:6])+"│   │"+"".join(cells[6:])
+    lines=[
+        "     "+" ".join(f"{p:>2}" for p in top[:6])+" │BAR│ "+" ".join(f"{p:>2}" for p in top[6:]),
+        "   ┌──────────────────┬───┬──────────────────┐",
+    ]
+    for level in range(5): lines.append("   │"+stack_row(top,level,True)+"│")
+    lines.append(f"   │                  │ {g.bar_w:1}/{g.bar_b:1} │                  │")
+    for level in range(4,-1,-1): lines.append("   │"+stack_row(bottom,level,False)+"│")
+    lines += [
+        "   └──────────────────┴───┴──────────────────┘",
+        "     "+" ".join(f"{p:>2}" for p in bottom[:6])+" │BAR│ "+" ".join(f"{p:>2}" for p in bottom[6:]),
+        f"   OFF  WHITE:{g.off_w:>2}  BLACK:{g.off_b:>2}       DICE  {' '.join('⚄' if d==5 else '⚅' if d==6 else str(d) for d in dice) if dice else '—'}",
+        "",footer(mode)
+    ]
     sys.stdout.write("\n".join(chrome("Backgammon",mode,"WHITE" if who=="W" else "BLACK",status)+lines)); sys.stdout.flush()
 
 
@@ -628,10 +707,11 @@ def play_backgammon(mode="1p"):
         g=backgammon_initial(); who="W"; paused=False; status=""; dice=[]
         while True:
             if g.off_w>=15 or g.off_b>=15:
-                status=("WHITE WINS." if g.off_w>=15 else "BLACK WINS.")+"  r restart · q exit"
+                status=("WHITE WINS." if g.off_w>=15 else "BLACK WINS.")+"  r restart · q menu"
                 render_bg(g,mode,who,[],status); k=read_key(fd)
                 if k=="r": g=backgammon_initial(); who="W"; continue
-                if k in {"q","s","esc"}: return 0
+                if k in {"q","esc"}: return MENU_RETURN
+                if k=="s": return 0
                 continue
             if not dice:
                 a,b=random.randint(1,6),random.randint(1,6); dice=[a]*4 if a==b else [a,b]
@@ -645,7 +725,8 @@ def play_backgammon(mode="1p"):
                 continue
             if ai_turn:
                 key=read_key(fd,0.25)
-                if key in {"q","s","esc"}: return 0
+                if key in {"q","esc"}: return MENU_RETURN
+                if key=="s": return 0
                 if key=="r": g=backgammon_initial(); who="W"; dice=[]; continue
                 if key==" ": paused=not paused; status="PAUSED" if paused else ""
                 if key=="h": help_screen(fd,"Backgammon",["No doubling cube; ordinary hits, bar entry, doubles and bearing off.","On your turn enter the source point for each die.","0 denotes the bar only when shown as forced."])
@@ -661,7 +742,8 @@ def play_backgammon(mode="1p"):
                 raw="bar"
             else:
                 raw=read_line(fd,f"die {die} · source point > ")
-                if raw in {"q","s"}: return 0
+                if raw=="q": return MENU_RETURN
+                if raw=="s": return 0
                 if raw=="r": g=backgammon_initial(); who="W"; dice=[]; continue
                 if raw=="h": help_screen(fd,"Backgammon",["Enter the source point for the shown die.","Bar entries are automatic when required.","No doubling cube; standard hitting/bearing off."]); continue
                 try: src=int(raw)
@@ -698,8 +780,8 @@ def _mark_provisioned() -> None:
 
 
 def provision_login(fd:int) -> bool:
-    """One theatrical first-run gate. JOSHUA is a reference, never security."""
-    if _provisioned() or os.environ.get("LOOK_GAMES_SKIP_LOGON") == "1":
+    """Theatrical gate shown every visit. JOSHUA is a reference, never security."""
+    if os.environ.get("LOOK_GAMES_SKIP_LOGON") == "1":
         return True
     while True:
         sys.stdout.write(_clear()+BRIGHT+"WOPR ACCESS TERMINAL"+RESET+"\n\n")
@@ -708,9 +790,7 @@ def provision_login(fd:int) -> bool:
         if value in {"Q","QUIT"}: return False
         if value=="JOSHUA":
             sys.stdout.write("\n"+CYAN+"GREETINGS PROFESSOR FALKEN."+RESET+"\n")
-            sys.stdout.flush(); time.sleep(.65)
-            try: _mark_provisioned()
-            except OSError: pass
+            sys.stdout.flush(); wopr_say("GREETINGS PROFESSOR FALKEN"); time.sleep(.65)
             return True
         sys.stdout.write("\n"+DIM+"IDENTIFICATION NOT RECOGNIZED BY SYSTEM"+RESET+"\n")
         sys.stdout.flush(); time.sleep(.8)
@@ -754,32 +834,54 @@ def choose_mode(fd:int, game:str, default="1p") -> str|None:
         if k in {"0","1","2"}: return {"0":"0p","1":"1p","2":"2p"}[k]
 
 
+def _dispatch(game:str, mode:str, gtnw_runner=None) -> int:
+    if game=="ttt": return play_ttt(mode)
+    if game=="checkers": return play_checkers(mode)
+    if game=="chess": return play_chess(mode)
+    if game=="backgammon": return play_backgammon(mode)
+    if game=="gtnw":
+        if mode!="0p":
+            print("LOOK games · Global Thermonuclear War is a 0p simulation."); return 2
+        return gtnw_runner() if gtnw_runner else 0
+    return 2
+
+
 def run(args:list[str], *, gtnw_runner=None) -> int:
     args=list(args or [])
     aliases={"tic-tac-toe":"ttt","tic":"ttt","draughts":"checkers","bg":"backgammon","war":"gtnw","thermonuclear":"gtnw"}
 
-    # Preserve the original hidden joke. The bare plural command denies that the
-    # very games reachable by name exist at all.
+    # The bare command now performs the full theatrical security gag before
+    # denying the existence of the games it plainly knows about.
     if not args:
+        if not (sys.stdin.isatty() and sys.stdout.isatty()):
+            print("No games installed.")
+            return 0
+        try:
+            with terminal() as fd:
+                if not provision_login(fd): return 0
+                sys.stdout.write(_clear()+BRIGHT+"WOPR ACCESS TERMINAL"+RESET+"\n\n"+DIM+"NO GAMES INSTALLED."+RESET+"\n")
+                sys.stdout.flush(); time.sleep(.9)
+        except RuntimeError as exc:
+            print(f"LOOK games · {exc}"); return 1
         print("No games installed.")
         return 0
 
     game=aliases.get(args[0].casefold(),args[0].casefold())
     if game in {"help","list","ls"}:
-        print("No games installed.")
-        return 0
+        print("No games installed."); return 0
     valid={g for _,_,g in _GAME_ITEMS}
     if game not in valid:
-        print(f"LOOK games · unknown simulation: {game}")
-        return 2
+        print(f"LOOK games · unknown simulation: {game}"); return 2
 
-    # Explicit mode remains a power-user shortcut. Otherwise enter through the
-    # WOPR selector, with the requested game already highlighted, then choose
-    # players inside the terminal.
     explicit_mode=args[1] if len(args)>1 else None
     try:
+        # Even direct power-user launches pass through LOGON. The gag is the
+        # entrance ritual, not a remembered authentication credential.
         if explicit_mode is not None:
             mode=mode_from(explicit_mode,"0p" if game=="gtnw" else "1p")
+            if sys.stdin.isatty() and sys.stdout.isatty():
+                with terminal() as fd:
+                    if not provision_login(fd): return 0
         else:
             with terminal() as fd:
                 if not provision_login(fd): return 0
@@ -793,15 +895,26 @@ def run(args:list[str], *, gtnw_runner=None) -> int:
     except RuntimeError as exc:
         print(f"LOOK games · {exc}"); return 1
 
-    try:
-        if game=="ttt": return play_ttt(mode)
-        if game=="checkers": return play_checkers(mode)
-        if game=="chess": return play_chess(mode)
-        if game=="backgammon": return play_backgammon(mode)
-        if game=="gtnw":
-            if mode!="0p":
-                print("LOOK games · Global Thermonuclear War is a 0p simulation."); return 2
-            return gtnw_runner() if gtnw_runner else 0
-        return 2
-    except RuntimeError as exc:
-        print(f"LOOK games · {exc}"); return 1
+    title=next((name for _,name,g in _GAME_ITEMS if g==game),game)
+    if game!="gtnw": wopr_say(title)
+
+    while True:
+        try:
+            result=_dispatch(game,mode,gtnw_runner)
+        except RuntimeError as exc:
+            print(f"LOOK games · {exc}"); return 1
+        if game=="gtnw" or result!=MENU_RETURN:
+            return result
+        # q/esc from a board game returns here; s remains a true stop.
+        try:
+            with terminal() as fd:
+                chosen=launcher(fd,"")
+                if not chosen: return 0
+                game=chosen
+                mode=choose_mode(fd,game,"0p" if game=="gtnw" else "1p")
+                if not mode: return 0
+        except RuntimeError as exc:
+            print(f"LOOK games · {exc}"); return 1
+        title=next((name for _,name,g in _GAME_ITEMS if g==game),game)
+        if game!="gtnw": wopr_say(title)
+

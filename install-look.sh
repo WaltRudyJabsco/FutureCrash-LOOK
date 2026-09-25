@@ -164,6 +164,8 @@ package_for() {
 echo
 echo "LOOK WORKSTATION"
 core=(zsh python3 git zoxide fzf fd nvim bat fortune cowsay fastfetch chafa pdftotext ttyd lsof mpv qrencode)
+core+=(sox)
+[[ "$(uname -s)" == "Linux" ]] && core+=(espeak-ng)
 missing=()
 for c in "${core[@]}"; do
   if have "$c"; then
