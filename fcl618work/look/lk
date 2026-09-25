@@ -13417,6 +13417,9 @@ def _media_snapshot_payload():
         "queue":[clean(row) for row in queue],
         "shuffle":bool(session.get("shuffle")),
         "repeat":str(session.get("repeat") or "off"),
+        "player":str(session.get("player") or ""),
+        "presentation":str(session.get("presentation") or ""),
+        "launch_argv":list(session.get("launch_argv") or []),
         "updated":session.get("updated"),
     }
 
@@ -13914,6 +13917,16 @@ def _media_doctor():
     return 0
 
 
+def _media_queue_has_video(queue):
+    """Return true when a queue needs a visible video presentation."""
+    for row in queue or []:
+        media_type=str(row.get("media_type") or "").casefold()
+        path=str(row.get("path") or row.get("title") or "").casefold()
+        if media_type.startswith("video/") or Path(path).suffix in {".mp4",".m4v",".mov",".mkv",".webm",".avi",".wmv",".flv",".vob",".mts",".m2ts",".ts"}:
+            return True
+    return False
+
+
 def _media_launch_session(session):
     """Mirror LOOK's canonical queue into mpv and start at the requested item."""
     session=media_core.normalize_session(session)
@@ -13982,6 +13995,9 @@ def _media_launch_session(session):
         pass
     cmd=[
         mpv,
+        # Playback is infrastructure: user mpv config must not silently disable
+        # video output or otherwise change Fabric semantics between nodes.
+        "--no-config",
         f"--input-ipc-server={MEDIA_IPC_FILE}",
         "--no-terminal",
         "--idle=yes",
@@ -13989,6 +14005,8 @@ def _media_launch_session(session):
         f"--playlist={MEDIA_QUEUE_FILE}",
         f"--playlist-start={idx}",
     ]
+    if _media_queue_has_video(queue):
+        cmd.extend(["--video=yes","--force-window=yes"])
     if session.get("repeat")=="all":
         cmd.append("--loop-playlist=inf")
     try:
@@ -13998,6 +14016,8 @@ def _media_launch_session(session):
         return 1
     session["pid"]=proc.pid
     session["player"]="mpv"
+    session["presentation"]="video" if _media_queue_has_video(queue) else "audio"
+    session["launch_argv"]=[str(x) for x in cmd]
     session["state"]="playing"
     session["current_index"]=index_map[idx]
     _media_save_session(session)
@@ -14023,7 +14043,10 @@ def _media_launch_stream(url,source="",session=None):
         _media_stop_owned_mpvs()
         try: MEDIA_IPC_FILE.unlink(missing_ok=True)
         except OSError: pass
-        cmd=[mpv,f"--input-ipc-server={MEDIA_IPC_FILE}","--no-terminal","--idle=yes",f"--log-file={MEDIA_MPV_LOG}",url]
+        cmd=[mpv,"--no-config",f"--input-ipc-server={MEDIA_IPC_FILE}","--no-terminal","--idle=yes",f"--log-file={MEDIA_MPV_LOG}"]
+        stream_video=_media_queue_has_video((session or {}).get("queue") or [])
+        if stream_video: cmd.extend(["--video=yes","--force-window=yes"])
+        cmd.append(url)
         proc=subprocess.Popen(cmd,stdin=subprocess.DEVNULL,stdout=subprocess.DEVNULL,stderr=subprocess.DEVNULL)
         if session is None:
             session=media_core.new_session([{"title":source or "Fabric media","digest":"stream"}])
@@ -14032,6 +14055,8 @@ def _media_launch_stream(url,source="",session=None):
         session["source"]=source
         session["started"]=time.time()
         session["player"]="mpv"
+        session["presentation"]="video" if stream_video else "audio"
+        session["launch_argv"]=[str(x) for x in cmd]
         session["state"]="playing"
         _media_save_session(session)
         print(f"LOOK media · Fabric stream → mpv" + (f" · {source}" if source else ""))
@@ -14608,6 +14633,7 @@ def _media_prepare_command(args):
 
 
 def _media_play_command(args):
+    print("LOOK media · searching…", flush=True)
     try:
         rows,shuffle=_media_resolve_targets(args)
     except (RuntimeError,ValueError,FileNotFoundError,OSError) as exc:

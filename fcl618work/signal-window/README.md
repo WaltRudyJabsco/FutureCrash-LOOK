@@ -1,6 +1,10 @@
-# Signal Window 1.10.4
+# Signal Window 1.10.5
 
-## 1.10.4 — Media language contract
+## 1.10.5 — Output ownership and native presentation
+
+- Media request progress surfaces immediately as `MEDIA · SEARCHING`.
+- Playback responses emit `MEDIA ROUTE · <target> · <player>` so remembered remote OUT selection is visible.
+- Native media cards show the actual playback engine instead of implying VLC or another open app owns playback.
 
 - Direct `lk play`, terminal LO, and Signal share selector/fuzzy/literal semantics.
 - Generic noun phrases such as `a song` are selectors, not catalog strings.

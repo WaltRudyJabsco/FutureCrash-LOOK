@@ -1,3 +1,11 @@
+## 6.2.5 — Own the Output
+
+- Keep browser-origin media effects pinned to the selected endpoint; no silent native-node fallback.
+- Make native media ownership observable: Signal reports target and actual player.
+- Launch LOOK-owned mpv with isolated config so per-machine user settings cannot silently disable video.
+- Force a native video window for video queues and record launch argv/presentation in session state.
+- Surface lightweight media-search progress before potentially slow Fabric resolution.
+
 # 6.2.4 — Good Listener
 
 - Establish one media-language contract across direct `lk play`, terminal LO, Signal, and Fabric routing: selector, fuzzy, literal, or clarify.
