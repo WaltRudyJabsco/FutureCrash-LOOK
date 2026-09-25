@@ -284,3 +284,16 @@ Current release: **6.1.10 — Media Mount Race Repair**.
 Browser endpoint management is now Fabric-wide: `lk fabric endpoints`, `allow`, and `revoke-endpoint` work from any reachable trusted node rather than only the Signal host. Tailcat adds direct certificate-pinned TLS transport between paired nodes on reachable LAN/IP paths and is preferred automatically; Tailscale remains a fallback for reachability and bootstrap rather than the definition of Fabric networking. Existing 6.0 pairings learn Tailcat metadata from authenticated peer identity and do not require another re-pair.
 
 Future Crash + LOOK remains an open, local-first project: **Fabric turns your computers and devices into one personal computer; LOOK is how you use it.**
+
+
+## Albert remote browser access (6.4.0)
+
+Albert stays on localhost. When Tailscale is installed, the installer publishes it through Tailscale Serve on HTTPS port 7330.
+
+```bash
+lk albert url      # print iPad/tailnet URL
+lk albert qr       # QR if qrencode exists; always prints URL
+lk albert ipad     # open the tailnet URL here
+```
+
+On an iPad connected to the same tailnet, open the URL printed by `lk albert url` in Safari.

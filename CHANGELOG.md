@@ -1,3 +1,10 @@
+## 6.4.0 — Open Door
+
+- Albert is now reachable from trusted tailnet browsers through Tailscale Serve while remaining loopback-only itself.
+- Added `lk albert url`, `lk albert qr`, and `lk albert ipad`/`remote` handoff commands.
+- Unified Node advertises Albert local/tailnet URLs.
+- Installer prints the iPad/tailnet URL when available.
+
 ## 6.3.8 — Browser Seat
 
 - `lk media arts`, `lk media showcase`, and `lk media classic-arts` once again open the official Classic Arts Showcase page in the system default browser.

@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Future Crash + LOOK Unified Node 6.3.8.
+"""Future Crash + LOOK Unified Node 6.4.0.
 
 A small distributed supervisor for trusted personal machines. Immediate events stay
 asynchronous; a one-second fabric pulse reconciles presence, leases and stale work.
@@ -58,8 +58,8 @@ try:
 except ImportError:
     from endpoint_auth import EndpointAuth
 
-VERSION = "6.3.8"
-RELEASE_NAME = "Browser Seat"
+VERSION = "6.4.0"
+RELEASE_NAME = "Open Door"
 DEFAULT_HOST = "127.0.0.1"
 DEFAULT_PORT = 7332
 DEFAULT_INGRESS_PORT = 0
@@ -324,6 +324,16 @@ def identity():
         return dict(IDENTITY_CACHE)
 
 
+def albert_urls():
+    """Publish Albert surfaces without making the Albert server itself network-facing."""
+    urls={"local":"http://127.0.0.1:7330"}
+    ts=tailscale_self()
+    dns=str(ts.get("dns") or "").strip()
+    if dns and ts.get("online", True):
+        urls["tailnet"]=f"https://{dns}:7330"
+    return urls
+
+
 def capabilities():
     lk = binary("lk")
     return {
@@ -338,6 +348,7 @@ def capabilities():
         "ollama": probe("127.0.0.1", 11434),
         "signal": probe("127.0.0.1", 7331),
         "albert": probe("127.0.0.1", 7330),
+        "albert.urls": albert_urls() if probe("127.0.0.1", 7330) else {},
         "node": True,
         "comfyui": probe("127.0.0.1", 8188),
         "mercury": probe("127.0.0.1", 8888),
@@ -2750,7 +2761,7 @@ def _openjev_shadow(state, question, candidates, *, profile="workspace", consequ
 
 
 class API(BaseHTTPRequestHandler):
-    server_version = "FCLNode/6.3.8"
+    server_version = "FCLNode/6.4.0"
 
     def setup(self):
         self._metric_request_id = None

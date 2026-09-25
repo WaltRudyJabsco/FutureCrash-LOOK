@@ -1509,6 +1509,9 @@ MAKE
 
 MEDIA
   lk player            tiny live miniplayer over LOOK MediaSession
+  lk albert            open Albert quiet Fabric surface
+  lk albert url        print the iPad/tailnet URL
+  lk albert qr         show QR when qrencode is available
   lk media             show current queue / state / track
   lk media browse      LOOK selector over the online Fabric catalog
   lk media find QUERY  search + select without retyping exact names
@@ -15564,6 +15567,7 @@ _COMMANDS = [
     ("lk budget", "[...]", "ai", "LO context/token budget"),
     ("lk media", "[...]", "media", "Media library, queue, playlists, transport", "lk music"),
     ("lk player", "", "media", "Live LOOK miniplayer"),
+    ("lk albert", "[url|qr|ipad]", "fabric", "Open/share Albert browser surface"),
     ("mm", "", "media", "Toggle media playback", "lk media toggle"),
     ("mn", "", "media", "Next media item", "lk media next"),
     ("mp", "", "media", "Previous media item", "lk media prev"),
@@ -16550,7 +16554,32 @@ def main():
     if cmd=="play": return media(["play",*rest]) if rest else media(["play"])
     if cmd=="player": return media_player()
     if cmd=="albert":
-        url="http://127.0.0.1:7330"
+        def _albert_tailnet_url():
+            ts=shutil.which("tailscale")
+            if not ts: return ""
+            try:
+                proc=subprocess.run([ts,"status","--json"],capture_output=True,text=True,timeout=2)
+                if proc.returncode: return ""
+                data=json.loads(proc.stdout or "{}")
+                dns=str(((data.get("Self") or {}).get("DNSName") or "")).rstrip(".")
+                return f"https://{dns}:7330" if dns else ""
+            except Exception:
+                return ""
+        local_url="http://127.0.0.1:7330"
+        remote_url=_albert_tailnet_url()
+        sub=(rest[0].casefold() if rest else "")
+        if sub in {"url","share"}:
+            print(remote_url or local_url); return 0
+        if sub=="qr":
+            url=remote_url or local_url
+            qr=shutil.which("qrencode")
+            if qr:
+                subprocess.run([qr,"-t","ANSIUTF8",url],check=False)
+            print(url); return 0
+        if sub in {"remote","ipad"}:
+            url=remote_url or local_url
+        else:
+            url=local_url
         result=_tool_open_url(url)
         if result.startswith("URL OPEN OK"):
             print("LOOK · Albert opened · "+url); return 0

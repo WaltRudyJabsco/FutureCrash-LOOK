@@ -173,13 +173,13 @@ def action(text, session=""):
         }
 
 class Handler(BaseHTTPRequestHandler):
-    server_version='Albert/1.0.2'
+    server_version='Albert/1.1.0'
     def log_message(self,*_): pass
     def send_json(self,code,obj):
         raw=json.dumps(obj,ensure_ascii=False).encode(); self.send_response(code); self.send_header('Content-Type','application/json; charset=utf-8'); self.send_header('Content-Length',str(len(raw))); self.end_headers(); self.wfile.write(raw)
     def do_GET(self):
         path=urlparse(self.path).path
-        if path in {'/health','/v1/health'}: return self.send_json(200,{"ok":True,"surface":"albert","version":"1.0.2","fabric":NODE})
+        if path in {'/health','/v1/health'}: return self.send_json(200,{"ok":True,"surface":"albert","version":"1.1.0","fabric":NODE})
         if path in {'/v1/actions','/api/capabilities'}:
             try: caps=node_json('/v1/capabilities')
             except Exception: caps={}

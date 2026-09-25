@@ -22,10 +22,27 @@ elif [[ "$OS" == Darwin ]] && command -v launchctl >/dev/null 2>&1; then
 <key>Label</key><string>com.futurecrash.albert</string>
 <key>ProgramArguments</key><array><string>/usr/bin/python3</string><string>$DST/server.py</string></array>
 <key>RunAtLoad</key><true/><key>KeepAlive</key><true/>
+<key>EnvironmentVariables</key><dict><key>PATH</key><string>$HOME/.local/bin:/opt/homebrew/bin:/usr/local/bin:/usr/bin:/bin</string></dict>
 <key>StandardOutPath</key><string>$DST/albert.log</string><key>StandardErrorPath</key><string>$DST/albert.log</string>
 </dict></plist>
 EOF
   launchctl bootout "gui/$(id -u)/com.futurecrash.albert" >/dev/null 2>&1 || true
   launchctl bootstrap "gui/$(id -u)" "$PLIST" || true
 fi
-printf 'Albert 5 installed\n  local: http://127.0.0.1:7330\n'
+ALBERT_HEALTH=0
+for _ in 1 2 3 4 5; do
+  if python3 - <<'PY_ALBERT_HEALTH' >/dev/null 2>&1
+import urllib.request
+with urllib.request.urlopen('http://127.0.0.1:7330/health', timeout=.4) as r:
+    raise SystemExit(0 if r.status == 200 else 1)
+PY_ALBERT_HEALTH
+  then ALBERT_HEALTH=1; break; fi
+  sleep .15
+done
+printf 'Albert 5 installed\n  local: http://127.0.0.1:7330%s\n' "$([[ $ALBERT_HEALTH == 1 ]] && printf ' · ready' || printf ' · starting')"
+if command -v tailscale >/dev/null 2>&1; then
+  ALBERT_DNS="$(tailscale status --json 2>/dev/null | python3 -c 'import json,sys; d=json.load(sys.stdin); print(((d.get("Self") or {}).get("DNSName") or "").rstrip("."))' 2>/dev/null || true)"
+  if [[ -n "$ALBERT_DNS" ]]; then
+    printf '  iPad/tailnet: https://%s:7330\n' "$ALBERT_DNS"
+  fi
+fi
