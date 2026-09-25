@@ -1,4 +1,11 @@
-# Signal Window 1.10.3
+# Signal Window 1.10.4
+
+## 1.10.4 — Media language contract
+
+- Direct `lk play`, terminal LO, and Signal share selector/fuzzy/literal semantics.
+- Generic noun phrases such as `a song` are selectors, not catalog strings.
+- Conversational quoted targets are literal; direct shell commands use `--exact`/`--literal` because shell quotes are not preserved as semantic input.
+- Fuzzy media matching ignores case, extensions, underscore/dash/space punctuation, and offers ranked candidates instead of silently queueing weak matches.
 
 ## 1.10.3 — Playability hints
 

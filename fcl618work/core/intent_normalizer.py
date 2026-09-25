@@ -9,7 +9,7 @@ from __future__ import annotations
 import re
 from typing import Any
 
-SCHEMA = "fabric-intent-v1"
+SCHEMA = "fabric-intent-v2"
 
 _MEDIA_KIND = {
     "movie": "video", "movies": "video", "video": "video", "videos": "video",
@@ -48,16 +48,23 @@ def normalize(prompt: str) -> dict[str, Any] | None:
     if low in controls:
         return _intent("media.control", control=controls[low])
 
-    # "play any/a/random movie", "play some music".  These are selectors, not
-    # literal catalog queries.  Random makes repeated demos useful and avoids
-    # pretending "any" names an object.
+    # Explicit generic noun phrases are selectors, never catalog strings.
+    # Keep this ahead of ordinary media lookup so "a song" cannot accidentally
+    # become a queue of titles containing those words.
     m = re.fullmatch(
-        r"(?:please\s+)?(?:play|put\s+on)\s+(?:(?:me\s+)?(?:a|an|any|some|random|something)\s+)?"
+        r"(?:please\s+)?(?:play|put\s+on)\s+(?:me\s+)?"
+        r"(?:a|an|any|some|random)\s+"
         r"(movie|movies|film|films|video|videos|music|song|songs|track|tracks)",
         low,
     )
     if m:
-        return _intent("media.play", kind=_MEDIA_KIND[m.group(1)], selection="random", limit=1)
+        return _intent("media.play", kind=_MEDIA_KIND[m.group(1)], selection="random", limit=1, match_mode="selector")
+
+    # A few bare media nouns are conventional requests rather than plausible
+    # titles. Quoting them below remains an explicit way to request a title.
+    m = re.fullmatch(r"(?:please\s+)?(?:play|put\s+on)\s+(music|movie|movies|film|films|video|videos)", low)
+    if m:
+        return _intent("media.play", kind=_MEDIA_KIND[m.group(1)], selection="random", limit=1, match_mode="selector")
 
     # "play something by Talking Heads" is a selector over an artist rather
     # than a request for a title literally named "something".
@@ -67,16 +74,20 @@ def normalize(prompt: str) -> dict[str, Any] | None:
         if artist:
             return _intent("media.play", kind="audio", artist=artist, selection="random", limit=1)
 
-    # Ordinary exact/fuzzy media request.  Preserve the user's target text for
-    # the catalog resolver; don't reinterpret names here.
+    # Ordinary media requests are fuzzy by default. A visibly quoted target is
+    # the conversational escape hatch for literal lookup; unlike a shell, LO
+    # and Signal still have the original quote characters at this edge.
     m = re.fullmatch(r"(?:please\s+)?(play|shuffle|queue)\s+(.+?)\s*", text, re.I)
     if m:
         verb = m.group(1).casefold()
-        query = _clean(m.group(2).strip(" .!?"))
+        raw = _clean(m.group(2).strip(" .!?"))
+        literal = len(raw) >= 2 and raw[0] == raw[-1] and raw[0] in {'\"', "'"}
+        query = _clean(raw[1:-1] if literal else raw)
         if query:
+            mode = "literal" if literal else "fuzzy"
             if verb == "queue":
-                return _intent("media.queue", query=query)
-            return _intent("media.play", query=query, shuffle=(verb == "shuffle"))
+                return _intent("media.queue", query=query, match_mode=mode)
+            return _intent("media.play", query=query, shuffle=(verb == "shuffle"), match_mode=mode)
     return None
 
 
@@ -110,5 +121,8 @@ def media_tool(intent: dict[str, Any] | None) -> dict[str, Any] | None:
         return {"tool": "media_queue", "args": {"query": intent.get("query") or ""}}
     if action == "media.play":
         args = {k: intent.get(k) for k in ("query", "kind", "artist", "selection", "limit", "shuffle") if intent.get(k) not in (None, "")}
+        mode=intent.get("match_mode")
+        if args.get("query") and mode in {"literal","fuzzy"}:
+            args["match_mode"]=mode
         return {"tool": "media_play", "args": args}
     return None

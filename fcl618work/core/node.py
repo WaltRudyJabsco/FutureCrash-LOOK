@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Future Crash + LOOK Unified Node 6.2.3.
+"""Future Crash + LOOK Unified Node 6.2.4.
 
 A small distributed supervisor for trusted personal machines. Immediate events stay
 asynchronous; a one-second fabric pulse reconciles presence, leases and stale work.
@@ -58,8 +58,8 @@ try:
 except ImportError:
     from endpoint_auth import EndpointAuth
 
-VERSION = "6.2.3"
-RELEASE_NAME = "Know Your Limits"
+VERSION = "6.2.4"
+RELEASE_NAME = "Good Listener"
 DEFAULT_HOST = "127.0.0.1"
 DEFAULT_PORT = 7332
 DEFAULT_INGRESS_PORT = 0
@@ -2324,6 +2324,7 @@ def _local_media_route(operation, payload):
         kind = str(payload.get("kind") or "").strip().casefold()
         artist = " ".join(str(payload.get("artist") or "").split()).strip()
         selection = str(payload.get("selection") or "").strip().casefold()
+        match_mode = str(payload.get("match_mode") or "").strip().casefold()
         limit = payload.get("limit")
         if not query and not (kind or artist or selection):
             raise ValueError("media query or selector required")
@@ -2332,6 +2333,7 @@ def _local_media_route(operation, payload):
         if kind: argv.extend(["--kind",kind])
         if artist: argv.extend(["--artist",artist])
         if selection: argv.extend(["--selection",selection])
+        if match_mode == "literal": argv.append("--exact")
         if limit not in (None, "", 0, "0"): argv.extend(["--limit",str(limit)])
         if bool(payload.get("shuffle")):
             argv.append("--shuffle")
@@ -2745,7 +2747,7 @@ def _openjev_shadow(state, question, candidates, *, profile="workspace", consequ
 
 
 class API(BaseHTTPRequestHandler):
-    server_version = "FCLNode/6.2.3"
+    server_version = "FCLNode/6.2.4"
 
     def setup(self):
         self._metric_request_id = None

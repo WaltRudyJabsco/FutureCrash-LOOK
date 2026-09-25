@@ -7082,7 +7082,8 @@ def _capability_tools():
                 "artist":{"type":"string"},
                 "selection":{"type":"string","enum":["all","random"]},
                 "limit":{"type":"integer","minimum":1,"maximum":100},
-                "shuffle":{"type":"boolean"}
+                "shuffle":{"type":"boolean"},
+                "match_mode":{"type":"string","enum":["fuzzy","literal","selector"]}
             }}
         }},
         {"type":"function","function":{
@@ -7142,7 +7143,8 @@ def _run_capability_tool(name,args,workspace,profile):
     if name=="media_play":
         return _media_tool_play(args.get("query",""),shuffle=bool(args.get("shuffle",False)),
                                 kind=args.get("kind",""),artist=args.get("artist",""),
-                                selection=args.get("selection",""),limit=args.get("limit",0))
+                                selection=args.get("selection",""),limit=args.get("limit",0),
+                                match_mode=args.get("match_mode","fuzzy"))
     if name=="media_queue":
         return _media_tool_queue(args.get("query",""))
     if name=="media_control":
@@ -13267,34 +13269,49 @@ def _media_catalog_entries():
     return media_core.merge_catalog_entries(payload.get("entries") or [],local_node=local_node),payload
 
 
-def _media_query_matches(query):
-    """Resolve catalog text and say whether the match is a stable human grouping."""
+def _media_query_matches(query,match_mode="fuzzy"):
+    """Resolve catalog text with one shared literal/fuzzy confidence contract."""
     query=" ".join(str(query or "").split()).strip()
     if not query:
         return "none",[]
     rows,_=_media_catalog_entries()
-    q=query.casefold()
-    exact_album=[r for r in rows if str(r.get("album") or "").casefold()==q]
+    mode=str(match_mode or "fuzzy").casefold()
+    if mode=="literal":
+        exact=media_core.exact_entries({"entries":rows},query)
+        if len(exact)==1: return "item",exact
+        if exact: return "ambiguous",exact
+        return "none",[]
+
+    qnorm=media_core.normalize_match_text(query)
+    exact_album=[r for r in rows if media_core.normalize_match_text(str(r.get("album") or ""))==qnorm]
     if exact_album:
         return "album",sorted(exact_album,key=media_core.entry_sort_key)
-    artist_q=media_core._artist_key(query)
-    exact_artist=[r for r in rows if media_core._artist_key(str(r.get("artist") or ""))==artist_q]
+    artist_q=media_core._artist_key(media_core.normalize_match_text(query))
+    exact_artist=[r for r in rows if media_core._artist_key(media_core.normalize_match_text(str(r.get("artist") or "")))==artist_q]
     if exact_artist:
         return "artist",sorted(exact_artist,key=media_core.entry_sort_key)
-    exact_title=[r for r in rows if str(r.get("title") or "").casefold()==q]
+    exact_title=[r for r in rows if media_core.normalize_match_text(str(r.get("title") or ""))==qnorm]
     if exact_title:
         return "title",sorted(exact_title,key=media_core.entry_sort_key)
-    fuzzy=media_core.search_entries({"entries":rows},query)
-    if len(fuzzy)==1:
-        return "item",fuzzy
-    # A partial artist spelling is still a stable grouping if every hit belongs to
-    # the same artist and the query actually occurs in that artist name.
+
+    ranked=media_core.rank_entries({"entries":rows},query,limit=12)
+    if not ranked:
+        return "none",[]
+    fuzzy=[row for row,_score in ranked]
     artists={str(r.get("artist") or "").strip() for r in fuzzy if str(r.get("artist") or "").strip()}
     if len(artists)==1:
         artist=next(iter(artists))
-        if artist_q and (artist_q in media_core._artist_key(artist) or media_core._artist_key(artist) in artist_q):
+        norm_artist=media_core._artist_key(media_core.normalize_match_text(artist))
+        if artist_q and (artist_q in norm_artist or norm_artist in artist_q):
             return "artist",sorted(fuzzy,key=media_core.entry_sort_key)
-    return "ambiguous",sorted(fuzzy,key=media_core.entry_sort_key)
+
+    top=ranked[0][1]
+    second=ranked[1][1] if len(ranked)>1 else 0.0
+    # Strong normalized/partial matches may execute without interaction. Close
+    # races remain ambiguous so the caller can cheaply offer candidates.
+    if top>=0.97 or (top>=0.90 and top-second>=0.08) or (top>=0.84 and len(ranked)==1):
+        return "item",[ranked[0][0]]
+    return "ambiguous",fuzzy
 
 
 def _media_tool_search(query,limit=12):
@@ -13322,13 +13339,13 @@ def _media_tool_search(query,limit=12):
     return json.dumps(payload,ensure_ascii=False)
 
 
-def _media_tool_play(query,shuffle=False,kind="",artist="",selection="",limit=0):
+def _media_tool_play(query,shuffle=False,kind="",artist="",selection="",limit=0,match_mode="fuzzy"):
     query=" ".join(str(query or "").split()).strip()
     kind_filter=str(kind or "").casefold()
     artist=" ".join(str(artist or "").split()).strip()
     selection=str(selection or "").casefold()
     if query:
-        match_kind,rows=_media_query_matches(query)
+        match_kind,rows=_media_query_matches(query,match_mode=match_mode)
     elif kind_filter or artist or selection:
         catalog,_=_media_catalog_entries()
         try: wanted_limit=max(0,min(100,int(limit or 0)))
@@ -14488,11 +14505,12 @@ def _media_identify_command(args):
 
 
 def _media_resolve_targets(args):
-    shuffle=False; kind=""; selection=""; artist=""; limit=0
+    shuffle=False; kind=""; selection=""; artist=""; limit=0; exact=False
     clean=[]; i=0
     while i<len(args):
         arg=args[i]
         if arg=="--shuffle": shuffle=True; i+=1; continue
+        if arg in {"--exact","--literal"}: exact=True; i+=1; continue
         if arg in {"--kind","--selection","--artist","--limit"}:
             if i+1>=len(args): raise ValueError(f"{arg} requires a value")
             value=str(args[i+1]); i+=2
@@ -14542,9 +14560,34 @@ def _media_resolve_targets(args):
             return rows,shuffle
 
     catalog,_=_media_catalog_entries()
-    rows=media_core.resolve_query({"entries":catalog},text)
-    if not rows:
-        raise ValueError(f"no Fabric media match for {text!r}; run lk media find or lk media scan")
+    # Direct `lk play ...` is still human language. Normalize selectors here so
+    # it cannot disagree with LO/Signal (the old "a song" literal-query bug).
+    if not exact:
+        try:
+            normalizer=_intent_normalizer_module()
+            resolution=normalizer.resolve("play "+text)
+            intent=resolution.get("intent") if resolution.get("status")=="resolved" else None
+        except Exception:
+            intent=None
+        if isinstance(intent,dict) and intent.get("action")=="media.play" and not intent.get("query"):
+            rows=media_core.select_entries(
+                {"entries":catalog}, kind=str(intent.get("kind") or ""),
+                artist=str(intent.get("artist") or ""), selection=str(intent.get("selection") or "all"),
+                limit=int(intent.get("limit") or 0),
+            )
+            if rows: return rows,shuffle
+            label=intent.get("artist") or ("any "+str(intent.get("kind") or "media"))
+            raise ValueError(f"no Fabric media match for {label!r}")
+
+    match_kind,rows=_media_query_matches(text,match_mode="literal" if exact else "fuzzy")
+    if match_kind=="none" or not rows:
+        # Rank below execution threshold only as assistance; never silently guess.
+        suggestions=media_core.rank_entries({"entries":catalog},text,limit=3)
+        hint="; did you mean " + ", ".join(repr(_media_row_label(r)) for r,_ in suggestions) + "?" if suggestions else ""
+        raise ValueError(f"no Fabric media match for {text!r}{hint}; run lk media find")
+    if match_kind=="ambiguous":
+        preview=", ".join(repr(_media_row_label(row)) for row in rows[:3])
+        raise ValueError(f"multiple Fabric media matches for {text!r}; did you mean {preview}? use --exact for literal lookup or lk media find")
     return rows,shuffle
 
 
@@ -14956,7 +14999,7 @@ def media(args):
     aliases={"playpause":"toggle","previous":"prev","back":"prev"}
     action=aliases.get(raw,raw)
     if action not in {"status","play","pause","toggle","next","prev","stop"}:
-        print("usage: lk media [browse|find QUERY|fabric|outputs|on NODE play TARGET|identify QUERY|--all|play [TARGET] [--shuffle]|pause|toggle|next|prev|stop|queue|doctor|clear|state|jump INDEX]")
+        print("usage: lk media [browse|find QUERY|fabric|outputs|on NODE play TARGET|identify QUERY|--all|play [TARGET] [--shuffle] [--exact]|pause|toggle|next|prev|stop|queue|doctor|clear|state|jump INDEX]")
         print("                [scan ROOT|scan --relocate OLD_ROOT NEW_ROOT|library|find QUERY|artists|albums|playlist ...|repeat [off|all]]")
         print("                [add PATH|stream PATH|stream @NODE DIGEST|info [@NODE] DIGEST]")
         return 2

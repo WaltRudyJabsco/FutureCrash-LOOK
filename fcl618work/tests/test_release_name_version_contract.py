@@ -9,6 +9,6 @@ def test_installer_uses_machine_version_interface():
 
 def test_node_exposes_human_and_machine_versions():
     text = (ROOT / "core" / "node.py").read_text()
-    assert 'RELEASE_NAME = "Know Your Limits"' in text
+    assert 'RELEASE_NAME = "Good Listener"' in text
     assert '"--version-number"' in text
     assert 'version=VERSION' in text

@@ -298,8 +298,8 @@ Show the current LOOK media session, state, track, progress, and queue position.
 .B lk media scan ROOT
 Build or refresh the fast dependency-free media library index for ROOT. Media bytes are not hashed or decoded during the scan.
 .TP
-.B lk media play TARGET [--shuffle]
-Play a file, directory, or indexed artist/album/title query as a LOOK-owned queue.
+.B lk media play TARGET [--shuffle] [--exact]
+Play a file, directory, selector, or indexed artist/album/title query as a LOOK-owned queue. Ordinary names use forgiving fuzzy matching; --exact (or --literal) requests deterministic literal lookup.
 .TP
 .B lk media queue
 Show the canonical queue around the current item.

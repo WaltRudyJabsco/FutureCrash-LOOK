@@ -1,3 +1,15 @@
+# 6.2.4 — Good Listener
+
+- Establish one media-language contract across direct `lk play`, terminal LO, Signal, and Fabric routing: selector, fuzzy, literal, or clarify.
+- Fix `lk play a song` being treated as catalog text; generic noun phrases now become structured selectors before lookup.
+- Make ordinary named media fuzzy by default while preserving deterministic literal lookup through quoted conversational targets and CLI `--exact`/`--literal`.
+- Normalize filename surfaces for matching: case, extension, underscore, dash, slash-like punctuation, and spacing no longer need exact typing.
+- Add confidence/margin gating so strong fuzzy matches execute, close matches offer candidates, and weak matches fail cheaply instead of creating accidental queues.
+- Preserve exact artist/album/title group semantics and existing explicit structured selectors.
+- Carry literal match mode through Signal → Unified Node → LOOK.
+- Signal Window 1.10.4.
+- 271 tests pass.
+
 # 6.2.3 — Know Your Limits
 
 - Terminal LO and Signal now consume the same `resolved / clarify / no_match` intent contract; selector phrases no longer depend on surface-specific parsing.
