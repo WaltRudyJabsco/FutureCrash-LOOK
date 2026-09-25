@@ -1,3 +1,9 @@
+# 6.4.10 · FRONT DOOR
+
+- Restores Albert startup on installed Linux and macOS layouts by resolving the shared Fabric core from `~/.local/share/future-crash-look/core`, with source-tree fallback for development.
+- Makes Albert installation health a hard contract: unified install now waits for `127.0.0.1:7330/health` and fails visibly instead of silently accepting a dead surface.
+- Keeps 6.4.9 browser endpoint authorization/presence architecture intact once Albert is actually alive.
+
 ## 6.4.9 — BROWSER VOICE
 
 - Browser sessions are first-class Fabric effect endpoints with live presence and capability advertisement.

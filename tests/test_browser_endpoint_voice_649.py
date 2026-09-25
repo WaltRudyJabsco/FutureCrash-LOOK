@@ -39,7 +39,7 @@ def test_surfaces_advertise_and_execute_browser_speech():
 
 
 def test_release_649_contract():
-    assert (ROOT/'VERSION').read_text().strip()=='6.4.9'
+    assert (ROOT/'VERSION').read_text().strip()=='6.4.10'
     node=(ROOT/'core/node.py').read_text()
-    assert 'VERSION = "6.4.9"' in node
-    assert 'RELEASE_NAME = "BROWSER VOICE"' in node
+    assert 'VERSION = "6.4.10"' in node
+    assert 'RELEASE_NAME = "FRONT DOOR"' in node

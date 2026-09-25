@@ -7,7 +7,12 @@ from pathlib import Path
 from urllib.parse import urlparse, unquote
 
 ROOT=Path(__file__).resolve().parent
-CORE_DIR=ROOT.parent/"core"
+# Installed Albert lives beside Future Crash rather than inside the source tree.
+# Prefer the canonical installed Fabric core; fall back to the checkout layout
+# for development/tests. This mirrors Signal and keeps both surfaces on one core.
+CORE_DIR=Path.home()/".local/share/future-crash-look/core"
+if not (CORE_DIR/"endpoint_auth.py").exists():
+    CORE_DIR=ROOT.parent/"core"
 if str(CORE_DIR) not in sys.path: sys.path.insert(0,str(CORE_DIR))
 from endpoint_auth import EndpointAuth
 ENDPOINT_AUTH=EndpointAuth()
@@ -222,7 +227,7 @@ def action(text, session="", context=None):
         }
 
 class Handler(BaseHTTPRequestHandler):
-    server_version='Albert/1.2.3'
+    server_version='Albert/1.2.4'
     def log_message(self,*_): pass
     def send_json(self,code,obj,headers=None):
         raw=json.dumps(obj,ensure_ascii=False).encode(); self.send_response(code); self.send_header('Content-Type','application/json; charset=utf-8'); self.send_header('Content-Length',str(len(raw)));

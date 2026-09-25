@@ -30,16 +30,25 @@ EOF
   launchctl bootstrap "gui/$(id -u)" "$PLIST" || true
 fi
 ALBERT_HEALTH=0
-for _ in 1 2 3 4 5; do
+for _ in $(seq 1 20); do
   if python3 - <<'PY_ALBERT_HEALTH' >/dev/null 2>&1
 import urllib.request
-with urllib.request.urlopen('http://127.0.0.1:7330/health', timeout=.4) as r:
+with urllib.request.urlopen('http://127.0.0.1:7330/health', timeout=.5) as r:
     raise SystemExit(0 if r.status == 200 else 1)
 PY_ALBERT_HEALTH
   then ALBERT_HEALTH=1; break; fi
-  sleep .15
+  sleep .2
 done
-printf 'Albert 5 installed\n  local: http://127.0.0.1:7330%s\n' "$([[ $ALBERT_HEALTH == 1 ]] && printf ' · ready' || printf ' · starting')"
+if [[ $ALBERT_HEALTH != 1 ]]; then
+  echo 'Albert install failed: http://127.0.0.1:7330/health did not become ready' >&2
+  if [[ "$OS" == Linux ]] && command -v systemctl >/dev/null 2>&1; then
+    systemctl --user --no-pager --full status albert.service >&2 || true
+  elif [[ "$OS" == Darwin ]] && [[ -f "$DST/albert.log" ]]; then
+    tail -40 "$DST/albert.log" >&2 || true
+  fi
+  exit 1
+fi
+printf 'Albert 5 installed\n  local: http://127.0.0.1:7330 · ready\n'
 if command -v tailscale >/dev/null 2>&1; then
   ALBERT_DNS="$(tailscale status --json 2>/dev/null | python3 -c 'import json,sys; d=json.load(sys.stdin); print(((d.get("Self") or {}).get("DNSName") or "").rstrip("."))' 2>/dev/null || true)"
   if [[ -n "$ALBERT_DNS" ]]; then
