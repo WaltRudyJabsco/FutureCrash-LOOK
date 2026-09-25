@@ -1,3 +1,12 @@
+## 6.4.7 — VOICEPRINT
+
+- Promoted speech to a first-class Fabric local-effect capability: nodes now advertise `audio.speak` and accept `/v1/audio/speak` with explicit output-node routing through the existing Fabric transport.
+- Added `fcl-node speak` / `lk fabric speak` and exposed `audio_speak` to the shared LO tool plane for explicit read-aloud, hands-busy notifications, and targeted room/node speech.
+- Unified the WOPR voice on macOS and Linux around eSpeak NG + SoX; macOS `say` remains only a graceful fallback.
+- LOOK Games now use Fabric speech first and the identical local speech pipeline as an offline fallback, fixing the Linux trigger path.
+- WOPR login now speaks “GREETINGS PROFESSOR FALKEN. SHALL WE PLAY A GAME?” and board-game endings get sparse machine commentary. GTNW keeps its own dramatic semantics.
+- eSpeak NG is now installed by default on macOS as well as Linux.
+
 ## 6.4.6 — FALKEN
 
 - LOOK Games board polish: checkerboard-backed chess/checkers with edge coordinates and a real backgammon board with round checkers, bar, points, dice, and borne-off counts.

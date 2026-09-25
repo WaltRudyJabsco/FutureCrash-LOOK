@@ -7138,6 +7138,15 @@ def _capability_tools():
             }}
         }},
         {"type":"function","function":{
+            "name":"audio_speak",
+            "description":"Speak short text aloud on a Fabric audio endpoint. Use for explicit read-aloud/speak requests, useful hands-busy notifications, or when the user names an output node. Speech is a local effect routed to the requested physical node; do not narrate ordinary answers unless asked.",
+            "parameters":{"type":"object","properties":{
+                "text":{"type":"string","description":"Short text to speak"},
+                "target":{"type":"string","description":"Optional Fabric node name; local when omitted"},
+                "voice_profile":{"type":"string","enum":["default","wopr"]}
+            },"required":["text"]}
+        }},
+        {"type":"function","function":{
             "name":"media_search",
             "description":"Search the trusted Fabric media catalog across online nodes. Use for local music/video discovery instead of web_search or filesystem guessing. Returns exact catalog records and match grouping without playing anything.",
             "parameters":{"type":"object","properties":{
@@ -7219,6 +7228,19 @@ def _run_capability_tool(name,args,workspace,profile):
         if game not in {"ttt","checkers","chess","backgammon","gtnw"}:
             return f"GAME FAILED · unknown simulation: {game}"
         return f"GAME READY · {game} · lk games {game}"
+    if name=="audio_speak":
+        text=" ".join(str(args.get("text") or "").split())
+        if not text: return "SPEAK FAILED · text required"
+        target=str(args.get("target") or "").strip()
+        voice=str(args.get("voice_profile") or "default").casefold()
+        argv=["speak"]
+        if target: argv += ["--node",target]
+        argv += ["--voice-profile",voice,text]
+        try:
+            result=_media_fabric_cli(argv)
+            return f"SPEAK OK · {result.get('node') or target or 'local'} · {result.get('engine') or '?'}"
+        except Exception as exc:
+            return f"SPEAK FAILED · {exc}"
     if name=="media_search":
         return _media_tool_search(args.get("query",""),args.get("limit",12))
     if name=="media_play":
@@ -7242,6 +7264,7 @@ _TOOL_POLICY = {
     "make_directory":("workspace","mutation"),"open_url":("all","action"),
     "list_processes":("all","observation"),"listening_ports":("all","observation"),"system_snapshot":("all","observation"),
     "game_action":("all","action"),
+    "audio_speak":("all","action"),
     "media_search":("all","observation"),"media_play":("all","action"),"media_queue":("all","action"),"media_control":("all","action"),
     "run_command":("power","command"),
 }
@@ -8711,7 +8734,7 @@ def _direct_searxng_search(query, limit=8):
     params=urllib.parse.urlencode({"q":query,"format":"json"})
     request=urllib.request.Request(base+"/search?"+params,headers={
         "Accept":"application/json",
-        "User-Agent":"Future-Crash-Fabric/6.4.6",
+        "User-Agent":"Future-Crash-Fabric/6.4.7",
     })
     with urllib.request.urlopen(request,timeout=12) as response:
         data=json.load(response)
@@ -10393,7 +10416,7 @@ def ollama_chat(force_search=False, initial_prompt=None, allow_start=True, host_
                         with _activity("inspecting"):
                             tool_content,_ok,_elapsed=_tool_transaction(
                                 name,args,lambda: _run_system_inspection_tool(name,args))
-                    elif name in {"generate_image","schedule_prompt","schedule_list","game_action","media_search","media_play","media_queue","media_control"}:
+                    elif name in {"generate_image","schedule_prompt","schedule_list","game_action","audio_speak","media_search","media_play","media_queue","media_control"}:
                         if name=="generate_image":
                             label,activity="image","generating"
                         elif name=="game_action":
@@ -13239,7 +13262,7 @@ def _gtnw_make_sim():
 def game_gtnw():
     try:
         with _game_terminal() as fd:
-            sim_no=1; speed=1; frame=0; arcs=_gtnw_make_sim(); finished_at=None
+            sim_no=1; speed=1; frame=0; arcs=_gtnw_make_sim(); finished_at=None; verdict_spoken=False
             while True:
                 max_frame=max(delay+len(pts) for _,pts,delay in arcs)
                 done=frame>=max_frame
@@ -13252,11 +13275,15 @@ def game_gtnw():
                                          "                 USSR VICTORIES     0\n"
                                          f"                 MUTUAL LOSSES      {sim_no}\n\n"
                                          "                      INTERESTING.\033[0m")
-                        sys.stdout.flush(); time.sleep(2.0)
+                        sys.stdout.flush()
+                        if not verdict_spoken:
+                            look_games.wopr_say("INTERESTING. SOMETIMES THE BEST MOVE IS NOT TO PLAY.")
+                            verdict_spoken=True
+                        time.sleep(2.0)
                     sim_no+=1; frame=0; arcs=_gtnw_make_sim(); finished_at=None; continue
                 key=_game_key(fd,0.10/max(1,speed))
                 if key=="esc": return 0
-                if key=="r": sim_no=1; speed=1; frame=0; arcs=_gtnw_make_sim(); finished_at=None; continue
+                if key=="r": sim_no=1; speed=1; frame=0; arcs=_gtnw_make_sim(); finished_at=None; verdict_spoken=False; continue
                 if key==" ": speed=2 if speed==1 else (4 if speed==2 else 1)
                 if not done: frame+=speed
     except RuntimeError as exc:
@@ -16571,12 +16598,19 @@ def _fabric_command(args):
     aliases={"list":"nodes","node":"status","model":"models"}
     sub=aliases.get(sub,sub)
     if sub=="dash": sub="dashboard"
-    if sub not in {"fabric","watch","dashboard","dash","beacon","lights","nodes","activity","pulse","models","status","qualify","services","service","jobs","job","submit","packet","cancel","events","http","decisions","decision","answer","ask","decision-shadow","decision-provider","identity","trust","untrust","pair-code","pair","transport","endpoints","endpoint-code","allow","revoke-endpoint"}:
-        print("usage: lk fabric [identity|trust|pair-code [URL]|pair NODE CODE|untrust NODE_ID|transport|endpoints|endpoint-code URL [once|trust]|allow CODE [once|trust]|revoke-endpoint ENDPOINT_ID|watch|dashboard|decisions [NODE]|decision [NODE] ID|answer [NODE] ID CHOICE|ask [NODE] QUESTION [CHOICE ...]|decision-shadow [NODE] STATE QUESTION CANDIDATE...|decision-provider [NODE]|beacon|lights|nodes|status|activity|pulse|models|jobs|events|submit|packet|cancel|qualify|services|service]")
+    if sub not in {"fabric","watch","dashboard","dash","beacon","lights","nodes","activity","pulse","models","status","qualify","services","service","jobs","job","submit","packet","cancel","events","http","decisions","decision","answer","ask","decision-shadow","decision-provider","identity","trust","untrust","pair-code","pair","transport","endpoints","endpoint-code","allow","revoke-endpoint","speak"}:
+        print("usage: lk fabric [identity|trust|pair-code [URL]|pair NODE CODE|untrust NODE_ID|transport|endpoints|endpoint-code URL [once|trust]|allow CODE [once|trust]|revoke-endpoint ENDPOINT_ID|watch|dashboard|decisions [NODE]|decision [NODE] ID|answer [NODE] ID CHOICE|ask [NODE] QUESTION [CHOICE ...]|decision-shadow [NODE] STATE QUESTION CANDIDATE...|decision-provider [NODE]|beacon|lights|nodes|status|activity|pulse|models|jobs|events|submit|packet|cancel|qualify|services|service|speak [NODE] TEXT]")
         return 2
     argv=[exe,sub]
     rest=list(args[1:])
-    if sub in {"status","activity","pulse","models","services","jobs","events","http","decisions","decision-provider"}:
+    if sub=="speak":
+        if not rest:
+            print("usage: lk fabric speak [NODE] TEXT"); return 2
+        # `@node` is unambiguous; otherwise one word means local speech.
+        if rest[0].startswith("@"):
+            argv += ["--node",rest.pop(0)[1:]]
+        argv += rest
+    elif sub in {"status","activity","pulse","models","services","jobs","events","http","decisions","decision-provider"}:
         if rest and not rest[0].startswith("-"):
             argv += ["--node",rest.pop(0)]
         argv += rest

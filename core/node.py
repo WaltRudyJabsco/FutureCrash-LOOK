@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Future Crash + LOOK Unified Node 6.4.6.
+"""Future Crash + LOOK Unified Node 6.4.7.
 
 A small distributed supervisor for trusted personal machines. Immediate events stay
 asynchronous; a one-second fabric pulse reconciles presence, leases and stale work.
@@ -58,8 +58,8 @@ try:
 except ImportError:
     from endpoint_auth import EndpointAuth
 
-VERSION = "6.4.6"
-RELEASE_NAME = "FALKEN"
+VERSION = "6.4.7"
+RELEASE_NAME = "VOICEPRINT"
 DEFAULT_HOST = "127.0.0.1"
 DEFAULT_PORT = 7332
 DEFAULT_INGRESS_PORT = 0
@@ -349,6 +349,10 @@ def capabilities():
         "signal": probe("127.0.0.1", 7331),
         "albert": probe("127.0.0.1", 7330),
         "albert.urls": albert_urls() if probe("127.0.0.1", 7330) else {},
+        # Speech is a local effect. Compute may float; sound belongs to the
+        # selected physical endpoint. The node owns synthesis so surfaces do not.
+        "audio.speak": bool(binary("espeak-ng") or (sys.platform == "darwin" and binary("say"))),
+        "audio.output": True,
         "node": True,
         "comfyui": probe("127.0.0.1", 8188),
         "mercury": probe("127.0.0.1", 8888),
@@ -371,6 +375,51 @@ def capabilities():
         "decision.openjev": probe("127.0.0.1", 8791),
     }
 
+
+
+def _audio_speak_local(text: str, voice_profile: str = "default"):
+    """Start sparse offline speech on this node and return immediately.
+
+    WOPR deliberately uses the same eSpeak NG + SoX chain on Linux and macOS so
+    the character does not change when the output endpoint changes machines.
+    """
+    clean=" ".join(str(text or "").split())
+    if not clean:
+        raise ValueError("text required")
+    if len(clean) > 1200:
+        raise ValueError("speech text is limited to 1200 characters")
+    profile=str(voice_profile or "default").casefold()
+    if profile not in {"default","wopr"}:
+        raise ValueError("voice_profile must be default or wopr")
+    speak=binary("espeak-ng")
+    play=binary("play")
+    if speak:
+        if profile=="wopr" and play:
+            # A detached shell owns the complete pipeline. This mirrors the exact
+            # command that works interactively and avoids a short-lived caller
+            # orphaning one end of a Python-managed pipe.
+            import shlex
+            command=(f"{shlex.quote(speak)} --stdout -s 135 -p 25 -v en-us {shlex.quote(clean)} | "
+                     f"{shlex.quote(play)} -q -t wav - pitch -250 chorus 0.6 0.9 55 0.4 0.25 2 -t")
+            subprocess.Popen(["/bin/sh","-c",command],stdin=subprocess.DEVNULL,
+                             stdout=subprocess.DEVNULL,stderr=subprocess.DEVNULL,start_new_session=True)
+            engine="espeak-ng+sox"
+        else:
+            argv=[speak,"-s","155" if profile=="default" else "135","-p","35" if profile=="default" else "25","-v","en-us",clean]
+            subprocess.Popen(argv,stdin=subprocess.DEVNULL,stdout=subprocess.DEVNULL,
+                             stderr=subprocess.DEVNULL,start_new_session=True)
+            engine="espeak-ng"
+    elif sys.platform=="darwin" and binary("say"):
+        # Installation normally supplies eSpeak NG on macOS now; `say` remains a
+        # graceful fallback instead of making speech capability disappear.
+        subprocess.Popen([binary("say"),"-r","145",clean],stdin=subprocess.DEVNULL,
+                         stdout=subprocess.DEVNULL,stderr=subprocess.DEVNULL,start_new_session=True)
+        engine="say"
+    else:
+        raise RuntimeError("no local speech synthesizer (install espeak-ng)")
+    FABRIC_STORE.event(None,"audio","speak",clean[:160],node=identity()["name"],
+                       data={"profile":profile,"engine":engine})
+    return {"ok":True,"node":identity()["name"],"profile":profile,"engine":engine,"text":clean}
 
 def load_profiles():
     try:
@@ -2033,7 +2082,7 @@ def _local_web_search(query, limit=8):
     base=os.environ.get("FCL_SEARXNG_URL","http://127.0.0.1:8888").rstrip("/")
     request=urllib.request.Request(base+"/search?"+params,headers={
         "Accept":"application/json",
-        "User-Agent":"Future-Crash-Fabric/6.4.6",
+        "User-Agent":"Future-Crash-Fabric/6.4.7",
     })
     try:
         with urllib.request.urlopen(request,timeout=8) as response:
@@ -2766,7 +2815,7 @@ def _openjev_shadow(state, question, candidates, *, profile="workspace", consequ
 
 
 class API(BaseHTTPRequestHandler):
-    server_version = "FCLNode/6.4.6"
+    server_version = "FCLNode/6.4.7"
 
     def setup(self):
         self._metric_request_id = None
@@ -3345,6 +3394,13 @@ class API(BaseHTTPRequestHandler):
                     lease_pulses=int(d.get("lease_pulses") or 8), stopped=bool(d.get("stopped"))))
             except ValueError as exc:
                 return self.sendj(400, {"ok": False, "error": str(exc)})
+        if path == "/v1/audio/speak":
+            try:
+                return self.sendj(200, _audio_speak_local(str(d.get("text") or ""), str(d.get("voice_profile") or "default")))
+            except ValueError as exc:
+                return self.sendj(400,{"ok":False,"error":str(exc)})
+            except Exception as exc:
+                return self.sendj(503,{"ok":False,"error":str(exc)})
         if path == "/v1/infer/stream":
             try:
                 return _stream_model_infer(self, d)
@@ -4667,9 +4723,10 @@ def main():
     ap.add_argument("command",nargs="?",default="serve",
         choices=["serve","status","nodes","activity","pulse","fabric","watch","dashboard","models","qualify","services","service",
                  "jobs","job","submit","packet","cancel","events","http","beacon","lights","artifact-add","artifact","artifacts","file-catalog","file-find","media-catalog","media-identify",
-                 "decisions","decision","answer","ask","decision-shadow","decision-provider","identity","trust","untrust","pair-code","pair","transport","endpoints","endpoint-code","allow","revoke-endpoint","media-outputs","media-state","media-play","media-control"])
+                 "decisions","decision","answer","ask","decision-shadow","decision-provider","identity","trust","untrust","pair-code","pair","transport","endpoints","endpoint-code","allow","revoke-endpoint","media-outputs","media-state","media-play","media-control","speak"])
     ap.add_argument("args",nargs="*")
     ap.add_argument("--node",dest="node",default=None,help="target Fabric node name")
+    ap.add_argument("--voice-profile",dest="voice_profile",default="default",choices=["default","wopr"],help="speech voice profile")
     ap.add_argument("--json",action="store_true",help="raw JSON where a human view exists")
     ap.add_argument("--yes",action="store_true",help="confirm a mutating managed-service action")
     ap.add_argument("--host",default=DEFAULT_HOST); ap.add_argument("--port",type=int,default=DEFAULT_PORT)
@@ -4861,6 +4918,13 @@ def main():
                 data=_target_get(a.host,a.port,a.node,path)
                 if a.command=="models" and not a.json: _print_models(data,a.node or "local")
                 else: print(json.dumps(data,indent=2))
+                return 0
+            if a.command=="speak":
+                if not a.args: ap.error("speak requires TEXT")
+                payload={"text":" ".join(a.args),"voice_profile":a.voice_profile}
+                result=_target_post(a.host,a.port,a.node,"/v1/audio/speak",payload,timeout=4.0)
+                if a.json: print(json.dumps(result,indent=2))
+                else: print(f"FABRIC SPEAK · {result.get('node') or a.node or 'local'} · {result.get('engine') or '?'}")
                 return 0
             if a.command=="media-outputs":
                 payload = _daemon_get(a.host, a.port, "/v1/media/outputs")

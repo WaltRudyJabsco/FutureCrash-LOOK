@@ -14,6 +14,9 @@ import select
 import shutil
 import subprocess
 import sys
+import json
+import urllib.request
+import shlex
 import termios
 import time
 import tty
@@ -107,32 +110,49 @@ def footer(mode:str) -> str:
     return DIM+"s stop   r restart   h help   q/esc menu"+RESET
 
 
+def _wopr_local_fallback(clean:str) -> bool:
+    """Use the same proven eSpeak NG + SoX chain on macOS and Linux."""
+    speak=shutil.which("espeak-ng")
+    play=shutil.which("play")
+    if speak:
+        try:
+            if play:
+                command=(f"{shlex.quote(speak)} --stdout -s 135 -p 25 -v en-us {shlex.quote(clean)} | "
+                         f"{shlex.quote(play)} -q -t wav - pitch -250 chorus 0.6 0.9 55 0.4 0.25 2 -t")
+                subprocess.Popen(["/bin/sh","-c",command],stdin=subprocess.DEVNULL,
+                                 stdout=subprocess.DEVNULL,stderr=subprocess.DEVNULL,start_new_session=True)
+            else:
+                subprocess.Popen([speak,"-s","135","-p","25","-v","en-us",clean],
+                                 stdout=subprocess.DEVNULL,stderr=subprocess.DEVNULL,start_new_session=True)
+            return True
+        except OSError:
+            pass
+    if sys.platform=="darwin" and shutil.which("say"):
+        try:
+            subprocess.Popen([shutil.which("say"),"-r","145",clean],stdout=subprocess.DEVNULL,
+                             stderr=subprocess.DEVNULL,start_new_session=True)
+            return True
+        except OSError:
+            pass
+    return False
+
+
 def wopr_say(text:str) -> bool:
-    """Speak one sparse WOPR line without making games depend on a neural TTS stack."""
+    """Speak through Fabric first; direct local synthesis is the offline fallback."""
     if os.environ.get("LOOK_GAMES_VOICE", "1").casefold() in {"0","off","false","no"}:
         return False
     clean=" ".join(str(text).split())
     if not clean: return False
     try:
-        if sys.platform=="darwin":
-            say=shutil.which("say")
-            if not say: return False
-            subprocess.Popen([say,"-v","Zarvox","-r","135",clean],stdout=subprocess.DEVNULL,stderr=subprocess.DEVNULL,start_new_session=True)
-            return True
-        if sys.platform.startswith("linux"):
-            speak=shutil.which("espeak-ng")
-            if not speak: return False
-            play=shutil.which("play")
-            if play:
-                src=subprocess.Popen([speak,"--stdout","-s","132","-p","28","-v","en-us",clean],stdout=subprocess.PIPE,stderr=subprocess.DEVNULL,start_new_session=True)
-                subprocess.Popen([play,"-q","-t","wav","-","pitch","-180","chorus","0.6","0.8","45","0.35","0.25","2"],stdin=src.stdout,stdout=subprocess.DEVNULL,stderr=subprocess.DEVNULL,start_new_session=True)
-                if src.stdout: src.stdout.close()
-            else:
-                subprocess.Popen([speak,"-s","132","-p","28","-v","en-us",clean],stdout=subprocess.DEVNULL,stderr=subprocess.DEVNULL,start_new_session=True)
-            return True
-    except OSError:
-        return False
-    return False
+        body=json.dumps({"text":clean,"voice_profile":"wopr"}).encode()
+        req=urllib.request.Request("http://127.0.0.1:7332/v1/audio/speak",data=body,
+                                   headers={"Content-Type":"application/json"},method="POST")
+        with urllib.request.urlopen(req,timeout=.45) as resp:
+            if 200 <= int(resp.status) < 300:
+                return True
+    except Exception:
+        pass
+    return _wopr_local_fallback(clean)
 
 
 def help_screen(fd:int, title:str, text:Iterable[str]):
@@ -145,6 +165,16 @@ def mode_from(value:str|None, default="1p") -> str:
     aliases={"0":"0p","0p":"0p","demo":"0p","cpu":"0p","1":"1p","1p":"1p","solo":"1p","2":"2p","2p":"2p","local":"2p"}
     if v not in aliases: raise ValueError("mode must be 0p, 1p, or 2p")
     return aliases[v]
+
+
+def wopr_outcome(kind:str="ordinary") -> None:
+    """Sparse end-state commentary; GTNW owns its original dramatic ending."""
+    if kind=="draw":
+        wopr_say("INTERESTING. A DRAW.")
+    elif kind=="checkmate":
+        wopr_say("INTERESTING. A FORCED CONCLUSION.")
+    else:
+        wopr_say("INTERESTING. THE GAME IS COMPLETE.")
 
 
 # ── Tic-tac-toe ──────────────────────────────────────────────────────────────
@@ -190,15 +220,17 @@ def render_ttt(board, mode, turn, notice=""):
 
 def play_ttt(mode="1p"):
     with terminal() as fd:
-        board=[""]*9; turn="X"; paused=False; notice=""
+        board=[""]*9; turn="X"; paused=False; notice=""; announced_result=None
         while True:
             result=ttt_winner(board)
             render_ttt(board,mode,turn,notice)
             if result:
+                if announced_result != result:
+                    wopr_outcome("draw" if result=="D" else "ordinary"); announced_result=result
                 notice="DRAW." if result=="D" else f"{result} WINS."
                 render_ttt(board,mode,turn,notice+"  r restart · q menu")
                 k=read_key(fd)
-                if k=="r": board=[""]*9; turn="X"; notice=""; continue
+                if k=="r": board=[""]*9; turn="X"; notice=""; announced_result=None; continue
                 if k in {"q","esc"}: return MENU_RETURN
                 if k=="s": return 0
                 continue
@@ -401,14 +433,17 @@ def render_chess(board, mode, who, status=""):
 
 def play_chess(mode="1p"):
     with terminal() as fd:
-        board=chess_initial(); who="W"; paused=False; status=""
+        board=chess_initial(); who="W"; paused=False; status=""; announced_end=False
         while True:
             moves=chess_moves(board,who)
             if not moves:
-                status=("CHECKMATE. "+("BLACK WINS." if who=="W" else "WHITE WINS.")) if chess_in_check(board,who) else "STALEMATE."
+                mate=chess_in_check(board,who)
+                if not announced_end:
+                    wopr_outcome("checkmate" if mate else "draw"); announced_end=True
+                status=("CHECKMATE. "+("BLACK WINS." if who=="W" else "WHITE WINS.")) if mate else "STALEMATE."
                 render_chess(board,mode,who,status+"  r restart · q menu")
                 k=read_key(fd)
-                if k=="r": board=chess_initial(); who="W"; status=""; continue
+                if k=="r": board=chess_initial(); who="W"; status=""; announced_end=False; continue
                 if k in {"q","esc"}: return MENU_RETURN
                 if k=="s": return 0
                 continue
@@ -548,13 +583,14 @@ def render_checkers(board, mode, who, status=""):
 
 def play_checkers(mode="1p"):
     with terminal() as fd:
-        board=checkers_initial(); who="W"; paused=False; status=""
+        board=checkers_initial(); who="W"; paused=False; status=""; announced_end=False
         while True:
             moves=checkers_moves(board,who)
             if not moves:
+                if not announced_end: wopr_outcome(); announced_end=True
                 status=("BLACK WINS." if who=="W" else "WHITE WINS.")+"  r restart · q menu"
                 render_checkers(board,mode,who,status); k=read_key(fd)
-                if k=="r": board=checkers_initial(); who="W"; status=""; continue
+                if k=="r": board=checkers_initial(); who="W"; status=""; announced_end=False; continue
                 if k in {"q","esc"}: return MENU_RETURN
                 if k=="s": return 0
                 continue
@@ -704,12 +740,13 @@ def render_bg(g,mode,who,dice,status=""):
 
 def play_backgammon(mode="1p"):
     with terminal() as fd:
-        g=backgammon_initial(); who="W"; paused=False; status=""; dice=[]
+        g=backgammon_initial(); who="W"; paused=False; status=""; dice=[]; announced_end=False
         while True:
             if g.off_w>=15 or g.off_b>=15:
+                if not announced_end: wopr_outcome(); announced_end=True
                 status=("WHITE WINS." if g.off_w>=15 else "BLACK WINS.")+"  r restart · q menu"
                 render_bg(g,mode,who,[],status); k=read_key(fd)
-                if k=="r": g=backgammon_initial(); who="W"; continue
+                if k=="r": g=backgammon_initial(); who="W"; announced_end=False; continue
                 if k in {"q","esc"}: return MENU_RETURN
                 if k=="s": return 0
                 continue
@@ -790,7 +827,7 @@ def provision_login(fd:int) -> bool:
         if value in {"Q","QUIT"}: return False
         if value=="JOSHUA":
             sys.stdout.write("\n"+CYAN+"GREETINGS PROFESSOR FALKEN."+RESET+"\n")
-            sys.stdout.flush(); wopr_say("GREETINGS PROFESSOR FALKEN"); time.sleep(.65)
+            sys.stdout.flush(); wopr_say("GREETINGS PROFESSOR FALKEN. SHALL WE PLAY A GAME?"); time.sleep(.65)
             return True
         sys.stdout.write("\n"+DIM+"IDENTIFICATION NOT RECOGNIZED BY SYSTEM"+RESET+"\n")
         sys.stdout.flush(); time.sleep(.8)

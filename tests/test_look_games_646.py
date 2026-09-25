@@ -38,14 +38,15 @@ def test_wopr_login_is_ritual_not_remembered_state():
     block=source[source.index('def provision_login'):source.index('def launcher')]
     assert '_provisioned()' not in block
     assert 'LOOK_GAMES_SKIP_LOGON' in block
-    assert 'wopr_say("GREETINGS PROFESSOR FALKEN")' in block
+    assert 'wopr_say("GREETINGS PROFESSOR FALKEN. SHALL WE PLAY A GAME?")' in block
     assert 'NO GAMES INSTALLED.' in source
 
 
 def test_voice_dependencies_and_platform_adapters():
     source=(ROOT/'look'/'games.py').read_text()
     installer=(ROOT/'install-look.sh').read_text()
-    assert '"say"' in source and '"Zarvox"' in source
     assert '"espeak-ng"' in source and '"play"' in source
-    assert 'mpv qrencode)' in installer and 'core+=(sox)' in installer
-    assert 'core+=(espeak-ng)' in installer
+    assert '/v1/audio/speak' in source
+    assert '"say"' in source  # graceful macOS fallback only
+    assert 'mpv qrencode)' in installer and 'core+=(sox espeak-ng)' in installer
+    assert 'core+=(sox espeak-ng)' in installer

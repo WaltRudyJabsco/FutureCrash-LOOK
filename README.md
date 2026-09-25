@@ -304,7 +304,7 @@ On an iPad connected to the same tailnet, open the URL printed by `lk albert url
 Albert is a first-class Fabric UI: synchronized beacon/disco presence, continuing answer-fold conversations, and artifact-aware paste/drop input. Pasted images and files are registered locally and supplied to the shared LO engine by reference rather than embedded into inference packets. Current-news/headline requests are routed through live search/tool evidence when available.
 
 
-## LOOK Games (6.4.6 · FALKEN)
+## LOOK Games (6.4.7 · VOICEPRINT)
 
 `lk games` opens the WOPR recreation channel. Board games support `0p`, `1p`, and `2p`: `lk games chess 1p`, `lk games checkers 0p`, `lk games backgammon 2p`, and `lk games ttt 1p`. `lk games gtnw` keeps the Global Thermonuclear War simulation. The old `lk ttt` and `lk gtnw` commands remain aliases.
 
@@ -315,6 +315,12 @@ Albert is a first-class Fabric UI: synchronized beacon/disco presence, continuin
 
 Albert, Signal, and terminal LOOK now share the same host-owned intent gate for obvious game and current-news requests before inference. Surface code controls presentation; it no longer decides whether `gtnw` means a game or whether `headlines` means live web search.
 
+
+### Fabric speech
+
+Speech is a routed local effect. Every node with a local synthesizer advertises `audio.speak`; cognition may run elsewhere while the selected endpoint speaks. `fcl-node speak --node NODE TEXT` targets a Fabric node directly, and `lk fabric speak @NODE TEXT` is the human LOOK doorway. The shared LO tool plane can also invoke `audio_speak` for explicit read-aloud and hands-busy notification requests.
+
+The WOPR profile uses the same offline `espeak-ng` + SoX chain on macOS and Linux. macOS `say` is only a graceful fallback. Set `LOOK_GAMES_VOICE=0` to mute game speech.
 
 ## LOOK Games — WOPR recreation channel
 

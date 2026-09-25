@@ -1,3 +1,7 @@
+## 6.4.7 — VOICEPRINT
+
+- Unified node now advertises and routes the `audio.speak` local-effect capability.
+
 # 1.2.2 — Authoritative Workstation Editor
 
 - Ask and Workstation render from one logical input buffer and cursor index.

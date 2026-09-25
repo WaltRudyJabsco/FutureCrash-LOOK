@@ -1,3 +1,9 @@
+## 6.4.7 — VOICEPRINT
+
+- Fabric-backed `audio.speak` capability with eSpeak NG + SoX WOPR profile on macOS and Linux.
+- Games route voice through Fabric first and use the same local pipeline as fallback.
+- Added sparse spoken WOPR greeting/outcome lines; GTNW keeps its own dramatic behavior.
+
 ## 6.4.6 — FALKEN
 
 - LOOK Games board polish: checkerboard-backed chess/checkers with edge coordinates and a real backgammon board with round checkers, bar, points, dice, and borne-off counts.
