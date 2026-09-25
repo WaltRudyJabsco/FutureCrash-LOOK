@@ -1,3 +1,18 @@
+# 6.4.12 · GROUND TRUTH
+
+- Carries forward LIVE WIRE's daemon-owned browser endpoint dispatch so `lk fabric speak @ipad ...` resolves against the resident Fabric endpoint registry.
+- Installer now prints the absolute bundle source directory and release before mutation.
+- Installer refuses mixed bundles by cross-checking root, LOOK, Albert, Future Crash, node, ingress, and Tailcat version metadata.
+- Cleans the remaining stale LOOK Fabric User-Agent version literal.
+- Post-install verification still requires both installed CLI and live node daemon to report the exact bundle release.
+
+# 6.4.11 · LIVE WIRE
+
+- Fixed browser-effect routing from `fcl-node speak` / `lk fabric speak`: the CLI no longer consults its own empty in-memory browser-presence table.
+- Added local-control `/v1/endpoints/fabric/dispatch`, so all active-browser resolution and action queuing happens inside the resident Fabric daemon that owns live endpoint state.
+- Exact endpoint IDs and friendly labels such as `@ipad` now resolve against the same aggregated endpoint registry shown by `lk fabric endpoints`.
+- The daemon-owned dispatch path is generic for future browser-local effects beyond speech.
+
 # 6.4.10 · FRONT DOOR
 
 - Restores Albert startup on installed Linux and macOS layouts by resolving the shared Fabric core from `~/.local/share/future-crash-look/core`, with source-tree fallback for development.

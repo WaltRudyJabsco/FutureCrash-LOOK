@@ -4,10 +4,10 @@ ROOT=Path(__file__).resolve().parents[1]
 
 
 def test_release_is_paper_brain():
-    assert (ROOT/'VERSION').read_text().strip() == '6.4.10'
+    assert (ROOT/'VERSION').read_text().strip() == '6.4.12'
     node=(ROOT/'core/node.py').read_text()
-    assert 'VERSION = "6.4.10"' in node
-    assert 'RELEASE_NAME = "FRONT DOOR"' in node
+    assert 'VERSION = "6.4.12"' in node
+    assert 'RELEASE_NAME = "GROUND TRUTH"' in node
 
 
 def test_albert_beacon_and_continuing_fold_ui():

@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Future Crash + LOOK Unified Node 6.4.10.
+"""Future Crash + LOOK Unified Node 6.4.12.
 
 A small distributed supervisor for trusted personal machines. Immediate events stay
 asynchronous; a one-second fabric pulse reconciles presence, leases and stale work.
@@ -58,8 +58,8 @@ try:
 except ImportError:
     from endpoint_auth import EndpointAuth
 
-VERSION = "6.4.10"
-RELEASE_NAME = "FRONT DOOR"
+VERSION = "6.4.12"
+RELEASE_NAME = "GROUND TRUTH"
 DEFAULT_HOST = "127.0.0.1"
 DEFAULT_PORT = 7332
 DEFAULT_INGRESS_PORT = 0
@@ -2161,7 +2161,7 @@ def _local_web_search(query, limit=8):
     base=os.environ.get("FCL_SEARXNG_URL","http://127.0.0.1:8888").rstrip("/")
     request=urllib.request.Request(base+"/search?"+params,headers={
         "Accept":"application/json",
-        "User-Agent":"Future-Crash-Fabric/6.4.10",
+        "User-Agent":"Future-Crash-Fabric/6.4.12",
     })
     try:
         with urllib.request.urlopen(request,timeout=8) as response:
@@ -2895,7 +2895,7 @@ def _openjev_shadow(state, question, candidates, *, profile="workspace", consequ
 
 
 class API(BaseHTTPRequestHandler):
-    server_version = "FCLNode/6.4.10"
+    server_version = "FCLNode/6.4.12"
 
     def setup(self):
         self._metric_request_id = None
@@ -3381,6 +3381,16 @@ class API(BaseHTTPRequestHandler):
                 return self.sendj(403,{"error":"Fabric endpoint management is local-control only"})
             result=_endpoint_revoke_fabric(str(d.get("endpoint_id") or ""))
             return self.sendj(200 if result.get("ok") else 404,result)
+        if path == "/v1/endpoints/fabric/dispatch":
+            if getattr(self.server,"plane","local") != "local":
+                return self.sendj(403,{"ok":False,"error":"Fabric endpoint dispatch is local-control only"})
+            try:
+                result=_endpoint_dispatch_fabric(str(d.get("target") or ""),str(d.get("action") or ""),d.get("payload") or {})
+                return self.sendj(200,result)
+            except ValueError as exc:
+                return self.sendj(409,{"ok":False,"error":str(exc)})
+            except Exception as exc:
+                return self.sendj(502,{"ok":False,"error":str(exc)})
         if path == "/v1/endpoints/allow":
             try:
                 row=ENDPOINT_AUTH.allow(str(d.get("code") or ""),str(d.get("mode") or "once"))
@@ -5023,8 +5033,10 @@ def main():
                     try:
                         result=_target_post(a.host,a.port,a.node,"/v1/audio/speak",payload,timeout=4.0)
                     except Exception as node_exc:
-                        try: result=_endpoint_dispatch_fabric(a.node,"audio.speak",payload)
-                        except Exception as endpoint_exc: raise RuntimeError(f"target {a.node!r} is neither a reachable node nor active browser endpoint: {endpoint_exc}") from node_exc
+                        try:
+                            result=_daemon_post(a.host,a.port,"/v1/endpoints/fabric/dispatch",{"target":a.node,"action":"audio.speak","payload":payload})
+                        except Exception as endpoint_exc:
+                            raise RuntimeError(f"target {a.node!r} is neither a reachable node nor active browser endpoint: {endpoint_exc}") from node_exc
                 else:
                     result=_target_post(a.host,a.port,None,"/v1/audio/speak",payload,timeout=4.0)
                 if a.json: print(json.dumps(result,indent=2))

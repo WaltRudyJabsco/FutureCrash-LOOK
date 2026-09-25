@@ -1,3 +1,5 @@
+# Future Crash + LOOK 6.4.12 · GROUND TRUTH
+
 # Future Crash + LOOK
 
 **One personal computer made from the machines you already own.**
@@ -317,6 +319,8 @@ Albert, Signal, and terminal LOOK now share the same host-owned intent gate for 
 
 
 ### Fabric speech
+
+Browser-local effects are resolved by the resident Fabric daemon, so endpoint listings and effect routing share the same live registry.
 
 Speech is a routed local effect. Every node with a local synthesizer advertises `audio.speak`; cognition may run elsewhere while the selected endpoint speaks. `fcl-node speak --node NODE TEXT` targets a Fabric node directly, and `lk fabric speak @NODE TEXT` is the human LOOK doorway. The shared LO tool plane can also invoke `audio_speak` for explicit read-aloud and hands-busy notification requests.
 
