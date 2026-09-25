@@ -1,4 +1,22 @@
-# Signal Window 1.10.2
+# Signal Window 1.10.5
+
+## 1.10.5 — Output ownership and native presentation
+
+- Media request progress surfaces immediately as `MEDIA · SEARCHING`.
+- Playback responses emit `MEDIA ROUTE · <target> · <player>` so remembered remote OUT selection is visible.
+- Native media cards show the actual playback engine instead of implying VLC or another open app owns playback.
+
+- Direct `lk play`, terminal LO, and Signal share selector/fuzzy/literal semantics.
+- Generic noun phrases such as `a song` are selectors, not catalog strings.
+- Conversational quoted targets are literal; direct shell commands use `--exact`/`--literal` because shell quotes are not preserved as semantic input.
+- Fuzzy media matching ignores case, extensions, underscore/dash/space punctuation, and offers ranked candidates instead of silently queueing weak matches.
+
+## 1.10.3 — Playability hints
+
+- Media queues carry conservative playability hints without requiring a library rescan.
+- Explicitly protected `.m4p` media fails before generic browser playback and points to another item or native output.
+- Decode/unsupported browser failures preserve the actual runtime diagnosis and offer the cheap native/alternate-item fallback.
+- Container hints never claim that `.m4v`, `.mp4`, or other ordinary files are DRM-free or codec-compatible.
 
 ## 1.10.2 — Endpoint video
 

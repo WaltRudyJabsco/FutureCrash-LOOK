@@ -1,3 +1,50 @@
+## 6.3.1 — Full Alphabet
+
+- Fix interactive LOOK/media filters stealing lowercase `j/k` before text input.
+- Use arrows or uppercase `J/K` for navigation while filtering; ordinary lowercase letters remain searchable.
+- Preserve lowercase `j/k` navigation in shared selectors only when not actively typing a filter.
+- Keep `q` as the empty-selector quit key without preventing `q` inside an active query.
+
+## 6.3.0 — Meet Albert
+
+- Albert 5 becomes a first-class installed Fabric surface at `http://127.0.0.1:7330`.
+- Responsive Paper interface renders semantic result folds instead of app-shaped screens.
+- Type, speech (where Web Speech exists), drag/drop, pin, save and dismiss are first-class inputs/actions.
+- Albert exposes a small action registry and probes the Unified Node rather than pretending unavailable adapters exist.
+- Browser media effects remain local by default; media preparation stays separate from playback ownership.
+- `lk albert` opens the surface.
+- `lk media classics` / `lk media classical` play All Classical Radio; `lk media arts` opens Classic Arts Showcase.
+
+## 6.2.5 — Own the Output
+
+- Keep browser-origin media effects pinned to the selected endpoint; no silent native-node fallback.
+- Make native media ownership observable: Signal reports target and actual player.
+- Launch LOOK-owned mpv with isolated config so per-machine user settings cannot silently disable video.
+- Force a native video window for video queues and record launch argv/presentation in session state.
+- Surface lightweight media-search progress before potentially slow Fabric resolution.
+
+# 6.2.4 — Good Listener
+
+- Establish one media-language contract across direct `lk play`, terminal LO, Signal, and Fabric routing: selector, fuzzy, literal, or clarify.
+- Fix `lk play a song` being treated as catalog text; generic noun phrases now become structured selectors before lookup.
+- Make ordinary named media fuzzy by default while preserving deterministic literal lookup through quoted conversational targets and CLI `--exact`/`--literal`.
+- Normalize filename surfaces for matching: case, extension, underscore, dash, slash-like punctuation, and spacing no longer need exact typing.
+- Add confidence/margin gating so strong fuzzy matches execute, close matches offer candidates, and weak matches fail cheaply instead of creating accidental queues.
+- Preserve exact artist/album/title group semantics and existing explicit structured selectors.
+- Carry literal match mode through Signal → Unified Node → LOOK.
+- Signal Window 1.10.4.
+- 271 tests pass.
+
+# 6.2.3 — Know Your Limits
+
+- Terminal LO and Signal now consume the same `resolved / clarify / no_match` intent contract; selector phrases no longer depend on surface-specific parsing.
+- Prompt decoration such as LOOK's visible `›` glyph is stripped at the natural-language edge, so pasted transcripts normalize identically to typed commands.
+- Media queue entries gain conservative playability hints lazily, including for pre-6.2.3 catalogs; no full media rescan is required.
+- `.m4p` is marked explicitly protected/restricted. Ordinary `.m4v`/`.mp4` files remain browser candidates rather than being falsely classified as DRM-free or guaranteed playable.
+- Signal refuses explicit protected browser media before `play()` and makes decode/unsupported failures actionable: try another item or a native output.
+- Signal Window 1.10.3.
+- 262 tests pass.
+
 # 6.2.2 — Stay Attached
 
 - Signal Window 1.10.2 keeps the active browser `<video>` element continuously attached while its media card rerenders.

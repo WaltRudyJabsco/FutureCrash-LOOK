@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Future Crash + LOOK Unified Node 6.2.2.
+"""Future Crash + LOOK Unified Node 6.3.1.
 
 A small distributed supervisor for trusted personal machines. Immediate events stay
 asynchronous; a one-second fabric pulse reconciles presence, leases and stale work.
@@ -58,8 +58,8 @@ try:
 except ImportError:
     from endpoint_auth import EndpointAuth
 
-VERSION = "6.2.2"
-RELEASE_NAME = "Stay Attached"
+VERSION = "6.3.1"
+RELEASE_NAME = "Full Alphabet"
 DEFAULT_HOST = "127.0.0.1"
 DEFAULT_PORT = 7332
 DEFAULT_INGRESS_PORT = 0
@@ -337,6 +337,7 @@ def capabilities():
         "tailcat": bool(FABRIC_IDENTITY.local_transports().get("tailcat")),
         "ollama": probe("127.0.0.1", 11434),
         "signal": probe("127.0.0.1", 7331),
+        "albert": probe("127.0.0.1", 7330),
         "node": True,
         "comfyui": probe("127.0.0.1", 8188),
         "mercury": probe("127.0.0.1", 8888),
@@ -1028,6 +1029,7 @@ def pulse_loop():
 MANAGED_SERVICES = {
     "node": {"linux": "future-crash-look-node.service", "darwin": "com.futurecrash.look.node"},
     "signal": {"linux": "signal-window.service", "darwin": "com.futurecrash.signal-window"},
+    "albert": {"linux": "albert.service", "darwin": "com.futurecrash.albert"},
     "ollama": {"linux": "ollama.service", "darwin": None},
     "comfy": {"linux": "server-comfy.service", "darwin": None},
     "mercury": {"linux": "server-mercury.service", "darwin": None},
@@ -2309,7 +2311,8 @@ def _local_media_output():
         "state": str(state.get("state") or "stopped"),
         "reason": reason,
         "player": "mpv" if player else "",
-        "capabilities": ["media.playback", "media.queue", "media.control"] if available else ["media.queue", "media.control"],
+        "presentation": "native",
+        "capabilities": ["media.playback", "media.queue", "media.control", "media.video"] if available else ["media.queue", "media.control"],
     }
 
 
@@ -2324,6 +2327,7 @@ def _local_media_route(operation, payload):
         kind = str(payload.get("kind") or "").strip().casefold()
         artist = " ".join(str(payload.get("artist") or "").split()).strip()
         selection = str(payload.get("selection") or "").strip().casefold()
+        match_mode = str(payload.get("match_mode") or "").strip().casefold()
         limit = payload.get("limit")
         if not query and not (kind or artist or selection):
             raise ValueError("media query or selector required")
@@ -2332,6 +2336,7 @@ def _local_media_route(operation, payload):
         if kind: argv.extend(["--kind",kind])
         if artist: argv.extend(["--artist",artist])
         if selection: argv.extend(["--selection",selection])
+        if match_mode == "literal": argv.append("--exact")
         if limit not in (None, "", 0, "0"): argv.extend(["--limit",str(limit)])
         if bool(payload.get("shuffle")):
             argv.append("--shuffle")
@@ -2745,7 +2750,7 @@ def _openjev_shadow(state, question, candidates, *, profile="workspace", consequ
 
 
 class API(BaseHTTPRequestHandler):
-    server_version = "FCLNode/6.2.2"
+    server_version = "FCLNode/6.3.1"
 
     def setup(self):
         self._metric_request_id = None

@@ -52,6 +52,7 @@ _lk() {
     'why:explain command resolution'
     'ollama:Ollama models/hosts/search/access'
     'media:media library/session/transport'
+    'play:play media with selector/fuzzy matching'
     'scan:refresh lightweight file catalog'
     'find:search local/Fabric file catalog'
     'catalog:inspect local file catalog'
@@ -168,6 +169,17 @@ _lk() {
       (( CURRENT == 3 )) && _values 'think display' compact full quiet
       return
       ;;
+    play)
+      if [[ "$words[CURRENT]" == --* ]]; then
+        _values 'play option' --exact --literal --shuffle
+        return
+      fi
+      local -a media_candidates
+      media_candidates=("${(@f)$(command lk media complete "$words[CURRENT]" 2>/dev/null)}")
+      (( ${#media_candidates} )) && compadd -Q -- "${media_candidates[@]}"
+      _files
+      return
+      ;;
     media|music)
       (( CURRENT == 3 )) && _values 'media action' status browse find fabric catalog outputs on identify play pause toggle next prev stop queue clear scan library artists albums save load playlists playlist repeat state jump add stream info
       if (( CURRENT >= 4 )) && [[ "$words[3]" == (scan|add|stream|info) ]]; then
@@ -175,6 +187,10 @@ _lk() {
         return
       fi
       if (( CURRENT >= 4 )) && [[ "$words[3]" == (play|find|browse|identify) ]]; then
+        if [[ "$words[3]" == play && "$words[CURRENT]" == --* ]]; then
+          _values 'play option' --exact --literal --shuffle --kind --selection --artist --limit
+          return
+        fi
         local -a media_candidates
         media_candidates=("${(@f)$(command lk media complete "$words[CURRENT]" 2>/dev/null)}")
         (( ${#media_candidates} )) && compadd -Q -- "${media_candidates[@]}"

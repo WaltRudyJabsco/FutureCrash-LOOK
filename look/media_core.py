@@ -12,6 +12,8 @@ import os
 import random
 import re
 import time
+import difflib
+import unicodedata
 from pathlib import Path
 from typing import Any, Iterable
 
@@ -33,6 +35,26 @@ MEDIA_EXTENSIONS = AUDIO_EXTENSIONS | VIDEO_EXTENSIONS
 _TRACK_PREFIX = re.compile(r"^\s*(\d{1,3})(?:\s*[-._)]\s*|\s+)(.+?)\s*$")
 _DISC_PREFIX = re.compile(r"^\s*(\d)[-_.](\d{1,3})(?:\s*[-._)]\s*|\s+)(.+?)\s*$")
 _SAFE_NAME = re.compile(r"[^A-Za-z0-9._ -]+")
+
+_BROWSER_CANDIDATE_FORMATS = {"mp4", "m4v", "mov", "webm", "mp3", "m4a", "aac", "wav", "ogg", "opus", "flac"}
+_NATIVE_PREFERRED_FORMATS = {"avi", "mkv", "wmv", "flv", "vob", "mts", "m2ts", "ts"}
+
+def media_playability(format_name: str, media_type: str = "") -> dict[str, str]:
+    """Cheap catalog hint; runtime playback remains authoritative.
+
+    Do not infer DRM or codecs from a filename. We only mark protection where
+    the container extension itself is explicit (.m4p); everything else is a
+    presentation hint, not a promise that a browser can decode the streams.
+    """
+    fmt = str(format_name or "").casefold().lstrip(".")
+    kind = str(media_type or "").casefold()
+    if fmt == "m4p":
+        return {"status": "protected_or_restricted", "reason": "protected-media container"}
+    if fmt in _BROWSER_CANDIDATE_FORMATS:
+        return {"status": "browser_candidate", "reason": "container commonly supported; codec/authorization still runtime-dependent"}
+    if fmt in _NATIVE_PREFERRED_FORMATS or kind.startswith(("audio/", "video/")):
+        return {"status": "native_preferred", "reason": "generic native player is safer than assuming browser support"}
+    return {"status": "unknown", "reason": "insufficient catalog evidence"}
 
 
 def _now() -> float:
@@ -110,6 +132,7 @@ def entry_from_path(path: str | Path, root: str | Path | None = None) -> dict[st
         "disc": disc,
         "format": target.suffix.casefold().lstrip("."),
         "media_type": _media_type(target),
+        "playability": media_playability(target.suffix.casefold().lstrip("."), _media_type(target)),
         "bytes": stat.st_size,
         "mtime": stat.st_mtime,
     }
@@ -196,12 +219,90 @@ def _haystack(row: dict[str, Any]) -> str:
     return " ".join(str(row.get(k) or "") for k in ("artist", "album", "title", "path", "format")).casefold()
 
 
+def normalize_match_text(value: str, *, strip_extension: bool = True) -> str:
+    """Normalize human/file naming differences without mutating catalog data.
+
+    Underscore, dash, punctuation and case should not decide whether a user can
+    find a movie. This is intentionally conservative: it normalizes spelling
+    surfaces, not meaning.
+    """
+    text = unicodedata.normalize("NFKD", str(value or "")).casefold()
+    text = "".join(ch for ch in text if not unicodedata.combining(ch))
+    # A path is useful evidence, but matching its basename is the human default.
+    text = text.replace("\\", "/").rsplit("/", 1)[-1]
+    if strip_extension:
+        suffix = Path(text).suffix.casefold()
+        if suffix in MEDIA_EXTENSIONS:
+            text = text[: -len(suffix)]
+    text = re.sub(r"[_\-–—./]+", " ", text)
+    text = re.sub(r"[^\w\s]+", " ", text, flags=re.UNICODE)
+    return " ".join(text.split())
+
+
+def _row_match_surfaces(row: dict[str, Any]) -> list[str]:
+    values = [
+        str(row.get("title") or ""), str(row.get("album") or ""),
+        str(row.get("artist") or ""), Path(str(row.get("path") or "")).name,
+    ]
+    out=[]
+    for value in values:
+        norm=normalize_match_text(value)
+        if norm and norm not in out: out.append(norm)
+    return out
+
+
+def rank_entries(library: Any, query: str, *, limit: int = 12) -> list[tuple[dict[str, Any], float]]:
+    """Rank forgiving filename/title matches; no semantic/model guessing here."""
+    rows = normalize_library(library)["entries"]
+    q = normalize_match_text(query)
+    if not q:
+        return []
+    q_tokens=set(q.split())
+    ranked=[]
+    for row in rows:
+        best=0.0
+        for surface in _row_match_surfaces(row):
+            if surface == q:
+                score=1.0
+            else:
+                tokens=set(surface.split())
+                overlap=len(q_tokens & tokens) / max(1, len(q_tokens | tokens))
+                containment=bool(q in surface or surface in q)
+                coverage=len(q_tokens & tokens) / max(1, len(q_tokens))
+                ratio=difflib.SequenceMatcher(None,q,surface).ratio()
+                score=max(ratio*0.82, overlap*0.88, coverage*0.86)
+                if containment: score=max(score,0.90 if min(len(q),len(surface))>=4 else 0.84)
+                if q_tokens and q_tokens <= tokens: score=max(score,0.93)
+            best=max(best,score)
+        if best >= 0.52:
+            ranked.append((row,best))
+    ranked.sort(key=lambda item:(-item[1], entry_sort_key(item[0])))
+    return ranked[:max(1,int(limit or 12))]
+
+
+def exact_entries(library: Any, query: str) -> list[dict[str, Any]]:
+    """Deterministic literal lookup used by explicit --exact / quoted requests."""
+    rows=normalize_library(library)["entries"]
+    q=str(query or "").strip().casefold()
+    if not q: return []
+    qnorm=normalize_match_text(query)
+    out=[]
+    for row in rows:
+        names=[str(row.get("title") or ""), str(row.get("album") or ""), str(row.get("artist") or ""), Path(str(row.get("path") or "")).name]
+        if any(name.casefold()==q for name in names if name) or any(normalize_match_text(name)==qnorm for name in names if name):
+            out.append(row)
+    return sorted(out,key=entry_sort_key)
+
+
 def search_entries(library: Any, query: str) -> list[dict[str, Any]]:
     rows = normalize_library(library)["entries"]
     tokens = [x.casefold() for x in query.split() if x.strip()]
     if not tokens:
         return list(rows)
-    return [row for row in rows if all(token in _haystack(row) for token in tokens)]
+    strict=[row for row in rows if all(token in _haystack(row) for token in tokens)]
+    if strict:
+        return strict
+    return [row for row,_score in rank_entries(library,query)]
 
 
 def _artist_key(value: str) -> str:
@@ -261,8 +362,10 @@ def entries_under(library: Any, directory: str | Path) -> list[dict[str, Any]]:
 
 
 def queue_entry(row: dict[str, Any]) -> dict[str, Any]:
-    allowed = ("id", "path", "node", "digest", "artist", "album", "title", "track", "disc", "format", "media_type", "bytes", "locations")
+    allowed = ("id", "path", "node", "digest", "artist", "album", "title", "track", "disc", "format", "media_type", "playability", "bytes", "locations")
     out = {key: row.get(key) for key in allowed if row.get(key) not in (None, "")}
+    if not out.get("playability"):
+        out["playability"] = media_playability(str(out.get("format") or ""), str(out.get("media_type") or ""))
     if not out.get("id"):
         locator = str(out.get("path") or out.get("digest") or json.dumps(out, sort_keys=True))
         out["id"] = _stable_id(locator)
