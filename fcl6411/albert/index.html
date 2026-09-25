@@ -1,0 +1,267 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover" />
+<meta name="theme-color" content="#f3efe3" />
+<title>Albert 5 — Fabric Paper</title>
+<style>
+:root{
+  --paper:#f3efe3; --ink:#171714; --muted:#716c62; --line:#d4cdbf;
+  --soft:#fbf8f0; --wash:rgba(255,255,255,.34); --shadow:rgba(46,38,24,.10);
+  --accent:#171714; --density:1; --radius:18px; --measure:760px;
+}
+*{box-sizing:border-box} html,body{margin:0;min-height:100%;background:#d9d4c8;color:var(--ink)}
+body{font-family:ui-monospace,SFMono-Regular,Menlo,Monaco,Consolas,"Liberation Mono",monospace}
+button,input,textarea{font:inherit;color:inherit} button{cursor:pointer}
+button:focus-visible,input:focus-visible,textarea:focus-visible{outline:2px solid var(--ink);outline-offset:2px}
+.shell{min-height:100vh;background:var(--paper);position:relative;overflow:hidden}
+.paper{min-height:100vh;overflow-y:auto;padding:28px 22px 150px;margin:auto;max-width:var(--measure);scroll-behavior:smooth}
+.top{display:grid;grid-template-columns:1fr auto;gap:18px;align-items:start;margin-bottom:26px}
+.clock{font-size:clamp(34px,8vw,54px);line-height:.92;letter-spacing:-.07em}.date{font-size:12px;color:var(--muted);margin-top:8px}
+.status{text-align:right;color:var(--muted);font-size:10px;line-height:1.6;letter-spacing:.06em;text-transform:uppercase}
+.quiet{font-family:ui-serif,Georgia,Cambria,"Times New Roman",serif;font-size:clamp(18px,4vw,24px);line-height:1.45;max-width:620px;margin:8px 0 26px}
+.eyebrow{font-size:9px;letter-spacing:.16em;text-transform:uppercase;color:var(--muted);margin:26px 0 7px}
+.stream{border-bottom:1px solid var(--line)}
+.fold{border-top:1px solid var(--line);position:relative;transition:opacity .2s ease,transform .2s ease}
+.fold.dismiss{opacity:0;transform:translateY(-7px)}
+.summary{width:100%;border:0;background:transparent;text-align:left;padding:calc(15px * var(--density)) 0;display:grid;grid-template-columns:1fr auto;gap:16px;align-items:start}
+.title{font-size:15px;line-height:1.35}.meta{font-size:11px;color:var(--muted);line-height:1.55;margin-top:4px}.right{font-size:10px;color:var(--muted);white-space:nowrap;margin-top:2px}
+.body{display:grid;grid-template-rows:0fr;opacity:0;transform:translateY(-3px);transition:grid-template-rows .28s ease,opacity .2s ease,transform .28s ease}
+.body.open{grid-template-rows:1fr;opacity:1;transform:none}.inner{overflow:hidden}.content{padding:3px 0 18px}
+.prose{font-family:ui-serif,Georgia,Cambria,"Times New Roman",serif;font-size:15px;line-height:1.62;max-width:680px}
+.actions{display:flex;flex-wrap:wrap;gap:7px;margin-top:12px}.action{border:1px solid var(--line);background:transparent;padding:7px 9px;font-size:10px}.action:hover{border-color:var(--ink)}.action.primary{border-color:var(--ink)}.action.quiet-action{border-color:transparent;color:var(--muted)}
+.pillbar{display:flex;flex-wrap:wrap;gap:6px;margin:8px 0}.pill{border:1px solid var(--line);padding:4px 6px;font-size:9px;color:var(--muted)}.pill.live:before{content:"●";font-size:7px;margin-right:5px;color:var(--ink)}
+.media{border:1px solid var(--line);background:#111;overflow:hidden;margin:10px 0;position:relative}.media video,.media img{display:block;width:100%;height:min(62vh,560px);object-fit:contain;background:#111}.media audio{display:block;width:100%;margin:0;background:var(--paper)}.media iframe{display:block;border:0;background:#111}.media-viewport{position:relative;width:100%;aspect-ratio:16/9;min-height:220px;background:#111;overflow:hidden}.media-viewport>video{width:100%;height:100%;max-height:none;object-fit:contain}.media-viewport .scaled-page{position:absolute;inset:0;overflow:hidden;background:#111}.media-viewport .scaled-page iframe{position:absolute;left:0;top:0;width:1200px;height:760px;transform-origin:0 0}.media-expand{position:absolute;z-index:3;right:8px;top:8px;border:1px solid rgba(255,255,255,.55);background:rgba(0,0,0,.58);color:#fff;padding:6px 8px;font-size:9px}.media-grid.expanded{display:block}.media-grid.expanded .media-viewport{aspect-ratio:auto;height:min(78vh,760px)}.media-grid.expanded .side{margin-top:10px}
+.audio-card{padding:18px}.audio-eq{height:34px;display:flex;align-items:flex-end;gap:3px;margin-top:14px;overflow:hidden}.audio-eq i{display:block;flex:1;min-width:2px;height:8%;border-top:1px solid var(--ink);background:color-mix(in srgb,var(--ink) 13%,transparent);transition:height .08s linear}.now{font-family:ui-serif,Georgia,serif;font-size:21px;line-height:1.3}.sub{color:var(--muted);font-size:10px;margin-top:5px}
+.object{border-left:2px solid var(--ink);padding:10px 12px;background:var(--wash);font-size:12px;line-height:1.55;margin:10px 0}.object-label{text-transform:uppercase;font-size:9px;letter-spacing:.12em;color:var(--muted);margin-bottom:4px}
+.route{display:grid;grid-template-columns:88px 1fr;gap:10px;border-top:1px solid var(--line);padding:7px 0;font-size:10px;line-height:1.5}.route b{color:var(--muted);font-weight:400;text-transform:uppercase;letter-spacing:.08em;font-size:9px}
+.progress{display:flex;align-items:center;gap:9px;color:var(--muted);font-size:11px}.dot{width:7px;height:7px;border-radius:50%;background:var(--ink);animation:pulse 1.15s ease-in-out infinite}@keyframes pulse{50%{opacity:.22;transform:scale(.78)}}
+.receipt{border:1px solid var(--ink);padding:11px 12px;margin-top:10px;font-size:11px;line-height:1.6}.receipt strong{font-size:9px;letter-spacing:.12em;text-transform:uppercase}
+.dropzone{border:1px dashed transparent;border-radius:12px;transition:.18s}.dropzone.drag{border-color:var(--ink);background:rgba(255,255,255,.28)}
+.composer-wrap{position:fixed;left:0;right:0;bottom:0;z-index:10;padding:32px 14px calc(12px + env(safe-area-inset-bottom));background:linear-gradient(to top,var(--paper) 72%,rgba(243,239,227,.95) 82%,rgba(243,239,227,0))}
+.composer{max-width:var(--measure);margin:auto;border-top:1px solid var(--ink);padding-top:10px;display:grid;grid-template-columns:auto 1fr auto auto;gap:8px;align-items:center}
+.prompt{font-size:19px}.ask{border:0;background:transparent;outline:0;width:100%;font-size:16px;padding:9px 0}.icon{border:0;background:transparent;color:var(--muted);padding:8px;font-size:15px}.icon.on{color:var(--ink);font-weight:700}
+.nav{max-width:var(--measure);margin:7px auto 0;display:flex;gap:4px;justify-content:space-between}.nav button{border:0;background:transparent;color:var(--muted);font-size:9px;padding:5px 6px}.nav button.active{color:var(--ink);font-weight:700}
+.sheet{position:fixed;z-index:30;left:50%;bottom:88px;transform:translate(-50%,18px);width:min(720px,calc(100vw - 28px));max-height:min(68vh,680px);overflow:auto;background:var(--paper);border:1px solid var(--line);box-shadow:0 20px 80px var(--shadow);padding:16px;opacity:0;pointer-events:none;transition:.2s}.sheet.open{opacity:1;pointer-events:auto;transform:translate(-50%,0)}
+.sheet-head{display:flex;justify-content:space-between;gap:20px;align-items:start;margin-bottom:12px}.sheet-title{font-size:12px;text-transform:uppercase;letter-spacing:.12em}.toolgrid{display:grid;grid-template-columns:repeat(auto-fit,minmax(150px,1fr));gap:8px}.tool{border:1px solid var(--line);padding:10px}.tool-name{font-size:11px}.tool-do{font-size:9px;line-height:1.45;color:var(--muted);margin-top:4px}
+.saved-note{color:var(--muted);font-size:10px;line-height:1.5}
+@media(min-width:800px){.shell{max-width:1040px;margin:24px auto;min-height:calc(100vh - 48px);border:1px solid var(--line);border-radius:28px;box-shadow:0 22px 80px var(--shadow)}.paper{padding:36px 42px 165px}.composer-wrap{left:50%;transform:translateX(-50%);width:min(1040px,100%);bottom:24px;border-radius:0 0 28px 28px}.media-grid{display:grid;grid-template-columns:minmax(0,1.5fr) minmax(220px,.7fr);gap:14px}.media-grid .media{margin:0}.media-grid .side{align-self:start}}
+@media(min-width:1100px){:root{--measure:900px}.title{font-size:16px}.prose{font-size:16px}}
+@media(max-width:480px){.paper{padding-left:18px;padding-right:18px}.composer-wrap{padding-left:10px;padding-right:10px}.composer{grid-template-columns:auto 1fr auto auto}.nav button{font-size:8px}.media-viewport{min-height:190px}.media-grid.expanded .media-viewport{height:62vh}}
+@media(prefers-reduced-motion:reduce){*{scroll-behavior:auto!important;animation:none!important;transition:none!important}}
+body.dark{--paper:#11110f;--ink:#f0eee7;--muted:#99948b;--line:#34312c;--wash:rgba(255,255,255,.04);--shadow:rgba(0,0,0,.4);background:#070706}
+body.terminal{--paper:#050905;--ink:#a8f0aa;--muted:#5c9c66;--line:#1c3f25;--wash:rgba(168,240,170,.03);--shadow:rgba(0,0,0,.55);background:#020402}
+
+.beacon-layer{position:fixed;inset:0;z-index:9999;pointer-events:none;opacity:0;transition:opacity .12s linear,background .12s linear;mix-blend-mode:multiply}
+body.dark .beacon-layer,body.terminal .beacon-layer{mix-blend-mode:screen}
+.attachment-tray{display:none;gap:6px;flex-wrap:wrap;padding:0 4px 8px}.attachment-tray.live{display:flex}.attachment{display:flex;align-items:center;gap:6px;border:1px solid var(--line);padding:5px 7px;font-size:9px;max-width:220px}.attachment img{width:28px;height:28px;object-fit:cover;border:1px solid var(--line)}.attachment button{border:0;background:transparent;color:var(--muted);padding:0 2px}
+.thread{margin-top:14px;border-top:1px solid var(--line);padding-top:10px}.thread-turn{padding:8px 0;border-bottom:1px dotted var(--line)}.thread-turn:last-child{border-bottom:0}.thread-role{font-size:8px;text-transform:uppercase;letter-spacing:.12em;color:var(--muted);margin-bottom:4px}.thread-text{font-family:ui-serif,Georgia,Cambria,"Times New Roman",serif;font-size:14px;line-height:1.55}.thread-compose{display:grid;grid-template-columns:1fr auto;gap:7px;margin-top:10px}.thread-compose input{min-width:0;border:0;border-bottom:1px solid var(--line);background:transparent;outline:0;padding:8px 2px;font-size:12px}.thread-compose button{border:1px solid var(--line);background:transparent;padding:7px 9px;font-size:9px}
+.auth-gate{position:fixed;inset:0;z-index:10000;background:rgba(243,239,227,.97);display:flex;align-items:center;justify-content:center;padding:24px}.auth-gate[hidden]{display:none}.auth-card{width:min(520px,100%);border-top:1px solid var(--ink);padding-top:16px}.auth-kicker{font-size:9px;letter-spacing:.16em;text-transform:uppercase;color:var(--muted)}.auth-title{font-family:ui-serif,Georgia,serif;font-size:24px;margin:8px 0 18px}.auth-code{font-size:42px;letter-spacing:.16em;margin:16px 0}.auth-command{font-size:12px;border:1px solid var(--line);padding:10px;margin:10px 0}.auth-note{font-size:10px;color:var(--muted);line-height:1.5}
+</style>
+</head>
+<body>
+<div class="auth-gate" id="authGate" hidden><div class="auth-card"><div class="auth-kicker">FABRIC ENDPOINT</div><div class="auth-title">Authorization required</div><div>Approve this browser from a trusted machine:</div><div class="auth-code" id="authCode">······</div><div class="auth-command">lk fabric allow <span id="authCodeInline">CODE</span> trust</div><div class="auth-note">Albert and Signal share the same Fabric endpoint credential on this host. Waiting for approval…</div></div></div>
+<div class="beacon-layer" id="beaconLayer"></div>
+<div class="shell dropzone" id="dropzone">
+  <main class="paper" id="paper">
+    <header class="top">
+      <div><div class="clock" id="clock">9:43</div><div class="date" id="date"></div></div>
+      <div class="status" id="status">ALBERT 5 · FABRIC<br>local surface · ready</div>
+    </header>
+    <div class="quiet" id="quiet">Your space is quiet. Ask for something, or drop something here.</div>
+
+    <div class="eyebrow">Now</div>
+    <section class="stream" id="stream"></section>
+
+    <div class="eyebrow" id="savedLabel" hidden>Saved</div>
+    <section class="stream" id="savedStream"></section>
+  </main>
+
+  <div class="composer-wrap">
+    <div class="attachment-tray" id="attachmentTray"></div>
+    <div class="composer">
+      <span class="prompt">›</span>
+      <input class="ask" id="ask" autocomplete="off" placeholder="ask, act, paste, or drop…" />
+      <button class="icon" id="mic" title="Speak">◉</button>
+      <button class="icon" id="tools" title="Capabilities">＋</button>
+    </div>
+    <nav class="nav">
+      <button class="active" data-filter="all">Paper</button>
+      <button data-filter="people">People</button>
+      <button data-filter="things">Things</button>
+      <button data-filter="watches">Watches</button>
+      <button id="themeBtn">Appearance</button>
+    </nav>
+  </div>
+</div>
+
+<div class="sheet" id="toolSheet">
+  <div class="sheet-head"><div><div class="sheet-title">Fabric capabilities</div><div class="saved-note">Fuzzy discovery chooses a capability. Execution remains exact.</div></div><button class="icon" onclick="closeSheets()">×</button></div>
+  <div class="toolgrid" id="toolgrid"></div>
+</div>
+
+<div class="sheet" id="themeSheet">
+  <div class="sheet-head"><div><div class="sheet-title">Appearance</div><div class="saved-note">The grammar stays fixed. Mood may change.</div></div><button class="icon" onclick="closeSheets()">×</button></div>
+  <div class="actions"><button class="action primary" onclick="setTheme('paper')">Paper</button><button class="action" onclick="setTheme('dark')">Dark</button><button class="action" onclick="setTheme('terminal')">Terminal</button></div>
+</div>
+
+<script>
+const FABRIC_ENDPOINT = '/v1/actions'; // Same-origin Albert action endpoint.
+const ALBERT_SESSION = (()=>{let s=localStorage.getItem('albert-session');if(!s){s='albert-'+crypto.randomUUID();localStorage.setItem('albert-session',s)}return s})();
+const ALL_CLASSICAL = 'https://allclassical.streamguys1.com/ac128kmp3';
+const CLASSIC_ARTS = 'https://www.classicartsshowcase.org/watch-classic-arts-showcase/';
+const CLASSIC_ARTS_STREAM = 'https://classicarts.global.ssl.fastly.net/live/cas/master_3000k.m3u8';
+const state={folds:[], saved:loadSaved(), busy:false, attachments:[]};
+let endpointAuthorized=false;
+const authGate=document.getElementById('authGate'),authCode=document.getElementById('authCode'),authCodeInline=document.getElementById('authCodeInline');
+function browserEndpointLabel(){const saved=localStorage.getItem('fabric-endpoint-label');if(saved)return saved;const ua=navigator.userAgent||'';if(/iPad/i.test(ua)||(/Macintosh/i.test(ua)&&navigator.maxTouchPoints>1))return 'iPad';if(/iPhone/i.test(ua))return 'iPhone';if(/Android/i.test(ua))return 'Android browser';if(/Macintosh|Mac OS/i.test(ua))return 'Mac browser';return 'Browser'}
+async function pollEndpointAuth(){try{const r=await fetch('/api/auth/status',{cache:'no-store'}),d=await r.json();if(d.authorized){endpointAuthorized=true;authGate.hidden=true;return}endpointAuthorized=false;authGate.hidden=false;const code=String(d.pending?.code||'------');authCode.textContent=code;authCodeInline.textContent=code}catch{authGate.hidden=false}setTimeout(pollEndpointAuth,1500)}
+function browserSpeak(payload){const text=String(payload?.text||'').trim();if(!text||!('speechSynthesis'in window))return;try{const u=new SpeechSynthesisUtterance(text);if(payload?.voice_profile==='wopr'){u.rate=.82;u.pitch=.55}else{u.rate=.96;u.pitch=1}speechSynthesis.cancel();speechSynthesis.speak(u);statusLine('speaking · '+browserEndpointLabel())}catch(err){statusLine('speech failed · '+err.message)}}
+async function pollEndpointActions(){if(!endpointAuthorized){setTimeout(pollEndpointActions,1500);return}try{const r=await fetch('/api/endpoint/poll',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({label:browserEndpointLabel(),capabilities:['display.output','audio.output','audio.speak','media.play','input.text'],metadata:{device:browserEndpointLabel(),platform:navigator.platform||''}})}),d=await r.json();for(const a of (d.actions||[])){if(a.action==='audio.speak')browserSpeak(a.payload||{})}}catch{}setTimeout(pollEndpointActions,1400)}
+pollEndpointAuth();pollEndpointActions();
+const capabilities=[
+  ['media.play','Play local or streamed audio/video','local effect'],['media.stop','Stop the selected output','local effect'],['audio.speak','Speak on this browser endpoint','local effect'],
+  ['files.search','Find objects across available nodes','read'],['files.open','Open an object on this endpoint','local effect'],
+  ['browser.open','Open a page or route','local effect'],['web.search','Search the web with provenance','read'],
+  ['mail.search','Find mail through an available provider','read'],['mail.read','Read a selected message','read'],['mail.send','Send a message','external effect'],
+  ['calendar.search','Find events','read'],['calendar.create','Create an event','external effect'],
+  ['contacts.search','Resolve a person','read'],['maps.route','Build directions using an available map provider','local effect'],
+  ['watch.create','Create a quiet recurring/conditional watch','external effect'],['system.open_app','Open an available application','local effect']
+];
+function loadSaved(){try{return JSON.parse(localStorage.getItem('albert5.saved')||'[]')}catch{return[]}}
+function storeSaved(){localStorage.setItem('albert5.saved',JSON.stringify(state.saved.slice(-24)))}
+function tick(){const d=new Date();clock.textContent=d.toLocaleTimeString([],{hour:'numeric',minute:'2-digit'}).replace(' ','');date.textContent=d.toLocaleDateString([],{weekday:'long',month:'long',day:'numeric'})}tick();setInterval(tick,30000);
+function esc(s=''){return String(s).replace(/[&<>"']/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#039;'}[c]))}
+function uid(){return 'f'+Math.random().toString(36).slice(2,9)}
+function updateQuiet(){const active=state.folds.filter(f=>!f.dismissed).length;quiet.textContent=state.busy?'Albert is working. You can keep using the paper.':active===0?'Your space is quiet. Ask for something, or drop something here.':active===1?'One thing is on the paper.':active<4?'A few things are on the paper. Nothing is demanding your attention.':'Your paper is getting busy. Dismiss or save anything you want to keep.'}
+function statusLine(text){status.innerHTML='ALBERT 5 · FABRIC<br>'+esc(text)}
+function foldShell(f,body){const pinned=f.pinned?' · pinned':'';const meta=(f.meta||'').startsWith('Fabric cognition')?'':(f.meta||'');return `<article class="fold" id="${f.id}" data-kind="${esc(f.kind||'thing')}"><button class="summary" onclick="toggleFold('${f.id}')"><div><div class="title">${esc(f.title||'Untitled')}</div><div class="meta">${esc(meta)}${pinned}</div></div><div class="right">${esc(f.badge||f.type||'open')}</div></button><div class="body ${f.open===false?'':'open'}"><div class="inner"><div class="content">${body}<div class="actions"><button class="action" onclick="pinFold('${f.id}')">${f.pinned?'unpin':'pin'}</button><button class="action" onclick="saveFold('${f.id}')">save</button><button class="action quiet-action" onclick="dismissFold('${f.id}')">dismiss</button></div></div></div></div></article>`}
+function renderBody(f){
+  if(f.type==='progress') return `<div class="progress"><span class="dot"></span><span>${esc(f.text||'Working…')}</span></div>`;
+  if(f.type==='answer') return `${(!f.turns?.length&&f.text)?`<div class="prose">${esc(f.text)}</div>`:''}${renderSources(f.sources)}${renderThread(f)}`;
+  if(f.type==='receipt') return `<div class="receipt"><strong>${esc(f.label||'Done')}</strong><br>${esc(f.text||'')}</div>`;
+  if(f.type==='audio') return `<div class="media"><div class="audio-card"><div class="now">${esc(f.title)}</div><div class="sub">${esc(f.subtitle||'')}</div><div class="audio-eq" id="eq-${f.id}" aria-label="live audio visualizer">${'<i></i>'.repeat(16)}</div></div><audio data-eq="eq-${f.id}" controls autoplay src="${esc(f.src)}"></audio></div>${f.note?`<div class="meta">${esc(f.note)}</div>`:''}`;
+  if(f.type==='video') return `<div class="media-grid" id="media-grid-${f.id}"><div class="media"><div class="media-viewport" id="media-view-${f.id}"><button class="media-expand" onclick="toggleMediaExpand('${f.id}',event)">expand</button>${f.src?`<video controls autoplay playsinline data-fallback="${esc(f.embed||'')}" onerror="videoFallback(this)" src="${esc(f.src)}"></video>`:`${scaledPage(f.embed||CLASSIC_ARTS,f.id)}`}</div></div><div class="side"><div class="prose">${esc(f.text||'')}</div>${f.external?`<div class="actions"><button class="action primary" onclick="window.open('${esc(f.external)}','_blank','noopener')">open official feed</button></div>`:''}</div></div>`;
+  if(f.type==='image') return `<div class="media"><img src="${esc(f.src)}" alt="${esc(f.title||'image')}" /></div>${f.text?`<div class="prose">${esc(f.text)}</div>`:''}`;
+  if(f.type==='file') return `<div class="object"><div class="object-label">${esc(f.mime||'object')}</div>${esc(f.name||f.title)}${f.detail?`<div class="meta">${esc(f.detail)}</div>`:''}</div>`;
+  if(f.type==='watch') return `<div class="pillbar"><span class="pill live">quiet watch</span>${(f.pills||[]).map(x=>`<span class="pill">${esc(x)}</span>`).join('')}</div><div class="prose">${esc(f.text||'')}</div>${renderPipeline(f.pipeline)}`;
+  if(f.type==='route') return `<div class="object"><div class="object-label">Route</div>${esc(f.text||'')}</div>${renderPipeline(f.pipeline)}`;
+  if(f.type==='person') return `<div class="object"><div class="object-label">Person</div>${esc(f.text||f.title)}</div>${renderPipeline(f.pipeline)}`;
+  return `<div class="prose">${esc(f.text||'')}</div>${renderPipeline(f.pipeline)}`;
+}
+
+function renderThread(f){
+  const attached=(f.attachments||[]).map(a=>`<span class="pill">${esc(a.name||a.mime||'attachment')}</span>`).join('');
+  const turns=(f.turns||[]).map(t=>`<div class="thread-turn"><div class="thread-role">${esc(t.role==='user'?'you':'Albert')}</div><div class="thread-text">${esc(t.text||'')}</div></div>`).join('');
+  return `<div class="thread">${attached?`<div class="pillbar">${attached}</div>`:''}${turns}<div class="thread-compose"><input id="thread-${f.id}" placeholder="continue this thought…" onkeydown="if(event.key==='Enter'){event.stopPropagation();replyFold('${f.id}')}" onclick="event.stopPropagation()"><button onclick="event.stopPropagation();replyFold('${f.id}')">reply</button></div></div>`;
+}
+async function replyFold(id){const input=document.getElementById(`thread-${id}`);const q=input?.value.trim();if(!q)return;if(input)input.value='';await askFabric(q,{parent_fold:id},id)}
+function scaledPage(url,id){return `<div class="scaled-page" data-scaled-page><iframe allow="autoplay; fullscreen" referrerpolicy="no-referrer" src="${esc(url||CLASSIC_ARTS)}"></iframe></div>`}
+function fitScaledPages(){document.querySelectorAll('[data-scaled-page]').forEach(box=>{const frame=box.querySelector('iframe');if(!frame)return;const baseW=1200,baseH=760;const scale=Math.min(box.clientWidth/baseW,box.clientHeight/baseH);frame.style.transform=`scale(${Math.max(.1,scale)})`;frame.style.left=Math.max(0,(box.clientWidth-baseW*scale)/2)+'px';frame.style.top=Math.max(0,(box.clientHeight-baseH*scale)/2)+'px'})}
+function videoFallback(video){const url=video.dataset.fallback;if(!url)return;try{video.pause()}catch{}const host=video.parentElement;video.remove();host.insertAdjacentHTML('beforeend',scaledPage(url,host.id));requestAnimationFrame(fitScaledPages)}
+function toggleMediaExpand(id,event){event?.stopPropagation();const grid=document.getElementById(`media-grid-${id}`);if(!grid)return;grid.classList.toggle('expanded');const btn=grid.querySelector('.media-expand');if(btn)btn.textContent=grid.classList.contains('expanded')?'contract':'expand';requestAnimationFrame(fitScaledPages)}
+window.addEventListener('resize',()=>requestAnimationFrame(fitScaledPages));
+
+function renderPipeline(p){if(!p)return'';return Object.entries(p).map(([k,v])=>`<div class="route"><b>${esc(k)}</b><div>${esc(v)}</div></div>`).join('')}
+function renderSources(s){if(!s?.length)return'';return `<div class="pillbar">${s.map(x=>`<span class="pill">${esc(x)}</span>`).join('')}</div>`}
+function savedShell(f){
+  return `<article class="fold saved-fold" id="saved-${f.id}" data-kind="${esc(f.kind||'thing')}"><button class="summary" onclick="reopenSaved('${f.id}')"><div><div class="title">${esc(f.title||'Untitled')}</div><div class="meta">${esc(f.meta||'')} · saved</div></div><div class="right">open</div></button><div class="body"><div class="inner"><div class="content"><div class="actions"><button class="action primary" onclick="reopenSaved('${f.id}')">open on paper</button><button class="action quiet-action" onclick="removeSaved('${f.id}')">remove saved</button></div></div></div></div></article>`
+}
+function teardownMedia(root=stream){
+  root.querySelectorAll('audio,video').forEach(media=>{
+    const eq=AUDIO_EQ.get(media);if(eq){try{eq.stop()}catch{}AUDIO_EQ.delete(media)}
+    try{media.pause()}catch{}
+    try{media.removeAttribute('src');media.load()}catch{}
+  });
+  root.querySelectorAll('iframe').forEach(frame=>{try{frame.src='about:blank'}catch{}});
+}
+function render(){teardownMedia(stream);stream.innerHTML=state.folds.filter(f=>!f.dismissed).map(f=>foldShell(f,renderBody(f))).join('');savedStream.innerHTML=state.saved.map(savedShell).join('');savedLabel.hidden=!state.saved.length;updateQuiet();requestAnimationFrame(()=>{initAudioEQ();fitScaledPages()})}
+const AUDIO_EQ=new WeakMap();
+function eqFallback(audio,bars){
+  let raf=0;
+  const seed=[...String(audio.currentSrc||audio.src||'albert')].reduce((a,c)=>(a*33+c.charCodeAt(0))>>>0,5381);
+  const draw=()=>{const t=performance.now()/390;bars.forEach((bar,i)=>{const active=!audio.paused&&!audio.ended;const wave=.16+.84*Math.abs(Math.sin(t*(.76+(i%5)*.07)+i*1.37+seed%17)*Math.cos(t*.43+i*.61));bar.style.height=(active?8+wave*84:8+(i%3)*2)+'%'});raf=requestAnimationFrame(draw)};
+  draw(); AUDIO_EQ.set(audio,{stop:()=>cancelAnimationFrame(raf),mode:'activity'});
+}
+function initAudioEQ(){
+  document.querySelectorAll('audio[data-eq]').forEach(audio=>{
+    if(audio.dataset.eqReady)return;audio.dataset.eqReady='1';const box=document.getElementById(audio.dataset.eq);if(!box)return;const bars=[...box.children];
+    let same=false;try{const u=new URL(audio.currentSrc||audio.src,location.href);same=u.protocol==='blob:'||u.origin===location.origin}catch{}
+    if(!same||!(window.AudioContext||window.webkitAudioContext)){eqFallback(audio,bars);return}
+    try{const AC=window.AudioContext||window.webkitAudioContext,ctx=new AC(),source=ctx.createMediaElementSource(audio),an=ctx.createAnalyser();an.fftSize=128;an.smoothingTimeConstant=.72;source.connect(an);an.connect(ctx.destination);const bins=new Uint8Array(an.frequencyBinCount);let raf=0;const draw=()=>{an.getByteFrequencyData(bins);const step=Math.max(1,Math.floor(bins.length/bars.length));bars.forEach((bar,i)=>{let sum=0;for(let j=0;j<step;j++)sum+=bins[Math.min(bins.length-1,i*step+j)];const v=sum/(step*255);bar.style.height=(audio.paused?8:8+v*88)+'%'});raf=requestAnimationFrame(draw)};audio.addEventListener('play',()=>ctx.resume(),{passive:true});draw();AUDIO_EQ.set(audio,{stop:()=>{cancelAnimationFrame(raf);ctx.close()},mode:'spectrum'})}catch{eqFallback(audio,bars)}
+  })
+}
+function addFold(f,{front=false}={}){f={id:uid(),open:true,kind:'thing',...f};front?state.folds.unshift(f):state.folds.push(f);render();setTimeout(()=>document.getElementById(f.id)?.scrollIntoView({behavior:'smooth',block:'center'}),30);return f.id}
+function replaceFold(id,f){const i=state.folds.findIndex(x=>x.id===id);if(i>=0){state.folds[i]={...state.folds[i],...f,id};render()}}
+function toggleFold(id){const f=state.folds.find(x=>x.id===id);if(f){f.open=!f.open;render()}}
+function dismissFold(id){const f=state.folds.find(x=>x.id===id);if(!f)return;const el=document.getElementById(id);if(el)teardownMedia(el);f.dismissed=true;el?.classList.add('dismiss');setTimeout(render,180)}
+function pinFold(id){const f=state.folds.find(x=>x.id===id);if(f){f.pinned=!f.pinned;render()}}
+function saveFold(id){const f=state.folds.find(x=>x.id===id);if(!f)return;const snapshot={...f,dismissed:false,open:false};const i=state.saved.findIndex(x=>x.id===f.id);if(i>=0)state.saved[i]=snapshot;else state.saved.push(snapshot);storeSaved();render()}
+function reopenSaved(id){const saved=state.saved.find(x=>x.id===id);if(!saved)return;const live={...saved,id:uid(),dismissed:false,open:true,pinned:false};state.folds.push(live);render();setTimeout(()=>document.getElementById(live.id)?.scrollIntoView({behavior:'smooth',block:'center'}),30)}
+function removeSaved(id){state.saved=state.saved.filter(x=>x.id!==id);storeSaved();render()}
+function addProgress(text='Understanding…'){state.busy=true;statusLine('thinking');const id=addFold({type:'progress',title:'Albert',meta:'cognition',badge:'working',text,kind:'progress'});return id}
+function finishProgress(id){state.folds=state.folds.filter(x=>x.id!==id);state.busy=false;statusLine('local surface · ready');render()}
+async function askFabric(query,context={},targetFold=null){
+  const progress=addProgress('Understanding what you mean…');
+  const attachmentIds=state.attachments.map(a=>a.id).filter(Boolean);
+  const attachmentSnapshot=state.attachments.map(a=>({id:a.id,name:a.name,mime:a.mime,preview:a.preview}));
+  try{
+    await sleep(180);replaceFold(progress,{text:'Discovering available capabilities…'});
+    const ctl=new AbortController();const t=setTimeout(()=>ctl.abort(),185000);
+    const session=context.session||ALBERT_SESSION;
+    const r=await fetch(FABRIC_ENDPOINT,{method:'POST',headers:{'content-type':'application/json'},body:JSON.stringify({surface:'albert',origin:'browser',session,input:{text:query},context:{...context,session,artifacts:attachmentIds}}),signal:ctl.signal});clearTimeout(t);
+    if(!r.ok)throw new Error('Fabric unavailable');const payload=await r.json();finishProgress(progress);
+    if(targetFold){const fold=state.folds.find(x=>x.id===targetFold);const normalized=normalizeResult(payload);if(fold&&normalized.type==='answer'){fold.turns=fold.turns||[];fold.turns.push({role:'user',text:query},{role:'assistant',text:normalized.text||''});if(attachmentSnapshot.length)fold.attachments=[...(fold.attachments||[]),...attachmentSnapshot];render();return}}
+    consumeFabric(payload,{query,attachments:attachmentSnapshot});clearAttachments();return;
+  }catch(e){replaceFold(progress,{text:'Fabric cognition is unavailable. I will not invent a result.'});await sleep(450);finishProgress(progress);consumeFabric({type:'answer',title:'Albert',meta:'Fabric cognition unavailable',badge:'offline',text:'The shared cognition/tool plane did not answer this request. Nothing was executed.'},{query,attachments:attachmentSnapshot});}
+}
+function consumeFabric(payload,context={}){const items=Array.isArray(payload)?payload:(payload.items||[payload]);items.filter(Boolean).forEach(x=>{const f=normalizeResult(x);if(context.query&&f.type==='answer'){f.prompt=context.query;f.turns=[{role:'user',text:context.query},{role:'assistant',text:f.text||''}];f.text='';if(!f.title||f.title==='Albert')f.title=topicTitle(context.query)}if(context.attachments?.length)f.attachments=context.attachments;addFold(f)})}
+function topicTitle(q){const t=String(q||'').trim().replace(/[?!.]+$/,'');if(!t)return 'Thought';return t.length>48?t.slice(0,47)+'…':t[0].toUpperCase()+t.slice(1)}
+function normalizeResult(x){if(x.fold)return x.fold;if(x.result)return normalizeResult(x.result);return {type:x.type||'answer',title:x.title||'Albert',meta:x.meta||x.tool||'Fabric',badge:x.badge||'ready',kind:x.kind||'thing',text:x.text||x.message||'',src:x.src,embed:x.embed,external:x.external,subtitle:x.subtitle,sources:x.sources,pipeline:x.pipeline,pills:x.pills}}
+function localCognition(raw){const q=raw.trim(),s=q.toLowerCase();
+  if(/^(play |put on )?(some )?(classics|classical|classical music)$/.test(s)||s.includes('all classical')) return {type:'audio',title:'All Classical Radio',subtitle:'Portland · live',meta:'media.play · this endpoint',badge:'live',kind:'thing',src:ALL_CLASSICAL,note:'Built-in open stream alias · classics / classical',pipeline:{intent:'media.play',selector:'stream:all-classical',target:'origin endpoint',player:'browser'}};
+  if(s.includes('classic arts')||s.includes('arts showcase')||s==='showcase'||s==='play arts') return {type:'video',title:'Classic Arts Showcase',meta:'media.play · this endpoint',badge:'live',kind:'thing',src:CLASSIC_ARTS_STREAM,embed:CLASSIC_ARTS,external:CLASSIC_ARTS,text:'A permanent arts channel: performance, visual arts, film and classical music.',pipeline:{intent:'media.play',selector:'stream:classic-arts-showcase',target:'origin endpoint',preferred:'direct HLS',fallback:'official web feed'}};
+  if(s.includes('watch')&&(/server|latency|uptime/.test(s))) return {type:'watch',title:'Server watch',meta:'watch.create · ready',badge:'watching',kind:'watches',text:'I’ll keep this quiet and surface it only when the condition matters.',pills:['server','conditional'],pipeline:{source:'Fabric node health',condition:extractThreshold(s)||'trouble / offline',transform:'compare with prior healthy state',presentation:'surface only when actionable'}};
+  if(s.includes('watch')||s.includes('every morning')||s.includes('every evening')) return {type:'watch',title:'Watch prepared',meta:'watch.create',badge:'ready',kind:'watches',text:q,pills:['recurring'],pipeline:{source:'to resolve from available capabilities',condition:'from your request',transform:'deduplicate + contextualize',presentation:'quiet fold'}};
+  if(/mail|email/.test(s)) return {type:'answer',title:'Mail capability found',meta:'mail.search · demo',badge:'ready',kind:'things',text:'Albert understood this as a mail action. A live Fabric adapter can now resolve the account, search, and return message objects here.',pipeline:{intent:'mail.search',discovery:'mail.*',risk:'read',next:'execute when provider is connected'}};
+  if(/calendar|schedule|meeting|appointment/.test(s)) return {type:'answer',title:'Calendar capability found',meta:'calendar.* · demo',badge:'ready',kind:'things',text:'This belongs to the calendar capability family. Albert can ask only for fields that materially affect the action.',pipeline:{intent:'calendar action',discovery:'calendar.*',risk:'read or external effect',confirmation:'only when consequential'}};
+  if(/direction|route|map|navigate/.test(s)) return {type:'route',title:'Route request',meta:'maps.route · provider-neutral',badge:'ready',kind:'things',text:q,pipeline:{intent:'maps.route',provider:'open provider first',fallback:'proprietary provider if selected',target:'this endpoint'}};
+  if(/play|movie|music|song|video/.test(s)) return {type:'answer',title:'Media intent understood',meta:'media.play · Fabric',badge:'ready',kind:'things',text:'The request is a media action. In the installed build, Fabric resolves the object and keeps output local unless you name another endpoint.',pipeline:{intent:'media.play',selector:q,target:'origin endpoint',effect:'local'}};
+  return {type:'answer',title:'Albert',meta:'local cognition fallback',badge:'answer',kind:'thing',text:`I understood the request as: “${q}”. The live Fabric cognition endpoint will turn this into an exact action envelope and tool call.`,pipeline:{understand:'natural language',discover:'fuzzy capability match',execute:'exact tool arguments',report:'fold + receipt'}};
+}
+function extractThreshold(s){const m=s.match(/(?:over|above|exceeds?)\s*(\d+)\s*ms/);return m?`latency > ${m[1]} ms`:''}
+function sleep(ms){return new Promise(r=>setTimeout(r,ms))}
+function submit(){const q=ask.value.trim();if(!q&&!state.attachments.length)return;ask.value='';askFabric(q||'Please inspect the attached object(s).')}
+ask.addEventListener('keydown',e=>{if(e.key==='Enter')submit()});
+// Paste/drop share one artifact path. Bytes stop at Albert's artifact edge; LO receives paths/references, never embedded blobs.
+['dragenter','dragover'].forEach(ev=>dropzone.addEventListener(ev,e=>{e.preventDefault();dropzone.classList.add('drag')}));['dragleave','drop'].forEach(ev=>dropzone.addEventListener(ev,e=>{e.preventDefault();dropzone.classList.remove('drag')}));
+dropzone.addEventListener('drop',async e=>{for(const file of [...e.dataTransfer.files]) await attachFile(file)});
+ask.addEventListener('paste',async e=>{const files=[...(e.clipboardData?.files||[])];if(!files.length)return;e.preventDefault();for(const file of files)await attachFile(file)});
+document.addEventListener('paste',async e=>{if(e.target===ask||e.target?.closest?.('.thread-compose'))return;const files=[...(e.clipboardData?.files||[])];if(!files.length)return;e.preventDefault();ask.focus();for(const file of files)await attachFile(file)});
+async function attachFile(file){
+  const r=await fetch('/v1/artifacts',{method:'POST',headers:{'content-type':file.type||'application/octet-stream','x-filename':encodeURIComponent(file.name||'pasted-object')},body:file});
+  if(!r.ok){addFold({type:'answer',title:'Attachment',meta:'artifact registration failed',badge:'error',text:'Albert could not register that pasted/dropped object.'});return}
+  const a=await r.json();a.name=file.name||a.name||'pasted object';a.mime=file.type||a.mime;state.attachments.push(a);renderAttachments();ask.focus();
+}
+function renderAttachments(){attachmentTray.classList.toggle('live',!!state.attachments.length);attachmentTray.innerHTML=state.attachments.map((a,i)=>`<div class="attachment">${String(a.mime||'').startsWith('image/')?`<img src="${esc(a.preview)}" alt="">`:''}<span>${esc(a.name||'object')}<br><span class="meta">${esc(a.mime||'object')}</span></span><button title="Remove" onclick="removeAttachment(${i})">×</button></div>`).join('')}
+function removeAttachment(i){state.attachments.splice(i,1);renderAttachments()}
+function clearAttachments(){state.attachments=[];renderAttachments()}
+function formatBytes(n){if(n<1024)return n+' B';if(n<1048576)return (n/1024).toFixed(1)+' KB';return (n/1048576).toFixed(1)+' MB'}
+// Speech stays on-device when the browser exposes Web Speech; otherwise the control simply explains the missing capability.
+let recognition=null;mic.addEventListener('click',()=>{const SR=window.SpeechRecognition||window.webkitSpeechRecognition;if(!SR){addFold({type:'answer',title:'Microphone',meta:'endpoint capability unavailable',badge:'info',text:'This browser does not expose Web Speech recognition. Fabric can supply another speech adapter when installed.'});return}if(recognition){recognition.stop();return}recognition=new SR();recognition.interimResults=true;recognition.continuous=false;recognition.onstart=()=>mic.classList.add('on');recognition.onresult=e=>{ask.value=[...e.results].map(r=>r[0].transcript).join('')};recognition.onend=()=>{mic.classList.remove('on');recognition=null;if(ask.value.trim())submit()};recognition.start()});
+function openSheet(id){closeSheets();document.getElementById(id).classList.add('open')}function closeSheets(){document.querySelectorAll('.sheet').forEach(x=>x.classList.remove('open'))}
+tools.onclick=()=>openSheet('toolSheet');themeBtn.onclick=()=>openSheet('themeSheet');document.addEventListener('keydown',e=>{if(e.key==='Escape')closeSheets()});
+function setTheme(t){document.body.classList.remove('dark','terminal');if(t!=='paper')document.body.classList.add(t);localStorage.setItem('albert5.theme',t);closeSheets()}
+setTheme(localStorage.getItem('albert5.theme')||'paper');
+toolgrid.innerHTML=capabilities.map(([n,d,r])=>`<div class="tool"><div class="tool-name">${esc(n)}</div><div class="tool-do">${esc(d)}<br>${esc(r)}</div></div>`).join('');
+document.querySelectorAll('.nav [data-filter]').forEach(btn=>btn.onclick=()=>{document.querySelectorAll('.nav [data-filter]').forEach(b=>b.classList.remove('active'));btn.classList.add('active');const filter=btn.dataset.filter;document.querySelectorAll('#stream .fold').forEach(el=>el.hidden=filter!=='all'&&el.dataset.kind!==filter)});
+// Albert is a Fabric surface, so synchronized beacon/light shows include it too.
+let lastBeacon='';
+async function pollLights(){try{const r=await fetch('/v1/lights',{cache:'no-store'});if(!r.ok)return;const d=await r.json(),c=d.light?.color||'';if(c===lastBeacon)return;lastBeacon=c;const colors={red:'#ff3b30',green:'#34c759',blue:'#0a84ff',white:'#ffffff'};beaconLayer.style.background=colors[c]||'transparent';beaconLayer.style.opacity=c&&c!=='off'?'.48':'0'}catch{}}
+setInterval(pollLights,350);pollLights();
+// Opening paper: one compact introduction, not a dashboard.
+addFold({type:'answer',title:'Albert 5 is awake',meta:'Fabric paper · local surface',badge:'ready',kind:'thing',text:'This is your cognitive space, not another inbox. Ask for something, speak, paste, or drop an object. Results arrive as folds you can use, pin, save, or dismiss.',pipeline:{input:'type · speak · paste · drop',cognition:'intent → capability discovery → exact action',effects:'local by default',compute:'free to float across Fabric'}});
+</script>
+</body>
+</html>

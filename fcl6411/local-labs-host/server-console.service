@@ -1,0 +1,13 @@
+[Unit]
+Description=3090 Operator Console
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=simple
+ExecStart=/usr/bin/python3 %h/.local/share/3090-server/console.py
+Restart=on-failure
+RestartSec=3
+
+[Install]
+WantedBy=default.target
