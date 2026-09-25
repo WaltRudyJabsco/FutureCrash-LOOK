@@ -4,10 +4,10 @@ ROOT=Path(__file__).resolve().parents[1]
 
 
 def test_release_is_paper_brain():
-    assert (ROOT/'VERSION').read_text().strip() == '6.4.4'
+    assert (ROOT/'VERSION').read_text().strip() == '6.4.5'
     node=(ROOT/'core/node.py').read_text()
-    assert 'VERSION = "6.4.4"' in node
-    assert 'RELEASE_NAME = "Shall We Play"' in node
+    assert 'VERSION = "6.4.5"' in node
+    assert 'RELEASE_NAME = "JOSHUA"' in node
 
 
 def test_albert_beacon_and_continuing_fold_ui():
@@ -30,10 +30,13 @@ def test_albert_paste_uses_artifact_edge():
     assert 'selected_paths=selected' in server
 
 
-def test_albert_headlines_force_live_search():
+def test_albert_uses_shared_router_for_live_search():
     engine=(ROOT/'look/lo_engine.py').read_text()
+    core=(ROOT/'look/lk').read_text()
     server=(ROOT/'albert/server.py').read_text()
-    assert 'force_search=False' in engine
-    assert 'force_search=bool(force_search)' in engine
-    assert '_needs_live_search' in server
-    assert 'force_search=_needs_live_search(text)' in server
+    assert 'def route_intent(prompt: str)' in engine
+    assert 'def _lo_requires_live_web(prompt):' in core
+    assert 'turn_intent=_lo_intent_family(prompt)' in core
+    assert 'turn_force_search=bool(force_search or turn_intent=="web_current")' in core
+    assert 'force_search=False' in server
+    assert 'shared_intent=_load_lo_engine().route_intent(q)' in server

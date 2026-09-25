@@ -106,10 +106,9 @@ def cognition_json(text, session="", selected_paths=None):
         workspace=str(Path.home()),
         history=_session_history(sid),
         selected_paths=list(selected_paths or []),
-        force_search=_needs_live_search(text),
+        force_search=False,
         interface_context=(
-            "INTERFACE: Albert quiet paper browser surface. Answer normally and truthfully. "
-            "Use deterministic tools for current facts such as weather. For headlines, news, latest, current events, or anything time-sensitive, use the available web/search tool and cite/summarize retrieved evidence rather than model memory. Return concise prose suitable for a fold. "
+            "INTERFACE: Albert quiet paper browser surface. Answer normally and truthfully in concise prose suitable for a fold. "
             "Albert owns presentation; do not claim a UI action happened unless the tool result says it happened. "
             "Effects are local by default and compute may float across Fabric."
         ),
@@ -138,9 +137,16 @@ def action(text, session="", context=None):
             return {"type":"answer","title":"Fabric","meta":"node discovery","badge":f"{len(names)} nodes","kind":"things","text":"Available: "+", ".join(names),"pipeline":{"source":"/v1/nodes","effect":"read"}}
         except Exception as exc:
             return {"type":"answer","title":"Fabric","meta":"node discovery","badge":"offline","text":f"Unified Node is not reachable: {exc}"}
+    # The shared LO core owns intent routing. In particular, "play a game" is
+    # not media merely because it starts with the word play.
+    try:
+        shared_intent=_load_lo_engine().route_intent(q)
+    except Exception:
+        shared_intent="general"
+
     # Media language already has a mature deterministic bridge. Ask the node to
     # prepare rather than play so Albert remains the owner of browser effects.
-    if low.startswith(('play ','put on ','shuffle ','queue ')):
+    if shared_intent!="games" and low.startswith(('play ','put on ','shuffle ','queue ')):
         query=q
         for prefix in ('please ','play ','put on ','shuffle ','queue '):
             if query.casefold().startswith(prefix): query=query[len(prefix):].strip(); break
@@ -178,11 +184,12 @@ def action(text, session="", context=None):
         pipeline={"cognition":"shared LO engine","session":session or "albert"}
         if tool_names:
             pipeline["tools"]=" · ".join(tool_names)
+        is_game="game_action" in tool_names
         return {
             "type":"answer",
-            "title":"Albert",
-            "meta":"Fabric cognition · LO",
-            "badge":"grounded" if tool_names else "answer",
+            "title":"LOOK Games" if is_game else "Albert",
+            "meta":"",
+            "badge":"ready" if is_game else ("grounded" if tool_names else "answer"),
             "kind":"things",
             "text":text,
             "pipeline":pipeline,
@@ -209,13 +216,13 @@ def action(text, session="", context=None):
         }
 
 class Handler(BaseHTTPRequestHandler):
-    server_version='Albert/1.2.1'
+    server_version='Albert/1.2.2'
     def log_message(self,*_): pass
     def send_json(self,code,obj):
         raw=json.dumps(obj,ensure_ascii=False).encode(); self.send_response(code); self.send_header('Content-Type','application/json; charset=utf-8'); self.send_header('Content-Length',str(len(raw))); self.end_headers(); self.wfile.write(raw)
     def do_GET(self):
         path=urlparse(self.path).path
-        if path in {'/health','/v1/health'}: return self.send_json(200,{"ok":True,"surface":"albert","version":"1.2.1","fabric":NODE})
+        if path in {'/health','/v1/health'}: return self.send_json(200,{"ok":True,"surface":"albert","version":"1.2.2","fabric":NODE})
         if path in {'/v1/actions','/api/capabilities'}:
             try: caps=node_json('/v1/capabilities')
             except Exception: caps={}

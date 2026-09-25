@@ -1,3 +1,9 @@
+## 6.4.5 — JOSHUA
+
+- Shared LO front-door router for games/current-news intent.
+- `lk games` again denies that games exist; named simulations reveal the WOPR selector.
+- One-time `JOSHUA` LOGON provisioning and in-terminal player selection.
+
 ## 6.4.4 — LOOK Games
 
 - Added `lk games` WOPR recreation channel with Tic-Tac-Toe, Checkers, Chess, Backgammon, and GTNW.

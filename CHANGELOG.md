@@ -1,3 +1,13 @@
+# 6.4.5 · JOSHUA
+
+- Unified obvious intent routing in the shared LO core so LOOK, Signal, and Albert use the same pre-inference gate.
+- Current headlines/news requests now trigger deterministic web preflight from the shared core on every surface.
+- LOOK Games requests are host-routed before inference; `gtnw` can no longer wander into filesystem search.
+- Restored the original `lk games` deadpan response: `No games installed.`
+- Named game commands enter the WOPR selector with the requested game preselected, then choose 0p/1p/2p in-terminal. Explicit mode arguments remain shortcuts.
+- Added a one-time theatrical WOPR `LOGON:` gate; `JOSHUA` provisions the recreation channel locally.
+- Albert now relies on the shared router rather than carrying its own headlines/search policy.
+
 # 6.4.4 · Shall We Play
 
 - Added LOOK Games: Tic-Tac-Toe, Checkers, Chess, Backgammon, and GTNW under one WOPR recreation channel.

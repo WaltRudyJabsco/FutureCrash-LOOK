@@ -6414,6 +6414,67 @@ def _lo_media_intent_profile(prompt,profile="workspace"):
     return {"tool":"media_play","args":{"query":target,"shuffle":verb=="shuffle"}}
 
 
+
+def _lo_game_intent(prompt):
+    """Resolve the tiny LOOK Games vocabulary before a model can misroute it."""
+    raw=" ".join(str(prompt or "").strip().casefold().replace("-"," ").split())
+    exact={
+        "ttt":"ttt","tic tac toe":"ttt","tic tac toe game":"ttt",
+        "checkers":"checkers","draughts":"checkers","chess":"chess",
+        "backgammon":"backgammon","gtnw":"gtnw",
+        "global thermonuclear war":"gtnw","global thermonuclear war game":"gtnw",
+        "play a game":"","play game":"","games":"",
+    }
+    if raw in exact:
+        return {"tool":"game_action","args":{"game":exact[raw]}}
+    m=re.match(r"^(?:please\s+)?(?:(?:let'?s|lets)\s+)?(?:play|start|open|launch)\s+(?:a\s+)?(.+?)\s*$",raw)
+    if not m:
+        return None
+    noun=m.group(1).strip()
+    aliases={
+        "game":"","games":"","ttt":"ttt","tic tac toe":"ttt",
+        "checkers":"checkers","draughts":"checkers","chess":"chess",
+        "backgammon":"backgammon","gtnw":"gtnw","global thermonuclear war":"gtnw",
+    }
+    if noun not in aliases:
+        return None
+    return {"tool":"game_action","args":{"game":aliases[noun]}}
+
+
+def _lo_requires_live_web(prompt):
+    """Narrow current-information gate shared by every LO surface."""
+    low=" ".join(str(prompt or "").casefold().split())
+    if _lo_requires_weather(low):
+        return False
+    return bool(
+        re.search(r"\b(headlines?|current events?|breaking news|latest news|news today|today'?s news)\b",low)
+        or re.search(r"\bwhat (?:happened|is happening) (?:today|tonight|this morning|this afternoon|this evening)\b",low)
+    )
+
+
+def _lo_intent_family(prompt):
+    """Shared front-door routing hint used by LOOK, Signal, and Albert."""
+    if _lo_game_intent(prompt): return "games"
+    if _lo_requires_weather(prompt): return "weather"
+    if _lo_requires_live_web(prompt): return "web_current"
+    if _lo_media_intent_profile(prompt,"workspace"): return "media"
+    low=str(prompt or "").casefold()
+    if re.search(r"\b(file|folder|directory|workspace|codebase|project files?|this folder|search files?)\b",low): return "files"
+    return "general"
+
+
+def _lo_game_direct_answer(tool_content,ok):
+    text=str(tool_content or "")
+    if not ok:
+        return "LOOK Games is unavailable right now."
+    if text.startswith("GAME MENU ·"):
+        return "Available simulations: Tic-Tac-Toe, Checkers, Chess, Backgammon, and Global Thermonuclear War. In LOOK, enter `lk games <name>`."
+    m=re.match(r"GAME READY · ([a-z0-9-]+) · (.+)$",text)
+    if m:
+        labels={"ttt":"Tic-Tac-Toe","checkers":"Checkers","chess":"Chess","backgammon":"Backgammon","gtnw":"Global Thermonuclear War"}
+        return f"{labels.get(m.group(1),m.group(1))} is ready on the LOOK terminal surface. Use `{m.group(2)}`."
+    return text
+
 def _lo_media_direct_answer(tool_content,ok):
     text=str(tool_content or "")
     if ok and text.startswith("MEDIA PLAY OK"):
@@ -7070,6 +7131,13 @@ def _capability_tools():
             "parameters":{"type":"object","properties":{}}
         }},
         {"type":"function","function":{
+            "name":"game_action",
+            "description":"Resolve LOOK Games requests such as chess, checkers, backgammon, Tic-Tac-Toe, or Global Thermonuclear War. This returns the canonical LOOK game command; browser surfaces must not pretend an interactive terminal game was launched.",
+            "parameters":{"type":"object","properties":{
+                "game":{"type":"string","enum":["","ttt","checkers","chess","backgammon","gtnw"]}
+            }}
+        }},
+        {"type":"function","function":{
             "name":"media_search",
             "description":"Search the trusted Fabric media catalog across online nodes. Use for local music/video discovery instead of web_search or filesystem guessing. Returns exact catalog records and match grouping without playing anything.",
             "parameters":{"type":"object","properties":{
@@ -7142,6 +7210,15 @@ def _run_capability_tool(name,args,workspace,profile):
             f"{j.get('id')} · {'on' if j.get('enabled',True) else 'off'} · {j.get('kind')} {j.get('spec')} · next {_when_label(j.get('next_run',0)) if j.get('next_run') else 'done'} · {j.get('prompt','')}"
             for j in rows[:40]
         )
+    if name=="game_action":
+        game=str(args.get("game") or "").casefold().strip()
+        aliases={"tic-tac-toe":"ttt","tic tac toe":"ttt","draughts":"checkers","global thermonuclear war":"gtnw"}
+        game=aliases.get(game,game)
+        if not game:
+            return "GAME MENU · lk games <ttt|checkers|chess|backgammon|gtnw>"
+        if game not in {"ttt","checkers","chess","backgammon","gtnw"}:
+            return f"GAME FAILED · unknown simulation: {game}"
+        return f"GAME READY · {game} · lk games {game}"
     if name=="media_search":
         return _media_tool_search(args.get("query",""),args.get("limit",12))
     if name=="media_play":
@@ -7164,6 +7241,7 @@ _TOOL_POLICY = {
     "copy_path":("workspace","mutation"),"move_path":("workspace","mutation"),"remove_path":("workspace","mutation"),
     "make_directory":("workspace","mutation"),"open_url":("all","action"),
     "list_processes":("all","observation"),"listening_ports":("all","observation"),"system_snapshot":("all","observation"),
+    "game_action":("all","action"),
     "media_search":("all","observation"),"media_play":("all","action"),"media_queue":("all","action"),"media_control":("all","action"),
     "run_command":("power","command"),
 }
@@ -8633,7 +8711,7 @@ def _direct_searxng_search(query, limit=8):
     params=urllib.parse.urlencode({"q":query,"format":"json"})
     request=urllib.request.Request(base+"/search?"+params,headers={
         "Accept":"application/json",
-        "User-Agent":"Future-Crash-Fabric/6.4.4",
+        "User-Agent":"Future-Crash-Fabric/6.4.5",
     })
     with urllib.request.urlopen(request,timeout=12) as response:
         data=json.load(response)
@@ -9674,6 +9752,12 @@ def ollama_chat(force_search=False, initial_prompt=None, allow_start=True, host_
         if not prompt:
             continue
 
+        # Shared host routing runs before any surface or model gets to improvise.
+        # This is the same gate for terminal LOOK, Signal, and Albert.
+        turn_intent=_lo_intent_family(prompt)
+        turn_force_search=bool(force_search or turn_intent=="web_current")
+        if events: events.emit("intent_routed",family=turn_intent,forced_search=turn_force_search)
+
         # An explicit `lk ...` line is an operator command, not language for the model.
         # Execute it argv-safe with the current TTY so interactive LOOK surfaces work
         # inside LO without consuming inference or Fabric model authorization.
@@ -9833,10 +9917,29 @@ def ollama_chat(force_search=False, initial_prompt=None, allow_start=True, host_
         messages.append({"role":"system","content":_temporal_context()})
         messages.append(user_message)
 
+        # LOOK Games are a tiny deterministic capability family. Resolve them
+        # before inference so "gtnw" can never become a filesystem or web search.
+        game_intent=None if turn_force_search else _lo_game_intent(prompt)
+        if game_intent:
+            game_name=game_intent["tool"]; game_args=game_intent["args"]
+            if events: events.emit("tool_start",tool=game_name,mode="preflight")
+            game_content,game_ok,_game_elapsed=_tool_transaction(
+                game_name,game_args,lambda: _run_capability_tool(game_name,game_args,workspace,profile))
+            answer=_lo_game_direct_answer(game_content,game_ok)
+            print("\n"+_lo_label("lo","35")+"\n"+_ollama_markup(answer)+"\n")
+            messages.append({"role":"assistant","content":answer})
+            if events:
+                events.emit("tool_done",tool=game_name,mode="preflight",elapsed_tool_ms=_game_elapsed,status=("ok" if game_ok else "failed"))
+                events.emit("response",text=answer)
+                events.emit("request_done",status=("ok" if game_ok else "error"),rounds=0,tool_calls=1,prompt_tokens=0,output_tokens=0,load_ms=0)
+            _ai_foreground(False,"lo")
+            if one_shot: return 0 if game_ok else 1
+            continue
+
         # Narrow local-media commands are deterministic capability requests, not
         # general web/search questions. Resolve them before inference so a model
         # cannot turn "play Talking Heads" into an internet search.
-        media_intent=None if force_search else _lo_media_intent_profile(prompt,profile)
+        media_intent=None if turn_force_search else _lo_media_intent_profile(prompt,profile)
         if media_intent and media_intent.get("pending_decision"):
             d=media_intent.get("pending_decision") or {}
             answer=f"I need a quick media choice. Decision {d.get('id','?')} is pending in Fabric; answer it here, Signal, or another trusted surface."
@@ -9871,7 +9974,7 @@ def ollama_chat(force_search=False, initial_prompt=None, allow_start=True, host_
             continue
 
         # Search mode is deliberately deterministic: search first, then answer.
-        if force_search:
+        if turn_force_search:
             if not has_web:
                 _ai_foreground(False,"lo")
                 print("search › OLLAMA_API_KEY is not set\n")
@@ -10091,7 +10194,7 @@ def ollama_chat(force_search=False, initial_prompt=None, allow_start=True, host_
             tools=[]
             if supports_tools and not host_repair_final and not weather_text_fast_path:
                 tools = _lo_tools(profile)
-                if has_web and not force_search:
+                if has_web and not turn_force_search:
                     tools.append(web_tool)
                 payload_obj["tools"] = tools
 
@@ -10252,7 +10355,7 @@ def ollama_chat(force_search=False, initial_prompt=None, allow_start=True, host_
                             external_action_succeeded=True
                             last_action=_lo_action_from_tool(name,args,tool_content)
                     elif name == "web_search":
-                        if not has_web or force_search:
+                        if not has_web or turn_force_search:
                             tool_content = "Web search is unavailable in this session."
                         else:
                             query = args.get("query", prompt)
@@ -10290,9 +10393,11 @@ def ollama_chat(force_search=False, initial_prompt=None, allow_start=True, host_
                         with _activity("inspecting"):
                             tool_content,_ok,_elapsed=_tool_transaction(
                                 name,args,lambda: _run_system_inspection_tool(name,args))
-                    elif name in {"generate_image","schedule_prompt","schedule_list","media_search","media_play","media_queue","media_control"}:
+                    elif name in {"generate_image","schedule_prompt","schedule_list","game_action","media_search","media_play","media_queue","media_control"}:
                         if name=="generate_image":
                             label,activity="image","generating"
+                        elif name=="game_action":
+                            label,activity="game","game"
                         elif name.startswith("media_"):
                             label,activity="media","media"
                         else:

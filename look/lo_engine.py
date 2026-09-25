@@ -89,6 +89,13 @@ class EventCollector:
         self.rows.append(row)
 
 
+def route_intent(prompt: str) -> str:
+    """Expose LOOK's shared front-door router to browser/native surfaces."""
+    core=_load_core()
+    fn=getattr(core,"_lo_intent_family",None)
+    return str(fn(prompt) if callable(fn) else "general")
+
+
 def available() -> bool:
     try:
         _load_core()

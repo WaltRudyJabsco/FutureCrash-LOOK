@@ -17,6 +17,7 @@ import time
 import tty
 from contextlib import contextmanager
 from dataclasses import dataclass
+from pathlib import Path
 from typing import Iterable
 
 RESET="\033[0m"
@@ -670,36 +671,128 @@ def play_backgammon(mode="1p"):
             if not dice: who="B" if who=="W" else "W"
 
 
-# ── Launcher ─────────────────────────────────────────────────────────────────
-def launcher(fd:int):
-    items=[("1","TIC-TAC-TOE","ttt"),("2","CHECKERS","checkers"),("3","CHESS","chess"),("4","BACKGAMMON","backgammon"),("5","GLOBAL THERMONUCLEAR WAR","gtnw")]
+# ── WOPR doorway ───────────────────────────────────────────────────────────────
+_GAMES_STATE=Path.home()/".local/share/look/games.json"
+_GAME_ITEMS=[
+    ("1","TIC-TAC-TOE","ttt"),
+    ("2","CHECKERS","checkers"),
+    ("3","CHESS","chess"),
+    ("4","BACKGAMMON","backgammon"),
+    ("5","GLOBAL THERMONUCLEAR WAR","gtnw"),
+]
+
+
+def _provisioned() -> bool:
+    try:
+        import json
+        row=json.loads(_GAMES_STATE.read_text(encoding="utf-8"))
+        return bool(row.get("joshua"))
+    except Exception:
+        return False
+
+
+def _mark_provisioned() -> None:
+    import json
+    _GAMES_STATE.parent.mkdir(parents=True,exist_ok=True)
+    _GAMES_STATE.write_text(json.dumps({"joshua":True},indent=2)+"\n",encoding="utf-8")
+
+
+def provision_login(fd:int) -> bool:
+    """One theatrical first-run gate. JOSHUA is a reference, never security."""
+    if _provisioned() or os.environ.get("LOOK_GAMES_SKIP_LOGON") == "1":
+        return True
+    while True:
+        sys.stdout.write(_clear()+BRIGHT+"WOPR ACCESS TERMINAL"+RESET+"\n\n")
+        sys.stdout.write(DIM+"LOGON: "+RESET); sys.stdout.flush()
+        value=read_line(fd,"",allow_empty=True).strip().upper()
+        if value in {"Q","QUIT"}: return False
+        if value=="JOSHUA":
+            sys.stdout.write("\n"+CYAN+"GREETINGS PROFESSOR FALKEN."+RESET+"\n")
+            sys.stdout.flush(); time.sleep(.65)
+            try: _mark_provisioned()
+            except OSError: pass
+            return True
+        sys.stdout.write("\n"+DIM+"IDENTIFICATION NOT RECOGNIZED BY SYSTEM"+RESET+"\n")
+        sys.stdout.flush(); time.sleep(.8)
+
+
+def launcher(fd:int, preselected:str=""):
+    """Show the WOPR list. A named command arrives preselected but can be changed."""
+    selected=preselected if any(g==preselected for _,_,g in _GAME_ITEMS) else ""
     while True:
         lines=chrome("Available Simulations","SELECT")
-        lines += [f"  {k}   {name}" for k,name,_ in items]
-        lines += ["",DIM+"choose 1-5   q/esc exit"+RESET]
+        for key,name,game in _GAME_ITEMS:
+            cursor=">" if game==selected else " "
+            lines.append(f" {cursor} {key}   {name}")
+        if selected:
+            lines += ["",DIM+"enter accept   1-5 choose another   q/esc exit"+RESET]
+        else:
+            lines += ["",DIM+"choose 1-5   q/esc exit"+RESET]
         sys.stdout.write("\n".join(lines)); sys.stdout.flush()
         k=read_key(fd)
         if k in {"q","esc","s"}: return None
-        for key,_,name in items:
-            if k==key: return name
+        if k=="enter" and selected: return selected
+        for key,_,name in _GAME_ITEMS:
+            if k==key:
+                selected=name
+                break
+        else:
+            continue
+        if not preselected:
+            return selected
+
+
+def choose_mode(fd:int, game:str, default="1p") -> str|None:
+    if game=="gtnw": return "0p"
+    labels={"0p":"COMPUTER / COMPUTER","1p":"HUMAN / COMPUTER","2p":"HUMAN / HUMAN"}
+    while True:
+        lines=chrome(next((n for _,n,g in _GAME_ITEMS if g==game),game),"PLAYERS")
+        lines += ["  0   COMPUTER / COMPUTER","  1   HUMAN / COMPUTER","  2   HUMAN / HUMAN","",DIM+"choose 0-2   q/esc exit"+RESET]
+        sys.stdout.write("\n".join(lines)); sys.stdout.flush()
+        k=read_key(fd)
+        if k in {"q","esc","s"}: return None
+        if k in {"0","1","2"}: return {"0":"0p","1":"1p","2":"2p"}[k]
 
 
 def run(args:list[str], *, gtnw_runner=None) -> int:
     args=list(args or [])
-    game=(args[0].casefold() if args else "")
     aliases={"tic-tac-toe":"ttt","tic":"ttt","draughts":"checkers","bg":"backgammon","war":"gtnw","thermonuclear":"gtnw"}
-    game=aliases.get(game,game)
-    if not game:
-        try:
-            with terminal() as fd: game=launcher(fd)
-        except RuntimeError as exc:
-            print(f"LOOK games · {exc}"); return 1
-        if not game: return 0
-        # A launcher selection starts in 1p, except GTNW which is its own 0p simulation.
-        args=[game]
-    try: mode=mode_from(args[1] if len(args)>1 else None, "0p" if game=="gtnw" else "1p")
+
+    # Preserve the original hidden joke. The bare plural command denies that the
+    # very games reachable by name exist at all.
+    if not args:
+        print("No games installed.")
+        return 0
+
+    game=aliases.get(args[0].casefold(),args[0].casefold())
+    if game in {"help","list","ls"}:
+        print("No games installed.")
+        return 0
+    valid={g for _,_,g in _GAME_ITEMS}
+    if game not in valid:
+        print(f"LOOK games · unknown simulation: {game}")
+        return 2
+
+    # Explicit mode remains a power-user shortcut. Otherwise enter through the
+    # WOPR selector, with the requested game already highlighted, then choose
+    # players inside the terminal.
+    explicit_mode=args[1] if len(args)>1 else None
+    try:
+        if explicit_mode is not None:
+            mode=mode_from(explicit_mode,"0p" if game=="gtnw" else "1p")
+        else:
+            with terminal() as fd:
+                if not provision_login(fd): return 0
+                chosen=launcher(fd,game)
+                if not chosen: return 0
+                game=chosen
+                mode=choose_mode(fd,game,"0p" if game=="gtnw" else "1p")
+                if not mode: return 0
     except ValueError as exc:
         print(f"LOOK games · {exc}"); return 2
+    except RuntimeError as exc:
+        print(f"LOOK games · {exc}"); return 1
+
     try:
         if game=="ttt": return play_ttt(mode)
         if game=="checkers": return play_checkers(mode)
@@ -709,16 +802,6 @@ def run(args:list[str], *, gtnw_runner=None) -> int:
             if mode!="0p":
                 print("LOOK games · Global Thermonuclear War is a 0p simulation."); return 2
             return gtnw_runner() if gtnw_runner else 0
-        if game in {"help","list","ls"}:
-            print("LOOK GAMES // WOPR RECREATION CHANNEL")
-            print("  ttt          [0p|1p|2p]")
-            print("  checkers     [0p|1p|2p]")
-            print("  chess        [0p|1p|2p]")
-            print("  backgammon   [0p|1p|2p]")
-            print("  gtnw          0p")
-            print("\nExamples: lk games chess 1p · lk games checkers 0p")
-            return 0
-        print(f"LOOK games · unknown simulation: {game}")
         return 2
     except RuntimeError as exc:
         print(f"LOOK games · {exc}"); return 1
