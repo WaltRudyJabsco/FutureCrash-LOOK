@@ -1,3 +1,9 @@
+## 6.3.8 — Browser Seat
+
+- `lk media arts`, `lk media showcase`, and `lk media classic-arts` once again open the official Classic Arts Showcase page in the system default browser.
+- Removed the special native HLS/mpv experiment for this Easter egg; All Classical audio remains native.
+- Albert keeps its scaled/expandable Classic Arts in-fold presentation.
+
 ## 6.3.7 — Window Seat
 
 - Fixed native video presentation when a LOOK-owned mpv already exists as an audio/headless session.
