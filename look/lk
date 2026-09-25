@@ -8596,6 +8596,37 @@ def _archive_lookup(query,rows=5):
                       source_url="https://archive.org/"),ensure_ascii=False)
 
 
+def _fabric_web_search(query, limit=8):
+    """Search through Fabric's accountless SearXNG edge.
+
+    Web search is a Fabric capability, not an Ollama-account feature. The local
+    node may satisfy it itself or route it to another node advertising web.search.
+    """
+    import json
+    import urllib.parse
+    import urllib.request
+    query=str(query or "").strip()
+    if not query:
+        raise RuntimeError("web search query required")
+    params=urllib.parse.urlencode({"q":query,"limit":max(1,min(int(limit or 8),20))})
+    with urllib.request.urlopen("http://127.0.0.1:7332/v1/web/search?"+params,timeout=12) as response:
+        data=json.load(response)
+    if data.get("error") and not data.get("results"):
+        raise RuntimeError(str(data.get("error")))
+    return data
+
+def _search_web(query):
+    """Prefer our accountless Fabric search; hosted Ollama is only a fallback."""
+    fabric_error=None
+    try:
+        return _fabric_web_search(query)
+    except Exception as exc:
+        fabric_error=exc
+    if os.environ.get("OLLAMA_API_KEY"):
+        return _ollama_web_search(query)
+    raise RuntimeError(f"Fabric web search unavailable: {fabric_error}")
+
+
 def _ollama_web_search(query):
     """Search via Ollama's hosted web API using the inherited API key."""
     import json
@@ -9439,7 +9470,7 @@ def ollama_chat(force_search=False, initial_prompt=None, allow_start=True, host_
     observed_image_paths=set()
     fresh_image_paths={str(p) for p in _resource_image_paths(resource_refs)}
 
-    has_web = bool(os.environ.get("OLLAMA_API_KEY"))
+    has_web = True  # Fabric web.search is attempted first; provider failure is reported by the tool.
     mode = "LOOK OLLAMA SEARCH" if force_search else "LOOK OLLAMA"
     web_state = "required" if force_search else ("available" if has_web else "off")
     shown_host=("fabric:auto" if fabric_mode else (host_name or _ollama_host_name(base)))
@@ -9807,7 +9838,7 @@ def ollama_chat(force_search=False, initial_prompt=None, allow_start=True, host_
             try:
                 print(f"{_ansi_label('search ›', '33')} {prompt}")
                 with _activity("searching"):
-                    result = _ollama_web_search(prompt)
+                    result = _search_web(prompt)
                 messages.append({
                     "role": "system",
                     "content": "Current web search results for the user's latest question:\n" + _typed_search_text(result) +
@@ -10178,7 +10209,7 @@ def ollama_chat(force_search=False, initial_prompt=None, allow_start=True, host_
                             try:
                                 print(f"{_ansi_label('search ›', '33')} {query}")
                                 with _activity("searching"):
-                                    search_result = _ollama_web_search(query)
+                                    search_result = _search_web(query)
                                 tool_content = _typed_search_text(search_result)
                             except Exception as exc:
                                 tool_content = f"Web search failed: {exc}"

@@ -163,7 +163,7 @@ package_for() {
 
 echo
 echo "LOOK WORKSTATION"
-core=(zsh python3 git zoxide fzf fd nvim bat fortune cowsay fastfetch chafa pdftotext ttyd lsof mpv)
+core=(zsh python3 git zoxide fzf fd nvim bat fortune cowsay fastfetch chafa pdftotext ttyd lsof mpv qrencode)
 missing=()
 for c in "${core[@]}"; do
   if have "$c"; then

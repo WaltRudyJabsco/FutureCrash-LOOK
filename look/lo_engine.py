@@ -98,7 +98,7 @@ def available() -> bool:
 
 
 def chat_once(prompt: str, *, profile='workspace', workspace=None, selected_paths=None,
-              history=None, interface_context=None, persona=None):
+              history=None, interface_context=None, persona=None, force_search=False):
     """Run one LO operator turn and return structured machine data."""
     core=_load_core()
     _load_web_key()
@@ -118,7 +118,7 @@ def chat_once(prompt: str, *, profile='workspace', workspace=None, selected_path
             os.environ['LOOK_LO_PERSONALITY']=str(persona).strip().lower()
         try:
             rc=core.ollama_chat(
-                initial_prompt=str(prompt), allow_start=True,
+                force_search=bool(force_search), initial_prompt=str(prompt), allow_start=True,
                 access_profile=profile, selected_paths=selected_paths,
                 workspace_override=workspace, one_shot=True, events=events,
                 conversation_history=history or [], interface_context=interface_context,

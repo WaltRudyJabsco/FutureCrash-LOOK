@@ -52,9 +52,15 @@ button:focus-visible,input:focus-visible,textarea:focus-visible{outline:2px soli
 @media(prefers-reduced-motion:reduce){*{scroll-behavior:auto!important;animation:none!important;transition:none!important}}
 body.dark{--paper:#11110f;--ink:#f0eee7;--muted:#99948b;--line:#34312c;--wash:rgba(255,255,255,.04);--shadow:rgba(0,0,0,.4);background:#070706}
 body.terminal{--paper:#050905;--ink:#a8f0aa;--muted:#5c9c66;--line:#1c3f25;--wash:rgba(168,240,170,.03);--shadow:rgba(0,0,0,.55);background:#020402}
+
+.beacon-layer{position:fixed;inset:0;z-index:9999;pointer-events:none;opacity:0;transition:opacity .12s linear,background .12s linear;mix-blend-mode:multiply}
+body.dark .beacon-layer,body.terminal .beacon-layer{mix-blend-mode:screen}
+.attachment-tray{display:none;gap:6px;flex-wrap:wrap;padding:0 4px 8px}.attachment-tray.live{display:flex}.attachment{display:flex;align-items:center;gap:6px;border:1px solid var(--line);padding:5px 7px;font-size:9px;max-width:220px}.attachment img{width:28px;height:28px;object-fit:cover;border:1px solid var(--line)}.attachment button{border:0;background:transparent;color:var(--muted);padding:0 2px}
+.thread{margin-top:14px;border-top:1px solid var(--line);padding-top:10px}.thread-turn{padding:8px 0;border-bottom:1px dotted var(--line)}.thread-turn:last-child{border-bottom:0}.thread-role{font-size:8px;text-transform:uppercase;letter-spacing:.12em;color:var(--muted);margin-bottom:4px}.thread-text{font-family:ui-serif,Georgia,Cambria,"Times New Roman",serif;font-size:14px;line-height:1.55}.thread-compose{display:grid;grid-template-columns:1fr auto;gap:7px;margin-top:10px}.thread-compose input{min-width:0;border:0;border-bottom:1px solid var(--line);background:transparent;outline:0;padding:8px 2px;font-size:12px}.thread-compose button{border:1px solid var(--line);background:transparent;padding:7px 9px;font-size:9px}
 </style>
 </head>
 <body>
+<div class="beacon-layer" id="beaconLayer"></div>
 <div class="shell dropzone" id="dropzone">
   <main class="paper" id="paper">
     <header class="top">
@@ -71,6 +77,7 @@ body.terminal{--paper:#050905;--ink:#a8f0aa;--muted:#5c9c66;--line:#1c3f25;--was
   </main>
 
   <div class="composer-wrap">
+    <div class="attachment-tray" id="attachmentTray"></div>
     <div class="composer">
       <span class="prompt">›</span>
       <input class="ask" id="ask" autocomplete="off" placeholder="ask, act, paste, or drop…" />
@@ -103,7 +110,7 @@ const ALBERT_SESSION = (()=>{let s=localStorage.getItem('albert-session');if(!s)
 const ALL_CLASSICAL = 'https://allclassical.streamguys1.com/ac128kmp3';
 const CLASSIC_ARTS = 'https://www.classicartsshowcase.org/watch-classic-arts-showcase/';
 const CLASSIC_ARTS_STREAM = 'https://classicarts.global.ssl.fastly.net/live/cas/master_3000k.m3u8';
-const state={folds:[], saved:loadSaved(), busy:false};
+const state={folds:[], saved:loadSaved(), busy:false, attachments:[]};
 const capabilities=[
   ['media.play','Play local or streamed audio/video','local effect'],['media.stop','Stop the selected output','local effect'],
   ['files.search','Find objects across available nodes','read'],['files.open','Open an object on this endpoint','local effect'],
@@ -120,10 +127,10 @@ function esc(s=''){return String(s).replace(/[&<>"']/g,c=>({'&':'&amp;','<':'&lt
 function uid(){return 'f'+Math.random().toString(36).slice(2,9)}
 function updateQuiet(){const active=state.folds.filter(f=>!f.dismissed).length;quiet.textContent=state.busy?'Albert is working. You can keep using the paper.':active===0?'Your space is quiet. Ask for something, or drop something here.':active===1?'One thing is on the paper.':active<4?'A few things are on the paper. Nothing is demanding your attention.':'Your paper is getting busy. Dismiss or save anything you want to keep.'}
 function statusLine(text){status.innerHTML='ALBERT 5 · FABRIC<br>'+esc(text)}
-function foldShell(f,body){const pinned=f.pinned?' · pinned':'';return `<article class="fold" id="${f.id}" data-kind="${esc(f.kind||'thing')}"><button class="summary" onclick="toggleFold('${f.id}')"><div><div class="title">${esc(f.title||'Untitled')}</div><div class="meta">${esc(f.meta||'')}${pinned}</div></div><div class="right">${esc(f.badge||f.type||'open')}</div></button><div class="body ${f.open===false?'':'open'}"><div class="inner"><div class="content">${body}<div class="actions"><button class="action" onclick="pinFold('${f.id}')">${f.pinned?'unpin':'pin'}</button><button class="action" onclick="saveFold('${f.id}')">save</button><button class="action quiet-action" onclick="dismissFold('${f.id}')">dismiss</button></div></div></div></div></article>`}
+function foldShell(f,body){const pinned=f.pinned?' · pinned':'';const meta=(f.meta||'').startsWith('Fabric cognition')?'':(f.meta||'');return `<article class="fold" id="${f.id}" data-kind="${esc(f.kind||'thing')}"><button class="summary" onclick="toggleFold('${f.id}')"><div><div class="title">${esc(f.title||'Untitled')}</div><div class="meta">${esc(meta)}${pinned}</div></div><div class="right">${esc(f.badge||f.type||'open')}</div></button><div class="body ${f.open===false?'':'open'}"><div class="inner"><div class="content">${body}<div class="actions"><button class="action" onclick="pinFold('${f.id}')">${f.pinned?'unpin':'pin'}</button><button class="action" onclick="saveFold('${f.id}')">save</button><button class="action quiet-action" onclick="dismissFold('${f.id}')">dismiss</button></div></div></div></div></article>`}
 function renderBody(f){
   if(f.type==='progress') return `<div class="progress"><span class="dot"></span><span>${esc(f.text||'Working…')}</span></div>`;
-  if(f.type==='answer') return `<div class="prose">${esc(f.text||'')}</div>${renderSources(f.sources)}`;
+  if(f.type==='answer') return `${(!f.turns?.length&&f.text)?`<div class="prose">${esc(f.text)}</div>`:''}${renderSources(f.sources)}${renderThread(f)}`;
   if(f.type==='receipt') return `<div class="receipt"><strong>${esc(f.label||'Done')}</strong><br>${esc(f.text||'')}</div>`;
   if(f.type==='audio') return `<div class="media"><div class="audio-card"><div class="now">${esc(f.title)}</div><div class="sub">${esc(f.subtitle||'')}</div><div class="audio-eq" id="eq-${f.id}" aria-label="live audio visualizer">${'<i></i>'.repeat(16)}</div></div><audio data-eq="eq-${f.id}" controls autoplay src="${esc(f.src)}"></audio></div>${f.note?`<div class="meta">${esc(f.note)}</div>`:''}`;
   if(f.type==='video') return `<div class="media-grid" id="media-grid-${f.id}"><div class="media"><div class="media-viewport" id="media-view-${f.id}"><button class="media-expand" onclick="toggleMediaExpand('${f.id}',event)">expand</button>${f.src?`<video controls autoplay playsinline data-fallback="${esc(f.embed||'')}" onerror="videoFallback(this)" src="${esc(f.src)}"></video>`:`${scaledPage(f.embed||CLASSIC_ARTS,f.id)}`}</div></div><div class="side"><div class="prose">${esc(f.text||'')}</div>${f.external?`<div class="actions"><button class="action primary" onclick="window.open('${esc(f.external)}','_blank','noopener')">open official feed</button></div>`:''}</div></div>`;
@@ -135,6 +142,12 @@ function renderBody(f){
   return `<div class="prose">${esc(f.text||'')}</div>${renderPipeline(f.pipeline)}`;
 }
 
+function renderThread(f){
+  const attached=(f.attachments||[]).map(a=>`<span class="pill">${esc(a.name||a.mime||'attachment')}</span>`).join('');
+  const turns=(f.turns||[]).map(t=>`<div class="thread-turn"><div class="thread-role">${esc(t.role==='user'?'you':'Albert')}</div><div class="thread-text">${esc(t.text||'')}</div></div>`).join('');
+  return `<div class="thread">${attached?`<div class="pillbar">${attached}</div>`:''}${turns}<div class="thread-compose"><input id="thread-${f.id}" placeholder="continue this thought…" onkeydown="if(event.key==='Enter'){event.stopPropagation();replyFold('${f.id}')}" onclick="event.stopPropagation()"><button onclick="event.stopPropagation();replyFold('${f.id}')">reply</button></div></div>`;
+}
+async function replyFold(id){const input=document.getElementById(`thread-${id}`);const q=input?.value.trim();if(!q)return;if(input)input.value='';await askFabric(q,{parent_fold:id},id)}
 function scaledPage(url,id){return `<div class="scaled-page" data-scaled-page><iframe allow="autoplay; fullscreen" referrerpolicy="no-referrer" src="${esc(url||CLASSIC_ARTS)}"></iframe></div>`}
 function fitScaledPages(){document.querySelectorAll('[data-scaled-page]').forEach(box=>{const frame=box.querySelector('iframe');if(!frame)return;const baseW=1200,baseH=760;const scale=Math.min(box.clientWidth/baseW,box.clientHeight/baseH);frame.style.transform=`scale(${Math.max(.1,scale)})`;frame.style.left=Math.max(0,(box.clientWidth-baseW*scale)/2)+'px';frame.style.top=Math.max(0,(box.clientHeight-baseH*scale)/2)+'px'})}
 function videoFallback(video){const url=video.dataset.fallback;if(!url)return;try{video.pause()}catch{}const host=video.parentElement;video.remove();host.insertAdjacentHTML('beforeend',scaledPage(url,host.id));requestAnimationFrame(fitScaledPages)}
@@ -180,16 +193,22 @@ function reopenSaved(id){const saved=state.saved.find(x=>x.id===id);if(!saved)re
 function removeSaved(id){state.saved=state.saved.filter(x=>x.id!==id);storeSaved();render()}
 function addProgress(text='Understanding…'){state.busy=true;statusLine('thinking');const id=addFold({type:'progress',title:'Albert',meta:'cognition',badge:'working',text,kind:'progress'});return id}
 function finishProgress(id){state.folds=state.folds.filter(x=>x.id!==id);state.busy=false;statusLine('local surface · ready');render()}
-async function askFabric(query,context={}){
+async function askFabric(query,context={},targetFold=null){
   const progress=addProgress('Understanding what you mean…');
+  const attachmentIds=state.attachments.map(a=>a.id).filter(Boolean);
+  const attachmentSnapshot=state.attachments.map(a=>({id:a.id,name:a.name,mime:a.mime,preview:a.preview}));
   try{
     await sleep(180);replaceFold(progress,{text:'Discovering available capabilities…'});
     const ctl=new AbortController();const t=setTimeout(()=>ctl.abort(),185000);
-    const r=await fetch(FABRIC_ENDPOINT,{method:'POST',headers:{'content-type':'application/json'},body:JSON.stringify({surface:'albert',origin:'browser',session:ALBERT_SESSION,input:{text:query},context:{...context,session:ALBERT_SESSION}}),signal:ctl.signal});clearTimeout(t);
-    if(!r.ok)throw new Error('Fabric unavailable');const payload=await r.json();finishProgress(progress);consumeFabric(payload);return;
-  }catch(e){replaceFold(progress,{text:'Fabric cognition is unavailable. I will not invent a result.'});await sleep(450);finishProgress(progress);consumeFabric({type:'answer',title:'Albert',meta:'Fabric cognition unavailable',badge:'offline',text:'The shared cognition/tool plane did not answer this request. Nothing was executed.'});}
+    const session=context.session||ALBERT_SESSION;
+    const r=await fetch(FABRIC_ENDPOINT,{method:'POST',headers:{'content-type':'application/json'},body:JSON.stringify({surface:'albert',origin:'browser',session,input:{text:query},context:{...context,session,artifacts:attachmentIds}}),signal:ctl.signal});clearTimeout(t);
+    if(!r.ok)throw new Error('Fabric unavailable');const payload=await r.json();finishProgress(progress);
+    if(targetFold){const fold=state.folds.find(x=>x.id===targetFold);const normalized=normalizeResult(payload);if(fold&&normalized.type==='answer'){fold.turns=fold.turns||[];fold.turns.push({role:'user',text:query},{role:'assistant',text:normalized.text||''});if(attachmentSnapshot.length)fold.attachments=[...(fold.attachments||[]),...attachmentSnapshot];render();return}}
+    consumeFabric(payload,{query,attachments:attachmentSnapshot});clearAttachments();return;
+  }catch(e){replaceFold(progress,{text:'Fabric cognition is unavailable. I will not invent a result.'});await sleep(450);finishProgress(progress);consumeFabric({type:'answer',title:'Albert',meta:'Fabric cognition unavailable',badge:'offline',text:'The shared cognition/tool plane did not answer this request. Nothing was executed.'},{query,attachments:attachmentSnapshot});}
 }
-function consumeFabric(payload){const items=Array.isArray(payload)?payload:(payload.items||[payload]);items.filter(Boolean).forEach(x=>addFold(normalizeResult(x)))}
+function consumeFabric(payload,context={}){const items=Array.isArray(payload)?payload:(payload.items||[payload]);items.filter(Boolean).forEach(x=>{const f=normalizeResult(x);if(context.query&&f.type==='answer'){f.prompt=context.query;f.turns=[{role:'user',text:context.query},{role:'assistant',text:f.text||''}];f.text='';if(!f.title||f.title==='Albert')f.title=topicTitle(context.query)}if(context.attachments?.length)f.attachments=context.attachments;addFold(f)})}
+function topicTitle(q){const t=String(q||'').trim().replace(/[?!.]+$/,'');if(!t)return 'Thought';return t.length>48?t.slice(0,47)+'…':t[0].toUpperCase()+t.slice(1)}
 function normalizeResult(x){if(x.fold)return x.fold;if(x.result)return normalizeResult(x.result);return {type:x.type||'answer',title:x.title||'Albert',meta:x.meta||x.tool||'Fabric',badge:x.badge||'ready',kind:x.kind||'thing',text:x.text||x.message||'',src:x.src,embed:x.embed,external:x.external,subtitle:x.subtitle,sources:x.sources,pipeline:x.pipeline,pills:x.pills}}
 function localCognition(raw){const q=raw.trim(),s=q.toLowerCase();
   if(/^(play |put on )?(some )?(classics|classical|classical music)$/.test(s)||s.includes('all classical')) return {type:'audio',title:'All Classical Radio',subtitle:'Portland · live',meta:'media.play · this endpoint',badge:'live',kind:'thing',src:ALL_CLASSICAL,note:'Built-in open stream alias · classics / classical',pipeline:{intent:'media.play',selector:'stream:all-classical',target:'origin endpoint',player:'browser'}};
@@ -204,12 +223,21 @@ function localCognition(raw){const q=raw.trim(),s=q.toLowerCase();
 }
 function extractThreshold(s){const m=s.match(/(?:over|above|exceeds?)\s*(\d+)\s*ms/);return m?`latency > ${m[1]} ms`:''}
 function sleep(ms){return new Promise(r=>setTimeout(r,ms))}
-function submit(){const q=ask.value.trim();if(!q)return;ask.value='';askFabric(q)}
+function submit(){const q=ask.value.trim();if(!q&&!state.attachments.length)return;ask.value='';askFabric(q||'Please inspect the attached object(s).')}
 ask.addEventListener('keydown',e=>{if(e.key==='Enter')submit()});
-// Drag/drop is a first-class input surface. Nothing uploads until Fabric is explicitly invoked.
+// Paste/drop share one artifact path. Bytes stop at Albert's artifact edge; LO receives paths/references, never embedded blobs.
 ['dragenter','dragover'].forEach(ev=>dropzone.addEventListener(ev,e=>{e.preventDefault();dropzone.classList.add('drag')}));['dragleave','drop'].forEach(ev=>dropzone.addEventListener(ev,e=>{e.preventDefault();dropzone.classList.remove('drag')}));
-dropzone.addEventListener('drop',async e=>{for(const file of [...e.dataTransfer.files]) await ingestFile(file)});
-async function ingestFile(file){const detail=`${formatBytes(file.size)} · ${file.type||'unknown type'}`;if(file.type.startsWith('image/')){const url=URL.createObjectURL(file);addFold({type:'image',title:file.name,meta:detail,badge:'image',kind:'things',src:url,text:'Dropped onto Albert. Ask about it or hand it to a Fabric vision capability.'});return}if(file.type.startsWith('video/')){const url=URL.createObjectURL(file);addFold({type:'video',title:file.name,meta:detail,badge:'video',kind:'things',src:url,text:'Local video object.'});return}if(file.type.startsWith('audio/')){const url=URL.createObjectURL(file);addFold({type:'audio',title:file.name,subtitle:'local object',meta:detail,badge:'audio',kind:'things',src:url});return}if(file.type.startsWith('text/')&&file.size<1024*1024){const text=await file.text();addFold({type:'file',title:file.name,name:file.name,mime:file.type,meta:detail,badge:'text',kind:'things',detail:text.slice(0,280)+(text.length>280?'…':'')});return}addFold({type:'file',title:file.name,name:file.name,mime:file.type,meta:detail,badge:'object',kind:'things',detail:'Ready to register as a Fabric artifact instead of embedding bytes in the cognition packet.'})}
+dropzone.addEventListener('drop',async e=>{for(const file of [...e.dataTransfer.files]) await attachFile(file)});
+ask.addEventListener('paste',async e=>{const files=[...(e.clipboardData?.files||[])];if(!files.length)return;e.preventDefault();for(const file of files)await attachFile(file)});
+document.addEventListener('paste',async e=>{if(e.target===ask||e.target?.closest?.('.thread-compose'))return;const files=[...(e.clipboardData?.files||[])];if(!files.length)return;e.preventDefault();ask.focus();for(const file of files)await attachFile(file)});
+async function attachFile(file){
+  const r=await fetch('/v1/artifacts',{method:'POST',headers:{'content-type':file.type||'application/octet-stream','x-filename':encodeURIComponent(file.name||'pasted-object')},body:file});
+  if(!r.ok){addFold({type:'answer',title:'Attachment',meta:'artifact registration failed',badge:'error',text:'Albert could not register that pasted/dropped object.'});return}
+  const a=await r.json();a.name=file.name||a.name||'pasted object';a.mime=file.type||a.mime;state.attachments.push(a);renderAttachments();ask.focus();
+}
+function renderAttachments(){attachmentTray.classList.toggle('live',!!state.attachments.length);attachmentTray.innerHTML=state.attachments.map((a,i)=>`<div class="attachment">${String(a.mime||'').startsWith('image/')?`<img src="${esc(a.preview)}" alt="">`:''}<span>${esc(a.name||'object')}<br><span class="meta">${esc(a.mime||'object')}</span></span><button title="Remove" onclick="removeAttachment(${i})">×</button></div>`).join('')}
+function removeAttachment(i){state.attachments.splice(i,1);renderAttachments()}
+function clearAttachments(){state.attachments=[];renderAttachments()}
 function formatBytes(n){if(n<1024)return n+' B';if(n<1048576)return (n/1024).toFixed(1)+' KB';return (n/1048576).toFixed(1)+' MB'}
 // Speech stays on-device when the browser exposes Web Speech; otherwise the control simply explains the missing capability.
 let recognition=null;mic.addEventListener('click',()=>{const SR=window.SpeechRecognition||window.webkitSpeechRecognition;if(!SR){addFold({type:'answer',title:'Microphone',meta:'endpoint capability unavailable',badge:'info',text:'This browser does not expose Web Speech recognition. Fabric can supply another speech adapter when installed.'});return}if(recognition){recognition.stop();return}recognition=new SR();recognition.interimResults=true;recognition.continuous=false;recognition.onstart=()=>mic.classList.add('on');recognition.onresult=e=>{ask.value=[...e.results].map(r=>r[0].transcript).join('')};recognition.onend=()=>{mic.classList.remove('on');recognition=null;if(ask.value.trim())submit()};recognition.start()});
@@ -219,6 +247,10 @@ function setTheme(t){document.body.classList.remove('dark','terminal');if(t!=='p
 setTheme(localStorage.getItem('albert5.theme')||'paper');
 toolgrid.innerHTML=capabilities.map(([n,d,r])=>`<div class="tool"><div class="tool-name">${esc(n)}</div><div class="tool-do">${esc(d)}<br>${esc(r)}</div></div>`).join('');
 document.querySelectorAll('.nav [data-filter]').forEach(btn=>btn.onclick=()=>{document.querySelectorAll('.nav [data-filter]').forEach(b=>b.classList.remove('active'));btn.classList.add('active');const filter=btn.dataset.filter;document.querySelectorAll('#stream .fold').forEach(el=>el.hidden=filter!=='all'&&el.dataset.kind!==filter)});
+// Albert is a Fabric surface, so synchronized beacon/light shows include it too.
+let lastBeacon='';
+async function pollLights(){try{const r=await fetch('/v1/lights',{cache:'no-store'});if(!r.ok)return;const d=await r.json(),c=d.light?.color||'';if(c===lastBeacon)return;lastBeacon=c;const colors={red:'#ff3b30',green:'#34c759',blue:'#0a84ff',white:'#ffffff'};beaconLayer.style.background=colors[c]||'transparent';beaconLayer.style.opacity=c&&c!=='off'?'.48':'0'}catch{}}
+setInterval(pollLights,350);pollLights();
 // Opening paper: one compact introduction, not a dashboard.
 addFold({type:'answer',title:'Albert 5 is awake',meta:'Fabric paper · local surface',badge:'ready',kind:'thing',text:'This is your cognitive space, not another inbox. Ask for something, speak, paste, or drop an object. Results arrive as folds you can use, pin, save, or dismiss.',pipeline:{input:'type · speak · paste · drop',cognition:'intent → capability discovery → exact action',effects:'local by default',compute:'free to float across Fabric'}});
 </script>

@@ -1,3 +1,10 @@
+## 6.4.2 — Clean Paper
+
+- Albert joins Fabric beacon/disco light shows through the local node light state.
+- Answer folds now support continuing conversation in place instead of forcing every follow-up into a new card.
+- Paste and drag/drop register images/files at Albert’s artifact edge and pass stable file references into the shared LO cognition engine.
+- Current-news/headline requests explicitly require live search/tool evidence rather than model-memory answers.
+
 ## 6.4.0 — Open Door
 
 - Albert is now reachable from trusted tailnet browsers through Tailscale Serve while remaining loopback-only itself.

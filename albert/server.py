@@ -1,12 +1,14 @@
 #!/usr/bin/env python3
 """Albert 5: quiet browser surface for the local Future Crash Fabric."""
 from __future__ import annotations
-import json, mimetypes, os, urllib.request, urllib.error, importlib.util, threading, time
+import json, mimetypes, os, urllib.request, urllib.error, importlib.util, threading, time, hashlib, re
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
-from urllib.parse import urlparse
+from urllib.parse import urlparse, unquote
 
 ROOT=Path(__file__).resolve().parent
+ARTIFACT_DIR=Path.home()/".local/share/future-crash-look/albert-artifacts"
+ARTIFACT_DIR.mkdir(parents=True,exist_ok=True)
 HOST=os.environ.get("ALBERT_HOST","127.0.0.1")
 PORT=int(os.environ.get("ALBERT_PORT","7330"))
 NODE=os.environ.get("FABRIC_NODE_URL","http://127.0.0.1:7332").rstrip("/")
@@ -84,7 +86,17 @@ def node_json(path, payload=None, timeout=1.25):
     req=urllib.request.Request(NODE+path, data=(json.dumps(payload).encode() if payload is not None else None), headers={"Content-Type":"application/json"})
     with urllib.request.urlopen(req,timeout=timeout) as r: return json.loads(r.read().decode())
 
-def cognition_json(text, session=""):
+
+def _needs_live_search(text):
+    low=str(text or '').casefold()
+    return any(token in low for token in ('headline','headlines','news','latest','today','current events','what happened'))
+
+def _looks_like_tool_plumbing(text):
+    low=str(text or "").casefold()
+    return ("### function call" in low or "<tool_call>" in low or
+            bool(re.search(r"```(?:json)?\s*\{\s*[\"'](?:name|tool)[\"']\s*:", str(text or ""), re.I)))
+
+def cognition_json(text, session="", selected_paths=None):
     """Run the same native LO engine used by Signal, without crossing Signal auth."""
     sid=(session or "albert")[:120]
     engine=_load_lo_engine()
@@ -93,9 +105,11 @@ def cognition_json(text, session=""):
         profile="workspace",
         workspace=str(Path.home()),
         history=_session_history(sid),
+        selected_paths=list(selected_paths or []),
+        force_search=_needs_live_search(text),
         interface_context=(
             "INTERFACE: Albert quiet paper browser surface. Answer normally and truthfully. "
-            "Use deterministic tools for current facts such as weather. Return concise prose suitable for a fold. "
+            "Use deterministic tools for current facts such as weather. For headlines, news, latest, current events, or anything time-sensitive, use the available web/search tool and cite/summarize retrieved evidence rather than model memory. Return concise prose suitable for a fold. "
             "Albert owns presentation; do not claim a UI action happened unless the tool result says it happened. "
             "Effects are local by default and compute may float across Fabric."
         ),
@@ -103,10 +117,15 @@ def cognition_json(text, session=""):
     answer=str(result.get("text") or "").strip()
     if not answer:
         raise RuntimeError("shared LO engine returned no answer")
+    if _looks_like_tool_plumbing(answer):
+        # Tool protocol is machinery, never paper. A model that narrates a call
+        # instead of executing it has not completed the user's request.
+        raise RuntimeError("cognition returned unexecuted tool protocol")
     _session_append(sid,text,answer)
     return {"text":answer,"lo_events":list(result.get("events") or []),"provenance":result.get("provenance")}
 
-def action(text, session=""):
+def action(text, session="", context=None):
+    context=context or {}
     q=" ".join(str(text or "").strip().split()); low=q.casefold().strip(" .!?")
     if low in {"classics","classical","classical music","play classics","play classical","put on classical music"} or "all classical" in low:
         return {"type":"audio","title":"All Classical Radio","subtitle":"Portland · live","meta":"media.play · this endpoint","badge":"live","kind":"things","src":ALL_CLASSICAL,"note":"Fabric built-in · classics","pipeline":{"intent":"media.play","selector":"stream:all-classical","target":"origin endpoint","effect":"local"}}
@@ -138,7 +157,14 @@ def action(text, session=""):
     # cognition/tool plane used elsewhere. Albert must never stop at a fake
     # "understood" receipt when Fabric can actually reason, search or use tools.
     try:
-        reply=cognition_json(q, session=session)
+        artifact_ids=[str(x) for x in (context.get("artifacts") or []) if str(x).strip()]
+        selected=[]
+        for aid in artifact_ids[:8]:
+            safe=re.sub(r"[^a-f0-9]","",aid.lower())[:64]
+            matches=list(ARTIFACT_DIR.glob(safe+"*")) if safe else []
+            if matches:
+                selected.append(str(matches[0]))
+        reply=cognition_json(q, session=session, selected_paths=selected)
         text=str(reply.get("text") or "").strip()
         if not text:
             raise RuntimeError(reply.get("error") or "empty cognition response")
@@ -173,13 +199,13 @@ def action(text, session=""):
         }
 
 class Handler(BaseHTTPRequestHandler):
-    server_version='Albert/1.1.0'
+    server_version='Albert/1.2.0'
     def log_message(self,*_): pass
     def send_json(self,code,obj):
         raw=json.dumps(obj,ensure_ascii=False).encode(); self.send_response(code); self.send_header('Content-Type','application/json; charset=utf-8'); self.send_header('Content-Length',str(len(raw))); self.end_headers(); self.wfile.write(raw)
     def do_GET(self):
         path=urlparse(self.path).path
-        if path in {'/health','/v1/health'}: return self.send_json(200,{"ok":True,"surface":"albert","version":"1.1.0","fabric":NODE})
+        if path in {'/health','/v1/health'}: return self.send_json(200,{"ok":True,"surface":"albert","version":"1.2.0","fabric":NODE})
         if path in {'/v1/actions','/api/capabilities'}:
             try: caps=node_json('/v1/capabilities')
             except Exception: caps={}
@@ -187,17 +213,39 @@ class Handler(BaseHTTPRequestHandler):
         if path=='/api/fabric':
             try: return self.send_json(200,{"ok":True,"nodes":node_json('/v1/nodes'),"capabilities":node_json('/v1/capabilities')})
             except Exception as exc: return self.send_json(503,{"ok":False,"error":str(exc)})
+        if path=='/v1/lights':
+            try: return self.send_json(200,node_json('/v1/lights'))
+            except Exception as exc: return self.send_json(503,{"pulse":0,"light":None,"error":str(exc)})
+        if path.startswith('/v1/artifacts/'):
+            aid=re.sub(r'[^a-f0-9]','',path.rsplit('/',1)[-1].lower())[:64]
+            matches=list(ARTIFACT_DIR.glob(aid+'*')) if aid else []
+            if not matches: return self.send_error(404)
+            target=matches[0]; data=target.read_bytes()
+            self.send_response(200); self.send_header('Content-Type',mimetypes.guess_type(target.name)[0] or 'application/octet-stream'); self.send_header('Cache-Control','private, max-age=3600'); self.send_header('Content-Length',str(len(data))); self.end_headers(); self.wfile.write(data); return
         rel='index.html' if path in {'/','/index.html'} else path.lstrip('/')
         target=(ROOT/rel).resolve()
         if ROOT not in target.parents and target!=ROOT: return self.send_error(403)
         if not target.is_file(): return self.send_error(404)
         data=target.read_bytes(); self.send_response(200); self.send_header('Content-Type',mimetypes.guess_type(target.name)[0] or 'application/octet-stream'); self.send_header('Cache-Control','no-cache'); self.send_header('Content-Length',str(len(data))); self.end_headers(); self.wfile.write(data)
     def do_POST(self):
-        if urlparse(self.path).path!='/v1/actions': return self.send_error(404)
+        path=urlparse(self.path).path
+        if path=='/v1/artifacts':
+            try:
+                n=int(self.headers.get('Content-Length') or 0)
+                if n<=0 or n>32*1024*1024: return self.send_json(413,{"ok":False,"error":"artifact must be 1 byte to 32 MiB"})
+                data=self.rfile.read(n); digest=hashlib.sha256(data).hexdigest()
+                name=unquote(str(self.headers.get('X-Filename') or 'object')).replace('\x00','')
+                suffix=Path(name).suffix[:16]
+                target=ARTIFACT_DIR/(digest+suffix)
+                if not target.exists(): target.write_bytes(data)
+                return self.send_json(200,{"ok":True,"id":digest,"uri":"artifact://sha256/"+digest,"name":name,"mime":self.headers.get('Content-Type') or mimetypes.guess_type(name)[0] or 'application/octet-stream',"size":len(data),"preview":"/v1/artifacts/"+digest})
+            except Exception as exc: return self.send_json(400,{"ok":False,"error":str(exc)})
+        if path!='/v1/actions': return self.send_error(404)
         try:
             n=int(self.headers.get('Content-Length') or 0); raw=self.rfile.read(min(n,262144)); payload=json.loads(raw or b'{}'); text=((payload.get('input') or {}).get('text') or payload.get('text') or '')
-            session=str(payload.get("session") or payload.get("context",{}).get("session") or "").strip()[:120]
-            return self.send_json(200,action(text,session=session))
+            context=payload.get('context') or {}
+            session=str(payload.get("session") or context.get("session") or "").strip()[:120]
+            return self.send_json(200,action(text,session=session,context=context))
         except Exception as exc: return self.send_json(400,{"ok":False,"error":str(exc)})
 
 if __name__=='__main__':

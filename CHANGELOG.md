@@ -1,3 +1,18 @@
+## 6.4.2 — Clean Paper
+
+- Current-information cognition now searches through Fabric SearXNG first; hosted Ollama search is fallback-only.
+- Albert rejects raw model/tool protocol instead of printing function-call syntax onto the paper.
+- Answer folds begin as real user/Albert threads and subsequent replies continue inside the same fold.
+- Routine cognition plumbing is hidden from normal fold headers.
+- `qrencode` joins the normal Homebrew/Linuxbrew workstation utility set, so Albert/Fabric QR handoff works after a standard install.
+
+## 6.4.2 — Clean Paper
+
+- Albert joins Fabric beacon/disco light shows through the local node light state.
+- Answer folds now support continuing conversation in place instead of forcing every follow-up into a new card.
+- Paste and drag/drop register images/files at Albert’s artifact edge and pass stable file references into the shared LO cognition engine.
+- Current-news/headline requests explicitly require live search/tool evidence rather than model-memory answers.
+
 ## 6.4.0 — Open Door
 
 - Albert is now reachable from trusted tailnet browsers through Tailscale Serve while remaining loopback-only itself.
