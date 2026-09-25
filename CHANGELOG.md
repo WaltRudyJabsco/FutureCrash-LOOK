@@ -1,3 +1,10 @@
+## 6.3.2 — One Brain
+
+- Albert uses the shared LO cognition/tool plane for general requests.
+- Persistent Albert session context enables coherent follow-ups.
+- Removed the generic fake-understood terminal state.
+- Albert fails closed when shared cognition is unavailable.
+
 ## 6.3.1 — Full Alphabet
 
 - Fix interactive LOOK/media filters stealing lowercase `j/k` before text input.

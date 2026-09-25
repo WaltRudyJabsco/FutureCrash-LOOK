@@ -1,3 +1,10 @@
+## 6.3.2 — One Brain
+
+- Albert no longer terminates unknown requests with a fake “understood” cognition receipt.
+- Non-fast-path requests now hand off to the shared native LO cognition/tool plane used by Signal.
+- Albert persists a browser session id, so follow-ups such as “what was the weather?” retain the active location/context.
+- If shared cognition is unavailable, Albert fails closed and says nothing was executed.
+
 # 5.4.7
 
 - Filter beacon/light/RGB/pulse renderer effects out of Dash RECENT.

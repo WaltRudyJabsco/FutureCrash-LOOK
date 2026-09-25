@@ -98,7 +98,8 @@ body.terminal{--paper:#050905;--ink:#a8f0aa;--muted:#5c9c66;--line:#1c3f25;--was
 </div>
 
 <script>
-const FABRIC_ENDPOINT = '/v1/actions'; // Same-origin Fabric action endpoint. Albert falls back locally when absent.
+const FABRIC_ENDPOINT = '/v1/actions'; // Same-origin Albert action endpoint.
+const ALBERT_SESSION = (()=>{let s=localStorage.getItem('albert-session');if(!s){s='albert-'+crypto.randomUUID();localStorage.setItem('albert-session',s)}return s})();
 const ALL_CLASSICAL = 'https://allclassical.streamguys1.com/ac128kmp3';
 const CLASSIC_ARTS = 'https://www.classicartsshowcase.org/watch-classic-arts-showcase/';
 const state={folds:[], saved:loadSaved(), busy:false};
@@ -147,10 +148,10 @@ async function askFabric(query,context={}){
   const progress=addProgress('Understanding what you mean…');
   try{
     await sleep(180);replaceFold(progress,{text:'Discovering available capabilities…'});
-    const ctl=new AbortController();const t=setTimeout(()=>ctl.abort(),1300);
-    const r=await fetch(FABRIC_ENDPOINT,{method:'POST',headers:{'content-type':'application/json'},body:JSON.stringify({surface:'albert',origin:'browser',input:{text:query},context}),signal:ctl.signal});clearTimeout(t);
+    const ctl=new AbortController();const t=setTimeout(()=>ctl.abort(),185000);
+    const r=await fetch(FABRIC_ENDPOINT,{method:'POST',headers:{'content-type':'application/json'},body:JSON.stringify({surface:'albert',origin:'browser',session:ALBERT_SESSION,input:{text:query},context:{...context,session:ALBERT_SESSION}}),signal:ctl.signal});clearTimeout(t);
     if(!r.ok)throw new Error('Fabric unavailable');const payload=await r.json();finishProgress(progress);consumeFabric(payload);return;
-  }catch(e){replaceFold(progress,{text:'Using local cognition fallback…'});await sleep(220);finishProgress(progress);consumeFabric(localCognition(query));}
+  }catch(e){replaceFold(progress,{text:'Fabric cognition is unavailable. I will not invent a result.'});await sleep(450);finishProgress(progress);consumeFabric({type:'answer',title:'Albert',meta:'Fabric cognition unavailable',badge:'offline',text:'The shared cognition/tool plane did not answer this request. Nothing was executed.'});}
 }
 function consumeFabric(payload){const items=Array.isArray(payload)?payload:(payload.items||[payload]);items.filter(Boolean).forEach(x=>addFold(normalizeResult(x)))}
 function normalizeResult(x){if(x.fold)return x.fold;if(x.result)return normalizeResult(x.result);return {type:x.type||'answer',title:x.title||'Albert',meta:x.meta||x.tool||'Fabric',badge:x.badge||'ready',kind:x.kind||'thing',text:x.text||x.message||'',src:x.src,embed:x.embed,external:x.external,subtitle:x.subtitle,sources:x.sources,pipeline:x.pipeline,pills:x.pills}}

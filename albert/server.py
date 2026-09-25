@@ -10,6 +10,7 @@ ROOT=Path(__file__).resolve().parent
 HOST=os.environ.get("ALBERT_HOST","127.0.0.1")
 PORT=int(os.environ.get("ALBERT_PORT","7330"))
 NODE=os.environ.get("FABRIC_NODE_URL","http://127.0.0.1:7332").rstrip("/")
+COGNITION=os.environ.get("ALBERT_COGNITION_URL","http://127.0.0.1:7331/api/chat")
 ALL_CLASSICAL="https://allclassical.streamguys1.com/ac128kmp3"
 CLASSIC_ARTS="https://www.classicartsshowcase.org/watch-classic-arts-showcase/"
 TOOLS=[
@@ -30,7 +31,23 @@ def node_json(path, payload=None, timeout=1.25):
     req=urllib.request.Request(NODE+path, data=(json.dumps(payload).encode() if payload is not None else None), headers={"Content-Type":"application/json"})
     with urllib.request.urlopen(req,timeout=timeout) as r: return json.loads(r.read().decode())
 
-def action(text):
+def cognition_json(text, session=""):
+    """Use the shared LO cognition/tool plane; Albert only owns presentation."""
+    payload={
+        "text": text,
+        "visual": False,
+        "session": session or "albert",
+        "media_endpoint": "browser",
+    }
+    req=urllib.request.Request(
+        COGNITION,
+        data=json.dumps(payload).encode(),
+        headers={"Content-Type":"application/json"},
+    )
+    with urllib.request.urlopen(req, timeout=180) as r:
+        return json.loads(r.read().decode())
+
+def action(text, session=""):
     q=" ".join(str(text or "").strip().split()); low=q.casefold().strip(" .!?")
     if low in {"classics","classical","classical music","play classics","play classical","put on classical music"} or "all classical" in low:
         return {"type":"audio","title":"All Classical Radio","subtitle":"Portland · live","meta":"media.play · this endpoint","badge":"live","kind":"things","src":ALL_CLASSICAL,"note":"Fabric built-in · classics","pipeline":{"intent":"media.play","selector":"stream:all-classical","target":"origin endpoint","effect":"local"}}
@@ -58,21 +75,52 @@ def action(text):
                 return {"type":"answer","title":title,"meta":f"media.prepare · {len(queue)} item(s)","badge":"prepared","kind":"things","text":"Fabric resolved the request without stealing playback from this browser endpoint.","pipeline":{"intent":"media.play","source":"Fabric media catalog","target":"origin endpoint","next":"browser playback adapter"}}
         except Exception:
             pass
-    # Until additional adapters land, expose the interpretation boundary instead
-    # of pretending an unavailable mail/calendar/maps action happened.
-    family='action'
-    for key,name in [('mail','mail.*'),('email','mail.*'),('calendar','calendar.*'),('meeting','calendar.*'),('map','maps.*'),('direction','maps.*'),('route','maps.*'),('file','files.*'),('document','files.*'),('watch','watch.*')]:
-        if key in low: family=name; break
-    return {"type":"answer","title":"Albert","meta":"Fabric cognition handoff","badge":"understood","kind":"things","text":f"I understand the request: “{q}”. The matching capability family is {family}; Albert will execute it when that adapter is available rather than inventing a result.","pipeline":{"understand":"natural language","discover":family,"execute":"exact tool call","trust":"ask only when ambiguity or consequence matters"}}
+    # Anything not handled by a deterministic fast path goes to the *same* LO
+    # cognition/tool plane used elsewhere. Albert must never stop at a fake
+    # "understood" receipt when Fabric can actually reason, search or use tools.
+    try:
+        reply=cognition_json(q, session=session)
+        text=str(reply.get("text") or "").strip()
+        if not text:
+            raise RuntimeError(reply.get("error") or "empty cognition response")
+        events=reply.get("lo_events") or []
+        tool_names=[]
+        for event in events:
+            if isinstance(event,dict):
+                name=event.get("tool")
+                if name and name not in tool_names:
+                    tool_names.append(str(name))
+        pipeline={"cognition":"shared LO engine","session":session or "albert"}
+        if tool_names:
+            pipeline["tools"]=" · ".join(tool_names)
+        return {
+            "type":"answer",
+            "title":"Albert",
+            "meta":"Fabric cognition · LO",
+            "badge":"grounded" if tool_names else "answer",
+            "kind":"things",
+            "text":text,
+            "pipeline":pipeline,
+        }
+    except Exception as exc:
+        return {
+            "type":"answer",
+            "title":"Albert",
+            "meta":"Fabric cognition unavailable",
+            "badge":"offline",
+            "kind":"things",
+            "text":"I can’t reach the shared cognition/tool plane right now, so I’m not going to pretend this request was completed.",
+            "pipeline":{"cognition":COGNITION,"error":str(exc)},
+        }
 
 class Handler(BaseHTTPRequestHandler):
-    server_version='Albert/1.0.0'
+    server_version='Albert/1.0.1'
     def log_message(self,*_): pass
     def send_json(self,code,obj):
         raw=json.dumps(obj,ensure_ascii=False).encode(); self.send_response(code); self.send_header('Content-Type','application/json; charset=utf-8'); self.send_header('Content-Length',str(len(raw))); self.end_headers(); self.wfile.write(raw)
     def do_GET(self):
         path=urlparse(self.path).path
-        if path in {'/health','/v1/health'}: return self.send_json(200,{"ok":True,"surface":"albert","version":"1.0.0","fabric":NODE})
+        if path in {'/health','/v1/health'}: return self.send_json(200,{"ok":True,"surface":"albert","version":"1.0.1","fabric":NODE})
         if path in {'/v1/actions','/api/capabilities'}:
             try: caps=node_json('/v1/capabilities')
             except Exception: caps={}
@@ -89,9 +137,10 @@ class Handler(BaseHTTPRequestHandler):
         if urlparse(self.path).path!='/v1/actions': return self.send_error(404)
         try:
             n=int(self.headers.get('Content-Length') or 0); raw=self.rfile.read(min(n,262144)); payload=json.loads(raw or b'{}'); text=((payload.get('input') or {}).get('text') or payload.get('text') or '')
-            return self.send_json(200,action(text))
+            session=str(payload.get("session") or payload.get("context",{}).get("session") or "").strip()[:120]
+            return self.send_json(200,action(text,session=session))
         except Exception as exc: return self.send_json(400,{"ok":False,"error":str(exc)})
 
 if __name__=='__main__':
-    print(f'Albert 5 · http://{HOST}:{PORT} · Fabric {NODE}',flush=True)
+    print(f'Albert 5 · http://{HOST}:{PORT} · Fabric {NODE} · cognition {COGNITION}',flush=True)
     ThreadingHTTPServer((HOST,PORT),Handler).serve_forever()
