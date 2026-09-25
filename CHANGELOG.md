@@ -1,3 +1,13 @@
+## 6.3.5 — Dead Means Dead
+
+- Albert explicitly tears down audio/video/EQ contexts before folds are dismissed or DOM is rebuilt. Saved items remain inert snapshots until reopened on paper.
+
+## 6.3.4 — Saved Means Saved
+
+- Albert Saved entries are durable snapshots that can be reopened onto the live paper after the original fold is dismissed.
+- Saved entries now expose `open on paper` and `remove saved` instead of dead live-fold controls.
+- Reopened audio folds recreate their player and visualizer normally.
+
 ## 6.3.3 — Alive
 
 - Albert now loads the shared native LO engine directly instead of calling Signal's paired-browser `/api/chat` endpoint. Signal can be closed; Albert cognition remains available as long as LOOK/LO is installed.

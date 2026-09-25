@@ -135,7 +135,18 @@ function renderBody(f){
 }
 function renderPipeline(p){if(!p)return'';return Object.entries(p).map(([k,v])=>`<div class="route"><b>${esc(k)}</b><div>${esc(v)}</div></div>`).join('')}
 function renderSources(s){if(!s?.length)return'';return `<div class="pillbar">${s.map(x=>`<span class="pill">${esc(x)}</span>`).join('')}</div>`}
-function render(){stream.innerHTML=state.folds.filter(f=>!f.dismissed).map(f=>foldShell(f,renderBody(f))).join('');savedStream.innerHTML=state.saved.map(f=>foldShell({...f,id:'saved-'+f.id},renderBody(f))).join('');savedLabel.hidden=!state.saved.length;updateQuiet();requestAnimationFrame(initAudioEQ)}
+function savedShell(f){
+  return `<article class="fold saved-fold" id="saved-${f.id}" data-kind="${esc(f.kind||'thing')}"><button class="summary" onclick="reopenSaved('${f.id}')"><div><div class="title">${esc(f.title||'Untitled')}</div><div class="meta">${esc(f.meta||'')} · saved</div></div><div class="right">open</div></button><div class="body"><div class="inner"><div class="content"><div class="actions"><button class="action primary" onclick="reopenSaved('${f.id}')">open on paper</button><button class="action quiet-action" onclick="removeSaved('${f.id}')">remove saved</button></div></div></div></div></article>`
+}
+function teardownMedia(root=stream){
+  root.querySelectorAll('audio,video').forEach(media=>{
+    const eq=AUDIO_EQ.get(media);if(eq){try{eq.stop()}catch{}AUDIO_EQ.delete(media)}
+    try{media.pause()}catch{}
+    try{media.removeAttribute('src');media.load()}catch{}
+  });
+  root.querySelectorAll('iframe').forEach(frame=>{try{frame.src='about:blank'}catch{}});
+}
+function render(){teardownMedia(stream);stream.innerHTML=state.folds.filter(f=>!f.dismissed).map(f=>foldShell(f,renderBody(f))).join('');savedStream.innerHTML=state.saved.map(savedShell).join('');savedLabel.hidden=!state.saved.length;updateQuiet();requestAnimationFrame(initAudioEQ)}
 const AUDIO_EQ=new WeakMap();
 function eqFallback(audio,bars){
   let raf=0;
@@ -154,9 +165,11 @@ function initAudioEQ(){
 function addFold(f,{front=false}={}){f={id:uid(),open:true,kind:'thing',...f};front?state.folds.unshift(f):state.folds.push(f);render();setTimeout(()=>document.getElementById(f.id)?.scrollIntoView({behavior:'smooth',block:'center'}),30);return f.id}
 function replaceFold(id,f){const i=state.folds.findIndex(x=>x.id===id);if(i>=0){state.folds[i]={...state.folds[i],...f,id};render()}}
 function toggleFold(id){const f=state.folds.find(x=>x.id===id);if(f){f.open=!f.open;render()}}
-function dismissFold(id){const f=state.folds.find(x=>x.id===id);if(!f)return;f.dismissed=true;const el=document.getElementById(id);el?.classList.add('dismiss');setTimeout(render,180)}
+function dismissFold(id){const f=state.folds.find(x=>x.id===id);if(!f)return;const el=document.getElementById(id);if(el)teardownMedia(el);f.dismissed=true;el?.classList.add('dismiss');setTimeout(render,180)}
 function pinFold(id){const f=state.folds.find(x=>x.id===id);if(f){f.pinned=!f.pinned;render()}}
-function saveFold(id){const f=state.folds.find(x=>x.id===id);if(!f)return;state.saved.push({...f,dismissed:false,open:false});storeSaved();render()}
+function saveFold(id){const f=state.folds.find(x=>x.id===id);if(!f)return;const snapshot={...f,dismissed:false,open:false};const i=state.saved.findIndex(x=>x.id===f.id);if(i>=0)state.saved[i]=snapshot;else state.saved.push(snapshot);storeSaved();render()}
+function reopenSaved(id){const saved=state.saved.find(x=>x.id===id);if(!saved)return;const live={...saved,id:uid(),dismissed:false,open:true,pinned:false};state.folds.push(live);render();setTimeout(()=>document.getElementById(live.id)?.scrollIntoView({behavior:'smooth',block:'center'}),30)}
+function removeSaved(id){state.saved=state.saved.filter(x=>x.id!==id);storeSaved();render()}
 function addProgress(text='Understanding…'){state.busy=true;statusLine('thinking');const id=addFold({type:'progress',title:'Albert',meta:'cognition',badge:'working',text,kind:'progress'});return id}
 function finishProgress(id){state.folds=state.folds.filter(x=>x.id!==id);state.busy=false;statusLine('local surface · ready');render()}
 async function askFabric(query,context={}){

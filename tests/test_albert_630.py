@@ -42,3 +42,16 @@ def test_audio_visualizers_are_audio_only():
     assert 'def _media_player_visualizer' in lk
     assert '_media_queue_has_video([entry])' in lk
     assert 'mpv IPC does not expose decoded PCM' in lk
+
+def test_albert_saved_items_rehydrate_live_folds():
+    html=(ROOT/'albert/index.html').read_text()
+    assert 'function savedShell' in html
+    assert 'onclick="reopenSaved(' in html
+    assert 'open on paper' in html
+    assert 'function reopenSaved(id)' in html
+    assert 'id:uid(),dismissed:false,open:true' in html
+    assert 'function removeSaved(id)' in html
+    # Saved entries must not reuse live-fold controls with synthetic IDs.
+    render_line=next(line for line in html.splitlines() if line.startswith('function render(){'))
+    assert 'state.saved.map(savedShell)' in render_line
+    assert "foldShell({...f,id:'saved-'" not in render_line
