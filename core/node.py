@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Future Crash + LOOK Unified Node 6.4.12.
+"""Future Crash + LOOK Unified Node 6.5.0.
 
 A small distributed supervisor for trusted personal machines. Immediate events stay
 asynchronous; a one-second fabric pulse reconciles presence, leases and stale work.
@@ -58,8 +58,8 @@ try:
 except ImportError:
     from endpoint_auth import EndpointAuth
 
-VERSION = "6.4.12"
-RELEASE_NAME = "GROUND TRUTH"
+VERSION = "6.5.0"
+RELEASE_NAME = "LAST MILE"
 DEFAULT_HOST = "127.0.0.1"
 DEFAULT_PORT = 7332
 DEFAULT_INGRESS_PORT = 0
@@ -115,6 +115,7 @@ BROWSER_ENDPOINT_TTL = 20.0
 BROWSER_ACTION_TTL = 90.0
 BROWSER_ENDPOINTS = {}
 BROWSER_ACTIONS = {}
+BROWSER_RECEIPTS = {}
 
 def _browser_prune(now=None):
     now=time.time() if now is None else float(now)
@@ -126,6 +127,9 @@ def _browser_prune(now=None):
             kept=[r for r in rows if now-float(r.get("created") or 0) <= BROWSER_ACTION_TTL]
             if kept: BROWSER_ACTIONS[eid]=kept
             else: BROWSER_ACTIONS.pop(eid,None)
+        for aid,row in list(BROWSER_RECEIPTS.items()):
+            if now-float(row.get("updated") or row.get("created") or 0) > BROWSER_ACTION_TTL:
+                BROWSER_RECEIPTS.pop(aid,None)
 
 def _browser_presence(endpoint_id, label, capabilities, surface="browser", metadata=None):
     eid=str(endpoint_id or "").strip()
@@ -151,13 +155,39 @@ def _browser_queue(endpoint_id, action, payload):
     if not row: raise ValueError("browser endpoint is offline")
     if action not in set(row.get("capabilities") or []): raise ValueError(f"browser endpoint lacks capability: {action}")
     item={"id":"ba-"+uuid.uuid4().hex[:12],"action":action,"payload":dict(payload or {}),"created":time.time()}
-    with BROWSER_ENDPOINT_LOCK: BROWSER_ACTIONS.setdefault(eid,[]).append(item)
+    receipt={"id":item["id"],"endpoint_id":eid,"action":action,"state":"queued","created":item["created"],"updated":item["created"],"detail":"queued for browser delivery","history":[{"state":"queued","at":item["created"]}]}
+    with BROWSER_ENDPOINT_LOCK:
+        BROWSER_ACTIONS.setdefault(eid,[]).append(item)
+        BROWSER_RECEIPTS[item["id"]]=receipt
     return item
+
+def _browser_receipt(endpoint_id, action_id, state, detail=""):
+    eid=str(endpoint_id or "").strip(); aid=str(action_id or "").strip(); state=str(state or "").strip().lower()
+    allowed={"queued","delivered","received","waiting","started","ended","error"}
+    if state not in allowed: raise ValueError("invalid browser effect receipt state")
+    with BROWSER_ENDPOINT_LOCK:
+        row=BROWSER_RECEIPTS.get(aid)
+        if not row or str(row.get("endpoint_id") or "") != eid: raise ValueError("browser effect receipt not found")
+        now=time.time(); row["state"]=state; row["updated"]=now; row["detail"]=str(detail or "")[:240]
+        row.setdefault("history",[]).append({"state":state,"at":now,"detail":row["detail"]})
+        return dict(row)
+
+def _browser_receipt_get(action_id):
+    _browser_prune(); aid=str(action_id or "").strip()
+    with BROWSER_ENDPOINT_LOCK:
+        row=BROWSER_RECEIPTS.get(aid)
+        return dict(row) if row else None
 
 def _browser_poll(endpoint_id):
     eid=str(endpoint_id or "").strip(); _browser_prune()
     with BROWSER_ENDPOINT_LOCK:
         rows=list(BROWSER_ACTIONS.pop(eid,[]))
+        now=time.time()
+        for item in rows:
+            row=BROWSER_RECEIPTS.get(item.get("id"))
+            if row:
+                row["state"]="delivered"; row["updated"]=now; row["detail"]="delivered to browser poll"
+                row.setdefault("history",[]).append({"state":"delivered","at":now})
     return rows
 
 def _endpoint_match(target, row):
@@ -184,7 +214,7 @@ def _endpoint_dispatch_fabric(target, action, payload):
             except Exception as exc: last=exc
         if response is None: raise RuntimeError(f"browser endpoint dispatch failed: {last}")
         item=response.get("queued") or {}
-    return {"ok":True,"node":owner,"endpoint":row,"queued":item,"engine":"browser"}
+    return {"ok":True,"node":owner,"endpoint":row,"queued":item,"receipt":_browser_receipt_get(item.get("id")) if owner in {"local",local} else None,"engine":"browser"}
 
 BEACON_PATTERNS = {
     "rgb": ("red", "green", "blue", "white"),
@@ -2161,7 +2191,7 @@ def _local_web_search(query, limit=8):
     base=os.environ.get("FCL_SEARXNG_URL","http://127.0.0.1:8888").rstrip("/")
     request=urllib.request.Request(base+"/search?"+params,headers={
         "Accept":"application/json",
-        "User-Agent":"Future-Crash-Fabric/6.4.12",
+        "User-Agent":"Future-Crash-Fabric/6.5.0",
     })
     try:
         with urllib.request.urlopen(request,timeout=8) as response:
@@ -2895,7 +2925,7 @@ def _openjev_shadow(state, question, candidates, *, profile="workspace", consequ
 
 
 class API(BaseHTTPRequestHandler):
-    server_version = "FCLNode/6.4.12"
+    server_version = "FCLNode/6.5.0"
 
     def setup(self):
         self._metric_request_id = None
@@ -3493,6 +3523,11 @@ class API(BaseHTTPRequestHandler):
         if path == "/v1/endpoints/poll":
             try: return self.sendj(200,{"ok":True,"actions":_browser_poll(str(d.get("endpoint_id") or ""))})
             except Exception as exc: return self.sendj(400,{"ok":False,"error":str(exc)})
+        if path == "/v1/endpoints/receipt":
+            try:
+                row=_browser_receipt(str(d.get("endpoint_id") or ""),str(d.get("action_id") or ""),str(d.get("state") or ""),str(d.get("detail") or ""))
+                return self.sendj(200,{"ok":True,"receipt":row})
+            except ValueError as exc: return self.sendj(404,{"ok":False,"error":str(exc)})
         if path == "/v1/endpoints/dispatch":
             try:
                 item=_browser_queue(str(d.get("endpoint_id") or ""),str(d.get("action") or ""),d.get("payload") or {})
@@ -5042,7 +5077,8 @@ def main():
                 if a.json: print(json.dumps(result,indent=2))
                 else:
                     target=((result.get("endpoint") or {}).get("label") or result.get('node') or a.node or 'local')
-                    print(f"FABRIC SPEAK · {target} · {result.get('engine') or '?'}")
+                    status=((result.get('receipt') or {}).get('state') or ('queued' if result.get('engine')=='browser' else 'played'))
+                    print(f"FABRIC SPEAK · {target} · {result.get('engine') or '?'} · {status}")
                 return 0
             if a.command=="media-outputs":
                 payload = _daemon_get(a.host, a.port, "/v1/media/outputs")

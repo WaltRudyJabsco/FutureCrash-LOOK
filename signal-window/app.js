@@ -14,14 +14,21 @@ function browserEndpointLabel(){
   if(/Macintosh|Mac OS/i.test(ua))return 'Mac browser';
   return 'Browser';
 }
-function browserSpeak(payload){
-  const text=String(payload?.text||'').trim();if(!text||!('speechSynthesis'in window))return;
-  try{const u=new SpeechSynthesisUtterance(text);if(payload?.voice_profile==='wopr'){u.rate=.82;u.pitch=.55}else{u.rate=.96;u.pitch=1}speechSynthesis.cancel();speechSynthesis.speak(u);event('FABRIC SPEAK · '+browserEndpointLabel())}catch(err){event('FABRIC SPEAK ERROR · '+err.message)}
+let browserAudioUnlocked=false,pendingBrowserSpeech=[];
+async function effectReceipt(actionId,state,detail=''){if(!actionId)return;try{await fetch('/api/endpoint/receipt',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({action_id:actionId,state,detail})})}catch{}}
+function drainBrowserSpeech(){if(!browserAudioUnlocked)return;const q=pendingBrowserSpeech.splice(0);for(const a of q)browserSpeak(a)}
+function unlockBrowserAudio(){if(browserAudioUnlocked)return;try{if('speechSynthesis'in window){const u=new SpeechSynthesisUtterance(' ');u.volume=0;u.rate=10;u.onend=()=>{browserAudioUnlocked=true;event('FABRIC AUDIO · READY');drainBrowserSpeech()};speechSynthesis.speak(u);setTimeout(()=>{if(!browserAudioUnlocked){browserAudioUnlocked=true;event('FABRIC AUDIO · READY');drainBrowserSpeech()}},180)}}catch{browserAudioUnlocked=true;drainBrowserSpeech()}}
+['pointerdown','touchend','keydown'].forEach(ev=>document.addEventListener(ev,unlockBrowserAudio,{passive:true}));
+function browserSpeak(action){
+  const payload=action?.payload||action||{},actionId=action?.id||'';const text=String(payload?.text||'').trim();effectReceipt(actionId,'received','browser runtime received action');
+  if(!text||!('speechSynthesis'in window)){effectReceipt(actionId,'error','speech synthesis unavailable');event('FABRIC SPEAK ERROR · UNAVAILABLE');return}
+  if(!browserAudioUnlocked){pendingBrowserSpeech.push(action);effectReceipt(actionId,'waiting','waiting for browser audio unlock');event('FABRIC AUDIO · TAP ONCE TO ENABLE');return}
+  try{const u=new SpeechSynthesisUtterance(text);if(payload?.voice_profile==='wopr'){u.rate=.82;u.pitch=.55}else{u.rate=.96;u.pitch=1}u.onstart=()=>{effectReceipt(actionId,'started','speech synthesis started');event('FABRIC SPEAK · '+browserEndpointLabel())};u.onend=()=>effectReceipt(actionId,'ended','speech synthesis ended');u.onerror=e=>effectReceipt(actionId,'error',String(e?.error||'speech synthesis error'));speechSynthesis.cancel();speechSynthesis.speak(u)}catch(err){effectReceipt(actionId,'error',err.message);event('FABRIC SPEAK ERROR · '+err.message)}
 }
 async function pollEndpointActions(){
   if(!endpointAuthorized){setTimeout(pollEndpointActions,1500);return}
-  try{const r=await fetch('/api/endpoint/poll',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({label:browserEndpointLabel(),capabilities:['display.output','audio.output','audio.speak','media.play','input.text'],metadata:{device:browserEndpointLabel(),platform:navigator.platform||''}})});const d=await r.json();for(const a of (d.actions||[])){if(a.action==='audio.speak')browserSpeak(a.payload||{})}}catch{}
-  setTimeout(pollEndpointActions,1400);
+  try{const r=await fetch('/api/endpoint/poll',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({label:browserEndpointLabel(),capabilities:['display.output','audio.output','audio.speak','media.play','input.text'],metadata:{device:browserEndpointLabel(),platform:navigator.platform||'',audio_unlocked:browserAudioUnlocked}})});const d=await r.json();for(const a of (d.actions||[])){if(a.action==='audio.speak')browserSpeak(a)}}catch{}
+  setTimeout(pollEndpointActions,900);
 }
 pollEndpointActions();
 const signalSession=localStorage.getItem('signal-session')||crypto.randomUUID();

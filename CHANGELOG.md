@@ -1,3 +1,11 @@
+# 6.5.0 · LAST MILE
+
+- Browser endpoints now have a reusable effect runtime with explicit queued/delivered/received/waiting/started/ended/error receipts.
+- iPad/iPhone Safari audio is unlocked by a real user gesture; speech waits locally instead of being silently dropped when WebKit blocks autoplay.
+- Albert and Signal share the same browser-effect receipt and audio-unlock behavior.
+- `lk fabric speak @browser ...` now reports browser delivery as queued rather than implying that queued work has already played.
+- Browser effect metadata advertises whether local audio has been unlocked, preparing the same runtime for media, beacon sound, and other endpoint-local effects.
+
 # 6.4.12 · GROUND TRUTH
 
 - Carries forward LIVE WIRE's daemon-owned browser endpoint dispatch so `lk fabric speak @ipad ...` resolves against the resident Fabric endpoint registry.

@@ -308,6 +308,14 @@ class Handler(BaseHTTPRequestHandler):
                 value=node_json('/v1/endpoints/poll',{'endpoint_id':ep.get('endpoint_id')},timeout=1.5)
                 return self.send_json(200,value or {'actions':[]})
             except Exception as exc:return self.send_json(502,{'ok':False,'error':str(exc),'actions':[]})
+        if path=='/api/endpoint/receipt':
+            ep=self._require_endpoint('lo.use')
+            if not ep:return
+            try:
+                n=int(self.headers.get('Content-Length') or 0); d=json.loads(self.rfile.read(min(n,16384)) or b'{}')
+                value=node_json('/v1/endpoints/receipt',{'endpoint_id':ep.get('endpoint_id'),'action_id':d.get('action_id'),'state':d.get('state'),'detail':d.get('detail') or ''},timeout=1.5)
+                return self.send_json(200,value or {'ok':True})
+            except Exception as exc:return self.send_json(502,{'ok':False,'error':str(exc)})
         if path in {'/v1/artifacts','/v1/actions'} and not self._require_endpoint('lo.use'): return
         if path=='/v1/artifacts':
             try:

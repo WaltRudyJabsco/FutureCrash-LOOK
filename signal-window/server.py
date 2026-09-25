@@ -1025,6 +1025,14 @@ class App(BaseHTTPRequestHandler):
                 return self.json(200,value)
             except Exception as exc:
                 return self.json(502,{"ok":False,"error":str(exc),"actions":[]})
+        if self.path=="/api/endpoint/receipt":
+            try:
+                n=int(self.headers.get("Content-Length","0")); d=json.loads(self.rfile.read(n) or b"{}")
+                ep=self._endpoint() or {}
+                value=_node_call("/v1/endpoints/receipt",{"endpoint_id":ep.get("endpoint_id"),"action_id":d.get("action_id"),"state":d.get("state"),"detail":d.get("detail") or ""},timeout=1.5) or {"ok":True}
+                return self.json(200,value)
+            except Exception as exc:
+                return self.json(502,{"ok":False,"error":str(exc)})
         if self.path=="/api/fabric/decisions/answer":
             try:
                 n=int(self.headers.get("Content-Length","0")); d=json.loads(self.rfile.read(n) or b"{}")
