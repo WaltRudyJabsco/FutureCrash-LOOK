@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Future Crash + LOOK Unified Node 6.4.7.
+"""Future Crash + LOOK Unified Node 6.4.8.
 
 A small distributed supervisor for trusted personal machines. Immediate events stay
 asynchronous; a one-second fabric pulse reconciles presence, leases and stale work.
@@ -58,8 +58,8 @@ try:
 except ImportError:
     from endpoint_auth import EndpointAuth
 
-VERSION = "6.4.7"
-RELEASE_NAME = "VOICEPRINT"
+VERSION = "6.4.8"
+RELEASE_NAME = "SOUND CHECK"
 DEFAULT_HOST = "127.0.0.1"
 DEFAULT_PORT = 7332
 DEFAULT_INGRESS_PORT = 0
@@ -149,6 +149,8 @@ def binary(name: str) -> str | None:
     if found:
         return found
     for p in (Path.home()/".local/bin"/name, Path.home()/"bin"/name,
+              Path("/home/linuxbrew/.linuxbrew/bin")/name,
+              Path.home()/".linuxbrew/bin"/name,
               Path("/opt/homebrew/bin")/name, Path("/usr/local/bin")/name,
               Path("/usr/bin")/name):
         if p.exists() and os.access(p, os.X_OK):
@@ -2082,7 +2084,7 @@ def _local_web_search(query, limit=8):
     base=os.environ.get("FCL_SEARXNG_URL","http://127.0.0.1:8888").rstrip("/")
     request=urllib.request.Request(base+"/search?"+params,headers={
         "Accept":"application/json",
-        "User-Agent":"Future-Crash-Fabric/6.4.7",
+        "User-Agent":"Future-Crash-Fabric/6.4.8",
     })
     try:
         with urllib.request.urlopen(request,timeout=8) as response:
@@ -2815,7 +2817,7 @@ def _openjev_shadow(state, question, candidates, *, profile="workspace", consequ
 
 
 class API(BaseHTTPRequestHandler):
-    server_version = "FCLNode/6.4.7"
+    server_version = "FCLNode/6.4.8"
 
     def setup(self):
         self._metric_request_id = None

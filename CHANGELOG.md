@@ -1,3 +1,7 @@
+## 6.4.8 — SOUND CHECK
+
+- Fixed Fabric speech under Linux systemd by teaching canonical service binary discovery about Linuxbrew (`/home/linuxbrew/.linuxbrew/bin` and `~/.linuxbrew/bin`). Interactive WOPR voice and `/v1/audio/speak` now resolve the same eSpeak NG/SoX binaries.
+
 ## 6.4.7 — VOICEPRINT
 
 - Promoted speech to a first-class Fabric local-effect capability: nodes now advertise `audio.speak` and accept `/v1/audio/speak` with explicit output-node routing through the existing Fabric transport.

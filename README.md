@@ -304,7 +304,7 @@ On an iPad connected to the same tailnet, open the URL printed by `lk albert url
 Albert is a first-class Fabric UI: synchronized beacon/disco presence, continuing answer-fold conversations, and artifact-aware paste/drop input. Pasted images and files are registered locally and supplied to the shared LO engine by reference rather than embedded into inference packets. Current-news/headline requests are routed through live search/tool evidence when available.
 
 
-## LOOK Games (6.4.7 · VOICEPRINT)
+## LOOK Games (6.4.8 · SOUND CHECK)
 
 `lk games` opens the WOPR recreation channel. Board games support `0p`, `1p`, and `2p`: `lk games chess 1p`, `lk games checkers 0p`, `lk games backgammon 2p`, and `lk games ttt 1p`. `lk games gtnw` keeps the Global Thermonuclear War simulation. The old `lk ttt` and `lk gtnw` commands remain aliases.
 
