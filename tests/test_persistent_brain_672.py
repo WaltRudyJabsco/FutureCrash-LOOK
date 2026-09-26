@@ -24,6 +24,8 @@ class PersistentBrain672Tests(unittest.TestCase):
         self.assertIn('slot="home.location"',text)
         self.assertIn('slot="weather.location"',text)
         self.assertIn('_brain_clear_pending("weather"',text)
+        self.assertIn('_brain_resume_goal("weather"',text)
+        self.assertIn('status="failed"',text)
         self.assertIn('weather_location=_lo_learned_home_location(_load_memory())',text)
 
     def test_context_budget_keeps_more_history_but_retrieves_bounded_context(self):

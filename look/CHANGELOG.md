@@ -1,3 +1,9 @@
+## 6.7.3 — LET GO
+
+- Harden persistent goal/slot lifecycle so stale WEATHER state cannot capture unrelated turns.
+- Distinguish waiting-for-human from running-at-edge state.
+- Retire failed weather invocations and structurally reject new intent as a location-slot answer.
+
 ## 6.7.2 — STAY AWAKE
 
 - Persistent working-state goals/slots and `lk brain`.

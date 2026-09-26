@@ -138,6 +138,10 @@ class WeatherEdge514Tests(unittest.TestCase):
         self.assertEqual(self.w['_lo_learned_home_location'](memory),'Portland, Oregon')
         self.assertEqual(self.w['_lo_weather_pending_location']('home',memory),'Portland, Oregon')
         self.assertEqual(self.w['_lo_weather_pending_location']('portland',memory),'portland')
+        self.assertEqual(self.w['_lo_weather_pending_location']('weather in portland oregon',memory),'portland oregon')
+        self.assertIsNone(self.w['_lo_weather_pending_location']('what is the time',memory))
+        self.assertIsNone(self.w['_lo_weather_pending_location']('lo what is the date',memory))
+        self.assertIsNone(self.w['_lo_weather_pending_location']('open the browser',memory))
         self.assertIsNone(self.w['_lo_weather_pending_location']('home',{'atoms':[]}))
 
     def test_current_weather_has_deterministic_final_answer(self):

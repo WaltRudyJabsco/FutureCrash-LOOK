@@ -6784,14 +6784,38 @@ def _brain_set_pending(kind, *, goal="", slot="", resume="", request=""):
     _save_brain_state(state)
     return state["pending"]
 
-def _brain_clear_pending(goal="", *, outcome=""):
+def _brain_resume_goal(goal, *, request=""):
+    """A required operator slot was filled; the goal is runnable, not pending.
+
+    Pending means LO is waiting on the operator. Once the operator answers, clear
+    that obligation before touching an external edge so a provider failure or
+    process restart cannot reinterpret an unrelated future utterance as the slot.
+    """
+    state=_load_brain_state()
+    pending=state.get("pending")
+    if pending and (not goal or pending.get("goal")==goal):
+        state["pending"]=None
+    rows=[]; found=False
+    for row in state.get("active_goals",[]):
+        if row.get("goal")==goal:
+            live=dict(row); live["status"]="running"; live["slot"]=""
+            if request: live["request"]=request[:500]
+            live["updated_at"]=time.time(); rows.append(live); found=True
+        else:
+            rows.append(row)
+    if goal and not found:
+        rows.append({"goal":goal,"status":"running","slot":"","request":request[:500],"updated_at":time.time()})
+    state["active_goals"]=rows
+    _save_brain_state(state)
+
+def _brain_clear_pending(goal="", *, outcome="", status="done"):
     state=_load_brain_state(); pending=state.get("pending")
     if pending and (not goal or pending.get("goal")==goal): state["pending"]=None
     if goal:
         active=[]
         for row in state.get("active_goals",[]):
             if row.get("goal")==goal:
-                done=dict(row); done["status"]="done" if outcome else "cleared"; done["outcome"]=outcome[:500]; done["updated_at"]=time.time()
+                done=dict(row); done["status"]=status if outcome else "cleared"; done["outcome"]=outcome[:500]; done["updated_at"]=time.time()
                 state.setdefault("recent_goals",[]).append(done)
             else: active.append(row)
         state["active_goals"]=active
@@ -6886,16 +6910,26 @@ def _lo_store_home_location(memory, location):
     return _merge_machine_atoms(memory,[{"k":"preference","s":"home","r":"weather_location","v":location,"c":100,"u":1}])
 
 def _lo_weather_pending_location(prompt, memory):
-    """Treat the answer to our own location question as working state."""
-    text=" ".join(str(prompt or "").strip().split()).strip(" ,.;:?!")
+    """Resolve only a plausible answer to LO's pending weather-location slot.
+
+    A pending slot gets first refusal, not ownership of the next utterance. New
+    questions and commands supersede it. Explicit weather wording may still fill
+    the slot, but only its extracted location is consumed.
+    """
+    raw=" ".join(str(prompt or "").strip().split())
+    text=raw.strip(" ,.;:?!")
     if not text or len(text.split()) > 10:
         return None
     low=text.casefold()
     if low in {"home","my home","at home","here"}:
         return _lo_learned_home_location(memory)
-    # Reject obvious new requests; a short bare place is otherwise exactly what
-    # the host asked the operator to supply.
-    if re.search(r"\b(play|open|find|search|stop|pause|write|delete|email|calendar)\b",low):
+    if _lo_requires_weather(raw):
+        return _lo_weather_location(raw)
+    # Questions/commands are new intent, not slot values. Keep this structural:
+    # do not grow a blacklist of every capability LO may acquire.
+    if raw.rstrip().endswith("?") or re.match(
+        r"^(?:lo\s+)?(?:what|when|where|who|why|how|which|is|are|am|was|were|do|does|did|can|could|would|will|should|tell|show|give|play|open|find|search|stop|pause|write|delete|email|calendar)\b",
+        low, re.I):
         return None
     return _normalize_weather_location(text)
 
@@ -9143,7 +9177,7 @@ def _direct_searxng_search(query, limit=8):
     params=urllib.parse.urlencode({"q":query,"format":"json"})
     request=urllib.request.Request(base+"/search?"+params,headers={
         "Accept":"application/json",
-        "User-Agent":"Future-Crash-Fabric/6.7.2",
+        "User-Agent":"Future-Crash-Fabric/6.7.3",
     })
     with urllib.request.urlopen(request,timeout=12) as response:
         data=json.load(response)
@@ -10244,13 +10278,16 @@ def ollama_chat(force_search=False, initial_prompt=None, allow_start=True, host_
                 _mirror_machine_atoms_to_fabric([{"k":"preference","s":"home","r":"weather_location","v":candidate,"c":100,"u":1}])
                 weather_forced_location=candidate
                 pending_home_definition=False
-                _brain_set_pending("slot",goal="weather",slot="weather.location",resume="weather.current",request="weather at home")
+                _brain_resume_goal("weather",request="weather at home")
 
         # The answer to our own weather-location question belongs to working state.
         # Never send literal "home" to a public geocoder.
         if pending_weather_clarification and not weather_forced_location:
             memory=_load_memory()
             weather_forced_location=_lo_weather_pending_location(prompt,memory)
+            if weather_forced_location:
+                pending_weather_clarification=False
+                _brain_resume_goal("weather",request=brain_pending.get("request") or prompt)
             if str(prompt).strip().casefold() in {"home","my home","at home","here"} and not weather_forced_location:
                 answer="What city should I use for home?"
                 pending_home_definition=True
@@ -10675,6 +10712,10 @@ def ollama_chat(force_search=False, initial_prompt=None, allow_start=True, host_
                     "\nUse this canonical WEATHER result to answer the user's latest question. "
                     "Do not call weather again unless the receipt is unusable."
                 )})
+            if not weather_succeeded:
+                pending_weather_clarification=False
+                pending_home_definition=False
+                _brain_clear_pending("weather",outcome=f"weather failed for {weather_location}",status="failed")
             if events:
                 events.emit("tool_done", tool="weather", mode="preflight",
                             elapsed_tool_ms=int((time.monotonic()-tool_started)*1000),

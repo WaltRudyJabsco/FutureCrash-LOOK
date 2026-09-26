@@ -1,3 +1,11 @@
+# 6.7.3 · LET GO
+
+- Pending cognitive slots now get first refusal rather than ownership of the next utterance.
+- Filling `weather.location` clears the human-input obligation before external I/O.
+- Failed WEATHER runs retire as failed instead of persisting as zombie goals.
+- Explicit weather restatements extract only their location while unrelated questions/commands supersede pending clarification.
+- Added regression coverage for `what is the time` / `lo what is the date` after a failed weather continuation.
+
 # 6.7.2 · STAY AWAKE
 
 - Added persistent `brain_state.json` working state with active goals and unresolved slots.
