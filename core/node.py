@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Future Crash + LOOK Unified Node 6.7.3.
+"""Future Crash + LOOK Unified Node 6.7.4.
 
 A small distributed supervisor for trusted personal machines. Immediate events stay
 asynchronous; a one-second fabric pulse reconciles presence, leases and stale work.
@@ -66,7 +66,7 @@ try:
 except ImportError:
     import rendezvous
 
-VERSION = "6.7.3"
+VERSION = "6.7.4"
 RELEASE_NAME = "HOME BASE"
 DEFAULT_HOST = "127.0.0.1"
 DEFAULT_PORT = 7332
@@ -2209,7 +2209,7 @@ def _local_web_search(query, limit=8):
     base=os.environ.get("FCL_SEARXNG_URL","http://127.0.0.1:8888").rstrip("/")
     request=urllib.request.Request(base+"/search?"+params,headers={
         "Accept":"application/json",
-        "User-Agent":"Future-Crash-Fabric/6.7.3",
+        "User-Agent":"Future-Crash-Fabric/6.7.4",
     })
     try:
         with urllib.request.urlopen(request,timeout=8) as response:
@@ -2943,7 +2943,7 @@ def _openjev_shadow(state, question, candidates, *, profile="workspace", consequ
 
 
 class API(BaseHTTPRequestHandler):
-    server_version = "FCLNode/6.7.3"
+    server_version = "FCLNode/6.7.4"
 
     def setup(self):
         self._metric_request_id = None

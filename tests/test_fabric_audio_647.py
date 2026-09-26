@@ -5,7 +5,7 @@ ROOT=Path(__file__).resolve().parents[1]
 
 
 def test_release_and_audio_capability_contract():
-    assert (ROOT/'VERSION').read_text().strip()=='6.7.3'
+    assert (ROOT/'VERSION').read_text().strip()=='6.7.4'
     node=(ROOT/'core/node.py').read_text()
     assert 'RELEASE_NAME = "HOME BASE"' in node
     assert '"audio.speak"' in node

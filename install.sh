@@ -1,15 +1,15 @@
 #!/usr/bin/env bash
 set -euo pipefail
 ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
-echo "Future Crash + LOOK 6.7.3 · LET GO"
+echo "Future Crash + LOOK 6.7.4 · CLEAN BREAK"
 echo "────────────────────────────────────────"
 
 # Refuse a mixed bundle before mutating the machine. A unified release must move
 # LOOK and the node together.
 EXPECTED_RELEASE="$(tr -d '[:space:]' < "$ROOT/VERSION")"
-[[ "$EXPECTED_RELEASE" == "6.7.3" ]] || { echo "BUNDLE ERROR: expected release 6.7.3, found $EXPECTED_RELEASE"; exit 4; }
+[[ "$EXPECTED_RELEASE" == "6.7.4" ]] || { echo "BUNDLE ERROR: expected release 6.7.4, found $EXPECTED_RELEASE"; exit 4; }
 echo "BUNDLE SOURCE  $ROOT"
-echo "BUNDLE RELEASE $EXPECTED_RELEASE · LET GO"
+echo "BUNDLE RELEASE $EXPECTED_RELEASE · CLEAN BREAK"
 for vf in "$ROOT/look/VERSION" "$ROOT/albert/VERSION" "$ROOT/future-crash/VERSION"; do
   component_version="$(tr -d '[:space:]' < "$vf")"
   [[ "$component_version" == "$EXPECTED_RELEASE" ]] || { echo "BUNDLE ERROR: $vf reports $component_version, expected $EXPECTED_RELEASE"; exit 4; }
@@ -50,7 +50,7 @@ FCL_UNIFIED_INSTALL_CHILD=1 "$ROOT/install-look.sh" "$@"
 ((UNINSTALL)) && exit 0
 if ((DRY_RUN)); then
   echo
-  echo "[dry-run] would install/restart Unified Node 6.7.3 · LET GO with signed Fabric rendezvous, Tailcat direct transport, ONE BRAIN cognition, LIVING MIND memory, browser endpoints, SearXNG, Media, Artifacts, and Signal Window 1.10.5"
+  echo "[dry-run] would install/restart Unified Node 6.7.4 · CLEAN BREAK with signed Fabric rendezvous, Tailcat direct transport, ONE BRAIN cognition, LIVING MIND memory, browser endpoints, SearXNG, Media, Artifacts, and Signal Window 1.10.5"
   echo "[dry-run] OpenJev mode: $OPENJEV_MODE (auto adopts an existing worker; absence is non-fatal)"
   echo "[dry-run] would initialize Tailcat :7443, install optional signed rendezvous discovery, keep Tailscale :7332 → fcl-ingress :7333 as fallback, and verify Fabric CLI wiring"
   exit 0

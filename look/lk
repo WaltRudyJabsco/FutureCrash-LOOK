@@ -6371,6 +6371,18 @@ def _temporal_context():
         "timezone, or relative dates from model knowledge or prior conversation."
     )
 
+def _lo_direct_temporal_answer(prompt):
+    """Answer simple host-clock questions without asking a model to reinterpret time."""
+    low=" ".join(str(prompt or "").casefold().split()).strip(" ?!.")
+    now=datetime.now().astimezone()
+    if re.fullmatch(r"(?:what(?:'s| is) )?(?:the )?(?:local )?time(?: is it)?",low) or low in {"what time is it","time"}:
+        return f"{now.strftime('%-I:%M %p')} {now.tzname() or 'local'}"
+    if re.fullmatch(r"(?:what(?:'s| is) )?(?:the )?(?:date|date today|today's date)(?: today)?",low) or low in {"what is the date","what's the date"}:
+        return now.strftime("%A, %B %-d, %Y")
+    if low in {"what day is it","what day is today","what day is it today"}:
+        return now.strftime("%A, %B %-d, %Y")
+    return None
+
 def _lo_decision_post(path,payload,timeout=3.0):
     req=urllib.request.Request(
         "http://127.0.0.1:7332"+path,
@@ -9177,7 +9189,7 @@ def _direct_searxng_search(query, limit=8):
     params=urllib.parse.urlencode({"q":query,"format":"json"})
     request=urllib.request.Request(base+"/search?"+params,headers={
         "Accept":"application/json",
-        "User-Agent":"Future-Crash-Fabric/6.7.3",
+        "User-Agent":"Future-Crash-Fabric/6.7.4",
     })
     with urllib.request.urlopen(request,timeout=12) as response:
         data=json.load(response)
@@ -10125,6 +10137,7 @@ def ollama_chat(force_search=False, initial_prompt=None, allow_start=True, host_
             "LOOK renders these with terminal styling, and http/https Markdown links may be clickable in supporting terminals. "
             "Do not over-format simple answers. "
             "Casual conversation, personal statements, preferences, and general-knowledge questions are valid on their own. "
+            "EPISTEMIC SCOPE: live-receipt requirements are turn-local and capability-specific. WEATHER requires a live WEATHER receipt only for current/forecast weather. Stable historical facts, explanations, recipes, and ordinary general knowledge may be answered from model knowledge unless the user asks for verification. Never invent a capability or requirement such as LIVE HISTORY, and never carry a failed receipt requirement from an earlier turn into the current one. "
             "Do NOT search or inspect the workspace merely because file tools are available. Tool availability is not a reason to use a tool. "
             "Use workspace tools only when the user actually refers to files, code, the current project, this folder/here, or asks for local inspection/action. "
             "Use relevant user memories naturally when they help, but do not expose importance scores, memory IDs, or say 'your memory says' unless the user asks about memory internals. "
@@ -10247,6 +10260,8 @@ def ollama_chat(force_search=False, initial_prompt=None, allow_start=True, host_
         if not prompt:
             continue
 
+        pending_home_candidate=None
+
         # Explicit operator location statements are semantic corrections, not prose
         # for a geocoder or model to reinterpret.  Persist them as a typed atom.
         home_declaration=_lo_home_location_declaration(prompt)
@@ -10274,8 +10289,10 @@ def ollama_chat(force_search=False, initial_prompt=None, allow_start=True, host_
             memory=_load_memory()
             candidate=_lo_weather_pending_location(prompt,memory)
             if candidate and str(prompt).strip().casefold() not in {"home","my home","at home","here"}:
-                memory=_lo_store_home_location(memory,candidate); _save_memory(memory)
-                _mirror_machine_atoms_to_fabric([{"k":"preference","s":"home","r":"weather_location","v":candidate,"c":100,"u":1}])
+                # A clarification answer is tentative until the canonical place edge
+                # accepts it. Explicit declarations ("my home is ...") still teach
+                # synchronously above because they are operator assertions.
+                pending_home_candidate=candidate
                 weather_forced_location=candidate
                 pending_home_definition=False
                 _brain_resume_goal("weather",request="weather at home")
@@ -10306,6 +10323,19 @@ def ollama_chat(force_search=False, initial_prompt=None, allow_start=True, host_
             if len(prompt.split())<=10 and not prompt.endswith("?"):
                 continuation_of=dict(pending_media_clarification)
                 prompt=f"play {prompt}"
+
+        # Simple date/time questions terminate at the host clock. This prevents a
+        # language model from inventing an unrelated evidence contract (for example
+        # carrying a prior WEATHER failure forward as "LIVE HISTORY").
+        temporal_answer=_lo_direct_temporal_answer(prompt)
+        if temporal_answer:
+            print("\n"+_lo_label("lo","35")+"\n"+_ollama_markup(temporal_answer)+"\n")
+            _save_recent_exchange(prompt,temporal_answer)
+            if events:
+                events.emit("response",text=temporal_answer)
+                events.emit("request_done",status="ok",rounds=0,tool_calls=0,prompt_tokens=0,output_tokens=0,load_ms=0)
+            if one_shot: return 0
+            continue
 
         # Pure acknowledgement is a zero-tool turn. Never ask a model to reconstruct
         # whether the preceding host action succeeded; the receipt already settled it.
@@ -10701,6 +10731,10 @@ def ollama_chat(force_search=False, initial_prompt=None, allow_start=True, host_
             if weather_succeeded:
                 pending_weather_clarification=False
                 pending_home_definition=False
+                if pending_home_candidate:
+                    memory=_load_memory()
+                    memory=_lo_store_home_location(memory,pending_home_candidate); _save_memory(memory)
+                    _mirror_machine_atoms_to_fabric([{"k":"preference","s":"home","r":"weather_location","v":pending_home_candidate,"c":100,"u":1}])
                 _brain_clear_pending("weather",outcome=f"weather receipt for {weather_location}")
                 weather_prefetched=True
                 receipt=_info_receipt("weather",weather_content)

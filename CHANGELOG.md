@@ -1,3 +1,10 @@
+# 6.7.4 · CLEAN BREAK
+
+- Live receipt requirements are capability-specific and turn-local; failed WEATHER state cannot induce invented `LIVE HISTORY` requirements.
+- Home clarification candidates are persisted only after canonical location/weather validation.
+- Simple time/date questions answer directly from the trusted host clock.
+- Added regressions for evidence isolation and transactional home teaching.
+
 # 6.7.3 · LET GO
 
 - Pending cognitive slots now get first refusal rather than ownership of the next utterance.

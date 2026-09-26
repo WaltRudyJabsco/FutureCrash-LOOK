@@ -1,3 +1,9 @@
+## 6.7.4 — CLEAN BREAK
+
+- Isolate live-edge evidence contracts at the turn boundary.
+- Validate clarification-derived home locations before durable memory writes.
+- Terminate simple clock/date questions at host truth.
+
 ## 6.7.3 — LET GO
 
 - Harden persistent goal/slot lifecycle so stale WEATHER state cannot capture unrelated turns.

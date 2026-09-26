@@ -35,4 +35,22 @@ class PersistentBrain672Tests(unittest.TestCase):
         self.assertIn('LO_RECENT_CONTEXT_CHARS=14000',text)
         self.assertIn('MEMORY_RETRIEVED_ATOMS=18',text)
 
+    def test_failed_edge_policy_is_turn_local(self):
+        text=LOOK.read_text()
+        self.assertIn("EPISTEMIC SCOPE: live-receipt requirements are turn-local",text)
+        self.assertIn("Never invent a capability or requirement such as LIVE HISTORY",text)
+
+    def test_home_clarification_is_tentative_until_weather_validates(self):
+        text=LOOK.read_text()
+        self.assertIn("pending_home_candidate=candidate",text)
+        self.assertIn("if pending_home_candidate:",text)
+        # The clarification branch must no longer persist before WEATHER succeeds.
+        branch=text[text.index("if pending_home_definition and not weather_forced_location:"):text.index("# The answer to our own weather-location question")]
+        self.assertNotIn("_lo_store_home_location(memory,candidate)",branch)
+
+    def test_simple_time_and_date_are_host_clock_answers(self):
+        text=LOOK.read_text()
+        self.assertIn("def _lo_direct_temporal_answer(prompt):",text)
+        self.assertIn("temporal_answer=_lo_direct_temporal_answer(prompt)",text)
+
 if __name__=='__main__': unittest.main()
