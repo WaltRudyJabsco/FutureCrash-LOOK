@@ -14,7 +14,7 @@ def test_cli_delegates_browser_speech_resolution_to_resident_daemon():
 
 
 def test_release_6411_contract():
-    assert (ROOT/'VERSION').read_text().strip()=='6.6.1'
+    assert (ROOT/'VERSION').read_text().strip()=='6.6.2'
     node=(ROOT/'core/node.py').read_text()
-    assert 'VERSION = "6.6.1"' in node
-    assert 'RELEASE_NAME = "LIVING MIND"' in node
+    assert 'VERSION = "6.6.2"' in node
+    assert 'RELEASE_NAME = "TRUE CURSOR"' in node

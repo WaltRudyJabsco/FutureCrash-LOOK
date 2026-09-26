@@ -1,3 +1,10 @@
+# 6.6.2 · TRUE CURSOR
+
+- Fixes LO terminal Backspace/Delete redraw corruption caused by ANSI-colored bytes inside the readline/libedit prompt width.
+- Separates the multi-line `YOU` label from line-editor ownership.
+- GNU readline marks ANSI escapes as zero-width; macOS libedit receives a plain-width-safe arrow prompt for deterministic redraws.
+- Preserves normal history, arrows, Home/End, and existing LO cognition/memory behavior.
+
 # 6.6.1 · LIVING MIND
 
 - Makes successful host-action receipts authoritative through final presentation, including media/speech/game actions.

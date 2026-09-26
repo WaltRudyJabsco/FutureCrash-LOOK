@@ -1,8 +1,8 @@
 # Future Crash + LOOK
 
-## 6.6.1 · LIVING MIND
+## 6.6.2 · TRUE CURSOR
 
-LOOK, Signal, and Albert share one cognition plane, now backed by living machine-native memory. Natural language is resolved fuzzily, execution remains exact, completed action receipts are authoritative, unresolved goals can continue across turns, and memory stores generously while prompt retrieval stays tightly budgeted.
+LO terminal editing now keeps readline/libedit cursor geometry honest on macOS and Linux while preserving ONE BRAIN cognition and LIVING MIND memory. Backspace/Delete, arrows, history, and Home/End operate on the real input buffer without stale colored-prompt glyphs.
 
 Fabric now publishes its machine-readable action vocabulary at `GET /v1/actions` and its bounded routing analysis at `GET /v1/cognition/route?q=...`.
 

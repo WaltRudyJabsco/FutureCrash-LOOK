@@ -26,7 +26,7 @@ try:
 except Exception:
     readline = None
 
-VERSION="4.49.0"
+VERSION="4.49.1"
 
 LOOK_WORDMARK = r"""       ██╗      ██╗  ██╗
        ██║      ██║ ██╔╝
@@ -8937,7 +8937,7 @@ def _direct_searxng_search(query, limit=8):
     params=urllib.parse.urlencode({"q":query,"format":"json"})
     request=urllib.request.Request(base+"/search?"+params,headers={
         "Accept":"application/json",
-        "User-Agent":"Future-Crash-Fabric/6.6.1",
+        "User-Agent":"Future-Crash-Fabric/6.6.2",
     })
     with urllib.request.urlopen(request,timeout=12) as response:
         data=json.load(response)
@@ -9337,6 +9337,27 @@ def _lo_rule():
 
 def _lo_label(name, color="2"):
     return _c(str(name).upper(),color)
+
+
+def _lo_readline_prompt(text):
+    """Return a prompt whose display width matches what the line editor sees.
+
+    GNU readline understands SOH/STX around ANSI escapes.  Python's libedit
+    compatibility layer is less consistent across macOS builds, so use a plain
+    prompt there rather than letting invisible color bytes corrupt redraw math.
+    """
+    raw=str(text)
+    if readline is None:
+        return raw
+    if "libedit" in (getattr(readline, "__doc__", "") or "").lower():
+        return re.sub(r"\x1b\[[0-9;]*m", "", raw)
+    return re.sub(r"(\x1b\[[0-9;]*m)", r"\001\1\002", raw)
+
+
+def _lo_read_input():
+    """Read one LO chat line without making readline own the multi-line label."""
+    print("\n"+_lo_label("you","36"))
+    return input(_lo_readline_prompt(_c("› ","36")))
 
 
 def _receipt_log_path():
@@ -9969,7 +9990,7 @@ def ollama_chat(force_search=False, initial_prompt=None, allow_start=True, host_
             _lo_speaker("you",prompt,"36")
         else:
             try:
-                prompt = input("\n"+_lo_label("you","36")+"\n"+_c("› ","36")).strip()
+                prompt = _lo_read_input().strip()
             except EOFError:
                 print()
                 return 0
