@@ -1,10 +1,12 @@
 # Future Crash + LOOK
 
-## 6.6.6 · OPEN REEL
+## 6.7.0 · BEACON
 
-Native video playback now launches cleanly on current mpv builds: LOOK no longer passes the invalid `--video=yes` value and instead lets mpv use its normal automatic video-track selection while still forcing the video window to appear immediately. Queue playback and Fabric stream playback use the same rule.
+BEACON begins Fabric's independent Internet discovery layer. Already-paired nodes can optionally announce short-lived, Ed25519-signed presence through a tiny public rendezvous service. Pairwise authorization tokens stay on the devices; only one-way capability slots are published. Resolved addresses become temporary Tailcat candidates while the certificate pinned during pairing remains the authority.
 
-Includes SHOWTIME startup receipts, MOVIE NIGHT selector normalization, TRUE CURSOR terminal editing, ONE BRAIN cognition, and LIVING MIND memory.
+This is deliberately the first networking stage, not a fake Tailscale replacement: 6.7.0 adds secure rendezvous but leaves UDP hole punching and encrypted relay for the next stages. Tailscale remains a fallback while those pieces are built.
+
+Also includes the 6.6.5 native mpv video fix, SHOWTIME startup receipts, MOVIE NIGHT selector normalization, TRUE CURSOR terminal editing, ONE BRAIN cognition, and LIVING MIND memory.
 
 **One personal computer made from the machines you already own.**
 

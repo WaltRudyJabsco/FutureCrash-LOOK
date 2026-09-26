@@ -1,8 +1,7 @@
-## 6.6.6 — OPEN REEL
+## 6.7.0 — BEACON
 
-- Generic movie/video playback skips locally detectable protected Apple/FairPlay/Common-Encryption items.
-- Protected items are reported and skipped at the playback edge; ordinary open files remain first-class.
-- Catalog scanning remains cheap; protection sniffing is bounded to selection/launch.
+- Added `lk fabric rendezvous status|set URL|off|sync|announce|resolve`.
+- Fabric can learn signed short-lived Tailcat candidates independently of Tailscale discovery.
 
 ## 6.6.5 — PICTURE LOCK
 

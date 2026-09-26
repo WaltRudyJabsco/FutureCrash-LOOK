@@ -219,6 +219,39 @@ class FabricIdentity:
             _atomic_json(self.trust_path, data)
         return removed
 
+    def learn_discovered_endpoints(self, node_id: str, endpoints: list[str], *, expires_at: float, source: str = "rendezvous") -> bool:
+        """Attach short-lived address candidates to an already-trusted peer.
+
+        Discovery may tell us where a peer is, but it never gets to change who
+        that peer is or which Tailcat certificate was pinned during pairing.
+        """
+        data = self.trusted()
+        row = (data.get("nodes") or {}).get(str(node_id or ""))
+        if not isinstance(row, dict):
+            return False
+        transports = row.setdefault("transports", {})
+        tailcat = transports.setdefault("tailcat", {})
+        clean = []
+        for value in endpoints or []:
+            value = str(value or "").rstrip("/")
+            if value.startswith("https://") and value not in clean:
+                clean.append(value)
+        tailcat["discovered_endpoints"] = clean[:16]
+        tailcat["discovered_expires"] = float(expires_at or 0)
+        tailcat["discovered_source"] = str(source or "discovery")
+        row["updated_at"] = _now()
+        _atomic_json(self.trust_path, data)
+        return True
+
+    @staticmethod
+    def _active_tailcat_endpoints(row: dict, *, now_value: float | None = None) -> list[str]:
+        tc = ((row.get("transports") or {}).get("tailcat") or {}) if isinstance(row.get("transports"), dict) else {}
+        values = [str(x).rstrip("/") for x in (tc.get("endpoints") or []) if str(x).startswith("https://")]
+        current = float(now_value if now_value is not None else _now())
+        if float(tc.get("discovered_expires") or 0) > current:
+            values.extend(str(x).rstrip("/") for x in (tc.get("discovered_endpoints") or []) if str(x).startswith("https://"))
+        return list(dict.fromkeys(values))
+
     def verify_peer(self, node_id: str, token: str) -> bool:
         row = (self.trusted().get("nodes") or {}).get(str(node_id or "")) or {}
         expected = str(row.get("auth_token_hash") or "")
@@ -239,8 +272,7 @@ class FabricIdentity:
         for row in (self.trusted().get("nodes") or {}).values():
             if not isinstance(row,dict): continue
             candidates={_host(str(row.get("endpoint") or "")), str(row.get("hostname") or "").casefold(), str(row.get("name") or "").casefold()}
-            tc=((row.get("transports") or {}).get("tailcat") or {}) if isinstance(row.get("transports"),dict) else {}
-            for ep in tc.get("endpoints") or []:
+            for ep in self._active_tailcat_endpoints(row):
                 candidates.add(_host(str(ep)))
             candidates.discard("")
             if target in candidates or any(target.split(".",1)[0] == c.split(".",1)[0] for c in candidates):
@@ -252,7 +284,7 @@ class FabricIdentity:
         if not row: return None
         tc=((row.get("transports") or {}).get("tailcat") or {}) if isinstance(row.get("transports"),dict) else {}
         cert=str(tc.get("cert_pem") or "")
-        endpoints=[str(x) for x in (tc.get("endpoints") or [])]
+        endpoints=self._active_tailcat_endpoints(row)
         target=_host(url)
         if not cert or target not in {_host(x) for x in endpoints}:
             return None

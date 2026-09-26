@@ -9,7 +9,7 @@ def test_direct_lk_play_normalizes_selectors_before_catalog_lookup():
     block=LK[LK.index('def _media_resolve_targets'):LK.index('def _media_prepare_command')]
     assert 'normalizer.resolve("play "+text)' in block
     assert 'intent.get("action")=="media.play"' in block
-    assert '_media_select_runtime_safe' in block
+    assert 'media_core.select_entries' in block
 
 
 def test_direct_cli_has_explicit_exact_escape_hatch():

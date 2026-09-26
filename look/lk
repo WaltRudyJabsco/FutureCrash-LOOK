@@ -8937,7 +8937,7 @@ def _direct_searxng_search(query, limit=8):
     params=urllib.parse.urlencode({"q":query,"format":"json"})
     request=urllib.request.Request(base+"/search?"+params,headers={
         "Accept":"application/json",
-        "User-Agent":"Future-Crash-Fabric/6.6.6",
+        "User-Agent":"Future-Crash-Fabric/6.7.0",
     })
     with urllib.request.urlopen(request,timeout=12) as response:
         data=json.load(response)
@@ -13855,25 +13855,6 @@ def _media_tool_search(query,limit=12):
     return json.dumps(payload,ensure_ascii=False)
 
 
-def _media_select_runtime_safe(catalog, *, kind="", artist="", selection="all", limit=0):
-    """Select generic media while skipping locally-known protected items.
-
-    Shuffle happens before the bounded protection sniff, so `play a movie` keeps
-    walking candidates until it finds one Fabric can actually hand to mpv.
-    """
-    rows=media_core.select_entries({"entries":catalog},kind=kind,artist=artist,selection=selection or "all",limit=0)
-    safe=[]; skipped=[]
-    wanted=max(0,int(limit or 0))
-    for row in rows:
-        reason=media_core.protected_media_reason(row)
-        if reason:
-            skipped.append((row,reason)); continue
-        safe.append(row)
-        if wanted and len(safe)>=wanted:
-            break
-    return safe,skipped
-
-
 def _media_tool_play(query,shuffle=False,kind="",artist="",selection="",limit=0,match_mode="fuzzy"):
     query=" ".join(str(query or "").split()).strip()
     kind_filter=str(kind or "").casefold()
@@ -13885,7 +13866,7 @@ def _media_tool_play(query,shuffle=False,kind="",artist="",selection="",limit=0,
         catalog,_=_media_catalog_entries()
         try: wanted_limit=max(0,min(100,int(limit or 0)))
         except (TypeError,ValueError): wanted_limit=0
-        rows,protected=_media_select_runtime_safe(catalog,kind=kind_filter,artist=artist,selection=selection or "all",limit=wanted_limit)
+        rows=media_core.select_entries({"entries":catalog},kind=kind_filter,artist=artist,selection=selection or "all",limit=wanted_limit)
         match_kind="selector"
     else:
         return _ToolResult(False,"needs_input","MEDIA NEEDS INPUT · what should I play?")
@@ -14522,20 +14503,7 @@ def _media_launch_session(session):
         print("  install mpv with your package manager; the library/index itself has no dependency")
         return 1
 
-    protected=[]
-    launch_queue=[]
-    launch_index_map=[]
-    for queue_index,entry in enumerate(queue):
-        reason=media_core.protected_media_reason(entry)
-        if reason:
-            protected.append((_media_entry_label(entry),reason)); continue
-        launch_queue.append(entry); launch_index_map.append(queue_index)
-    if protected:
-        print(f"LOOK media · {len(protected)} protected/restricted item(s) skipped")
-        for label,reason in protected[:3]:
-            print(f"  × {label} · {reason}")
-    playable,missing,inner_index_map=_media_write_m3u(launch_queue)
-    index_map=[launch_index_map[i] for i in inner_index_map]
+    playable,missing,index_map=_media_write_m3u(queue)
     if not playable:
         print("LOOK media · no playable queue entries")
         for label,error in missing[:5]:
@@ -15148,7 +15116,7 @@ def _media_resolve_targets(args):
         clean.append(arg); i+=1
     if not clean and (kind or selection or artist):
         catalog,_=_media_catalog_entries()
-        rows,protected=_media_select_runtime_safe(catalog,kind=kind,artist=artist,selection=selection or "all",limit=limit)
+        rows=media_core.select_entries({"entries":catalog},kind=kind,artist=artist,selection=selection or "all",limit=limit)
         if not rows:
             label=artist or ("any "+kind if kind else "media")
             raise ValueError(f"no Fabric media match for {label!r}; run lk media find or lk media scan")
@@ -15194,8 +15162,8 @@ def _media_resolve_targets(args):
         except Exception:
             intent=None
         if isinstance(intent,dict) and intent.get("action")=="media.play" and not intent.get("query"):
-            rows,protected=_media_select_runtime_safe(
-                catalog, kind=str(intent.get("kind") or ""),
+            rows=media_core.select_entries(
+                {"entries":catalog}, kind=str(intent.get("kind") or ""),
                 artist=str(intent.get("artist") or ""), selection=str(intent.get("selection") or "all"),
                 limit=int(intent.get("limit") or 0),
             )
@@ -16963,8 +16931,8 @@ def _fabric_command(args):
     aliases={"list":"nodes","node":"status","model":"models"}
     sub=aliases.get(sub,sub)
     if sub=="dash": sub="dashboard"
-    if sub not in {"fabric","watch","dashboard","dash","beacon","lights","nodes","activity","pulse","models","status","qualify","services","service","jobs","job","submit","packet","cancel","events","http","decisions","decision","answer","ask","decision-shadow","decision-provider","identity","trust","untrust","pair-code","pair","transport","endpoints","endpoint-code","allow","revoke-endpoint","speak"}:
-        print("usage: lk fabric [identity|trust|pair-code [URL]|pair NODE CODE|untrust NODE_ID|transport|endpoints|endpoint-code URL [once|trust]|allow CODE [once|trust]|revoke-endpoint ENDPOINT_ID|watch|dashboard|decisions [NODE]|decision [NODE] ID|answer [NODE] ID CHOICE|ask [NODE] QUESTION [CHOICE ...]|decision-shadow [NODE] STATE QUESTION CANDIDATE...|decision-provider [NODE]|beacon|lights|nodes|status|activity|pulse|models|jobs|events|submit|packet|cancel|qualify|services|service|speak [NODE] TEXT]")
+    if sub not in {"fabric","watch","dashboard","dash","beacon","lights","nodes","activity","pulse","models","status","qualify","services","service","jobs","job","submit","packet","cancel","events","http","decisions","decision","answer","ask","decision-shadow","decision-provider","identity","trust","untrust","pair-code","pair","transport","rendezvous","endpoints","endpoint-code","allow","revoke-endpoint","speak"}:
+        print("usage: lk fabric [identity|trust|pair-code [URL]|pair NODE CODE|untrust NODE_ID|transport|rendezvous [status|set URL|off|sync]|endpoints|endpoint-code URL [once|trust]|allow CODE [once|trust]|revoke-endpoint ENDPOINT_ID|watch|dashboard|decisions [NODE]|decision [NODE] ID|answer [NODE] ID CHOICE|ask [NODE] QUESTION [CHOICE ...]|decision-shadow [NODE] STATE QUESTION CANDIDATE...|decision-provider [NODE]|beacon|lights|nodes|status|activity|pulse|models|jobs|events|submit|packet|cancel|qualify|services|service|speak [NODE] TEXT]")
         return 2
     argv=[exe,sub]
     rest=list(args[1:])

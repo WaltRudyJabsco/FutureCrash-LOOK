@@ -1,15 +1,15 @@
 #!/usr/bin/env bash
 set -euo pipefail
 ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
-echo "Future Crash + LOOK 6.6.6 · OPEN REEL"
+echo "Future Crash + LOOK 6.7.0 · BEACON"
 echo "────────────────────────────────────────"
 
 # Refuse a mixed bundle before mutating the machine. A unified release must move
 # LOOK and the node together.
 EXPECTED_RELEASE="$(tr -d '[:space:]' < "$ROOT/VERSION")"
-[[ "$EXPECTED_RELEASE" == "6.6.6" ]] || { echo "BUNDLE ERROR: expected release 6.6.6, found $EXPECTED_RELEASE"; exit 4; }
+[[ "$EXPECTED_RELEASE" == "6.7.0" ]] || { echo "BUNDLE ERROR: expected release 6.7.0, found $EXPECTED_RELEASE"; exit 4; }
 echo "BUNDLE SOURCE  $ROOT"
-echo "BUNDLE RELEASE $EXPECTED_RELEASE · OPEN REEL"
+echo "BUNDLE RELEASE $EXPECTED_RELEASE · BEACON"
 for vf in "$ROOT/look/VERSION" "$ROOT/albert/VERSION" "$ROOT/future-crash/VERSION"; do
   component_version="$(tr -d '[:space:]' < "$vf")"
   [[ "$component_version" == "$EXPECTED_RELEASE" ]] || { echo "BUNDLE ERROR: $vf reports $component_version, expected $EXPECTED_RELEASE"; exit 4; }
@@ -22,6 +22,7 @@ checks=[
     (root/'core/node.py', r'^VERSION = "([^"]+)"', 'node'),
     (root/'core/ingress.py', r'^VERSION = "([^"]+)"', 'ingress'),
     (root/'core/tailcat.py', r'^VERSION = "([^"]+)"', 'tailcat'),
+    (root/'core/rendezvous.py', r'^VERSION = "([^"]+)"', 'rendezvous'),
 ]
 for path,pat,label in checks:
     m=re.search(pat,path.read_text(),re.M)
@@ -49,9 +50,9 @@ FCL_UNIFIED_INSTALL_CHILD=1 "$ROOT/install-look.sh" "$@"
 ((UNINSTALL)) && exit 0
 if ((DRY_RUN)); then
   echo
-  echo "[dry-run] would install/restart Unified Node 6.6.6 · OPEN REEL with OPEN REEL terminal editing, shared ONE BRAIN cognition, LIVING MIND memory, Fabric endpoint management, SearXNG, Media, Artifacts, and Signal Window 1.10.5"
+  echo "[dry-run] would install/restart Unified Node 6.7.0 · BEACON with signed Fabric rendezvous, Tailcat direct transport, ONE BRAIN cognition, LIVING MIND memory, browser endpoints, SearXNG, Media, Artifacts, and Signal Window 1.10.5"
   echo "[dry-run] OpenJev mode: $OPENJEV_MODE (auto adopts an existing worker; absence is non-fatal)"
-  echo "[dry-run] would initialize Tailcat :7443 as preferred direct encrypted transport, keep Tailscale :7332 → fcl-ingress :7333 as fallback, and verify Fabric CLI wiring"
+  echo "[dry-run] would initialize Tailcat :7443, install optional signed rendezvous discovery, keep Tailscale :7332 → fcl-ingress :7333 as fallback, and verify Fabric CLI wiring"
   exit 0
 fi
 
@@ -107,6 +108,8 @@ install -m 0755 "$ROOT/core/ingress.py" "$HOME/.local/share/future-crash-look/co
 install -m 0755 "$ROOT/core/fcl-ingress" "$HOME/.local/bin/fcl-ingress"
 install -m 0755 "$ROOT/core/tailcat.py" "$HOME/.local/share/future-crash-look/core/tailcat.py"
 install -m 0755 "$ROOT/core/fcl-tailcat" "$HOME/.local/bin/fcl-tailcat"
+install -m 0644 "$ROOT/core/rendezvous.py" "$HOME/.local/share/future-crash-look/core/rendezvous.py"
+install -m 0755 "$ROOT/core/fcl-rendezvous" "$HOME/.local/bin/fcl-rendezvous"
 install -m 0644 "$ROOT/VERSION" "$HOME/.local/share/future-crash-look/RELEASE"
 # Create the machine's Fabric keypair once. It is independent of Tailscale and
 # survives normal upgrades; private key material never leaves this host.
@@ -368,6 +371,9 @@ fi
 if ! cmp -s "$ROOT/core/tailcat.py" "$HOME/.local/share/future-crash-look/core/tailcat.py"; then
   echo "INSTALL ERROR: installed Tailcat transport differs from release" >&2; exit 8
 fi
+if ! cmp -s "$ROOT/core/rendezvous.py" "$HOME/.local/share/future-crash-look/core/rendezvous.py"; then
+  echo "INSTALL ERROR: installed Fabric rendezvous differs from release" >&2; exit 8
+fi
 if ! cmp -s "$ROOT/core/fabric_client.py" "$HOME/.local/share/future-crash-look/core/fabric_client.py"; then
   echo "INSTALL ERROR: Fabric client differs from release" >&2; exit 8
 fi
@@ -394,13 +400,14 @@ if ! cmp -s "$ROOT/core/cognition.py" "$HOME/.local/share/future-crash-look/core
 fi
 if ! PYTHONPATH="$HOME/.local/share/future-crash-look/core" python3 - <<'PY_RUNTIME' >/dev/null 2>&1
 import conductor, fabric_client, memory_store, decision, cognition
-import fabric_identity, endpoint_auth, intent_normalizer, tailcat
+import fabric_identity, endpoint_auth, intent_normalizer, tailcat, rendezvous
 assert conductor.classify("ping").tier == "reflex"
 assert callable(fabric_client.stream_infer)
 assert callable(fabric_identity.public_identity)
 assert callable(endpoint_auth.EndpointAuth)
 assert intent_normalizer.normalize("play any movie")["kind"] == "video"
 assert callable(tailcat.ensure_identity)
+assert callable(rendezvous.sync_once)
 assert decision.plan(profile="power", confidence=.7).timeout_action == "continue"
 assert cognition.analyze("headlienes", use_openjev=False).primary == "web"
 assert any(row["id"] == "audio.speak" for row in cognition.public_registry())
@@ -429,6 +436,7 @@ echo "  file/content catalog reconciliation started in background"
 
 echo "  fcl-node identity   # stable Fabric node identity"
 echo "  fcl-tailcat show    # native encrypted transport endpoints"
+echo "  lk fabric rendezvous status  # optional public discovery state"
 echo "  fcl-node pair-code  # open a one-use pairing invitation"
 echo "  fcl-node fabric     # human view of the compute fabric"
 echo "  fcl-node models     # model capability advertisements"

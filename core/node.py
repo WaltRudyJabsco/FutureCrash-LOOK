@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Future Crash + LOOK Unified Node 6.6.6.
+"""Future Crash + LOOK Unified Node 6.7.0.
 
 A small distributed supervisor for trusted personal machines. Immediate events stay
 asynchronous; a one-second fabric pulse reconciles presence, leases and stale work.
@@ -61,9 +61,13 @@ try:
     from .endpoint_auth import EndpointAuth
 except ImportError:
     from endpoint_auth import EndpointAuth
+try:
+    from . import rendezvous
+except ImportError:
+    import rendezvous
 
-VERSION = "6.6.6"
-RELEASE_NAME = "OPEN REEL"
+VERSION = "6.7.0"
+RELEASE_NAME = "BEACON"
 DEFAULT_HOST = "127.0.0.1"
 DEFAULT_PORT = 7332
 DEFAULT_INGRESS_PORT = 0
@@ -912,7 +916,7 @@ def peer_rows():
     for node_id,row in (FABRIC_IDENTITY.trusted(public=True).get("nodes") or {}).items():
         if not isinstance(row,dict): continue
         tc=((row.get("transports") or {}).get("tailcat") or {}) if isinstance(row.get("transports"),dict) else {}
-        endpoints=[str(x).rstrip('/') for x in (tc.get("endpoints") or []) if str(x).startswith('https://')]
+        endpoints=FABRIC_IDENTITY._active_tailcat_endpoints(row)
         name=str(row.get("name") or row.get("hostname") or node_id)
         key=name.casefold()
         merged[key]={"name":name,"dns":"","ips":[],"online":True,"node_id":node_id,
@@ -2205,7 +2209,7 @@ def _local_web_search(query, limit=8):
     base=os.environ.get("FCL_SEARXNG_URL","http://127.0.0.1:8888").rstrip("/")
     request=urllib.request.Request(base+"/search?"+params,headers={
         "Accept":"application/json",
-        "User-Agent":"Future-Crash-Fabric/6.6.6",
+        "User-Agent":"Future-Crash-Fabric/6.7.0",
     })
     try:
         with urllib.request.urlopen(request,timeout=8) as response:
@@ -2939,7 +2943,7 @@ def _openjev_shadow(state, question, candidates, *, profile="workspace", consequ
 
 
 class API(BaseHTTPRequestHandler):
-    server_version = "FCLNode/6.6.6"
+    server_version = "FCLNode/6.7.0"
 
     def setup(self):
         self._metric_request_id = None
@@ -4883,7 +4887,7 @@ def main():
     ap.add_argument("command",nargs="?",default="serve",
         choices=["serve","status","nodes","activity","pulse","fabric","watch","dashboard","models","qualify","services","service",
                  "jobs","job","submit","packet","cancel","events","http","beacon","lights","artifact-add","artifact","artifacts","file-catalog","file-find","media-catalog","media-identify",
-                 "decisions","decision","answer","ask","decision-shadow","decision-provider","identity","trust","untrust","pair-code","pair","transport","endpoints","endpoint-code","allow","revoke-endpoint","media-outputs","media-state","media-play","media-control","speak"])
+                 "decisions","decision","answer","ask","decision-shadow","decision-provider","identity","trust","untrust","pair-code","pair","transport","rendezvous","endpoints","endpoint-code","allow","revoke-endpoint","media-outputs","media-state","media-play","media-control","speak"])
     ap.add_argument("args",nargs="*")
     ap.add_argument("--node",dest="node",default=None,help="target Fabric node name")
     ap.add_argument("--voice-profile",dest="voice_profile",default="default",choices=["default","wopr"],help="speech voice profile")
@@ -5014,6 +5018,43 @@ def main():
                     print(f"  {str(peer.get('name') or '?'):<18} {active:<10} {base}")
                 print("  policy  Tailcat direct TLS first · Tailscale fallback")
                 print("          * TAILSCALE* = discovered transport only; peer is not directly paired/trusted")
+                return 0
+            if a.command=="rendezvous":
+                op=(a.args[0] if a.args else "status").casefold()
+                if op=="set":
+                    if len(a.args)<2: ap.error("rendezvous set requires URL")
+                    data=rendezvous.save_config(a.args[1])
+                    result=rendezvous.sync_once(FABRIC_IDENTITY)
+                    print(f"FABRIC RENDEZVOUS · enabled · {data.get('url')}")
+                    if result.get("error"): print(f"  first sync  {result.get('error')}")
+                    else: print("  first sync  complete")
+                    return 0
+                if op in {"off","disable"}:
+                    rendezvous.save_config(None); print("FABRIC RENDEZVOUS · off"); return 0
+                if op in {"sync","announce","resolve"}:
+                    cfg=rendezvous.load_config(); url=str(cfg.get("url") or "")
+                    if not url: ap.error("rendezvous is not configured; use: lk fabric rendezvous set URL")
+                    if op=="announce": result=rendezvous.announce(FABRIC_IDENTITY,url)
+                    elif op=="resolve": result=rendezvous.resolve(FABRIC_IDENTITY,url)
+                    else: result=rendezvous.sync_once(FABRIC_IDENTITY)
+                    if a.json: print(json.dumps(result,indent=2))
+                    else:
+                        print(f"FABRIC RENDEZVOUS · {op} · {url}")
+                        if isinstance(result,dict) and result.get("error"): print(f"  ! {result.get('error')}")
+                        else: print("  ready")
+                    return 0
+                if op!="status": ap.error("rendezvous requires status|set URL|off|sync|announce|resolve")
+                data=rendezvous.status()
+                if a.json: print(json.dumps(data,indent=2)); return 0
+                print("FABRIC RENDEZVOUS")
+                print(f"  state   {'ENABLED' if data.get('enabled') else 'OFF'}")
+                print(f"  url     {data.get('url') or '—'}")
+                print(f"  signer  {'ssh-ed25519 ready' if data.get('signer') else 'ssh-keygen unavailable'}")
+                last=data.get('last_sync') or {}
+                if last.get('updated_at'):
+                    age=max(0,int(time.time()-float(last.get('updated_at') or 0)))
+                    print(f"  sync    {age}s ago" + (f" · {last.get('error')}" if last.get('error') else ""))
+                print("  role    discovery only · identity and trust remain local · Tailcat carries data")
                 return 0
             if a.command=="endpoints":
                 data=_daemon_get(a.host,a.port,"/v1/endpoints/fabric")
@@ -5346,6 +5387,7 @@ def main():
     if hasattr(signal, "SIGUSR1"):
         faulthandler.register(signal.SIGUSR1, file=sys.stderr, all_threads=True)
     threading.Thread(target=pulse_loop,name="fabric-pulse",daemon=True).start()
+    threading.Thread(target=rendezvous.background_loop,args=(FABRIC_IDENTITY,),name="fabric-rendezvous",daemon=True).start()
     threading.Thread(target=background_qualifier,name="model-qualifier",daemon=True).start()
     threading.Thread(target=background_curator,name="model-curator",daemon=True).start()
     threading.Thread(target=job_worker_loop,name="fabric-jobs",daemon=True).start()

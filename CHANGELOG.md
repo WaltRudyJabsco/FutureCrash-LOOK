@@ -1,10 +1,10 @@
-# 6.6.6 · OPEN REEL
+# 6.7.0 · BEACON
 
-- Makes generic `play a movie` / `play a video` selectors skip locally detectable protected Apple/FairPlay/Common-Encryption media instead of handing it to mpv.
-- Adds a bounded runtime protection sniff for `.m4p`, `.m4v`, `.mp4`, `.mov`, `.m4a`, and `.m4b`; ordinary open media remains untouched.
-- Keeps catalog scanning cheap: protection inspection happens only as candidates are selected or launched.
-- Adds a final launch guard so explicit protected items fail cleanly and mixed queues skip them while preserving ordinary AVI/MOV/MKV/MP4 playback.
-- Preserves 6.6.5 PICTURE LOCK mpv video-track handling and all prior 6.6.x cognition/memory work.
+- Added signed, capability-slot Fabric rendezvous for already-paired nodes.
+- Pairwise authorization tokens never cross the network; only one-way rendezvous slots do.
+- Added short-lived discovered Tailcat endpoints without changing pinned peer identity/certificates.
+- Added `lk fabric rendezvous` and self-hostable `fcl-rendezvous`.
+- Tailscale remains an explicit fallback; hole punching and relay are intentionally deferred.
 
 # 6.6.5 · PICTURE LOCK
 
