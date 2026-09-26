@@ -1,3 +1,9 @@
+## 6.7.2 — STAY AWAKE
+
+- Persistent working-state goals/slots and `lk brain`.
+- Home/weather continuation survives process boundaries and promotes explicit corrections immediately.
+- Larger retained recent memory with bounded prompt retrieval.
+
 ## 6.7.0 — BEACON
 
 - Added `lk fabric rendezvous status|set URL|off|sync|announce|resolve`.

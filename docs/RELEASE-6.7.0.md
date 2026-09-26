@@ -1,4 +1,4 @@
-# 6.7.1 · BEACON
+# 6.7.0 · BEACON
 
 BEACON starts the next transport stage without pretending Tailscale is already gone.
 

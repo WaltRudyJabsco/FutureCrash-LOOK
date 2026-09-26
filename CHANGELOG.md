@@ -1,3 +1,13 @@
+# 6.7.2 · STAY AWAKE
+
+- Added persistent `brain_state.json` working state with active goals and unresolved slots.
+- Added `lk brain` / `lk brain clear`.
+- Weather→home clarification now persists `home.location`, teaches it from the answer, resumes the original goal, and closes on a real receipt.
+- `I live in …` and `remember that I live in …` synchronously update typed home memory.
+- Learned home is the default for otherwise locationless weather.
+- Expanded cheap recent-memory retention and bounded semantic retrieval.
+- Kept cognition event-driven: no always-spinning model loop.
+
 # 6.7.1 · HOME BASE
 
 - Weather location questions now create deterministic working state; the next bare place answers that exact pending question.

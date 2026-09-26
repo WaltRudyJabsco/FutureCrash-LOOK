@@ -69,6 +69,7 @@ UNDO_LIMIT=20
 MEMORY_QUEUE=STATE_DIR/"memory_queue"
 MEMORY_WORKER_LOCK=STATE_DIR/"memory_worker.lock"
 LO_RECENT_FILE=STATE_DIR/"lo_recent.json"
+BRAIN_STATE_FILE=STATE_DIR/"brain_state.json"
 LO_JOBS_DIR=STATE_DIR/"jobs"
 LO_EVENTS_DIR=STATE_DIR/"events"
 AI_SOCKET=STATE_DIR/"ai.sock"
@@ -165,12 +166,12 @@ RECENT_MEMORY_SLOTS=4
 MEMORY_CANDIDATE_LIMIT=128
 MEMORY_DURABLE_LIMIT=1024
 MEMORY_ATOM_LIMIT=4096
-MEMORY_RETRIEVED_ATOMS=10
-MEMORY_RETRIEVED_MACHINE_ATOMS=16
+MEMORY_RETRIEVED_ATOMS=18
+MEMORY_RETRIEVED_MACHINE_ATOMS=24
 MEMORY_DOMAINS=("personal","preferences","projects","architecture","operational","resolver","style","general")
-LO_RECENT_EXCHANGES=12
-LO_RECENT_MAX_CHARS=18000
-LO_RECENT_CONTEXT_CHARS=7000
+LO_RECENT_EXCHANGES=48
+LO_RECENT_MAX_CHARS=64000
+LO_RECENT_CONTEXT_CHARS=14000
 MEMORY_SCHEMA_VERSION=4
 SKILLS_SCHEMA_VERSION=1
 BUNDLED_SKILLS_VERSION=1
@@ -6745,6 +6746,86 @@ def _normalize_weather_location(location):
 
 
 
+def _empty_brain_state():
+    return {"schema_version":1,"pending":None,"active_goals":[],"recent_goals":[],"updated_at":0}
+
+def _load_brain_state():
+    """Persistent working state. Goals survive a chat process; models do not have to."""
+    try:
+        data=json.loads(BRAIN_STATE_FILE.read_text(encoding="utf-8"))
+        if not isinstance(data,dict): return _empty_brain_state()
+    except (OSError,json.JSONDecodeError):
+        return _empty_brain_state()
+    out=_empty_brain_state(); out.update(data)
+    if not isinstance(out.get("active_goals"),list): out["active_goals"]=[]
+    if not isinstance(out.get("recent_goals"),list): out["recent_goals"]=[]
+    return out
+
+def _save_brain_state(state):
+    try:
+        STATE_DIR.mkdir(parents=True,exist_ok=True)
+        state=dict(state or _empty_brain_state()); state["updated_at"]=time.time()
+        state["active_goals"]=list(state.get("active_goals") or [])[-16:]
+        state["recent_goals"]=list(state.get("recent_goals") or [])[-24:]
+        tmp=BRAIN_STATE_FILE.with_suffix(".tmp")
+        tmp.write_text(json.dumps(state,ensure_ascii=False,indent=2)+"\n",encoding="utf-8")
+        os.chmod(tmp,0o600); tmp.replace(BRAIN_STATE_FILE); os.chmod(BRAIN_STATE_FILE,0o600)
+        return True
+    except OSError:
+        return False
+
+def _brain_set_pending(kind, *, goal="", slot="", resume="", request=""):
+    state=_load_brain_state()
+    state["pending"]={"kind":kind,"goal":goal,"slot":slot,"resume":resume,"request":request[:500],"since":time.time()}
+    if goal:
+        rows=[g for g in state.get("active_goals",[]) if g.get("goal")!=goal]
+        rows.append({"goal":goal,"status":"waiting","slot":slot,"request":request[:500],"updated_at":time.time()})
+        state["active_goals"]=rows
+    _save_brain_state(state)
+    return state["pending"]
+
+def _brain_clear_pending(goal="", *, outcome=""):
+    state=_load_brain_state(); pending=state.get("pending")
+    if pending and (not goal or pending.get("goal")==goal): state["pending"]=None
+    if goal:
+        active=[]
+        for row in state.get("active_goals",[]):
+            if row.get("goal")==goal:
+                done=dict(row); done["status"]="done" if outcome else "cleared"; done["outcome"]=outcome[:500]; done["updated_at"]=time.time()
+                state.setdefault("recent_goals",[]).append(done)
+            else: active.append(row)
+        state["active_goals"]=active
+    _save_brain_state(state)
+
+def _brain_context():
+    state=_load_brain_state(); pending=state.get("pending")
+    active=state.get("active_goals",[])
+    if not pending and not active: return ""
+    lines=["PERSISTENT WORKING STATE (authoritative; continue it unless the operator clearly changes goals):"]
+    if pending:
+        lines.append(f"PENDING: goal={pending.get('goal','')} slot={pending.get('slot','')} resume={pending.get('resume','')} request={pending.get('request','')}")
+    for row in active[-4:]:
+        lines.append(f"ACTIVE: {row.get('goal','')} · {row.get('status','active')} · missing {row.get('slot','')}")
+    return "\n".join(lines)
+
+def _brain_command(args):
+    args=list(args or []); state=_load_brain_state()
+    if args and args[0] in {"clear","reset"}:
+        _save_brain_state(_empty_brain_state()); print("LO brain · working state cleared"); return 0
+    print("LO brain · persistent working state")
+    pending=state.get("pending")
+    if pending:
+        print(f"  pending      {pending.get('goal','?')} · needs {pending.get('slot','?')} · {_age_label(pending.get('since',0))}")
+        if pending.get('request'): print(f"  request      {pending.get('request')}")
+    else: print("  pending      none")
+    active=state.get("active_goals",[])
+    print(f"  active       {len(active)} goal{'s' if len(active)!=1 else ''}")
+    for row in active[-6:]: print(f"               {row.get('goal','?')} · {row.get('status','active')} · {row.get('slot','')}")
+    recent=state.get("recent_goals",[])
+    print(f"  recent       {len(recent)} completed/cleared")
+    print("  rule         models may sleep; goals stay alive")
+    return 0
+
 def _lo_home_location_declaration(prompt):
     """Read an explicit operator correction such as 'my home is Portland Oregon'.
 
@@ -6754,7 +6835,14 @@ def _lo_home_location_declaration(prompt):
     text=" ".join(str(prompt or "").strip().split()).strip(" .!?")
     if not text:
         return None
-    match=re.search(r"(?:^|\b)(?:no[, ]+)?(?:my\s+)?home(?:\s+location)?\s+(?:is|=)\s+(.+)$",text,re.I)
+    patterns=(
+        r"(?:^|\b)(?:no[, ]+)?(?:my\s+)?home(?:\s+location)?\s+(?:is|=)\s+(.+)$",
+        r"^(?:please\s+)?(?:remember(?:\s+that)?\s+)?i\s+(?:live|reside)\s+in\s+(.+)$",
+    )
+    match=None
+    for pattern in patterns:
+        match=re.search(pattern,text,re.I)
+        if match: break
     if not match:
         return None
     place=match.group(1).strip(" ,.;:?!")
@@ -9055,7 +9143,7 @@ def _direct_searxng_search(query, limit=8):
     params=urllib.parse.urlencode({"q":query,"format":"json"})
     request=urllib.request.Request(base+"/search?"+params,headers={
         "Accept":"application/json",
-        "User-Agent":"Future-Crash-Fabric/6.7.1",
+        "User-Agent":"Future-Crash-Fabric/6.7.2",
     })
     with urllib.request.urlopen(request,timeout=12) as response:
         data=json.load(response)
@@ -10080,6 +10168,8 @@ def ollama_chat(force_search=False, initial_prompt=None, allow_start=True, host_
     recent_context_index=len(messages)
     recent_context=_recent_context()
     messages.append({"role":"system","content":recent_context})
+    brain_context_index=len(messages)
+    messages.append({"role":"system","content":_brain_context()})
 
     # Machine interfaces such as Signal may keep a small ephemeral conversation
     # session outside the terminal.  Accept only plain user/assistant text here:
@@ -10099,7 +10189,10 @@ def ollama_chat(force_search=False, initial_prompt=None, allow_start=True, host_
     last_action=None
     last_candidates=""
     pending_media_clarification=None
-    pending_weather_clarification=False
+    brain_state=_load_brain_state()
+    brain_pending=brain_state.get("pending") or {}
+    pending_weather_clarification=brain_pending.get("goal")=="weather" and brain_pending.get("slot") in {"weather.location","home.location"}
+    pending_home_definition=brain_pending.get("goal")=="weather" and brain_pending.get("slot")=="home.location"
     last_authoritative_receipt=None
     turn_id=0
     while True:
@@ -10141,6 +10234,18 @@ def ollama_chat(force_search=False, initial_prompt=None, allow_start=True, host_
                 if one_shot: return 0
                 continue
 
+        # If our previous question specifically asked what HOME means, the next
+        # short place fills home.location, persists it, and resumes the original goal.
+        if pending_home_definition and not weather_forced_location:
+            memory=_load_memory()
+            candidate=_lo_weather_pending_location(prompt,memory)
+            if candidate and str(prompt).strip().casefold() not in {"home","my home","at home","here"}:
+                memory=_lo_store_home_location(memory,candidate); _save_memory(memory)
+                _mirror_machine_atoms_to_fabric([{"k":"preference","s":"home","r":"weather_location","v":candidate,"c":100,"u":1}])
+                weather_forced_location=candidate
+                pending_home_definition=False
+                _brain_set_pending("slot",goal="weather",slot="weather.location",resume="weather.current",request="weather at home")
+
         # The answer to our own weather-location question belongs to working state.
         # Never send literal "home" to a public geocoder.
         if pending_weather_clarification and not weather_forced_location:
@@ -10148,6 +10253,8 @@ def ollama_chat(force_search=False, initial_prompt=None, allow_start=True, host_
             weather_forced_location=_lo_weather_pending_location(prompt,memory)
             if str(prompt).strip().casefold() in {"home","my home","at home","here"} and not weather_forced_location:
                 answer="What city should I use for home?"
+                pending_home_definition=True
+                _brain_set_pending("slot",goal="weather",slot="home.location",resume="weather.current",request="weather at home")
                 print("\n"+_lo_label("lo","35")+"\n"+_ollama_markup(answer)+"\n")
                 if events:
                     events.emit("response",text=answer)
@@ -10271,6 +10378,7 @@ def ollama_chat(force_search=False, initial_prompt=None, allow_start=True, host_
         # disk, then retrieve only what is relevant to this exact prompt.
         memory=_load_memory()
         messages[memory_message_index]["content"]=_memory_context(memory,prompt)
+        messages[brain_context_index]["content"]=_brain_context()
         messages=[m for i,m in enumerate(messages) if i < base_message_count or not (m.get("role")=="system" and str(m.get("content","")).startswith("RESOURCE CONTEXT GOVERNOR:"))]
         messages=_trim_lo_history(messages, base_message_count)
         # Resource context is governed before inference: handles stay cheap; evidence is sliced.
@@ -10502,7 +10610,9 @@ def ollama_chat(force_search=False, initial_prompt=None, allow_start=True, host_
             if not weather_location:
                 weather_location=_lo_weather_history_location(weather_discourse)
                 weather_location_source="session" if weather_location else None
-            if not weather_location and re.search(r"\b(?:my weather|home weather|at home)\b",str(prompt),re.I):
+            # A learned home is the operator-owned default for an otherwise
+            # locationless weather request. Do not ask again once they taught us.
+            if not weather_location:
                 weather_location=_lo_learned_home_location(_load_memory())
                 weather_location_source="learned_home" if weather_location else None
             if not weather_location:
@@ -10516,6 +10626,8 @@ def ollama_chat(force_search=False, initial_prompt=None, allow_start=True, host_
         # that WEATHER itself failed.
         if weather_required and not weather_location:
             pending_weather_clarification=True
+            pending_home_definition=False
+            _brain_set_pending("slot",goal="weather",slot="weather.location",resume="weather.current",request=prompt)
             answer="Which location should I use for the weather?"
             print("\n"+_lo_label("lo","35")+"\n"+_ollama_markup(answer)+"\n")
             if events:
@@ -10551,6 +10663,8 @@ def ollama_chat(force_search=False, initial_prompt=None, allow_start=True, host_
                     time.sleep(.18)
             if weather_succeeded:
                 pending_weather_clarification=False
+                pending_home_definition=False
+                _brain_clear_pending("weather",outcome=f"weather receipt for {weather_location}")
                 weather_prefetched=True
                 receipt=_info_receipt("weather",weather_content)
                 if receipt:
@@ -17258,6 +17372,7 @@ def main():
     if cmd=="_remember-worker": return _memory_worker()
     if cmd=="_skill-feedback-worker": return _skill_feedback_worker()
     if cmd=="memory": return _memory_command(rest)
+    if cmd=="brain": return _brain_command(rest)
     if cmd=="forget":
         if not rest: print("usage: lk forget <text>"); return 2
         n=_forget_memory(" ".join(rest)); print(f"Removed {n} matching memory item(s)."); return 0

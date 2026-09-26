@@ -7,7 +7,7 @@ already shares with one peer.  Presence is signed by the node's existing Ed25519
 identity.  The public service therefore learns only ephemeral network presence and
 cannot create Fabric trust.
 
-6.7.1 is the first stage of replacing Tailscale discovery.  It does not yet perform
+6.7.2 is the first stage of replacing Tailscale discovery.  It does not yet perform
 UDP hole punching or encrypted relay; Tailcat/Tailscale remain the data transports.
 """
 from __future__ import annotations
@@ -34,7 +34,7 @@ try:
 except ImportError:
     from fabric_identity import FabricIdentity, public_identity
 
-VERSION = "6.7.1"
+VERSION = "6.7.2"
 RELEASE_NAME = "HOME BASE"
 PRESENCE_SCHEMA = "fabric-rendezvous-presence-v1"
 RESPONSE_SCHEMA = "fabric-rendezvous-response-v1"
@@ -357,7 +357,7 @@ def _https_endpoint(host: str, port: int) -> str:
 
 
 class Handler(BaseHTTPRequestHandler):
-    server_version = "FCLRendezvous/6.7.1"
+    server_version = "FCLRendezvous/6.7.2"
 
     def log_message(self, fmt, *args):
         return

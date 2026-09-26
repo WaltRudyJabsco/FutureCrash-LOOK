@@ -1,5 +1,10 @@
 # Future Crash + LOOK
 
+## 6.7.2 · STAY AWAKE
+
+Persistent working state now survives LO sessions: unresolved goals/slots are explicit, `lk brain` exposes them, Home Base corrections synchronously rewrite semantic memory, and learned home becomes the default for locationless weather. Recent memory keeps substantially more raw continuity while retrieval stays bounded. Models may sleep; goals stay alive.
+
+
 ## 6.7.1 · HOME BASE
 
 HOME BASE fixes a working-state failure exposed by ordinary weather conversation. When LO asks for a location, the next short answer is now owned by that pending goal instead of being reinterpreted as a fresh prompt. Literal `home` is never sent to a public geocoder; an explicit statement such as `my home is Portland OR` becomes a typed, replaceable semantic preference and is reused by `home` / `my weather`.

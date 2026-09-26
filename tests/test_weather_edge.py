@@ -130,6 +130,8 @@ class WeatherEdge514Tests(unittest.TestCase):
         self.assertEqual(self.w['_lo_home_location_declaration']('my home is portland oregon'),'portland oregon')
         self.assertEqual(self.w['_lo_home_location_declaration']('no home is Portland OR'),'Portland, Oregon')
         self.assertEqual(self.w['_lo_home_location_declaration']('my home is portland what is the weather'),'portland')
+        self.assertEqual(self.w['_lo_home_location_declaration']('remember that i live in portland oregon'),'portland oregon')
+        self.assertEqual(self.w['_lo_home_location_declaration']('I live in Portland OR'),'Portland, Oregon')
 
     def test_pending_weather_location_resolves_home_atom_or_bare_place(self):
         memory={'atoms':[{'k':'preference','s':'home','r':'weather_location','v':'Portland, Oregon','c':100,'u':1,'t':1}]}

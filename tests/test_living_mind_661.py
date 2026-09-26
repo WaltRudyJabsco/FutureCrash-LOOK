@@ -51,7 +51,7 @@ def test_memory_schema_four_is_generous_but_retrieval_bounded():
     assert 'MEMORY_CANDIDATE_LIMIT=128' in text
     assert 'MEMORY_DURABLE_LIMIT=1024' in text
     assert 'MEMORY_ATOM_LIMIT=4096' in text
-    assert 'MEMORY_RETRIEVED_MACHINE_ATOMS=16' in text
+    assert 'MEMORY_RETRIEVED_MACHINE_ATOMS=24' in text
     assert '45*60' in text
 
 

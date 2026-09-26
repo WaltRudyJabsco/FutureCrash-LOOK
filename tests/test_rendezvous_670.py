@@ -70,7 +70,7 @@ def test_peer_rows_include_live_rendezvous_candidate(tmp_path, monkeypatch):
 def test_registry_is_ephemeral_slot_scoped(monkeypatch):
     reg=rendezvous.Registry()
     payload={
-        'schema':rendezvous.PRESENCE_SCHEMA,'version':'6.7.1','node_id':'fcl-test','public_key':'key',
+        'schema':rendezvous.PRESENCE_SCHEMA,'version':'6.7.2','node_id':'fcl-test','public_key':'key',
         'name':'test','hostname':'test','issued_at':int(time.time()),'expires_at':int(time.time())+60,
         'tailcat_port':7443,'tailcat_endpoints':[],'slots':['a'*64],
     }
@@ -84,7 +84,7 @@ def test_registry_is_ephemeral_slot_scoped(monkeypatch):
 
 def test_670_bundle_installs_rendezvous_and_keeps_tailscale_fallback():
     root=Path(__file__).resolve().parents[1]
-    assert (root/'VERSION').read_text().strip()=='6.7.1'
+    assert (root/'VERSION').read_text().strip()=='6.7.2'
     install=(root/'install.sh').read_text()
     lk=(root/'look/lk').read_text()
     node_text=(root/'core/node.py').read_text()
