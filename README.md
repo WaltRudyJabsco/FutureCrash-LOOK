@@ -1,6 +1,6 @@
 # Future Crash + LOOK
 
-## 6.6.2 · TRUE CURSOR
+## 6.6.3 · MOVIE NIGHT
 
 LO terminal editing now keeps readline/libedit cursor geometry honest on macOS and Linux while preserving ONE BRAIN cognition and LIVING MIND memory. Backspace/Delete, arrows, history, and Home/End operate on the real input buffer without stale colored-prompt glyphs.
 

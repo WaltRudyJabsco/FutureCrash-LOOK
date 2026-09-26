@@ -37,3 +37,26 @@ def test_media_tool_translation_keeps_core_structured():
     normalized=intent_normalizer.normalize('play a movie')
     tool=intent_normalizer.media_tool(normalized)
     assert tool=={'tool':'media_play','args':{'kind':'video','selection':'random','limit':1}}
+
+
+def test_conversational_movie_selectors_do_not_become_catalog_queries():
+    for phrase in (
+        'play us a movie',
+        'play a movie for us',
+        'any movie will do',
+        'a movie is fine',
+        'just some video',
+    ):
+        got=intent_normalizer.normalize(phrase)
+        assert got['action']=='media.play', phrase
+        assert got['kind']=='video', phrase
+        assert got['selection']=='random', phrase
+        assert 'query' not in got, phrase
+
+
+def test_conversational_audio_selectors_stay_typed_too():
+    got=intent_normalizer.normalize('any song will do')
+    assert got['action']=='media.play'
+    assert got['kind']=='audio'
+    assert got['selection']=='random'
+    assert 'query' not in got

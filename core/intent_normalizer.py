@@ -52,9 +52,22 @@ def normalize(prompt: str) -> dict[str, Any] | None:
     # Keep this ahead of ordinary media lookup so "a song" cannot accidentally
     # become a queue of titles containing those words.
     m = re.fullmatch(
-        r"(?:please\s+)?(?:play|put\s+on)\s+(?:me\s+)?"
+        r"(?:please\s+)?(?:play|put\s+on)\s+(?:(?:me|us)\s+)?"
         r"(?:a|an|any|some|random)\s+"
-        r"(movie|movies|film|films|video|videos|music|song|songs|track|tracks)",
+        r"(movie|movies|film|films|video|videos|music|song|songs|track|tracks)"
+        r"(?:\s+for\s+(?:me|us))?",
+        low,
+    )
+    if m:
+        return _intent("media.play", kind=_MEDIA_KIND[m.group(1)], selection="random", limit=1, match_mode="selector")
+
+    # Casual answers/refinements such as "any movie will do" are still generic
+    # selectors. They commonly arrive after a failed or ambiguous media turn, so
+    # never feed these words into catalog search as if they were titles/artists.
+    m = re.fullmatch(
+        r"(?:just\s+)?(?:a|an|any|some|random)\s+"
+        r"(movie|movies|film|films|video|videos|music|song|songs|track|tracks)"
+        r"(?:\s+(?:will\s+do|is\s+fine|is\s+good|works|would\s+be\s+fine))?",
         low,
     )
     if m:

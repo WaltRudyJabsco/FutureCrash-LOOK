@@ -1,3 +1,9 @@
+# 6.6.3 · MOVIE NIGHT
+
+- Restores conversational generic media selectors at the English edge: `play us a movie`, `play a movie for us`, `any movie will do`, `a movie is fine`, and equivalent audio forms now become typed random selectors instead of catalog text searches.
+- Keeps actual movie/video playback on the existing media engine; this is a selector-routing fix, not a player rewrite.
+- Includes the 6.6.2 TRUE CURSOR terminal Backspace/Delete fix.
+
 # 6.6.2 · TRUE CURSOR
 
 - Fixes LO terminal Backspace/Delete redraw corruption caused by ANSI-colored bytes inside the readline/libedit prompt width.
