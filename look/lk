@@ -162,14 +162,16 @@ def _safe_cwd(repair=True):
 
 
 RECENT_MEMORY_SLOTS=4
-MEMORY_CANDIDATE_LIMIT=32
-MEMORY_DURABLE_LIMIT=240
-MEMORY_RETRIEVED_ATOMS=6
-MEMORY_DOMAINS=("personal","preferences","projects","style","general")
+MEMORY_CANDIDATE_LIMIT=128
+MEMORY_DURABLE_LIMIT=1024
+MEMORY_ATOM_LIMIT=4096
+MEMORY_RETRIEVED_ATOMS=10
+MEMORY_RETRIEVED_MACHINE_ATOMS=16
+MEMORY_DOMAINS=("personal","preferences","projects","architecture","operational","resolver","style","general")
 LO_RECENT_EXCHANGES=12
 LO_RECENT_MAX_CHARS=18000
 LO_RECENT_CONTEXT_CHARS=7000
-MEMORY_SCHEMA_VERSION=3
+MEMORY_SCHEMA_VERSION=4
 SKILLS_SCHEMA_VERSION=1
 BUNDLED_SKILLS_VERSION=1
 
@@ -2053,7 +2055,7 @@ def doctor_island():
 def _empty_memory():
     return {"schema_version": MEMORY_SCHEMA_VERSION,
             "summary": "", "legacy_summary": "", "core_summary": "", "domain_summaries": {},
-            "durable": [], "memories": [], "maintenance_cycles": 0,
+            "durable": [], "memories": [], "atoms": [], "maintenance_cycles": 0,
             "last_decay_at": time.time(), "last_evidence_at": 0, "last_maintenance_at": 0,
             "last_consolidated_at": 0, "last_compiled_at": 0, "last_change": "",
             "last_extraction_at": 0, "last_extraction": "never", "last_extraction_reason": "",
@@ -2062,7 +2064,7 @@ def _empty_memory():
             "candidate_merges_total": 0, "candidate_local_suppressed": 0,
             "candidate_expired_total": 0,
             "compiler_base": "", "compiler_model": "",
-            "candidate_evictions": 0}
+            "candidate_evictions": 0, "last_fabric_sync_at": 0}
 
 
 DEFAULT_CORE = """# LO Core
@@ -2182,6 +2184,7 @@ def _migrate_old_memory(data):
         "domain_summaries": {},
         "durable": [],
         "memories": memories[-MEMORY_CANDIDATE_LIMIT:],
+        "atoms": [],
         "maintenance_cycles": 0,
     }
 
@@ -2227,6 +2230,19 @@ def _load_memory():
         durable=durable[-MEMORY_DURABLE_LIMIT:]
         domain_summaries=data.get("domain_summaries",{}) if isinstance(data.get("domain_summaries"),dict) else {}
         domain_summaries={str(k):_sanitize_summary(v)[:1000] for k,v in domain_summaries.items() if str(k) in MEMORY_DOMAINS and _sanitize_summary(v)}
+        atoms=[]
+        for item in data.get("atoms",[]):
+            if not isinstance(item,dict): continue
+            kind=str(item.get("k") or item.get("kind") or "fact")[:32]
+            subject=" ".join(str(item.get("s") or item.get("subject") or "").split())[:180]
+            relation=" ".join(str(item.get("r") or item.get("relation") or "").split())[:80]
+            value=" ".join(str(item.get("v") or item.get("value") or "").split())[:360]
+            if not (subject or value): continue
+            atoms.append({"k":kind,"s":subject,"r":relation,"v":value,
+                          "c":max(1,min(100,int(item.get("c",item.get("confidence",70)) or 70))),
+                          "u":max(1,int(item.get("u",item.get("uses",1)) or 1)),
+                          "t":float(item.get("t",item.get("updated_at",time.time())) or time.time())})
+        atoms=atoms[-MEMORY_ATOM_LIMIT:]
         previous_summary=_sanitize_summary(data.get("summary",""))
         legacy_summary=_sanitize_summary(data.get("legacy_summary",""))
         if source_schema<MEMORY_SCHEMA_VERSION and previous_summary:
@@ -2240,6 +2256,7 @@ def _load_memory():
                 "domain_summaries":domain_summaries,
                 "durable":durable,
                 "memories":cleaned[:MEMORY_CANDIDATE_LIMIT],
+                "atoms":atoms,
                 "maintenance_cycles":max(0,int(data.get("maintenance_cycles",0) or 0)),
                 "last_decay_at":float(data.get("last_decay_at",time.time()) or time.time()),
                 "last_evidence_at":float(data.get("last_evidence_at",0) or 0),
@@ -2262,7 +2279,8 @@ def _load_memory():
                 "candidate_evictions":max(0,int(data.get("candidate_evictions",0) or 0)),
                 "last_compiled_at":float(data.get("last_compiled_at",0) or 0),
                 "compiler_base":str(data.get("compiler_base",""))[:500],
-                "compiler_model":str(data.get("compiler_model",""))[:200]}
+                "compiler_model":str(data.get("compiler_model",""))[:200],
+                "last_fabric_sync_at":float(data.get("last_fabric_sync_at",0) or 0)}
         # Schema 3 has no permanent legacy tier. Fold an old compact summary into
         # one scoped durable atom if it is not already represented, then retire it.
         legacy=str(result.get("legacy_summary","")).strip()
@@ -2388,6 +2406,19 @@ def _prune_contaminated_memory(memory):
         row["domain"]=domain if domain in MEMORY_DOMAINS else "general"
         durable.append(row)
     memory["durable"]=durable[-MEMORY_DURABLE_LIMIT:]
+
+    atoms=[]
+    for item in memory.get("atoms",[]):
+        if not isinstance(item,dict): continue
+        subject=" ".join(str(item.get("s","")).split())[:180]
+        value=" ".join(str(item.get("v","")).split())[:360]
+        if not (subject or value): continue
+        atoms.append({"k":str(item.get("k","fact"))[:32],"s":subject,
+                      "r":str(item.get("r",""))[:80],"v":value,
+                      "c":max(1,min(100,int(item.get("c",70) or 70))),
+                      "u":max(1,int(item.get("u",1) or 1)),
+                      "t":float(item.get("t",time.time()) or time.time())})
+    memory["atoms"]=atoms[-MEMORY_ATOM_LIMIT:]
 
     memory["summary"]=_sanitize_summary(memory.get("summary",""))
     memory["legacy_summary"]=_sanitize_summary(memory.get("legacy_summary",""))[:2200]
@@ -2535,6 +2566,12 @@ def _memory_domain(text):
     low=" ".join(str(text or "").split()).casefold()
     if _looks_environmental_memory(low):
         return "environment"
+    if re.search(r"\b(architecture|architectural|fabric|cognition|one brain|decision plane|action registry|endpoint|routing|transport)\b",low):
+        return "architecture"
+    if re.search(r"\b(resolver|resolve|alias|fuzzy|referent|continuation|clarification)\b",low):
+        return "resolver"
+    if re.search(r"\b(systemd|launchd|linuxbrew|homebrew|service|installer|runtime|receipt|operational|port|daemon)\b",low):
+        return "operational"
     if re.search(r"\b(project|novel|story|future crash|look shell|lo\b|we're building|we are building|current project)\b",low):
         return "projects"
     if re.search(r"\b(prefer|preference|filename|format|naming|lowercase|hyphen|workflow|always want|don't want|do not want)\b",low):
@@ -2698,7 +2735,7 @@ def _fallback_core_summary(summaries):
 def _compile_memory(base,model,memory,force=False):
     """Background memory compiler: durable atoms -> domain summaries -> tiny core."""
     now=time.time()
-    if not force and now-float(memory.get("last_compiled_at",0) or 0)<6*3600:
+    if not force and now-float(memory.get("last_compiled_at",0) or 0)<45*60:
         return memory,False
     changed=False
     summaries=dict(memory.get("domain_summaries",{}) or {})
@@ -2747,6 +2784,12 @@ def _memory_context(memory,query=""):
     if atoms:
         rows="\n".join(f"- {m.get('text','')}" for m in atoms)
         parts.append("Relevant durable memory details:\n"+rows)
+
+    machine=_relevant_machine_atoms(memory,query)
+    if machine:
+        # Compact projection only at the prompt boundary; storage stays typed.
+        rows="\n".join(f"- {a.get('k')}|{a.get('s')}|{a.get('r')}|{a.get('v')}" for a in machine)
+        parts.append("Relevant machine memory:\n"+rows)
 
     # Candidates are cheap hypotheses; inject only relevant ones, never the whole pool.
     candidates=[]
@@ -2882,11 +2925,13 @@ def _fabric_memory_sync():
 
 def _fabric_memory_show(scope=None):
     store,node=_fabric_memory_store()
-    items=store.public(include_local=True).get("items") or []
+    public=store.public(include_local=True)
+    items=public.get("items") or []; atoms=public.get("atoms") or []
     if scope:
         items=[x for x in items if str(x.get("scope") or "").lower()==scope.lower()]
+        atoms=[x for x in atoms if str(x.get("scope") or "").lower()==scope.lower()]
     _title("Fabric memory")
-    print(f"  NODE {node} · {len(items)} item(s)")
+    print(f"  NODE {node} · {len(items)} prose item(s) · {len(atoms)} machine atom(s)")
     if not items:
         print("  No memories in this scope.")
         return 0
@@ -2939,6 +2984,17 @@ def _memory_command(args):
                 print(f"  synced across Fabric · {result.get('count',0)} replicated item(s)")
             else:
                 print("  saved locally; Fabric sync unavailable")
+        return 0
+    if args and args[0]=="learned":
+        _title("LO learned","machine-native + compiled")
+        atoms=sorted(memory.get("atoms",[]),key=lambda x:float(x.get("t",0)),reverse=True)
+        print(f"  MACHINE ATOMS · {len(atoms)}")
+        for a in atoms[:24]:
+            human=" ".join(x for x in (str(a.get("s",'')),str(a.get("r",'')),str(a.get("v",''))) if x).strip()
+            print(f"  {str(a.get('k','fact')).upper():<11} {human[:100]}{'…' if len(human)>100 else ''}  · {int(a.get('c',0))}%/{int(a.get('u',1))}")
+        durable=sorted(memory.get("durable",[]),key=lambda x:int(x.get("importance",0)),reverse=True)
+        print(f"\n  DURABLE · {len(durable)}")
+        for d in durable[:16]: print(f"  {str(d.get('domain','general')).upper():<11} {str(d.get('text',''))[:104]}")
         return 0
     if args and args[0]=="clear":
         if not _confirm("Clear LO user memory? [y/N] "): return 1
@@ -3014,7 +3070,8 @@ def _memory_command(args):
             print("  No compiled domain summaries yet.")
 
         durable=memory.get("durable",[]) or []
-        print(f"\n  DURABLE ATOMS · {len(durable)} stored")
+        machine_atoms=memory.get("atoms",[]) or []
+        print(f"\n  DURABLE ATOMS · {len(durable)} stored · MACHINE ATOMS · {len(machine_atoms)}")
         for item in sorted(durable,key=lambda x:int(x.get("importance",0)),reverse=True)[:8]:
             text=str(item.get("text",""))
             shown=text if len(text)<=62 else text[:59]+"…"
@@ -3051,21 +3108,24 @@ def _memory_command(args):
         print(f"  extraction · {memory.get('last_extraction','never')} {_age_label(memory.get('last_extraction_at',0))} · {kept}/{total} candidate · {none} none · {int(memory.get('candidate_local_suppressed',0))} local")
         reason=str(memory.get("last_extraction_reason","")).strip()
         if reason: print(f"             · {reason[:108]}")
-        if total>=12 and kept/max(1,total)<0.12:
+        if total>=12 and kept/max(1,total)<0.12 and not machine_atoms:
             print(f"  MEMORY HEALTH · candidate starvation · {kept/max(1,total):.0%} retained")
+        elif total>=12:
+            print(f"  MEMORY HEALTH · living · {kept/max(1,total):.0%} prose retained · {len(machine_atoms)} machine atoms")
         print(f"  metabolism · merged {int(memory.get('candidate_merges_total',0))} · promoted {int(memory.get('promotions_total',0))} · expired {int(memory.get('candidate_expired_total',0))} · evicted {int(memory.get('candidate_evictions',0))}")
         print(f"  compiler · consolidated {consolidated} · last {_age_label(memory.get('last_compiled_at',0))}")
         if memory.get("last_worker_error"):
             print(f"  worker error · {str(memory.get('last_worker_error'))[:120]}")
         print("  recent stores both sides of each exchange; display shows user side only")
-        print("  candidates are cheap hypotheses; durable atoms earn promotion; compiler rewrites compact domain summaries")
+        print("  memory is cheap; attention is budgeted · machine atoms stay compact; compiler continuously redrafts summaries")
+        print("  use `lk memory learned` for the human projection of machine-native learning")
         try:
             fstore,fnode=_fabric_memory_store()
-            fitems=fstore.public(include_local=True).get("items") or []
+            fpublic=fstore.public(include_local=True); fitems=fpublic.get("items") or []; fatoms=fpublic.get("atoms") or []
             shared=sum(1 for x in fitems if x.get("scope")=="shared")
             persona=sum(1 for x in fitems if str(x.get("scope") or "").startswith("persona:"))
             local=sum(1 for x in fitems if str(x.get("scope") or "").startswith("node:"))
-            print(f"  Fabric memory · shared {shared} · persona {persona} · local {local} · node {fnode}")
+            print(f"  Fabric memory · shared {shared} · persona {persona} · local {local} · machine {len(fatoms)} · node {fnode}")
             print("  use `lk memory fabric` to inspect scopes; `lk memory sync` to reconcile peers")
         except Exception:
             pass
@@ -3432,26 +3492,29 @@ def _high_recall_memory_candidate(user_text):
         return None
     markers=(
         "we want ","we need ","we should ","we decided ","we're building ","we are building ",
-        "the architecture","should be the default","the idea is ","the point is ","our memory",
-        "our system","for look","future crash","mercury writer","local-first","tailscale","3090",
+        "the architecture","architecture should","should be the default","the default should","the idea is ","the point is ",
+        "the rule is ","the principle is ","foundation","our memory","memory is ","our system","our brain",
+        "for look","future crash","fabric","one brain","mercury writer","local-first","tailscale","3090",
+        "i want ","i don't want ","i do not want ","trustworthy","fuzzy","exact execution",
         "i prefer ","i usually ","i always ","i don't want ","i do not want ",
         "i like ","i love ","my favorite ","my favourite ",
     )
     hits=sum(1 for m in markers if m in low)
     if not hits: return None
-    importance=34 if hits==1 else 46 if hits==2 else 58
-    if any(m in low for m in ("i prefer ","i always ","we decided ","should be the default","local-first")):
-        importance=max(importance,52)
+    importance=38 if hits==1 else 54 if hits==2 else 68
+    if any(m in low for m in ("i prefer ","i always ","we decided ","should be the default","the rule is ","the principle is ","local-first")):
+        importance=max(importance,68)
     return importance,text[:520].rstrip()
 
 def _extract_memory_candidate(base, model, user_text, assistant_text):
     prompt=f"""Capture the compact meat of this exchange when it would help conversational
 continuity later.
 
-Store ONE candidate memory when the user expresses a potentially reusable preference, favorite,
-habit, personal choice, project decision, active project state, recurring workflow preference,
-or explicit request to remember something. Candidates are cheap hypotheses: prefer capturing
-a plausible reusable fact at modest importance over returning NONE; decay and competition prune it later.
+Store ONE candidate memory whenever the exchange contains reusable user-owned signal: a preference,
+project/architecture decision, active project state, recurring workflow, naming/resolution convention,
+operational lesson the user accepted, or explicit request to remember something. Memory is cheap;
+attention is expensive. Prefer capturing useful signal at modest importance over returning NONE;
+metabolism, merging, contradiction handling, and retrieval budgets prune what LO actually thinks with later.
 
 Important guidance:
 - "I like...", "I love...", "one of my favorites...", "I prefer...", "I usually...",
@@ -3461,9 +3524,10 @@ Important guidance:
 - "sidebar", "no need to remember this", "just for now", and similar language mean
   conversation-local context: RECENT should retain the exchange, but return NONE here so it
   does not enter candidate/durable memory unless the user separately marks it long-term.
-- User memory must be grounded in what the USER actually said or clearly confirmed.
-  Never turn an assistant suggestion into a user preference merely because the assistant proposed it.
-  A bare acknowledgement such as "nice", "thanks", or "okay" does not establish a new preference.
+- Memory must be grounded in what the USER said, directed, corrected, or clearly confirmed.
+  An assistant suggestion alone is not user memory. But if the user explicitly adopts a design, asks to ship it,
+  corrects a resolver, or validates an operational result, that confirmation is evidence about the shared project.
+  Bare social acknowledgement without a referent remains NONE.
 - Return NONE for mechanical turns, acknowledgements, disposable commands, or content-free chatter.
 - When the exchange changes the state of an ongoing project, establishes a working convention,
   states a preference likely to affect later answers, or reveals a reusable choice/pattern,
@@ -3941,7 +4005,7 @@ def _promotion_candidates(memory,durable_text=""):
         importance=int(item.get("importance",0))
         uses=int(item.get("uses",1))
         text=str(item.get("text",""))
-        if (durable_text and text.casefold()==durable_text.casefold()) or (importance>=95 and uses>=2) or (uses>=4 and importance>=65):
+        if (durable_text and text.casefold()==durable_text.casefold()) or importance>=88 or (uses>=2 and importance>=60) or (uses>=3 and importance>=48):
             promoted.append(item)
     return promoted
 
@@ -4037,7 +4101,67 @@ EXPLICIT DURABLE MEMORY:
         return old_summary
 
 
-def _remember_exchange(base, model, memory, user_text, assistant_text, profile="workspace"):
+def _atom_key(atom):
+    return (str(atom.get("k","")).casefold(),str(atom.get("s","")).casefold(),
+            str(atom.get("r","")).casefold(),str(atom.get("v","")).casefold())
+
+
+def _merge_machine_atoms(memory, incoming):
+    """Cheap machine-native memory. Human prose is only an inspection projection."""
+    now=time.time(); rows=list(memory.get("atoms",[])); by_key={_atom_key(x):x for x in rows if isinstance(x,dict)}
+    for raw in incoming or []:
+        if not isinstance(raw,dict): continue
+        atom={"k":str(raw.get("k") or "fact")[:32],
+              "s":" ".join(str(raw.get("s") or "").split())[:180],
+              "r":" ".join(str(raw.get("r") or "").split())[:80],
+              "v":" ".join(str(raw.get("v") or "").split())[:360],
+              "c":max(1,min(100,int(raw.get("c",70) or 70))),
+              "u":max(1,int(raw.get("u",1) or 1)),"t":float(raw.get("t",now) or now)}
+        if not (atom["s"] or atom["v"]): continue
+        key=_atom_key(atom); old=by_key.get(key)
+        if old:
+            old["u"]=int(old.get("u",1))+atom["u"]
+            old["c"]=min(100,max(int(old.get("c",70)),atom["c"])+2)
+            old["t"]=max(float(old.get("t",0)),atom["t"])
+        else:
+            rows.append(atom); by_key[key]=atom
+    # Storage is cheap, but stale low-value atoms should not grow without bound.
+    rows.sort(key=lambda x:(float(x.get("t",0)),int(x.get("c",0)),int(x.get("u",1))))
+    memory["atoms"]=rows[-MEMORY_ATOM_LIMIT:]
+    return memory
+
+
+def _machine_atom_relevance(atom,query):
+    material=" ".join(str(atom.get(k,"")) for k in ("k","s","r","v"))
+    return _memory_relevance(material,query)
+
+
+def _relevant_machine_atoms(memory,query,limit=MEMORY_RETRIEVED_MACHINE_ATOMS):
+    ranked=[]; now=time.time()
+    for atom in memory.get("atoms",[]):
+        score=_machine_atom_relevance(atom,query)
+        if score<=0: continue
+        age=max(0.0,(now-float(atom.get("t",now)))/86400.0)
+        rank=score*100+int(atom.get("c",0))+min(20,int(atom.get("u",1))*2)-min(20,age)
+        ranked.append((rank,atom))
+    ranked.sort(key=lambda x:x[0],reverse=True)
+    return [x[1] for x in ranked[:max(1,int(limit))]]
+
+
+def _mirror_machine_atoms_to_fabric(atoms):
+    """Best-effort local write. Peer convergence is handled by bounded Fabric sync."""
+    try:
+        store,_node=_fabric_memory_store()
+        for a in atoms or []:
+            if not isinstance(a,dict): continue
+            store.add_atom("shared",str(a.get("k") or "fact"),str(a.get("s") or ""),
+                           str(a.get("r") or ""),str(a.get("v") or ""),int(a.get("c",70) or 70),_node)
+        return True
+    except Exception:
+        return False
+
+
+def _remember_exchange(base, model, memory, user_text, assistant_text, profile="workspace", cognition=None):
     """Living Memory: evidence-driven extraction, semantic reinforcement, consolidation."""
     now=time.time()
     memory=_prune_contaminated_memory(memory)
@@ -4045,6 +4169,17 @@ def _remember_exchange(base, model, memory, user_text, assistant_text, profile="
     memory["last_evidence_at"]=now
     memory["compiler_base"]=str(base)[:500]
     memory["compiler_model"]=str(model)[:200]
+    if isinstance(cognition,dict):
+        incoming_atoms=cognition.get("atoms") or []
+        memory=_merge_machine_atoms(memory,incoming_atoms)
+        if incoming_atoms:
+            _mirror_machine_atoms_to_fabric(incoming_atoms)
+            # Converge shared cognition in the background without making each
+            # interactive turn pay for peer discovery/network latency.
+            if now-float(memory.get("last_fabric_sync_at",0) or 0) >= 120:
+                result=_fabric_memory_sync()
+                if result.get("ok"):
+                    memory["last_fabric_sync_at"]=now
 
     local_only=_conversation_local_memory_intent(user_text)
     candidate=None if local_only else _extract_memory_candidate(base,model,user_text,assistant_text)
@@ -4342,7 +4477,7 @@ def _start_memory_worker():
         pass
 
 
-def _queue_memory_exchange(base, model, user_text, assistant_text, profile="workspace"):
+def _queue_memory_exchange(base, model, user_text, assistant_text, profile="workspace", cognition=None):
     """Durably enqueue an exchange, then let detached housekeeping own compression."""
     try:
         MEMORY_QUEUE.mkdir(parents=True, exist_ok=True)
@@ -4355,6 +4490,7 @@ def _queue_memory_exchange(base, model, user_text, assistant_text, profile="work
             "user":user_text[:12000],
             "assistant":assistant_text[:16000],
             "profile":profile if profile in LO_PROFILES else "workspace",
+            "cognition":cognition if isinstance(cognition,dict) else {},
         }
         tmp.write_text(json.dumps(payload, ensure_ascii=False), encoding="utf-8")
         os.chmod(tmp, 0o600)
@@ -4399,6 +4535,7 @@ def _memory_worker():
                     str(job.get("user","")),
                     str(job.get("assistant","")),
                     str(job.get("profile","workspace")),
+                    job.get("cognition") if isinstance(job.get("cognition"),dict) else None,
                 )
                 job_path.unlink()
             except Exception:
@@ -6421,6 +6558,16 @@ def _lo_tools_for_route(profile,route):
     narrowed=[t for t in tools if t.get("function",{}).get("name","") in allowed]
     # Never hand the model an empty schema because a new family has not yet been registered.
     return narrowed or tools
+
+
+def _lo_social_ack(prompt):
+    """Pure social feedback must not reopen or reinterpret completed host actions."""
+    low=" ".join(str(prompt or "").casefold().strip(" .!?").split())
+    if re.fullmatch(r"(?:great|good|nice|excellent|amazing|awesome|perfect)(?: job| work)?(?: thanks)?",low):
+        return "Glad that worked."
+    if re.fullmatch(r"(?:you did great|you did well|well done|thank you|thanks|thanks a lot|much appreciated)",low):
+        return "Thanks."
+    return None
 
 
 def _lo_media_intent(prompt):
@@ -8790,7 +8937,7 @@ def _direct_searxng_search(query, limit=8):
     params=urllib.parse.urlencode({"q":query,"format":"json"})
     request=urllib.request.Request(base+"/search?"+params,headers={
         "Accept":"application/json",
-        "User-Agent":"Future-Crash-Fabric/6.6.0",
+        "User-Agent":"Future-Crash-Fabric/6.6.1",
     })
     with urllib.request.urlopen(request,timeout=12) as response:
         data=json.load(response)
@@ -9812,6 +9959,8 @@ def ollama_chat(force_search=False, initial_prompt=None, allow_start=True, host_
     pending_prompt = (initial_prompt or "").strip()
     last_action=None
     last_candidates=""
+    pending_media_clarification=None
+    last_authoritative_receipt=None
     turn_id=0
     while True:
         if pending_prompt:
@@ -9829,6 +9978,27 @@ def ollama_chat(force_search=False, initial_prompt=None, allow_start=True, host_
                 continue
 
         if not prompt:
+            continue
+
+        # A pending deterministic media ambiguity owns the next plausible selector.
+        # This is working state, not a new goal reconstructed from chat prose.
+        continuation_of=None
+        if pending_media_clarification and not re.match(r"^(?:play|queue|shuffle|stop|pause|resume|next|previous)\b",prompt,re.I):
+            if len(prompt.split())<=10 and not prompt.endswith("?"):
+                continuation_of=dict(pending_media_clarification)
+                prompt=f"play {prompt}"
+
+        # Pure acknowledgement is a zero-tool turn. Never ask a model to reconstruct
+        # whether the preceding host action succeeded; the receipt already settled it.
+        social_answer=_lo_social_ack(prompt)
+        if social_answer:
+            print("\n"+_lo_label("lo","35")+"\n"+_ollama_markup(social_answer)+"\n")
+            _save_recent_exchange(prompt,social_answer)
+            if events:
+                events.emit("intent_routed",family="social",families=["social"],confidence=1.0,margin=1.0,source="rules",forced_search=False)
+                events.emit("response",text=social_answer)
+                events.emit("request_done",status="ok",rounds=0,tool_calls=0,prompt_tokens=0,output_tokens=0,load_ms=0)
+            if one_shot: return 0
             continue
 
         # Shared host routing runs before any surface or model gets to improvise.
@@ -10054,7 +10224,21 @@ def ollama_chat(force_search=False, initial_prompt=None, allow_start=True, host_
             answer=_lo_media_direct_answer(media_content,media_ok)
             print("\n"+_lo_label("lo","35")+"\n"+_ollama_markup(answer)+"\n")
             messages.append({"role":"assistant","content":answer})
-            if media_ok: turn_successful_tools.add(media_name)
+            if media_ok:
+                turn_successful_tools.add(media_name)
+                last_authoritative_receipt={"tool":media_name,"result":str(media_content)[:1200],"time":time.time()}
+                if continuation_of:
+                    # Successful clarification teaches a compact resolver relationship.
+                    old=str(continuation_of.get("query") or "").strip()
+                    new=str(media_args.get("query") or "").strip()
+                    if old and new:
+                        memory=_merge_machine_atoms(memory,[{"k":"resolver","s":old,"r":"resolves_to","v":new,"c":92,"u":1}])
+                        _save_memory(memory)
+                pending_media_clarification=None
+            elif "MEDIA AMBIGUOUS" in str(media_content):
+                pending_media_clarification={"query":str(media_args.get("query") or detail),"time":time.time()}
+            else:
+                pending_media_clarification=None
             if events:
                 events.emit("tool_done",tool=media_name,mode="preflight",elapsed_tool_ms=_media_elapsed,status=("ok" if media_ok else "failed"))
                 events.emit("response",text=answer)
@@ -10656,10 +10840,15 @@ def ollama_chat(force_search=False, initial_prompt=None, allow_start=True, host_
             # successful receipt in this turn. This intentionally duplicates the
             # earlier policy guard so future control-flow edits cannot bypass it.
             candidate_final=_split_ollama_thinking(message)[1]
+            # Any successful action tool in this turn is authoritative evidence. The
+            # renderer may not overrule a real receipt merely because it came through
+            # media/speech/game rather than OPEN/PREVIEW/REVEAL bookkeeping.
+            authoritative_action_tools={"media_play","media_queue","media_control","audio_speak","game_action","open_path","preview_path","reveal_path","open_url"}
+            authoritative_action_success=bool(authoritative_action_tools & set(turn_successful_tools)) or external_action_succeeded
             if mutation_required and mutation_succeeded:
                 candidate_final=_mutation_truth_summary(last_mutation_result)
                 message={"role":"assistant","content":candidate_final,"thinking":"","tool_calls":[]}
-            elif _answer_claims_external_success(candidate_final) and not external_action_succeeded:
+            elif _answer_claims_external_success(candidate_final) and not authoritative_action_success:
                 candidate_final="I don't have a successful host-action receipt, so I can't claim that it opened or played."
                 message={"role":"assistant","content":candidate_final,"thinking":"","tool_calls":[]}
             elif external_action_succeeded and (
@@ -10703,13 +10892,20 @@ def ollama_chat(force_search=False, initial_prompt=None, allow_start=True, host_
             _save_recent_exchange(prompt, answer)
             if feedback_queued and sys.stdout.isatty():
                 print(_c("  reflecting · background","2"))
-            if _queue_memory_exchange(base, model, prompt, answer, profile):
+            cognition_atoms=[]
+            if turn_successful_tools:
+                for tool_name in sorted(turn_successful_tools):
+                    cognition_atoms.append({"k":"action","s":tool_name,"r":"succeeded_for","v":prompt[:240],"c":100,"u":1})
+            if turn_goal:
+                cognition_atoms.append({"k":"goal","s":str(turn_goal.primary),"r":"request","v":prompt[:240],"c":max(50,int(float(getattr(turn_route,'confidence',.5))*100)),"u":1})
+            cognition={"atoms":cognition_atoms}
+            if _queue_memory_exchange(base, model, prompt, answer, profile, cognition=cognition):
                 if sys.stdout.isatty():
                     print(_c("  memory · background", "2"))
             else:
                 # If queueing ever fails, preserve memory rather than silently dropping it.
                 with _activity("remembering"):
-                    memory = _remember_exchange(base, model, memory, prompt, answer, profile)
+                    memory = _remember_exchange(base, model, memory, prompt, answer, profile, cognition=cognition)
             _ai_foreground(False,"lo")
             if one_shot:
                 return 0

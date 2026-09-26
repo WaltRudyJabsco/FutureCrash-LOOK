@@ -1,3 +1,13 @@
+# 6.6.1 · LIVING MIND
+
+- Makes successful host-action receipts authoritative through final presentation, including media/speech/game actions.
+- Adds explicit working-state continuation for unresolved media selectors; a clarification refines the existing goal instead of starting over.
+- Treats praise/acknowledgement as zero-tool social turns so LO cannot hallucinate a postmortem of an already completed action.
+- Upgrades Living Memory to schema 4 with larger cheap candidate/durable budgets, machine-native atoms, tighter retrieval budgets, and 45-minute continuous domain recompilation.
+- Successful goals/actions and resolver corrections become compact typed atoms; human-readable memory is rendered only at the inspection/prompt boundary.
+- Fabric Memory v2 replicates machine atoms across trusted nodes alongside prose memory; background memory maintenance performs bounded peer convergence.
+- Adds `lk memory learned` to inspect the human projection of machine-native learning.
+
 # 6.6.0 · ONE BRAIN
 
 - Adds `core/cognition.py`, a shared DecisionPlane used by LOOK, Signal, Albert, and machine clients.

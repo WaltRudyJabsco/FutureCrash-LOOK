@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Future Crash + LOOK Unified Node 6.6.0.
+"""Future Crash + LOOK Unified Node 6.6.1.
 
 A small distributed supervisor for trusted personal machines. Immediate events stay
 asynchronous; a one-second fabric pulse reconciles presence, leases and stale work.
@@ -62,8 +62,8 @@ try:
 except ImportError:
     from endpoint_auth import EndpointAuth
 
-VERSION = "6.6.0"
-RELEASE_NAME = "ONE BRAIN"
+VERSION = "6.6.1"
+RELEASE_NAME = "LIVING MIND"
 DEFAULT_HOST = "127.0.0.1"
 DEFAULT_PORT = 7332
 DEFAULT_INGRESS_PORT = 0
@@ -2047,7 +2047,9 @@ def _lights_broadcast(pattern="demo", *, show_id=None, start_pulse=None, repeat=
 def _memory_sync() -> dict:
     """Explicit bounded peer merge of shared/persona memory."""
     snapshot = {"self": node_info(), "peers": PEERS.public()}
-    combined = list(FABRIC_MEMORY.public(include_local=False).get("items") or [])
+    public_local=FABRIC_MEMORY.public(include_local=False)
+    combined = list(public_local.get("items") or [])
+    combined_atoms = list(public_local.get("atoms") or [])
     pulled = pushed = failures = 0
     peers = snapshot.get("peers") or {}
     if isinstance(peers, dict):
@@ -2058,20 +2060,24 @@ def _memory_sync() -> dict:
         try:
             remote = http_json(_remote_url(snapshot, name, "/v1/memory"), timeout=.8)
             combined.extend(remote.get("items") or [])
+            combined_atoms.extend(remote.get("atoms") or [])
             pulled += 1
         except Exception:
             failures += 1
     merged = FABRIC_MEMORY.merge(combined)
-    union = FABRIC_MEMORY.public(include_local=False).get("items") or []
+    merged_atoms = FABRIC_MEMORY.merge_atoms(combined_atoms)
+    public_union=FABRIC_MEMORY.public(include_local=False)
+    union = public_union.get("items") or []
+    union_atoms = public_union.get("atoms") or []
     for name in peer_names:
         try:
-            http_json(_remote_url(snapshot, name, "/v1/memory"), {"action":"merge", "items": union}, timeout=.8)
+            http_json(_remote_url(snapshot, name, "/v1/memory"), {"action":"merge", "items": union, "atoms": union_atoms}, timeout=.8)
             pushed += 1
         except Exception:
             failures += 1
     FABRIC_STORE.event(None, "memory", "sync", f"{len(union)} shared/persona memories",
                        node=identity()["name"], data={"pulled":pulled,"pushed":pushed,"failures":failures})
-    return {"ok": True, "count": len(union), "pulled": pulled, "pushed": pushed, "failures": failures, "merge": merged}
+    return {"ok": True, "count": len(union), "atoms": len(union_atoms), "pulled": pulled, "pushed": pushed, "failures": failures, "merge": merged, "merge_atoms": merged_atoms}
 
 
 
@@ -2199,7 +2205,7 @@ def _local_web_search(query, limit=8):
     base=os.environ.get("FCL_SEARXNG_URL","http://127.0.0.1:8888").rstrip("/")
     request=urllib.request.Request(base+"/search?"+params,headers={
         "Accept":"application/json",
-        "User-Agent":"Future-Crash-Fabric/6.6.0",
+        "User-Agent":"Future-Crash-Fabric/6.6.1",
     })
     try:
         with urllib.request.urlopen(request,timeout=8) as response:
@@ -2933,7 +2939,7 @@ def _openjev_shadow(state, question, candidates, *, profile="workspace", consequ
 
 
 class API(BaseHTTPRequestHandler):
-    server_version = "FCLNode/6.6.0"
+    server_version = "FCLNode/6.6.1"
 
     def setup(self):
         self._metric_request_id = None
@@ -3506,7 +3512,9 @@ class API(BaseHTTPRequestHandler):
                     item=FABRIC_MEMORY.add(str(d.get("scope") or "shared"), str(d.get("text") or ""), int(d.get("importance") or 60), identity()["name"])
                     return self.sendj(200, {"ok":True,"item":item})
                 if action == "merge":
-                    return self.sendj(200, FABRIC_MEMORY.merge(d.get("items") or []))
+                    items_result=FABRIC_MEMORY.merge(d.get("items") or [])
+                    atoms_result=FABRIC_MEMORY.merge_atoms(d.get("atoms") or [])
+                    return self.sendj(200, {"ok":True,"items":items_result,"atoms":atoms_result})
                 if action == "sync":
                     return self.sendj(200, _memory_sync())
                 return self.sendj(400, {"ok":False,"error":"memory action must be add, merge, or sync"})

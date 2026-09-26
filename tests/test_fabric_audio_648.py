@@ -8,7 +8,7 @@ def test_service_binary_discovery_includes_linuxbrew():
     assert 'Path.home()/".linuxbrew/bin"/name' in src
 
 def test_sound_check_release_contract():
-    assert (ROOT/'VERSION').read_text().strip() == '6.6.0'
+    assert (ROOT/'VERSION').read_text().strip() == '6.6.1'
     node=(ROOT/'core/node.py').read_text()
-    assert 'VERSION = "6.6.0"' in node
-    assert 'RELEASE_NAME = "ONE BRAIN"' in node
+    assert 'VERSION = "6.6.1"' in node
+    assert 'RELEASE_NAME = "LIVING MIND"' in node
