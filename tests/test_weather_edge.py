@@ -18,7 +18,8 @@ def weather_namespace():
         '_lo_weather_history_location', '_lo_weather_default_location',
         '_lo_weather_context', '_lo_weather_followup', '_lo_weather_followup_location',
         '_lo_weather_verification_requested', '_weather_payload',
-        '_weather_direct_followup', '_weather_verify_nws', '_weather_verification_answer',
+        '_lo_home_location_declaration', '_lo_learned_home_location', '_lo_weather_pending_location',
+        '_weather_direct_followup', '_weather_code_text', '_weather_direct_summary', '_weather_verify_nws', '_weather_verification_answer',
     }
     body=[]
     for node in tree.body:
@@ -123,6 +124,32 @@ class WeatherEdge514Tests(unittest.TestCase):
         self.assertIn('NWS 68.0°F',answer)
         self.assertIn('difference 2.5°F',answer)
         self.assertGreaterEqual(len(calls),3)
+
+
+    def test_home_declaration_is_operator_state_not_geocoder_guess(self):
+        self.assertEqual(self.w['_lo_home_location_declaration']('my home is portland oregon'),'portland oregon')
+        self.assertEqual(self.w['_lo_home_location_declaration']('no home is Portland OR'),'Portland, Oregon')
+        self.assertEqual(self.w['_lo_home_location_declaration']('my home is portland what is the weather'),'portland')
+
+    def test_pending_weather_location_resolves_home_atom_or_bare_place(self):
+        memory={'atoms':[{'k':'preference','s':'home','r':'weather_location','v':'Portland, Oregon','c':100,'u':1,'t':1}]}
+        self.assertEqual(self.w['_lo_learned_home_location'](memory),'Portland, Oregon')
+        self.assertEqual(self.w['_lo_weather_pending_location']('home',memory),'Portland, Oregon')
+        self.assertEqual(self.w['_lo_weather_pending_location']('portland',memory),'portland')
+        self.assertIsNone(self.w['_lo_weather_pending_location']('home',{'atoms':[]}))
+
+    def test_current_weather_has_deterministic_final_answer(self):
+        receipt={
+            'edge':'WEATHER','source':'Open-Meteo',
+            'location':{'name':'Portland','admin1':'Oregon','country':'United States'},
+            'current':{'temperature_2m':61.2,'apparent_temperature':60.0,'relative_humidity_2m':70,'wind_speed_10m':4.5,'weather_code':1},
+            'forecast':[{'date':'2026-09-25','high_f':72.0,'low_f':51.0,'precip_probability_pct':10}],
+        }
+        answer=self.w['_weather_direct_summary'](json.dumps(receipt))
+        self.assertIn('Portland, Oregon:',answer)
+        self.assertIn('61.2°F',answer)
+        self.assertIn('today 72.0°/51.0°',answer)
+        self.assertIn('rain 10%',answer)
 
     def test_missing_location_has_distinct_host_path(self):
         text=LOOK.read_text()

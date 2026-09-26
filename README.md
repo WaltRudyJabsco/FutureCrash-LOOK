@@ -1,5 +1,11 @@
 # Future Crash + LOOK
 
+## 6.7.1 · HOME BASE
+
+HOME BASE fixes a working-state failure exposed by ordinary weather conversation. When LO asks for a location, the next short answer is now owned by that pending goal instead of being reinterpreted as a fresh prompt. Literal `home` is never sent to a public geocoder; an explicit statement such as `my home is Portland OR` becomes a typed, replaceable semantic preference and is reused by `home` / `my weather`.
+
+Current-weather answers are also rendered directly from the canonical WEATHER receipt, so a successful lookup cannot end in `(no final response)` or be reconstructed incorrectly by the language model. This release intentionally leaves the 6.7 BEACON networking architecture unchanged.
+
 ## 6.7.0 · BEACON
 
 BEACON begins Fabric's independent Internet discovery layer. Already-paired nodes can optionally announce short-lived, Ed25519-signed presence through a tiny public rendezvous service. Pairwise authorization tokens stay on the devices; only one-way capability slots are published. Resolved addresses become temporary Tailcat candidates while the certificate pinned during pairing remains the authority.

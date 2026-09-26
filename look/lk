@@ -6743,6 +6743,74 @@ def _normalize_weather_location(location):
             return f"{city}, {state}"
     return place
 
+
+
+def _lo_home_location_declaration(prompt):
+    """Read an explicit operator correction such as 'my home is Portland Oregon'.
+
+    This is semantic state supplied by the operator, not geocoder inference.  A
+    trailing weather request is stripped so the learned value stays a place.
+    """
+    text=" ".join(str(prompt or "").strip().split()).strip(" .!?")
+    if not text:
+        return None
+    match=re.search(r"(?:^|\b)(?:no[, ]+)?(?:my\s+)?home(?:\s+location)?\s+(?:is|=)\s+(.+)$",text,re.I)
+    if not match:
+        return None
+    place=match.group(1).strip(" ,.;:?!")
+    # Keep ordinary place words, but cut a second clause that asks for weather.
+    place=re.split(r"\s+(?=(?:what(?:'s| is)|how(?:'s| is)|give me|tell me)\s+(?:the\s+)?(?:weather|forecast|temperature)\b)",place,maxsplit=1,flags=re.I)[0]
+    place=re.split(r"\s+(?=weather\b)",place,maxsplit=1,flags=re.I)[0]
+    place=_normalize_weather_location(place.strip(" ,.;:?!"))
+    return place if 1 <= len(place) <= 96 else None
+
+def _lo_learned_home_location(memory):
+    """Return the newest authoritative machine atom for the operator's home."""
+    best=None
+    for atom in (memory or {}).get("atoms",[]) or []:
+        if not isinstance(atom,dict):
+            continue
+        if str(atom.get("s") or "").casefold() != "home":
+            continue
+        if str(atom.get("r") or "").casefold() != "weather_location":
+            continue
+        value=_normalize_weather_location(atom.get("v"))
+        if not value:
+            continue
+        stamp=float(atom.get("t",0) or 0)
+        if best is None or stamp >= best[0]:
+            best=(stamp,value)
+    return best[1] if best else None
+
+def _lo_store_home_location(memory, location):
+    """Set, rather than accumulate, the single current home weather location."""
+    location=_normalize_weather_location(location)
+    if not location:
+        return memory
+    rows=[]
+    for atom in (memory or {}).get("atoms",[]) or []:
+        if not isinstance(atom,dict):
+            continue
+        if str(atom.get("s") or "").casefold()=="home" and str(atom.get("r") or "").casefold()=="weather_location":
+            continue
+        rows.append(atom)
+    memory["atoms"]=rows
+    return _merge_machine_atoms(memory,[{"k":"preference","s":"home","r":"weather_location","v":location,"c":100,"u":1}])
+
+def _lo_weather_pending_location(prompt, memory):
+    """Treat the answer to our own location question as working state."""
+    text=" ".join(str(prompt or "").strip().split()).strip(" ,.;:?!")
+    if not text or len(text.split()) > 10:
+        return None
+    low=text.casefold()
+    if low in {"home","my home","at home","here"}:
+        return _lo_learned_home_location(memory)
+    # Reject obvious new requests; a short bare place is otherwise exactly what
+    # the host asked the operator to supply.
+    if re.search(r"\b(play|open|find|search|stop|pause|write|delete|email|calendar)\b",low):
+        return None
+    return _normalize_weather_location(text)
+
 def _lo_weather_location(prompt):
     """Extract and canonicalize an explicit place for deterministic WEATHER."""
     text=" ".join(str(prompt or "").strip().split())
@@ -6775,7 +6843,8 @@ def _lo_weather_history_location(history):
         if not isinstance(prior,dict) or str(prior.get("role") or "").lower()!="user":
             continue
         text=str(prior.get("content") or "")
-        place=_lo_weather_location(text)
+        declared_home=_lo_home_location_declaration(text)
+        place=_lo_weather_location(text) or declared_home
         if place:
             current=place
             weather_active=True
@@ -8748,6 +8817,55 @@ def _weather_lookup(location):
         days.append({"date":day,"weather_code":at("weather_code"),"high_f":at("temperature_2m_max"),"low_f":at("temperature_2m_min"),"precip_probability_pct":at("precipitation_probability_max"),"precipitation_in":at("precipitation_sum"),"sunrise":at("sunrise"),"sunset":at("sunset")})
     return json.dumps(_info_envelope("Open-Meteo","WEATHER",{"location":place,"observed_at":(data.get("current") or {}).get("time"),"current":data.get("current") or {},"current_units":data.get("current_units") or {},"forecast":days},as_of=(data.get("current") or {}).get("time"),source_url="https://open-meteo.com/"),ensure_ascii=False)
 
+def _weather_code_text(code):
+    try: code=int(code)
+    except Exception: return ""
+    if code==0: return "clear"
+    if code in (1,2): return "partly cloudy"
+    if code==3: return "overcast"
+    if code in (45,48): return "foggy"
+    if code in (51,53,55,56,57): return "drizzle"
+    if code in (61,63,65,66,67): return "rain"
+    if code in (71,73,75,77): return "snow"
+    if code in (80,81,82): return "rain showers"
+    if code in (85,86): return "snow showers"
+    if code in (95,96,99): return "thunderstorms"
+    return ""
+
+def _weather_direct_summary(tool_content):
+    """Render ordinary current-weather requests directly from the typed receipt."""
+    row=_weather_payload(tool_content)
+    if not row:
+        return None
+    place=row.get("location") or {}
+    name=str(place.get("name") or "the selected location")
+    region=str(place.get("admin1") or place.get("region") or "").strip()
+    country=str(place.get("country") or "").strip()
+    label=", ".join(x for x in (name,region) if x)
+    if country and country.casefold() not in {"united states","united states of america"}:
+        label=", ".join(x for x in (label,country) if x)
+    cur=row.get("current") or {}
+    forecast=list(row.get("forecast") or [])
+    today=forecast[0] if forecast else {}
+    temp=cur.get("temperature_2m"); feels=cur.get("apparent_temperature")
+    humidity=cur.get("relative_humidity_2m"); wind=cur.get("wind_speed_10m")
+    condition=_weather_code_text(cur.get("weather_code"))
+    bits=[]
+    if temp is not None: bits.append(f"{float(temp):.1f}°F")
+    if condition: bits.append(condition)
+    if feels is not None and temp is not None and abs(float(feels)-float(temp)) >= 1.0:
+        bits.append(f"feels like {float(feels):.1f}°F")
+    current=" · ".join(bits) if bits else "Current conditions available"
+    details=[]
+    if today.get("high_f") is not None and today.get("low_f") is not None:
+        details.append(f"today {float(today['high_f']):.1f}°/{float(today['low_f']):.1f}°")
+    if today.get("precip_probability_pct") is not None:
+        details.append(f"rain {float(today['precip_probability_pct']):.0f}%")
+    if humidity is not None: details.append(f"humidity {float(humidity):.0f}%")
+    if wind is not None: details.append(f"wind {float(wind):.1f} mph")
+    suffix=("; " + ", ".join(details)) if details else ""
+    return f"{label}: {current}{suffix}."
+
 def _weather_verify_nws(tool_content):
     """Cross-check current conditions against the nearest NWS observation station.
 
@@ -8937,7 +9055,7 @@ def _direct_searxng_search(query, limit=8):
     params=urllib.parse.urlencode({"q":query,"format":"json"})
     request=urllib.request.Request(base+"/search?"+params,headers={
         "Accept":"application/json",
-        "User-Agent":"Future-Crash-Fabric/6.7.0",
+        "User-Agent":"Future-Crash-Fabric/6.7.1",
     })
     with urllib.request.urlopen(request,timeout=12) as response:
         data=json.load(response)
@@ -9981,6 +10099,7 @@ def ollama_chat(force_search=False, initial_prompt=None, allow_start=True, host_
     last_action=None
     last_candidates=""
     pending_media_clarification=None
+    pending_weather_clarification=False
     last_authoritative_receipt=None
     turn_id=0
     while True:
@@ -10000,6 +10119,41 @@ def ollama_chat(force_search=False, initial_prompt=None, allow_start=True, host_
 
         if not prompt:
             continue
+
+        # Explicit operator location statements are semantic corrections, not prose
+        # for a geocoder or model to reinterpret.  Persist them as a typed atom.
+        home_declaration=_lo_home_location_declaration(prompt)
+        weather_forced_location=None
+        if home_declaration:
+            memory=_load_memory()
+            memory=_lo_store_home_location(memory,home_declaration)
+            _save_memory(memory)
+            _mirror_machine_atoms_to_fabric([{"k":"preference","s":"home","r":"weather_location","v":home_declaration,"c":100,"u":1}])
+            if pending_weather_clarification or _lo_requires_weather(prompt):
+                weather_forced_location=home_declaration
+            else:
+                answer=f"Got it — home is {home_declaration}."
+                print("\n"+_lo_label("lo","35")+"\n"+_ollama_markup(answer)+"\n")
+                _save_recent_exchange(prompt,answer)
+                if events:
+                    events.emit("response",text=answer)
+                    events.emit("request_done",status="ok",rounds=0,tool_calls=0,prompt_tokens=0,output_tokens=0,load_ms=0)
+                if one_shot: return 0
+                continue
+
+        # The answer to our own weather-location question belongs to working state.
+        # Never send literal "home" to a public geocoder.
+        if pending_weather_clarification and not weather_forced_location:
+            memory=_load_memory()
+            weather_forced_location=_lo_weather_pending_location(prompt,memory)
+            if str(prompt).strip().casefold() in {"home","my home","at home","here"} and not weather_forced_location:
+                answer="What city should I use for home?"
+                print("\n"+_lo_label("lo","35")+"\n"+_ollama_markup(answer)+"\n")
+                if events:
+                    events.emit("response",text=answer)
+                    events.emit("request_done",status="needs_input",rounds=0,tool_calls=0,prompt_tokens=0,output_tokens=0,load_ms=0)
+                if one_shot: return 0
+                continue
 
         # A pending deterministic media ambiguity owns the next plausible selector.
         # This is working state, not a new goal reconstructed from chat prose.
@@ -10025,6 +10179,8 @@ def ollama_chat(force_search=False, initial_prompt=None, allow_start=True, host_
         # Shared host routing runs before any surface or model gets to improvise.
         # This is the same gate for terminal LOOK, Signal, and Albert.
         turn_route=_lo_cognition_route(prompt,use_openjev=True)
+        if weather_forced_location:
+            turn_route=_lo_cognition_route("weather",use_openjev=True)
         turn_intent="web_current" if turn_route.primary=="web" else turn_route.primary
         turn_force_search=bool(force_search or turn_intent=="web_current")
         turn_goal=_lo_goal(prompt,turn_route)
@@ -10316,7 +10472,7 @@ def ollama_chat(force_search=False, initial_prompt=None, allow_start=True, host_
         weather_discourse=[m for m in messages if str(m.get("role") or "").lower() in {"user","assistant"}][-16:]
         weather_explicit=_lo_requires_weather(prompt)
         weather_followup=_lo_weather_followup(prompt, weather_discourse)
-        weather_required=(weather_explicit or weather_followup)
+        weather_required=bool(weather_forced_location or weather_explicit or weather_followup)
         weather_verify=_lo_weather_verification_requested(prompt) if weather_required else False
         weather_succeeded=False
         weather_repair_sent=False
@@ -10338,14 +10494,17 @@ def ollama_chat(force_search=False, initial_prompt=None, allow_start=True, host_
         weather_location=None
         weather_location_source=None
         if weather_required:
-            weather_location=_lo_weather_location(prompt)
-            weather_location_source="explicit" if weather_location else None
+            weather_location=weather_forced_location or _lo_weather_location(prompt)
+            weather_location_source="working" if weather_forced_location else ("explicit" if weather_location else None)
             if not weather_location and weather_followup:
                 weather_location=_lo_weather_followup_location(prompt, weather_discourse)
                 weather_location_source="followup" if weather_location else None
             if not weather_location:
                 weather_location=_lo_weather_history_location(weather_discourse)
                 weather_location_source="session" if weather_location else None
+            if not weather_location and re.search(r"\b(?:my weather|home weather|at home)\b",str(prompt),re.I):
+                weather_location=_lo_learned_home_location(_load_memory())
+                weather_location_source="learned_home" if weather_location else None
             if not weather_location:
                 weather_location=_lo_weather_default_location()
                 weather_location_source="configured" if weather_location else None
@@ -10356,6 +10515,7 @@ def ollama_chat(force_search=False, initial_prompt=None, allow_start=True, host_
         # question instead of running a doomed model/tool round and later claiming
         # that WEATHER itself failed.
         if weather_required and not weather_location:
+            pending_weather_clarification=True
             answer="Which location should I use for the weather?"
             print("\n"+_lo_label("lo","35")+"\n"+_ollama_markup(answer)+"\n")
             if events:
@@ -10390,6 +10550,7 @@ def ollama_chat(force_search=False, initial_prompt=None, allow_start=True, host_
                     if events: events.emit("tool_retry", tool="weather", mode="preflight", reason="transient_read_failure", attempt=2)
                     time.sleep(.18)
             if weather_succeeded:
+                pending_weather_clarification=False
                 weather_prefetched=True
                 receipt=_info_receipt("weather",weather_content)
                 if receipt:
@@ -10426,6 +10587,8 @@ def ollama_chat(force_search=False, initial_prompt=None, allow_start=True, host_
                             events.emit("source_receipt", **{k:verification_receipt.get(k) for k in ("edge","source","confidence","as_of","retrieved_at","source_url") if verification_receipt.get(k) is not None})
             if direct_weather_answer is None:
                 direct_weather_answer=_weather_direct_followup(prompt,weather_content)
+            if direct_weather_answer is None and (weather_forced_location or re.search(r"\b(?:weather|temperature|my weather)\b",str(prompt),re.I)):
+                direct_weather_answer=_weather_direct_summary(weather_content)
 
         if direct_weather_answer:
             print("\n"+_lo_label("lo","35")+"\n"+_ollama_markup(direct_weather_answer)+"\n")

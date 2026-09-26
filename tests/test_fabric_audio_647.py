@@ -5,9 +5,9 @@ ROOT=Path(__file__).resolve().parents[1]
 
 
 def test_release_and_audio_capability_contract():
-    assert (ROOT/'VERSION').read_text().strip()=='6.7.0'
+    assert (ROOT/'VERSION').read_text().strip()=='6.7.1'
     node=(ROOT/'core/node.py').read_text()
-    assert 'RELEASE_NAME = "BEACON"' in node
+    assert 'RELEASE_NAME = "HOME BASE"' in node
     assert '"audio.speak"' in node
     assert 'if path == "/v1/audio/speak"' in node
     assert 'voice_profile must be default or wopr' in node

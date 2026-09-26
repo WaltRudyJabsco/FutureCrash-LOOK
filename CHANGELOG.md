@@ -1,3 +1,11 @@
+# 6.7.1 · HOME BASE
+
+- Weather location questions now create deterministic working state; the next bare place answers that exact pending question.
+- `home` is an operator-owned semantic alias, never a geocoder guess. Explicit `home is …` corrections replace the previous home location and sync as a typed Fabric memory atom.
+- `my weather` / `home` reuse the learned location.
+- Successful current-weather receipts render a deterministic final answer instead of depending on model prose.
+- 6.7 BEACON rendezvous behavior is otherwise unchanged.
+
 # 6.7.0 · BEACON
 
 - Added signed, capability-slot Fabric rendezvous for already-paired nodes.
