@@ -1,4 +1,4 @@
-## 6.7.4 — CLEAN BREAK
+## 6.7.5 — OPEN LINE
 
 - Isolate live-edge evidence contracts at the turn boundary.
 - Validate clarification-derived home locations before durable memory writes.

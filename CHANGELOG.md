@@ -1,3 +1,10 @@
+# 6.7.5 · OPEN LINE
+
+- Canonical JSON information edges use bounded dual transport: Python urllib first, native curl fallback second.
+- WEATHER transport failures now surface the actual DNS/TLS/socket/provider error and emit a typed tool_error event.
+- Keeps WEATHER epistemic strictness: fallback transport may obtain the receipt, but model memory still cannot substitute for live conditions.
+- Added regression coverage for transport fallback and diagnostic preservation.
+
 # 6.7.4 · CLEAN BREAK
 
 - Live receipt requirements are capability-specific and turn-local; failed WEATHER state cannot induce invented `LIVE HISTORY` requirements.
