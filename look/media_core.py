@@ -39,6 +39,54 @@ _SAFE_NAME = re.compile(r"[^A-Za-z0-9._ -]+")
 _BROWSER_CANDIDATE_FORMATS = {"mp4", "m4v", "mov", "webm", "mp3", "m4a", "aac", "wav", "ogg", "opus", "flac"}
 _NATIVE_PREFERRED_FORMATS = {"avi", "mkv", "wmv", "flv", "vob", "mts", "m2ts", "ts"}
 
+_PROTECTED_MP4_TAGS = (b"drms", b"drmi", b"encv", b"enca")
+_PROTECTED_CONTAINER_FORMATS = {"m4p", "m4v", "mp4", "mov", "m4a", "m4b"}
+
+def protected_media_reason(entry_or_path: Any) -> str:
+    """Return a concrete protection reason when local evidence says media is encrypted.
+
+    Catalog scans stay cheap. This bounded runtime sniff is used only at playback
+    selection/launch so generic requests can skip protected Apple/MP4 items instead
+    of handing encrypted bytes to mpv. Unknown files remain playable candidates.
+    """
+    if isinstance(entry_or_path, dict):
+        row = entry_or_path
+        path = str(row.get("path") or "")
+        fmt = str(row.get("format") or Path(path).suffix).casefold().lstrip(".")
+        status = str((row.get("playability") or {}).get("status") or "")
+        if status == "protected_or_restricted":
+            return str((row.get("playability") or {}).get("reason") or "protected/restricted media")
+    else:
+        path = str(entry_or_path or "")
+        fmt = Path(path).suffix.casefold().lstrip(".")
+    if fmt == "m4p":
+        return "protected-media container"
+    if fmt not in _PROTECTED_CONTAINER_FORMATS or not path or path.startswith(("http://", "https://")):
+        return ""
+    target = Path(path).expanduser()
+    try:
+        if not target.is_file():
+            return ""
+        size = target.stat().st_size
+        chunk = 4 * 1024 * 1024
+        with target.open("rb") as fh:
+            head = fh.read(min(chunk, size))
+            tail = b""
+            if size > chunk:
+                fh.seek(max(0, size - chunk))
+                tail = fh.read(chunk)
+        sample = head + tail
+    except OSError:
+        return ""
+    if any(tag in sample for tag in _PROTECTED_MP4_TAGS):
+        return "encrypted/protected MP4 track"
+    # Common Encryption/FairPlay metadata uses a protection-information box plus
+    # a scheme box. Requiring both keeps random payload bytes from becoming DRM.
+    if b"sinf" in sample and b"schm" in sample:
+        return "encrypted/protected MP4 scheme"
+    return ""
+
+
 def media_playability(format_name: str, media_type: str = "") -> dict[str, str]:
     """Cheap catalog hint; runtime playback remains authoritative.
 

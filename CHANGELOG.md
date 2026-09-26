@@ -1,3 +1,11 @@
+# 6.6.6 · OPEN REEL
+
+- Makes generic `play a movie` / `play a video` selectors skip locally detectable protected Apple/FairPlay/Common-Encryption media instead of handing it to mpv.
+- Adds a bounded runtime protection sniff for `.m4p`, `.m4v`, `.mp4`, `.mov`, `.m4a`, and `.m4b`; ordinary open media remains untouched.
+- Keeps catalog scanning cheap: protection inspection happens only as candidates are selected or launched.
+- Adds a final launch guard so explicit protected items fail cleanly and mixed queues skip them while preserving ordinary AVI/MOV/MKV/MP4 playback.
+- Preserves 6.6.5 PICTURE LOCK mpv video-track handling and all prior 6.6.x cognition/memory work.
+
 # 6.6.5 · PICTURE LOCK
 
 - Fixes native video startup on current mpv releases by removing the invalid `--video=yes` option.

@@ -1,6 +1,6 @@
 # Future Crash + LOOK
 
-## 6.6.5 · PICTURE LOCK
+## 6.6.6 · OPEN REEL
 
 Native video playback now launches cleanly on current mpv builds: LOOK no longer passes the invalid `--video=yes` value and instead lets mpv use its normal automatic video-track selection while still forcing the video window to appear immediately. Queue playback and Fabric stream playback use the same rule.
 

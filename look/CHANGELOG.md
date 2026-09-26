@@ -1,3 +1,9 @@
+## 6.6.6 — OPEN REEL
+
+- Generic movie/video playback skips locally detectable protected Apple/FairPlay/Common-Encryption items.
+- Protected items are reported and skipped at the playback edge; ordinary open files remain first-class.
+- Catalog scanning remains cheap; protection sniffing is bounded to selection/launch.
+
 ## 6.6.5 — PICTURE LOCK
 
 - Native mpv video launches no longer pass `--video=yes`; current mpv accepts `auto`, `no`, or explicit track IDs, so LOOK leaves automatic track selection at the mpv default.
