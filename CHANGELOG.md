@@ -1,3 +1,10 @@
+# 6.6.4 · SHOWTIME
+
+- Makes native media receipts truthful: a new mpv worker must survive startup and expose LOOK's IPC socket before `MEDIA PLAY OK` can be returned.
+- Uses `--force-window=immediate` for video so the player window appears before slow, remote, or failing media initialization can hide it.
+- Surfaces early mpv exit/readiness failures with the owned player log instead of saving a fictional `playing` session.
+- Includes 6.6.3 MOVIE NIGHT selector normalization and 6.6.2 TRUE CURSOR terminal editing.
+
 # 6.6.3 · MOVIE NIGHT
 
 - Restores conversational generic media selectors at the English edge: `play us a movie`, `play a movie for us`, `any movie will do`, `a movie is fine`, and equivalent audio forms now become typed random selectors instead of catalog text searches.
