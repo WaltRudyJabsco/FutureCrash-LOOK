@@ -13,7 +13,8 @@ def test_fresh_mpv_launch_requires_readiness_before_success_session():
     assert wait < body.index('session["state"]="playing"',wait)
 
 def test_video_window_is_immediate_on_queue_and_stream_launch():
-    assert LK.count('cmd.extend(["--video=yes","--force-window=immediate"])') >= 2
+    assert LK.count('cmd.append("--force-window=immediate")') >= 2
+    assert '"--video=yes"' not in LK
     assert '"--force-window=yes"' not in LK
 
 def test_start_failure_surfaces_owned_mpv_log():

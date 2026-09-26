@@ -1,10 +1,10 @@
 # Future Crash + LOOK
 
-## 6.6.4 · SHOWTIME
+## 6.6.5 · PICTURE LOCK
 
-LO terminal editing now keeps readline/libedit cursor geometry honest on macOS and Linux while preserving ONE BRAIN cognition and LIVING MIND memory. Backspace/Delete, arrows, history, and Home/End operate on the real input buffer without stale colored-prompt glyphs.
+Native video playback now launches cleanly on current mpv builds: LOOK no longer passes the invalid `--video=yes` value and instead lets mpv use its normal automatic video-track selection while still forcing the video window to appear immediately. Queue playback and Fabric stream playback use the same rule.
 
-Fabric now publishes its machine-readable action vocabulary at `GET /v1/actions` and its bounded routing analysis at `GET /v1/cognition/route?q=...`.
+Includes SHOWTIME startup receipts, MOVIE NIGHT selector normalization, TRUE CURSOR terminal editing, ONE BRAIN cognition, and LIVING MIND memory.
 
 **One personal computer made from the machines you already own.**
 

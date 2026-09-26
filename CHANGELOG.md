@@ -1,3 +1,11 @@
+# 6.6.5 · PICTURE LOCK
+
+- Fixes native video startup on current mpv releases by removing the invalid `--video=yes` option.
+- Keeps `--force-window=immediate` for video so slow or remote media still gets a visible player immediately.
+- Lets mpv's default `video=auto` behavior choose the appropriate video track instead of overriding it.
+- Applies the same launch rule to local queue playback and Fabric stream playback.
+- Preserves 6.6.4 SHOWTIME startup-readiness receipts and all 6.6.x cognition, memory, selector, and terminal fixes.
+
 # 6.6.4 · SHOWTIME
 
 - Makes native media receipts truthful: a new mpv worker must survive startup and expose LOOK's IPC socket before `MEDIA PLAY OK` can be returned.

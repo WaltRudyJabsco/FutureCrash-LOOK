@@ -7,7 +7,8 @@ def test_native_video_launch_is_deterministic_and_visible():
     text=(ROOT/'look/lk').read_text()
     block=text[text.index('def _media_launch_session'):text.index('def _media_launch_stream')]
     assert '"--no-config"' in block
-    assert '"--video=yes"' in block
+    assert '"--video=yes"' not in block
+    assert 'cmd.append("--force-window=immediate")' in block
     assert '"--force-window=immediate"' in block
     assert 'session["player"]="mpv"' in block
     assert 'session["presentation"]="video" if _media_queue_has_video(queue) else "audio"' in block

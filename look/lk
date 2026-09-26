@@ -8937,7 +8937,7 @@ def _direct_searxng_search(query, limit=8):
     params=urllib.parse.urlencode({"q":query,"format":"json"})
     request=urllib.request.Request(base+"/search?"+params,headers={
         "Accept":"application/json",
-        "User-Agent":"Future-Crash-Fabric/6.6.4",
+        "User-Agent":"Future-Crash-Fabric/6.6.5",
     })
     with urllib.request.urlopen(request,timeout=12) as response:
         data=json.load(response)
@@ -14564,7 +14564,7 @@ def _media_launch_session(session):
         f"--playlist-start={idx}",
     ]
     if queue_video:
-        cmd.extend(["--video=yes","--force-window=immediate"])
+        cmd.append("--force-window=immediate")
     if session.get("repeat")=="all":
         cmd.append("--loop-playlist=inf")
     try:
@@ -14606,7 +14606,7 @@ def _media_launch_stream(url,source="",session=None):
         try: MEDIA_IPC_FILE.unlink(missing_ok=True)
         except OSError: pass
         cmd=[mpv,"--no-config",f"--input-ipc-server={MEDIA_IPC_FILE}","--no-terminal","--idle=yes",f"--log-file={MEDIA_MPV_LOG}"]
-        if stream_video: cmd.extend(["--video=yes","--force-window=immediate"])
+        if stream_video: cmd.append("--force-window=immediate")
         cmd.append(url)
         try:
             proc=subprocess.Popen(cmd,stdin=subprocess.DEVNULL,stdout=subprocess.DEVNULL,stderr=subprocess.DEVNULL)

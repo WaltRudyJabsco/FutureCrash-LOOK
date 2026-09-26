@@ -1,3 +1,8 @@
+## 6.6.5 — PICTURE LOCK
+
+- Native mpv video launches no longer pass `--video=yes`; current mpv accepts `auto`, `no`, or explicit track IDs, so LOOK leaves automatic track selection at the mpv default.
+- Video launches still force an immediate window for truthful startup behavior.
+
 ## 6.4.9 — BROWSER VOICE
 
 - Browser sessions are first-class Fabric effect endpoints with live presence and capability advertisement.
