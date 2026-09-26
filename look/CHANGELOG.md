@@ -1,4 +1,4 @@
-## 6.8.0 — MODEL GROUND TRUTH
+## 6.8.1 — MODEL GROUND TRUTH
 
 - Role-based model defaults replace fixed qwen3:8b semantic defaults in Future Crash / Signal.
 - Fabric route explanation and evidence freshness make placement decisions inspectable.

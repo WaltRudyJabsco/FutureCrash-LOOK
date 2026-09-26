@@ -1,4 +1,9 @@
-# 6.8.0 · MODEL GROUND TRUTH
+# 6.8.1 · MODEL GROUND TRUTH
+
+- Wire the existing Fabric route explainer through the `lk fabric route reflex|balanced|deep` CLI wrapper.
+- Add regression coverage so documented Fabric verbs cannot be omitted from the LOOK dispatcher.
+
+# 6.8.1 · MODEL GROUND TRUTH
 
 - Future Crash defaults to the Fabric curator BALANCED role instead of a historical named model.
 - Signal Window defaults to the curator REFLEX role, keeping explicit model selection authoritative.

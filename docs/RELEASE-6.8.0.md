@@ -1,6 +1,6 @@
-# Future Crash + LOOK 6.8.0 · MODEL GROUND TRUTH
+# Future Crash + LOOK 6.8.1 · MODEL GROUND TRUTH
 
-6.8.0 joins model testing, curation, runtime defaults, routing, and observability around one principle: model choice should come from measured deployment evidence rather than historical names.
+6.8.1 joins model testing, curation, runtime defaults, routing, and observability around one principle: model choice should come from measured deployment evidence rather than historical names.
 
 ## Role-based defaults
 

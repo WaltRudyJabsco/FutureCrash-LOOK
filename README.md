@@ -1,6 +1,6 @@
 # Future Crash + LOOK
 
-## 6.8.0 · MODEL GROUND TRUTH
+## 6.8.1 · MODEL GROUND TRUTH
 
 Persistent working state now survives LO sessions: unresolved goals/slots are explicit, `lk brain` exposes them, Home Base corrections synchronously rewrite semantic memory, and learned home becomes the default for locationless weather. Recent memory keeps substantially more raw continuity while retrieval stays bounded. Models may sleep; goals stay alive.
 
