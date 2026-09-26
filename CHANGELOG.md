@@ -1,4 +1,13 @@
-# 6.7.5 · OPEN LINE
+# 6.8.0 · MODEL GROUND TRUTH
+
+- Future Crash defaults to the Fabric curator BALANCED role instead of a historical named model.
+- Signal Window defaults to the curator REFLEX role, keeping explicit model selection authoritative.
+- Add explainable Fabric routing (`lk fabric route reflex|balanced|deep`) using the exact production scoring path.
+- Benchmark evidence is now classified fresh / aging / stale; stale evidence is visible rather than silently trusted forever.
+- Dash exposes curator mode/profile/target from the same model evidence used by residency policy.
+- Curator plans can be queried by role without mutating node policy.
+
+# 6.7.6 · CANONICAL EDGE
 
 - Canonical JSON information edges use bounded dual transport: Python urllib first, native curl fallback second.
 - WEATHER transport failures now surface the actual DNS/TLS/socket/provider error and emit a typed tool_error event.

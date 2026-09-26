@@ -1,4 +1,15 @@
-## 6.7.5 — OPEN LINE
+## 6.8.0 — MODEL GROUND TRUTH
+
+- Role-based model defaults replace fixed qwen3:8b semantic defaults in Future Crash / Signal.
+- Fabric route explanation and evidence freshness make placement decisions inspectable.
+- Dash now surfaces curator target state.
+
+## 6.7.6 — CANONICAL EDGE
+- Canonicalize full US state names before WEATHER/PLACE lookup (`portland oregon` → `portland, Oregon`).
+- Apply canonicalization inside `_weather_lookup` so model-issued tool calls and deterministic preflight cannot diverge across nodes.
+- Preserve transactional home teaching and live-receipt trust boundaries.
+
+## 6.7.6 — CANONICAL EDGE
 
 - Isolate live-edge evidence contracts at the turn boundary.
 - Validate clarification-derived home locations before durable memory writes.

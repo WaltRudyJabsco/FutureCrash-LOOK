@@ -42,7 +42,8 @@ class WeatherEdge514Tests(unittest.TestCase):
     def test_state_shorthand_is_canonicalized(self):
         self.assertEqual(self.w['_lo_weather_location']('weather in portland or'),'portland, Oregon')
         self.assertEqual(self.w['_lo_weather_location']('weather in Portland, OR'),'Portland, Oregon')
-        self.assertEqual(self.w['_lo_weather_location']('weather in Portland Oregon'),'Portland Oregon')
+        self.assertEqual(self.w['_lo_weather_location']('weather in Portland Oregon'),'Portland, Oregon')
+        self.assertEqual(self.w['_normalize_weather_location']('portland oregon'),'portland, Oregon')
 
     def test_session_location_reused_for_implicit_weather(self):
         history=[
@@ -127,10 +128,10 @@ class WeatherEdge514Tests(unittest.TestCase):
 
 
     def test_home_declaration_is_operator_state_not_geocoder_guess(self):
-        self.assertEqual(self.w['_lo_home_location_declaration']('my home is portland oregon'),'portland oregon')
+        self.assertEqual(self.w['_lo_home_location_declaration']('my home is portland oregon'),'portland, Oregon')
         self.assertEqual(self.w['_lo_home_location_declaration']('no home is Portland OR'),'Portland, Oregon')
         self.assertEqual(self.w['_lo_home_location_declaration']('my home is portland what is the weather'),'portland')
-        self.assertEqual(self.w['_lo_home_location_declaration']('remember that i live in portland oregon'),'portland oregon')
+        self.assertEqual(self.w['_lo_home_location_declaration']('remember that i live in portland oregon'),'portland, Oregon')
         self.assertEqual(self.w['_lo_home_location_declaration']('I live in Portland OR'),'Portland, Oregon')
 
     def test_pending_weather_location_resolves_home_atom_or_bare_place(self):
@@ -138,7 +139,7 @@ class WeatherEdge514Tests(unittest.TestCase):
         self.assertEqual(self.w['_lo_learned_home_location'](memory),'Portland, Oregon')
         self.assertEqual(self.w['_lo_weather_pending_location']('home',memory),'Portland, Oregon')
         self.assertEqual(self.w['_lo_weather_pending_location']('portland',memory),'portland')
-        self.assertEqual(self.w['_lo_weather_pending_location']('weather in portland oregon',memory),'portland oregon')
+        self.assertEqual(self.w['_lo_weather_pending_location']('weather in portland oregon',memory),'portland, Oregon')
         self.assertIsNone(self.w['_lo_weather_pending_location']('what is the time',memory))
         self.assertIsNone(self.w['_lo_weather_pending_location']('lo what is the date',memory))
         self.assertIsNone(self.w['_lo_weather_pending_location']('open the browser',memory))
@@ -156,6 +157,10 @@ class WeatherEdge514Tests(unittest.TestCase):
         self.assertIn('61.2°F',answer)
         self.assertIn('today 72.0°/51.0°',answer)
         self.assertIn('rain 10%',answer)
+
+    def test_weather_lookup_normalizes_every_entry_path(self):
+        text=LOOK.read_text()
+        self.assertIn('location=_normalize_weather_location(location)',text)
 
     def test_missing_location_has_distinct_host_path(self):
         text=LOOK.read_text()

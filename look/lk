@@ -6754,6 +6754,17 @@ def _normalize_weather_location(location):
         if state:
             city=match.group(1).strip(" \t,")
             return f"{city}, {state}"
+
+    # Speech and casual typing commonly omit the comma in a full state name
+    # ("portland oregon").  Canonicalization is a host responsibility: model
+    # choice must never determine whether the same place resolves on two nodes.
+    for state in sorted(set(_US_STATE_ABBREVIATIONS.values()), key=len, reverse=True):
+        suffix=" "+state.casefold()
+        folded=place.casefold()
+        if folded.endswith(suffix):
+            city=place[:len(place)-len(state)].strip(" \t,")
+            if city:
+                return f"{city}, {state}"
     return place
 
 
@@ -8968,7 +8979,9 @@ def _place_lookup(query,count=5):
 def _weather_lookup(location):
     import json
     from urllib.parse import urlencode
-    location=str(location or "").strip()
+    # Normalize at the edge too. Model-issued tool calls and deterministic
+    # preflight must resolve identical user places identically.
+    location=_normalize_weather_location(location)
     geo=json.loads(_place_lookup(location,1)); matches=geo.get("results") or []
     if not matches: return f"No weather location match for {location!r}."
     place=matches[0]
@@ -9218,7 +9231,7 @@ def _direct_searxng_search(query, limit=8):
     params=urllib.parse.urlencode({"q":query,"format":"json"})
     request=urllib.request.Request(base+"/search?"+params,headers={
         "Accept":"application/json",
-        "User-Agent":"Future-Crash-Fabric/6.7.5",
+        "User-Agent":"Future-Crash-Fabric/6.8.0",
     })
     with urllib.request.urlopen(request,timeout=12) as response:
         data=json.load(response)

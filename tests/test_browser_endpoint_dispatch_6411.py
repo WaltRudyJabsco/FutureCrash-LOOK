@@ -14,7 +14,7 @@ def test_cli_delegates_browser_speech_resolution_to_resident_daemon():
 
 
 def test_release_6411_contract():
-    assert (ROOT/'VERSION').read_text().strip()=='6.7.5'
+    assert (ROOT/'VERSION').read_text().strip()=='6.8.0'
     node=(ROOT/'core/node.py').read_text()
-    assert 'VERSION = "6.7.5"' in node
-    assert 'RELEASE_NAME = "HOME BASE"' in node
+    assert 'VERSION = "6.8.0"' in node
+    assert 'RELEASE_NAME = "MODEL GROUND TRUTH"' in node

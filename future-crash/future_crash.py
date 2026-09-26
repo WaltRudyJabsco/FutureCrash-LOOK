@@ -4006,7 +4006,7 @@ def _look_selected_ollama_host():
 
 
 def _look_active_model():
-    """Read LOOK's shared active model. This is the default for every FC inference."""
+    """Read LOOK's shared active model as a compatibility fallback."""
     path=Path.home()/".local"/"share"/"look"/"ollama_model"
     try:
         model=path.read_text(encoding="utf-8").strip()
@@ -4014,7 +4014,24 @@ def _look_active_model():
             return model
     except OSError:
         pass
-    return "qwen3:8b"
+    return ""
+
+def _curated_role_model(profile="balanced"):
+    """Ask the local Fabric curator which model best fits this machine and role."""
+    try:
+        url=f"http://127.0.0.1:7332/v1/models/curation?profile={urllib.parse.quote(profile)}"
+        with urllib.request.urlopen(url,timeout=1.2) as r:
+            data=json.loads(r.read().decode("utf-8","replace"))
+        target=((data.get("plan") or {}).get("target") or []) if isinstance(data,dict) else []
+        if target:
+            return str(target[0])
+    except Exception:
+        pass
+    return ""
+
+def _default_model():
+    """Role-based default: curator first, legacy shared selection second, named fallback last."""
+    return _curated_role_model("balanced") or _look_active_model() or "qwen3:8b"
 
 
 def parse_args():
@@ -4023,7 +4040,7 @@ def parse_args():
         epilog="Ambient: esc shell · a ask · x workstation · t threads · m mute · ? help · q quit",
     )
     p.add_argument("--version", action="version", version=f"Future Crash {VERSION}")
-    p.add_argument("--model", default=None, help="Ollama model (default: LOOK selected model, then qwen3:8b)")
+    p.add_argument("--model", default=None, help="Ollama model (default: Fabric curator BALANCED role, then LOOK selected model)")
     p.add_argument("--ollama", default=None, help="Ollama base URL (default: LOOK selected host, then localhost)")
     p.add_argument("--fps", type=int, default=12, help="UI refresh rate (default: 12)")
     p.add_argument("--no-ai-ambient", action="store_true", help="disable ambient LLM observations")
@@ -4039,7 +4056,7 @@ if __name__ == "__main__":
         args.ollama=_look_selected_ollama_host()
     args.follow_look_model = not bool(args.model)
     if not args.model:
-        args.model=_look_active_model()
+        args.model=_default_model()
     app = FutureCrash(args)
     try:
         app.start()

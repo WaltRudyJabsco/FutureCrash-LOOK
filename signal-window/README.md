@@ -1,6 +1,6 @@
-# Signal Window 1.10.5
+# Signal Window 1.11.0
 
-## 1.10.5 — Output ownership and native presentation
+## 1.11.0 — Output ownership and native presentation
 
 - Media request progress surfaces immediately as `MEDIA · SEARCHING`.
 - Playback responses emit `MEDIA ROUTE · <target> · <player>` so remembered remote OUT selection is visible.

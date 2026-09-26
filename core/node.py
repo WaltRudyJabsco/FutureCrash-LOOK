@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Future Crash + LOOK Unified Node 6.7.5.
+"""Future Crash + LOOK Unified Node 6.8.0.
 
 A small distributed supervisor for trusted personal machines. Immediate events stay
 asynchronous; a one-second fabric pulse reconciles presence, leases and stale work.
@@ -66,8 +66,8 @@ try:
 except ImportError:
     import rendezvous
 
-VERSION = "6.7.5"
-RELEASE_NAME = "HOME BASE"
+VERSION = "6.8.0"
+RELEASE_NAME = "MODEL GROUND TRUTH"
 DEFAULT_HOST = "127.0.0.1"
 DEFAULT_PORT = 7332
 DEFAULT_INGRESS_PORT = 0
@@ -2209,7 +2209,7 @@ def _local_web_search(query, limit=8):
     base=os.environ.get("FCL_SEARXNG_URL","http://127.0.0.1:8888").rstrip("/")
     request=urllib.request.Request(base+"/search?"+params,headers={
         "Accept":"application/json",
-        "User-Agent":"Future-Crash-Fabric/6.7.5",
+        "User-Agent":"Future-Crash-Fabric/6.8.0",
     })
     try:
         with urllib.request.urlopen(request,timeout=8) as response:
@@ -2943,7 +2943,7 @@ def _openjev_shadow(state, question, candidates, *, profile="workspace", consequ
 
 
 class API(BaseHTTPRequestHandler):
-    server_version = "FCLNode/6.7.5"
+    server_version = "FCLNode/6.8.0"
 
     def setup(self):
         self._metric_request_id = None
@@ -3300,6 +3300,11 @@ class API(BaseHTTPRequestHandler):
             decision=FABRIC_STORE.get_decision(did)
             return self.sendj(200,{"decision":decision}) if decision else self.sendj(404,{"error":"decision not found"})
         if path == "/v1/models/curation":
+            q=parse_qs(urlparse(self.path).query)
+            requested=str((q.get("profile") or [""])[0]).lower()
+            if requested in {"reflex","balanced","deep"}:
+                state=load_curator_state()
+                return self.sendj(200,{"state":state,"plan":curator_plan(requested),"requested_profile":requested})
             return self.sendj(200, curator_status())
         if path == "/v1/models/benchmark-guard":
             return self.sendj(200, benchmark_guard_state())
@@ -3983,7 +3988,11 @@ def _benchmark_state(model):
     age=max(0.0, now()-float(b.get("tested_at") or 0))
     if b.get("fatal_error") or b.get("speed_error") or str(b.get("fit") or "").upper()=="ERROR":
         return "failed", age
-    return "benchmarked", age
+    if age > 30*24*60*60:
+        return "stale", age
+    if age > 7*24*60*60:
+        return "aging", age
+    return "fresh", age
 
 
 def _benchmark_label(model, compact=False):
@@ -3992,6 +4001,8 @@ def _benchmark_label(model, compact=False):
         return "B—" if compact else "unbenchmarked"
     if state=="failed":
         return f"B! {_dash_age(age)}" if compact else f"benchmark failed {_dash_age(age)}"
+    if state=="stale":
+        return f"B~ {_dash_age(age)}" if compact else f"benchmark stale · {_dash_age(age)}"
     b=(model or {}).get("benchmark") or {}
     fit=str(b.get("fit") or "?").upper()
     tools=b.get("tools")
@@ -4558,6 +4569,9 @@ def _dash_render_condensed(data, width=92, height=30, ansi=False):
            "NODES / MODELS",rule]
     for name,node in rows:
         lines.append(f"{str(name):<22.22} {_dash_state(node):<14.14} {_dash_model(node)[:max(16,width-39)]}")
+    curation=data.get("curation") or {}; cstate=curation.get("state") or {}; cplan=curation.get("plan") or {}
+    target=", ".join(cplan.get("target") or []) or "none"
+    lines.append(f"CURATOR · {str(cstate.get('mode') or 'observe').upper()} · {str(cstate.get('profile') or 'balanced').upper()} · target {target}")
 
     services=" ".join(_dash_service_bits(data)) or "pending"
     # Add secondary evidence whenever the row budget permits.  This avoids the old
@@ -4626,6 +4640,7 @@ def _dash_fetch(host, port, cache, force=False):
         "events": ("/v1/events", 0.5),
         "decisions": ("/v1/decisions/fabric", 2.0),
         "services": ("/v1/services", 8.0),
+        "curation": ("/v1/models/curation", 5.0),
     }
     for key, (path, cadence) in schedule.items():
         due = float((cache.get("_next") or {}).get(key) or 0)
@@ -4885,7 +4900,7 @@ def _print_jobs(data, target="local"):
 def main():
     ap=argparse.ArgumentParser(description="Future Crash + LOOK unified node")
     ap.add_argument("command",nargs="?",default="serve",
-        choices=["serve","status","nodes","activity","pulse","fabric","watch","dashboard","models","qualify","services","service",
+        choices=["serve","status","nodes","activity","pulse","fabric","watch","dashboard","models","route","qualify","services","service",
                  "jobs","job","submit","packet","cancel","events","http","beacon","lights","artifact-add","artifact","artifacts","file-catalog","file-find","media-catalog","media-identify",
                  "decisions","decision","answer","ask","decision-shadow","decision-provider","identity","trust","untrust","pair-code","pair","transport","rendezvous","endpoints","endpoint-code","allow","revoke-endpoint","media-outputs","media-state","media-play","media-control","speak"])
     ap.add_argument("args",nargs="*")
@@ -5116,6 +5131,30 @@ def main():
                     print("  scan with iPhone camera:")
                     try: subprocess.run([qr,"-t","ANSIUTF8",invite["url"]],timeout=2,check=False)
                     except Exception: pass
+                return 0
+            if a.command=="route":
+                tier=(a.args[0] if a.args else "balanced").lower()
+                if tier not in {"reflex","balanced","deep"}: ap.error("route tier must be reflex|balanced|deep")
+                try:
+                    from .fabric_client import explain_route
+                except ImportError:
+                    from fabric_client import explain_route
+                result=explain_route(tier=tier,base=f"http://{a.host}:{a.port}")
+                if a.json:
+                    print(json.dumps(result,indent=2)); return 0
+                chosen=result.get("selected") or {}
+                print(f"FABRIC ROUTE · {tier.upper()}")
+                print("─"*96)
+                if chosen:
+                    print(f"SELECTED  {chosen.get('node')} · {chosen.get('model')} · score {chosen.get('score')} · expected {chosen.get('expected_ms')} ms")
+                else:
+                    print("SELECTED  none")
+                print("\nCANDIDATES")
+                for row in result.get("candidates") or []:
+                    mark="✓" if row.get("eligible") and row is not chosen else ("→" if row==chosen else "×")
+                    state="resident" if row.get("resident") else "cold"
+                    why=(", ".join(row.get("reasons") or []) or "eligible")
+                    print(f"  {mark} {str(row.get('node') or '?'):<18.18} {str(row.get('model') or '?'):<28.28} {state:<8} score {row.get('score'):>8} · {why}")
                 return 0
             path={"status":"/v1/node","activity":"/v1/activity","pulse":"/v1/pulse","models":"/v1/models","services":"/v1/services","http":"/v1/http"}.get(a.command)
             if path:

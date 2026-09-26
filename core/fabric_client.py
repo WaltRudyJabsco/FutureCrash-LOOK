@@ -161,6 +161,44 @@ def _choose_from_snapshot(snapshot, *, model=None, requires=None, latency=False,
     return scored[0]
 
 
+
+def explain_route(*, tier="balanced", model=None, requires=None, base=DEFAULT_NODE):
+    """Explain one Fabric inference placement using the exact routing evidence.
+
+    This is diagnostic only: it never submits work or changes residency.
+    """
+    tier=tier if tier in {"reflex","balanced","deep"} else "balanced"
+    snap=_nodes(base)
+    requires=set(requires or ["text"])
+    rows=[]
+    for name,dns,ad in _candidates(snap):
+        runtime=ad.get("runtime") or {}; inf=ad.get("inference") or {}; models=inf.get("models") or []
+        active=(ad.get("supervisor") or {}).get("active")
+        preferred=inf.get("preferred_model")
+        for m in models:
+            f=m.get("features") or {}
+            reasons=[]
+            if model and m.get("name") != model: reasons.append("model mismatch")
+            missing=[r for r in requires if r in {"vision","tools","thinking","embedding"} and not f.get(r)]
+            if missing: reasons.append("missing "+",".join(sorted(missing)))
+            resident=bool(m.get("resident")); size=float(m.get("size") or 10**12)
+            expected=_model_expected_ms(m,tier)
+            busy_penalty=100000.0 if active else 0.0
+            cold_penalty=5000.0 if not resident else 0.0
+            network_penalty=120.0 if dns is not None else 0.0
+            preferred_bonus=-150.0 if m.get("name")==preferred else 0.0
+            policy=(size/1e9)*35.0 if tier=="reflex" else (-(size/1e9)*35.0 if tier=="deep" else (size/1e9)*3.0)
+            evidence_bias=_benchmark_role_bias(m,tier)
+            score=busy_penalty+cold_penalty+network_penalty+expected+preferred_bonus+policy+evidence_bias
+            rows.append({"node":name,"model":m.get("name"),"eligible":not reasons,"reasons":reasons,
+                         "resident":resident,"preferred":m.get("name")==preferred,"busy":bool(active),
+                         "expected_ms":round(expected,1),"score":round(score,1),
+                         "qualification":m.get("qualification"),"benchmark":m.get("benchmark"),
+                         "size":int(m.get("size") or 0)})
+    eligible=[r for r in rows if r["eligible"]]
+    eligible.sort(key=lambda r:r["score"]); selected=eligible[0] if eligible else None
+    return {"tier":tier,"requires":sorted(requires),"selected":selected,"candidates":sorted(rows,key=lambda r:(not r["eligible"],r["score"]))}
+
 def choose_node(base=DEFAULT_NODE, *, model=None, requires=None, latency=False, exclude=None):
     """Choose a worker from one atomic routing snapshot."""
     return _choose_from_snapshot(_nodes(base), model=model, requires=requires,
