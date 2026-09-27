@@ -1,3 +1,11 @@
+# 6.9.1 · LOOK FIT & FINISH
+
+- Interactive LOOK/filter/select views now enforce one candidate per terminal row; static noninteractive listings may still use compact columns.
+- Remove selectable-view section/header rows so visual row, selection index, and preview target remain one-to-one even with hundreds of results.
+- Add a persistent interactive clipboard shelf: `B` stages Copy, `T` stages Cut, and `P` pastes into the current LOOK directory.
+- Clipboard paste delegates to the existing `_batch` copy/move transaction engine, preserving rollback and `lk undo`; successful Cut clears its shelf only after the move completes.
+- Existing `C Copy To`, `M Move To`, `R remove`, marking, native OS clipboard, and static column layouts remain intact.
+
 # 6.9.0 · COGNITIVE FABRIC
 
 - Fold the planned 6.8.2 receipts/sets work and 6.9 cognition work into one release.

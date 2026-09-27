@@ -260,7 +260,7 @@ def tree_rows(target:Path, depth:int, width:int, hidden:bool, query:str='', high
     return rows
 
 
-def build_view(target:Path, mode:str, hidden:bool, width:int, tree_depth:int, query:str='', highlight_path:Path|None=None, marked:set[Path]|None=None)->list[str]:
+def build_view(target:Path, mode:str, hidden:bool, width:int, tree_depth:int, query:str='', highlight_path:Path|None=None, marked:set[Path]|None=None, interactive_rows:bool=False)->list[str]:
     entries=read_entries(target,hidden)
     if query:
         entries=[e for e in entries if query_matches(e.name,query)]
@@ -289,13 +289,30 @@ def build_view(target:Path, mode:str, hidden:bool, width:int, tree_depth:int, qu
     header=(f'{BOLD}{CYAN}LOOK{RESET}  {WHITE}{display}{RESET}'
             f'  {FAINT}{tree_dir_count} dirs · {tree_file_count} files{mode_label}{RESET}')
     rule=FAINT+('─'*min(width, max(24,len(strip_ansi(header)))))+RESET
+    # Interactive/filter/select views have a strict one-candidate/one-row contract.
+    # The pager's selection index is an index into `matching_paths`; headings and
+    # packed columns here would make visual cursor motion diverge from that index.
+    if interactive_rows:
+        if mode=='tree':
+            paths=matching_paths(target,mode,hidden,query,tree_depth)
+            interactive=[]
+            for path in paths:
+                try:
+                    st=path.lstat()
+                    entry=Entry(path,path.name,path.is_dir(),path.is_symlink(),st.st_size,st.st_mtime,st.st_mode)
+                except OSError:
+                    continue
+                interactive.append(entry)
+            return detail_rows(interactive,width,highlight_path,marked)
+        return detail_rows(entries,width,highlight_path,marked) or [FAINT+'· empty'+RESET]
+
     rows=[header,rule]
     if mode=='tree':
         rows+=tree_rows(target,tree_depth,width,hidden,query,highlight_path,marked)
     elif mode in {'detail','recent','size'}:
         rows+=detail_rows(entries,width,highlight_path,marked)
     else:
-        # Smart mode: small sets get labeled sections; larger sets become one compact grouped grid.
+        # Static display may use columns; interactive display never does.
         if mode=='smart' and len(entries)<=18:
             if dirs:
                 rows += [f'{FAINT}{BOLD}FOLDERS{RESET}'] + column_grid(dirs,width,highlight_path,marked)
@@ -809,7 +826,7 @@ def action_footer(parts:list[str],width:int)->list[str]:
     return lines
 
 
-def pager(rows:list[str],height:int,width:int,rebuild=None,candidates=None,on_browse=None,on_back=None,on_parent=None,on_go=None,on_activate=None,force_interactive=False,initial_select:Path|None=None,initial_query:str='',marked_set:set[Path]|None=None,current_dir:Path|None=None)->None:
+def pager(rows:list[str],height:int,width:int,rebuild=None,candidates=None,on_browse=None,on_back=None,on_parent=None,on_go=None,on_activate=None,force_interactive=False,initial_select:Path|None=None,initial_query:str='',marked_set:set[Path]|None=None,current_dir:Path|None=None,clipboard_state:dict|None=None)->None:
     # Interactive state machine: browse -> filter -> select.
     usable=max(3,height-5)
     if (len(rows)<=height-1 and not force_interactive) or not (sys.stdin.isatty() and sys.stdout.isatty()):
@@ -820,6 +837,7 @@ def pager(rows:list[str],height:int,width:int,rebuild=None,candidates=None,on_br
     notice=''
     pending=''
     marked:set[Path]=marked_set if marked_set is not None else set()
+    shelf=clipboard_state if clipboard_state is not None else {}
 
     if initial_select is not None and candidates:
         matches=candidates('')
@@ -875,6 +893,39 @@ def pager(rows:list[str],height:int,width:int,rebuild=None,candidates=None,on_br
         sys.stdout.write(HIDE)
         sys.stdout.flush()
         notice=f'LO returned · {len(paths)} context path{"s" if len(paths)!=1 else ""}'
+
+    def stage_clipboard(kind:str)->None:
+        nonlocal notice
+        paths=action_paths()
+        if not paths:
+            notice='nothing selected'; return
+        shelf.clear(); shelf.update(kind=kind,paths=[str(p.resolve()) for p in paths])
+        # Keep the OS clipboard useful too. Paste inside LOOK uses the durable shelf,
+        # while other applications can still receive the selected filesystem objects.
+        copy_files_to_clipboard(paths)
+        notice=f'{kind} staged · {len(paths)} item{"s" if len(paths)!=1 else ""} · P paste'
+
+    def paste_clipboard()->None:
+        nonlocal notice
+        raw=shelf.get('paths') or []
+        kind=str(shelf.get('kind') or '')
+        if kind not in {'copy','move'} or not raw:
+            notice='clipboard shelf empty'; return
+        sources=[Path(x) for x in raw]
+        if any(not p.exists() for p in sources):
+            notice='clipboard source no longer exists'; return
+        dest=current_dir.resolve() if current_dir is not None else None
+        if dest is None or not dest.is_dir():
+            notice='paste destination unavailable'; return
+        lk=Path(__file__).resolve().parent/'lk'
+        with activity(f'{"copying" if kind=="copy" else "moving"} {len(sources)} clipboard item{"s" if len(sources)!=1 else ""}'):
+            proc=subprocess.run([sys.executable,str(lk),'_batch',kind,str(dest),*map(str,sources)])
+        if proc.returncode==0:
+            if kind=='move': shelf.clear()
+            marked.clear()
+            notice='pasted · lk undo'
+        else:
+            notice='paste failed'
 
     def run_action(kind:str)->None:
         nonlocal notice
@@ -978,8 +1029,8 @@ def pager(rows:list[str],height:int,width:int,rebuild=None,candidates=None,on_br
                         f'  {GRAY}{len(matches)} {match_word}{RESET}'
                         + (f'  · {sel}' if sel else ''))
                 action_parts=['J/K move','Tab mark','A all','Enter/→ open','B clipboard',
-                              'C Copy To','M Move To','R remove','L LO context','X clear set',
-                              'E edit','O open with','Y path','G go','← parent','Esc clear']
+                              'B Copy','T Cut','P Paste','C Copy To','M Move To','R remove',
+                              'L LO context','X clear set','E edit','O open with','Y path','G go','← parent','Esc clear']
             elif selecting:
                 name=picked.name if picked else '(no matches)'
                 kind='folder' if picked and picked.is_dir() else 'file'
@@ -987,8 +1038,8 @@ def pager(rows:list[str],height:int,width:int,rebuild=None,candidates=None,on_br
                 status=(f'  {CYAN}{BOLD}SELECT{RESET} {WHITE}{name}{RESET} {GRAY}· {kind}{RESET}'
                         + (f'  · {sel}' if sel else ''))
                 action_parts=['j/k move','Tab mark','Enter/→ open','B clipboard',
-                              'C Copy To','M Move To','R remove','L LO context','X clear set',
-                              'E edit','O open with','Y path','G go','← parent','Esc filter','q quit']
+                              'B Copy','T Cut','P Paste','C Copy To','M Move To','R remove',
+                              'L LO context','X clear set','E edit','O open with','Y path','G go','← parent','Esc filter','q quit']
             elif query:
                 status=(f'  {CYAN}{BOLD}FILTER{RESET} {WHITE}{query}{RESET}'
                         f'  {GRAY}{last}/{len(current)}{RESET}')
@@ -1061,9 +1112,11 @@ def pager(rows:list[str],height:int,width:int,rebuild=None,candidates=None,on_br
                     run_action({'C':'copy','M':'move','R':'remove'}[key])
                     refresh_filter()
                 elif key=='B' and matches:
-                    paths=action_paths()
-                    if paths:
-                        notice='copied file to clipboard' if copy_files_to_clipboard(paths) else 'file clipboard unavailable'
+                    stage_clipboard('copy')
+                elif key=='T' and matches:
+                    stage_clipboard('move')
+                elif key=='P':
+                    paste_clipboard(); refresh_filter()
                 elif key=='Y' and matches:
                     paths=action_paths()
                     if paths:
@@ -1092,10 +1145,6 @@ def pager(rows:list[str],height:int,width:int,rebuild=None,candidates=None,on_br
                         opened,message=open_with(picked)
                         sys.stdout.write(HIDE); sys.stdout.flush()
                         if not opened and message!='open-with cancelled': notice=message
-                elif key=='P' and matches:
-                    picked=selected_path()
-                    if picked:
-                        sys.stdout.write(SHOW+RESET+'\n'+str(picked.resolve())+'\n'); sys.stdout.flush(); return
                 elif key in {'\x7f','\b'}:
                     if query: query=query[:-1]; refresh_filter()
                 elif key=='\x03': break
@@ -1150,9 +1199,11 @@ def pager(rows:list[str],height:int,width:int,rebuild=None,candidates=None,on_br
                     run_action({'c':'copy','C':'copy','m':'move','M':'move','r':'remove','R':'remove'}[key])
                     refresh_filter(); continue
                 if key=='B':
-                    paths=action_paths()
-                    notice='copied file to clipboard' if paths and copy_files_to_clipboard(paths) else 'file clipboard unavailable'
-                    continue
+                    stage_clipboard('copy'); continue
+                if key=='T':
+                    stage_clipboard('move'); continue
+                if key=='P':
+                    paste_clipboard(); refresh_filter(); continue
                 if key in {'y','Y'}:
                     paths=action_paths()
                     value='\n'.join(str(x) for x in paths)
@@ -1176,7 +1227,7 @@ def pager(rows:list[str],height:int,width:int,rebuild=None,candidates=None,on_br
                     sys.stdout.write(HIDE); sys.stdout.flush()
                     if not opened and message!='open-with cancelled': notice=message
                     continue
-                if key in {'p','P'}:
+                if key=='p':
                     sys.stdout.write(SHOW+RESET+'\n'+str(picked.resolve())+'\n'); sys.stdout.flush(); return
                 continue
 
@@ -1371,6 +1422,7 @@ def main():
     initial_select=Path(os.path.expanduser(args.select)).resolve() if args.select else None
     history:list[Path]=[]
     working_set:set[Path]=set()
+    clipboard_shelf:dict={}
     while True:
         if not target.is_dir():
             print(f'look: not a directory: {target}',file=sys.stderr); return 1
@@ -1393,7 +1445,7 @@ def main():
             nonlocal go_to
             go_to=path.resolve()
         pager(rows,sz.lines,sz.columns,
-              rebuild=lambda q,h=None,w=None,m=None: build_view(target,args.mode,hidden,w or sz.columns,args.depth,q,h,m),
+              rebuild=lambda q,h=None,w=None,m=None: build_view(target,args.mode,hidden,w or sz.columns,args.depth,q,h,m,interactive_rows=True),
               candidates=lambda q: matching_paths(target,args.mode,hidden,q,args.depth),
               on_browse=choose_dir,
               on_back=choose_back if history else None,
@@ -1403,7 +1455,8 @@ def main():
               initial_select=initial_select if not browsed_once else None,
               initial_query=args.query if not browsed_once else '',
               marked_set=working_set,
-              current_dir=target)
+              current_dir=target,
+              clipboard_state=clipboard_shelf)
         if go_to is not None:
             request=Path.home()/'.local'/'share'/'look'/'cd_request'
             request.parent.mkdir(parents=True,exist_ok=True)
