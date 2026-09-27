@@ -1,3 +1,7 @@
+# Future Crash + LOOK 7.0.4 — JEV WIRED
+
+7.0.4 fixes the installed-layout contract for the JEV command tree introduced in 7.0.3. The unified installer now ships `core/jev.py`, verifies the installed copy byte-for-byte, and includes JEV in the post-install runtime import check. A dedicated regression stages only the installed core path and proves LOOK can resolve `run asciiquarium in new terminal` with no source checkout available.
+
 # Future Crash + LOOK 7.0.3 — JEV TREES
 
 7.0.3 turns the 7.0.2 action reflex into the first reusable JEV judgment tree. Explicit command language is decomposed into typed command payload plus host-owned execution modifiers before any shell action: `again` is retry semantics, `in the terminal` is current-terminal presentation, and `in a new terminal` is asynchronous new-terminal presentation. One-token RUN payloads fast-path; multi-token payloads must have a resolvable executable head or fall back to cognition instead of becoming accidental argv.

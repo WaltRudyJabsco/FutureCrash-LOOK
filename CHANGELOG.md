@@ -1,3 +1,10 @@
+# 7.0.4 — JEV WIRED
+
+- Ship `core/jev.py` in the unified installer.
+- Verify installed JEV bytes against the release.
+- Import/smoke-test JEV in installer runtime validation.
+- Add an installed-layout regression with no source-tree fallback.
+
 # 7.0.3 — JEV TREES
 
 - Add shared `core/jev.py` as the first small deterministic judgment-tree layer: explicit structure is resolved before model cognition, while ambiguous language falls through.

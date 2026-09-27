@@ -1,3 +1,8 @@
+# 7.0.4 — JEV WIRED
+
+- Fix JEV loading after installation by ensuring the unified installer deploys the shared JEV core module.
+- Add installed-layout regression coverage.
+
 ## 6.9.0 — COGNITIVE FABRIC
 
 - Enforce speech effects through `audio_speak` receipts; repair narrow printed pseudo-calls once.
