@@ -1,3 +1,9 @@
+# Future Crash + LOOK 7.0.3 — JEV TREES
+
+7.0.3 turns the 7.0.2 action reflex into the first reusable JEV judgment tree. Explicit command language is decomposed into typed command payload plus host-owned execution modifiers before any shell action: `again` is retry semantics, `in the terminal` is current-terminal presentation, and `in a new terminal` is asynchronous new-terminal presentation. One-token RUN payloads fast-path; multi-token payloads must have a resolvable executable head or fall back to cognition instead of becoming accidental argv.
+
+The command tree lives in `core/jev.py`, separate from LOOK execution. Surfaces provide edge facts such as PATH resolution; JEV returns a typed decision; current access/risk policy still owns authorization and execution.
+
 # Future Crash + LOOK 7.0.2 — ACTION REFLEX
 
 7.0.2 keeps 7.0.1's authority model and moves explicit execution ahead of deliberative cognition. Clear `run/launch/execute/start` commands and recent typed retries are resolved at the host edge, rechecked against current authority, executed, and only then explained. Persistent memory can inform an action but can no longer veto a fresh operator imperative.

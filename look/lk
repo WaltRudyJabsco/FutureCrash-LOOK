@@ -6517,6 +6517,16 @@ def _intent_normalizer_module():
     return intent_normalizer
 
 
+def _jev_module():
+    # Shared deterministic judgment trees; surfaces supply edge facts/actions.
+    candidates=[Path.home()/".local/share/future-crash-look/core", ROOT.parent/"core"]
+    for path in candidates:
+        if (path/"jev.py").exists() and str(path) not in sys.path:
+            sys.path.insert(0,str(path))
+    import jev
+    return jev
+
+
 def _cognition_module():
     # One cognition vocabulary for terminal LO, Signal, Albert, and future surfaces.
     candidates=[Path.home()/".local/share/future-crash-look/core", ROOT.parent/"core"]
@@ -7558,7 +7568,8 @@ def _command_tool():
             "command":{"type":"string","description":"Shell command to execute with zsh -lc"},
             "cwd":{"type":"string","description":"Working directory; default is the LO starting workspace"},
             "timeout":{"type":"integer","description":"Timeout seconds, 1-60 for captured commands; default 20. Interactive commands remain attached until they exit or the user interrupts them."},
-            "interactive":{"type":"boolean","description":"Use the current terminal for an interactive/TUI program. Set true when the user asks to run something in the terminal."}
+            "interactive":{"type":"boolean","description":"Use the current terminal for an interactive/TUI program. Set true when the user asks to run something in the terminal."},
+            "new_terminal":{"type":"boolean","description":"Launch the command asynchronously in a new terminal window. Host-owned presentation mode; do not put words like 'in a new terminal' into command."}
         },"required":["command"]}
     }}
 
@@ -7619,40 +7630,34 @@ def _lo_latest_command_action(max_age=_LO_RETRY_ACTION_MAX_AGE_SECONDS):
             return {"tool":"run_command","args":args,"path":command}
     return None
 
-def _lo_explicit_command_action(prompt,last_action=None):
-    """Recognize only unambiguous operator requests to execute a shell command.
+def _jev_command_intent(prompt,last_action=None):
+    """Resolve an explicit command through the shared deterministic JEV tree."""
+    previous={}
+    if last_action and last_action.get("tool")=="run_command":
+        previous=dict(last_action.get("args") or {})
 
-    Language proposes most actions, but an explicit `run/launch X` must not be
-    vetoed by stale model memory.  Ambiguous phrases such as `run tests` still
-    go through cognition unless they name a real executable or explicitly say
-    `in the terminal`.
-    """
-    text=" ".join(str(prompt or "").strip().split())
-    m=re.match(r"^(?:please\s+)?(run|launch|execute|start)\s+(.+?)\s*[.!]?\s*$",text,re.I)
-    if not m:
+    def head_resolves(head):
+        if shutil.which(head):
+            return True
+        if "/" in head or head.startswith("."):
+            try: return Path(head).expanduser().exists()
+            except OSError: return False
+        return False
+
+    decision=_jev_module().command_imperative(
+        prompt,head_resolves=head_resolves,prior=previous)
+    if not decision:
         return None
-    verb=m.group(1).casefold(); command=m.group(2).strip()
-    terminal=bool(re.search(r"\s+(?:in|inside|on|from)\s+(?:the\s+)?terminal\s*$",command,re.I))
-    if terminal:
-        command=re.sub(r"\s+(?:in|inside|on|from)\s+(?:the\s+)?terminal\s*$","",command,flags=re.I).strip()
-    if not command or re.fullmatch(r"(?i)(it|that|this|it again|that again|this again)",command):
-        return None
-    try:
-        words=shlex.split(command)
-    except ValueError:
-        return None
-    if not words:
-        return None
-    first=words[0]
-    # A single token is itself an explicit command name.  Multi-token natural
-    # language is direct only when its head resolves as an executable, or the
-    # operator explicitly named the terminal as the execution surface.
-    if len(words)>1 and not terminal and shutil.which(first) is None:
-        return None
-    interactive=terminal or verb=="launch"
-    if last_action and last_action.get("tool")=="run_command" and str(last_action.get("path") or "")==command:
-        interactive=interactive or bool((last_action.get("args") or {}).get("interactive"))
-    return {"tool":"run_command","args":{"command":command,"interactive":interactive},"path":command}
+    command=str(decision["command"])
+    args={"command":command,"interactive":decision["terminal"]=="current"}
+    if decision["terminal"]=="new":
+        args["new_terminal"]=True
+    return {"tool":"run_command","args":args,"path":command,"jev":decision}
+
+
+def _lo_explicit_command_action(prompt,last_action=None):
+    """Compatibility wrapper for the host-owned JEV command tree."""
+    return _jev_command_intent(prompt,last_action)
 
 
 def _power_command_risk(command):
@@ -7680,6 +7685,51 @@ def _power_command_risk(command):
     if exe in {"brew","apt","apt-get","dnf","yum","pacman","zypper"} and len(words)>=2 and words[1].casefold() in {"remove","uninstall","autoremove","upgrade","full-upgrade"}:
         return "hazardous"
     return "ordinary"
+
+
+def _launch_command_new_terminal(command,cwd,shell):
+    """Dispatch a command to a new terminal without waiting for that UI to exit."""
+    try:
+        if sys.platform=="darwin":
+            script=(
+                'on run argv\n'
+                'tell application "Terminal"\n'
+                'activate\n'
+                'do script (item 1 of argv)\n'
+                'end tell\n'
+                'end run'
+            )
+            shell_line=f"cd {shlex.quote(str(cwd))} && {command}"
+            proc=subprocess.run(
+                ["osascript","-e",script,shell_line],
+                stdout=subprocess.PIPE,stderr=subprocess.STDOUT,text=True,timeout=8,
+            )
+            if proc.returncode!=0:
+                detail=(proc.stdout or "").strip()
+                return f"New terminal dispatch failed: {detail or 'osascript exit '+str(proc.returncode)}"
+            return "new terminal dispatch ok · command launched"
+
+        if sys.platform.startswith("linux"):
+            candidates=(
+                ("x-terminal-emulator",lambda exe:[exe,"-e",shell,"-lc",command]),
+                ("gnome-terminal",lambda exe:[exe,"--",shell,"-lc",command]),
+                ("konsole",lambda exe:[exe,"-e",shell,"-lc",command]),
+                ("kitty",lambda exe:[exe,shell,"-lc",command]),
+                ("alacritty",lambda exe:[exe,"-e",shell,"-lc",command]),
+                ("wezterm",lambda exe:[exe,"start","--cwd",str(cwd),"--",shell,"-lc",command]),
+            )
+            for name,build in candidates:
+                exe=shutil.which(name)
+                if not exe: continue
+                subprocess.Popen(build(exe),cwd=str(cwd),stdin=subprocess.DEVNULL,
+                                 stdout=subprocess.DEVNULL,stderr=subprocess.DEVNULL,
+                                 start_new_session=True)
+                return f"new terminal dispatch ok · command launched via {name}"
+            return "New terminal dispatch failed: no supported terminal launcher found"
+
+        return f"New terminal dispatch failed: unsupported platform {sys.platform}"
+    except (OSError,subprocess.SubprocessError) as exc:
+        return f"New terminal dispatch failed: {exc}"
 
 
 def _run_command_tool(workspace,args,profile):
@@ -7720,6 +7770,10 @@ def _run_command_tool(workspace,args,profile):
     shell=shutil.which("zsh")
     if not shell:
         return "Command tool failed: zsh is not available on PATH"
+
+    new_terminal=bool(args.get("new_terminal",False))
+    if new_terminal:
+        return _launch_command_new_terminal(command,cwd,shell)
 
     interactive=bool(args.get("interactive",False))
     if interactive:
@@ -9469,7 +9523,7 @@ def _direct_searxng_search(query, limit=8):
     params=urllib.parse.urlencode({"q":query,"format":"json"})
     request=urllib.request.Request(base+"/search?"+params,headers={
         "Accept":"application/json",
-        "User-Agent":"Future-Crash-Fabric/7.0.2",
+        "User-Agent":"Future-Crash-Fabric/7.0.3",
     })
     with urllib.request.urlopen(request,timeout=12) as response:
         data=json.load(response)
@@ -9994,6 +10048,8 @@ def _url_result(message):
 
 def _command_result(message):
     text=str(message or "")
+    if text.startswith("new terminal dispatch ok"):
+        return _ToolResult(True,"dispatched",text)
     interactive=re.match(r"interactive\s+exit\s+(-?\d+)",text)
     if interactive:
         code=int(interactive.group(1))
@@ -10772,6 +10828,8 @@ def ollama_chat(force_search=False, initial_prompt=None, allow_start=True, host_
                 typed=_command_result(direct_result)
                 if typed.status=="interrupted":
                     reply=f"Launched {command_text}; the interactive terminal session was interrupted."
+                elif typed.status=="dispatched" and args.get("new_terminal"):
+                    reply=f"Launched {command_text} in a new terminal."
                 else:
                     lines=str(direct_result).splitlines()
                     output="\n".join(lines[1:]).strip() if lines and lines[0].startswith("exit ") else ""
@@ -10810,6 +10868,8 @@ def ollama_chat(force_search=False, initial_prompt=None, allow_start=True, host_
                 typed=_command_result(repeat_result)
                 if ok and typed.status=="interrupted":
                     reply=f"Launched {shown} again; the interactive terminal session was interrupted."
+                elif ok and typed.status=="dispatched" and (last_action.get("args") or {}).get("new_terminal"):
+                    reply=f"Launched {shown} again in a new terminal."
                 elif ok:
                     lines=str(repeat_result).splitlines()
                     output="\n".join(lines[1:]).strip() if lines and lines[0].startswith("exit ") else ""

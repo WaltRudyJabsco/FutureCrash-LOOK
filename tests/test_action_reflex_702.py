@@ -9,7 +9,9 @@ lk=importlib.util.module_from_spec(spec); sys.modules[loader.name]=lk; loader.ex
 
 def test_explicit_terminal_command_is_host_reflex():
     action=lk._lo_explicit_command_action('run asciiquarium in the terminal')
-    assert action == {'tool':'run_command','args':{'command':'asciiquarium','interactive':True},'path':'asciiquarium'}
+    assert action['tool']=='run_command'
+    assert action['args']=={'command':'asciiquarium','interactive':True}
+    assert action['path']=='asciiquarium'
     assert lk._lo_explicit_command_action('launch asciiquarium in the terminal')['args']['interactive'] is True
 
 

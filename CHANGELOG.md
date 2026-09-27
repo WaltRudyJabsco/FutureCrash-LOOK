@@ -1,3 +1,12 @@
+# 7.0.3 — JEV TREES
+
+- Add shared `core/jev.py` as the first small deterministic judgment-tree layer: explicit structure is resolved before model cognition, while ambiguous language falls through.
+- Parse command imperatives into typed semantics rather than literal argv. `run asciiquarium again` now executes `asciiquarium`; `again` never reaches the program.
+- Recognize `in the terminal`, `interactively`, and `in a new/another/separate terminal` as execution modifiers rather than command text.
+- Add asynchronous new-terminal dispatch: macOS Terminal via AppleScript; Linux via a bounded known terminal-launcher set. LOOK returns immediately after successful dispatch.
+- Preserve prior terminal presentation for an explicit `again` only when the command referent matches; current authority is always rechecked.
+- Add end-to-end regressions proving JEV executes before cognition for the two observed failures, plus modifier-order, multi-argument executable, ambiguity, dispatch-success, and dispatch-failure tests.
+
 # 7.0.2 — ACTION REFLEX
 
 - Route unambiguous `run`, `launch`, `execute`, and `start` imperatives directly to the host action edge before cognition/model deliberation.
