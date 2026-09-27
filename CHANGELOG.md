@@ -1,4 +1,9 @@
-# 6.9.1 · LOOK FIT & FINISH
+## 6.9.2 — RENDEZVOUS VERSION CONSISTENCY
+
+- Fix rendezvous runtime and HTTP server banner still reporting 6.9.0 inside the 6.9.1 bundle.
+- Add regression coverage requiring all runtime release surfaces to match root VERSION.
+
+# 6.9.2 · LOOK FIT & FINISH
 
 - Interactive LOOK/filter/select views now enforce one candidate per terminal row; static noninteractive listings may still use compact columns.
 - Remove selectable-view section/header rows so visual row, selection index, and preview target remain one-to-one even with hundreds of results.
