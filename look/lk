@@ -70,6 +70,7 @@ MEMORY_QUEUE=STATE_DIR/"memory_queue"
 MEMORY_WORKER_LOCK=STATE_DIR/"memory_worker.lock"
 LO_RECENT_FILE=STATE_DIR/"lo_recent.json"
 BRAIN_STATE_FILE=STATE_DIR/"brain_state.json"
+WORLD_STATE_FILE=STATE_DIR/"world_state.json"
 MODEL_SETS_FILE=STATE_DIR/"model_sets.json"
 LO_JOBS_DIR=STATE_DIR/"jobs"
 LO_EVENTS_DIR=STATE_DIR/"events"
@@ -6524,6 +6525,45 @@ def _cognition_module():
     return cognition
 
 
+def _world_module():
+    candidates=[Path.home()/".local/share/future-crash-look/core", ROOT.parent/"core"]
+    for path in candidates:
+        if (path/"world_state.py").exists() and str(path) not in sys.path:
+            sys.path.insert(0,str(path))
+    import world_state
+    return world_state
+
+
+def _world_state():
+    return _world_module().WorldState(WORLD_STATE_FILE)
+
+
+def _world_context():
+    try:
+        return _world_state().context()
+    except Exception:
+        return ""
+
+
+def _lo_tool_error_query(prompt):
+    low=" ".join(str(prompt or "").casefold().split())
+    return bool(re.search(r"\b(?:what|which|show|tell me)\b.*\b(?:tool )?(?:error|failure)\b|\bwhat was the (?:tool )?(?:error|failure)\b",low))
+
+
+def _lo_latest_tool_error_answer():
+    try:
+        row=_world_state().latest_failure()
+    except Exception:
+        row=None
+    if not row:
+        return None
+    action=row.get("action") or "tool"
+    status=row.get("status") or "failed"
+    message=str(row.get("message") or "").strip()
+    failure=row.get("failure_class") or "action_failure"
+    return f"The last tool failure was `{action}` [{status}] ({failure}): {message}"
+
+
 def _lo_cognition_route(prompt,use_openjev=True):
     """Return the shared bounded route while preserving exact host reflexes."""
     # Exact deterministic edges remain authoritative. Cognition adds fuzziness and
@@ -6856,6 +6896,30 @@ def _brain_context():
     for row in active[-4:]:
         lines.append(f"ACTIVE: {row.get('goal','')} · {row.get('status','active')} · missing {row.get('slot','')}")
     return "\n".join(lines)
+
+def _world_command(args):
+    try:
+        state=_world_state().load()
+    except Exception as exc:
+        print(f"LO world unavailable: {exc}"); return 1
+    print("LO world · typed persistent state")
+    gid=state.get("active_goal_id") or "none"
+    print(f"  active goal  {gid}")
+    goals=state.get("goals") or []
+    if goals:
+        for row in goals[-5:]:
+            print(f"  goal         {row.get('id','?')} · {row.get('status','?')} · {row.get('primary','general')} · {str(row.get('request',''))[:72]}")
+    receipts=state.get("receipts") or []
+    print(f"  receipts     {len(receipts)} typed")
+    for row in receipts[-5:]:
+        mark="✓" if row.get("ok") else "×"
+        extra=f" · {row.get('failure_class')}" if row.get('failure_class') else ""
+        print(f"               {mark} {row.get('action','?')} · {row.get('status','?')}{extra} · {str(row.get('message','')).splitlines()[0][:80]}")
+    events=state.get("events") or []
+    print(f"  events       {len(events)} bounded")
+    print("  rule         language proposes; receipts establish truth; goals survive models")
+    return 0
+
 
 def _brain_command(args):
     args=list(args or []); state=_load_brain_state()
@@ -7488,14 +7552,45 @@ def _command_tool():
         "parameters":{"type":"object","properties":{
             "command":{"type":"string","description":"Shell command to execute with zsh -lc"},
             "cwd":{"type":"string","description":"Working directory; default is the LO starting workspace"},
-            "timeout":{"type":"integer","description":"Timeout seconds, 1-60; default 20. Long-running work should use a purpose-built task."}
+            "timeout":{"type":"integer","description":"Timeout seconds, 1-60; default 20 for captured commands"},
+            "interactive":{"type":"boolean","description":"Attach the real terminal TTY for an explicitly requested interactive/full-screen terminal program; control returns to LO when it exits"}
         },"required":["command"]}
     }}
+
+def _looks_like_shell_file_discovery(command):
+    """Guard the dedicated file-search edge from shell fallbacks.
+
+    Parse command words conservatively; execution commands such as `asciiquarium`
+    must never trip this guard merely because arbitrary arguments contain words
+    like find/search.
+    """
+    text=str(command or "").strip()
+    if not text: return False
+    # Check each shell pipeline/sequence head, not arbitrary argument text.
+    for segment in re.split(r"(?:&&|\|\||[;|])",text):
+        try:
+            parts=shlex.split(segment.strip())
+        except ValueError:
+            parts=segment.strip().split()
+        if not parts: continue
+        i=0
+        while i < len(parts) and re.fullmatch(r"[A-Za-z_][A-Za-z0-9_]*=.*",parts[i]): i+=1
+        if i>=len(parts): continue
+        base=Path(parts[i]).name.casefold()
+        if base in {"find","mdfind","fd","fdfind","locate","plocate"}: return True
+        if base in {"rg","grep","egrep","fgrep"} and any(p in {"-l","--files","--files-with-matches"} for p in parts[i+1:]): return True
+    return False
+
+
+def _lo_terminal_interactive_intent(prompt):
+    low=" ".join(str(prompt or "").casefold().split())
+    return bool(re.search(r"\b(?:in|inside|on) (?:the )?terminal\b|\binteractive(?:ly)?\b|\bfull[- ]?screen terminal\b",low))
+
 
 def _run_command_tool(workspace,args,profile):
     command=str(args.get("command","")).strip()
     if _looks_like_shell_file_discovery(command):
-        return "Command blocked: use search_files for filesystem discovery.", False
+        return "Command blocked: use search_files for filesystem discovery."
     if not command:
         return "Command tool failed: empty command"
 
@@ -7530,6 +7625,18 @@ def _run_command_tool(workspace,args,profile):
     shell=shutil.which("zsh")
     if not shell:
         return "Command tool failed: zsh is not available on PATH"
+
+    interactive=bool(args.get("interactive"))
+    if interactive:
+        if not (sys.stdin.isatty() and sys.stdout.isatty()):
+            return "Command tool failed: interactive terminal requested but no TTY is attached"
+        try:
+            proc=subprocess.run([shell,"-lc",command],cwd=str(cwd))
+            return f"exit {proc.returncode} · interactive terminal command completed"
+        except KeyboardInterrupt:
+            return "exit 130 · interactive terminal command interrupted"
+        except OSError as exc:
+            return f"Command tool failed: {exc}"
 
     try:
         proc=subprocess.run(
@@ -9265,7 +9372,7 @@ def _direct_searxng_search(query, limit=8):
     params=urllib.parse.urlencode({"q":query,"format":"json"})
     request=urllib.request.Request(base+"/search?"+params,headers={
         "Accept":"application/json",
-        "User-Agent":"Future-Crash-Fabric/6.9.4",
+        "User-Agent":"Future-Crash-Fabric/7.0.0",
     })
     with urllib.request.urlopen(request,timeout=12) as response:
         data=json.load(response)
@@ -9815,7 +9922,12 @@ def _tool_receipt_fields(name,args):
             if k in args and args.get(k) not in (None,"")}
 
 def _tool_transaction(name,args,runner,*,actor="lo",truth_name=None):
-    """One edge for timing, execution, classification, journaling, and return."""
+    """One edge for preflight, execution, typed receipt, and verification truth."""
+    action_name=truth_name or name
+    try:
+        execution_policy=_world_state().begin_action(action_name,args=args)
+    except Exception:
+        execution_policy={"mode":"normal","preflight":False,"verify":False,"risk":"unknown"}
     started=time.monotonic()
     try:
         raw=runner()
@@ -9825,8 +9937,14 @@ def _tool_transaction(name,args,runner,*,actor="lo",truth_name=None):
     fields=_tool_receipt_fields(name,args)
     fields["duration_ms"]=int((time.monotonic()-started)*1000)
     fields["status"]=typed.status
+    fields["execution_mode"]=execution_policy.get("mode","normal")
+    fields["verify_required"]=str(bool(execution_policy.get("verify"))).lower()
     _audit_receipt(actor,name,typed.message.splitlines()[0] if typed.message else "no result",
                    ok=typed.ok,**fields)
+    try:
+        _world_state().record_receipt(action_name,typed.ok,typed.status,typed.message,args=args,duration_ms=fields["duration_ms"])
+    except Exception:
+        pass
     return typed.message,typed.ok,fields["duration_ms"]
 
 def receipts(limit=30):
@@ -10487,6 +10605,19 @@ def ollama_chat(force_search=False, initial_prompt=None, allow_start=True, host_
             if one_shot: return 0
             continue
 
+        # Machine truth is queried from typed world state, never reconstructed from
+        # model prose. This is especially important after host/tool failures.
+        if _lo_tool_error_query(prompt):
+            error_answer=_lo_latest_tool_error_answer()
+            if error_answer:
+                print("\n"+_lo_label("lo","35")+"\n"+_ollama_markup(error_answer)+"\n")
+                _save_recent_exchange(prompt,error_answer)
+                if events:
+                    events.emit("response",text=error_answer)
+                    events.emit("request_done",status="ok",rounds=0,tool_calls=0,prompt_tokens=0,output_tokens=0,load_ms=0)
+                if one_shot: return 0
+                continue
+
         # Pure acknowledgement is a zero-tool turn. Never ask a model to reconstruct
         # whether the preceding host action succeeded; the receipt already settled it.
         social_answer=_lo_social_ack(prompt)
@@ -10508,6 +10639,9 @@ def ollama_chat(force_search=False, initial_prompt=None, allow_start=True, host_
         turn_intent="web_current" if turn_route.primary=="web" else turn_route.primary
         turn_force_search=bool(force_search or turn_intent=="web_current")
         turn_goal=_lo_goal(prompt,turn_route)
+        if turn_goal:
+            try: _world_state().begin_goal(turn_goal)
+            except Exception: pass
         if events:
             events.emit("intent_routed",family=turn_intent,families=list(turn_route.families),confidence=turn_route.confidence,margin=turn_route.margin,source=turn_route.source,forced_search=turn_force_search)
             if turn_goal:
@@ -10596,7 +10730,10 @@ def ollama_chat(force_search=False, initial_prompt=None, allow_start=True, host_
         memory=_load_memory()
         messages[memory_message_index]["content"]=_memory_context(memory,prompt)
         messages[brain_context_index]["content"]=_brain_context()
-        messages=[m for i,m in enumerate(messages) if i < base_message_count or not (m.get("role")=="system" and str(m.get("content","")).startswith("RESOURCE CONTEXT GOVERNOR:"))]
+        messages=[m for i,m in enumerate(messages) if i < base_message_count or not (m.get("role")=="system" and str(m.get("content","")).startswith(("RESOURCE CONTEXT GOVERNOR:","TYPED WORLD STATE (")))]
+        world_context=_world_context()
+        if world_context:
+            messages.append({"role":"system","content":world_context})
         messages=_trim_lo_history(messages, base_message_count)
         # Resource context is governed before inference: handles stay cheap; evidence is sliced.
         _resource_tier,_resource_budget=_lo_budget_for(prompt,thinking_mode,selected_paths)
@@ -11229,6 +11366,8 @@ def ollama_chat(force_search=False, initial_prompt=None, allow_start=True, host_
                             _evidence_record("action",f"{name} succeeded",confidence=100,receipt=name)
                         _lo_receipt("result",str(tool_content).splitlines()[0],ok=_ok,color="33")
                     elif name=="run_command":
+                        if _lo_terminal_interactive_intent(prompt):
+                            args=dict(args); args["interactive"]=True
                         if profile not in {"power","unsafe"}:
                             tool_content="Command execution is unavailable in this access profile."
                         else:
@@ -11245,6 +11384,7 @@ def ollama_chat(force_search=False, initial_prompt=None, allow_start=True, host_
                             with _activity("inspecting" if is_inspection else "running command"):
                                 tool_content,_ok,_elapsed=_tool_transaction(
                                     name,args,lambda: _run_command_tool(workspace,args,profile))
+                            if _ok: turn_successful_tools.add(name)
                             _lo_receipt("result",tool_content.splitlines()[0],ok=_ok,color="33")
                     else:
                         tool_content = f"Unknown tool: {name}"
@@ -11434,11 +11574,19 @@ def ollama_chat(force_search=False, initial_prompt=None, allow_start=True, host_
                 print("\n"+_lo_label("lo","35")+"\n"+_ollama_markup(final)+"\n")
             else:
                 print("\n"+_lo_label("lo","35")+"\n"+_c("(no final response)","2")+"\n")
+            if turn_goal and not events:
+                try:
+                    assessment=_cognition_module().assess(turn_goal,successful_tools=list(turn_successful_tools),final_text=final)
+                    _world_state().close_goal(turn_goal.id,satisfied=bool(assessment.get("satisfied")),reason=str(assessment.get("reason") or ""))
+                except Exception:
+                    pass
             if events:
                 events.emit("response", text=final)
                 if turn_goal:
                     try:
                         assessment=_cognition_module().assess(turn_goal,successful_tools=list(turn_successful_tools),final_text=final)
+                        try: _world_state().close_goal(turn_goal.id,satisfied=bool(assessment.get("satisfied")),reason=str(assessment.get("reason") or ""))
+                        except Exception: pass
                         events.emit("goal_verified",goal_id=turn_goal.id,**assessment)
                     except Exception:
                         pass
@@ -16700,6 +16848,8 @@ _COMMANDS = [
     ("lk thinking", "[...]", "ai", "LO thinking mode"),
     ("lk think-display", "[...]", "ai", "Thinking display"),
     ("lk memory", "[...]", "ai", "LO memory"),
+    ("lk brain", "", "ai", "Persistent working goals"),
+    ("lk world", "", "ai", "Typed goals, receipts, failures, and wake state"),
     ("lk skills", "[...]", "ai", "LO learned skills"),
     ("lk profile", "[...]", "ai", "Portable LOOK/LO profile"),
     ("lk feedback", "[...]", "ai", "LO feedback/expression"),
@@ -17813,6 +17963,7 @@ def main():
     if cmd=="_skill-feedback-worker": return _skill_feedback_worker()
     if cmd=="memory": return _memory_command(rest)
     if cmd=="brain": return _brain_command(rest)
+    if cmd=="world": return _world_command(rest)
     if cmd=="forget":
         if not rest: print("usage: lk forget <text>"); return 2
         n=_forget_memory(" ".join(rest)); print(f"Removed {n} matching memory item(s)."); return 0

@@ -1,3 +1,16 @@
+## 7.0.0 — WORLD STATE
+
+- Add persistent typed `world_state.json`: goals, task steps, receipts, failure classes, and wake events survive model/session boundaries.
+- Wire every common tool transaction through structural preflight and typed completion receipts; consequential effects are marked deliberate/verify-required while reads stay normal.
+- Persist cognition task graphs instead of letting them evaporate after a turn.
+- Inject recent authoritative world receipts into cognition so machine truth outranks conversational reconstruction.
+- Answer “what was the tool error/failure?” deterministically from the exact typed failure receipt.
+- Make prior failures evidence rather than vetoes: a new explicit operator request is a fresh attempt.
+- Restore the missing `_looks_like_shell_file_discovery` guard that caused `run_command` to crash with NameError; freeze `asciiquarium` as a regression case.
+- Add explicit interactive TTY execution for requests such as “run asciiquarium in the terminal”; captured shell work remains non-interactive.
+- Add `lk world` observability for active goal, recent typed receipts/failures, and bounded events.
+- Preserve 6.9.4 LOOK navigation and view-relative move fixes.
+
 ## 6.9.4 — VIEW-RELATIVE MOVE DESTINATIONS
 
 - Fix interactive `C Copy To` / `M Move To` resolving relative destination names against the shell process working directory instead of the directory LOOK is currently displaying.

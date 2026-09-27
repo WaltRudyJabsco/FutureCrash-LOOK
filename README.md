@@ -1,6 +1,16 @@
 # Future Crash + LOOK
 
 
+### 7.0.0 · WORLD STATE
+
+7.0.0 moves LO from conversation-centered tool use toward a persistent operating intelligence. Language proposes; deterministic edges act; typed receipts establish truth; task graphs and wake state survive model/session boundaries.
+
+The new `world_state.json` records active goals, bounded task steps, action preflight policy, typed receipts, classified failures, and wake events. `lk world` exposes that state directly. Consequential actions pass through a structural deliberate/verify-required policy while read-only actions remain cheap.
+
+A real regression drove the design: `run asciiquarium in the terminal` crashed because `_looks_like_shell_file_discovery` was referenced but undefined, and a later model turn paraphrased the failure incorrectly. 7.0.0 restores the guard, records the exact host failure, and answers later tool-error questions directly from the receipt instead of asking a model to remember what happened.
+
+
+
 ### 6.9.4 · LOOK FIT & FINISH
 
 6.9.4 restores the core interactive LOOK invariant: one candidate is one visible row. It also layers Copy/Cut/Paste staging over LOOK's existing marked-selection, native clipboard, `_batch` transaction, rollback, and `lk undo` machinery.
