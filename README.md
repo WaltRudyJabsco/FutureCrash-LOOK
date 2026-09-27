@@ -1,3 +1,7 @@
+# Future Crash + LOOK 7.0.5 — TYPED REFERENTS
+
+7.0.5 makes host-created UI objects first-class referents. A command launched in a new terminal now records a typed `terminal_window` handle in authoritative world-state receipts. JEV can resolve follow-ups such as `can you close that window`, `close it`, and `close that` against a single compatible recent object and dispatch a dedicated `close_object` primitive before model cognition. Linux terminal sessions record the PID of the process running inside the spawned terminal; macOS records the Terminal window ID. Ambiguous referents fall through rather than being guessed.
+
 # Future Crash + LOOK 7.0.4 — JEV WIRED
 
 7.0.4 fixes the installed-layout contract for the JEV command tree introduced in 7.0.3. The unified installer now ships `core/jev.py`, verifies the installed copy byte-for-byte, and includes JEV in the post-install runtime import check. A dedicated regression stages only the installed core path and proves LOOK can resolve `run asciiquarium in new terminal` with no source checkout available.

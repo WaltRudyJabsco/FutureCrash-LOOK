@@ -68,7 +68,7 @@ def execution_policy(action: str) -> dict[str,Any]:
     action=str(action or "")
     destructive={"remove_path"}
     mutations={"write_file","create_text_files","copy_path","move_path","make_directory"}
-    consequential={"run_command","schedule_prompt","generate_image","media_play","media_queue","media_control","audio_speak","open_path","open_url"}
+    consequential={"run_command","close_object","schedule_prompt","generate_image","media_play","media_queue","media_control","audio_speak","open_path","open_url"}
     if action in destructive:
         return {"mode":"deliberate","preflight":True,"verify":True,"risk":"destructive"}
     if action in mutations:

@@ -70,7 +70,8 @@ def test_new_terminal_dispatch_is_typed_success(tmp_path,monkeypatch):
     result=lk._run_command_tool(tmp_path,{'command':'asciiquarium','new_terminal':True},'unsafe')
     assert result.startswith('new terminal dispatch ok')
     assert calls
-    assert calls[0][0][-1]=='asciiquarium'
+    assert 'asciiquarium' in calls[0][0][-1]
+    assert "printf '%s\\n' $$" in calls[0][0][-1]
     typed=lk._command_result(result)
     assert typed.ok is True and typed.status=='dispatched'
 

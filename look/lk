@@ -7687,8 +7687,10 @@ def _power_command_risk(command):
     return "ordinary"
 
 
-def _launch_command_new_terminal(command,cwd,shell):
-    """Dispatch a command to a new terminal without waiting for that UI to exit."""
+def _launch_command_new_terminal(command,cwd,shell,args=None):
+    """Dispatch a command and attach a typed handle to the created terminal object."""
+    args=args if isinstance(args,dict) else {}
+    ref_id="term_"+uuid.uuid4().hex[:12]
     try:
         if sys.platform=="darwin":
             script=(
@@ -7696,6 +7698,8 @@ def _launch_command_new_terminal(command,cwd,shell):
                 'tell application "Terminal"\n'
                 'activate\n'
                 'do script (item 1 of argv)\n'
+                'delay 0.1\n'
+                'return id of front window\n'
                 'end tell\n'
                 'end run'
             )
@@ -7707,6 +7711,8 @@ def _launch_command_new_terminal(command,cwd,shell):
             if proc.returncode!=0:
                 detail=(proc.stdout or "").strip()
                 return f"New terminal dispatch failed: {detail or 'osascript exit '+str(proc.returncode)}"
+            window_id=(proc.stdout or "").strip().splitlines()[-1].strip() if (proc.stdout or "").strip() else ""
+            args["_referent"]={"id":ref_id,"kind":"terminal_window","platform":"darwin","os_window_id":window_id,"command":command,"status":"open"}
             return "new terminal dispatch ok · command launched"
 
         if sys.platform.startswith("linux"):
@@ -7718,12 +7724,16 @@ def _launch_command_new_terminal(command,cwd,shell):
                 ("alacritty",lambda exe:[exe,"-e",shell,"-lc",command]),
                 ("wezterm",lambda exe:[exe,"start","--cwd",str(cwd),"--",shell,"-lc",command]),
             )
+            handle_dir=STATE_DIR/"terminal_handles"; handle_dir.mkdir(parents=True,exist_ok=True)
+            pid_file=handle_dir/f"{ref_id}.pid"
+            wrapped=f"printf '%s\\n' $$ > {shlex.quote(str(pid_file))}; exec {shlex.quote(shell)} -lc {shlex.quote(command)}"
             for name,build in candidates:
                 exe=shutil.which(name)
                 if not exe: continue
-                subprocess.Popen(build(exe),cwd=str(cwd),stdin=subprocess.DEVNULL,
+                proc=subprocess.Popen(build(exe)[:-1]+[wrapped],cwd=str(cwd),stdin=subprocess.DEVNULL,
                                  stdout=subprocess.DEVNULL,stderr=subprocess.DEVNULL,
                                  start_new_session=True)
+                args["_referent"]={"id":ref_id,"kind":"terminal_window","platform":"linux","pid_file":str(pid_file),"launcher_pid":int(getattr(proc,"pid",0) or 0),"command":command,"status":"open"}
                 return f"new terminal dispatch ok · command launched via {name}"
             return "New terminal dispatch failed: no supported terminal launcher found"
 
@@ -7731,6 +7741,62 @@ def _launch_command_new_terminal(command,cwd,shell):
     except (OSError,subprocess.SubprocessError) as exc:
         return f"New terminal dispatch failed: {exc}"
 
+
+
+def _lo_recent_referents(last_action=None,limit=24):
+    """Newest-first typed host objects available for deictic follow-up."""
+    out=[]
+    if last_action:
+        ref=(last_action.get("args") or {}).get("_referent")
+        # The current turn referent is explicitly salient. Do not dilute "that"
+        # with older objects merely because they remain in durable history.
+        if isinstance(ref,dict): return [dict(ref)]
+    try:
+        rows=_world_state().latest_receipts(limit)
+    except Exception:
+        rows=[]
+    for row in reversed(rows):
+        ref=(row.get("args") or {}).get("_referent")
+        if isinstance(ref,dict): out.append(dict(ref))
+    return out
+
+
+def _jev_referential_intent(prompt,last_action=None):
+    return _jev_module().referential_action(prompt,_lo_recent_referents(last_action))
+
+
+def _close_typed_referent(ref):
+    """Close one host object using the handle created by its launch receipt."""
+    ref=dict(ref or {})
+    if ref.get("kind")!="terminal_window":
+        return "Close failed: unsupported referent type"
+    platform_name=str(ref.get("platform") or "")
+    if platform_name=="darwin":
+        wid=str(ref.get("os_window_id") or "").strip()
+        if not wid.isdigit(): return "Close failed: terminal window handle is unavailable"
+        script='tell application "Terminal" to close (first window whose id is '+wid+')'
+        proc=subprocess.run(["osascript","-e",script],stdout=subprocess.PIPE,stderr=subprocess.STDOUT,text=True,timeout=8)
+        if proc.returncode!=0:
+            return f"Close failed: {(proc.stdout or '').strip() or 'Terminal rejected the window handle'}"
+        return "close ok · terminal window closed"
+    if platform_name=="linux":
+        pid=0
+        try:
+            pid_file=Path(str(ref.get("pid_file") or ""))
+            if pid_file.exists(): pid=int(pid_file.read_text().strip())
+        except (OSError,ValueError): pid=0
+        if pid<=1:
+            try: pid=int(ref.get("launcher_pid") or 0)
+            except (TypeError,ValueError): pid=0
+        if pid<=1: return "Close failed: terminal process handle is unavailable"
+        try:
+            os.kill(pid,signal.SIGTERM)
+        except ProcessLookupError:
+            return "Close failed: terminal window is no longer running"
+        except OSError as exc:
+            return f"Close failed: {exc}"
+        return "close ok · terminal window closed"
+    return f"Close failed: unsupported platform {platform_name or 'unknown'}"
 
 def _run_command_tool(workspace,args,profile):
     command=str(args.get("command","")).strip()
@@ -7773,7 +7839,7 @@ def _run_command_tool(workspace,args,profile):
 
     new_terminal=bool(args.get("new_terminal",False))
     if new_terminal:
-        return _launch_command_new_terminal(command,cwd,shell)
+        return _launch_command_new_terminal(command,cwd,shell,args)
 
     interactive=bool(args.get("interactive",False))
     if interactive:
@@ -9523,7 +9589,7 @@ def _direct_searxng_search(query, limit=8):
     params=urllib.parse.urlencode({"q":query,"format":"json"})
     request=urllib.request.Request(base+"/search?"+params,headers={
         "Accept":"application/json",
-        "User-Agent":"Future-Crash-Fabric/7.0.4",
+        "User-Agent":"Future-Crash-Fabric/7.0.5",
     })
     with urllib.request.urlopen(request,timeout=12) as response:
         data=json.load(response)
@@ -10074,6 +10140,9 @@ def _normalize_tool_result(name,result):
         return _filesystem_result(name,result)
     if name=="open_url": return _url_result(result)
     if name=="run_command": return _command_result(result)
+    if name=="close_object":
+        text=str(result or ""); ok=text.startswith("close ok")
+        return _ToolResult(ok,"closed" if ok else "failed",text)
     return _default_result(result)
 
 def _tool_receipt_fields(name,args):
@@ -10807,6 +10876,26 @@ def ollama_chat(force_search=False, initial_prompt=None, allow_start=True, host_
 
         # Fast host actions are real turns but intentionally skip deliberative cognition.
         turn_id += 1
+
+        # Referential JEV actions operate on typed objects created by prior host actions.
+        ref_action=_jev_referential_intent(prompt,last_action)
+        if ref_action:
+            ref=ref_action["object"]
+            if profile not in {"power","unsafe"}:
+                ref_result="Window control is unavailable in this access profile."; ref_ok=False
+            else:
+                with _activity("closing window"):
+                    ref_result,ref_ok,_elapsed=_tool_transaction(
+                        "close_object",{"object":ref},lambda: _close_typed_referent(ref))
+            _lo_receipt("result",str(ref_result).splitlines()[0],ok=ref_ok,color="33")
+            reply="Closed that window." if ref_ok else str(ref_result)
+            print("\n"+_lo_label("lo","35")+"\n"+_ollama_markup(reply)+"\n")
+            _save_recent_exchange(prompt,reply)
+            if events:
+                events.emit("response",text=reply)
+                events.emit("request_done",status=("ok" if ref_ok else "failed"),rounds=0,tool_calls=1,prompt_tokens=0,output_tokens=0,load_ms=0)
+            if one_shot: return 0
+            continue
 
         # Explicit shell imperatives are deterministic operator authority.  They
         # bypass model deliberation but never bypass the current host access/risk gate.

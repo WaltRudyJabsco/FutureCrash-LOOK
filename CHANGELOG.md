@@ -1,3 +1,13 @@
+# 7.0.5 — TYPED REFERENTS
+
+- Host actions can now produce typed referent objects carried in authoritative receipts.
+- New-terminal launches produce a `terminal_window` referent with a host-close handle.
+- JEV resolves narrow deictic follow-ups such as `close that window` before cognition.
+- Linux records the inside-terminal process PID; macOS records Terminal's window ID.
+- `close_object` is a typed host primitive, eliminating the prior `run_command` → file-dispatch failure.
+- Ambiguous compatible referents fall back to cognition instead of guessing.
+- Adds end-to-end regressions for the exact launch/close continuity failure.
+
 # 7.0.4 — JEV WIRED
 
 - Ship `core/jev.py` in the unified installer.
