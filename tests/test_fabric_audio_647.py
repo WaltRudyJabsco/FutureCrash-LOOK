@@ -5,7 +5,7 @@ ROOT=Path(__file__).resolve().parents[1]
 
 
 def test_release_and_audio_capability_contract():
-    assert (ROOT/'VERSION').read_text().strip()=='7.0.1'
+    assert (ROOT/'VERSION').read_text().strip()=='7.0.2'
     node=(ROOT/'core/node.py').read_text()
     assert 'RELEASE_NAME = "COGNITIVE FABRIC"' in node
     assert '"audio.speak"' in node

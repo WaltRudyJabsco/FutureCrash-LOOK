@@ -1,3 +1,12 @@
+# 7.0.2 — ACTION REFLEX
+
+- Route unambiguous `run`, `launch`, `execute`, and `start` imperatives directly to the host action edge before cognition/model deliberation.
+- Restore the most recent typed `run_command` receipt as a bounded four-hour retry referent, so a fresh LO process can honor `try again` without reconstructing action state from prose.
+- Treat an exact bare repeat of the last command name as a deterministic retry.
+- Recheck the current access profile and POWER hazard classifier on every retry; referents persist, authority never does.
+- Preserve interactive exit 130 as `launched; interrupted`, and surface that exact receipt on direct/repeated execution.
+- Add a real LO-turn regression that fails if cognition is invoked before `run asciiquarium in the terminal`, plus stale-memory, missing-executable, bare-repeat, and authority-downgrade coverage.
+
 # 7.0.1 — AUTHORITY THAT ACTS
 
 - Recalibrates CONSERVATIVE / WORKSPACE / POWER / UNSAFE into four distinct authority grants.

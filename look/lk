@@ -7207,6 +7207,8 @@ def _lo_action_continuation(prompt,last_action):
     if not last_action: return False
     low=" ".join(str(prompt or "").casefold().split())
     if not low: return False
+    if last_action.get("tool")=="run_command" and low==str(last_action.get("path") or "").casefold():
+        return True
     patterns=(
         r"^(yes|yes!|yep|yeah|sure|okay|ok)(\b|[!.])",
         r"^(try|do|play|open|run)\s+(it\s+|that\s+)?again\b",
@@ -7588,6 +7590,69 @@ def _looks_like_shell_file_discovery(command):
 def _lo_terminal_interactive_intent(prompt):
     low=" ".join(str(prompt or "").casefold().split())
     return bool(re.search(r"\b(?:in|inside|on|from) (?:the )?terminal\b|\binteractive(?:ly)?\b|\bfull[- ]?screen terminal\b",low))
+
+
+_LO_RETRY_ACTION_MAX_AGE_SECONDS=4*60*60
+
+def _lo_latest_command_action(max_age=_LO_RETRY_ACTION_MAX_AGE_SECONDS):
+    """Recover a recent typed command attempt as an explicit-retry referent.
+
+    This is host state, not conversational memory.  A later `again` still passes
+    through the current access profile and command-risk gate before execution.
+    """
+    try:
+        rows=_world_state().latest_receipts(24)
+    except Exception:
+        return None
+    now=time.time()
+    for row in reversed(rows):
+        if str(row.get("action") or "")!="run_command":
+            continue
+        try:
+            if max_age is not None and now-float(row.get("observed_at") or 0)>float(max_age):
+                return None
+        except (TypeError,ValueError):
+            return None
+        args=dict(row.get("args") or {})
+        command=str(args.get("command") or "").strip()
+        if command:
+            return {"tool":"run_command","args":args,"path":command}
+    return None
+
+def _lo_explicit_command_action(prompt,last_action=None):
+    """Recognize only unambiguous operator requests to execute a shell command.
+
+    Language proposes most actions, but an explicit `run/launch X` must not be
+    vetoed by stale model memory.  Ambiguous phrases such as `run tests` still
+    go through cognition unless they name a real executable or explicitly say
+    `in the terminal`.
+    """
+    text=" ".join(str(prompt or "").strip().split())
+    m=re.match(r"^(?:please\s+)?(run|launch|execute|start)\s+(.+?)\s*[.!]?\s*$",text,re.I)
+    if not m:
+        return None
+    verb=m.group(1).casefold(); command=m.group(2).strip()
+    terminal=bool(re.search(r"\s+(?:in|inside|on|from)\s+(?:the\s+)?terminal\s*$",command,re.I))
+    if terminal:
+        command=re.sub(r"\s+(?:in|inside|on|from)\s+(?:the\s+)?terminal\s*$","",command,flags=re.I).strip()
+    if not command or re.fullmatch(r"(?i)(it|that|this|it again|that again|this again)",command):
+        return None
+    try:
+        words=shlex.split(command)
+    except ValueError:
+        return None
+    if not words:
+        return None
+    first=words[0]
+    # A single token is itself an explicit command name.  Multi-token natural
+    # language is direct only when its head resolves as an executable, or the
+    # operator explicitly named the terminal as the execution surface.
+    if len(words)>1 and not terminal and shutil.which(first) is None:
+        return None
+    interactive=terminal or verb=="launch"
+    if last_action and last_action.get("tool")=="run_command" and str(last_action.get("path") or "")==command:
+        interactive=interactive or bool((last_action.get("args") or {}).get("interactive"))
+    return {"tool":"run_command","args":{"command":command,"interactive":interactive},"path":command}
 
 
 def _power_command_risk(command):
@@ -9404,7 +9469,7 @@ def _direct_searxng_search(query, limit=8):
     params=urllib.parse.urlencode({"q":query,"format":"json"})
     request=urllib.request.Request(base+"/search?"+params,headers={
         "Accept":"application/json",
-        "User-Agent":"Future-Crash-Fabric/7.0.1",
+        "User-Agent":"Future-Crash-Fabric/7.0.2",
     })
     with urllib.request.urlopen(request,timeout=12) as response:
         data=json.load(response)
@@ -10513,7 +10578,9 @@ def ollama_chat(force_search=False, initial_prompt=None, allow_start=True, host_
 
     base_message_count=len(messages)
     pending_prompt = (initial_prompt or "").strip()
-    last_action=None
+    # Retry referents come from typed host receipts, so a fresh LO process can
+    # honor "try again" without asking a model to reconstruct prior action state.
+    last_action=_lo_latest_command_action()
     last_candidates=""
     pending_media_clarification=None
     brain_state=_load_brain_state()
@@ -10682,6 +10749,85 @@ def ollama_chat(force_search=False, initial_prompt=None, allow_start=True, host_
             if one_shot: return 0
             continue
 
+        # Fast host actions are real turns but intentionally skip deliberative cognition.
+        turn_id += 1
+
+        # Explicit shell imperatives are deterministic operator authority.  They
+        # bypass model deliberation but never bypass the current host access/risk gate.
+        direct_command=_lo_explicit_command_action(prompt,last_action)
+        if direct_command:
+            args=dict(direct_command["args"]); command_text=str(args.get("command") or "").strip()
+            print(f"{_lo_label('command','33')}  {command_text}")
+            if profile not in {"power","unsafe"}:
+                direct_result="Command execution is unavailable in this access profile."
+                direct_ok=False
+            else:
+                with _activity("running command"):
+                    direct_result,direct_ok,_elapsed=_tool_transaction(
+                        "run_command",args,lambda: _run_command_tool(workspace,args,profile))
+                last_action=_lo_action_from_tool("run_command",args,direct_result) or direct_command
+                last_authoritative_receipt={"tool":"run_command","result":str(direct_result)[:1200],"time":time.time()}
+            _lo_receipt("result",str(direct_result).splitlines()[0],ok=direct_ok,color="33")
+            if direct_ok:
+                typed=_command_result(direct_result)
+                if typed.status=="interrupted":
+                    reply=f"Launched {command_text}; the interactive terminal session was interrupted."
+                else:
+                    lines=str(direct_result).splitlines()
+                    output="\n".join(lines[1:]).strip() if lines and lines[0].startswith("exit ") else ""
+                    reply=f"Ran {command_text}." + (f"\n{output}" if output else "")
+            else:
+                reply=str(direct_result)
+            print("\n"+_lo_label("lo","35")+"\n"+_ollama_markup(reply)+"\n")
+            _save_recent_exchange(prompt,reply)
+            if events:
+                events.emit("response",text=reply)
+                events.emit("request_done",status=("ok" if direct_ok else "failed"),rounds=0,tool_calls=1,prompt_tokens=0,output_tokens=0,load_ms=0)
+            if one_shot: return 0
+            continue
+
+        # Repeat is a deterministic UI primitive, not a fresh reasoning task.
+        # It inherits the referent, never the old authority: current access policy
+        # is checked again before every repeated command.
+        if (_lo_repeat_intent(prompt) or _lo_action_continuation(prompt,last_action)) and last_action:
+            if last_action["tool"]=="run_command" and profile not in {"power","unsafe"}:
+                repeat_result="Command execution is unavailable in this access profile."
+                ok=False
+            else:
+                with _activity(last_action["tool"].replace("_"," ")):
+                    repeat_result,ok,_elapsed=_tool_transaction(
+                        "repeat_action",last_action["args"],
+                        lambda: (_tool_open_url(last_action["args"].get("url",""),last_action["args"].get("intent","open"))
+                                 if last_action["tool"]=="open_url"
+                                 else _run_command_tool(workspace,last_action["args"],profile)
+                                 if last_action["tool"]=="run_command"
+                                 else _run_filesystem_tool(workspace,last_action["tool"],last_action["args"],profile)),
+                        truth_name=last_action["tool"])
+            shown=(last_action["path"] if last_action["tool"]=="run_command" else Path(last_action["path"]).name)
+            if last_action["tool"]=="run_command":
+                _lo_receipt("result",str(repeat_result).splitlines()[0],ok=ok,color="33")
+                last_authoritative_receipt={"tool":"run_command","result":str(repeat_result)[:1200],"time":time.time()}
+                typed=_command_result(repeat_result)
+                if ok and typed.status=="interrupted":
+                    reply=f"Launched {shown} again; the interactive terminal session was interrupted."
+                elif ok:
+                    lines=str(repeat_result).splitlines()
+                    output="\n".join(lines[1:]).strip() if lines and lines[0].startswith("exit ") else ""
+                    reply="Ran it again." + (f"\n{output}" if output else "")
+                else:
+                    reply=str(repeat_result)
+            else:
+                reply=(f"Done again — {shown}" if ok else str(repeat_result))
+            print("\n"+_lo_label("lo","35")+"\n"+_ollama_markup(reply)+"\n")
+            _save_recent_exchange(prompt,reply)
+            if events:
+                events.emit("response",text=reply)
+                events.emit("request_done",status=("ok" if ok else "failed"),rounds=0,tool_calls=1,prompt_tokens=0,output_tokens=0,load_ms=0)
+            if one_shot: return 0
+            continue
+
+        turn_id -= 1
+
         # Shared host routing runs before any surface or model gets to improvise.
         # This is the same gate for terminal LOOK, Signal, and Albert.
         turn_route=_lo_cognition_route(prompt,use_openjev=True)
@@ -10761,25 +10907,6 @@ def ollama_chat(force_search=False, initial_prompt=None, allow_start=True, host_
                     else:
                         print("\\n"+_lo_label("lo","35")+"\\n"+_ollama_markup(str(tool_content))+"\\n")
                     continue
-
-        # Repeat is a deterministic UI primitive, not a fresh reasoning task.
-        if (_lo_repeat_intent(prompt) or _lo_action_continuation(prompt,last_action)) and last_action:
-            with _activity(last_action["tool"].replace("_"," ")):
-                repeat_result,ok,_elapsed=_tool_transaction(
-                    "repeat_action",last_action["args"],
-                    lambda: (_tool_open_url(last_action["args"].get("url",""),last_action["args"].get("intent","open"))
-                             if last_action["tool"]=="open_url"
-                             else _run_command_tool(workspace,last_action["args"],profile)
-                             if last_action["tool"]=="run_command"
-                             else _run_filesystem_tool(workspace,last_action["tool"],last_action["args"],profile)),
-                    truth_name=last_action["tool"])
-            shown=(last_action["path"] if last_action["tool"]=="run_command" else Path(last_action["path"]).name)
-            if last_action["tool"]=="run_command":
-                reply=("Ran it again." if ok else str(repeat_result))
-            else:
-                reply=(f"Done again — {shown}" if ok else str(repeat_result))
-            print("\n"+_lo_label("lo","35")+"\n"+_ollama_markup(reply)+"\n")
-            continue
 
         _ai_foreground(True,"lo")
         # Memory can change asynchronously between turns. Reload cheaply from
