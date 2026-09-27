@@ -1,15 +1,15 @@
 #!/usr/bin/env bash
 set -euo pipefail
 ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
-echo "Future Crash + LOOK 7.0.5 · TYPED REFERENTS"
+echo "Future Crash + LOOK 7.1.0 · JEV FABRIC"
 echo "────────────────────────────────────────"
 
 # Refuse a mixed bundle before mutating the machine. A unified release must move
 # LOOK and the node together.
 EXPECTED_RELEASE="$(tr -d '[:space:]' < "$ROOT/VERSION")"
-[[ "$EXPECTED_RELEASE" == "7.0.5" ]] || { echo "BUNDLE ERROR: expected release 7.0.5, found $EXPECTED_RELEASE"; exit 4; }
+[[ "$EXPECTED_RELEASE" == "7.1.0" ]] || { echo "BUNDLE ERROR: expected release 7.1.0, found $EXPECTED_RELEASE"; exit 4; }
 echo "BUNDLE SOURCE  $ROOT"
-echo "BUNDLE RELEASE $EXPECTED_RELEASE · TYPED REFERENTS"
+echo "BUNDLE RELEASE $EXPECTED_RELEASE · JEV FABRIC"
 for vf in "$ROOT/look/VERSION" "$ROOT/albert/VERSION" "$ROOT/future-crash/VERSION"; do
   component_version="$(tr -d '[:space:]' < "$vf")"
   [[ "$component_version" == "$EXPECTED_RELEASE" ]] || { echo "BUNDLE ERROR: $vf reports $component_version, expected $EXPECTED_RELEASE"; exit 4; }
@@ -50,8 +50,8 @@ FCL_UNIFIED_INSTALL_CHILD=1 "$ROOT/install-look.sh" "$@"
 ((UNINSTALL)) && exit 0
 if ((DRY_RUN)); then
   echo
-  echo "[dry-run] would install/restart Unified Node 7.0.5 · TYPED REFERENTS with signed Fabric rendezvous, Tailcat direct transport, ONE BRAIN cognition, LIVING MIND memory, browser endpoints, SearXNG, Media, Artifacts, and Signal Window 1.11.0"
-  echo "[dry-run] OpenJev mode: $OPENJEV_MODE (auto adopts an existing worker; absence is non-fatal)"
+  echo "[dry-run] would install/restart Unified Node 7.1.0 · JEV FABRIC with signed Fabric rendezvous, Tailcat direct transport, ONE BRAIN cognition, LIVING MIND memory, browser endpoints, SearXNG, Media, Artifacts, and Signal Window 1.11.0"
+  echo "[dry-run] OpenJev mode: $OPENJEV_MODE (auto provisions on capable nodes; absence/failure is non-fatal)"
   echo "[dry-run] would initialize Tailcat :7443, install optional signed rendezvous discovery, keep Tailscale :7332 → fcl-ingress :7333 as fallback, and verify Fabric CLI wiring"
   exit 0
 fi
@@ -112,6 +112,7 @@ install -m 0755 "$ROOT/core/tailcat.py" "$HOME/.local/share/future-crash-look/co
 install -m 0755 "$ROOT/core/fcl-tailcat" "$HOME/.local/bin/fcl-tailcat"
 install -m 0644 "$ROOT/core/rendezvous.py" "$HOME/.local/share/future-crash-look/core/rendezvous.py"
 install -m 0755 "$ROOT/core/fcl-rendezvous" "$HOME/.local/bin/fcl-rendezvous"
+install -m 0755 "$ROOT/core/fcl-openjev-worker" "$HOME/.local/bin/fcl-openjev-worker"
 install -m 0644 "$ROOT/VERSION" "$HOME/.local/share/future-crash-look/RELEASE"
 # Create the machine's Fabric keypair once. It is independent of Tailscale and
 # survives normal upgrades; private key material never leaves this host.
@@ -171,12 +172,24 @@ if [[ -x "$ROOT/albert/install.sh" ]]; then
   "$ROOT/albert/install.sh"
 fi
 
-# OpenJev is an optional decision worker, never a bundle dependency. Normal
-# upgrades adopt a compatible existing install; explicit --openjev=install is
-# the only mode allowed to clone/download large model assets.
+# JEV-1 is the optional learned judgment tier. JEV-0 deterministic trees are
+# always installed. In auto mode, capable nodes (>=12 GiB RAM) provision JEV-1;
+# failure is graceful and never blocks the deterministic/local-LLM stack.
 OPENJEV_ROOT="$HOME/.local/share/open-jev"
 OPENJEV_CHECKPOINT="$OPENJEV_ROOT/models/Open-Jev-2B/package/checkpoint"
 OPENJEV_READY=0
+if [[ "$OPENJEV_MODE" == "auto" && ( ! -x "$OPENJEV_ROOT/.venv/bin/python" || ! -e "$OPENJEV_CHECKPOINT" ) ]]; then
+  MEM_GIB=0
+  if [[ "$(uname -s)" == "Darwin" ]]; then MEM_GIB=$(( $(sysctl -n hw.memsize 2>/dev/null || echo 0) / 1073741824 ));
+  elif [[ -r /proc/meminfo ]]; then MEM_GIB=$(( $(awk '/MemTotal/{print $2}' /proc/meminfo) / 1048576 )); fi
+  if (( MEM_GIB >= 12 )) && command -v git >/dev/null 2>&1 && command -v python3 >/dev/null 2>&1; then
+    OPENJEV_MODE="install"
+    echo "JEV-1 · capable node (${MEM_GIB} GiB) · provisioning local decision worker"
+  else
+    OPENJEV_MODE="adopt"
+    echo "JEV-1 · auto skipped local provisioning (${MEM_GIB} GiB or prerequisites unavailable)"
+  fi
+fi
 if [[ "$OPENJEV_MODE" == "install" && ! -x "$OPENJEV_ROOT/.venv/bin/python" ]]; then
   echo "OpenJev · installing optional decision worker"
   command -v git >/dev/null 2>&1 || { echo "OpenJev install skipped: git unavailable"; OPENJEV_MODE="off"; }
@@ -257,14 +270,17 @@ PY_JEV
   systemctl --user restart future-crash-look-ingress.service || systemctl --user start future-crash-look-ingress.service || true
   if (( TAILCAT_READY )); then systemctl --user restart future-crash-look-tailcat.service || systemctl --user start future-crash-look-tailcat.service || true; fi
 elif [[ "$OS" == "Darwin" ]] && command -v launchctl >/dev/null 2>&1; then
-  mkdir -p "$HOME/Library/LaunchAgents"
+  mkdir -p "$HOME/Library/LaunchAgents" "$HOME/.local/state/future-crash-look"
   sed "s|__HOME__|$HOME|g" "$ROOT/core/com.futurecrash.look.node.plist" > "$HOME/Library/LaunchAgents/com.futurecrash.look.node.plist"
   sed "s|__HOME__|$HOME|g" "$ROOT/core/com.futurecrash.look.ingress.plist" > "$HOME/Library/LaunchAgents/com.futurecrash.look.ingress.plist"
   if (( TAILCAT_READY )); then sed "s|__HOME__|$HOME|g" "$ROOT/core/com.futurecrash.look.tailcat.plist" > "$HOME/Library/LaunchAgents/com.futurecrash.look.tailcat.plist"; fi
+  if (( OPENJEV_READY )); then sed "s|__HOME__|$HOME|g" "$ROOT/core/com.futurecrash.look.openjev.plist" > "$HOME/Library/LaunchAgents/com.futurecrash.look.openjev.plist"; fi
   launchctl bootout "gui/$(id -u)/com.futurecrash.look.ingress" >/dev/null 2>&1 || true
   launchctl bootout "gui/$(id -u)/com.futurecrash.look.tailcat" >/dev/null 2>&1 || true
   launchctl bootout "gui/$(id -u)/com.futurecrash.look.node" >/dev/null 2>&1 || true
+  launchctl bootout "gui/$(id -u)/com.futurecrash.look.openjev" >/dev/null 2>&1 || true
   launchctl bootstrap "gui/$(id -u)" "$HOME/Library/LaunchAgents/com.futurecrash.look.node.plist" || true
+  if (( OPENJEV_READY )); then launchctl bootstrap "gui/$(id -u)" "$HOME/Library/LaunchAgents/com.futurecrash.look.openjev.plist" || true; fi
   launchctl bootstrap "gui/$(id -u)" "$HOME/Library/LaunchAgents/com.futurecrash.look.ingress.plist" || true
   if (( TAILCAT_READY )); then launchctl bootstrap "gui/$(id -u)" "$HOME/Library/LaunchAgents/com.futurecrash.look.tailcat.plist" || true; fi
 else
@@ -390,6 +406,9 @@ if ! cmp -s "$ROOT/core/intent_normalizer.py" "$HOME/.local/share/future-crash-l
 fi
 if ! cmp -s "$ROOT/core/jev.py" "$HOME/.local/share/future-crash-look/core/jev.py"; then
   echo "INSTALL ERROR: installed JEV core differs from release" >&2; exit 8
+fi
+if ! cmp -s "$ROOT/core/fcl-openjev-worker" "$HOME/.local/bin/fcl-openjev-worker"; then
+  echo "INSTALL ERROR: installed JEV-1 worker launcher differs from release" >&2; exit 8
 fi
 if ! cmp -s "$ROOT/core/conductor.py" "$HOME/.local/share/future-crash-look/core/conductor.py"; then
   echo "INSTALL ERROR: installed conductor differs from release" >&2; exit 8

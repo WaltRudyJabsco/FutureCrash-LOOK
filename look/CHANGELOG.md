@@ -1,3 +1,11 @@
+# 7.1.0 — JEV FABRIC
+
+- Universal JEV-0 deterministic intent layer plus optional local JEV-1 learned judgment.
+- Explicit image generation owns its prompt before WEATHER routing.
+- Normalize conversational glue/self-address for deterministic actions.
+- Resolve unique recent typed-object aliases/prefixes while refusing ambiguity.
+- Add Linux/macOS JEV-1 lifecycle support and capability diagnostics.
+
 # 7.0.5 — TYPED REFERENTS
 
 - Host actions can now produce typed referent objects carried in authoritative receipts.

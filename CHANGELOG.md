@@ -1,3 +1,14 @@
+# 7.1.0 — JEV FABRIC
+
+- Promote JEV-0 deterministic judgment trees to a universal node runtime layer.
+- Adopt the existing OpenJev 2B worker as JEV-1: local learned judgment between deterministic trees and general cognition.
+- `--openjev=auto` now provisions JEV-1 on capable nodes (12 GiB+ RAM) and fails gracefully when prerequisites/model acquisition are unavailable.
+- Add Linux/macOS JEV-1 lifecycle wiring and a device-neutral launcher that selects CUDA, Apple MPS, then CPU.
+- Add top-down image intent ownership: explicit image-generation prompts bypass weather hijacking even when their payload contains rain/snow/weather words.
+- Normalize discourse/self-address before JEV (`and`, `then`, `now`, `lo`, `look`).
+- Add bounded typed-referent name/prefix resolution (`close ascii` → unique active `asciiquarium` terminal), with ambiguity falling through.
+- Add end-to-end regressions for the observed image/weather and referent failures.
+
 # 7.0.5 — TYPED REFERENTS
 
 - Host actions can now produce typed referent objects carried in authoritative receipts.

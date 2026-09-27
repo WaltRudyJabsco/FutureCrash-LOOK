@@ -2039,7 +2039,7 @@ def doctor_island():
         ("warm model", bool(loaded), (", ".join(loaded[:2]) if loaded else "none; local model may cold-start")),
         ("memory", _ensure_memory_file(), "local durable memory"),
         ("media", bool(shutil.which("mpv") or platform.system()=="Darwin"), "local playback edge"),
-        ("OpenJev", openjev, "local decision worker" if openjev else "optional; rules/local LLM remain"),
+        ("JEV-1", openjev, "local learned judgment" if openjev else "optional; JEV-0/local LLM remain"),
     ]
     print(_c(f"LOOK {VERSION} · ISLAND", "1;36"))
     print(_c("single-node autonomy · loopback only · remote Fabric not required", "2"))
@@ -2047,7 +2047,7 @@ def doctor_island():
     for name,ok,detail in rows:
         print(f"  {'✓' if ok else '·'} {name:<12} {detail}")
     print("\nCAPABILITY LADDER")
-    print("  deterministic rules → local decision worker → local LLM")
+    print("  JEV-0 deterministic trees → JEV-1 local judgment → local LLM")
     print("  remote Fabric adds capability when reachable; it is not required for LOOK.")
     if not models:
         print("\n  Local AI is unavailable right now; deterministic LOOK still works.")
@@ -6771,7 +6771,12 @@ def _lo_media_direct_answer(tool_content,ok):
 
 
 def _lo_requires_weather(prompt):
-    """Current/forecast weather is a live edge, never a model-knowledge answer."""
+    """Current/forecast weather is a live edge, never image-prompt vocabulary."""
+    try:
+        if _jev_module().image_imperative(prompt):
+            return False
+    except Exception:
+        pass
     text=" ".join(str(prompt or "").casefold().split())
     return bool(re.search(
         r"\b(weather|forecast|temperature|temp|rain(?:ing)?|snow(?:ing)?|wind(?:y)?|humidity|precipitation)\b",
@@ -7658,6 +7663,13 @@ def _jev_command_intent(prompt,last_action=None):
 def _lo_explicit_command_action(prompt,last_action=None):
     """Compatibility wrapper for the host-owned JEV command tree."""
     return _jev_command_intent(prompt,last_action)
+
+
+def _jev_image_intent(prompt):
+    decision=_jev_module().image_imperative(prompt)
+    if not decision:
+        return None
+    return {"tool":"generate_image","args":{"prompt":str(decision["prompt"])},"jev":decision}
 
 
 def _power_command_risk(command):
@@ -9589,7 +9601,7 @@ def _direct_searxng_search(query, limit=8):
     params=urllib.parse.urlencode({"q":query,"format":"json"})
     request=urllib.request.Request(base+"/search?"+params,headers={
         "Accept":"application/json",
-        "User-Agent":"Future-Crash-Fabric/7.0.5",
+        "User-Agent":"Future-Crash-Fabric/7.1.0",
     })
     with urllib.request.urlopen(request,timeout=12) as response:
         data=json.load(response)
@@ -10876,6 +10888,25 @@ def ollama_chat(force_search=False, initial_prompt=None, allow_start=True, host_
 
         # Fast host actions are real turns but intentionally skip deliberative cognition.
         turn_id += 1
+
+        # Top-level JEV ownership: an explicit image-generation request owns its
+        # descriptive payload. Topic words such as rain/snow never reach weather.
+        image_action=_jev_image_intent(prompt)
+        if image_action:
+            args=dict(image_action["args"])
+            print(f"{_lo_label('image','35')}  {args.get('prompt','')}")
+            with _activity("generating"):
+                image_result,image_ok,_elapsed=_tool_transaction(
+                    "generate_image",args,lambda: _run_capability_tool("generate_image",args,workspace,profile))
+            _lo_receipt("result",str(image_result).splitlines()[0],ok=image_ok,color="33")
+            reply=("Generated the image." if image_ok else str(image_result))
+            print("\n"+_lo_label("lo","35")+"\n"+_ollama_markup(reply)+"\n")
+            _save_recent_exchange(prompt,reply)
+            if events:
+                events.emit("response",text=reply)
+                events.emit("request_done",status=("ok" if image_ok else "failed"),rounds=0,tool_calls=1,prompt_tokens=0,output_tokens=0,load_ms=0)
+            if one_shot: return 0
+            continue
 
         # Referential JEV actions operate on typed objects created by prior host actions.
         ref_action=_jev_referential_intent(prompt,last_action)

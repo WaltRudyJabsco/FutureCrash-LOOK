@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Future Crash + LOOK Unified Node 7.0.5.
+"""Future Crash + LOOK Unified Node 7.1.0.
 
 A small distributed supervisor for trusted personal machines. Immediate events stay
 asynchronous; a one-second fabric pulse reconciles presence, leases and stale work.
@@ -66,7 +66,7 @@ try:
 except ImportError:
     import rendezvous
 
-VERSION = "7.0.5"
+VERSION = "7.1.0"
 RELEASE_NAME = "COGNITIVE FABRIC"
 DEFAULT_HOST = "127.0.0.1"
 DEFAULT_PORT = 7332
@@ -490,6 +490,10 @@ def capabilities():
         "decision.shadow": True,
         "decision.choice": probe("127.0.0.1", 8791),
         "decision.openjev": probe("127.0.0.1", 8791),
+        # JEV is a cognition capability, not a machine role. JEV-0 is universal
+        # deterministic code; JEV-1 is the optional local learned worker.
+        "cognition.jev0": True,
+        "cognition.jev1": probe("127.0.0.1", 8791),
         # 6.6 shared cognition vocabulary. Surfaces consume this same registry
         # rather than inventing their own tool/intention maps.
         "cognition.route": True,
@@ -2212,7 +2216,7 @@ def _local_web_search(query, limit=8):
     base=os.environ.get("FCL_SEARXNG_URL","http://127.0.0.1:8888").rstrip("/")
     request=urllib.request.Request(base+"/search?"+params,headers={
         "Accept":"application/json",
-        "User-Agent":"Future-Crash-Fabric/7.0.5",
+        "User-Agent":"Future-Crash-Fabric/7.1.0",
     })
     try:
         with urllib.request.urlopen(request,timeout=8) as response:
@@ -2946,7 +2950,7 @@ def _openjev_shadow(state, question, candidates, *, profile="workspace", consequ
 
 
 class API(BaseHTTPRequestHandler):
-    server_version = "FCLNode/7.0.5"
+    server_version = "FCLNode/7.1.0"
 
     def setup(self):
         self._metric_request_id = None

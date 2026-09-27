@@ -12,6 +12,24 @@ from typing import Callable, Mapping, Any
 
 COMMAND_VERBS={"run","launch","execute","start"}
 
+
+_DISCOURSE_PREFIX=re.compile(r"^(?:(?:and|then|now|okay|ok|so)\s+)+",re.I)
+_SELF_PREFIX=re.compile(r"^(?:lo|look)\s*[,>:;-]?\s+",re.I)
+
+def normalize_utterance(text: str) -> str:
+    """Remove harmless conversational wrappers before deterministic judgment.
+
+    This never rewrites payload content after an intent has been recognized; it
+    only peels surface glue such as ``and`` or a self-address such as ``lo``.
+    """
+    out=" ".join(str(text or "").strip().split())
+    previous=None
+    while out and out!=previous:
+        previous=out
+        out=_DISCOURSE_PREFIX.sub("",out).strip()
+        out=_SELF_PREFIX.sub("",out).strip()
+    return out
+
 # Suffixes are semantic host modifiers, never argv.  Order is intentionally
 # irrelevant: the parser peels them repeatedly until no known modifier remains.
 _COMMAND_SUFFIXES=(
@@ -41,7 +59,7 @@ def command_imperative(
     filesystem/PATH policy. `prior` may preserve presentation mode for AGAIN,
     but never carries authority; the caller must re-check current policy.
     """
-    normalized=" ".join(str(text or "").strip().split())
+    normalized=normalize_utterance(text)
     match=re.match(r"^(?:please\s+)?(run|launch|execute|start)\s+(.+?)\s*[.!]?\s*$",normalized,re.I)
     if not match:
         return None
@@ -101,36 +119,97 @@ def command_imperative(
 
 _CLOSE_VERBS={"close","dismiss","shut"}
 
+def _referent_names(ref: Mapping[str,Any]) -> list[str]:
+    names=[]
+    command=str(ref.get("command") or "").strip()
+    if command:
+        try:
+            words=shlex.split(command)
+        except ValueError:
+            words=command.split()
+        if words:
+            head=words[0].rsplit("/",1)[-1]
+            names.extend([command,head])
+    for key in ("name","label","title"):
+        if ref.get(key): names.append(str(ref[key]))
+    names.extend(str(x) for x in (ref.get("aliases") or []) if str(x).strip())
+    out=[]
+    for name in names:
+        norm=" ".join(name.casefold().split()).strip()
+        if norm and norm not in out: out.append(norm)
+    return out
+
+def _referent_match(query: str, ref: Mapping[str,Any]) -> float:
+    q=" ".join(str(query or "").casefold().split()).strip(" .!?")
+    q=re.sub(r"\b(?:the\s+)?(?:window|terminal(?:\s+window)?)\b$","",q).strip()
+    if not q: return 0.0
+    best=0.0
+    for name in _referent_names(ref):
+        if q==name: best=max(best,1.0)
+        elif len(q)>=3 and name.startswith(q): best=max(best,.97)
+        elif len(q)>=4 and q in name: best=max(best,.88)
+    return best
+
 def referential_action(text: str, referents):
     """Resolve a narrow action over a recent typed referent or return None.
 
-    The tree intentionally understands only deictic continuity such as
-    "close that window" / "close it".  It never guesses when zero or multiple
-    compatible referents exist.
+    Deictic forms resolve against compatible recent objects. Named/prefix forms
+    (``close ascii``) are allowed only when one object is the clear deterministic
+    match. Ambiguity falls through to cognition.
     """
-    normalized=" ".join(str(text or "").strip().split())
+    normalized=normalize_utterance(text)
     m=re.match(r"^(?:please\s+)?(?:(?:can|could|would|will)\s+you\s+)?(close|dismiss|shut)\s+(?:down\s+)?(.+?)\s*[.!?]?\s*$",normalized,re.I)
     if not m:
         return None
     verb=m.group(1).casefold(); obj=m.group(2).casefold().strip()
-    hint=""
-    if re.search(r"\b(window|terminal(?:\s+window)?)\b",obj): hint="terminal_window"
+    hint="terminal_window" if re.search(r"\b(window|terminal(?:\s+window)?)\b",obj) else ""
     deictic=bool(re.fullmatch(r"(?:it|that|this|that one|this one|the window|that window|this window|the terminal|that terminal|this terminal|that terminal window|this terminal window)",obj))
-    if not deictic and not hint:
-        return None
-    candidates=[]
+    compatible=[]
     for ref in list(referents or []):
         if not isinstance(ref,Mapping): continue
         kind=str(ref.get("kind") or "")
         if hint and kind!=hint: continue
         if kind not in {"terminal_window"}: continue
-        candidates.append(dict(ref))
-    # Preserve caller recency order while deduplicating durable/ephemeral copies.
+        compatible.append(dict(ref))
     unique=[]; seen=set()
-    for ref in candidates:
+    for ref in compatible:
         key=str(ref.get("id") or ref.get("os_window_id") or ref.get("pid") or ref)
         if key in seen: continue
         seen.add(key); unique.append(ref)
-    if len(unique)!=1:
+    if deictic:
+        if len(unique)!=1: return None
+        selected=unique[0]
+        steps=[f"verb:{verb}",f"referent:{selected.get('kind','object')}","resolve:deictic"]
+    else:
+        scored=sorted(((_referent_match(obj,ref),idx,ref) for idx,ref in enumerate(unique)),key=lambda x:(-x[0],x[1]))
+        if not scored or scored[0][0] < .88: return None
+        second=scored[1][0] if len(scored)>1 else 0.0
+        if second>=scored[0][0]-.08: return None
+        selected=scored[0][2]
+        steps=[f"verb:{verb}",f"referent:{selected.get('kind','object')}",f"resolve:name:{scored[0][0]:.2f}"]
+    return {"kind":"referential_action","verb":verb,"action":"close","object":selected,"confidence":1.0,"steps":steps}
+
+
+def image_imperative(text: str):
+    """Resolve explicit image-generation language before topic words can hijack it.
+
+    The recognized image noun establishes ownership of the remaining description.
+    Words such as rain/snow/sun inside that payload are image content, not weather
+    requests. Signal/Oracle-specific requests intentionally fall through.
+    """
+    normalized=normalize_utterance(text)
+    low=normalized.casefold()
+    if re.search(r"\b(?:signal|oracle)\b",low) and re.search(r"\b(?:image|picture|art|scene)\b",low):
         return None
-    return {"kind":"referential_action","verb":verb,"action":"close","object":unique[0],"confidence":1.0,"steps":[f"verb:{verb}",f"referent:{unique[0].get('kind','object')}"]}
+    patterns=(
+        r"^(?:please\s+)?(?:make|generate|create|render|draw)\s+(?:me\s+)?(?:an?\s+)?(?:image|picture|illustration|artwork|photo)\s+(?:of|showing|depicting)\s+(.+?)\s*[.!?]?\s*$",
+        r"^(?:please\s+)?(?:make|generate|create|render|draw)\s+(?:me\s+)?(.+?)\s+(?:image|picture|illustration|artwork|photo)\s*[.!?]?\s*$",
+    )
+    for pattern in patterns:
+        m=re.match(pattern,normalized,re.I)
+        if not m: continue
+        prompt=m.group(1).strip(" .!?")
+        if not prompt: return None
+        return {"kind":"image_generation","tool":"generate_image","prompt":prompt,"confidence":1.0,
+                "steps":["verb:generate","object:image","payload:owned"]}
+    return None

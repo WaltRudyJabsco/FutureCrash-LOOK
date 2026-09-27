@@ -1,3 +1,7 @@
+# Future Crash + LOOK 7.1.0 — JEV FABRIC
+
+7.1.0 makes JEV a node-level cognition layer. JEV-0 deterministic trees ship on every node and own obvious semantic structure before general cognition; JEV-1 uses the existing OpenJev worker as an optional local learned judgment tier, auto-provisioned on capable nodes and managed on Linux/macOS. Explicit image generation now owns its descriptive payload so words such as `rain` cannot hijack the turn into weather. Typed-referent JEV normalizes conversational glue/self-address and resolves bounded unique aliases such as `and close it`, `lo close that window`, and `close ascii`. Ambiguous residue still escalates rather than being guessed.
+
 # Future Crash + LOOK 7.0.5 — TYPED REFERENTS
 
 7.0.5 makes host-created UI objects first-class referents. A command launched in a new terminal now records a typed `terminal_window` handle in authoritative world-state receipts. JEV can resolve follow-ups such as `can you close that window`, `close it`, and `close that` against a single compatible recent object and dispatch a dedicated `close_object` primitive before model cognition. Linux terminal sessions record the PID of the process running inside the spawned terminal; macOS records the Terminal window ID. Ambiguous referents fall through rather than being guessed.

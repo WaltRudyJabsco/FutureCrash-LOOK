@@ -1,3 +1,7 @@
+# JEV Fabric (7.1.0)
+
+LO now uses a two-tier local judgment front end: JEV-0 deterministic trees handle obvious structure at effectively zero model cost; optional JEV-1 (OpenJev 2B) handles bounded ambiguity locally before general cognition. Every installed node has JEV-0. Capable nodes can auto-provision JEV-1, preserving useful local cognition when disconnected from the wider Fabric.
+
 # LOOK Shell
 
 **Keep Unix. Lose some syntax.**

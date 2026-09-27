@@ -183,8 +183,30 @@ def _score_alias(text: str, alias: str) -> float:
     return max(seq*0.82, overlap*0.90)
 
 
+def _owned_family(text: str) -> str | None:
+    """Return a top-level capability frame that owns its payload.
+
+    Ownership prevents payload vocabulary from activating unrelated sibling
+    families. For example, rain inside an explicit image prompt is image content,
+    not a weather request.
+    """
+    try:
+        try:
+            from . import jev as _jev
+        except Exception:
+            import jev as _jev
+        if _jev.image_imperative(text):
+            return "image"
+    except Exception:
+        pass
+    return None
+
+
 def _rule_scores(text: str) -> dict[str, float]:
     low=_compact(text)
+    owned=_owned_family(text)
+    if owned:
+        return {owned:.999}
     scores: dict[str,float] = {}
     def bump(family: str, value: float):
         scores[family]=max(scores.get(family,0.0),value)
