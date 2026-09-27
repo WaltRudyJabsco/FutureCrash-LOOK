@@ -1,3 +1,9 @@
+## 6.9.4 — VIEW-RELATIVE MOVE DESTINATIONS
+
+- Fix interactive `C Copy To` / `M Move To` resolving relative destination names against the shell process working directory instead of the directory LOOK is currently displaying.
+- A typed relative destination such as `archive` now means `<current LOOK directory>/archive` on both macOS and Linux. Absolute paths and `~` expansion remain unchanged.
+- This removes the launch-directory-dependent failure where multi-file moves could work on one machine but try to create/use the destination under `$HOME` on another.
+
 ## 6.9.3 — FAST NAVIGATION
 
 - Shift-Up / Shift-Down mirror Page Up / Page Down across LOOK browse, filter, and selection states.

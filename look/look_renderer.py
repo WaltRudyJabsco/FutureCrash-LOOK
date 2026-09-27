@@ -826,6 +826,16 @@ def action_footer(parts:list[str],width:int)->list[str]:
     return lines
 
 
+def resolve_action_destination(dest:str,current_dir:Path|None)->Path:
+    """Resolve a filer action destination in LOOK's visible-directory context."""
+    raw=Path(os.path.expanduser(dest))
+    if raw.is_absolute():
+        return raw.resolve()
+    if current_dir is not None:
+        return (current_dir.resolve()/raw).resolve()
+    return raw.resolve()
+
+
 def pager(rows:list[str],height:int,width:int,rebuild=None,candidates=None,on_browse=None,on_back=None,on_parent=None,on_go=None,on_activate=None,force_interactive=False,initial_select:Path|None=None,initial_query:str='',marked_set:set[Path]|None=None,current_dir:Path|None=None,clipboard_state:dict|None=None)->None:
     # Interactive state machine: browse -> filter -> select.
     usable=max(3,height-5)
@@ -946,10 +956,16 @@ def pager(rows:list[str],height:int,width:int,rebuild=None,candidates=None,on_br
             dest=dest.strip()
             if cancelled or not dest:
                 notice='cancelled'; return
+            # A relative action destination belongs to the directory LOOK is
+            # displaying, not to the shell process CWD.  The two often match on
+            # macOS launch paths but need not (notably when LOOK is started from
+            # $HOME and then browses elsewhere).
+            expanded=resolve_action_destination(dest,current_dir)
+            dest=str(expanded)
+
             # A multi-item destination must be a directory. Resolve this before
             # entering the batch subprocess so a missing path can never hide a
             # creation prompt behind the activity spinner.
-            expanded=Path(os.path.expanduser(dest)).resolve()
             if len(paths)>1 and not expanded.exists():
                 sys.stdout.write(SHOW+RESET+'\n'); sys.stdout.flush()
                 try:
