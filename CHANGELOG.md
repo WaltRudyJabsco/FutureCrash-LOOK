@@ -1,3 +1,11 @@
+## 6.9.3 — LOOK NAVIGATION
+
+- Make lowercase `g` in the ordinary LOOK viewer toggle between the top and bottom of the current view; uppercase `G` remains the semantic Go action.
+- Keep lowercase letters as filter text while filtering; selection mode now reserves Go for uppercase `G` only.
+- Add an optional Meta-Shift navigation layer without adding a mode: `H/J/K/L` normalize to the existing left/down/up/right actions.
+- Add accelerated Meta-Shift arrows: Up/Down page, Left jumps to top, Right jumps to bottom.
+- Linux Alt-as-Meta works directly (`ESC` + uppercase key); macOS Option works when the terminal is configured to send Meta/Esc rather than compose Unicode characters.
+
 ## 6.9.2 — RENDEZVOUS VERSION CONSISTENCY
 
 - Fix rendezvous runtime and HTTP server banner still reporting 6.9.0 inside the 6.9.1 bundle.

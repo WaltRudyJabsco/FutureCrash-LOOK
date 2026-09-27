@@ -1,6 +1,11 @@
 # Future Crash + LOOK
 
 
+### 6.9.3 · LOOK NAVIGATION
+
+LOOK keeps its mnemonic command language while adding a small optional Meta-Shift ergonomic layer. In the ordinary viewer, `g` toggles between list ends and `G` remains Go. Meta-Shift-H/J/K/L are aliases for the existing arrows; Meta-Shift-Up/Down page and Meta-Shift-Left/Right jump to the ends. Filter text remains ordinary lowercase input.
+
+
 ### 6.9.2 · LOOK FIT & FINISH
 
 6.9.2 restores the core interactive LOOK invariant: one candidate is one visible row. It also layers Copy/Cut/Paste staging over LOOK's existing marked-selection, native clipboard, `_batch` transaction, rollback, and `lk undo` machinery.
