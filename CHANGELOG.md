@@ -1,17 +1,16 @@
-## 6.9.3 — LOOK NAVIGATION
+## 6.9.3 — FAST NAVIGATION
 
-- Make lowercase `g` in the ordinary LOOK viewer toggle between the top and bottom of the current view; uppercase `G` remains the semantic Go action.
-- Keep lowercase letters as filter text while filtering; selection mode now reserves Go for uppercase `G` only.
-- Add an optional Meta-Shift navigation layer without adding a mode: `H/J/K/L` normalize to the existing left/down/up/right actions.
-- Add accelerated Meta-Shift arrows: Up/Down page, Left jumps to top, Right jumps to bottom.
-- Linux Alt-as-Meta works directly (`ESC` + uppercase key); macOS Option works when the terminal is configured to send Meta/Esc rather than compose Unicode characters.
+- Shift-Up / Shift-Down mirror Page Up / Page Down across LOOK browse, filter, and selection states.
+- Shift-Left / Shift-Right jump to the beginning / end of the active list.
+- Lowercase `g` in the ordinary LOOK viewer toggles between the two ends; uppercase `G` remains Go.
+- Uses the same standard CSI modifier sequences verified on macOS and Linux terminals.
 
-## 6.9.2 — RENDEZVOUS VERSION CONSISTENCY
+## 6.9.3 — RENDEZVOUS VERSION CONSISTENCY
 
 - Fix rendezvous runtime and HTTP server banner still reporting 6.9.0 inside the 6.9.1 bundle.
 - Add regression coverage requiring all runtime release surfaces to match root VERSION.
 
-# 6.9.2 · LOOK FIT & FINISH
+# 6.9.3 · LOOK FIT & FINISH
 
 - Interactive LOOK/filter/select views now enforce one candidate per terminal row; static noninteractive listings may still use compact columns.
 - Remove selectable-view section/header rows so visual row, selection index, and preview target remain one-to-one even with hundreds of results.

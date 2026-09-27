@@ -1,14 +1,9 @@
 # Future Crash + LOOK
 
 
-### 6.9.3 · LOOK NAVIGATION
+### 6.9.3 · LOOK FIT & FINISH
 
-LOOK keeps its mnemonic command language while adding a small optional Meta-Shift ergonomic layer. In the ordinary viewer, `g` toggles between list ends and `G` remains Go. Meta-Shift-H/J/K/L are aliases for the existing arrows; Meta-Shift-Up/Down page and Meta-Shift-Left/Right jump to the ends. Filter text remains ordinary lowercase input.
-
-
-### 6.9.2 · LOOK FIT & FINISH
-
-6.9.2 restores the core interactive LOOK invariant: one candidate is one visible row. It also layers Copy/Cut/Paste staging over LOOK's existing marked-selection, native clipboard, `_batch` transaction, rollback, and `lk undo` machinery.
+6.9.3 restores the core interactive LOOK invariant: one candidate is one visible row. It also layers Copy/Cut/Paste staging over LOOK's existing marked-selection, native clipboard, `_batch` transaction, rollback, and `lk undo` machinery.
 ## 6.9.0 · COGNITIVE FABRIC
 
 6.9.0 closes the loop between model evidence, deterministic primitives, receipts, memory and persistent goals. Speech and explicit remembering require real host receipts; model tests now include LOOK-specific Fabric Fit; named model sets preserve good configurations as champion/challenger experiments; and shared cognition carries explicit evidence authority plus wake/close semantics for durable goals.

@@ -325,24 +325,6 @@ def build_view(target:Path, mode:str, hidden:bool, width:int, tree_depth:int, qu
     return rows
 
 
-# Meta-Shift is LOOK's optional ergonomic navigation layer. Terminals usually
-# encode Alt/Option-as-Meta by prefixing ESC; xterm-style modified arrows use
-# CSI 1;4{A-D}. Normalize both forms to LOOK's existing navigation language so
-# there is no second command system or mode to maintain.
-META_SHIFT_KEY_ALIASES={
-    '\x1bH':'\x1b[D',  # Meta-Shift-H -> left
-    '\x1bJ':'\x1b[B',  # Meta-Shift-J -> down
-    '\x1bK':'\x1b[A',  # Meta-Shift-K -> up
-    '\x1bL':'\x1b[C',  # Meta-Shift-L -> right
-    '\x1b[1;4A':'pageup',
-    '\x1b[1;4B':'pagedown',
-    '\x1b[1;4D':'top',
-    '\x1b[1;4C':'bottom',
-}
-
-def normalize_navigation_key(key:str)->str:
-    return META_SHIFT_KEY_ALIASES.get(key,key)
-
 def read_key(timeout:float|None=None)->str:
     fd=sys.stdin.fileno(); old=termios.tcgetattr(fd)
     try:
@@ -1066,7 +1048,7 @@ def pager(rows:list[str],height:int,width:int,rebuild=None,candidates=None,on_br
                 back_hint='Esc back' if on_back else 'Esc exit'
                 status=f'  {FAINT}{last}/{len(current)}{RESET}'
                 action_parts=['Enter/→ filter','Space/PgDn next','b/PgUp back',
-                              'g ends','G go','←/< parent',back_hint,'q quit']
+                              'g ends','G go','⇧↑/↓ page','⇧←/→ ends','←/< parent',back_hint,'q quit']
             if notice:
                 status=f'{status}  {YELLOW}{notice}{RESET}'
                 notice=''
@@ -1076,7 +1058,6 @@ def pager(rows:list[str],height:int,width:int,rebuild=None,candidates=None,on_br
                 key,pending=pending,''
             else:
                 key=read_key()
-            key=normalize_navigation_key(key)
 
             if filtering:
                 if key in {'q','Q','\x03'}: break
@@ -1098,19 +1079,18 @@ def pager(rows:list[str],height:int,width:int,rebuild=None,candidates=None,on_br
                 elif key in {'\x1b[A','K'} and matches:
                     selected=max(0,selected-1)
                     top=max(0,top-1)
-                elif key in {'\x1b[6~','pagedown'} and matches:
+                elif key in {'\x1b[6~','\x1b[1;2B'} and matches:
                     selected=min(len(matches)-1,selected+usable)
                     top=min(max(0,len(current)-usable),top+usable)
-                elif key in {'\x1b[5~','pageup'} and matches:
+                elif key in {'\x1b[5~','\x1b[1;2A'} and matches:
                     selected=max(0,selected-usable)
                     top=max(0,top-usable)
+                elif key=='\x1b[1;2D' and matches:
+                    selected=0; top=0
+                elif key=='\x1b[1;2C' and matches:
+                    selected=len(matches)-1; top=max(0,len(current)-usable)
                 elif key=='\x1b':
                     query=''; filtering=False; selecting=False; refresh_filter()
-                elif key=='top' and matches:
-                    selected=0; top=0
-                elif key=='bottom' and matches:
-                    selected=len(matches)-1
-                    top=max(0,len(current)-usable)
                 elif key=='\x1b[D' and on_parent:
                     on_parent(); return
                 elif key.startswith('\x1b[') and key!='\x1b[Z':
@@ -1197,10 +1177,10 @@ def pager(rows:list[str],height:int,width:int,rebuild=None,candidates=None,on_br
                 if key=='\x1b': selecting=False; filtering=True; continue
                 if key in {'j','J','\x1b[B'} and matches: selected=(selected+1)%len(matches); continue
                 if key in {'k','K','\x1b[A'} and matches: selected=(selected-1)%len(matches); continue
-                if key in {'\x1b[6~','pagedown'} and matches: selected=min(len(matches)-1,selected+usable); continue
-                if key in {'\x1b[5~','pageup'} and matches: selected=max(0,selected-usable); continue
-                if key=='top' and matches: selected=0; continue
-                if key=='bottom' and matches: selected=len(matches)-1; continue
+                if key in {'\x1b[6~','\x1b[1;2B'} and matches: selected=min(len(matches)-1,selected+usable); continue
+                if key in {'\x1b[5~','\x1b[1;2A'} and matches: selected=max(0,selected-usable); continue
+                if key=='\x1b[1;2D' and matches: selected=0; continue
+                if key=='\x1b[1;2C' and matches: selected=len(matches)-1; continue
                 if key=='\x1b[D' and on_parent:
                     on_parent(); return
                 picked=selected_path()
@@ -1235,7 +1215,7 @@ def pager(rows:list[str],height:int,width:int,rebuild=None,candidates=None,on_br
                     value='\n'.join(str(x) for x in paths)
                     notice='copied paths' if value and copy_text(value) else 'clipboard unavailable'
                     continue
-                if key=='G' and on_go:
+                if key in {'g','G'} and on_go:
                     on_go(picked if picked.is_dir() else picked.parent); return
                 if key=='L':
                     run_lo_context()
@@ -1269,15 +1249,15 @@ def pager(rows:list[str],height:int,width:int,rebuild=None,candidates=None,on_br
                     return
                 else:
                     break
-            elif key in {' ','\x1b[6~','pagedown'}:
+            elif key in {' ','\x1b[6~','\x1b[1;2B'}:
                 if last>=len(current): break
                 top=min(max(0,len(current)-usable),top+usable)
-            elif key in {'b','\x1b[5~','pageup'}: top=max(0,top-usable)
+            elif key in {'b','\x1b[5~','\x1b[1;2A'}: top=max(0,top-usable)
             elif key in {'j','\x1b[B'}: top=min(max(0,len(current)-usable),top+1)
             elif key in {'k','\x1b[A'}: top=max(0,top-1)
+            elif key=='\x1b[1;2D': top=0
+            elif key=='\x1b[1;2C': top=max(0,len(current)-usable)
             elif key=='g': top=max(0,len(current)-usable) if top==0 else 0
-            elif key=='top': top=0
-            elif key=='bottom': top=max(0,len(current)-usable)
             elif key=='G' and on_go and current_dir is not None:
                 on_go(current_dir); return
             elif key in {'<','\x1b[D'} and on_parent:
