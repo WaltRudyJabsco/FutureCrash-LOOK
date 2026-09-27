@@ -1,8 +1,18 @@
+## 6.9.0 — COGNITIVE FABRIC
+
+- Enforce speech effects through `audio_speak` receipts; repair narrow printed pseudo-calls once.
+- Resolve verified anaphoric home/default-location memory synchronously with host receipts.
+- Add `lk ollama set` named sets, champion/challenger labels and comparisons.
+- Add model Fabric Fit benchmark evidence and feed it to curator role selection.
+- Add evidence authority and explicit persistent-goal wake/close semantics.
+
 ## 6.8.1 — MODEL GROUND TRUTH
 
-- Role-based model defaults replace fixed qwen3:8b semantic defaults in Future Crash / Signal.
-- Fabric route explanation and evidence freshness make placement decisions inspectable.
-- Dash now surfaces curator target state.
+- Route explainer is exposed through `lk fabric route`.
+
+## 6.8.0 — MODEL GROUND TRUTH
+
+- Curated role defaults, route evidence freshness and Dash curator telemetry.
 
 ## 6.7.6 — CANONICAL EDGE
 - Canonicalize full US state names before WEATHER/PLACE lookup (`portland oregon` → `portland, Oregon`).

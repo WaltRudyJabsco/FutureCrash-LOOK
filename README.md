@@ -1,9 +1,22 @@
 # Future Crash + LOOK
 
-## 6.8.1 · MODEL GROUND TRUTH
+## 6.9.0 · COGNITIVE FABRIC
 
-Persistent working state now survives LO sessions: unresolved goals/slots are explicit, `lk brain` exposes them, Home Base corrections synchronously rewrite semantic memory, and learned home becomes the default for locationless weather. Recent memory keeps substantially more raw continuity while retrieval stays bounded. Models may sleep; goals stay alive.
+6.9.0 closes the loop between model evidence, deterministic primitives, receipts, memory and persistent goals. Speech and explicit remembering require real host receipts; model tests now include LOOK-specific Fabric Fit; named model sets preserve good configurations as champion/challenger experiments; and shared cognition carries explicit evidence authority plus wake/close semantics for durable goals.
 
+Useful model-set commands:
+
+```text
+lk ollama set list
+lk ollama set save NAME
+lk ollama set show NAME
+lk ollama set champion NAME
+lk ollama set challenger NAME
+lk ollama set compare A B
+lk ollama set apply NAME [reflex|balanced|deep]
+```
+
+Tailcat/Tailscale transport is intentionally unchanged in this release.
 
 ## 6.7.1 · HOME BASE
 

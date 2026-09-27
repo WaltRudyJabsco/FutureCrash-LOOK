@@ -148,6 +148,10 @@ lk ollama test --resident-set
 lk ollama curate           # shows node-local eligible + disabled set
 lk ollama curate --apply
 lk ollama curate auto on
+lk ollama set save NAME       # snapshot current curated role targets
+lk ollama set list            # saved/champion/challenger sets
+lk ollama set apply NAME      # impose saved balanced set
+lk ollama set compare A B     # compare saved benchmark evidence
 lk ollama warm MODEL [MODEL ...]
 ```
 

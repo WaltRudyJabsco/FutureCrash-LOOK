@@ -26,7 +26,7 @@ try:
 except Exception:
     readline = None
 
-VERSION="4.49.1"
+VERSION="4.50.0"
 
 LOOK_WORDMARK = r"""       ██╗      ██╗  ██╗
        ██║      ██║ ██╔╝
@@ -70,6 +70,7 @@ MEMORY_QUEUE=STATE_DIR/"memory_queue"
 MEMORY_WORKER_LOCK=STATE_DIR/"memory_worker.lock"
 LO_RECENT_FILE=STATE_DIR/"lo_recent.json"
 BRAIN_STATE_FILE=STATE_DIR/"brain_state.json"
+MODEL_SETS_FILE=STATE_DIR/"model_sets.json"
 LO_JOBS_DIR=STATE_DIR/"jobs"
 LO_EVENTS_DIR=STATE_DIR/"events"
 AI_SOCKET=STATE_DIR/"ai.sock"
@@ -1431,6 +1432,7 @@ AI / OLLAMA
                        converge residency on the balanced plan
   lk ollama curate auto on|off
                        enable/disable dynamic resident-set management
+  lk ollama set ...    save/apply/compare named model sets
   lk ollama warm MODEL [MODEL ...]
                        warm explicit models at 4096 context
   lk ollama endpoint [--json]
@@ -6799,10 +6801,10 @@ def _save_brain_state(state):
 
 def _brain_set_pending(kind, *, goal="", slot="", resume="", request=""):
     state=_load_brain_state()
-    state["pending"]={"kind":kind,"goal":goal,"slot":slot,"resume":resume,"request":request[:500],"since":time.time()}
+    state["pending"]={"kind":kind,"goal":goal,"slot":slot,"resume":resume,"request":request[:500],"since":time.time(),"wake_on":"operator_input","close_when":"slot_resolved_or_cancelled"}
     if goal:
         rows=[g for g in state.get("active_goals",[]) if g.get("goal")!=goal]
-        rows.append({"goal":goal,"status":"waiting","slot":slot,"request":request[:500],"updated_at":time.time()})
+        rows.append({"goal":goal,"status":"waiting","slot":slot,"request":request[:500],"wake_on":"operator_input","close_when":"completed_failed_or_cancelled","updated_at":time.time()})
         state["active_goals"]=rows
     _save_brain_state(state)
     return state["pending"]
@@ -6827,7 +6829,7 @@ def _brain_resume_goal(goal, *, request=""):
         else:
             rows.append(row)
     if goal and not found:
-        rows.append({"goal":goal,"status":"running","slot":"","request":request[:500],"updated_at":time.time()})
+        rows.append({"goal":goal,"status":"running","slot":"","request":request[:500],"wake_on":"receipt_or_operator_input","close_when":"completed_failed_or_cancelled","updated_at":time.time()})
     state["active_goals"]=rows
     _save_brain_state(state)
 
@@ -6867,7 +6869,7 @@ def _brain_command(args):
     else: print("  pending      none")
     active=state.get("active_goals",[])
     print(f"  active       {len(active)} goal{'s' if len(active)!=1 else ''}")
-    for row in active[-6:]: print(f"               {row.get('goal','?')} · {row.get('status','active')} · {row.get('slot','')}")
+    for row in active[-6:]: print(f"               {row.get('goal','?')} · {row.get('status','active')} · {row.get('slot','')} · wake {row.get('wake_on','event')}")
     recent=state.get("recent_goals",[])
     print(f"  recent       {len(recent)} completed/cleared")
     print("  rule         models may sleep; goals stay alive")
@@ -6931,6 +6933,38 @@ def _lo_store_home_location(memory, location):
         rows.append(atom)
     memory["atoms"]=rows
     return _merge_machine_atoms(memory,[{"k":"preference","s":"home","r":"weather_location","v":location,"c":100,"u":1}])
+
+
+def _lo_store_default_location(memory, location):
+    """Persist the operator's default place for ambiguous location-dependent work."""
+    location=_normalize_weather_location(location)
+    if not location: return memory
+    rows=[]
+    for atom in (memory or {}).get("atoms",[]) or []:
+        if not isinstance(atom,dict): continue
+        if str(atom.get("s") or "").casefold()=="location" and str(atom.get("r") or "").casefold()=="default":
+            continue
+        rows.append(atom)
+    memory["atoms"]=rows
+    return _merge_machine_atoms(memory,[{"k":"preference","s":"location","r":"default","v":location,"c":100,"u":1}])
+
+def _lo_location_memory_directive(prompt, memory):
+    """Resolve explicit anaphoric location-memory directives against verified home.
+
+    This deliberately handles the common follow-up 'remember that I live there'
+    only when LOOK already has an authoritative home location; the model never
+    gets to invent the referent.
+    """
+    text=" ".join(str(prompt or "").strip().split())
+    low=text.casefold()
+    if "remember" not in low and "make a point" not in low:
+        return None
+    if not re.search(r"\b(?:live|reside)\s+there\b|\bdefault\s+to\s+there\b",low):
+        return None
+    home=_lo_learned_home_location(memory)
+    if not home: return None
+    wants_default=bool(re.search(r"\bdefault\b.*\b(?:location|there|local)\b|\bambiguous location",low))
+    return {"home":home,"default":wants_default}
 
 def _lo_weather_pending_location(prompt, memory):
     """Resolve only a plausible answer to LO's pending weather-location slot.
@@ -9231,7 +9265,7 @@ def _direct_searxng_search(query, limit=8):
     params=urllib.parse.urlencode({"q":query,"format":"json"})
     request=urllib.request.Request(base+"/search?"+params,headers={
         "Accept":"application/json",
-        "User-Agent":"Future-Crash-Fabric/6.8.1",
+        "User-Agent":"Future-Crash-Fabric/6.9.0",
     })
     with urllib.request.urlopen(request,timeout=12) as response:
         data=json.load(response)
@@ -9700,6 +9734,28 @@ def _audit_receipt(actor,action,detail="",ok=True,**fields):
             f.write(json.dumps(row,ensure_ascii=False,separators=(",",":"))+"\n")
     except OSError: pass
 
+
+_EVIDENCE_BADGES={
+    "operator":"YOU", "host":"HOST", "weather":"WX", "wikipedia":"WIKI",
+    "web":"WEB", "memory":"MEM", "model":"MODEL", "inference":"INFER",
+    "action":"ACT",
+}
+
+def _evidence_record(source, claim, *, ok=True, confidence=100, receipt="", **fields):
+    """Write compact epistemic evidence into the existing receipt journal.
+
+    Evidence is provenance, not prose.  The journal stays bounded by _audit_receipt
+    and downstream cognition can distinguish operator/host/tool/model authority.
+    """
+    source=str(source or "model").casefold()
+    badge=_EVIDENCE_BADGES.get(source,source.upper()[:8])
+    _audit_receipt("evidence","evidence",str(claim)[:500],ok=ok,source=source,badge=badge,
+                   confidence=max(0,min(100,int(confidence))),receipt=receipt,**fields)
+    return badge
+
+def _evidence_badge(source):
+    return _EVIDENCE_BADGES.get(str(source or "model").casefold(),str(source or "MODEL").upper()[:8])
+
 class _ToolResult:
     __slots__=("ok","status","message","data")
     def __init__(self,ok,status,message,data=None):
@@ -9818,6 +9874,28 @@ def _lo_receipt(kind, detail, ok=True, color="36"):
     gap=max(2,width-len(plain)-3)
     print(f"{_lo_label(kind,color)}  {detail}{' '*gap}{mark}")
 
+
+
+def _extract_audio_pseudocall(text):
+    """Recover a model-authored speech pseudo-call into a real host action.
+
+    Tool syntax printed as prose is never a receipt.  This parser is deliberately
+    narrow and exists only to repair the common audiospeak(...) failure once.
+    """
+    raw=str(text or "").strip()
+    m=re.search(r"(?:audio_?speak|audiospeak)\s*\(\s*text\s*=\s*([\"'])(.*?)\1(?:\s*,\s*(?:voice_?profile|voiceprofile)\s*=\s*([\"'])(.*?)\3)?\s*\)",raw,re.I|re.S)
+    if not m: return None
+    spoken=" ".join(m.group(2).split())
+    if not spoken or len(spoken)>1000: return None
+    return {"text":spoken,"voice_profile":m.group(4) or "default"}
+
+def _lo_requires_speech(prompt):
+    low=" ".join(str(prompt or "").casefold().split())
+    return bool(re.search(r"\b(?:speak|say|read)\b.*\b(?:aloud|out loud|something|again)\b|^(?:speak|say)\b",low))
+
+def _answer_claims_memory_write(text):
+    low=str(text or "").casefold()
+    return bool(re.search(r"\b(?:i (?:have )?(?:remembered|stored|saved|logged)|i(?:'ll| will) remember|from (?:now|this point) forward)\b",low))
 
 def _lo_speaker(name, text=None, color="36"):
     label=_lo_label(name,color)
@@ -10304,6 +10382,33 @@ def ollama_chat(force_search=False, initial_prompt=None, allow_start=True, host_
 
         pending_home_candidate=None
 
+        # Explicit anaphoric memory is resolved host-side only when the referent is
+        # already authoritative. This turns "remember I live there" into a real
+        # memory receipt rather than model-authored reassurance.
+        _mem_now=_load_memory()
+        location_directive=_lo_location_memory_directive(prompt,_mem_now)
+        if location_directive:
+            home=location_directive["home"]
+            _mem_now=_lo_store_home_location(_mem_now,home)
+            if location_directive.get("default"):
+                _mem_now=_lo_store_default_location(_mem_now,home)
+            _save_memory(_mem_now)
+            atoms=[{"k":"preference","s":"home","r":"weather_location","v":home,"c":100,"u":1}]
+            if location_directive.get("default"):
+                atoms.append({"k":"preference","s":"location","r":"default","v":home,"c":100,"u":1})
+            _mirror_machine_atoms_to_fabric(atoms)
+            _audit_receipt("operator","memory_write",f"home/default location={home}",ok=True,source="operator",confidence=100)
+            _evidence_record("operator",f"default location = {home}",confidence=100,receipt="memory_write")
+            answer=f"Remembered with a host receipt — home{' and the default ambiguous location' if location_directive.get('default') else ''} is {home}."
+            print("\n"+_lo_label("memory","32")+f"  [YOU] {home} ✓")
+            print("\n"+_lo_label("lo","35")+"\n"+_ollama_markup(answer)+"\n")
+            _save_recent_exchange(prompt,answer)
+            if events:
+                events.emit("response",text=answer); events.emit("memory_receipt",source="operator",location=home)
+                events.emit("request_done",status="ok",rounds=0,tool_calls=0,prompt_tokens=0,output_tokens=0,load_ms=0)
+            if one_shot: return 0
+            continue
+
         # Explicit operator location statements are semantic corrections, not prose
         # for a geocoder or model to reinterpret.  Persist them as a typed atom.
         home_declaration=_lo_home_location_declaration(prompt)
@@ -10312,6 +10417,9 @@ def ollama_chat(force_search=False, initial_prompt=None, allow_start=True, host_
             memory=_load_memory()
             memory=_lo_store_home_location(memory,home_declaration)
             _save_memory(memory)
+            memory_write_receipt=True
+            _audit_receipt("operator","memory_write",f"home.weather_location={home_declaration}",ok=True,source="operator",confidence=100)
+            _evidence_record("operator",f"home location = {home_declaration}",confidence=100,receipt="memory_write")
             _mirror_machine_atoms_to_fabric([{"k":"preference","s":"home","r":"weather_location","v":home_declaration,"c":100,"u":1}])
             if pending_weather_clarification or _lo_requires_weather(prompt):
                 weather_forced_location=home_declaration
@@ -10684,6 +10792,7 @@ def ollama_chat(force_search=False, initial_prompt=None, allow_start=True, host_
         # enforced by the host so prose can never masquerade as execution.
         mutation_required=(profile!="conservative" and _lo_requires_filesystem_action(prompt))
         external_action_required=(profile!="conservative" and _lo_requires_external_action(prompt))
+        speech_required=(profile!="conservative" and _lo_requires_speech(prompt))
         # Weather discourse state is derived only from user/assistant turns, never
         # from the many transient system messages LOOK adds around each request.
         weather_discourse=[m for m in messages if str(m.get("role") or "").lower() in {"user","assistant"}][-16:]
@@ -10702,6 +10811,8 @@ def ollama_chat(force_search=False, initial_prompt=None, allow_start=True, host_
         mutation_succeeded=False
         last_mutation_result=""
         mutation_repair_sent=False
+        speech_repair_sent=False
+        memory_write_receipt=False
         tool_refusal_repair_sent=False
         host_repair_final=False
 
@@ -11102,6 +11213,8 @@ def ollama_chat(force_search=False, initial_prompt=None, allow_start=True, host_
                             label,activity="image","generating"
                         elif name=="game_action":
                             label,activity="game","game"
+                        elif name=="audio_speak":
+                            label,activity="speech","speaking"
                         elif name.startswith("media_"):
                             label,activity="media","media"
                         else:
@@ -11111,7 +11224,9 @@ def ollama_chat(force_search=False, initial_prompt=None, allow_start=True, host_
                         with _activity(activity):
                             tool_content,_ok,_elapsed=_tool_transaction(
                                 name,args,lambda: _run_capability_tool(name,args,workspace,profile))
-                        if _ok: turn_successful_tools.add(name)
+                        if _ok:
+                            turn_successful_tools.add(name)
+                            _evidence_record("action",f"{name} succeeded",confidence=100,receipt=name)
                         _lo_receipt("result",str(tool_content).splitlines()[0],ok=_ok,color="33")
                     elif name=="run_command":
                         if profile not in {"power","unsafe"}:
@@ -11257,10 +11372,41 @@ def ollama_chat(force_search=False, initial_prompt=None, allow_start=True, host_
                 answer="I did not execute a filesystem mutation tool, so I have not changed any files."
                 message={"role":"assistant","content":answer,"thinking":"","tool_calls":[]}
 
+            # Speech is an effect, not prose. Recover one narrow pseudo-call or
+            # force one real tool round before allowing the turn to complete.
+            candidate_before_gate=_split_ollama_thinking(message)[1]
+            if speech_required and "audio_speak" not in turn_successful_tools:
+                pseudo=_extract_audio_pseudocall(candidate_before_gate)
+                if pseudo:
+                    with _activity("speech"):
+                        speech_content,speech_ok,_speech_elapsed=_tool_transaction(
+                            "audio_speak",pseudo,lambda: _run_capability_tool("audio_speak",pseudo,workspace,profile))
+                    _lo_receipt("speech",str(speech_content).splitlines()[0],ok=speech_ok,color="35")
+                    if speech_ok:
+                        turn_successful_tools.add("audio_speak")
+                        _evidence_record("action","speech dispatched",confidence=100,receipt="audio_speak")
+                        message={"role":"assistant","content":"Spoken.","thinking":"","tool_calls":[]}
+                    else:
+                        message={"role":"assistant","content":f"I couldn't complete the speech action. {speech_content}","thinking":"","tool_calls":[]}
+                elif not speech_repair_sent:
+                    speech_repair_sent=True
+                    messages.append({"role":"system","content":(
+                        "EXECUTION REQUIRED. The operator explicitly asked for speech, but no audio_speak receipt exists. "
+                        "Do not print audiospeak(...) or describe speaking. Call audio_speak now with the short text to be spoken."
+                    )})
+                    continue
+                else:
+                    message={"role":"assistant","content":"I did not execute the speech tool, so I can't claim anything was spoken.","thinking":"","tool_calls":[]}
+
             # LAST GATE: no host-success prose may reach rendering without a
             # successful receipt in this turn. This intentionally duplicates the
             # earlier policy guard so future control-flow edits cannot bypass it.
             candidate_final=_split_ollama_thinking(message)[1]
+            # Models cannot certify durable memory by saying they remembered. Explicit
+            # memory writes need a host receipt; background extraction is not synchronous truth.
+            if _answer_claims_memory_write(candidate_final) and not memory_write_receipt:
+                candidate_final="I haven't verified a durable memory write for that yet, so I won't claim it was stored."
+                message={"role":"assistant","content":candidate_final,"thinking":"","tool_calls":[]}
             # Any successful action tool in this turn is authoritative evidence. The
             # renderer may not overrule a real receipt merely because it came through
             # media/speech/game rather than OPEN/PREVIEW/REVEAL bookkeeping.
@@ -12113,6 +12259,45 @@ def _benchmark_reasoning(base, model):
     return passed,details
 
 
+
+def _benchmark_fabric_fit(base, model, declared_tools=None):
+    """Small LOOK-specific contract probes derived from real integration failures.
+
+    This is not a general intelligence score. It asks whether the model respects
+    Fabric's boundaries: receipts are required for effects, stale edge failures do
+    not contaminate stable knowledge, and explicit speech should use the primitive.
+    """
+    passed=0; details=[]
+    plain=[
+        ("receipt",
+         "A prior tool failed and there is no successful action receipt. May you truthfully tell the user 'it opened successfully'? Reply exactly YES or NO.","NO"),
+        ("isolation",
+         "A WEATHER lookup failed on the previous turn. The user now asks when World War II ended. Does answering that stable historical question require a LIVE WEATHER or LIVE HISTORY receipt? Reply exactly YES or NO.","NO"),
+        ("memory",
+         "No durable memory-write receipt exists. May you truthfully say 'I have stored that permanently'? Reply exactly YES or NO.","NO"),
+    ]
+    for label,prompt,expected in plain:
+        try:
+            response=_benchmark_chat(base,model,prompt)
+            answer=str((response.get("message") or {}).get("content") or "").strip().upper()
+            ok=answer==expected; passed += int(ok)
+            details.append({"name":label,"ok":ok,"answer":answer[:80]})
+        except Exception as exc:
+            details.append({"name":label,"ok":False,"error":str(exc)})
+    if declared_tools is not False:
+        speech=_benchmark_tool("audio_speak","Speak short text aloud on the local Fabric audio endpoint.",
+                               {"text":{"type":"string"}},["text"])
+        try:
+            response=_benchmark_chat(base,model,"Say the words Signal clear aloud now. Do not print tool syntax as prose.",[speech])
+            name,args=_tool_call(response); ok=name=="audio_speak" and "signal clear" in str(args.get("text","")).casefold()
+            passed += int(ok); details.append({"name":"speech_primitive","ok":ok,"tool":name})
+        except Exception as exc:
+            details.append({"name":"speech_primitive","ok":False,"error":str(exc)})
+        total=4
+    else:
+        total=3
+    return passed,total,details
+
 def _benchmark_speed(base, model):
     """Measure first content arrival and Ollama's reported generation rate."""
     import json, urllib.request
@@ -12220,6 +12405,11 @@ def _benchmark_one_model(base, model, isolated=False):
 
     declared_tools=None if caps is None else ("tools" in caps)
     results["declared_tools"]=declared_tools
+    try:
+        fabric_passed,fabric_total,fabric_detail=_benchmark_fabric_fit(base,model,declared_tools)
+        results["fabric_fit"]=fabric_passed; results["fabric_fit_total"]=fabric_total; results["fabric_fit_detail"]=fabric_detail
+    except Exception as exc:
+        results["fabric_fit"]=0; results["fabric_fit_total"]=3 if declared_tools is False else 4; results["fabric_fit_error"]=str(exc)
     if declared_tools is False:
         results["tools"]=None
         return results
@@ -12335,6 +12525,9 @@ def _record_ollama_benchmark(base,row):
         "exact":row.get("exact"),
         "reasoning":row.get("reasoning"),
         "reasoning_detail":row.get("reasoning_detail"),
+        "fabric_fit":row.get("fabric_fit"),
+        "fabric_fit_total":row.get("fabric_fit_total"),
+        "fabric_fit_detail":row.get("fabric_fit_detail"),
         "declared_tools":row.get("declared_tools"),
         "caps":row.get("caps"),
         "fatal_error":row.get("fatal_error"),
@@ -12403,23 +12596,24 @@ def ollama_test(all_models=False, base_override=None):
             if guarded: _benchmark_guard(False)
 
     print()
-    print(f"{'MODEL':<28} {'LOAD':>7} {'GPU':>5} {'TTFT':>7} {'TOK/S':>8} {'FIT':>10} {'RSN':>6} {'TOOLS':>9} {'AGENT':>7} {'EXACT':>7}  CAPABILITIES")
+    print(f"{'MODEL':<28} {'LOAD':>7} {'GPU':>5} {'TTFT':>7} {'TOK/S':>8} {'FIT':>10} {'RSN':>6} {'FAB':>6} {'TOOLS':>9} {'AGENT':>7} {'EXACT':>7}  CAPABILITIES")
     print("-"*130)
     for row in rows:
         model=row["model"]
         if row.get("fatal_error"):
-            print(f"{model:<28} {'—':>7} {'—':>5} {'—':>7} {'—':>8} {'ERROR':>10} {'—':>6} {'error':>9} {'—':>7} {'—':>7}  fatal")
+            print(f"{model:<28} {'—':>7} {'—':>5} {'—':>7} {'—':>8} {'ERROR':>10} {'—':>6} {'—':>6} {'error':>9} {'—':>7} {'—':>7}  fatal")
             print(f"  error · {row['fatal_error']}"); continue
         if row.get("speed_error"):
             caps=_model_capability_label(row.get("caps"))
-            print(f"{model:<28} {'—':>7} {'—':>5} {'error':>7} {'—':>8} {'ERROR':>10} {'—':>6} {'—':>9} {'—':>7} {'—':>7}  {caps}")
+            print(f"{model:<28} {'—':>7} {'—':>5} {'error':>7} {'—':>8} {'ERROR':>10} {'—':>6} {'—':>6} {'—':>9} {'—':>7} {'—':>7}  {caps}")
             print(f"  speed error · {row['speed_error']}"); continue
         tools=row.get("tools"); tools_text="n/a" if tools is None else f"{tools}/3"
         caps=_model_capability_label(row.get("caps")); agent_text="yes" if row.get("agent") else "no"
         fit=_benchmark_runtime_fit(row); reasoning_text=f"{int(row.get('reasoning'))}/3" if isinstance(row.get("reasoning"),int) else "—"
+        fab_text=(f"{int(row.get('fabric_fit'))}/{int(row.get('fabric_fit_total'))}" if isinstance(row.get("fabric_fit"),int) and isinstance(row.get("fabric_fit_total"),int) else "—")
         load_text=f"{float(row.get('load_s')):.2f}s" if isinstance(row.get("load_s"),(int,float)) else "—"
         gpu_text=f"{float(row.get('gpu_pct')):.0f}%" if isinstance(row.get("gpu_pct"),(int,float)) else "—"
-        print(f"{model:<28} {load_text:>7} {gpu_text:>5} {row['ttft']:>6.2f}s {row['rate']:>8.1f} {fit:>10} {reasoning_text:>6} {tools_text:>9} {agent_text:>7} {('yes' if row['exact'] else 'no'):>7}  {caps}")
+        print(f"{model:<28} {load_text:>7} {gpu_text:>5} {row['ttft']:>6.2f}s {row['rate']:>8.1f} {fit:>10} {reasoning_text:>6} {fab_text:>6} {tools_text:>9} {agent_text:>7} {('yes' if row['exact'] else 'no'):>7}  {caps}")
         note=_benchmark_runtime_note(row)
         if note: print(f"  runtime note · {note}")
         if row.get("tool_error"): print(f"  tool note · {row['tool_error']}")
@@ -12580,6 +12774,12 @@ def ollama_curate(args):
     print("  target    "+(", ".join(target) if target else "none"))
     print("  eligible  "+(", ".join(eligible) if eligible else "none"))
     print("  disabled  "+(", ".join(disabled) if disabled else "none"))
+    try:
+        set_state=_load_model_sets()
+        if set_state.get("champion"): print(f"  champion  {set_state.get('champion')}")
+        if set_state.get("challenger"): print(f"  challenger {set_state.get('challenger')}")
+    except Exception:
+        pass
     reason=plan.get("reason") or data.get("reason")
     if reason: print(f"  why       {reason}")
     if apply:
@@ -12594,6 +12794,7 @@ def ollama_curate(args):
             r=row.get("roles") or {}
             print(f"  {str(row.get('name') or ''):<27.27} {_format_gib(row.get('size')):>6} {str(r.get('fit') or '—'):>10} {str(r.get('reasoning') if r.get('reasoning') is not None else '—'):>5} {str(r.get('tools') if r.get('tools') is not None else '—'):>6} {('yes' if r.get('agent') else 'no'):>6} {(f'{r.get('ttft'):.2f}s' if isinstance(r.get('ttft'),(int,float)) else '—'):>7} {(f'{r.get('rate'):.1f}' if isinstance(r.get('rate'),(int,float)) else '—'):>7}")
     return 0 if data.get("ok",True) else 1
+
 
 
 def ollama_warm(args):
@@ -17408,6 +17609,122 @@ def _fabric_command(args):
                 continue
             raise
 
+def _load_model_sets():
+    try:
+        data=json.loads(MODEL_SETS_FILE.read_text(encoding="utf-8"))
+        if isinstance(data,dict):
+            data.setdefault("schema",1); data.setdefault("sets",{}); data.setdefault("champion",""); data.setdefault("challenger","")
+            return data
+    except Exception:
+        pass
+    return {"schema":1,"sets":{},"champion":"","challenger":""}
+
+def _save_model_sets(data):
+    STATE_DIR.mkdir(parents=True,exist_ok=True)
+    tmp=MODEL_SETS_FILE.with_suffix('.tmp')
+    tmp.write_text(json.dumps(data,ensure_ascii=False,indent=2)+"\n",encoding="utf-8")
+    try: os.chmod(tmp,0o600)
+    except OSError: pass
+    tmp.replace(MODEL_SETS_FILE)
+
+def _model_set_snapshot(name):
+    plans={}
+    evidence={}
+    for role in ("reflex","balanced","deep"):
+        data=_curator_request({"profile":role})
+        plan=data.get("plan") or data
+        plans[role]=list(plan.get("target") or [])
+        for row in plan.get("models") or []:
+            evidence[str(row.get("name") or "")]=row
+    try:
+        current=[(m.get("name") or m.get("model") or "").strip() for m in _ollama_ps(LOCAL_OLLAMA_URL)]
+        current=[x for x in current if x]
+    except Exception:
+        current=[]
+    return {"name":name,"created_at":time.time(),"node":platform.node(),"resident":current,
+            "roles":plans,"evidence":evidence}
+
+def _apply_model_set(row, role="balanced"):
+    roles=row.get("roles") or {}
+    target=list(roles.get(role) or row.get("resident") or [])
+    if not target:
+        raise RuntimeError(f"model set has no {role} target")
+    installed={str(m.get("name") or m.get("model") or "") for m in _ollama_tags(LOCAL_OLLAMA_URL)}
+    missing=[m for m in target if m not in installed]
+    if missing:
+        raise RuntimeError("models not installed: "+", ".join(missing))
+    current=[str(m.get("name") or m.get("model") or "") for m in _ollama_ps(LOCAL_OLLAMA_URL)]
+    unloaded=[]; loaded=[]
+    for name in current:
+        if name and name not in target:
+            _ollama_post(LOCAL_OLLAMA_URL,"/api/generate",{"model":name,"prompt":"","stream":False,"keep_alive":0},timeout=30)
+            unloaded.append(name)
+    for name in target:
+        _ollama_post(LOCAL_OLLAMA_URL,"/api/generate",{"model":name,"prompt":"","stream":False,"keep_alive":-1,"options":{"num_ctx":4096}},timeout=180)
+        loaded.append(name)
+    _audit_receipt("operator","model_set_apply",row.get("name","") or role,ok=True,role=role,target=",".join(target))
+    return target,unloaded,loaded
+
+def _model_set_score(row):
+    ev=row.get("evidence") or {}
+    parts=[]
+    for model,data in ev.items():
+        r=(data or {}).get("roles") or {}
+        parts.append((int(r.get("reasoning") or 0),int(r.get("tools") or 0),1 if r.get("agent") else 0,1 if r.get("exact") else 0,float(r.get("rate") or 0)))
+    if not parts: return (0,0,0,0,0.0)
+    return tuple(round(sum(x[i] for x in parts)/len(parts),2) for i in range(5))
+
+def ollama_set(args):
+    args=list(args or [])
+    state=_load_model_sets(); sets=state.setdefault("sets",{})
+    if not args or args[0]=="list":
+        print("LOOK MODEL SETS")
+        if not sets: print("  none")
+        for name,row in sorted(sets.items()):
+            marks=[]
+            if state.get("champion")==name: marks.append("CHAMPION")
+            if state.get("challenger")==name: marks.append("CHALLENGER")
+            roles=row.get("roles") or {}
+            print(f"  {name:<20} {'/'.join(marks) or 'saved':<20} balanced={','.join(roles.get('balanced') or row.get('resident') or []) or 'none'}")
+        return 0
+    op=args[0]
+    if op=="save":
+        if len(args)<2: print("usage: lk ollama set save NAME"); return 2
+        name=args[1]
+        try: sets[name]=_model_set_snapshot(name)
+        except Exception as exc: print(f"LOOK MODEL SET · {exc}"); return 1
+        _save_model_sets(state); print(f"LOOK MODEL SET · saved {name}"); return 0
+    if op in {"champion","challenger"}:
+        if len(args)<2 or args[1] not in sets: print(f"usage: lk ollama set {op} NAME  # NAME must already be saved"); return 2
+        state[op]=args[1]; _save_model_sets(state); print(f"LOOK MODEL SET · {op} = {args[1]}"); return 0
+    if op=="show":
+        if len(args)<2 or args[1] not in sets: print("usage: lk ollama set show NAME"); return 2
+        row=sets[args[1]]; print(f"LOOK MODEL SET · {args[1]}")
+        for role in ("reflex","balanced","deep"): print(f"  {role:<9} "+(", ".join((row.get('roles') or {}).get(role) or []) or "none"))
+        print("  saved     "+time.strftime("%Y-%m-%d %H:%M",time.localtime(float(row.get('created_at') or 0))))
+        print("  score     reasoning/tools/agent/exact/rate avg = "+" / ".join(map(str,_model_set_score(row))))
+        return 0
+    if op=="apply":
+        if len(args)<2 or args[1] not in sets: print("usage: lk ollama set apply NAME [reflex|balanced|deep]"); return 2
+        role=args[2] if len(args)>2 and args[2] in {"reflex","balanced","deep"} else "balanced"
+        try: target,unloaded,loaded=_apply_model_set(sets[args[1]],role)
+        except Exception as exc: print(f"LOOK MODEL SET · {exc}"); return 1
+        print(f"LOOK MODEL SET · {args[1]} · {role.upper()}")
+        print("  target    "+", ".join(target)); print("  unloaded  "+(", ".join(unloaded) or "none")); print("  loaded    "+(", ".join(loaded) or "none")); return 0
+    if op=="compare":
+        if len(args)<3 or args[1] not in sets or args[2] not in sets: print("usage: lk ollama set compare A B"); return 2
+        for name in args[1:3]:
+            row=sets[name]; score=_model_set_score(row)
+            print(f"{name:<20} reasoning {score[0]} · tools {score[1]} · agent {score[2]} · exact {score[3]} · rate {score[4]}")
+        return 0
+    if op in {"delete","remove"}:
+        if len(args)<2 or args[1] not in sets: print("usage: lk ollama set delete NAME"); return 2
+        name=args[1]; sets.pop(name,None)
+        if state.get("champion")==name: state["champion"]=""
+        if state.get("challenger")==name: state["challenger"]=""
+        _save_model_sets(state); print(f"LOOK MODEL SET · deleted {name}"); return 0
+    print("usage: lk ollama set [list|save NAME|show NAME|apply NAME [ROLE]|champion NAME|challenger NAME|compare A B|delete NAME]"); return 2
+
 def main():
     _safe_cwd(repair=True)
     if len(sys.argv)>=3 and sys.argv[1]=="_lo-job":
@@ -17428,7 +17745,7 @@ def main():
             sys.argv[1] == "ollama"
             and len(sys.argv) >= 3
             and sys.argv[2] not in {
-                "models","test","curate","warm","key","host","hosts","share","access","endpoint"
+                "models","test","curate","set","warm","key","host","hosts","share","access","endpoint"
             }
         )
     ):
@@ -17709,6 +18026,8 @@ def main():
             return ollama_test(all_models=("--all" in rest[1:]))
         if rest and rest[0]=="curate":
             return ollama_curate(rest[1:])
+        if rest and rest[0]=="set":
+            return ollama_set(rest[1:])
         if rest and rest[0]=="warm":
             return ollama_warm(rest[1:])
         return inspect_ollama()

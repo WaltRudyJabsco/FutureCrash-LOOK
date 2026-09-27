@@ -16,6 +16,28 @@ from dataclasses import asdict, dataclass, field
 from typing import Any
 
 
+
+GOAL_STATES=("waiting_human","waiting_event","ready","running","done","failed","cancelled")
+SOURCE_AUTHORITY={
+    "operator":1.0, "host":1.0, "action":1.0, "weather":0.95, "wikipedia":0.85,
+    "web":0.72, "memory":0.70, "inference":0.60, "model":0.45,
+}
+
+@dataclass(frozen=True)
+class EvidenceReceipt:
+    source: str
+    claim: str
+    confidence: float
+    receipt: str = ""
+    observed_at: float = field(default_factory=time.time)
+
+    @property
+    def authority(self) -> float:
+        return SOURCE_AUTHORITY.get(self.source,0.4)
+
+    def public(self) -> dict[str,Any]:
+        row=asdict(self); row["authority"]=self.authority; return row
+
 @dataclass(frozen=True)
 class ActionSpec:
     name: str

@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Future Crash + LOOK Unified Node 6.8.1.
+"""Future Crash + LOOK Unified Node 6.9.0.
 
 A small distributed supervisor for trusted personal machines. Immediate events stay
 asynchronous; a one-second fabric pulse reconciles presence, leases and stale work.
@@ -66,8 +66,8 @@ try:
 except ImportError:
     import rendezvous
 
-VERSION = "6.8.1"
-RELEASE_NAME = "MODEL GROUND TRUTH"
+VERSION = "6.9.0"
+RELEASE_NAME = "COGNITIVE FABRIC"
 DEFAULT_HOST = "127.0.0.1"
 DEFAULT_PORT = 7332
 DEFAULT_INGRESS_PORT = 0
@@ -602,16 +602,19 @@ def _benchmark_role_evidence(model):
     rate=float(b.get("rate") if isinstance(b.get("rate"),(int,float)) else (q.get("generation_tok_s") or 0))
     reasoning=int(b.get("reasoning") or 0) if isinstance(b.get("reasoning"),(int,float)) else 0
     tools=int(b.get("tools") or 0) if isinstance(b.get("tools"),(int,float)) else 0
+    fabric_fit=int(b.get("fabric_fit") or 0) if isinstance(b.get("fabric_fit"),(int,float)) else 0
+    fabric_total=int(b.get("fabric_fit_total") or 0) if isinstance(b.get("fabric_fit_total"),(int,float)) else 0
     agent=bool(b.get("agent")); exact=bool(b.get("exact") or q.get("instruction_ok"))
     fit=str(b.get("fit") or "").upper()
     # Tuple ordering intentionally preserves raw evidence instead of manufacturing
     # a universal number. Callers can compare candidates for one role only.
     reflex=(1 if exact else 0, 1 if ttft and ttft<=2.0 else 0, rate, -gib)
-    general=(1 if fit in {"EXCELLENT","GOOD"} else 0, tools, 1 if agent else 0, reasoning, rate, -abs(gib-6.0))
-    deep=(reasoning, 1 if agent else 0, tools, 1 if fit not in {"POOR","ERROR"} else 0, gib)
+    fabric_ratio=(fabric_fit/max(1,fabric_total)) if fabric_total else 0.0
+    general=(1 if fit in {"EXCELLENT","GOOD"} else 0, fabric_ratio, tools, 1 if agent else 0, reasoning, rate, -abs(gib-6.0))
+    deep=(reasoning, fabric_ratio, 1 if agent else 0, tools, 1 if fit not in {"POOR","ERROR"} else 0, gib)
     return {"reflex":reflex,"balanced":general,"deep":deep,
             "raw":{"ttft":ttft or None,"rate":rate or None,"reasoning":reasoning,"tools":tools,
-                   "agent":agent,"exact":exact,"fit":fit or None,"size_gib":round(gib,2)}}
+                   "agent":agent,"exact":exact,"fit":fit or None,"fabric_fit":fabric_fit,"fabric_fit_total":fabric_total,"size_gib":round(gib,2)}}
 
 
 def _gpu_budget(models):
@@ -2209,7 +2212,7 @@ def _local_web_search(query, limit=8):
     base=os.environ.get("FCL_SEARXNG_URL","http://127.0.0.1:8888").rstrip("/")
     request=urllib.request.Request(base+"/search?"+params,headers={
         "Accept":"application/json",
-        "User-Agent":"Future-Crash-Fabric/6.8.1",
+        "User-Agent":"Future-Crash-Fabric/6.9.0",
     })
     try:
         with urllib.request.urlopen(request,timeout=8) as response:
@@ -2943,7 +2946,7 @@ def _openjev_shadow(state, question, candidates, *, profile="workspace", consequ
 
 
 class API(BaseHTTPRequestHandler):
-    server_version = "FCLNode/6.8.1"
+    server_version = "FCLNode/6.9.0"
 
     def setup(self):
         self._metric_request_id = None

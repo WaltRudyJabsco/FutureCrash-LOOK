@@ -1,16 +1,26 @@
+# 6.9.0 · COGNITIVE FABRIC
+
+- Fold the planned 6.8.2 receipts/sets work and 6.9 cognition work into one release.
+- Speech is now receipt-enforced: printed `audiospeak(...)` prose is repaired into one real `audio_speak` attempt or reported as unexecuted.
+- Explicit anaphoric location memory (`remember that I live there`, `default to there`) resolves only against an already-authoritative home atom and writes a synchronous memory receipt.
+- Model prose may not claim durable remembering without a host memory-write receipt.
+- Add named Ollama model sets with save/show/apply/list/delete plus CHAMPION and CHALLENGER labels and set comparison.
+- Extend model tests with LOOK-specific Fabric Fit probes derived from real failures: receipt discipline, stale-edge isolation, memory truth, and speech primitive selection.
+- Curator BALANCED/DEEP ranking now considers Fabric Fit alongside runtime, tools, agent behavior, and reasoning.
+- Add explicit evidence authority classes and receipt objects to shared cognition; action/tool successes feed the receipt journal as provenance.
+- Persistent goal state now records wake and close conditions instead of only an opaque status.
+- Tailcat transport architecture is unchanged; Tailscale remains the fallback while NAT traversal/relay is deferred.
+
 # 6.8.1 · MODEL GROUND TRUTH
 
 - Wire the existing Fabric route explainer through the `lk fabric route reflex|balanced|deep` CLI wrapper.
 - Add regression coverage so documented Fabric verbs cannot be omitted from the LOOK dispatcher.
 
-# 6.8.1 · MODEL GROUND TRUTH
+# 6.8.0 · MODEL GROUND TRUTH
 
-- Future Crash defaults to the Fabric curator BALANCED role instead of a historical named model.
-- Signal Window defaults to the curator REFLEX role, keeping explicit model selection authoritative.
-- Add explainable Fabric routing (`lk fabric route reflex|balanced|deep`) using the exact production scoring path.
-- Benchmark evidence is now classified fresh / aging / stale; stale evidence is visible rather than silently trusted forever.
-- Dash exposes curator mode/profile/target from the same model evidence used by residency policy.
-- Curator plans can be queried by role without mutating node policy.
+- Future Crash defaults to the Fabric curator BALANCED role; Signal defaults to REFLEX.
+- Add explainable Fabric routing and benchmark freshness semantics.
+- Dash exposes curator mode/profile/target from the same evidence used by residency policy.
 
 # 6.7.6 · CANONICAL EDGE
 
