@@ -4604,9 +4604,11 @@ def _path_access_allowed(workspace,target,capability):
     """Workspace supplies context. Profile supplies authority."""
     target=Path(target).resolve()
     profile=str(_FILESYSTEM_ACCESS_PROFILE or "workspace").casefold()
-    if capability=="read" and _ordinary_user_path(target): return True
+    # CONSERVATIVE is workspace/grant scoped. WORKSPACE is the ordinary
+    # personal-file tier; POWER/UNSAFE are current-user machine tiers.
+    if capability=="read" and profile in {"workspace","power","unsafe"} and _ordinary_user_path(target): return True
     if capability=="write" and profile=="workspace" and _ordinary_user_path(target): return True
-    if profile=="power": return True
+    if profile in {"power","unsafe"}: return True
     if _path_within(target,workspace): return True
     for rule in _ONCE_PATH_GRANTS:
         if _grant_covers(rule,target,capability): return True
@@ -4694,7 +4696,7 @@ def _safe_workspace_path(workspace, raw_path=".", capability="read", prompt_acce
     # creates a contradictory second permission system.
     if _FILESYSTEM_ACCESS_PROFILE in {"power","unsafe"}:
         return candidate
-    if capability=="read" and _ordinary_user_path(candidate):
+    if capability=="read" and _FILESYSTEM_ACCESS_PROFILE=="workspace" and _ordinary_user_path(candidate):
         return candidate
 
     if _path_access_allowed(workspace,candidate,capability):
@@ -7207,8 +7209,9 @@ def _lo_action_continuation(prompt,last_action):
     if not low: return False
     patterns=(
         r"^(yes|yes!|yep|yeah|sure|okay|ok)(\b|[!.])",
-        r"^(try|do|play|open)\s+(it\s+|that\s+)?again\b",
-        r"^(try again|do it|that one|the same one|go ahead|please do)\b",
+        r"^(try|do|play|open|run)\s+(it\s+|that\s+)?again\b",
+        r"^(try\s+(it|that)\s+now|run\s+(it|that)\s+now)\b",
+        r"^(try again|do it|run it|that one|the same one|go ahead|please do)\b",
     )
     return any(re.search(p,low) for p in patterns)
 
@@ -7429,9 +7432,9 @@ def lo_access(args):
     if not args or args[0] in {"status","list"}:
         _title("lo access")
         rows=[
-            ("conservative","broad user-file read/search/open; no file writes"),
-            ("workspace","broad personal files + journaled LOOK file actions; no shell"),
-            ("power","current-user filesystem + shell; risky commands confirm"),
+            ("conservative","starting-workspace read/search + explicit grants; no mutation or shell"),
+            ("workspace","ordinary personal-file work through journaled LOOK tools; no shell"),
+            ("power","normal current-user computer operation; hazardous shell commands confirm"),
             ("unsafe","current-user/OS-permitted filesystem + unrestricted shell"),
         ]
         for name,desc in rows:
@@ -7552,8 +7555,8 @@ def _command_tool():
         "parameters":{"type":"object","properties":{
             "command":{"type":"string","description":"Shell command to execute with zsh -lc"},
             "cwd":{"type":"string","description":"Working directory; default is the LO starting workspace"},
-            "timeout":{"type":"integer","description":"Timeout seconds, 1-60; default 20 for captured commands"},
-            "interactive":{"type":"boolean","description":"Attach the real terminal TTY for an explicitly requested interactive/full-screen terminal program; control returns to LO when it exits"}
+            "timeout":{"type":"integer","description":"Timeout seconds, 1-60 for captured commands; default 20. Interactive commands remain attached until they exit or the user interrupts them."},
+            "interactive":{"type":"boolean","description":"Use the current terminal for an interactive/TUI program. Set true when the user asks to run something in the terminal."}
         },"required":["command"]}
     }}
 
@@ -7584,7 +7587,34 @@ def _looks_like_shell_file_discovery(command):
 
 def _lo_terminal_interactive_intent(prompt):
     low=" ".join(str(prompt or "").casefold().split())
-    return bool(re.search(r"\b(?:in|inside|on) (?:the )?terminal\b|\binteractive(?:ly)?\b|\bfull[- ]?screen terminal\b",low))
+    return bool(re.search(r"\b(?:in|inside|on|from) (?:the )?terminal\b|\binteractive(?:ly)?\b|\bfull[- ]?screen terminal\b",low))
+
+
+def _power_command_risk(command):
+    """Classify shell authority at the host edge; models never decide this policy."""
+    words=_command_words(command)
+    if not words:
+        return "hazardous"
+    text=str(command or "")
+    exe=Path(words[0]).name.casefold()
+    # Composition/redirection makes a command materially harder to bound.
+    if re.search(r"[;&|><`]",text):
+        return "hazardous"
+    hazardous={
+        "sudo","doas","su","rm","rmdir","dd","mkfs","diskutil","fdisk","parted",
+        "shutdown","reboot","halt","poweroff","kill","killall","pkill",
+        "chmod","chown","chgrp","chflags","launchctl","systemctl","service",
+        "iptables","nft","pfctl","ifconfig","route","networksetup","csrutil","nvram",
+    }
+    if exe in hazardous:
+        return "hazardous"
+    if exe in {"bash","sh","zsh","fish","dash"} and any(w in {"-c","-lc"} for w in words[1:]):
+        return "hazardous"
+    if exe=="git" and len(words)>=2 and words[1].casefold() in {"push","clean","reset","rebase","filter-branch"}:
+        return "hazardous"
+    if exe in {"brew","apt","apt-get","dnf","yum","pacman","zypper"} and len(words)>=2 and words[1].casefold() in {"remove","uninstall","autoremove","upgrade","full-upgrade"}:
+        return "hazardous"
+    return "ordinary"
 
 
 def _run_command_tool(workspace,args,profile):
@@ -7619,22 +7649,24 @@ def _run_command_tool(workspace,args,profile):
 
     if profile=="power":
         grant_key=_command_grant_key(command)
-        trusted=_inspection_command(command) or grant_key in _SESSION_COMMAND_GRANTS
+        trusted=_power_command_risk(command)=="ordinary" or grant_key in _SESSION_COMMAND_GRANTS
         if not trusted and not _confirm_command(command):
             return "Command denied by user."
     shell=shutil.which("zsh")
     if not shell:
         return "Command tool failed: zsh is not available on PATH"
 
-    interactive=bool(args.get("interactive"))
+    interactive=bool(args.get("interactive",False))
     if interactive:
         if not (sys.stdin.isatty() and sys.stdout.isatty()):
-            return "Command tool failed: interactive terminal requested but no TTY is attached"
+            return "Command tool failed: interactive terminal requested without a TTY"
         try:
             proc=subprocess.run([shell,"-lc",command],cwd=str(cwd))
-            return f"exit {proc.returncode} · interactive terminal command completed"
+            if proc.returncode in {130,-signal.SIGINT}:
+                return "interactive exit 130 · launched; terminal session interrupted by user"
+            return f"interactive exit {proc.returncode} · terminal session {'completed' if proc.returncode==0 else 'ended'}"
         except KeyboardInterrupt:
-            return "exit 130 · interactive terminal command interrupted"
+            return "interactive exit 130 · launched; terminal session interrupted by user"
         except OSError as exc:
             return f"Command tool failed: {exc}"
 
@@ -9372,7 +9404,7 @@ def _direct_searxng_search(query, limit=8):
     params=urllib.parse.urlencode({"q":query,"format":"json"})
     request=urllib.request.Request(base+"/search?"+params,headers={
         "Accept":"application/json",
-        "User-Agent":"Future-Crash-Fabric/7.0.0",
+        "User-Agent":"Future-Crash-Fabric/7.0.1",
     })
     with urllib.request.urlopen(request,timeout=12) as response:
         data=json.load(response)
@@ -9897,6 +9929,12 @@ def _url_result(message):
 
 def _command_result(message):
     text=str(message or "")
+    interactive=re.match(r"interactive\s+exit\s+(-?\d+)",text)
+    if interactive:
+        code=int(interactive.group(1))
+        if code in {130,-signal.SIGINT} and "launched" in text:
+            return _ToolResult(True,"interrupted",text)
+        return _ToolResult(code==0,"ok" if code==0 else "failed",text)
     m=re.match(r"exit\s+(-?\d+)",text)
     ok=bool(m and int(m.group(1))==0)
     return _ToolResult(ok,"ok" if ok else "failed",text)
@@ -10249,11 +10287,14 @@ def _lo_repeat_intent(text):
     low=" ".join(str(text or "").casefold().split())
     if not low: return False
     exact={"again","again again","again again :)","do it again","play it again","play again",
-           "open it again","open that again","show it again","that again","one more time"}
+           "open it again","open that again","show it again","run it again","try it again","that again","one more time"}
     return low in exact or bool(re.fullmatch(r"(please\s+)?(play|open|show|do)?\s*(it|that)?\s*again[!. :)]*",low))
 
 def _lo_action_from_tool(name,args,result):
-    """Compact ephemeral referent after a successful actionable tool."""
+    """Compact ephemeral referent after an actionable host attempt."""
+    if name=="run_command":
+        command=str(args.get("command") or "").strip()
+        return {"tool":name,"args":dict(args),"path":command} if command else None
     if name not in {"open_path","preview_path","reveal_path","open_url"}: return None
     if not str(result).startswith(("OPEN OK","DISPATCH OK","PREVIEW OK","REVEAL OK","URL OPEN OK")): return None
     path=str(args.get("path") or args.get("url") or "").strip()
@@ -10411,17 +10452,17 @@ def ollama_chat(force_search=False, initial_prompt=None, allow_start=True, host_
 
     capability_notes={
         "conservative": (
-            "ACCESS PROFILE: CONSERVATIVE. You may inspect/search/read the starting workspace and use web search when available. "
+            "ACCESS PROFILE: CONSERVATIVE. You may inspect/search/read the starting workspace and explicitly host-granted paths, plus use web search when available. "
             "Mutation and shell execution tools are intentionally absent."
         ),
         "workspace": (
-            "ACCESS PROFILE: WORKSPACE. You may use LOOK's bounded filesystem tools in the starting workspace and in explicit host-approved path grants. "
+            "ACCESS PROFILE: WORKSPACE. You may use LOOK's journaled filesystem tools across ordinary personal/user storage and explicit host-approved path grants. "
             "Arbitrary shell execution is intentionally unavailable."
         ),
         "power": (
-            "ACCESS PROFILE: POWER. You may use bounded filesystem tools with explicit path grants and run_command for computer-level work. "
-            "Known read-only inspection commands may execute automatically; other commands receive a native LOOK confirmation outside the conversation. "
-            "Never ask the user to reply yes/confirm in chat. If inspection can answer the question, call run_command directly. Prefer inspection before mutation."
+            "ACCESS PROFILE: POWER. Operate the current user's computer normally. LOOK filesystem tools and run_command are available; ordinary commands execute automatically. "
+            "LOOK itself classifies hazardous shell commands and owns any native confirmation outside the conversation. Never ask the user to reply yes/confirm in chat. "
+            "When the user explicitly asks to run or retry a command, execute it; prior failure is evidence, never a veto. Set interactive=true for terminal/TUI programs."
         ),
         "unsafe": (
             "ACCESS PROFILE: UNSAFE. The user explicitly enabled unrestricted shell command execution for this session. "
@@ -10429,6 +10470,7 @@ def ollama_chat(force_search=False, initial_prompt=None, allow_start=True, host_
             "Avoid unnecessary destructive actions and report command results accurately."
         ),
     }
+    capability_message_index=len(messages)
     messages.append({"role":"system","content":capability_notes[profile]})
     thinking_mode=_load_thinking()
     thinking_notes={
@@ -10494,6 +10536,15 @@ def ollama_chat(force_search=False, initial_prompt=None, allow_start=True, host_
             except KeyboardInterrupt:
                 print("\n· cancelled")
                 continue
+
+        # Persistent settings may change while LO is already running (including
+        # through `lk settings`). Unless this session has an explicit profile
+        # override, adopt the new authority before interpreting the next turn.
+        if access_profile is None:
+            refreshed_profile=_load_lo_profile()
+            if refreshed_profile in LO_PROFILES and refreshed_profile!=profile:
+                profile=refreshed_profile
+                messages[capability_message_index]["content"]=capability_notes[profile]
 
         if not prompt:
             continue
@@ -10718,10 +10769,16 @@ def ollama_chat(force_search=False, initial_prompt=None, allow_start=True, host_
                     "repeat_action",last_action["args"],
                     lambda: (_tool_open_url(last_action["args"].get("url",""),last_action["args"].get("intent","open"))
                              if last_action["tool"]=="open_url"
+                             else _run_command_tool(workspace,last_action["args"],profile)
+                             if last_action["tool"]=="run_command"
                              else _run_filesystem_tool(workspace,last_action["tool"],last_action["args"],profile)),
                     truth_name=last_action["tool"])
-            shown=Path(last_action["path"]).name
-            print("\n"+_lo_label("lo","35")+"\n"+_ollama_markup(f"Done again — {shown}" if ok else str(repeat_result))+"\n")
+            shown=(last_action["path"] if last_action["tool"]=="run_command" else Path(last_action["path"]).name)
+            if last_action["tool"]=="run_command":
+                reply=("Ran it again." if ok else str(repeat_result))
+            else:
+                reply=(f"Done again — {shown}" if ok else str(repeat_result))
+            print("\n"+_lo_label("lo","35")+"\n"+_ollama_markup(reply)+"\n")
             continue
 
         _ai_foreground(True,"lo")
@@ -10810,6 +10867,11 @@ def ollama_chat(force_search=False, initial_prompt=None, allow_start=True, host_
         # every turn and keep exactly one current temporal receipt in context.
         messages=[m for m in messages if not (m.get("role")=="system" and str(m.get("content","")).startswith("TRUSTED TEMPORAL CONTEXT\n"))]
         messages.append({"role":"system","content":_temporal_context()})
+        if last_authoritative_receipt:
+            messages.append({"role":"system","content":(
+                "LATEST AUTHORITATIVE HOST RECEIPT (session evidence; quote it rather than speculate when the operator asks what happened):\n"
+                f"tool={last_authoritative_receipt.get('tool')}\n{last_authoritative_receipt.get('result','')}"
+            )})
         messages.append(user_message)
 
         # LOOK Games are a tiny deterministic capability family. Resolve them
@@ -11384,6 +11446,8 @@ def ollama_chat(force_search=False, initial_prompt=None, allow_start=True, host_
                             with _activity("inspecting" if is_inspection else "running command"):
                                 tool_content,_ok,_elapsed=_tool_transaction(
                                     name,args,lambda: _run_command_tool(workspace,args,profile))
+                            last_action=_lo_action_from_tool(name,args,tool_content)
+                            last_authoritative_receipt={"tool":"run_command","result":str(tool_content)[:1200],"time":time.time()}
                             if _ok: turn_successful_tools.add(name)
                             _lo_receipt("result",tool_content.splitlines()[0],ok=_ok,color="33")
                     else:

@@ -64,7 +64,7 @@ class WorldState700Tests(unittest.TestCase):
         text=LOOK.read_text()
         self.assertIn('"interactive":{"type":"boolean"',text)
         self.assertIn('if _lo_terminal_interactive_intent(prompt):',text)
-        self.assertIn('interactive terminal command completed',text)
+        self.assertIn('interactive exit 130 · launched; terminal session interrupted by user',text)
         self.assertIn('stdin=subprocess.DEVNULL',text)  # captured path remains non-interactive
 
     def test_installer_ships_world_state_core(self):

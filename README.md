@@ -1,3 +1,7 @@
+# Future Crash + LOOK 7.0.1 — AUTHORITY THAT ACTS
+
+7.0.1 keeps 7.0.0 WORLD STATE and sharpens its action boundary. POWER is now the normal trusted-computer tier: ordinary user commands run automatically, hazardous commands are classified at the deterministic host edge, interactive Ctrl-C is recorded as an interrupted successful launch, explicit retries really retry, and live access-setting changes take effect without restarting LO.
+
 # Future Crash + LOOK
 
 

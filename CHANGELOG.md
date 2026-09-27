@@ -1,3 +1,12 @@
+# 7.0.1 — AUTHORITY THAT ACTS
+
+- Recalibrates CONSERVATIVE / WORKSPACE / POWER / UNSAFE into four distinct authority grants.
+- POWER auto-runs ordinary current-user commands; deterministic host policy keeps hazardous commands behind native confirmation.
+- Interactive exit 130 is recorded as a launched/interrupted session, not a launch failure.
+- Explicit command retries execute again; prior failure never vetoes a fresh operator imperative.
+- Persistent access-level changes are adopted by an already-running LO session on the next turn.
+- Command attempts and exact receipts remain available for deterministic retry and truthful follow-up explanation.
+
 ## 7.0.0 — WORLD STATE
 
 - Add persistent typed `world_state.json`: goals, task steps, receipts, failure classes, and wake events survive model/session boundaries.
