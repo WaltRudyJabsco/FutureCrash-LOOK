@@ -1,15 +1,15 @@
 #!/usr/bin/env bash
 set -euo pipefail
 ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
-echo "Future Crash + LOOK 7.1.0 · JEV FABRIC"
+echo "Future Crash + LOOK 7.2.0 · CAPABILITY CURATOR"
 echo "────────────────────────────────────────"
 
 # Refuse a mixed bundle before mutating the machine. A unified release must move
 # LOOK and the node together.
 EXPECTED_RELEASE="$(tr -d '[:space:]' < "$ROOT/VERSION")"
-[[ "$EXPECTED_RELEASE" == "7.1.0" ]] || { echo "BUNDLE ERROR: expected release 7.1.0, found $EXPECTED_RELEASE"; exit 4; }
+[[ "$EXPECTED_RELEASE" == "7.2.0" ]] || { echo "BUNDLE ERROR: expected release 7.2.0, found $EXPECTED_RELEASE"; exit 4; }
 echo "BUNDLE SOURCE  $ROOT"
-echo "BUNDLE RELEASE $EXPECTED_RELEASE · JEV FABRIC"
+echo "BUNDLE RELEASE $EXPECTED_RELEASE · CAPABILITY CURATOR"
 for vf in "$ROOT/look/VERSION" "$ROOT/albert/VERSION" "$ROOT/future-crash/VERSION"; do
   component_version="$(tr -d '[:space:]' < "$vf")"
   [[ "$component_version" == "$EXPECTED_RELEASE" ]] || { echo "BUNDLE ERROR: $vf reports $component_version, expected $EXPECTED_RELEASE"; exit 4; }
@@ -50,7 +50,7 @@ FCL_UNIFIED_INSTALL_CHILD=1 "$ROOT/install-look.sh" "$@"
 ((UNINSTALL)) && exit 0
 if ((DRY_RUN)); then
   echo
-  echo "[dry-run] would install/restart Unified Node 7.1.0 · JEV FABRIC with signed Fabric rendezvous, Tailcat direct transport, ONE BRAIN cognition, LIVING MIND memory, browser endpoints, SearXNG, Media, Artifacts, and Signal Window 1.11.0"
+  echo "[dry-run] would install/restart Unified Node 7.2.0 · CAPABILITY CURATOR with signed Fabric rendezvous, Tailcat direct transport, ONE BRAIN cognition, LIVING MIND memory, browser endpoints, SearXNG, Media, Artifacts, and Signal Window 1.11.0"
   echo "[dry-run] OpenJev mode: $OPENJEV_MODE (auto provisions on capable nodes; absence/failure is non-fatal)"
   echo "[dry-run] would initialize Tailcat :7443, install optional signed rendezvous discovery, keep Tailscale :7332 → fcl-ingress :7333 as fallback, and verify Fabric CLI wiring"
   exit 0
@@ -99,6 +99,7 @@ install -m 0644 "$ROOT/core/fabric_identity.py" "$HOME/.local/share/future-crash
 install -m 0644 "$ROOT/core/endpoint_auth.py" "$HOME/.local/share/future-crash-look/core/endpoint_auth.py"
 install -m 0644 "$ROOT/core/intent_normalizer.py" "$HOME/.local/share/future-crash-look/core/intent_normalizer.py"
 install -m 0644 "$ROOT/core/jev.py" "$HOME/.local/share/future-crash-look/core/jev.py"
+install -m 0644 "$ROOT/core/capability_curator.py" "$HOME/.local/share/future-crash-look/core/capability_curator.py"
 install -m 0644 "$ROOT/core/conductor.py" "$HOME/.local/share/future-crash-look/core/conductor.py"
 install -m 0644 "$ROOT/core/decision.py" "$HOME/.local/share/future-crash-look/core/decision.py"
 install -m 0644 "$ROOT/core/cognition.py" "$HOME/.local/share/future-crash-look/core/cognition.py"
@@ -171,6 +172,14 @@ fi
 if [[ -x "$ROOT/albert/install.sh" ]]; then
   "$ROOT/albert/install.sh"
 fi
+
+# Capability curation is automatic and non-destructive. Discovery records the
+# adapters this machine can actually expose; successful ordinary use later
+# upgrades discovered adapters to proven ones.
+PYTHONPATH="$HOME/.local/share/future-crash-look/core${PYTHONPATH:+:$PYTHONPATH}" python3 - <<'PY_CAPS' || true
+import capability_curator
+capability_curator.refresh()
+PY_CAPS
 
 # JEV-1 is the optional learned judgment tier. JEV-0 deterministic trees are
 # always installed. In auto mode, capable nodes (>=12 GiB RAM) provision JEV-1;
@@ -407,6 +416,9 @@ fi
 if ! cmp -s "$ROOT/core/jev.py" "$HOME/.local/share/future-crash-look/core/jev.py"; then
   echo "INSTALL ERROR: installed JEV core differs from release" >&2; exit 8
 fi
+if ! cmp -s "$ROOT/core/capability_curator.py" "$HOME/.local/share/future-crash-look/core/capability_curator.py"; then
+  echo "INSTALL ERROR: installed capability curator differs from release" >&2; exit 8
+fi
 if ! cmp -s "$ROOT/core/fcl-openjev-worker" "$HOME/.local/bin/fcl-openjev-worker"; then
   echo "INSTALL ERROR: installed JEV-1 worker launcher differs from release" >&2; exit 8
 fi
@@ -428,13 +440,15 @@ fi
 if ! PYTHONPATH="$HOME/.local/share/future-crash-look/core" python3 - <<'PY_RUNTIME' >/dev/null 2>&1
 import conductor, fabric_client, memory_store, decision, cognition, world_state
 import fabric_identity, endpoint_auth, intent_normalizer, tailcat, rendezvous
-import jev
+import jev, capability_curator
 assert conductor.classify("ping").tier == "reflex"
 assert callable(fabric_client.stream_infer)
 assert callable(fabric_identity.public_identity)
 assert callable(endpoint_auth.EndpointAuth)
 assert intent_normalizer.normalize("play any movie")["kind"] == "video"
 assert callable(jev.command_imperative)
+assert callable(capability_curator.refresh)
+assert "capability.catalog" in capability_curator.public_capabilities()
 assert callable(tailcat.ensure_identity)
 assert callable(rendezvous.sync_once)
 assert callable(world_state.WorldState)

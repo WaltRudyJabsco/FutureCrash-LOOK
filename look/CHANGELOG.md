@@ -1,3 +1,10 @@
+# 7.2.0 — CAPABILITY CURATOR
+
+- JEV typed referents can now maximize, fullscreen, focus, minimize, and close known terminal windows.
+- Capability discovery is automatic; normal users do not configure adapters manually.
+- Linux launched terminals receive stable window tokens and a bounded control channel.
+- `lk capabilities` shows discovered/proven adapters and receipt counts.
+
 # 7.1.0 — JEV FABRIC
 
 - Universal JEV-0 deterministic intent layer plus optional local JEV-1 learned judgment.

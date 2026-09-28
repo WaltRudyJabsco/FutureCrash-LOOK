@@ -1,3 +1,7 @@
+# Future Crash + LOOK 7.2.0 — CAPABILITY CURATOR
+
+7.2.0 makes host capability discovery automatic. Each node non-destructively inspects its available OS/application adapters, persists a typed capability catalog, advertises those capabilities to Fabric, and upgrades adapters from discovered to proven through real successful receipts. JEV referential actions now include maximize, full screen, focus, and minimize as well as close. Linux terminal launches carry a zero-dependency control channel and stable window token, with stronger `wmctrl`/`xdotool` adapters preferred when present; macOS uses Terminal/AppleScript handles. `lk capabilities` exists for inspection/debugging, but install and normal operation curate automatically.
+
 # Future Crash + LOOK 7.1.0 — JEV FABRIC
 
 7.1.0 makes JEV a node-level cognition layer. JEV-0 deterministic trees ship on every node and own obvious semantic structure before general cognition; JEV-1 uses the existing OpenJev worker as an optional local learned judgment tier, auto-provisioned on capable nodes and managed on Linux/macOS. Explicit image generation now owns its descriptive payload so words such as `rain` cannot hijack the turn into weather. Typed-referent JEV normalizes conversational glue/self-address and resolves bounded unique aliases such as `and close it`, `lo close that window`, and `close ascii`. Ambiguous residue still escalates rather than being guessed.

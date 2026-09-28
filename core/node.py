@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Future Crash + LOOK Unified Node 7.1.0.
+"""Future Crash + LOOK Unified Node 7.2.0.
 
 A small distributed supervisor for trusted personal machines. Immediate events stay
 asynchronous; a one-second fabric pulse reconciles presence, leases and stale work.
@@ -65,8 +65,12 @@ try:
     from . import rendezvous
 except ImportError:
     import rendezvous
+try:
+    from . import capability_curator
+except ImportError:
+    import capability_curator
 
-VERSION = "7.1.0"
+VERSION = "7.2.0"
 RELEASE_NAME = "COGNITIVE FABRIC"
 DEFAULT_HOST = "127.0.0.1"
 DEFAULT_PORT = 7332
@@ -498,6 +502,7 @@ def capabilities():
         # rather than inventing their own tool/intention maps.
         "cognition.route": True,
         "action.registry": True,
+        **capability_curator.public_capabilities(),
     }
 
 
@@ -2216,7 +2221,7 @@ def _local_web_search(query, limit=8):
     base=os.environ.get("FCL_SEARXNG_URL","http://127.0.0.1:8888").rstrip("/")
     request=urllib.request.Request(base+"/search?"+params,headers={
         "Accept":"application/json",
-        "User-Agent":"Future-Crash-Fabric/7.1.0",
+        "User-Agent":"Future-Crash-Fabric/7.2.0",
     })
     try:
         with urllib.request.urlopen(request,timeout=8) as response:
@@ -2950,7 +2955,7 @@ def _openjev_shadow(state, question, candidates, *, profile="workspace", consequ
 
 
 class API(BaseHTTPRequestHandler):
-    server_version = "FCLNode/7.1.0"
+    server_version = "FCLNode/7.2.0"
 
     def setup(self):
         self._metric_request_id = None

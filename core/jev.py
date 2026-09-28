@@ -117,16 +117,20 @@ def command_imperative(
     }
 
 
-_CLOSE_VERBS={"close","dismiss","shut"}
+_REFERENTIAL_ACTIONS={
+    "close":"close","dismiss":"close","shut":"close",
+    "maximize":"maximize","maximise":"maximize","enlarge":"maximize",
+    "fullscreen":"fullscreen","full-screen":"fullscreen",
+    "focus":"focus","activate":"focus","raise":"focus","bring":"focus",
+    "minimize":"minimize","minimise":"minimize",
+}
 
 def _referent_names(ref: Mapping[str,Any]) -> list[str]:
     names=[]
     command=str(ref.get("command") or "").strip()
     if command:
-        try:
-            words=shlex.split(command)
-        except ValueError:
-            words=command.split()
+        try: words=shlex.split(command)
+        except ValueError: words=command.split()
         if words:
             head=words[0].rsplit("/",1)[-1]
             names.extend([command,head])
@@ -153,15 +157,17 @@ def _referent_match(query: str, ref: Mapping[str,Any]) -> float:
 def referential_action(text: str, referents):
     """Resolve a narrow action over a recent typed referent or return None.
 
-    Deictic forms resolve against compatible recent objects. Named/prefix forms
-    (``close ascii``) are allowed only when one object is the clear deterministic
-    match. Ambiguity falls through to cognition.
+    This tree decides action + object only. Whether the host can perform that
+    action is a separate capability-curation fact supplied at the edge.
     """
     normalized=normalize_utterance(text)
-    m=re.match(r"^(?:please\s+)?(?:(?:can|could|would|will)\s+you\s+)?(close|dismiss|shut)\s+(?:down\s+)?(.+?)\s*[.!?]?\s*$",normalized,re.I)
-    if not m:
-        return None
-    verb=m.group(1).casefold(); obj=m.group(2).casefold().strip()
+    # Normalize common two-word window phrasing before the compact verb tree.
+    normalized=re.sub(r"^(full)\s+screen\b","fullscreen",normalized,flags=re.I)
+    m=re.match(r"^(?:please\s+)?(?:(?:can|could|would|will)\s+you\s+)?(close|dismiss|shut|maximi[sz]e|enlarge|fullscreen|full-screen|focus|activate|raise|minimi[sz]e|bring)\s+(?:up\s+|down\s+|to\s+front\s+)?(.+?)\s*[.!?]?\s*$",normalized,re.I)
+    if not m: return None
+    rawverb=m.group(1).casefold(); verb=_REFERENTIAL_ACTIONS.get(rawverb)
+    if not verb: return None
+    obj=m.group(2).casefold().strip()
     hint="terminal_window" if re.search(r"\b(window|terminal(?:\s+window)?)\b",obj) else ""
     deictic=bool(re.fullmatch(r"(?:it|that|this|that one|this one|the window|that window|this window|the terminal|that terminal|this terminal|that terminal window|this terminal window)",obj))
     compatible=[]
@@ -178,17 +184,14 @@ def referential_action(text: str, referents):
         seen.add(key); unique.append(ref)
     if deictic:
         if len(unique)!=1: return None
-        selected=unique[0]
-        steps=[f"verb:{verb}",f"referent:{selected.get('kind','object')}","resolve:deictic"]
+        selected=unique[0]; steps=[f"verb:{verb}",f"referent:{selected.get('kind','object')}","resolve:deictic"]
     else:
         scored=sorted(((_referent_match(obj,ref),idx,ref) for idx,ref in enumerate(unique)),key=lambda x:(-x[0],x[1]))
         if not scored or scored[0][0] < .88: return None
         second=scored[1][0] if len(scored)>1 else 0.0
         if second>=scored[0][0]-.08: return None
-        selected=scored[0][2]
-        steps=[f"verb:{verb}",f"referent:{selected.get('kind','object')}",f"resolve:name:{scored[0][0]:.2f}"]
-    return {"kind":"referential_action","verb":verb,"action":"close","object":selected,"confidence":1.0,"steps":steps}
-
+        selected=scored[0][2]; steps=[f"verb:{verb}",f"referent:{selected.get('kind','object')}",f"resolve:name:{scored[0][0]:.2f}"]
+    return {"kind":"referential_action","verb":rawverb,"action":verb,"object":selected,"confidence":1.0,"steps":steps}
 
 def image_imperative(text: str):
     """Resolve explicit image-generation language before topic words can hijack it.

@@ -1,3 +1,13 @@
+# 7.2.0 — CAPABILITY CURATOR
+
+- Added automatic, non-destructive node capability curation with persisted adapter evidence.
+- Added typed terminal-window actions: maximize, fullscreen, focus, minimize, and close.
+- Added Linux stable window tokens and a zero-dependency terminal control channel; stronger OS adapters win when discovered.
+- Added macOS Terminal window action adapters through authoritative window IDs.
+- Fabric now advertises curated window capabilities instead of assuming them.
+- Successful real actions promote discovered adapters to proven; fallback dispatches remain explicitly unverified.
+- Added `lk capabilities [show|refresh]` as an observability surface, not a setup requirement.
+
 # 7.1.0 — JEV FABRIC
 
 - Promote JEV-0 deterministic judgment trees to a universal node runtime layer.

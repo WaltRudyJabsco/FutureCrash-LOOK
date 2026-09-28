@@ -6527,6 +6527,15 @@ def _jev_module():
     return jev
 
 
+def _capability_curator_module():
+    candidates=[Path.home()/".local/share/future-crash-look/core", ROOT.parent/"core"]
+    for path in candidates:
+        if (path/"capability_curator.py").exists() and str(path) not in sys.path:
+            sys.path.insert(0,str(path))
+    import capability_curator
+    return capability_curator
+
+
 def _cognition_module():
     # One cognition vocabulary for terminal LO, Signal, Albert, and future surfaces.
     candidates=[Path.home()/".local/share/future-crash-look/core", ROOT.parent/"core"]
@@ -7738,14 +7747,31 @@ def _launch_command_new_terminal(command,cwd,shell,args=None):
             )
             handle_dir=STATE_DIR/"terminal_handles"; handle_dir.mkdir(parents=True,exist_ok=True)
             pid_file=handle_dir/f"{ref_id}.pid"
-            wrapped=f"printf '%s\\n' $$ > {shlex.quote(str(pid_file))}; exec {shlex.quote(shell)} -lc {shlex.quote(command)}"
+            control_fifo=handle_dir/f"{ref_id}.ctl"
+            try:
+                if control_fifo.exists(): control_fifo.unlink()
+                os.mkfifo(control_fifo,0o600)
+            except OSError:
+                control_fifo=None
+            window_token=f"LOOK-{ref_id}"
+            controller=""
+            if control_fifo is not None:
+                qfifo=shlex.quote(str(control_fifo))
+                controller=("(while :; do if IFS= read -r op < "+qfifo+"; then case \"$op\" in "
+                            "maximize) printf '\\033[9;1t' > /dev/tty ;; "
+                            "fullscreen) printf '\\033[10;1t' > /dev/tty ;; "
+                            "minimize) printf '\\033[2t' > /dev/tty ;; "
+                            "focus) printf '\\033[5t' > /dev/tty ;; esac; fi; done) & ")
+            wrapped=(controller+f"printf '%s\\n' $$ > {shlex.quote(str(pid_file))}; "
+                     f"printf '\033]0;{window_token}\007'; "
+                     f"exec {shlex.quote(shell)} -lc {shlex.quote(command)}")
             for name,build in candidates:
                 exe=shutil.which(name)
                 if not exe: continue
                 proc=subprocess.Popen(build(exe)[:-1]+[wrapped],cwd=str(cwd),stdin=subprocess.DEVNULL,
                                  stdout=subprocess.DEVNULL,stderr=subprocess.DEVNULL,
                                  start_new_session=True)
-                args["_referent"]={"id":ref_id,"kind":"terminal_window","platform":"linux","pid_file":str(pid_file),"launcher_pid":int(getattr(proc,"pid",0) or 0),"command":command,"status":"open"}
+                args["_referent"]={"id":ref_id,"kind":"terminal_window","platform":"linux","pid_file":str(pid_file),"launcher_pid":int(getattr(proc,"pid",0) or 0),"window_token":window_token,"control_fifo":str(control_fifo) if control_fifo is not None else "","command":command,"status":"open"}
                 return f"new terminal dispatch ok · command launched via {name}"
             return "New terminal dispatch failed: no supported terminal launcher found"
 
@@ -7777,21 +7803,74 @@ def _jev_referential_intent(prompt,last_action=None):
     return _jev_module().referential_action(prompt,_lo_recent_referents(last_action))
 
 
-def _close_typed_referent(ref):
-    """Close one host object using the handle created by its launch receipt."""
-    ref=dict(ref or {})
-    if ref.get("kind")!="terminal_window":
-        return "Close failed: unsupported referent type"
+def _linux_window_id(ref):
+    token=str((ref or {}).get("window_token") or "").strip()
+    wmctrl=shutil.which("wmctrl")
+    if not token or not wmctrl: return ""
+    try:
+        proc=subprocess.run([wmctrl,"-lx"],capture_output=True,text=True,timeout=3)
+    except (OSError,subprocess.SubprocessError): return ""
+    for line in (proc.stdout or "").splitlines():
+        if token in line:
+            return line.split(None,1)[0]
+    return ""
+
+
+def _window_action_typed_referent(ref,action):
+    """Perform a curated action on one typed terminal-window referent."""
+    ref=dict(ref or {}); action=str(action or "").casefold()
+    if ref.get("kind")!="terminal_window": return f"Window {action} failed: unsupported referent type"
+    curator=_capability_curator_module(); adapters=curator.adapters_for("terminal_window",action)
     platform_name=str(ref.get("platform") or "")
+
     if platform_name=="darwin":
         wid=str(ref.get("os_window_id") or "").strip()
-        if not wid.isdigit(): return "Close failed: terminal window handle is unavailable"
-        script='tell application "Terminal" to close (first window whose id is '+wid+')'
-        proc=subprocess.run(["osascript","-e",script],stdout=subprocess.PIPE,stderr=subprocess.STDOUT,text=True,timeout=8)
-        if proc.returncode!=0:
-            return f"Close failed: {(proc.stdout or '').strip() or 'Terminal rejected the window handle'}"
-        return "close ok · terminal window closed"
+        if not wid.isdigit(): return f"Window {action} failed: terminal window handle is unavailable"
+        osa=shutil.which("osascript") or ("osascript" if action=="close" else "")
+        if not osa: return f"Window {action} failed: osascript is unavailable"
+        if action=="close": script='tell application "Terminal" to close (first window whose id is '+wid+')'
+        elif action=="focus": script='tell application \"Terminal\" to activate\ntell application \"Terminal\" to set index of (first window whose id is '+wid+') to 1'
+        elif action=="maximize": script='tell application \"Finder\" to set screenBounds to bounds of window of desktop\ntell application \"Terminal\" to set bounds of (first window whose id is '+wid+') to screenBounds\ntell application \"Terminal\" to activate'
+        elif action=="fullscreen": script='tell application \"Terminal\" to activate\ntell application \"Terminal\" to set index of (first window whose id is '+wid+') to 1\ntell application \"System Events\" to keystroke \"f\" using {control down, command down}'
+        else: return f"Window {action} failed: no macOS adapter"
+        proc=subprocess.run([osa,"-e",script],stdout=subprocess.PIPE,stderr=subprocess.STDOUT,text=True,timeout=8)
+        ok=proc.returncode==0
+        if adapters: curator.record_result(adapters[0]["id"],action,ok)
+        if not ok: return f"Window {action} failed: {(proc.stdout or '').strip() or 'Terminal rejected the action'}"
+        return ("close ok · terminal window closed" if action=="close" else f"window {action} ok · terminal window {action}d")
+
     if platform_name=="linux":
+        # Prefer semantic window-manager control when available; close retains a
+        # process-handle fallback so Wayland machines do not lose 7.0.5 behavior.
+        wid=_linux_window_id(ref)
+        wmctrl=shutil.which("wmctrl")
+        if wid and wmctrl and action in {"close","focus","maximize","fullscreen"}:
+            if action=="close": argv=[wmctrl,"-ic",wid]
+            elif action=="focus": argv=[wmctrl,"-ia",wid]
+            elif action=="maximize": argv=[wmctrl,"-ir",wid,"-b","add,maximized_vert,maximized_horz"]
+            else: argv=[wmctrl,"-ir",wid,"-b","add,fullscreen"]
+            proc=subprocess.run(argv,stdout=subprocess.PIPE,stderr=subprocess.STDOUT,text=True,timeout=5)
+            ok=proc.returncode==0
+            for adapter in adapters:
+                if adapter.get("id")=="linux-wmctrl": curator.record_result("linux-wmctrl",action,ok); break
+            if ok: return ("close ok · terminal window closed" if action=="close" else f"window {action} ok · terminal window {action}d")
+        if action=="minimize" and wid and shutil.which("xdotool"):
+            proc=subprocess.run([shutil.which("xdotool"),"windowminimize",wid],stdout=subprocess.PIPE,stderr=subprocess.STDOUT,text=True,timeout=5)
+            ok=proc.returncode==0; curator.record_result("linux-xdotool",action,ok)
+            if ok: return "window minimize ok · terminal window minimized"
+        control_fifo=Path(str(ref.get("control_fifo") or "")) if ref.get("control_fifo") else None
+        if action in {"focus","maximize","minimize","fullscreen"} and control_fifo is not None and control_fifo.exists():
+            try:
+                # O_NONBLOCK avoids hanging forever if the terminal-side controller died.
+                fd=os.open(control_fifo,os.O_WRONLY|os.O_NONBLOCK)
+                try: os.write(fd,(action+"\n").encode())
+                finally: os.close(fd)
+                return f"window {action} dispatch ok · terminal control channel"
+            except OSError as exc:
+                pass
+        if action!="close":
+            why="no compatible discovered window adapter"
+            return f"Window {action} failed: {why}"
         pid=0
         try:
             pid_file=Path(str(ref.get("pid_file") or ""))
@@ -7800,15 +7879,17 @@ def _close_typed_referent(ref):
         if pid<=1:
             try: pid=int(ref.get("launcher_pid") or 0)
             except (TypeError,ValueError): pid=0
-        if pid<=1: return "Close failed: terminal process handle is unavailable"
-        try:
-            os.kill(pid,signal.SIGTERM)
-        except ProcessLookupError:
-            return "Close failed: terminal window is no longer running"
-        except OSError as exc:
-            return f"Close failed: {exc}"
+        if pid<=1: return "Window close failed: terminal process handle is unavailable"
+        try: os.kill(pid,signal.SIGTERM)
+        except ProcessLookupError: return "Window close failed: terminal window is no longer running"
+        except OSError as exc: return f"Window close failed: {exc}"
+        curator.record_result("linux-process-handle","close",True)
         return "close ok · terminal window closed"
-    return f"Close failed: unsupported platform {platform_name or 'unknown'}"
+    return f"Window {action} failed: unsupported platform {platform_name or 'unknown'}"
+
+
+def _close_typed_referent(ref):
+    return _window_action_typed_referent(ref,"close")
 
 def _run_command_tool(workspace,args,profile):
     command=str(args.get("command","")).strip()
@@ -9601,7 +9682,7 @@ def _direct_searxng_search(query, limit=8):
     params=urllib.parse.urlencode({"q":query,"format":"json"})
     request=urllib.request.Request(base+"/search?"+params,headers={
         "Accept":"application/json",
-        "User-Agent":"Future-Crash-Fabric/7.1.0",
+        "User-Agent":"Future-Crash-Fabric/7.2.0",
     })
     with urllib.request.urlopen(request,timeout=12) as response:
         data=json.load(response)
@@ -10152,9 +10233,9 @@ def _normalize_tool_result(name,result):
         return _filesystem_result(name,result)
     if name=="open_url": return _url_result(result)
     if name=="run_command": return _command_result(result)
-    if name=="close_object":
-        text=str(result or ""); ok=text.startswith("close ok")
-        return _ToolResult(ok,"closed" if ok else "failed",text)
+    if name in {"close_object","object_action"}:
+        text=str(result or ""); ok=text.startswith(("close ok","window ")) and " failed:" not in text.casefold()
+        return _ToolResult(ok,"effect_ok" if ok else "failed",text)
     return _default_result(result)
 
 def _tool_receipt_fields(name,args):
@@ -10911,15 +10992,20 @@ def ollama_chat(force_search=False, initial_prompt=None, allow_start=True, host_
         # Referential JEV actions operate on typed objects created by prior host actions.
         ref_action=_jev_referential_intent(prompt,last_action)
         if ref_action:
-            ref=ref_action["object"]
+            ref=ref_action["object"]; object_action=str(ref_action.get("action") or "close")
             if profile not in {"power","unsafe"}:
                 ref_result="Window control is unavailable in this access profile."; ref_ok=False
             else:
-                with _activity("closing window"):
+                with _activity(object_action+" window"):
+                    runner=(lambda: _close_typed_referent(ref)) if object_action=="close" else (lambda: _window_action_typed_referent(ref,object_action))
                     ref_result,ref_ok,_elapsed=_tool_transaction(
-                        "close_object",{"object":ref},lambda: _close_typed_referent(ref))
+                        "object_action",{"object":ref,"intent":object_action},runner)
             _lo_receipt("result",str(ref_result).splitlines()[0],ok=ref_ok,color="33")
-            reply="Closed that window." if ref_ok else str(ref_result)
+            phrases={"close":"Closed that window.","maximize":"Maximized that window.","minimize":"Minimized that window.","fullscreen":"Made that window full screen.","focus":"Focused that window."}
+            if ref_ok and "dispatch ok" in str(ref_result):
+                reply={"maximize":"Sent maximize to that window.","minimize":"Sent minimize to that window.","fullscreen":"Sent full screen to that window.","focus":"Sent focus to that window."}.get(object_action,f"Sent {object_action} to that window.")
+            else:
+                reply=phrases.get(object_action,f"Applied {object_action} to that window.") if ref_ok else str(ref_result)
             print("\n"+_lo_label("lo","35")+"\n"+_ollama_markup(reply)+"\n")
             _save_recent_exchange(prompt,reply)
             if events:
@@ -18246,6 +18332,28 @@ def ollama_set(args):
         _save_model_sets(state); print(f"LOOK MODEL SET · deleted {name}"); return 0
     print("usage: lk ollama set [list|save NAME|show NAME|apply NAME [ROLE]|champion NAME|challenger NAME|compare A B|delete NAME]"); return 2
 
+def capability_command(args):
+    """Inspect or refresh this node's automatically curated host capabilities."""
+    curator=_capability_curator_module(); args=list(args or [])
+    if args and args[0] not in {"show","refresh"}:
+        print("usage: lk capabilities [show|refresh]"); return 2
+    data=curator.refresh() if args and args[0]=="refresh" else curator.catalog()
+    print("LOOK CAPABILITIES · AUTO-CURATED")
+    print(f"  platform  {data.get('platform') or '?'} · node {data.get('node') or '?'}")
+    rows=list(data.get("adapters") or [])
+    if not rows:
+        print("  no host adapters discovered")
+        return 0
+    for row in rows:
+        actions=",".join(row.get("actions") or []) or "none"
+        state=str(row.get("state") or "discovered").upper()
+        successes=int(row.get("successes") or 0); failures=int(row.get("failures") or 0)
+        print(f"  {row.get('kind','?'):<17} {row.get('id','?'):<28} {state:<10} {actions}")
+        if successes or failures:
+            print(f"    receipts · {successes} success · {failures} failure")
+    return 0
+
+
 def main():
     _safe_cwd(repair=True)
     if len(sys.argv)>=3 and sys.argv[1]=="_lo-job":
@@ -18407,6 +18515,7 @@ def main():
     if cmd=="share": return share_command(rest)
     if cmd=="services": return services_command(rest)
     if cmd=="vision": return vision_command(rest)
+    if cmd in {"capability","capabilities"}: return capability_command(rest)
     if cmd in {"generate","image"}: return generate_command(rest)
     if cmd=="comfy": return comfy_command(rest)
     if cmd in {"schedule","scheduler"}: return schedule_command(rest)
