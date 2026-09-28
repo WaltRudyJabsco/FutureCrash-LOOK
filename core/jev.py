@@ -85,6 +85,16 @@ def command_imperative(
     if not payload or re.fullmatch(r"(?i)(it|that|this)",payload):
         return None
 
+    # "another" is relational, not an executable name. It means another
+    # instance of the salient prior runnable object. Authority is still checked
+    # by the host when the reconstructed command executes.
+    if re.fullmatch(r"(?i)(?:another|another one|one more)",payload):
+        prior=dict(prior or {})
+        prior_command=str(prior.get("command") or "").strip()
+        if not prior_command:
+            return None
+        payload=prior_command; steps.append("resolve:another-prior-command")
+
     try:
         words=shlex.split(payload)
     except ValueError:
@@ -201,14 +211,44 @@ def referential_action(text: str, referents):
         else:
             return None
     else:
-        scored=sorted(((_referent_match(obj,ref),idx,ref) for idx,ref in enumerate(unique)),key=lambda x:(-x[0],x[1]))
-        if not scored or scored[0][0] < .88: return None
-        second=scored[1][0] if len(scored)>1 else 0.0
-        if second>=scored[0][0]-.08: return None
-        selected=scored[0][2]; steps=[f"verb:{verb}",f"referent:{selected.get('kind','object')}",f"resolve:name:{scored[0][0]:.2f}"]
+        # Relational noun phrases operate over the current compatible object set.
+        # Example: "first ascii window" = filter ascii matches, order by creation, select first.
+        ordinal=None
+        om=re.match(r"^(?:the\s+)?(first|oldest|last|newest|latest)\s+(.+)$",obj,re.I)
+        query=obj
+        if om:
+            ordinal=om.group(1).casefold(); query=om.group(2).strip()
+        candidates=[ref for ref in unique if _referent_match(query,ref)>=.88]
+        if ordinal and candidates:
+            def stamp(r):
+                return float(r.get("created_at") or r.get("launched_at") or r.get("observed_at") or 0)
+            candidates=sorted(candidates,key=stamp)
+            selected=candidates[0] if ordinal in {"first","oldest"} else candidates[-1]
+            steps=[f"verb:{verb}",f"referent:{selected.get('kind','object')}",f"resolve:ordinal:{ordinal}"]
+        else:
+            scored=sorted(((_referent_match(obj,ref),idx,ref) for idx,ref in enumerate(unique)),key=lambda x:(-x[0],x[1]))
+            if not scored or scored[0][0] < .88: return None
+            second=scored[1][0] if len(scored)>1 else 0.0
+            if second>=scored[0][0]-.08: return None
+            selected=scored[0][2]; steps=[f"verb:{verb}",f"referent:{selected.get('kind','object')}",f"resolve:name:{scored[0][0]:.2f}"]
+        # selected assigned by either ordinal or unique name path
     # JEV bookkeeping is not part of the host object's identity/capability data.
     selected={k:v for k,v in selected.items() if not str(k).startswith("_")}
     return {"kind":"referential_action","verb":rawverb,"action":verb,"object":selected,"confidence":1.0,"steps":steps}
+
+def state_query(text: str):
+    """Resolve narrow present-tense observation questions without model inference."""
+    normalized=normalize_utterance(text)
+    low=normalized.casefold().strip(" .!?")
+    patterns=(
+        r"^(?:what|which) windows (?:are )?(?:open|running|there)$",
+        r"^(?:show|list) (?:me )?(?:the )?(?:open )?windows$",
+        r"^(?:what|which) terminal windows (?:are )?(?:open|running|there)$",
+    )
+    if any(re.match(p,low) for p in patterns):
+        return {"kind":"state_query","domain":"windows","relation":"open","confidence":1.0,"steps":["query:windows","relation:open"]}
+    return None
+
 
 def image_imperative(text: str):
     """Resolve explicit image-generation language before topic words can hijack it.

@@ -83,6 +83,16 @@ def _pid_alive(pid:int)->bool:
     except OSError: return False
 
 
+def _fresh(row:dict[str,Any],now:float|None=None)->bool:
+    if row.get("status") in {"closed","retired"}: return False
+    now=_now() if now is None else now
+    try:
+        ttl=float(row.get("ttl",TTL_BY_KIND.get(str(row.get("kind") or "object"),15.0)) or 0)
+        observed=float(row.get("observed_at",0) or 0)
+    except (TypeError,ValueError): return False
+    return bool(observed and (ttl<=0 or now-observed<=ttl))
+
+
 def observe_object(ref:dict[str,Any],*,path:Path=DEFAULT_PATH,source:str="host_receipt",ttl:float|None=None,current:bool=True)->dict[str,Any]:
     """Upsert one typed live object from authoritative host evidence."""
     ref=dict(ref or {}); oid=_object_id(ref)
@@ -98,6 +108,8 @@ def observe_object(ref:dict[str,Any],*,path:Path=DEFAULT_PATH,source:str="host_r
         "observed_at":now,"source":source,"ttl":float(ttl if ttl is not None else TTL_BY_KIND.get(kind,15.0)),
         "confidence":1.0 if source in {"host_receipt","inspector"} else float(old.get("confidence",.8)),
     })
+    if not merged.get("created_at"):
+        merged["created_at"]=now
     pid=_pid_from_ref(merged)
     if pid: merged["pid"]=pid
     rows.append(merged); data["objects"]=rows
@@ -143,9 +155,58 @@ def refresh(*,path:Path=DEFAULT_PATH)->dict[str,Any]:
     return data
 
 
+
+def reconcile_domain(domain:str,observed:list[dict[str,Any]],*,path:Path=DEFAULT_PATH,source:str="inspector",authoritative:bool=False)->dict[str,Any]:
+    """Merge one observed world domain into Live State.
+
+    Authoritative reconciliation may retire objects previously seen by the same
+    observation domain when they disappear. Receipt-only objects are preserved
+    unless an observed object can be matched to them or another inspector proves
+    they are gone.
+    """
+    data=_load(path); now=_now(); domain=str(domain or "").strip()
+    rows=[dict(r) for r in data.get("objects",[])]
+    by_id={str(r.get("id") or ""):r for r in rows if str(r.get("id") or "")}
+    seen=set()
+    for raw in list(observed or []):
+        if not isinstance(raw,dict): continue
+        obj=dict(raw); oid=_object_id(obj)
+        if not oid: continue
+        # Prefer stable LOOK identity. If a desktop observer only gives us a raw
+        # OS window id, reconcile by process id against an existing typed object.
+        try: opid=int(obj.get("pid") or 0)
+        except (TypeError,ValueError): opid=0
+        if oid not in by_id:
+            owid=str(obj.get("os_window_id") or "").strip()
+            if owid:
+                matches=[rid for rid,row in by_id.items() if str(row.get("os_window_id") or "").strip()==owid and row.get("status") not in {"closed","retired"}]
+                if len(matches)==1: oid=matches[0]; obj["id"]=oid
+        if oid not in by_id and opid>1:
+            matches=[rid for rid,row in by_id.items() if _pid_from_ref(row)==opid and row.get("status") not in {"closed","retired"}]
+            if len(matches)==1: oid=matches[0]; obj["id"]=oid
+        old=by_id.get(oid,{})
+        merged=dict(old); merged.update(obj)
+        merged.update({"id":oid,"status":"open","observed_at":now,"source":source,"domain":domain,"confidence":1.0})
+        if "ttl" not in merged: merged["ttl"]=float(TTL_BY_KIND.get(str(merged.get("kind") or "object"),15.0))
+        by_id[oid]=merged; seen.add(oid)
+        if bool(merged.get("focused")):
+            data["current_object_id"]=oid
+    if authoritative:
+        for oid,row in list(by_id.items()):
+            if row.get("status") in {"closed","retired"}: continue
+            if str(row.get("domain") or "")==domain and str(row.get("source") or "").endswith("inspector") and oid not in seen:
+                row["status"]="closed"; row["retired_at"]=now; row["retire_reason"]="not_observed"; row["observed_at"]=now; row["source"]=source
+    data["objects"]=list(by_id.values())
+    if data.get("current_object_id") and data["current_object_id"] not in {r.get("id") for r in data["objects"] if r.get("status") not in {"closed","retired"}}:
+        data["current_object_id"]=""
+    record={"key":f"observation.{domain}","value":{"count":len(seen),"authoritative":bool(authoritative)},"observed_at":now,"ttl":5.0,"source":source,"confidence":1.0}
+    data["facts"]=[r for r in data.get("facts",[]) if str(r.get("key"))!=record["key"]]+[record]
+    _save(path,data); return snapshot(path=path)
+
 def active_objects(*,path:Path=DEFAULT_PATH,kind:str="",refresh_now:bool=True)->list[dict[str,Any]]:
     data=refresh(path=path) if refresh_now else _load(path)
-    rows=[dict(r) for r in data["objects"] if r.get("status") not in {"closed","retired"} and (not kind or r.get("kind")==kind)]
+    now=_now()
+    rows=[dict(r) for r in data["objects"] if _fresh(r,now) and (not kind or r.get("kind")==kind)]
     current=str(data.get("current_object_id") or "")
     rows.sort(key=lambda r:(str(r.get("id"))!=current,-float(r.get("observed_at",0) or 0)))
     return rows
@@ -155,7 +216,7 @@ def current_object(*,path:Path=DEFAULT_PATH)->dict[str,Any]|None:
     data=refresh(path=path); oid=str(data.get("current_object_id") or "")
     if not oid: return None
     for row in data["objects"]:
-        if str(row.get("id"))==oid and row.get("status") not in {"closed","retired"}: return dict(row)
+        if str(row.get("id"))==oid and _fresh(row): return dict(row)
     return None
 
 
@@ -163,7 +224,7 @@ def snapshot(*,path:Path=DEFAULT_PATH)->dict[str,Any]:
     data=refresh(path=path); now=_now()
     objects=[]
     for row in data["objects"]:
-        if row.get("status") in {"closed","retired"}: continue
+        if not _fresh(row,now): continue
         item=dict(row); item["age_ms"]=max(0,int((now-float(row.get("observed_at",now)))*1000)); objects.append(item)
     facts=[]
     for row in data["facts"]:

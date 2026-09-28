@@ -123,7 +123,11 @@ def record_result(adapter_id:str,action:str,ok:bool,path:Path=DEFAULT_PATH)->Non
 
 def public_capabilities(path:Path=DEFAULT_PATH)->dict[str,bool]:
     data=catalog(path)
-    out={"capability.catalog":True,"state.live":True}
+    platform_name=str(data.get("platform") or "")
+    out={
+        "capability.catalog":True,"state.live":True,"state.observe":True,
+        "state.observe.windows": bool((platform_name=="linux" and _which("wmctrl")) or (platform_name=="darwin" and _which("osascript"))),
+    }
     for action in WINDOW_ACTIONS:
         out[f"window.{action}"]=any(r.get("kind")=="terminal_window" and action in (r.get("actions") or []) for r in data.get("adapters",[]))
     return out

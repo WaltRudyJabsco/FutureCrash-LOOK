@@ -1,3 +1,7 @@
+# Future Crash + LOOK 7.4.0 — OBSERVATION PLANE
+
+7.4.0 turns Live State from a receipt-fed cache into an observed, reconciled world model. A read-only Observation Plane inspects current host objects where the OS exposes them, merges those observations onto stable typed identities, refreshes focus and freshness, and lets stale unrefreshable objects fall out of present-tense state. JEV adds first-class state queries and relational set selection, so `what windows are open`, `run another in a new terminal`, and `close the first ascii window` operate over current objects rather than chat history.
+
 # Future Crash + LOOK 7.3.0 — LIVE STATE
 
 7.3.0 separates present-tense machine state from durable memory/history. A bounded Live State layer keeps typed objects such as terminal windows fresh, records provenance and age, retires objects when authoritative evidence says they are gone, and hands JEV/cognition only the state slice relevant to the current request. Receipts update the scene automatically; `lk state` is an inspection/debugging surface, not a configuration requirement. This is the first explicit implementation of the spinning-plates model: skills and procedures can persist, while layouts, processes, referents, and other current facts stay refreshable and disposable.

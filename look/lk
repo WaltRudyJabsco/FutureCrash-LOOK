@@ -6546,8 +6546,36 @@ def _live_state_module():
     return live_state
 
 
+def _observation_module():
+    candidates=[Path.home()/".local/share/future-crash-look/core", ROOT.parent/"core"]
+    for path in candidates:
+        if (path/"observation.py").exists() and str(path) not in sys.path:
+            sys.path.insert(0,str(path))
+    import observation
+    return observation
+
+
+def _observe_live_state(domain="windows"):
+    """Refresh a live-state plate from a read-only host observer when available."""
+    try:
+        payload=_observation_module().observe([domain])
+        row=(payload.get("domains") or {}).get(domain) or {}
+        live=_live_state_module()
+        if row.get("observer"):
+            return live.reconcile_domain(
+                domain,list(row.get("objects") or []),path=LIVE_STATE_FILE,
+                source=str(row.get("observer"))+"_inspector",authoritative=bool(row.get("authoritative")))
+        return live.snapshot(path=LIVE_STATE_FILE)
+    except Exception:
+        try: return _live_state_module().snapshot(path=LIVE_STATE_FILE)
+        except Exception: return {"objects":[],"facts":[]}
+
+
 def _live_state_context(prompt):
     try:
+        low=" ".join(str(prompt or "").casefold().split())
+        if any(w in low for w in ("window","terminal","maximize","fullscreen","full screen","minimize","focus","close","open")):
+            _observe_live_state("windows")
         return _live_state_module().relevant_context(prompt,path=LIVE_STATE_FILE)
     except Exception:
         return ""
@@ -6555,7 +6583,16 @@ def _live_state_context(prompt):
 
 def _live_state_referents():
     try:
-        return _live_state_module().active_objects(path=LIVE_STATE_FILE)
+        _observe_live_state("windows")
+        live=_live_state_module(); rows=live.active_objects(path=LIVE_STATE_FILE)
+        current=live.current_object(path=LIVE_STATE_FILE) or {}
+        current_id=str(current.get("id") or "")
+        out=[]
+        for row in rows:
+            item=dict(row)
+            if current_id and str(item.get("id") or "")==current_id: item["_current"]=True
+            out.append(item)
+        return out
     except Exception:
         return []
 
@@ -7724,6 +7761,28 @@ def _jev_image_intent(prompt):
     return {"tool":"generate_image","args":{"prompt":str(decision["prompt"])},"jev":decision}
 
 
+def _jev_state_query(prompt):
+    return _jev_module().state_query(prompt)
+
+
+def _lo_state_query_answer(decision):
+    domain=str((decision or {}).get("domain") or "")
+    if domain!="windows": return None
+    snap=_observe_live_state("windows")
+    rows=[r for r in list(snap.get("objects") or []) if r.get("status") not in {"closed","retired"} and r.get("kind") in {"terminal_window","desktop_window"}]
+    fact=next((f for f in list(snap.get("facts") or []) if f.get("key")=="observation.windows"),{})
+    observed=bool((fact.get("value") or {}).get("authoritative"))
+    if not rows:
+        return "I don't currently observe any open windows." if observed else "I don't currently have any live window objects, and this node has no active desktop window observer."
+    lines=[]
+    for idx,row in enumerate(rows,1):
+        title=str(row.get("command") or row.get("title") or row.get("app_class") or row.get("id") or "window")
+        current=" · current" if str(row.get("id") or "")==str(snap.get("current_object_id") or "") else ""
+        lines.append(f"{idx}. {title}{current}")
+    scope="Observed open windows:" if observed else "Windows I currently know about from live state:"
+    return scope+"\n"+"\n".join(lines)
+
+
 def _power_command_risk(command):
     """Classify shell authority at the host edge; models never decide this policy."""
     words=_command_words(command)
@@ -7776,7 +7835,7 @@ def _launch_command_new_terminal(command,cwd,shell,args=None):
                 detail=(proc.stdout or "").strip()
                 return f"New terminal dispatch failed: {detail or 'osascript exit '+str(proc.returncode)}"
             window_id=(proc.stdout or "").strip().splitlines()[-1].strip() if (proc.stdout or "").strip() else ""
-            args["_referent"]={"id":ref_id,"kind":"terminal_window","platform":"darwin","os_window_id":window_id,"command":command,"status":"open"}
+            args["_referent"]={"id":ref_id,"kind":"terminal_window","platform":"darwin","os_window_id":window_id,"command":command,"status":"open","created_at":time.time()}
             return "new terminal dispatch ok · command launched"
 
         if sys.platform.startswith("linux"):
@@ -7814,7 +7873,7 @@ def _launch_command_new_terminal(command,cwd,shell,args=None):
                 proc=subprocess.Popen(build(exe)[:-1]+[wrapped],cwd=str(cwd),stdin=subprocess.DEVNULL,
                                  stdout=subprocess.DEVNULL,stderr=subprocess.DEVNULL,
                                  start_new_session=True)
-                args["_referent"]={"id":ref_id,"kind":"terminal_window","platform":"linux","pid_file":str(pid_file),"launcher_pid":int(getattr(proc,"pid",0) or 0),"window_token":window_token,"control_fifo":str(control_fifo) if control_fifo is not None else "","command":command,"status":"open"}
+                args["_referent"]={"id":ref_id,"kind":"terminal_window","platform":"linux","pid_file":str(pid_file),"launcher_pid":int(getattr(proc,"pid",0) or 0),"window_token":window_token,"control_fifo":str(control_fifo) if control_fifo is not None else "","command":command,"status":"open","created_at":time.time()}
                 return f"new terminal dispatch ok · command launched via {name}"
             return "New terminal dispatch failed: no supported terminal launcher found"
 
@@ -7826,16 +7885,18 @@ def _launch_command_new_terminal(command,cwd,shell,args=None):
 
 def _lo_recent_referents(last_action=None,limit=24):
     """Live typed objects available for deictic follow-up, newest/salient first."""
-    out=[]; seen=set()
+    out=[]; seen=set(); live_refs=_live_state_referents()
+    observed_current=next((r for r in live_refs if r.get("_current")),None)
     if last_action:
         ref=(last_action.get("args") or {}).get("_referent")
         if isinstance(ref,dict):
             key=str(ref.get("id") or ref.get("os_window_id") or ref.get("pid") or ref)
-            item=dict(ref); item["_salient"]=True
+            item=dict(ref)
+            current_key=str((observed_current or {}).get("id") or "")
+            if not current_key or current_key==key: item["_salient"]=True
             seen.add(key); out.append(item)
-    # Present state outranks durable action history. Closed/retired objects are
-    # omitted by the live inspector rather than lingering as false referents.
-    for ref in _live_state_referents():
+    # Present observation outranks durable action history when focus changed.
+    for ref in live_refs:
         key=str(ref.get("id") or ref.get("os_window_id") or ref.get("pid") or ref)
         if key in seen: continue
         seen.add(key); out.append(dict(ref))
@@ -9725,7 +9786,7 @@ def _direct_searxng_search(query, limit=8):
     params=urllib.parse.urlencode({"q":query,"format":"json"})
     request=urllib.request.Request(base+"/search?"+params,headers={
         "Accept":"application/json",
-        "User-Agent":"Future-Crash-Fabric/7.3.0",
+        "User-Agent":"Future-Crash-Fabric/7.4.0",
     })
     with urllib.request.urlopen(request,timeout=12) as response:
         data=json.load(response)
@@ -11013,6 +11074,19 @@ def ollama_chat(force_search=False, initial_prompt=None, allow_start=True, host_
 
         # Fast host actions are real turns but intentionally skip deliberative cognition.
         turn_id += 1
+
+        # Present-tense state queries are observations, not model questions.
+        state_query=_jev_state_query(prompt)
+        if state_query:
+            state_answer=_lo_state_query_answer(state_query)
+            if state_answer is not None:
+                print("\n"+_lo_label("lo","35")+"\n"+_ollama_markup(state_answer)+"\n")
+                _save_recent_exchange(prompt,state_answer)
+                if events:
+                    events.emit("response",text=state_answer)
+                    events.emit("request_done",status="ok",rounds=0,tool_calls=0,prompt_tokens=0,output_tokens=0,load_ms=0)
+                if one_shot: return 0
+                continue
 
         # Top-level JEV ownership: an explicit image-generation request owns its
         # descriptive payload. Topic words such as rain/snow never reach weather.
@@ -18385,7 +18459,8 @@ def live_state_command(args):
     if args and args[0] not in {"show","refresh"}:
         print("usage: lk state [show|refresh]"); return 2
     live=_live_state_module()
-    data=live.refresh(path=LIVE_STATE_FILE) if args and args[0]=="refresh" else live.snapshot(path=LIVE_STATE_FILE)
+    data=_observe_live_state("windows")
+    if args and args[0]=="refresh": data=live.refresh(path=LIVE_STATE_FILE)
     print("LOOK LIVE STATE · SPINNING PLATES")
     rows=list(data.get("objects") or [])
     if not rows:

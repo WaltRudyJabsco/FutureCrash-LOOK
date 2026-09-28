@@ -1,3 +1,16 @@
+# 7.4.0 — OBSERVATION PLANE
+
+- Added `core/observation.py`, a read-only host observation plane separate from actions, memory, and capability authority.
+- Linux observes current desktop windows through `wmctrl` when available and active focus through EWMH/xprop; macOS observes Terminal windows and front-window identity through AppleScript.
+- Observations reconcile onto stable LOOK object identities by token, OS window id, or process id instead of duplicating receipt objects.
+- Live State now enforces TTL freshness: facts that cannot be refreshed age out of present-tense queries rather than becoming accidental permanent memory.
+- Observed focus can outrank stale action salience.
+- Added first-class JEV state queries such as `what windows are open`, answered before general cognition.
+- Added relational command/reference semantics: `another` reuses the salient prior runnable object; `first/oldest/last/newest` select deterministically within a matching live object set.
+- `lk state` now performs an observation refresh before displaying the current scene.
+- Fabric advertises the observation capability separately from `state.live`.
+- Installer ships and verifies the observation plane in installed layout.
+
 # 7.3.0 — LIVE STATE
 
 - Added `core/live_state.py`: a bounded present-tense state pool distinct from durable world history and memory.

@@ -1,3 +1,12 @@
+# 7.4.0 — OBSERVATION PLANE
+
+- Live State is now refreshed from read-only OS observation where available, not only from LOOK's own action receipts.
+- `what windows are open` is a deterministic state query.
+- `run another in a new terminal` resolves `another` relationally against the prior runnable object.
+- `close the first ascii window` resolves by filtering current live objects and applying an ordinal relation.
+- Stale unrefreshable objects age out; observed focus can supersede stale action recency.
+- `lk state` refreshes the observed scene before display.
+
 # 7.3.0 — LIVE STATE
 
 - Added bounded present-tense state plates separate from durable world receipts.
