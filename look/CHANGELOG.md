@@ -1,3 +1,11 @@
+# 7.3.0 — LIVE STATE
+
+- Added bounded present-tense state plates separate from durable world receipts.
+- JEV referents resolve against live objects; close receipts retire objects immediately.
+- Current/salient and `the other one` relations are deterministic when the live scene supports them.
+- Relevant LIVE STATE is injected into cognition with source/age provenance.
+- Added `lk state` observability.
+
 # 7.2.0 — CAPABILITY CURATOR
 
 - JEV typed referents can now maximize, fullscreen, focus, minimize, and close known terminal windows.

@@ -123,7 +123,7 @@ def record_result(adapter_id:str,action:str,ok:bool,path:Path=DEFAULT_PATH)->Non
 
 def public_capabilities(path:Path=DEFAULT_PATH)->dict[str,bool]:
     data=catalog(path)
-    out={"capability.catalog":True}
+    out={"capability.catalog":True,"state.live":True}
     for action in WINDOW_ACTIONS:
         out[f"window.{action}"]=any(r.get("kind")=="terminal_window" and action in (r.get("actions") or []) for r in data.get("adapters",[]))
     return out

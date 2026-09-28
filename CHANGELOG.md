@@ -1,3 +1,15 @@
+# 7.3.0 — LIVE STATE
+
+- Added `core/live_state.py`: a bounded present-tense state pool distinct from durable world history and memory.
+- Host receipts create/update typed live objects; successful close actions retire them instead of leaving stale historical referents active.
+- Linux terminal objects are cheaply reconciled against their process handles; dead processes retire automatically.
+- Live objects carry provenance, observation age, confidence, TTL, and stable identity.
+- JEV now resolves current/salient objects and relational language such as `the other one` against the live scene; ambiguous named matches still fall through.
+- Cognition receives only a deterministic relevant slice of LIVE STATE, not the full machine scene on every turn.
+- Added `lk state [show|refresh]` as observability for spinning plates; normal operation updates state automatically.
+- Fabric advertises `state.live` alongside curated capabilities.
+- Installer ships and byte-verifies the live-state core and smoke-tests it in installed layout.
+
 # 7.2.0 — CAPABILITY CURATOR
 
 - Added automatic, non-destructive node capability curation with persisted adapter evidence.

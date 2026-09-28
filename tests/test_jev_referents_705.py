@@ -64,12 +64,9 @@ def test_close_macos_terminal_uses_window_id(monkeypatch):
     assert 'id is 77' in calls[0][-1]
 
 
-def test_recent_referent_can_be_recovered_from_world_receipt(monkeypatch):
+def test_recent_referent_comes_from_live_state_not_durable_receipt(monkeypatch):
     ref={'id':'term_1','kind':'terminal_window','platform':'linux','pid_file':'/tmp/x.pid'}
-    class W:
-        def latest_receipts(self,n):
-            return [{'action':'run_command','ok':True,'observed_at':time.time(),'args':{'command':'asciiquarium','new_terminal':True,'_referent':ref}}]
-    monkeypatch.setattr(lk,'_world_state',lambda:W())
+    monkeypatch.setattr(lk,'_live_state_referents',lambda:[ref])
     assert lk._lo_recent_referents(None)[0]==ref
 
 
@@ -97,10 +94,8 @@ def test_current_action_referent_outranks_older_windows(monkeypatch):
     current={'id':'term_now','kind':'terminal_window','platform':'linux','pid_file':'/tmp/now.pid'}
     old={'id':'term_old','kind':'terminal_window','platform':'linux','pid_file':'/tmp/old.pid'}
     last={'tool':'run_command','args':{'command':'asciiquarium','new_terminal':True,'_referent':current},'path':'asciiquarium'}
-    class W:
-        def latest_receipts(self,n):
-            return [{'action':'run_command','args':{'_referent':old}}]
-    monkeypatch.setattr(lk,'_world_state',lambda:W())
-    assert lk._lo_recent_referents(last)==[current]
+    monkeypatch.setattr(lk,'_live_state_referents',lambda:[current,old])
+    refs=lk._lo_recent_referents(last)
+    assert refs[0]['id']=='term_now' and refs[0]['_salient'] is True
     decision=lk._jev_referential_intent('close that window',last)
     assert decision['object']['id']=='term_now'

@@ -71,6 +71,7 @@ MEMORY_WORKER_LOCK=STATE_DIR/"memory_worker.lock"
 LO_RECENT_FILE=STATE_DIR/"lo_recent.json"
 BRAIN_STATE_FILE=STATE_DIR/"brain_state.json"
 WORLD_STATE_FILE=STATE_DIR/"world_state.json"
+LIVE_STATE_FILE=STATE_DIR/"live_state.json"
 MODEL_SETS_FILE=STATE_DIR/"model_sets.json"
 LO_JOBS_DIR=STATE_DIR/"jobs"
 LO_EVENTS_DIR=STATE_DIR/"events"
@@ -6536,6 +6537,48 @@ def _capability_curator_module():
     return capability_curator
 
 
+def _live_state_module():
+    candidates=[Path.home()/".local/share/future-crash-look/core", ROOT.parent/"core"]
+    for path in candidates:
+        if (path/"live_state.py").exists() and str(path) not in sys.path:
+            sys.path.insert(0,str(path))
+    import live_state
+    return live_state
+
+
+def _live_state_context(prompt):
+    try:
+        return _live_state_module().relevant_context(prompt,path=LIVE_STATE_FILE)
+    except Exception:
+        return ""
+
+
+def _live_state_referents():
+    try:
+        return _live_state_module().active_objects(path=LIVE_STATE_FILE)
+    except Exception:
+        return []
+
+
+def _live_state_after_receipt(action_name,args,typed):
+    """Update present-tense state only from typed host truth."""
+    try:
+        live=_live_state_module()
+        ref=(args or {}).get("_referent")
+        if action_name=="run_command" and typed.ok and isinstance(ref,dict):
+            live.observe_object(ref,path=LIVE_STATE_FILE,source="host_receipt",current=True)
+            return
+        if action_name in {"object_action","close_object"} and isinstance((args or {}).get("object"),dict):
+            obj=dict(args["object"]); intent=str((args or {}).get("intent") or "")
+            if typed.ok and intent=="close":
+                live.retire_object(obj,path=LIVE_STATE_FILE,reason="closed_by_operator",source="host_receipt")
+            elif typed.ok:
+                obj["last_action"]=intent; obj["last_action_at"]=time.time()
+                live.observe_object(obj,path=LIVE_STATE_FILE,source="host_receipt",current=True)
+    except Exception:
+        pass
+
+
 def _cognition_module():
     # One cognition vocabulary for terminal LO, Signal, Albert, and future surfaces.
     candidates=[Path.home()/".local/share/future-crash-look/core", ROOT.parent/"core"]
@@ -7782,21 +7825,21 @@ def _launch_command_new_terminal(command,cwd,shell,args=None):
 
 
 def _lo_recent_referents(last_action=None,limit=24):
-    """Newest-first typed host objects available for deictic follow-up."""
-    out=[]
+    """Live typed objects available for deictic follow-up, newest/salient first."""
+    out=[]; seen=set()
     if last_action:
         ref=(last_action.get("args") or {}).get("_referent")
-        # The current turn referent is explicitly salient. Do not dilute "that"
-        # with older objects merely because they remain in durable history.
-        if isinstance(ref,dict): return [dict(ref)]
-    try:
-        rows=_world_state().latest_receipts(limit)
-    except Exception:
-        rows=[]
-    for row in reversed(rows):
-        ref=(row.get("args") or {}).get("_referent")
-        if isinstance(ref,dict): out.append(dict(ref))
-    return out
+        if isinstance(ref,dict):
+            key=str(ref.get("id") or ref.get("os_window_id") or ref.get("pid") or ref)
+            item=dict(ref); item["_salient"]=True
+            seen.add(key); out.append(item)
+    # Present state outranks durable action history. Closed/retired objects are
+    # omitted by the live inspector rather than lingering as false referents.
+    for ref in _live_state_referents():
+        key=str(ref.get("id") or ref.get("os_window_id") or ref.get("pid") or ref)
+        if key in seen: continue
+        seen.add(key); out.append(dict(ref))
+    return out[:max(1,int(limit))]
 
 
 def _jev_referential_intent(prompt,last_action=None):
@@ -9682,7 +9725,7 @@ def _direct_searxng_search(query, limit=8):
     params=urllib.parse.urlencode({"q":query,"format":"json"})
     request=urllib.request.Request(base+"/search?"+params,headers={
         "Accept":"application/json",
-        "User-Agent":"Future-Crash-Fabric/7.2.0",
+        "User-Agent":"Future-Crash-Fabric/7.3.0",
     })
     with urllib.request.urlopen(request,timeout=12) as response:
         data=json.load(response)
@@ -10266,6 +10309,7 @@ def _tool_transaction(name,args,runner,*,actor="lo",truth_name=None):
         _world_state().record_receipt(action_name,typed.ok,typed.status,typed.message,args=args,duration_ms=fields["duration_ms"])
     except Exception:
         pass
+    _live_state_after_receipt(action_name,args,typed)
     return typed.message,typed.ok,fields["duration_ms"]
 
 def receipts(limit=30):
@@ -11180,10 +11224,13 @@ def ollama_chat(force_search=False, initial_prompt=None, allow_start=True, host_
         memory=_load_memory()
         messages[memory_message_index]["content"]=_memory_context(memory,prompt)
         messages[brain_context_index]["content"]=_brain_context()
-        messages=[m for i,m in enumerate(messages) if i < base_message_count or not (m.get("role")=="system" and str(m.get("content","")).startswith(("RESOURCE CONTEXT GOVERNOR:","TYPED WORLD STATE (")))]
+        messages=[m for i,m in enumerate(messages) if i < base_message_count or not (m.get("role")=="system" and str(m.get("content","")).startswith(("RESOURCE CONTEXT GOVERNOR:","TYPED WORLD STATE (","LIVE STATE (")))]
         world_context=_world_context()
         if world_context:
             messages.append({"role":"system","content":world_context})
+        live_context=_live_state_context(prompt)
+        if live_context:
+            messages.append({"role":"system","content":live_context})
         messages=_trim_lo_history(messages, base_message_count)
         # Resource context is governed before inference: handles stay cheap; evidence is sliced.
         _resource_tier,_resource_budget=_lo_budget_for(prompt,thinking_mode,selected_paths)
@@ -18332,6 +18379,28 @@ def ollama_set(args):
         _save_model_sets(state); print(f"LOOK MODEL SET · deleted {name}"); return 0
     print("usage: lk ollama set [list|save NAME|show NAME|apply NAME [ROLE]|champion NAME|challenger NAME|compare A B|delete NAME]"); return 2
 
+def live_state_command(args):
+    """Inspect the bounded present-tense state pool used by JEV/cognition."""
+    args=list(args or [])
+    if args and args[0] not in {"show","refresh"}:
+        print("usage: lk state [show|refresh]"); return 2
+    live=_live_state_module()
+    data=live.refresh(path=LIVE_STATE_FILE) if args and args[0]=="refresh" else live.snapshot(path=LIVE_STATE_FILE)
+    print("LOOK LIVE STATE · SPINNING PLATES")
+    rows=list(data.get("objects") or [])
+    if not rows:
+        print("  no live typed objects")
+    else:
+        current=str(data.get("current_object_id") or "")
+        for row in rows:
+            mark="*" if str(row.get("id") or "")==current else " "
+            name=str(row.get("command") or row.get("title") or row.get("name") or "")
+            source=str(row.get("source") or "host")
+            age=int(row.get("age_ms") or 0)
+            print(f" {mark} {row.get('kind','?'):<16} {row.get('id','?'):<18} {name} · {source} · {age}ms")
+    return 0
+
+
 def capability_command(args):
     """Inspect or refresh this node's automatically curated host capabilities."""
     curator=_capability_curator_module(); args=list(args or [])
@@ -18516,6 +18585,7 @@ def main():
     if cmd=="services": return services_command(rest)
     if cmd=="vision": return vision_command(rest)
     if cmd in {"capability","capabilities"}: return capability_command(rest)
+    if cmd in {"state","live-state","livestate"}: return live_state_command(rest)
     if cmd in {"generate","image"}: return generate_command(rest)
     if cmd=="comfy": return comfy_command(rest)
     if cmd in {"schedule","scheduler"}: return schedule_command(rest)

@@ -1,3 +1,7 @@
+# Future Crash + LOOK 7.3.0 — LIVE STATE
+
+7.3.0 separates present-tense machine state from durable memory/history. A bounded Live State layer keeps typed objects such as terminal windows fresh, records provenance and age, retires objects when authoritative evidence says they are gone, and hands JEV/cognition only the state slice relevant to the current request. Receipts update the scene automatically; `lk state` is an inspection/debugging surface, not a configuration requirement. This is the first explicit implementation of the spinning-plates model: skills and procedures can persist, while layouts, processes, referents, and other current facts stay refreshable and disposable.
+
 # Future Crash + LOOK 7.2.0 — CAPABILITY CURATOR
 
 7.2.0 makes host capability discovery automatic. Each node non-destructively inspects its available OS/application adapters, persists a typed capability catalog, advertises those capabilities to Fabric, and upgrades adapters from discovered to proven through real successful receipts. JEV referential actions now include maximize, full screen, focus, and minimize as well as close. Linux terminal launches carry a zero-dependency control channel and stable window token, with stronger `wmctrl`/`xdotool` adapters preferred when present; macOS uses Terminal/AppleScript handles. `lk capabilities` exists for inspection/debugging, but install and normal operation curate automatically.

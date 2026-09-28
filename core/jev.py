@@ -169,7 +169,7 @@ def referential_action(text: str, referents):
     if not verb: return None
     obj=m.group(2).casefold().strip()
     hint="terminal_window" if re.search(r"\b(window|terminal(?:\s+window)?)\b",obj) else ""
-    deictic=bool(re.fullmatch(r"(?:it|that|this|that one|this one|the window|that window|this window|the terminal|that terminal|this terminal|that terminal window|this terminal window)",obj))
+    deictic=bool(re.fullmatch(r"(?:it|that|this|that one|this one|other one|the other one|the window|that window|this window|the terminal|that terminal|this terminal|that terminal window|this terminal window)",obj))
     compatible=[]
     for ref in list(referents or []):
         if not isinstance(ref,Mapping): continue
@@ -183,14 +183,31 @@ def referential_action(text: str, referents):
         if key in seen: continue
         seen.add(key); unique.append(ref)
     if deictic:
-        if len(unique)!=1: return None
-        selected=unique[0]; steps=[f"verb:{verb}",f"referent:{selected.get('kind','object')}","resolve:deictic"]
+        # Deictic language may resolve against one explicitly salient/current
+        # live object even when other compatible objects exist. "Other one" is
+        # the inverse relation and is only deterministic when exactly one other
+        # compatible object remains.
+        salient=[r for r in unique if r.get("_salient") or r.get("_current")]
+        if obj in {"other one","the other one"}:
+            if len(salient)!=1: return None
+            sid=str(salient[0].get("id") or salient[0])
+            others=[r for r in unique if str(r.get("id") or r)!=sid]
+            if len(others)!=1: return None
+            selected=others[0]; steps=[f"verb:{verb}",f"referent:{selected.get('kind','object')}","resolve:other"]
+        elif len(salient)==1:
+            selected=salient[0]; steps=[f"verb:{verb}",f"referent:{selected.get('kind','object')}","resolve:salient"]
+        elif len(unique)==1:
+            selected=unique[0]; steps=[f"verb:{verb}",f"referent:{selected.get('kind','object')}","resolve:deictic"]
+        else:
+            return None
     else:
         scored=sorted(((_referent_match(obj,ref),idx,ref) for idx,ref in enumerate(unique)),key=lambda x:(-x[0],x[1]))
         if not scored or scored[0][0] < .88: return None
         second=scored[1][0] if len(scored)>1 else 0.0
         if second>=scored[0][0]-.08: return None
         selected=scored[0][2]; steps=[f"verb:{verb}",f"referent:{selected.get('kind','object')}",f"resolve:name:{scored[0][0]:.2f}"]
+    # JEV bookkeeping is not part of the host object's identity/capability data.
+    selected={k:v for k,v in selected.items() if not str(k).startswith("_")}
     return {"kind":"referential_action","verb":rawverb,"action":verb,"object":selected,"confidence":1.0,"steps":steps}
 
 def image_imperative(text: str):
