@@ -1,3 +1,7 @@
+# 7.5.1 — ALBERT SOURCES
+
+Albert saved objects, source provenance, and place/map rendering.
+
 # 7.5.0 — OBSERVATION PLANE
 
 - Added `core/observation.py`, a read-only host observation plane separate from actions, memory, and capability authority.

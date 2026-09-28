@@ -1,6 +1,6 @@
-# Future Crash + LOOK 7.5.0 — OBSERVATION PLANE
+# Future Crash + LOOK 7.5.1 — ALBERT SOURCES
 
-7.5.0 turns Live State from a receipt-fed cache into an observed, reconciled world model. A read-only Observation Plane inspects current host objects where the OS exposes them, merges those observations onto stable typed identities, refreshes focus and freshness, and lets stale unrefreshable objects fall out of present-tense state. JEV adds first-class state queries and relational set selection, so `what windows are open`, `run another in a new terminal`, and `close the first ascii window` operate over current objects rather than chat history.
+7.5.1 makes Albert a durable, sourced information surface: server-owned saved objects, trustworthy provenance badges, and provider-neutral place results with a quiet coordinate map renderer.
 
 # Future Crash + LOOK 7.3.0 — LIVE STATE
 

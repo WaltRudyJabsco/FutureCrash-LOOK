@@ -59,6 +59,8 @@ body.dark .beacon-layer,body.terminal .beacon-layer{mix-blend-mode:screen}
 .attachment-tray{display:none;gap:6px;flex-wrap:wrap;padding:0 4px 8px}.attachment-tray.live{display:flex}.attachment{display:flex;align-items:center;gap:6px;border:1px solid var(--line);padding:5px 7px;font-size:9px;max-width:220px}.attachment img{width:28px;height:28px;object-fit:cover;border:1px solid var(--line)}.attachment button{border:0;background:transparent;color:var(--muted);padding:0 2px}
 .thread{margin-top:14px;border-top:1px solid var(--line);padding-top:10px}.thread-turn{padding:8px 0;border-bottom:1px dotted var(--line)}.thread-turn:last-child{border-bottom:0}.thread-role{font-size:8px;text-transform:uppercase;letter-spacing:.12em;color:var(--muted);margin-bottom:4px}.thread-text{font-family:ui-serif,Georgia,Cambria,"Times New Roman",serif;font-size:14px;line-height:1.55}.thread-compose{display:grid;grid-template-columns:1fr auto;gap:7px;margin-top:10px}.thread-compose input{min-width:0;border:0;border-bottom:1px solid var(--line);background:transparent;outline:0;padding:8px 2px;font-size:12px}.thread-compose button{border:1px solid var(--line);background:transparent;padding:7px 9px;font-size:9px}
 .auth-gate{position:fixed;inset:0;z-index:10000;background:rgba(243,239,227,.97);display:flex;align-items:center;justify-content:center;padding:24px}.auth-gate[hidden]{display:none}.auth-card{width:min(520px,100%);border-top:1px solid var(--ink);padding-top:16px}.auth-kicker{font-size:9px;letter-spacing:.16em;text-transform:uppercase;color:var(--muted)}.auth-title{font-family:ui-serif,Georgia,serif;font-size:24px;margin:8px 0 18px}.auth-code{font-size:42px;letter-spacing:.16em;margin:16px 0}.auth-command{font-size:12px;border:1px solid var(--line);padding:10px;margin:10px 0}.auth-note{font-size:10px;color:var(--muted);line-height:1.5}
+
+.place-map{border:1px solid var(--line);background:var(--wash);margin:10px 0;padding:10px}.place-map svg{display:block;width:100%;height:230px}.map-line{stroke:var(--line);stroke-width:.6;fill:none}.map-point{fill:var(--paper);stroke:var(--ink);stroke-width:1.2}.map-label{font-size:4px;fill:var(--ink);font-family:ui-monospace,SFMono-Regular,Menlo,monospace}.place-list{display:grid;gap:6px;margin-top:9px}.place-row{font-size:10px;line-height:1.45;border-top:1px dotted var(--line);padding-top:6px}.saved-tools{display:flex;gap:6px;flex-wrap:wrap;margin-top:8px}.saved-title{border:0;border-bottom:1px solid var(--line);background:transparent;padding:5px 2px;min-width:180px;font-size:11px}
 </style>
 </head>
 <body>
@@ -113,7 +115,7 @@ const ALBERT_SESSION = localStorage.getItem('albert-session')||'main'; localStor
 const ALL_CLASSICAL = 'https://allclassical.streamguys1.com/ac128kmp3';
 const CLASSIC_ARTS = 'https://www.classicartsshowcase.org/watch-classic-arts-showcase/';
 const CLASSIC_ARTS_STREAM = 'https://classicarts.global.ssl.fastly.net/live/cas/master_3000k.m3u8';
-const state={folds:[], saved:loadSaved(), busy:false, attachments:[]};
+const state={folds:[], saved:[], busy:false, attachments:[]};
 let endpointAuthorized=false;
 const authGate=document.getElementById('authGate'),authCode=document.getElementById('authCode'),authCodeInline=document.getElementById('authCodeInline');
 function browserEndpointLabel(){const saved=localStorage.getItem('fabric-endpoint-label');if(saved)return saved;const ua=navigator.userAgent||'';if(/iPad/i.test(ua)||(/Macintosh/i.test(ua)&&navigator.maxTouchPoints>1))return 'iPad';if(/iPhone/i.test(ua))return 'iPhone';if(/Android/i.test(ua))return 'Android browser';if(/Macintosh|Mac OS/i.test(ua))return 'Mac browser';return 'Browser'}
@@ -135,8 +137,11 @@ const capabilities=[
   ['contacts.search','Resolve a person','read'],['maps.route','Build directions using an available map provider','local effect'],
   ['watch.create','Create a quiet recurring/conditional watch','external effect'],['system.open_app','Open an available application','local effect']
 ];
-function loadSaved(){try{return JSON.parse(localStorage.getItem('albert5.saved')||'[]')}catch{return[]}}
-function storeSaved(){localStorage.setItem('albert5.saved',JSON.stringify(state.saved.slice(-24)))}
+async function loadSaved(){
+  try{const r=await fetch('/api/saved',{cache:'no-store'});if(r.ok){const d=await r.json();state.saved=d.items||[];render();return}}catch{}
+  try{state.saved=JSON.parse(localStorage.getItem('albert5.saved')||'[]')}catch{state.saved=[]}
+}
+async function savedRequest(body){const r=await fetch('/api/saved',{method:'POST',headers:{'content-type':'application/json'},body:JSON.stringify(body)});if(!r.ok)throw new Error('saved object update failed');return r.json()}
 function tick(){const d=new Date();clock.textContent=d.toLocaleTimeString([],{hour:'numeric',minute:'2-digit'}).replace(' ','');date.textContent=d.toLocaleDateString([],{weekday:'long',month:'long',day:'numeric'})}tick();setInterval(tick,30000);
 function esc(s=''){return String(s).replace(/[&<>"']/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#039;'}[c]))}
 function uid(){return 'f'+Math.random().toString(36).slice(2,9)}
@@ -152,11 +157,21 @@ function renderBody(f){
   if(f.type==='image') return `<div class="media"><img src="${esc(f.src)}" alt="${esc(f.title||'image')}" /></div>${f.text?`<div class="prose">${esc(f.text)}</div>`:''}`;
   if(f.type==='file') return `<div class="object"><div class="object-label">${esc(f.mime||'object')}</div>${esc(f.name||f.title)}${f.detail?`<div class="meta">${esc(f.detail)}</div>`:''}</div>`;
   if(f.type==='watch') return `<div class="pillbar"><span class="pill live">quiet watch</span>${(f.pills||[]).map(x=>`<span class="pill">${esc(x)}</span>`).join('')}</div><div class="prose">${esc(f.text||'')}</div>${renderPipeline(f.pipeline)}`;
+  if(f.type==='places') return `${renderPlaceMap(f)}${f.text?`<div class="prose">${esc(f.text)}</div>`:''}${renderTrust(f.evidence)}${renderSources(f.sources)}`;
   if(f.type==='route') return `<div class="object"><div class="object-label">Route</div>${esc(f.text||'')}</div>${renderPipeline(f.pipeline)}`;
   if(f.type==='person') return `<div class="object"><div class="object-label">Person</div>${esc(f.text||f.title)}</div>${renderPipeline(f.pipeline)}`;
   return `<div class="prose">${esc(f.text||'')}</div>${renderPipeline(f.pipeline)}`;
 }
 
+function renderPlaceMap(f){
+  const ps=(f.places||[]).filter(p=>Number.isFinite(+p.lat)&&Number.isFinite(+p.lon));if(!ps.length)return'';
+  const lats=ps.map(p=>+p.lat),lons=ps.map(p=>+p.lon),minA=Math.min(...lats),maxA=Math.max(...lats),minO=Math.min(...lons),maxO=Math.max(...lons),da=Math.max(.002,maxA-minA),do_=Math.max(.002,maxO-minO);
+  const xy=p=>[8+84*((+p.lon-minO)/do_),8+64*(1-(+p.lat-minA)/da)];
+  const grid=[20,40,60,80].map(v=>`<path class="map-line" d="M${v} 5V75 M5 ${v*.75}H95"/>`).join('');
+  const marks=ps.map((p,i)=>{const [x,y]=xy(p);return `<g><circle class="map-point" cx="${x}" cy="${y}" r="1.8"/><text class="map-label" x="${Math.min(82,x+2.5)}" y="${Math.max(7,y-2)}">${esc(p.name||('Place '+(i+1)))}</text></g>`}).join('');
+  const rows=ps.map(p=>`<div class="place-row"><b>${esc(p.name)}</b><br>${esc(p.address||'')}</div>`).join('');
+  return `<div class="place-map" title="Coordinate map from sourced place data"><svg viewBox="0 0 100 80" preserveAspectRatio="xMidYMid meet">${grid}${marks}</svg><div class="place-list">${rows}</div></div>`;
+}
 function renderThread(f){
   const attached=(f.attachments||[]).map(a=>`<span class="pill">${esc(a.name||a.mime||'attachment')}</span>`).join('');
   const turns=(f.turns||[]).map(t=>`<div class="thread-turn"><div class="thread-role">${esc(t.role==='user'?'you':'Albert')}</div><div class="thread-text">${esc(t.text||'')}</div></div>`).join('');
@@ -176,7 +191,8 @@ function renderSignal(sig){if(!sig?.seed)return'';const bytes=(sig.seed.match(/.
 function renderChoices(f){if(!f.clarification?.choices?.length)return'';return `<div class="choices">${f.clarification.choices.map(c=>`<button class="action" onclick="answerChoice('${f.id}','${esc(c.value||c.label)}')">${esc(c.label||c.value)}</button>`).join('')}</div>`}
 async function answerChoice(id,value){await askFabric(value,{parent_fold:id,clarification:true},id)}
 function savedShell(f){
-  return `<article class="fold saved-fold" id="saved-${f.id}" data-kind="${esc(f.kind||'thing')}"><button class="summary" onclick="reopenSaved('${f.id}')"><div><div class="title">${esc(f.title||'Untitled')}</div><div class="meta">${esc(f.meta||'')} · saved</div></div><div class="right">open</div></button><div class="body"><div class="inner"><div class="content"><div class="actions"><button class="action primary" onclick="reopenSaved('${f.id}')">open on paper</button><button class="action quiet-action" onclick="removeSaved('${f.id}')">remove saved</button></div></div></div></div></article>`
+  const pin=f.pinned?'pinned':'pin';
+  return `<article class="fold saved-fold" id="saved-${f.id}" data-kind="${esc(f.kind||'thing')}"><button class="summary" onclick="reopenSaved('${f.id}')"><div><div class="title">${esc(f.title||'Untitled')}</div><div class="meta">${esc(f.meta||'')} · saved${f.pinned?' · pinned':''}</div></div><div class="right">open</div></button><div class="body open"><div class="inner"><div class="content"><div class="saved-tools"><button class="action primary" onclick="reopenSaved('${f.id}')">open on paper</button><input class="saved-title" id="saved-title-${f.id}" value="${esc(f.title||'')}" onclick="event.stopPropagation()" onkeydown="if(event.key==='Enter'){event.stopPropagation();renameSaved('${f.id}')}"/><button class="action" onclick="renameSaved('${f.id}')">rename</button><button class="action" onclick="toggleSavedPin('${f.id}')">${pin}</button><button class="action quiet-action" onclick="removeSaved('${f.id}')">delete</button></div></div></div></div></article>`
 }
 function teardownMedia(root=stream){
   root.querySelectorAll('audio,video').forEach(media=>{
@@ -206,10 +222,12 @@ function addFold(f,{front=false}={}){f={id:uid(),open:true,kind:'thing',...f};fr
 function replaceFold(id,f){const i=state.folds.findIndex(x=>x.id===id);if(i>=0){state.folds[i]={...state.folds[i],...f,id};render()}}
 function toggleFold(id){const f=state.folds.find(x=>x.id===id);if(f){f.open=!f.open;render()}}
 function dismissFold(id){const f=state.folds.find(x=>x.id===id);if(!f)return;const el=document.getElementById(id);if(el)teardownMedia(el);f.dismissed=true;el?.classList.add('dismiss');setTimeout(render,180)}
-function pinFold(id){const f=state.folds.find(x=>x.id===id);if(f){f.pinned=!f.pinned;render()}}
-function saveFold(id){const f=state.folds.find(x=>x.id===id);if(!f)return;const snapshot={...f,dismissed:false,open:false};const i=state.saved.findIndex(x=>x.id===f.id);if(i>=0)state.saved[i]=snapshot;else state.saved.push(snapshot);storeSaved();render()}
-function reopenSaved(id){const saved=state.saved.find(x=>x.id===id);if(!saved)return;const live={...saved,id:uid(),dismissed:false,open:true,pinned:false};state.folds.push(live);render();setTimeout(()=>document.getElementById(live.id)?.scrollIntoView({behavior:'smooth',block:'center'}),30)}
-function removeSaved(id){state.saved=state.saved.filter(x=>x.id!==id);storeSaved();render()}
+async function pinFold(id){const f=state.folds.find(x=>x.id===id);if(!f)return;if(!state.saved.some(x=>x.id===f.id))await saveFold(id);await toggleSavedPin(f.id)}
+async function saveFold(id){const f=state.folds.find(x=>x.id===id);if(!f)return;const snapshot={...f,dismissed:false,open:false,pinned:!!f.pinned};const d=await savedRequest({op:'save',item:snapshot});const i=state.saved.findIndex(x=>x.id===d.item.id);if(i>=0)state.saved[i]=d.item;else state.saved.push(d.item);render()}
+async function reopenSaved(id){const saved=state.saved.find(x=>x.id===id);if(!saved)return;if(saved.prompt){await askFabric(saved.prompt,{saved_id:id});return}const live={...saved,id:uid(),dismissed:false,open:true};state.folds.push(live);render();setTimeout(()=>document.getElementById(live.id)?.scrollIntoView({behavior:'smooth',block:'center'}),30)}
+async function renameSaved(id){const el=document.getElementById('saved-title-'+id),title=el?.value.trim();if(!title)return;const d=await savedRequest({op:'patch',id,changes:{title}});const i=state.saved.findIndex(x=>x.id===id);if(i>=0&&d.item)state.saved[i]=d.item;render()}
+async function toggleSavedPin(id){const row=state.saved.find(x=>x.id===id);if(!row)return;const d=await savedRequest({op:'patch',id,changes:{pinned:!row.pinned}});const i=state.saved.findIndex(x=>x.id===id);if(i>=0&&d.item)state.saved[i]=d.item;render()}
+async function removeSaved(id){await savedRequest({op:'delete',id});state.saved=state.saved.filter(x=>x.id!==id);render()}
 function addProgress(text='Understanding…'){state.busy=true;statusLine('thinking');const id=addFold({type:'progress',title:'Albert',meta:'cognition',badge:'working',text,kind:'progress'});return id}
 function finishProgress(id){state.folds=state.folds.filter(x=>x.id!==id);state.busy=false;statusLine('local surface · ready');render()}
 async function askFabric(query,context={},targetFold=null){
@@ -228,7 +246,7 @@ async function askFabric(query,context={},targetFold=null){
 }
 function consumeFabric(payload,context={}){const items=Array.isArray(payload)?payload:(payload.items||[payload]);items.filter(Boolean).forEach(x=>{const f=normalizeResult(x);if(context.query&&f.type==='answer'){f.prompt=context.query;f.turns=[{role:'user',text:context.query},{role:'assistant',text:f.text||''}];f.text='';if(!f.title||f.title==='Albert')f.title=topicTitle(context.query)}if(context.attachments?.length)f.attachments=context.attachments;addFold(f)})}
 function topicTitle(q){const t=String(q||'').trim().replace(/[?!.]+$/,'');if(!t)return 'Thought';return t.length>48?t.slice(0,47)+'…':t[0].toUpperCase()+t.slice(1)}
-function normalizeResult(x){if(x.fold)return x.fold;if(x.result)return normalizeResult(x.result);return {type:x.type||'answer',title:x.title||'Albert',meta:x.meta||x.tool||'Fabric',badge:x.badge||'ready',kind:x.kind||'thing',text:x.text||x.message||'',src:x.src,embed:x.embed,external:x.external,subtitle:x.subtitle,sources:x.sources,pipeline:x.pipeline,pills:x.pills,evidence:x.evidence,clarification:x.clarification,signal:x.signal}}
+function normalizeResult(x){if(x.fold)return x.fold;if(x.result)return normalizeResult(x.result);return {type:x.type||'answer',title:x.title||'Albert',meta:x.meta||x.tool||'Fabric',badge:x.badge||'ready',kind:x.kind||'thing',text:x.text||x.message||'',src:x.src,embed:x.embed,external:x.external,subtitle:x.subtitle,sources:x.sources,pipeline:x.pipeline,pills:x.pills,evidence:x.evidence,clarification:x.clarification,signal:x.signal,places:x.places,prompt:x.prompt}}
 function localCognition(raw){const q=raw.trim(),s=q.toLowerCase();
   if(/^(play |put on )?(some )?(classics|classical|classical music)$/.test(s)||s.includes('all classical')) return {type:'audio',title:'All Classical Radio',subtitle:'Portland · live',meta:'media.play · this endpoint',badge:'live',kind:'thing',src:ALL_CLASSICAL,note:'Built-in open stream alias · classics / classical',pipeline:{intent:'media.play',selector:'stream:all-classical',target:'origin endpoint',player:'browser'}};
   if(s.includes('classic arts')||s.includes('arts showcase')||s==='showcase'||s==='play arts') return {type:'video',title:'Classic Arts Showcase',meta:'media.play · this endpoint',badge:'live',kind:'thing',src:CLASSIC_ARTS_STREAM,embed:CLASSIC_ARTS,external:CLASSIC_ARTS,text:'A permanent arts channel: performance, visual arts, film and classical music.',pipeline:{intent:'media.play',selector:'stream:classic-arts-showcase',target:'origin endpoint',preferred:'direct HLS',fallback:'official web feed'}};
@@ -272,7 +290,7 @@ async function pollLights(){try{const r=await fetch('/v1/lights',{cache:'no-stor
 setInterval(pollLights,350);pollLights();
 // Opening paper: one compact introduction, not a dashboard.
 async function restoreThread(){try{const r=await fetch('/api/thread?session='+encodeURIComponent(ALBERT_SESSION),{cache:'no-store'});if(!r.ok)return;const d=await r.json();if(!d.turns?.length)return;addFold({type:'answer',title:'Albert',meta:'continued thread',badge:'restored',kind:'thing',turns:d.turns.map(t=>({role:t.role,text:t.content}))},{front:true})}catch{}}
-restoreThread();
+restoreThread();loadSaved();
 </script>
 </body>
 </html>

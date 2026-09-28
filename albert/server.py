@@ -4,7 +4,7 @@ from __future__ import annotations
 import json, mimetypes, os, urllib.request, urllib.error, importlib.util, threading, time, hashlib, re, sys
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
-from urllib.parse import urlparse, unquote
+from urllib.parse import urlparse, unquote, urlencode, parse_qs
 
 ROOT=Path(__file__).resolve().parent
 # Installed Albert lives beside Future Crash rather than inside the source tree.
@@ -33,6 +33,7 @@ _SESSIONS={}
 _SESSION_LOCK=threading.Lock()
 _SESSION_TTL=30*24*3600
 THREAD_FILE=Path.home()/'.local/share/future-crash-look/albert-threads.json'
+SAVED_FILE=Path.home()/'.local/share/future-crash-look/albert-saved.json'
 THREAD_FILE.parent.mkdir(parents=True,exist_ok=True)
 
 def _lo_engine_path():
@@ -73,6 +74,90 @@ def _save_threads():
     tmp.replace(THREAD_FILE)
 
 _SESSIONS.update(_load_threads())
+
+def _read_saved():
+    try:
+        rows=json.loads(SAVED_FILE.read_text()) if SAVED_FILE.exists() else []
+        return rows if isinstance(rows,list) else []
+    except Exception:
+        return []
+
+def _write_saved(rows):
+    SAVED_FILE.parent.mkdir(parents=True,exist_ok=True)
+    clean=list(rows or [])[-48:]
+    tmp=SAVED_FILE.with_name(SAVED_FILE.name+f'.{os.getpid()}.{threading.get_ident()}.tmp')
+    tmp.write_text(json.dumps(clean,ensure_ascii=False,indent=2))
+    tmp.replace(SAVED_FILE)
+
+def _canonical_saved_title(item):
+    title=str(item.get('title') or '').strip()
+    kind=str(item.get('type') or '').casefold()
+    prompt=str(item.get('prompt') or '').strip()
+    if kind=='places':
+        return title if title and title!='Albert' else 'Places'
+    if 'weather' in prompt.casefold():
+        # The result title is preferred when the weather edge supplied a place.
+        if title and title.casefold() not in {'albert','the weather','the weather again','weather again'}:
+            return title
+        return 'Weather'
+    return title or (prompt[:48].rstrip(' ?!.') if prompt else 'Saved item')
+
+def _normalize_saved(item):
+    row=dict(item or {})
+    row['id']=str(row.get('id') or hashlib.sha256(json.dumps(row,sort_keys=True,default=str).encode()).hexdigest()[:16])[:80]
+    row['title']=_canonical_saved_title(row)[:100]
+    row['pinned']=bool(row.get('pinned'))
+    row['saved_at']=float(row.get('saved_at') or time.time())
+    # Saved objects retain the request needed to refresh dynamic information.
+    if row.get('prompt'): row['prompt']=str(row['prompt'])[:12000]
+    return row
+
+def saved_upsert(item):
+    row=_normalize_saved(item)
+    rows=_read_saved(); rows=[x for x in rows if str(x.get('id'))!=row['id']]; rows.append(row); _write_saved(rows)
+    return row
+
+def saved_patch(item_id,changes):
+    rows=_read_saved(); found=None
+    for i,row in enumerate(rows):
+        if str(row.get('id'))==str(item_id):
+            nxt=dict(row)
+            if 'title' in changes: nxt['title']=str(changes.get('title') or '').strip()[:100] or row.get('title') or 'Saved item'
+            if 'pinned' in changes: nxt['pinned']=bool(changes.get('pinned'))
+            rows[i]=_normalize_saved(nxt); found=rows[i]; break
+    if found: _write_saved(rows)
+    return found
+
+def saved_delete(item_id):
+    rows=_read_saved(); nxt=[x for x in rows if str(x.get('id'))!=str(item_id)]
+    if len(nxt)==len(rows): return False
+    _write_saved(nxt); return True
+
+def _place_query(text):
+    q=' '.join(str(text or '').split())
+    low=q.casefold()
+    if low.startswith(('map ','show me on a map ','where is ','where are ')) or any(x in low for x in (' on a map',' map of ',' near ')):
+        for prefix in ('show me on a map ','where is ','where are ','map '):
+            if low.startswith(prefix): return q[len(prefix):].strip(' ?.')
+        return q
+    return ''
+
+def places_search(query,limit=6):
+    params=urlencode({'q':query,'format':'jsonv2','limit':max(1,min(int(limit),8)),'addressdetails':1})
+    req=urllib.request.Request('https://nominatim.openstreetmap.org/search?'+params,headers={'User-Agent':'FutureCrash-Albert/7.5.1 (local personal assistant)','Accept':'application/json'})
+    with urllib.request.urlopen(req,timeout=5.0) as r: raw=json.loads(r.read().decode())
+    places=[]
+    for x in raw:
+        try: lat=float(x['lat']); lon=float(x['lon'])
+        except Exception: continue
+        label=str(x.get('name') or str(x.get('display_name') or '').split(',')[0] or 'Place')[:100]
+        places.append({'name':label,'lat':lat,'lon':lon,'address':str(x.get('display_name') or label)[:300],'kind':str(x.get('type') or x.get('category') or 'place')[:50]})
+    return places
+
+def places_result(query):
+    places=places_search(query)
+    if not places: return None
+    return {'type':'places','title':query[:80].title(),'meta':'OpenStreetMap · Nominatim','badge':'verified','kind':'things','text':f"{len(places)} place"+('' if len(places)==1 else 's')+' found.','places':places,'evidence':[{'class':'PLACES','source':'OpenStreetMap · Nominatim','confidence':'DIRECT','verified':True}],'sources':['OpenStreetMap contributors · Nominatim'],'prompt':'map '+query}
 
 def _session_history(session_id):
     session_id=str(session_id or 'main')[:120]
@@ -174,6 +259,15 @@ def action(text, session="", context=None):
             return {"type":"answer","title":"Fabric","meta":"node discovery","badge":f"{len(names)} nodes","kind":"things","text":"Available: "+", ".join(names),"pipeline":{"source":"/v1/nodes","effect":"read"}}
         except Exception as exc:
             return {"type":"answer","title":"Fabric","meta":"node discovery","badge":"offline","text":f"Unified Node is not reachable: {exc}"}
+    place_q=_place_query(q)
+    if place_q:
+        try:
+            found=places_result(place_q)
+            if found: return found
+        except Exception:
+            # Provider failure falls through to cognition; never fabricate coordinates.
+            pass
+
     # The shared LO core owns intent routing. In particular, "play a game" is
     # not media merely because it starts with the word play.
     try:
@@ -256,7 +350,7 @@ def action(text, session="", context=None):
         }
 
 class Handler(BaseHTTPRequestHandler):
-    server_version='Albert/1.3.0'
+    server_version='Albert/1.4.0'
     def log_message(self,*_): pass
     def send_json(self,code,obj,headers=None):
         raw=json.dumps(obj,ensure_ascii=False).encode(); self.send_response(code); self.send_header('Content-Type','application/json; charset=utf-8'); self.send_header('Content-Length',str(len(raw)));
@@ -298,7 +392,10 @@ class Handler(BaseHTTPRequestHandler):
     def do_GET(self):
         path=urlparse(self.path).path
         if path=='/api/auth/status': return self._auth_status()
-        if path in {'/health','/v1/health'}: return self.send_json(200,{"ok":True,"surface":"albert","version":"1.3.0","fabric":NODE})
+        if path in {'/health','/v1/health'}: return self.send_json(200,{"ok":True,"surface":"albert","version":"1.4.0","fabric":NODE})
+        if path=='/api/saved':
+            if not self._require_endpoint('lo.use'): return
+            return self.send_json(200,{'ok':True,'items':_read_saved()})
         if path=='/api/thread':
             if not self._require_endpoint('lo.use'): return
             from urllib.parse import parse_qs
@@ -331,6 +428,18 @@ class Handler(BaseHTTPRequestHandler):
         data=target.read_bytes(); self.send_response(200); self.send_header('Content-Type',mimetypes.guess_type(target.name)[0] or 'application/octet-stream'); self.send_header('Cache-Control','no-cache'); self.send_header('Content-Length',str(len(data))); self.end_headers(); self.wfile.write(data)
     def do_POST(self):
         path=urlparse(self.path).path
+        if path=='/api/saved':
+            if not self._require_endpoint('lo.use'): return
+            try:
+                n=int(self.headers.get('Content-Length') or 0); d=json.loads(self.rfile.read(min(n,262144)) or b'{}')
+                op=str(d.get('op') or 'save')
+                if op=='save': return self.send_json(200,{'ok':True,'item':saved_upsert(d.get('item') or {})})
+                if op=='patch':
+                    row=saved_patch(d.get('id'),d.get('changes') or {})
+                    return self.send_json(200 if row else 404,{'ok':bool(row),'item':row})
+                if op=='delete': return self.send_json(200,{'ok':saved_delete(d.get('id'))})
+                return self.send_json(400,{'ok':False,'error':'unknown saved operation'})
+            except Exception as exc: return self.send_json(400,{'ok':False,'error':str(exc)})
         if path=='/api/endpoint/poll':
             ep=self._require_endpoint('lo.use')
             if not ep:return

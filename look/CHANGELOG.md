@@ -1,3 +1,7 @@
+# 7.5.1 — ALBERT SOURCES
+
+Albert saved objects, source provenance, and place/map rendering.
+
 # 7.5.0 — OBSERVATION PLANE
 
 - Live State is now refreshed from read-only OS observation where available, not only from LOOK's own action receipts.
