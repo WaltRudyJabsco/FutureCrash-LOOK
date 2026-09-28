@@ -1,4 +1,4 @@
-# 7.4.0 — OBSERVATION PLANE
+# 7.5.0 — OBSERVATION PLANE
 
 - Live State is now refreshed from read-only OS observation where available, not only from LOOK's own action receipts.
 - `what windows are open` is a deterministic state query.

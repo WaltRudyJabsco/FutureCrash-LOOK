@@ -31,7 +31,9 @@ _LO_ENGINE=None
 _LO_LOCK=threading.Lock()
 _SESSIONS={}
 _SESSION_LOCK=threading.Lock()
-_SESSION_TTL=6*3600
+_SESSION_TTL=30*24*3600
+THREAD_FILE=Path.home()/'.local/share/future-crash-look/albert-threads.json'
+THREAD_FILE.parent.mkdir(parents=True,exist_ok=True)
 
 def _lo_engine_path():
     candidates=[
@@ -57,27 +59,51 @@ def _load_lo_engine():
         _LO_ENGINE=module
         return module
 
+def _load_threads():
+    try:
+        raw=json.loads(THREAD_FILE.read_text()) if THREAD_FILE.exists() else {}
+        return {str(k):(float(v.get("stamp") or 0),list(v.get("rows") or [])) for k,v in raw.items() if isinstance(v,dict)}
+    except Exception:
+        return {}
+
+def _save_threads():
+    payload={k:{"stamp":stamp,"rows":rows} for k,(stamp,rows) in _SESSIONS.items()}
+    tmp=THREAD_FILE.with_name(THREAD_FILE.name+f'.{os.getpid()}.tmp')
+    tmp.write_text(json.dumps(payload,ensure_ascii=False,indent=2))
+    tmp.replace(THREAD_FILE)
+
+_SESSIONS.update(_load_threads())
+
 def _session_history(session_id):
-    if not session_id:
-        return []
+    session_id=str(session_id or 'main')[:120]
     now=time.time()
     with _SESSION_LOCK:
-        for key,(stamp,_rows) in list(_SESSIONS.items()):
-            if now-stamp > _SESSION_TTL:
-                _SESSIONS.pop(key,None)
+        expired=[key for key,(stamp,_rows) in _SESSIONS.items() if now-stamp > _SESSION_TTL]
+        for key in expired: _SESSIONS.pop(key,None)
+        if expired: _save_threads()
         row=_SESSIONS.get(session_id)
         return list(row[1]) if row else []
 
 def _session_append(session_id,user_text,assistant_text):
-    if not session_id:
-        return
+    session_id=str(session_id or 'main')[:120]
     with _SESSION_LOCK:
         rows=list(_SESSIONS.get(session_id,(0,[]))[1])
-        if user_text:
-            rows.append({"role":"user","content":str(user_text)[:12000]})
-        if assistant_text:
-            rows.append({"role":"assistant","content":str(assistant_text)[:12000]})
-        _SESSIONS[session_id]=(time.time(),rows[-12:])
+        if user_text: rows.append({"role":"user","content":str(user_text)[:12000]})
+        if assistant_text: rows.append({"role":"assistant","content":str(assistant_text)[:12000]})
+        _SESSIONS[session_id]=(time.time(),rows[-40:])
+        _save_threads()
+
+def _trust_evidence(reply):
+    receipts=list(reply.get("receipts") or [])
+    if receipts:
+        out=[]
+        for r in receipts:
+            edge=str(r.get("edge") or "SOURCE").upper()
+            out.append({"class":edge,"source":str(r.get("source") or edge),"confidence":str(r.get("confidence") or "DIRECT"),"verified":edge not in {"MODEL","INFER"}})
+        return out
+    p=reply.get("provenance") or {}
+    edge=str(p.get("edge") or "MODEL").upper()
+    return [{"class":edge,"source":str(p.get("source") or "model"),"confidence":str(p.get("confidence") or "INFERRED"),"verified":False}]
 
 TOOLS=[
  {"name":"media.play","does":"Play or prepare media","risk":"local_effect"},
@@ -132,7 +158,7 @@ def cognition_json(text, session="", selected_paths=None):
         # instead of executing it has not completed the user's request.
         raise RuntimeError("cognition returned unexecuted tool protocol")
     _session_append(sid,text,answer)
-    return {"text":answer,"lo_events":list(result.get("events") or []),"provenance":result.get("provenance")}
+    return {"text":answer,"lo_events":list(result.get("events") or []),"provenance":result.get("provenance"),"receipts":list(result.get("receipts") or []),"route":result.get("route")}
 
 def action(text, session="", context=None):
     context=context or {}
@@ -196,13 +222,16 @@ def action(text, session="", context=None):
         if tool_names:
             pipeline["tools"]=" · ".join(tool_names)
         is_game="game_action" in tool_names
+        evidence=_trust_evidence(reply)
         return {
             "type":"answer",
             "title":"LOOK Games" if is_game else "Albert",
             "meta":"",
-            "badge":"ready" if is_game else ("grounded" if tool_names else "answer"),
+            "badge":"ready" if is_game else ("verified" if any(x.get("verified") for x in evidence) else "inference"),
             "kind":"things",
             "text":text,
+            "evidence":evidence,
+            "signal":{"mode":"response","seed":hashlib.sha256(text.encode()).hexdigest()[:24]},
             "pipeline":pipeline,
         }
     except Exception as exc:
@@ -227,7 +256,7 @@ def action(text, session="", context=None):
         }
 
 class Handler(BaseHTTPRequestHandler):
-    server_version='Albert/1.2.4'
+    server_version='Albert/1.3.0'
     def log_message(self,*_): pass
     def send_json(self,code,obj,headers=None):
         raw=json.dumps(obj,ensure_ascii=False).encode(); self.send_response(code); self.send_header('Content-Type','application/json; charset=utf-8'); self.send_header('Content-Length',str(len(raw)));
@@ -269,7 +298,12 @@ class Handler(BaseHTTPRequestHandler):
     def do_GET(self):
         path=urlparse(self.path).path
         if path=='/api/auth/status': return self._auth_status()
-        if path in {'/health','/v1/health'}: return self.send_json(200,{"ok":True,"surface":"albert","version":"1.2.3","fabric":NODE})
+        if path in {'/health','/v1/health'}: return self.send_json(200,{"ok":True,"surface":"albert","version":"1.3.0","fabric":NODE})
+        if path=='/api/thread':
+            if not self._require_endpoint('lo.use'): return
+            from urllib.parse import parse_qs
+            sid=str(parse_qs(urlparse(self.path).query).get('session',['main'])[0] or 'main')[:120]
+            return self.send_json(200,{"ok":True,"session":sid,"turns":_session_history(sid)})
         if path in {'/v1/actions','/api/capabilities'}:
             if not self._require_endpoint('lo.use'): return
             try: caps=node_json('/v1/capabilities')

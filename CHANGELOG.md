@@ -1,4 +1,4 @@
-# 7.4.0 — OBSERVATION PLANE
+# 7.5.0 — OBSERVATION PLANE
 
 - Added `core/observation.py`, a read-only host observation plane separate from actions, memory, and capability authority.
 - Linux observes current desktop windows through `wmctrl` when available and active focus through EWMH/xprop; macOS observes Terminal windows and front-window identity through AppleScript.
@@ -934,3 +934,9 @@ Signal media output routing is now explicit: browser playback is a local browser
 - Existing LO memory remains intact.
 - Existing Future Crash compact local memory remains intact and is supplied as Oracle-local context.
 - Ambient, fortune, threads, and Signal compilation keep their specialized lightweight paths.
+
+## 7.5.0 — ALBERT TRUST
+- Persistent server-owned Albert thread continuity across browser views/restarts.
+- Trust/evidence badges derived from LO receipts and provenance; model synthesis is never verified.
+- Additive typed clarification and Signal presentation fields in Albert's response envelope.
+- Removed the mandatory startup greeting fold; status remains visible without polluting conversation history.
