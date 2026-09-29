@@ -41,6 +41,7 @@ STATE_DIR=HOME/".local"/"share"/"look"
 CONFIG_DIR=HOME/".config"/"look"
 PROFILE_CONFIG_FILE=CONFIG_DIR/"profile.json"
 FEEDBACK_FILE=CONFIG_DIR/"feedback.json"
+RENDERER_CONFIG_FILE=CONFIG_DIR/"renderer.json"
 PROFILE_SCHEMA_VERSION=1
 MEMORY_FILE=STATE_DIR/"ollama_memory.json"
 CORE_FILE=STATE_DIR/"core.md"
@@ -370,6 +371,44 @@ def _save_feedback(data):
     try: os.chmod(tmp,0o600)
     except OSError: pass
     tmp.replace(FEEDBACK_FILE)
+
+
+def _load_renderer_config():
+    data={"icons":"classic"}
+    try:
+        loaded=json.loads(RENDERER_CONFIG_FILE.read_text(encoding="utf-8"))
+        if isinstance(loaded,dict) and str(loaded.get("icons","classic")).casefold() in {"classic","nerd"}:
+            data["icons"]=str(loaded.get("icons")).casefold()
+    except (OSError,ValueError,TypeError):
+        pass
+    return data
+
+
+def _save_renderer_config(data):
+    CONFIG_DIR.mkdir(parents=True,exist_ok=True)
+    icons=str(data.get("icons","classic")).casefold()
+    payload={"icons": icons if icons in {"classic","nerd"} else "classic"}
+    tmp=RENDERER_CONFIG_FILE.with_suffix(".tmp")
+    tmp.write_text(json.dumps(payload,indent=2)+"\n",encoding="utf-8")
+    try: os.chmod(tmp,0o600)
+    except OSError: pass
+    tmp.replace(RENDERER_CONFIG_FILE)
+
+
+def _settings_pick_icons():
+    current=_load_renderer_config()["icons"]
+    return _settings_pick_choice("file icons",current,[
+        ("classic","◆ folders · · files · clean LOOK default"),
+        ("nerd","Nerd Font folders + file-type glyphs"),
+    ],lambda args:_settings_set_icons(args[0] if args else current))
+
+
+def _settings_set_icons(value):
+    value=str(value).casefold()
+    if value not in {"classic","nerd"}: return 2
+    _save_renderer_config({"icons":value})
+    print(f"LOOK icons · {value} · applies next time LOOK opens")
+    return 0
 
 
 def _tone_file(kind):
@@ -9786,7 +9825,7 @@ def _direct_searxng_search(query, limit=8):
     params=urllib.parse.urlencode({"q":query,"format":"json"})
     request=urllib.request.Request(base+"/search?"+params,headers={
         "Accept":"application/json",
-        "User-Agent":"Future-Crash-Fabric/7.5.1",
+        "User-Agent":"Future-Crash-Fabric/7.5.2",
     })
     with urllib.request.urlopen(request,timeout=12) as response:
         data=json.load(response)
@@ -13651,6 +13690,9 @@ def _settings_rows():
         ("shortcuts","FILES","Shell shortcuts",_settings_shortcut_policy(),
          "Control optional ultra-short aliases. The permanent lk* namespace is always available.",
          "shortcut aliases shell keyboard lkl lkd lkf lkt lkr lkz ll ld lf"),
+        ("icons","FILES","File icons",_load_renderer_config()["icons"],
+         "Choose classic LOOK markers or optional Nerd Font file-type glyphs.",
+         "icons nerd font glyph folder file type symbols appearance classic"),
         ("apps","DESKTOP","Preferred apps",f"{len(_load_apps())} overrides",
          "Choose preferred apps for browser, editor, images, PDF, video, and audio. System defaults remain available.",
          "apps applications desktop open preview video vlc mpv pdf image editor browser audio"),
@@ -13895,6 +13937,7 @@ def _settings_action(key):
     if key=="fileaccess": return _settings_file_access_menu()
     if key=="apps": return _settings_apps_menu()
     if key=="shortcuts": return _settings_pick_shortcuts()
+    if key=="icons": return _settings_pick_icons()
     if key=="personality": return _settings_pick_personality()
     if key=="thinking": return _settings_pick_thinking()
     if key=="thinkdisplay": return _settings_pick_think_display()

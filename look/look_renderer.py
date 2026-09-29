@@ -63,6 +63,19 @@ else:
 
 CLEAR='\x1b[2J\x1b[H'; HIDE='\x1b[?25l'; SHOW='\x1b[?25h'
 
+_RENDERER_CONFIG=Path.home()/'.config'/'look'/'renderer.json'
+
+def _icon_mode()->str:
+    """Presentation preference only; LOOK never requires a Nerd Font."""
+    try:
+        data=json.loads(_RENDERER_CONFIG.read_text(encoding='utf-8'))
+        return 'nerd' if str(data.get('icons','classic')).casefold()=='nerd' else 'classic'
+    except (OSError,ValueError,TypeError):
+        return 'classic'
+
+_ICON_MODE=_icon_mode()
+
+
 @contextmanager
 def activity(label:str):
     """Small terminal activity indicator for genuinely blocking renderer work."""
@@ -156,11 +169,25 @@ def color_for(e:Entry)->str:
 
 
 def marker(e:Entry)->str:
-    # Deliberately use normal Unicode, never private-use Nerd Font codepoints.
-    if e.is_dir: return '◆'
-    if e.is_link: return '↗'
-    if e.executable: return '▸'
-    return '·'
+    # Classic remains the default LOOK identity. Nerd mode uses only widely
+    # available Font Awesome glyphs bundled by Nerd Fonts, with a generic file
+    # fallback so unknown extensions never become blank mystery characters.
+    if _ICON_MODE!='nerd':
+        if e.is_dir: return '◆'
+        if e.is_link: return '↗'
+        if e.executable: return '▸'
+        return '·'
+    if e.is_dir: return '\uf07b'       # folder
+    if e.is_link: return '\uf0c1'      # link
+    ext=e.path.suffix.casefold()
+    if ext=='.pdf': return '\uf1c1'
+    if ext in {'.png','.jpg','.jpeg','.gif','.webp','.svg','.heic','.bmp','.tif','.tiff'}: return '\uf1c5'
+    if ext in {'.mp3','.wav','.flac','.m4a','.aiff','.ogg'}: return '\uf1c7'
+    if ext in {'.mp4','.mov','.mkv','.avi','.webm','.m4v'}: return '\uf1c8'
+    if ext in {'.zip','.gz','.tar','.7z','.rar','.bz2','.xz','.dmg','.pkg'}: return '\uf1c6'
+    if ext in {'.py','.js','.ts','.jsx','.tsx','.sh','.zsh','.rb','.go','.rs','.c','.cpp','.h','.html','.css','.json','.toml','.yaml','.yml','.sql'}: return '\uf1c9'
+    if e.executable: return '\uf120'
+    return '\uf15b'                   # generic file
 
 
 def strip_ansi(s:str)->str:
@@ -836,12 +863,12 @@ def resolve_action_destination(dest:str,current_dir:Path|None)->Path:
     return raw.resolve()
 
 
-def pager(rows:list[str],height:int,width:int,rebuild=None,candidates=None,on_browse=None,on_back=None,on_parent=None,on_go=None,on_activate=None,force_interactive=False,initial_select:Path|None=None,initial_query:str='',marked_set:set[Path]|None=None,current_dir:Path|None=None,clipboard_state:dict|None=None)->None:
+def pager(rows:list[str],height:int,width:int,rebuild=None,browse_rebuild=None,candidates=None,on_browse=None,on_back=None,on_parent=None,on_go=None,on_activate=None,force_interactive=False,initial_select:Path|None=None,initial_query:str='',marked_set:set[Path]|None=None,current_dir:Path|None=None,clipboard_state:dict|None=None)->None:
     # Interactive state machine: browse -> filter -> select.
     usable=max(3,height-5)
     if (len(rows)<=height-1 and not force_interactive) or not (sys.stdin.isatty() and sys.stdout.isatty()):
         print('\n'.join(rows)); return
-    top=0; query=initial_query or ''; filtering=bool(query); selecting=False; selected=0
+    top=0; query=initial_query or ''; filtering=bool(query); selecting=False; cursoring=False; selected=0
     current=rows
     matches:list[Path]=[]
     notice=''
@@ -1006,6 +1033,15 @@ def pager(rows:list[str],height:int,width:int,rebuild=None,candidates=None,on_br
         sys.stdout.write(HIDE)
         while True:
             picked=selected_path()
+            if cursoring and browse_rebuild:
+                current=browse_rebuild(picked, marked)
+                # Keep the highlighted grid row visible without converting the
+                # ordinary browse surface into the one-row filter surface.
+                if picked and matches:
+                    cols=max(1, max(1,width)//max(1,min(38,max((len(p.name)+6 for p in matches),default=1))))
+                    cursor_row=selected//cols
+                    if cursor_row < top: top=cursor_row
+                    elif cursor_row >= top+usable: top=max(0,cursor_row-usable+1)
             if filtering and rebuild:
                 # Side previews consume terminal width. Reflow the grid to the
                 # visible list pane so highlighted matches cannot live beneath
@@ -1056,6 +1092,11 @@ def pager(rows:list[str],height:int,width:int,rebuild=None,candidates=None,on_br
                 action_parts=['j/k move','Tab mark','Enter/→ open','B clipboard',
                               'B Copy','T Cut','P Paste','C Copy To','M Move To','R remove',
                               'L LO context','X clear set','E edit','O open with','Y path','G go','← parent','Esc filter','q quit']
+            elif cursoring:
+                name=picked.name if picked else '(empty)'
+                status=f'  {CYAN}{BOLD}BROWSE{RESET} {WHITE}{name}{RESET}  {GRAY}{selected+1 if matches else 0}/{len(matches)}{RESET}'
+                action_parts=['↑/↓ choose','Enter/→ open','Space/PgDn next','b/PgUp back',
+                              'g ends','G go','⇧↑/↓ page','⇧←/→ ends','←/< parent','Esc clear','q quit']
             elif query:
                 status=(f'  {CYAN}{BOLD}FILTER{RESET} {WHITE}{query}{RESET}'
                         f'  {GRAY}{last}/{len(current)}{RESET}')
@@ -1188,6 +1229,49 @@ def pager(rows:list[str],height:int,width:int,rebuild=None,candidates=None,on_br
                     refresh_filter()
                 continue
 
+            if cursoring:
+                if key in {'q','Q','\x03'}: break
+                if key=='\x1b':
+                    cursoring=False; matches=[]; selected=0
+                    current=browse_rebuild(None,marked) if browse_rebuild else rows
+                    continue
+                if key in {'\x1b[B','j'} and matches:
+                    selected=min(len(matches)-1,selected+1); continue
+                if key in {'\x1b[A','k'} and matches:
+                    selected=max(0,selected-1); continue
+                if key in {'\x1b[6~','\x1b[1;2B'} and matches:
+                    selected=min(len(matches)-1,selected+usable); continue
+                if key in {'\x1b[5~','\x1b[1;2A'} and matches:
+                    selected=max(0,selected-usable); continue
+                if key=='\x1b[1;2D' and matches: selected=0; continue
+                if key=='\x1b[1;2C' and matches: selected=len(matches)-1; continue
+                if key=='g' and matches:
+                    selected=(len(matches)-1 if selected==0 else 0); continue
+                if key=='G' and on_go and current_dir is not None:
+                    on_go(current_dir); return
+                if key in {'<','\x1b[D'} and on_parent:
+                    on_parent(); return
+                if key in {'\r','\n','\x1b[C'}:
+                    picked=selected_path()
+                    if picked:
+                        if on_activate: on_activate(picked); return
+                        if picked.is_dir() and on_browse: on_browse(picked); return
+                        opened,message=open_default(picked)
+                        if opened: break
+                        notice=message
+                    continue
+                # Typing or explicit filter enters the existing one-row filter
+                # contract, starting from a clean query rather than the grid.
+                if key=='/':
+                    cursoring=False; filtering=True; query=''; refresh_filter(); continue
+                if len(key)==1 and key.isprintable() and key not in {' ','b'}:
+                    cursoring=False; filtering=True; query=key; refresh_filter(); continue
+                if key in {' ','\x1b[6~'}:
+                    selected=min(len(matches)-1,selected+usable); continue
+                if key in {'b','\x1b[5~'}:
+                    selected=max(0,selected-usable); continue
+                continue
+
             if selecting:
                 if key in {'q','Q','\x03'}: break
                 if key=='\x1b': selecting=False; filtering=True; continue
@@ -1269,8 +1353,10 @@ def pager(rows:list[str],height:int,width:int,rebuild=None,candidates=None,on_br
                 if last>=len(current): break
                 top=min(max(0,len(current)-usable),top+usable)
             elif key in {'b','\x1b[5~','\x1b[1;2A'}: top=max(0,top-usable)
-            elif key in {'j','\x1b[B'}: top=min(max(0,len(current)-usable),top+1)
-            elif key in {'k','\x1b[A'}: top=max(0,top-1)
+            elif key in {'j','\x1b[B'} and candidates:
+                matches=candidates(''); selected=0; cursoring=bool(matches)
+            elif key in {'k','\x1b[A'} and candidates:
+                matches=candidates(''); selected=max(0,len(matches)-1); cursoring=bool(matches)
             elif key=='\x1b[1;2D': top=0
             elif key=='\x1b[1;2C': top=max(0,len(current)-usable)
             elif key=='g': top=max(0,len(current)-usable) if top==0 else 0
@@ -1470,6 +1556,7 @@ def main():
             go_to=path.resolve()
         pager(rows,sz.lines,sz.columns,
               rebuild=lambda q,h=None,w=None,m=None: build_view(target,args.mode,hidden,w or sz.columns,args.depth,q,h,m,interactive_rows=True),
+              browse_rebuild=lambda h=None,m=None: build_view(target,args.mode,hidden,sz.columns,args.depth,'',h,m,interactive_rows=False),
               candidates=lambda q: matching_paths(target,args.mode,hidden,q,args.depth),
               on_browse=choose_dir,
               on_back=choose_back if history else None,

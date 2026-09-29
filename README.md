@@ -1,6 +1,6 @@
-# Future Crash + LOOK 7.5.1 — ALBERT SOURCES
+# Future Crash + LOOK 7.5.2 — LOOK FLOW
 
-7.5.1 makes Albert a durable, sourced information surface: server-owned saved objects, trustworthy provenance badges, and provider-neutral place results with a quiet coordinate map renderer.
+7.5.2 makes Albert a durable, sourced information surface: server-owned saved objects, trustworthy provenance badges, and provider-neutral place results with a quiet coordinate map renderer.
 
 # Future Crash + LOOK 7.3.0 — LIVE STATE
 
