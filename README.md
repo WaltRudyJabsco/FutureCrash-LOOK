@@ -1,6 +1,6 @@
-# Future Crash + LOOK 7.6.1 — SETTLED PORTAL
+# Future Crash + LOOK 7.6.2 — QUIET FRAME
 
-7.6.1 makes LOOK native previews input-safe: navigation wins over rendering, obsolete previews are skipped, Kitty placements are deleted with a valid protocol command, and native preview height is bounded.
+7.6.2 stabilizes the managed LOOK preview portal: filtered frames erase stale columns, selection moves visibly through the list, and graphical previews replace only after input has genuinely settled.
 
 # Future Crash + LOOK 7.3.0 — LIVE STATE
 

@@ -1,4 +1,11 @@
-# 7.6.1 — SETTLED PORTAL
+# 7.6.2 — QUIET FRAME
+
+- Erase stale right-side text on partial-frame redraws.
+- Keep filter selection moving visibly before scrolling the list.
+- Replace native previews only after the new payload is ready.
+- Debounce graphical previews for 180 ms of input idle.
+
+# 7.6.2 — SETTLED PORTAL
 
 - Give navigation priority over native preview rendering.
 - Skip obsolete previews during arrow-key bursts.

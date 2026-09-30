@@ -13,7 +13,7 @@ def test_kitty_delete_has_empty_payload_delimiter(monkeypatch):
 
 def test_native_render_is_behind_idle_input_gate():
     text=(ROOT/'look'/'look_renderer.py').read_text()
-    idle=text.index("settled_key=read_key(0.075)")
+    idle=text.index("settled_key=read_key(PREVIEW_SETTLE_SECONDS)")
     render=text.index("blob=_native_preview_block(preview_path")
     assert idle < render
     assert "if not settled_key:" in text[idle:render]

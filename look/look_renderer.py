@@ -28,6 +28,7 @@ from datetime import datetime, timedelta
 from pathlib import Path
 
 RESET='\x1b[0m'; BOLD='\x1b[1m'; DIM='\x1b[2m'; ITALIC='\x1b[3m'; REVERSE='\x1b[7m'
+PREVIEW_SETTLE_SECONDS=0.18  # Long enough to outlast ordinary typing/arrow bursts.
 
 # LOOK 3 presentation layer. The behavioral core stays deliberately boring;
 # presentation scales up only when the terminal advertises truecolor.
@@ -974,6 +975,7 @@ def pager(rows:list[str],height:int,width:int,rebuild=None,browse_rebuild=None,f
     matches:list[Path]=[]
     notice=''
     pending=''
+    native_visible=False
     marked:set[Path]=marked_set if marked_set is not None else set()
     shelf=clipboard_state if clipboard_state is not None else {}
 
@@ -1158,9 +1160,9 @@ def pager(rows:list[str],height:int,width:int,rebuild=None,browse_rebuild=None,f
             # HOME + erase-below avoids the visible blank-frame flash caused by
             # a full 2J clear on every cursor move. The complete frame is still
             # deterministic and stale rows are erased after the footer below.
-            sys.stdout.write(_clear_native_preview()+'\x1b[H')
+            sys.stdout.write('\x1b[H')
             if context_rows:
-                sys.stdout.write('\n'.join(fit(r,width) for r in context_rows)+'\n')
+                sys.stdout.write('\n'.join(fit(r,width)+'\x1b[K' for r in context_rows)+'\n')
             native_overlay=None
             if (selecting or filtering) and picked:
                 if width>=96:
@@ -1184,7 +1186,7 @@ def pager(rows:list[str],height:int,width:int,rebuild=None,browse_rebuild=None,f
                         r=right[i] if i<len(right) else ''
                         pad=max(0,left_w-len(strip_ansi(l)))
                         rendered.append(l+' '*pad+FAINT+' │ '+RESET+r)
-                    sys.stdout.write('\n'.join(rendered[:list_usable]))
+                    sys.stdout.write('\n'.join(r+'\x1b[K' for r in rendered[:list_usable]))
                     if native_candidate:
                         # Store geometry/path only. The expensive Chafa payload
                         # is created later, after a short input-idle gate.
@@ -1195,9 +1197,9 @@ def pager(rows:list[str],height:int,width:int,rebuild=None,browse_rebuild=None,f
                     rendered=[fit(r,width) for r in page[:list_h]]
                     rendered.append(FAINT+('─'*width)+RESET)
                     rendered.extend(preview_rows(picked,width,preview_h))
-                    sys.stdout.write('\n'.join(rendered[:list_usable]))
+                    sys.stdout.write('\n'.join(r+'\x1b[K' for r in rendered[:list_usable]))
             else:
-                sys.stdout.write('\n'.join(fit(r,width) for r in page))
+                sys.stdout.write('\n'.join(fit(r,width)+'\x1b[K' for r in page))
             last=min(len(current),top+usable)
             action_parts=[]
             if filtering:
@@ -1236,7 +1238,7 @@ def pager(rows:list[str],height:int,width:int,rebuild=None,browse_rebuild=None,f
                 status=f'{status}  {YELLOW}{notice}{RESET}'
                 notice=''
             footer=action_footer(action_parts,width)
-            sys.stdout.write('\n'+fit(status,width)+'\n'+'\n'.join(footer)+'\x1b[J')
+            sys.stdout.write('\n'+fit(status,width)+'\x1b[K\n'+'\n'.join(line+'\x1b[K' for line in footer)+'\x1b[J')
             sys.stdout.flush()
             # Native graphics are a settled-state enhancement, never part of
             # navigation itself. Give input priority: if another key arrives in
@@ -1244,16 +1246,22 @@ def pager(rows:list[str],height:int,width:int,rebuild=None,browse_rebuild=None,f
             # preview. Only an idle selection earns a native render.
             settled_key=''
             if native_overlay and not pending:
-                settled_key=read_key(0.075)
+                settled_key=read_key(PREVIEW_SETTLE_SECONDS)
                 if not settled_key:
                     row,col,preview_path,preview_w,preview_h=native_overlay
                     blob=_native_preview_block(preview_path,preview_w,min(preview_h,32))
                     if blob:
                         try:
-                            sys.stdout.write(f'\x1b7\x1b[{row};{col}H'+blob+'\x1b8')
+                            sys.stdout.write(_clear_native_preview()+f'\x1b7\x1b[{row};{col}H'+blob+'\x1b8')
                             sys.stdout.flush()
+                            native_visible=True
                         except KeyboardInterrupt:
                             break
+            elif native_visible:
+                # Leaving a native-previewable selection must remove the old
+                # placement, but ordinary frame redraws do not erase graphics.
+                sys.stdout.write(_clear_native_preview()); sys.stdout.flush()
+                native_visible=False
             if pending:
                 key,pending=pending,''
             elif settled_key:
@@ -1277,16 +1285,16 @@ def pager(rows:list[str],height:int,width:int,rebuild=None,browse_rebuild=None,f
                     continue
                 elif key in {'\x1b[B','J'} and matches:
                     selected=min(len(matches)-1,selected+1)
-                    top=min(max(0,len(current)-list_usable),top+1)
+                    if selected>=top+list_usable: top=selected-list_usable+1
                 elif key in {'\x1b[A','K'} and matches:
                     selected=max(0,selected-1)
-                    top=max(0,top-1)
+                    if selected<top: top=selected
                 elif key in {'\x1b[6~','\x1b[1;2B'} and matches:
                     selected=min(len(matches)-1,selected+list_usable)
-                    top=min(max(0,len(current)-list_usable),top+list_usable)
+                    top=min(max(0,len(current)-list_usable),max(top,selected-list_usable+1))
                 elif key in {'\x1b[5~','\x1b[1;2A'} and matches:
                     selected=max(0,selected-list_usable)
-                    top=max(0,top-list_usable)
+                    top=min(top,selected)
                 elif key=='\x1b[1;2D' and matches:
                     selected=0; top=0
                 elif key=='\x1b[1;2C' and matches:
