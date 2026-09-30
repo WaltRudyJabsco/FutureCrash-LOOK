@@ -18,11 +18,11 @@ def test_iterm_uses_managed_kitty_protocol(monkeypatch):
     r=load_renderer()
     monkeypatch.setenv('TERM_PROGRAM','iTerm.app'); monkeypatch.delenv('KITTY_WINDOW_ID',raising=False)
     assert r._terminal_graphics_format()=='kitty'
-    assert r._clear_native_preview()=='\x1b_Ga=d,d=A\x1b\\'
+    assert r._clear_native_preview()=='\x1b_Ga=d,d=A,q=2;\x1b\\'
 
 def test_each_interactive_frame_deletes_previous_graphic_before_fixed_right_portal(monkeypatch,tmp_path):
     r=load_renderer(); a=tmp_path/'a.png'; b=tmp_path/'b.png'; a.write_bytes(b'x'); b.write_bytes(b'x')
-    seq=iter(['\x1b[B','\r'])
+    seq=iter(['','\x1b[B','','\r'])
     monkeypatch.setattr(r,'read_key',lambda timeout=None: next(seq))
     monkeypatch.setattr(r,'_terminal_graphics_format',lambda:'kitty')
     monkeypatch.setattr(r,'_native_preview_block',lambda path,w,h:'PIXELS:'+path.name)
@@ -32,7 +32,7 @@ def test_each_interactive_frame_deletes_previous_graphic_before_fixed_right_port
     activated=[]
     r.pager(['LOOK'],20,120,rebuild=rebuild,filter_context=lambda q,w:['LOOK  ~/Desktop  0 dirs · 2 files','---'],
             candidates=candidates,on_activate=lambda p:activated.append(p),force_interactive=True,initial_query='png')
-    screen=out.getvalue(); delete='\x1b_Ga=d,d=A\x1b\\'
+    screen=out.getvalue(); delete='\x1b_Ga=d,d=A,q=2;\x1b\\'
     assert screen.count(delete)>=2
     assert '\x1b[3;73HPIXELS:a.png' in screen
     assert '\x1b[3;73HPIXELS:b.png' in screen

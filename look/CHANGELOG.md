@@ -1,3 +1,10 @@
+# 7.6.1 — SETTLED PORTAL
+
+- Give navigation priority over native preview rendering.
+- Skip obsolete previews during arrow-key bursts.
+- Correct Kitty graphics deletion and bound native payload height.
+- Exit cleanly if native preview output is interrupted.
+
 # 7.6.0 — PREVIEW PORTAL
 
 - Managed right-side native preview lifecycle: erase old placement, then draw one current image.

@@ -1,6 +1,6 @@
-# Future Crash + LOOK 7.6.0 — PREVIEW PORTAL
+# Future Crash + LOOK 7.6.1 — SETTLED PORTAL
 
-7.6.0 restores LOOK’s wide-terminal left-list/right-preview geometry while bounding native image graphics inside the right pane and removing full-screen-clear flicker during cursor movement.
+7.6.1 makes LOOK native previews input-safe: navigation wins over rendering, obsolete previews are skipped, Kitty placements are deleted with a valid protocol command, and native preview height is bounded.
 
 # Future Crash + LOOK 7.3.0 — LIVE STATE
 

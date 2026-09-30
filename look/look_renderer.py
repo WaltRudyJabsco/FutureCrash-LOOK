@@ -521,7 +521,7 @@ def _clear_native_preview()->str:
     """Delete LOOK's visible Kitty graphics before drawing the next frame."""
     if _terminal_graphics_format()=='kitty':
         # Kitty delete action, uppercase A also releases associated image data.
-        return '\x1b_Ga=d,d=A\x1b\\'
+        return '\x1b_Ga=d,d=A,q=2;\x1b\\'
     return ''
 
 
@@ -1167,13 +1167,17 @@ def pager(rows:list[str],height:int,width:int,rebuild=None,browse_rebuild=None,f
                     left_w=max(38,int(width*0.58))
                     right_w=max(28,width-left_w-3)
                     left=[fit(r,left_w) for r in page]
-                    native_blob=_native_preview_block(picked,right_w,list_usable)
-                    # Native graphics and symbol/text previews share exactly the
-                    # same right-hand pane. Pixel protocols are drawn *after* the
-                    # text frame at an absolute pane origin; they are never
-                    # concatenated into a text row. Chafa bottom-aligns inside the
-                    # pane, so graphics cannot escape above the LOOK header.
-                    right=[] if native_blob else preview_rows(picked,right_w,list_usable)
+                    native_candidate=(
+                        _PREVIEW_MODE in {'auto','graphics'}
+                        and _terminal_graphics_format()=='kitty'
+                        and picked.is_file()
+                        and picked.suffix.casefold() in {'.png','.jpg','.jpeg','.gif','.webp','.bmp','.tif','.tiff','.heic','.pdf'}
+                    )
+                    # Native rendering is deliberately deferred until after the
+                    # text frame is on screen and input has been idle briefly.
+                    # Arrow-key bursts therefore never queue obsolete megabyte
+                    # graphics payloads behind the pager.
+                    right=[] if native_candidate else preview_rows(picked,right_w,list_usable)
                     rendered=[]
                     for i in range(max(len(left),len(right),list_usable)):
                         l=left[i] if i<len(left) else ''
@@ -1181,10 +1185,10 @@ def pager(rows:list[str],height:int,width:int,rebuild=None,browse_rebuild=None,f
                         pad=max(0,left_w-len(strip_ansi(l)))
                         rendered.append(l+' '*pad+FAINT+' │ '+RESET+r)
                     sys.stdout.write('\n'.join(rendered[:list_usable]))
-                    if native_blob:
-                        # Terminal rows/columns are 1-based. Context rows sit
-                        # above the list; the preview begins beside list row 1.
-                        native_overlay=(len(context_rows)+1,left_w+4,native_blob)
+                    if native_candidate:
+                        # Store geometry/path only. The expensive Chafa payload
+                        # is created later, after a short input-idle gate.
+                        native_overlay=(len(context_rows)+1,left_w+4,picked,right_w,list_usable)
                 else:
                     preview_h=max(4,list_usable//3)
                     list_h=max(3,list_usable-preview_h-1)
@@ -1233,12 +1237,27 @@ def pager(rows:list[str],height:int,width:int,rebuild=None,browse_rebuild=None,f
                 notice=''
             footer=action_footer(action_parts,width)
             sys.stdout.write('\n'+fit(status,width)+'\n'+'\n'.join(footer)+'\x1b[J')
-            if native_overlay:
-                row,col,blob=native_overlay
-                sys.stdout.write(f'\x1b7\x1b[{row};{col}H'+blob+'\x1b8')
             sys.stdout.flush()
+            # Native graphics are a settled-state enhancement, never part of
+            # navigation itself. Give input priority: if another key arrives in
+            # this tiny window, process it immediately and skip this obsolete
+            # preview. Only an idle selection earns a native render.
+            settled_key=''
+            if native_overlay and not pending:
+                settled_key=read_key(0.075)
+                if not settled_key:
+                    row,col,preview_path,preview_w,preview_h=native_overlay
+                    blob=_native_preview_block(preview_path,preview_w,min(preview_h,32))
+                    if blob:
+                        try:
+                            sys.stdout.write(f'\x1b7\x1b[{row};{col}H'+blob+'\x1b8')
+                            sys.stdout.flush()
+                        except KeyboardInterrupt:
+                            break
             if pending:
                 key,pending=pending,''
+            elif settled_key:
+                key=settled_key
             else:
                 key=read_key()
 
@@ -1491,8 +1510,10 @@ def pager(rows:list[str],height:int,width:int,rebuild=None,browse_rebuild=None,f
             elif key in {'<','\x1b[D'} and on_parent:
                 on_parent()
                 return
+    except KeyboardInterrupt:
+        pass
     finally:
-        sys.stdout.write(SHOW+RESET+'\n'); sys.stdout.flush()
+        sys.stdout.write(_clear_native_preview()+SHOW+RESET+'\n'); sys.stdout.flush()
 
 def _global_catalog_stream(root:Path, catalog:list[Path], done:threading.Event)->None:
     """Populate catalog progressively; caller may read it while discovery runs."""
