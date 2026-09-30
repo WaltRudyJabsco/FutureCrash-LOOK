@@ -1,4 +1,4 @@
-# 7.5.4 — ATTENTION ROUTER
+# 7.5.5 — ATTENTION ROUTER
 
 - Fixes `lk voice preview` and the Settings preview row so they audition the configured default voice rather than a personality override.
 - Adds typed Fabric attention events and explicit endpoint-aware voice routing through `lk alert [@TARGET] MESSAGE`.
