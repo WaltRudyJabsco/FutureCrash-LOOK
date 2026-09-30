@@ -1,3 +1,11 @@
+# 7.5.3 — LOOK FEEL
+
+- Makes Nerd Font file/folder glyphs the default LOOK presentation; Classic remains selectable.
+- Adds image preview modes: Auto, Graphics, ASCII, and Off. Auto prefers Kitty/iTerm2/Sixel through Chafa only when the terminal advertises support, with symbol fallback.
+- Expands feedback sound to Off/Subtle/Expressive. Sounds follow semantic receipts, not navigation keystrokes.
+- Adds shared Fabric voice presets (Albert, Warm, Crisp, Deep, Max, Philosopher, Pirate, WOPR), personality voice overrides, and a voice preview action in `lk settings`.
+- Preserves the 7.5.2 browse invariant: paging scans without selecting; Up/Down establishes object selection; Enter filters when neutral and opens when selected.
+
 # 7.5.2 — LOOK FLOW
 
 A focused LOOK interaction release.

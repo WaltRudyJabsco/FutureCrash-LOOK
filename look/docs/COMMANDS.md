@@ -158,3 +158,8 @@ The file catalog incrementally extracts bounded text from common text/source/con
 `lk fabric endpoint-code URL [once|trust]` — mint a one-use Signal/browser invitation; with `qrencode`, scan it directly with an iPhone camera.
 
 `lk fabric revoke-endpoint ENDPOINT_ID` — revoke a browser endpoint credential wherever it lives in the reachable Fabric.
+
+## Personalization
+`lk settings` — Nerd/Classic file icons, image preview Auto/Graphics/ASCII/Off, feedback sound Off/Subtle/Expressive, and shared Fabric voice selection.
+
+`lk voice` · `lk voice set PROFILE` · `lk voice personalities on|off` · `lk voice preview [PROFILE]`

@@ -128,7 +128,7 @@ The design rule is simple: **dangerous operations should be obvious, and mistake
 
 ## Preview what you found
 
-LOOK previews text and code directly. If `chafa` is present, common images render inside the terminal. PDFs can render page one when a local rasterizer is available; `pdftotext` also lets LOOK and LO extract text from text-bearing PDFs.
+LOOK previews text and code directly. If `chafa` is present, common images render inside the terminal. `lk settings` offers Auto/Graphics/ASCII/Off; Auto prefers a clearly advertised Kitty/iTerm2/Sixel protocol and otherwise uses Chafa symbols. PDFs can render page one when a local rasterizer is available; `pdftotext` also lets LOOK and LO extract text from text-bearing PDFs.
 
 These are capabilities, not alternate interfaces. A missing preview helper degrades gracefully to text or metadata.
 
@@ -746,3 +746,7 @@ lk find "Portland schools pdf" # Fabric-wide when online, local when isolated
 ```
 
 Discovery is intentionally cheap: LOOK does not read, hash, embed, or transfer file contents during a scan. Catalog policy does not change filesystem access policy.
+
+## Personalization and speech
+
+`lk settings` controls LOOK file icons, image preview mode, receipt-driven feedback sound, and shared Fabric speech preferences. Nerd icons are the default; Classic remains available. Speech presets are shared by LOOK/LO/Fabric rather than being LOOK-only, and personality-specific voices can be disabled.

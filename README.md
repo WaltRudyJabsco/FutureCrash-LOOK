@@ -1,6 +1,6 @@
-# Future Crash + LOOK 7.5.2 — LOOK FLOW
+# Future Crash + LOOK 7.5.3 — LOOK FEEL
 
-7.5.2 makes Albert a durable, sourced information surface: server-owned saved objects, trustworthy provenance badges, and provider-neutral place results with a quiet coordinate map renderer.
+7.5.3 polishes LOOK as a daily terminal interface: Nerd icons by default, capability-aware image previews, receipt-driven sound feedback, and shared Fabric voice presets.
 
 # Future Crash + LOOK 7.3.0 — LIVE STATE
 

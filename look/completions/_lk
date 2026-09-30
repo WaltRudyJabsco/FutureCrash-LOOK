@@ -68,6 +68,7 @@ _lk() {
     'ai:Living AI broker'
     'feedback:terminal motion/sound feedback'
     'sound:toggle feedback sound'
+    'voice:configure shared Fabric speech voice'
     'personality:LO personality'
     'thinking:LO thinking depth'
     'think-display:LO thinking presentation'
@@ -253,6 +254,10 @@ _lk() {
         _values 'motion state' off subtle normal
         return
       fi
+      ;;
+
+    voice)
+      (( CURRENT == 3 )) && _values 'voice action' status set personalities preview
       ;;
     sound)
       (( CURRENT == 3 )) && _values 'sound state' on off

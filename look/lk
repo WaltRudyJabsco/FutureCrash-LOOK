@@ -42,6 +42,7 @@ CONFIG_DIR=HOME/".config"/"look"
 PROFILE_CONFIG_FILE=CONFIG_DIR/"profile.json"
 FEEDBACK_FILE=CONFIG_DIR/"feedback.json"
 RENDERER_CONFIG_FILE=CONFIG_DIR/"renderer.json"
+SPEECH_CONFIG_FILE=CONFIG_DIR/"speech.json"
 PROFILE_SCHEMA_VERSION=1
 MEMORY_FILE=STATE_DIR/"ollama_memory.json"
 CORE_FILE=STATE_DIR/"core.md"
@@ -347,26 +348,29 @@ def _ai_command(args):
 
 
 def _load_feedback():
-    data={"sound":False,"motion":"subtle"}
+    data={"sound":"off","motion":"subtle"}
     try:
         loaded=json.loads(FEEDBACK_FILE.read_text(encoding="utf-8"))
         if isinstance(loaded,dict):
-            data["sound"]=bool(loaded.get("sound",False))
+            raw=loaded.get("sound","off")
+            if isinstance(raw,bool):
+                raw="subtle" if raw else "off"
+            raw=str(raw).casefold()
+            if raw in {"off","subtle","expressive"}: data["sound"]=raw
             motion=str(loaded.get("motion","subtle")).lower()
-            if motion in {"off","subtle","normal"}:
-                data["motion"]=motion
-    except (OSError,ValueError,TypeError):
-        pass
+            if motion in {"off","subtle","normal"}: data["motion"]=motion
+    except (OSError,ValueError,TypeError): pass
     return data
 
 
 def _save_feedback(data):
     CONFIG_DIR.mkdir(parents=True,exist_ok=True)
-    payload={
-        "sound":bool(data.get("sound",False)),
-        "motion":str(data.get("motion","subtle")) if str(data.get("motion","subtle")) in {"off","subtle","normal"} else "subtle",
-    }
-    tmp=FEEDBACK_FILE.with_suffix(".tmp")
+    sound=str(data.get("sound","off")).casefold()
+    if sound not in {"off","subtle","expressive"}: sound="off"
+    motion=str(data.get("motion","subtle")).casefold()
+    if motion not in {"off","subtle","normal"}: motion="subtle"
+    payload={"sound":sound,"motion":motion}
+    tmp=FEEDBACK_FILE.with_name(FEEDBACK_FILE.name+f".{os.getpid()}.tmp")
     tmp.write_text(json.dumps(payload,indent=2)+"\n",encoding="utf-8")
     try: os.chmod(tmp,0o600)
     except OSError: pass
@@ -374,21 +378,27 @@ def _save_feedback(data):
 
 
 def _load_renderer_config():
-    data={"icons":"classic"}
+    data={"icons":"nerd","preview":"auto"}
     try:
         loaded=json.loads(RENDERER_CONFIG_FILE.read_text(encoding="utf-8"))
-        if isinstance(loaded,dict) and str(loaded.get("icons","classic")).casefold() in {"classic","nerd"}:
-            data["icons"]=str(loaded.get("icons")).casefold()
-    except (OSError,ValueError,TypeError):
-        pass
+        if isinstance(loaded,dict):
+            icons=str(loaded.get("icons","nerd")).casefold()
+            preview=str(loaded.get("preview","auto")).casefold()
+            if icons in {"classic","nerd"}: data["icons"]=icons
+            if preview in {"auto","graphics","ascii","off"}: data["preview"]=preview
+    except (OSError,ValueError,TypeError): pass
     return data
 
 
 def _save_renderer_config(data):
     CONFIG_DIR.mkdir(parents=True,exist_ok=True)
-    icons=str(data.get("icons","classic")).casefold()
-    payload={"icons": icons if icons in {"classic","nerd"} else "classic"}
-    tmp=RENDERER_CONFIG_FILE.with_suffix(".tmp")
+    current=_load_renderer_config()
+    current.update(data or {})
+    icons=str(current.get("icons","nerd")).casefold()
+    preview=str(current.get("preview","auto")).casefold()
+    payload={"icons":icons if icons in {"classic","nerd"} else "nerd",
+             "preview":preview if preview in {"auto","graphics","ascii","off"} else "auto"}
+    tmp=RENDERER_CONFIG_FILE.with_name(RENDERER_CONFIG_FILE.name+f".{os.getpid()}.tmp")
     tmp.write_text(json.dumps(payload,indent=2)+"\n",encoding="utf-8")
     try: os.chmod(tmp,0o600)
     except OSError: pass
@@ -398,8 +408,8 @@ def _save_renderer_config(data):
 def _settings_pick_icons():
     current=_load_renderer_config()["icons"]
     return _settings_pick_choice("file icons",current,[
-        ("classic","◆ folders · · files · clean LOOK default"),
-        ("nerd","Nerd Font folders + file-type glyphs"),
+        ("nerd","Nerd Font folders + file-type glyphs · default"),
+        ("classic","◆ folders · · files · classic clean mode"),
     ],lambda args:_settings_set_icons(args[0] if args else current))
 
 
@@ -411,134 +421,190 @@ def _settings_set_icons(value):
     return 0
 
 
+def _settings_pick_preview():
+    current=_load_renderer_config()["preview"]
+    return _settings_pick_choice("image preview",current,[
+        ("auto","terminal graphics when supported · ASCII fallback"),
+        ("graphics","prefer native terminal image protocol"),
+        ("ascii","always use Chafa symbol rendering"),
+        ("off","metadata only"),
+    ],lambda args:_settings_set_preview(args[0] if args else current))
+
+
+def _settings_set_preview(value):
+    value=str(value).casefold()
+    if value not in {"auto","graphics","ascii","off"}: return 2
+    _save_renderer_config({"preview":value})
+    print(f"LOOK image preview · {value} · applies next time LOOK opens")
+    return 0
+
+
+def _speech_profiles():
+    return {
+        "albert":{"rate":155,"pitch":35,"expression":0.35},
+        "warm":{"rate":145,"pitch":30,"expression":0.28},
+        "crisp":{"rate":172,"pitch":42,"expression":0.22},
+        "deep":{"rate":140,"pitch":20,"expression":0.30},
+        "max":{"rate":178,"pitch":48,"expression":0.58},
+        "philosopher":{"rate":132,"pitch":28,"expression":0.18},
+        "pirate":{"rate":142,"pitch":24,"expression":0.48},
+        "wopr":{"rate":135,"pitch":25,"expression":0.65},
+    }
+
+
+def _load_speech_config():
+    data={"voice":"albert","personality_voices":True}
+    try:
+        loaded=json.loads(SPEECH_CONFIG_FILE.read_text(encoding="utf-8"))
+        if isinstance(loaded,dict):
+            voice=str(loaded.get("voice","albert")).casefold()
+            if voice in _speech_profiles(): data["voice"]=voice
+            data["personality_voices"]=bool(loaded.get("personality_voices",True))
+    except (OSError,ValueError,TypeError): pass
+    return data
+
+
+def _save_speech_config(data):
+    CONFIG_DIR.mkdir(parents=True,exist_ok=True)
+    current=_load_speech_config(); current.update(data or {})
+    voice=str(current.get("voice","albert")).casefold()
+    if voice not in _speech_profiles(): voice="albert"
+    payload={"voice":voice,"personality_voices":bool(current.get("personality_voices",True))}
+    tmp=SPEECH_CONFIG_FILE.with_name(SPEECH_CONFIG_FILE.name+f".{os.getpid()}.tmp")
+    tmp.write_text(json.dumps(payload,indent=2)+"\n",encoding="utf-8")
+    try: os.chmod(tmp,0o600)
+    except OSError: pass
+    tmp.replace(SPEECH_CONFIG_FILE)
+
+
+def _resolve_voice_profile(requested="default"):
+    requested=str(requested or "default").casefold()
+    if requested not in {"default","auto"}: return requested
+    cfg=_load_speech_config()
+    if cfg.get("personality_voices"):
+        mapped={"robot":"crisp","max":"max","philosopher":"philosopher","pirate":"pirate"}.get(_load_personality())
+        if mapped: return mapped
+    return cfg["voice"]
+
+
+def _voice_command(args):
+    cfg=_load_speech_config()
+    if not args or args[0] in {"status","show"}:
+        _title("voice","Fabric speech")
+        print(f"  default       {cfg['voice']}")
+        print(f"  personalities {'on' if cfg['personality_voices'] else 'off'}")
+        print(f"  resolved now  {_resolve_voice_profile()}")
+        print("  lk voice set PROFILE")
+        print("  lk voice personalities on|off")
+        print("  lk voice preview [PROFILE]")
+        return 0
+    cmd=args[0].casefold()
+    if cmd=="set" and len(args)>=2:
+        voice=args[1].casefold()
+        if voice not in _speech_profiles():
+            print("voice profiles · "+", ".join(_speech_profiles())); return 2
+        _save_speech_config({"voice":voice}); print(f"LOOK voice · {voice}"); return 0
+    if cmd=="personalities" and len(args)>=2 and args[1].casefold() in {"on","off"}:
+        _save_speech_config({"personality_voices":args[1].casefold()=="on"})
+        print(f"LOOK personality voices · {args[1].casefold()}"); return 0
+    if cmd=="preview":
+        voice=args[1].casefold() if len(args)>=2 else _resolve_voice_profile()
+        if voice not in _speech_profiles(): print(f"unknown voice profile: {voice}"); return 2
+        try:
+            result=_media_fabric_cli(["speak","--voice-profile",voice,"Albert is awake. The signal is clear."])
+            print(f"LOOK voice preview · {voice} · {result.get('engine') or 'speech'}"); return 0
+        except Exception as exc:
+            print(f"LOOK voice preview failed · {exc}"); return 1
+    print("usage: lk voice [status|set PROFILE|personalities on|off|preview [PROFILE]]"); return 2
+
+
+def _settings_pick_voice():
+    cfg=_load_speech_config(); current=cfg["voice"]
+    choices=[(k,f"rate {v['rate']} · pitch {v['pitch']}") for k,v in _speech_profiles().items()]
+    return _settings_pick_choice("default voice",current,choices,lambda args:_voice_command(["set",args[0]]) if args else 0)
+
+
+def _settings_pick_personality_voices():
+    current="on" if _load_speech_config()["personality_voices"] else "off"
+    return _settings_pick_choice("personality voices",current,[
+        ("on","personality may choose its matching voice"),("off","every personality uses the default voice")
+    ],lambda args:_voice_command(["personalities",args[0]]) if args else 0)
+
+
 def _tone_file(kind):
     """Generate tiny synthesized feedback tones; no bundled audio assets required."""
-    cache=STATE_DIR/"feedback"
-    cache.mkdir(parents=True,exist_ok=True)
+    cache=STATE_DIR/"feedback"; cache.mkdir(parents=True,exist_ok=True)
     path=cache/f"{kind}.wav"
-    if path.exists():
-        return path
-    spec={
-        "accept":(660,0.045,0.13),
-        "complete":(880,0.075,0.15),
-        "notify":(740,0.060,0.13),
-        "error":(220,0.090,0.16),
-    }
-    freq,duration,amp=spec.get(kind,spec["accept"])
-    rate=22050
-    frames=max(1,int(rate*duration))
+    if path.exists(): return path
+    spec={"accept":(660,0.045,0.13),"complete":(880,0.075,0.15),"notify":(740,0.060,0.13),"error":(220,0.090,0.16)}
+    freq,duration,amp=spec.get(kind,spec["accept"]); rate=22050; frames=max(1,int(rate*duration))
     try:
         with wave.open(str(path),"wb") as wav:
-            wav.setnchannels(1); wav.setsampwidth(2); wav.setframerate(rate)
-            buf=bytearray()
+            wav.setnchannels(1); wav.setsampwidth(2); wav.setframerate(rate); buf=bytearray()
             for i in range(frames):
-                # Short fade keeps terminal feedback from sounding clicky.
                 fade=min(1.0,i/(rate*.008),max(0.0,(frames-i)/(rate*.012)))
-                sample=int(32767*amp*fade*math.sin(2*math.pi*freq*i/rate))
-                buf.extend(struct.pack("<h",sample))
+                sample=int(32767*amp*fade*math.sin(2*math.pi*freq*i/rate)); buf.extend(struct.pack("<h",sample))
             wav.writeframes(bytes(buf))
         return path
-    except OSError:
-        return None
+    except OSError: return None
 
 
 def _play_feedback_sound(kind):
     path=_tone_file(kind)
-    if not path:
-        return
-    player=None
-    args=[]
-    if platform.system()=="Darwin" and shutil.which("afplay"):
-        player=shutil.which("afplay"); args=[player,str(path)]
-    elif shutil.which("paplay"):
-        player=shutil.which("paplay"); args=[player,str(path)]
-    elif shutil.which("aplay"):
-        player=shutil.which("aplay"); args=[player,"-q",str(path)]
-    if not player:
-        return
-    try:
-        subprocess.Popen(args,stdout=subprocess.DEVNULL,stderr=subprocess.DEVNULL,start_new_session=True)
-    except OSError:
-        pass
+    if not path: return
+    if platform.system()=="Darwin" and shutil.which("afplay"): args=[shutil.which("afplay"),str(path)]
+    elif shutil.which("paplay"): args=[shutil.which("paplay"),str(path)]
+    elif shutil.which("aplay"): args=[shutil.which("aplay"),"-q",str(path)]
+    else: return
+    try: subprocess.Popen(args,stdout=subprocess.DEVNULL,stderr=subprocess.DEVNULL,start_new_session=True)
+    except OSError: pass
 
 
 def _feedback(kind="accept", label=""):
-    """Finite, optional feedback. Never animates or sounds in piped output."""
+    """Receipt-driven finite feedback. Ordinary navigation never calls this."""
     cfg=_load_feedback()
-    if not sys.stdout.isatty():
-        return
-    if cfg.get("sound"):
-        _play_feedback_sound(kind)
+    if not sys.stdout.isatty(): return
+    sound=cfg.get("sound","off")
+    if sound=="expressive" or (sound=="subtle" and kind in {"complete","error","notify"}): _play_feedback_sound(kind)
     motion=cfg.get("motion","subtle")
-    if motion=="off":
-        return
-
-    glyphs={
-        "accept":("·","◆","·"),
-        "complete":("·","◈","✓"),
-        "notify":("·","◐","●"),
-        "error":("·","×","!"),
-    }.get(kind,("·","◆","·"))
+    if motion=="off": return
+    glyphs={"accept":("·","◆","·"),"complete":("·","◈","✓"),"notify":("·","◐","●"),"error":("·","×","!")}.get(kind,("·","◆","·"))
     code={"accept":"36","complete":"32","notify":"36","error":"33"}.get(kind,"36")
-    frames=glyphs if motion=="normal" else (glyphs[1],glyphs[-1])
-    delay=.045 if motion=="normal" else .035
+    frames=glyphs if motion=="normal" else (glyphs[1],glyphs[-1]); delay=.045 if motion=="normal" else .035
     suffix=f" {_c(label,'2')}" if label else ""
     for frame in frames:
-        sys.stdout.write(f"\r\033[2K{_c(frame,code)}{suffix}")
-        sys.stdout.flush()
-        time.sleep(delay)
-    sys.stdout.write("\r\033[2K")
-    sys.stdout.flush()
+        sys.stdout.write(f"\r\033[2K{_c(frame,code)}{suffix}"); sys.stdout.flush(); time.sleep(delay)
+    sys.stdout.write("\r\033[2K"); sys.stdout.flush()
 
 
 def _feedback_command(args):
     cfg=_load_feedback()
     if not args or args[0] in {"status","show"}:
         _title("feedback","terminal expression")
-        print(f"  sound   {'on' if cfg['sound'] else 'off'}")
-        print(f"  motion  {cfg['motion']}")
-        print(f"  config  {FEEDBACK_FILE}")
-        print()
-        print("  lk sound              toggle sound")
-        print("  lk feedback sound on|off")
-        print("  lk feedback motion off|subtle|normal")
-        print("  lk feedback demo")
+        print(f"  sound   {cfg['sound']}"); print(f"  motion  {cfg['motion']}"); print(f"  config  {FEEDBACK_FILE}")
+        print("\n  lk sound              toggle off/subtle")
+        print("  lk feedback sound off|subtle|expressive")
+        print("  lk feedback motion off|subtle|normal\n  lk feedback demo")
         return 0
     if args[0]=="sound":
-        if len(args)==1:
-            cfg["sound"]=not cfg["sound"]
-        else:
-            value=args[1].lower()
-            if value not in {"on","off"}:
-                print("usage: lk feedback sound on|off"); return 2
-            cfg["sound"]=(value=="on")
-        _save_feedback(cfg)
-        print(f"LOOK sound · {'on' if cfg['sound'] else 'off'}")
-        if cfg["sound"]:
-            _feedback("accept","sound on")
+        value=(args[1].casefold() if len(args)>1 else ("subtle" if cfg["sound"]=="off" else "off"))
+        if value in {"on","true"}: value="subtle"
+        if value not in {"off","subtle","expressive"}: print("usage: lk feedback sound off|subtle|expressive"); return 2
+        cfg["sound"]=value; _save_feedback(cfg); print(f"LOOK sound · {value}")
+        if value!="off": _feedback("accept","sound on")
         return 0
     if args[0]=="motion":
-        if len(args)<2 or args[1].lower() not in {"off","subtle","normal"}:
-            print("usage: lk feedback motion off|subtle|normal"); return 2
-        cfg["motion"]=args[1].lower()
-        _save_feedback(cfg)
-        print(f"LOOK motion · {cfg['motion']}")
-        _feedback("accept","motion")
-        return 0
+        if len(args)<2 or args[1].lower() not in {"off","subtle","normal"}: print("usage: lk feedback motion off|subtle|normal"); return 2
+        cfg["motion"]=args[1].lower(); _save_feedback(cfg); print(f"LOOK motion · {cfg['motion']}"); _feedback("accept","motion"); return 0
     if args[0]=="demo":
-        for kind in ("accept","complete","notify","error"):
-            _feedback(kind,kind)
-            print(f"  {kind}")
+        for kind in ("accept","complete","notify","error"): _feedback(kind,kind); print(f"  {kind}")
         return 0
-    print("usage: lk feedback [status|sound on|off|motion off|subtle|normal|demo]")
-    return 2
+    print("usage: lk feedback [status|sound off|subtle|expressive|motion off|subtle|normal|demo]"); return 2
 
 
 def _sound_command(args):
-    if args:
-        return _feedback_command(["sound",*args])
-    cfg=_load_feedback()
-    return _feedback_command(["sound","off" if cfg["sound"] else "on"])
+    if args: return _feedback_command(["sound",*args])
+    cfg=_load_feedback(); return _feedback_command(["sound","subtle" if cfg["sound"]=="off" else "off"])
 
 
 def _normalize_ollama_url(value):
@@ -8154,7 +8220,7 @@ def _capability_tools():
             "parameters":{"type":"object","properties":{
                 "text":{"type":"string","description":"Short text to speak"},
                 "target":{"type":"string","description":"Optional Fabric node name; local when omitted"},
-                "voice_profile":{"type":"string","enum":["default","wopr"]}
+                "voice_profile":{"type":"string","enum":["default","albert","warm","crisp","deep","max","philosopher","pirate","wopr"]}
             },"required":["text"]}
         }},
         {"type":"function","function":{
@@ -8243,7 +8309,7 @@ def _run_capability_tool(name,args,workspace,profile):
         text=" ".join(str(args.get("text") or "").split())
         if not text: return "SPEAK FAILED · text required"
         target=str(args.get("target") or "").strip()
-        voice=str(args.get("voice_profile") or "default").casefold()
+        voice=_resolve_voice_profile(args.get("voice_profile") or "default")
         argv=["speak"]
         if target: argv += ["--node",target]
         argv += ["--voice-profile",voice,text]
@@ -9825,7 +9891,7 @@ def _direct_searxng_search(query, limit=8):
     params=urllib.parse.urlencode({"q":query,"format":"json"})
     request=urllib.request.Request(base+"/search?"+params,headers={
         "Accept":"application/json",
-        "User-Agent":"Future-Crash-Fabric/7.5.2",
+        "User-Agent":"Future-Crash-Fabric/7.5.3",
     })
     with urllib.request.urlopen(request,timeout=12) as response:
         data=json.load(response)
@@ -13691,8 +13757,11 @@ def _settings_rows():
          "Control optional ultra-short aliases. The permanent lk* namespace is always available.",
          "shortcut aliases shell keyboard lkl lkd lkf lkt lkr lkz ll ld lf"),
         ("icons","FILES","File icons",_load_renderer_config()["icons"],
-         "Choose classic LOOK markers or optional Nerd Font file-type glyphs.",
+         "Choose Nerd Font file-type glyphs or classic LOOK markers.",
          "icons nerd font glyph folder file type symbols appearance classic"),
+        ("preview","FILES","Image preview",_load_renderer_config()["preview"],
+         "Auto uses terminal-native graphics when clearly supported and falls back to the classic Chafa symbol preview.",
+         "image preview graphics ascii chafa kitty sixel iterm terminal photo picture"),
         ("apps","DESKTOP","Preferred apps",f"{len(_load_apps())} overrides",
          "Choose preferred apps for browser, editor, images, PDF, video, and audio. System defaults remain available.",
          "apps applications desktop open preview video vlc mpv pdf image editor browser audio"),
@@ -13706,9 +13775,18 @@ def _settings_rows():
         ("share","REMOTE","Tailnet services",_settings_share_state(),
          "Share local LOOK services such as Ollama, ComfyUI, Mercury Writer, and web terminal through Tailscale Serve.",
          "remote tailscale share services ollama comfy mercury writer webterm laptop tower"),
-        ("sound","FEEL","Feedback sound","on" if _load_feedback()["sound"] else "off",
-         "Turn LOOK's small completion/error sounds on or off.",
-         "sound audio beep feedback quiet"),
+        ("sound","FEEL","Feedback sound",_load_feedback()["sound"],
+         "Receipt-driven sounds: subtle confirms meaningful completion/error; expressive also voices lighter accepted events.",
+         "sound audio beep feedback quiet subtle expressive receipts"),
+        ("voice","SPEECH","Default voice",_load_speech_config()["voice"],
+         "Shared Fabric speech voice used by LOOK, LO and local speech endpoints unless a personality voice is enabled.",
+         "speech voice audio talk albert warm crisp deep max philosopher pirate"),
+        ("personalityvoices","SPEECH","Personality voices","on" if _load_speech_config()["personality_voices"] else "off",
+         "Allow Max, Robot, Philosopher and Pirate personalities to select their matching voice preset.",
+         "speech voice personality max robot philosopher pirate preset"),
+        ("voicepreview","SPEECH","Preview voice",_resolve_voice_profile(),
+         "Speak a fixed audition line through the canonical Fabric speech primitive.",
+         "speech voice preview test audition listen"),
         ("motion","FEEL","Feedback motion",_load_feedback()["motion"],
          "Controls subtle terminal motion cues for accepted/completed work.",
          "motion animation feedback visual subtle normal off"),
@@ -13777,8 +13855,8 @@ def _settings_pick_think_display():
 
 def _settings_pick_sound():
     cfg=_load_feedback()
-    return _settings_pick_choice("sound","on" if cfg["sound"] else "off",[
-        ("on","audible feedback"),("off","silent")
+    return _settings_pick_choice("sound",cfg["sound"],[
+        ("off","silent"),("subtle","completion, error and attention receipts"),("expressive","include lighter accepted-event tones")
     ],lambda args:_feedback_command(["sound",args[0]] if args else ["sound"]))
 
 
@@ -13938,6 +14016,7 @@ def _settings_action(key):
     if key=="apps": return _settings_apps_menu()
     if key=="shortcuts": return _settings_pick_shortcuts()
     if key=="icons": return _settings_pick_icons()
+    if key=="preview": return _settings_pick_preview()
     if key=="personality": return _settings_pick_personality()
     if key=="thinking": return _settings_pick_thinking()
     if key=="thinkdisplay": return _settings_pick_think_display()
@@ -13952,6 +14031,9 @@ def _settings_action(key):
     if key=="key": return ollama_key([])
     if key=="share": return _settings_share_menu()
     if key=="sound": return _settings_pick_sound()
+    if key=="voice": return _settings_pick_voice()
+    if key=="personalityvoices": return _settings_pick_personality_voices()
+    if key=="voicepreview": return _voice_command(["preview"])
     if key=="motion": return _settings_pick_motion()
     if key=="profile": return _profile_status()
     if key=="memory": return _memory_command([])
@@ -17224,7 +17306,7 @@ def _surface_config():
         print(f"  display      {_load_think_display()}")
         print(f"  host         {_ollama_host_name(_ollama_base())}")
         fb=_load_feedback()
-        print(f"  feedback     sound {'on' if fb['sound'] else 'off'} · motion {fb['motion']}")
+        print(f"  feedback     sound {fb['sound']} · motion {fb['motion']}")
         print(f"  profile      {'backup configured' if _load_profile_config().get('backup_root') else 'no backup'}")
         print()
         print(f"  {_c('[s]','36')} settings      {_c('[a]','36')} access")
@@ -18639,6 +18721,7 @@ def main():
     if cmd=="budget": return _lo_budget_command(rest)
     if cmd=="feedback": return _feedback_command(rest)
     if cmd=="sound": return _sound_command(rest)
+    if cmd=="voice": return _voice_command(rest)
     if cmd=="personality": return lo_personality(rest)
     if cmd=="thinking": return lo_thinking(rest)
     if cmd in {"think-display","thinkdisplay"}: return lo_think_display(rest)

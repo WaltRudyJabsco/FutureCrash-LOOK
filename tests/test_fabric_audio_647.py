@@ -5,13 +5,14 @@ ROOT=Path(__file__).resolve().parents[1]
 
 
 def test_release_and_audio_capability_contract():
-    assert (ROOT/'VERSION').read_text().strip()=='7.5.2'
+    assert (ROOT/'VERSION').read_text().strip()=='7.5.3'
     node=(ROOT/'core/node.py').read_text()
     assert 'RELEASE_NAME = "COGNITIVE FABRIC"' in node
     assert '"audio.speak"' in node
     assert 'if path == "/v1/audio/speak"' in node
-    assert 'voice_profile must be default or wopr' in node
-    assert 'espeak-ng' in node and 'pitch -250 chorus' in node
+    assert "'albert':(155,35,0.35)" in node
+    assert "'wopr':(135,25,0.65)" in node
+    assert 'espeak-ng' in node and 'chorus 0.5 0.8 45 0.35 0.20 2 -t' in node
 
 
 def test_cross_platform_install_gets_same_wopr_voice_dependencies():

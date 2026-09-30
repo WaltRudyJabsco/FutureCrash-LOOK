@@ -65,15 +65,22 @@ CLEAR='\x1b[2J\x1b[H'; HIDE='\x1b[?25l'; SHOW='\x1b[?25h'
 
 _RENDERER_CONFIG=Path.home()/'.config'/'look'/'renderer.json'
 
-def _icon_mode()->str:
-    """Presentation preference only; LOOK never requires a Nerd Font."""
+def _renderer_config()->dict:
+    data={'icons':'nerd','preview':'auto'}
     try:
-        data=json.loads(_RENDERER_CONFIG.read_text(encoding='utf-8'))
-        return 'nerd' if str(data.get('icons','classic')).casefold()=='nerd' else 'classic'
+        loaded=json.loads(_RENDERER_CONFIG.read_text(encoding='utf-8'))
+        if isinstance(loaded,dict):
+            icons=str(loaded.get('icons','nerd')).casefold()
+            preview=str(loaded.get('preview','auto')).casefold()
+            if icons in {'classic','nerd'}: data['icons']=icons
+            if preview in {'auto','graphics','ascii','off'}: data['preview']=preview
     except (OSError,ValueError,TypeError):
-        return 'classic'
+        pass
+    return data
 
-_ICON_MODE=_icon_mode()
+_RENDERER_PREFS=_renderer_config()
+_ICON_MODE=_RENDERER_PREFS['icons']
+_PREVIEW_MODE=_RENDERER_PREFS['preview']
 
 
 @contextmanager
@@ -169,9 +176,8 @@ def color_for(e:Entry)->str:
 
 
 def marker(e:Entry)->str:
-    # Classic remains the default LOOK identity. Nerd mode uses only widely
-    # available Font Awesome glyphs bundled by Nerd Fonts, with a generic file
-    # fallback so unknown extensions never become blank mystery characters.
+    # Nerd mode is the default when LOOK's bundled font is installed. Classic
+    # remains a clean opt-out and unknown extensions always get a safe glyph.
     if _ICON_MODE!='nerd':
         if e.is_dir: return '◆'
         if e.is_link: return '↗'
@@ -407,22 +413,53 @@ def matching_paths(target:Path, mode:str, hidden:bool, query:str='', tree_depth:
 
 
 
+def _terminal_graphics_format()->str|None:
+    """Return a Chafa graphics backend only when the terminal clearly advertises one."""
+    term=os.environ.get('TERM','').casefold()
+    program=os.environ.get('TERM_PROGRAM','').casefold()
+    if os.environ.get('KITTY_WINDOW_ID') or 'kitty' in term:
+        return 'kitty'
+    if program in {'iterm.app','iterm2'}:
+        return 'iterm'
+    if 'sixel' in term or os.environ.get('DEC_SIXEL') in {'1','true','yes'}:
+        return 'sixels'
+    return None
+
+
 def _chafa_render(path:Path, width:int, height:int)->list[str]:
-    """Optional terminal-native image preview. LOOK remains fully functional without chafa."""
-    chafa=shutil.which("chafa")
+    """Render images through Chafa; native protocols are capability-detected."""
+    if _PREVIEW_MODE=='off':
+        return []
+    chafa=shutil.which('chafa')
     if not chafa or height<4 or width<20:
         return []
+    fmt='symbols'
+    native=_terminal_graphics_format()
+    if _PREVIEW_MODE=='graphics':
+        if not native:
+            return []
+        fmt=native
+    elif _PREVIEW_MODE=='auto' and native:
+        fmt=native
     try:
         proc=subprocess.run(
-            [chafa,"--format=symbols","--size",f"{max(8,width)}x{max(2,height)}",str(path)],
+            [chafa,f'--format={fmt}','--size',f'{max(8,width)}x{max(2,height)}',str(path)],
             capture_output=True,text=True,timeout=3
         )
-        if proc.returncode==0 and proc.stdout.strip():
-            return proc.stdout.rstrip("\n").splitlines()[:height]
+        if proc.returncode==0 and proc.stdout:
+            # Symbol mode is ordinary rows. Native graphics protocols are opaque
+            # terminal escape payloads and must not be truncated by fit().
+            if fmt!='symbols':
+                return [proc.stdout.rstrip('\n')]
+            return proc.stdout.rstrip('\n').splitlines()[:height]
     except (OSError,subprocess.SubprocessError):
         pass
+    if _PREVIEW_MODE=='auto' and fmt!='symbols':
+        try:
+            proc=subprocess.run([chafa,'--format=symbols','--size',f'{max(8,width)}x{max(2,height)}',str(path)],capture_output=True,text=True,timeout=3)
+            if proc.returncode==0 and proc.stdout.strip(): return proc.stdout.rstrip('\n').splitlines()[:height]
+        except (OSError,subprocess.SubprocessError): pass
     return []
-
 
 def _pdf_image_preview(path:Path, width:int, height:int)->list[str]:
     """Render PDF page 1 through an available local rasterizer, then chafa."""
