@@ -165,6 +165,9 @@ echo
 echo "LOOK WORKSTATION"
 core=(zsh python3 git zoxide fzf fd nvim bat fortune cowsay fastfetch chafa pdftotext ttyd lsof mpv qrencode)
 core+=(sox espeak-ng)
+# MPRIS is Linux's system-player transport edge (Spotify, browsers, VLC, etc.).
+# macOS uses AppleScript adapters for Music/Spotify and needs no helper.
+[[ "$(uname -s 2>/dev/null || true)" == "Linux" ]] && core+=(playerctl)
 missing=()
 for c in "${core[@]}"; do
   if have "$c"; then

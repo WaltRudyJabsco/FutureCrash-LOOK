@@ -26,7 +26,7 @@ try:
 except ImportError:
     from fabric_identity import FabricIdentity
 
-VERSION = "7.7.5"
+VERSION = "7.7.6"
 DEFAULT_HOST = "127.0.0.1"
 DEFAULT_PORT = 7333
 DEFAULT_BACKEND_HOST = "127.0.0.1"
@@ -43,6 +43,14 @@ HOP_HEADERS = {
     "connection", "keep-alive", "proxy-authenticate", "proxy-authorization",
     "te", "trailers", "transfer-encoding", "upgrade",
 }
+
+def _is_stream_path(path: str) -> bool:
+    """Routes whose response bytes must never be buffered by the guard."""
+    return (
+        path in {"/v1/infer/stream", "/v1/media/audio", "/v1/media/item", "/v1/media/artifact"}
+        or path.startswith("/v1/artifacts/")
+    )
+
 
 
 def monotonic() -> float:
@@ -173,7 +181,7 @@ class GuardServer(ThreadingHTTPServer):
 
 
 class Handler(BaseHTTPRequestHandler):
-    server_version = "FCLIngress/7.7.5"
+    server_version = "FCLIngress/7.7.6"
     protocol_version = "HTTP/1.0"  # response EOF is the stream boundary; no keep-alive pool.
 
     def log_message(self, *args):
@@ -213,7 +221,11 @@ class Handler(BaseHTTPRequestHandler):
         try:
             # Audio is a byte stream too. Buffering an entire track in the ingress
             # defeats Range playback and can consume large amounts of RAM.
-            is_stream = path in {"/v1/infer/stream", "/v1/media/audio"}
+            # Media item/artifact routes are byte streams too. Treating them as
+            # control responses buffers an entire song/movie behind the ingress
+            # guard and lets the short control timeout turn healthy playback into
+            # an opaque 502. Stream them incrementally and preserve Range headers.
+            is_stream = _is_stream_path(path)
             if is_stream:
                 stream_slot = self.server.stream_slots.acquire(blocking=False)
                 if not stream_slot:
@@ -244,7 +256,11 @@ class Handler(BaseHTTPRequestHandler):
             self.send_response(upstream.status, upstream.reason)
             for key, value in upstream.getheaders():
                 lk = key.lower()
-                if lk in HOP_HEADERS or lk in {"content-length"}:
+                if lk in HOP_HEADERS:
+                    continue
+                # A streaming response may safely retain its known byte length;
+                # Range clients such as mpv and browsers use it for seeking.
+                if lk == "content-length" and not is_stream:
                     continue
                 self.send_header(key, value)
             self.send_header("Connection", "close")

@@ -570,7 +570,7 @@ class NativePreviewController:
                     if not convert: return None
                     cmd=[convert]
                     if Path(convert).name=='magick': cmd+=['convert']
-                    cmd += [str(path),'[0]','-thumbnail',f'{pixel_edge}x{pixel_edge}>',str(temp)]
+                    cmd += [str(path)+'[0]','-thumbnail',f'{pixel_edge}x{pixel_edge}>',str(temp)]
                     proc=subprocess.run(cmd,stdout=subprocess.DEVNULL,stderr=subprocess.DEVNULL,timeout=8)
                 if proc.returncode or not temp.exists(): return None
             temp.replace(out); return out

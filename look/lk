@@ -9929,7 +9929,7 @@ def _direct_searxng_search(query, limit=8):
     params=urllib.parse.urlencode({"q":query,"format":"json"})
     request=urllib.request.Request(base+"/search?"+params,headers={
         "Accept":"application/json",
-        "User-Agent":"Future-Crash-Fabric/7.7.5",
+        "User-Agent":"Future-Crash-Fabric/7.7.6",
     })
     with urllib.request.urlopen(request,timeout=12) as response:
         data=json.load(response)
@@ -15116,59 +15116,95 @@ def _media_macos_status_for(app):
     return {"player":app,"state":state,"artist":artist,"title":title}
 
 
-def _media_macos_show_status(preferred=None):
-    apps=[preferred] if preferred else ["Music","Spotify"]
-    if preferred:
-        apps += [app for app in ("Music","Spotify") if app!=preferred]
+def _media_macos_players():
+    return [x for x in (_media_macos_status_for(app) for app in ("Music","Spotify")) if x]
 
-    players=[x for x in (_media_macos_status_for(app) for app in apps) if x]
+
+def _media_macos_owner(*, include_paused_owner=True):
+    players=_media_macos_players()
+    playing=next((p for p in players if p["state"].lower()=="playing"),None)
+    if playing:
+        return playing
+    if include_paused_owner:
+        owner=str((_media_session() or {}).get("owner") or "")
+        if owner.startswith("system:"):
+            wanted=owner.split(":",1)[1]
+            prior=next((p for p in players if p["player"]==wanted),None)
+            if prior:
+                return prior
+    return None
+
+
+def _media_macos_show_status(preferred=None):
+    players=_media_macos_players()
     if not players:
         print("LOOK media · no supported player is open (Music or Spotify)")
         return 1
-
-    current=next((p for p in players if p["state"].lower()=="playing"),players[0])
+    current=next((p for p in players if p["player"]==preferred),None) if preferred else None
+    current=current or next((p for p in players if p["state"].lower()=="playing"),players[0])
     track=" — ".join(x for x in (current["artist"],current["title"]) if x)
     print(f"{current['player']} · {current['state'] or 'unknown'}" + (f" · {track}" if track else ""))
     return 0
 
 
-def _media_macos(action):
+def _media_macos(action, preferred=None):
     if action=="status":
-        return _media_macos_show_status()
-
+        return _media_macos_show_status(preferred)
     commands={
-        "Music":{"toggle":"playpause","next":"next track","prev":"previous track","stop":"stop"},
-        "Spotify":{"toggle":"playpause","next":"next track","prev":"previous track","stop":"pause"},
+        "Music":{"play":"play","pause":"pause","toggle":"playpause","next":"next track","prev":"previous track","stop":"stop"},
+        "Spotify":{"play":"play","pause":"pause","toggle":"playpause","next":"next track","prev":"previous track","stop":"pause"},
     }
-
-    for app in ("Music","Spotify"):
+    owner=_media_macos_owner()
+    order=[]
+    if preferred: order.append(preferred)
+    if owner and owner["player"] not in order: order.append(owner["player"])
+    order += [app for app in ("Music","Spotify") if app not in order]
+    for app in order:
         p=_media_macos_run(app,commands[app][action])
-        if p is None:
-            continue
+        if p is None: continue
         out=(p.stdout or "").strip()
         if p.returncode==0 and out!="__LOOK_NOT_RUNNING__":
+            _media_claim_owner("system:"+app)
             return _media_macos_show_status(preferred=app)
-
     print("LOOK media · no supported player is open (Music or Spotify)")
     return 1
 
 
-def _media_linux(action):
+def _media_linux_players():
     playerctl=shutil.which("playerctl")
+    if not playerctl: return playerctl,[]
+    try:
+        p=subprocess.run([playerctl,"-l"],capture_output=True,text=True,timeout=3)
+        return playerctl,[x.strip() for x in (p.stdout or "").splitlines() if x.strip()]
+    except (OSError,subprocess.SubprocessError):
+        return playerctl,[]
+
+
+def _media_linux_owner(*, include_paused_owner=True):
+    playerctl,players=_media_linux_players()
+    if not playerctl: return None
+    for candidate in players:
+        try:
+            st=subprocess.run([playerctl,"-p",candidate,"status"],capture_output=True,text=True,timeout=2)
+            if (st.stdout or "").strip().lower()=="playing": return candidate
+        except (OSError,subprocess.SubprocessError): pass
+    if include_paused_owner:
+        owner=str((_media_session() or {}).get("owner") or "")
+        if owner.startswith("system:") and owner.split(":",1)[1] in players:
+            return owner.split(":",1)[1]
+    return None
+
+
+def _media_linux(action, preferred=None):
+    playerctl,players=_media_linux_players()
     if not playerctl:
         print("LOOK media · Linux media control needs playerctl (MPRIS)")
         print("  install with your package manager, e.g. sudo apt install playerctl")
         return 1
+    if not players:
+        print("LOOK media · no MPRIS player found"); return 1
+    chosen=preferred if preferred in players else (_media_linux_owner() or players[0])
     try:
-        p=subprocess.run([playerctl,"-l"],capture_output=True,text=True,timeout=3)
-        players=[x.strip() for x in (p.stdout or "").splitlines() if x.strip()]
-        if not players:
-            print("LOOK media · no MPRIS player found"); return 1
-        chosen=players[0]
-        for candidate in players:
-            st=subprocess.run([playerctl,"-p",candidate,"status"],capture_output=True,text=True,timeout=2)
-            if (st.stdout or "").strip().lower()=="playing":
-                chosen=candidate; break
         if action=="status":
             state=subprocess.run([playerctl,"-p",chosen,"status"],capture_output=True,text=True,timeout=2).stdout.strip()
             artist=subprocess.run([playerctl,"-p",chosen,"metadata","artist"],capture_output=True,text=True,timeout=2).stdout.strip()
@@ -15176,10 +15212,30 @@ def _media_linux(action):
             track=" — ".join(x for x in (artist,title) if x)
             print(f"{chosen} · {state or 'unknown'}" + (f" · {track}" if track else ""))
             return 0
-        command={"toggle":"play-pause","next":"next","prev":"previous","stop":"stop"}[action]
-        return subprocess.run([playerctl,"-p",chosen,command],timeout=3).returncode
+        command={"play":"play","pause":"pause","toggle":"play-pause","next":"next","prev":"previous","stop":"stop"}[action]
+        rc=subprocess.run([playerctl,"-p",chosen,command],timeout=3).returncode
+        if rc==0: _media_claim_owner("system:"+chosen)
+        return rc
     except (OSError,subprocess.SubprocessError) as e:
         print(f"LOOK media · {e}"); return 1
+
+
+def _media_system_owner():
+    if platform.system()=="Darwin":
+        row=_media_macos_owner()
+        return ("Darwin",row["player"]) if row else None
+    if platform.system()=="Linux":
+        player=_media_linux_owner()
+        return ("Linux",player) if player else None
+    return None
+
+
+def _media_system_control(action, owner=None):
+    system=platform.system()
+    preferred=(owner[1] if owner else None)
+    if system=="Darwin": return _media_macos(action,preferred)
+    if system=="Linux": return _media_linux(action,preferred)
+    print(f"LOOK media · unsupported platform: {system}"); return 1
 
 
 def _media_fcl_node():
@@ -15424,6 +15480,9 @@ def _media_snapshot_payload():
         "shuffle":bool(session.get("shuffle")),
         "repeat":str(session.get("repeat") or "off"),
         "player":str(session.get("player") or ""),
+        "owner":str(session.get("owner") or ""),
+        "source_node":str((snap.get("entry") or {}).get("node") or ""),
+        "playback_node":socket.gethostname(),
         "presentation":str(session.get("presentation") or ""),
         "launch_argv":list(session.get("launch_argv") or []),
         "updated":session.get("updated"),
@@ -15571,6 +15630,19 @@ def _media_save_session(session):
     session["updated"]=time.time()
     _atomic_json(MEDIA_SESSION_FILE,session)
     return session
+
+
+def _media_claim_owner(owner):
+    """Remember who owns transport so pause does not lose the next keypress.
+
+    A player that is merely paused is still the active media session. External
+    playback is re-detected on every command, so a newly playing app can claim
+    ownership without a resident watcher.
+    """
+    session=_media_session() or media_core.new_session([])
+    session["owner"]=str(owner or "")
+    session["owner_updated"]=time.time()
+    return _media_save_session(session)
 
 
 def _media_mpv_request(command):
@@ -16024,6 +16096,7 @@ def _media_launch_session(session):
                 _media_mpv_request(["set_property","playlist-pos",idx])
                 _media_mpv_request(["set_property","pause",False])
                 session["player"]="mpv"
+                session["owner"]="look"
                 session["state"]="playing"
                 session["current_index"]=index_map[idx]
                 _media_save_session(session)
@@ -16066,6 +16139,7 @@ def _media_launch_session(session):
         return 1
     session["pid"]=proc.pid
     session["player"]="mpv"
+    session["owner"]="look"
     session["presentation"]="video" if _media_queue_has_video(queue) else "audio"
     session["launch_argv"]=[str(x) for x in cmd]
     session["state"]="playing"
@@ -16088,7 +16162,7 @@ def _media_launch_stream(url,source="",session=None):
                     if session is None:
                         session=media_core.new_session([{"title":source or "Fabric media","digest":"stream"}])
                     session["url"]=url; session["source"]=source; session["started"]=time.time()
-                    session["player"]="mpv"; session["state"]="playing"
+                    session["player"]="mpv"; session["owner"]="look"; session["state"]="playing"
                     _media_save_session(session)
                     print(f"LOOK media · Fabric stream → existing mpv" + (f" · {source}" if source else ""))
                     return 0
@@ -16112,6 +16186,7 @@ def _media_launch_stream(url,source="",session=None):
         session["source"]=source
         session["started"]=time.time()
         session["player"]="mpv"
+        session["owner"]="look"
         session["presentation"]="video" if stream_video else "audio"
         session["launch_argv"]=[str(x) for x in cmd]
         session["state"]="playing"
@@ -17127,18 +17202,25 @@ def media(args):
         print("                [add PATH|stream PATH|stream @NODE DIGEST|info [@NODE] DIGEST]")
         return 2
 
+    # Transport belongs to one active media session, not to a particular UI.
+    # A live LOOK/mpv worker owns transport. Otherwise a currently playing (or
+    # previously claimed paused) system player owns it. Only when neither owns
+    # transport may a saved LOOK queue be resumed.
+    if _media_mpv_alive():
+        result=_media_control_session(action)
+        if result is not None:
+            if action not in {"status","stop"}: _media_control_session("status")
+            return result
+
+    system_owner=_media_system_owner()
+    if system_owner:
+        return _media_system_control(action,system_owner)
+
     result=_media_control_session(action)
     if result is not None:
-        if action not in {"status","stop"}:
-            _media_control_session("status")
+        if action not in {"status","stop"}: _media_control_session("status")
         return result
-
-    # No LOOK-owned session: retain useful control of existing system players.
-    system=platform.system()
-    legacy_action={"play":"toggle","pause":"toggle"}.get(action,action)
-    if system=="Darwin": return _media_macos(legacy_action)
-    if system=="Linux": return _media_linux(legacy_action)
-    print(f"LOOK media · unsupported platform: {system}"); return 1
+    return _media_system_control(action)
 
 
 # --- Starter control surfaces -------------------------------------------------

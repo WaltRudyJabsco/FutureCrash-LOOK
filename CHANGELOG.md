@@ -1,3 +1,9 @@
+# 7.7.6 — MEDIA SESSION
+
+- Restore remote Fabric media byte/range streaming through the ingress guard.
+- Fix Linux JPEG native previews.
+- Route MM/MN/MP through one active media-session owner across LOOK and supported system players.
+
 # 7.7.5 — TRUE FRAME
 
 - Makes macOS Fabric ingress a verified launchd lifecycle: bootstrap, kickstart, then :7333 health.
