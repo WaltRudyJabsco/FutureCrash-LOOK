@@ -426,40 +426,62 @@ def _terminal_graphics_format()->str|None:
     return None
 
 
-def _chafa_render(path:Path, width:int, height:int)->list[str]:
-    """Render images through Chafa; native protocols are capability-detected."""
+def _chafa_render(path:Path, width:int, height:int, *, allow_native:bool=False)->list[str]:
+    """Render composable preview rows. Pixel protocols are never spliced into text."""
     if _PREVIEW_MODE=='off':
         return []
     chafa=shutil.which('chafa')
     if not chafa or height<4 or width<20:
         return []
+    # Embedded preview_rows() must remain ordinary terminal rows. Native Kitty,
+    # iTerm and Sixel payloads position pixels relative to the terminal cursor and
+    # cannot safely be concatenated beside list text.
     fmt='symbols'
-    native=_terminal_graphics_format()
-    if _PREVIEW_MODE=='graphics':
-        if not native:
-            return []
+    native=_terminal_graphics_format() if allow_native else None
+    if allow_native and _PREVIEW_MODE in {'auto','graphics'} and native:
         fmt=native
-    elif _PREVIEW_MODE=='auto' and native:
-        fmt=native
+    elif _PREVIEW_MODE=='graphics' and not allow_native:
+        # A native-only preference still needs a stable embedded fallback. The
+        # dedicated viewport below will provide the pixel preview when possible.
+        fmt='symbols'
     try:
         proc=subprocess.run(
             [chafa,f'--format={fmt}','--size',f'{max(8,width)}x{max(2,height)}',str(path)],
             capture_output=True,text=True,timeout=3
         )
         if proc.returncode==0 and proc.stdout:
-            # Symbol mode is ordinary rows. Native graphics protocols are opaque
-            # terminal escape payloads and must not be truncated by fit().
             if fmt!='symbols':
                 return [proc.stdout.rstrip('\n')]
             return proc.stdout.rstrip('\n').splitlines()[:height]
     except (OSError,subprocess.SubprocessError):
         pass
-    if _PREVIEW_MODE=='auto' and fmt!='symbols':
-        try:
-            proc=subprocess.run([chafa,'--format=symbols','--size',f'{max(8,width)}x{max(2,height)}',str(path)],capture_output=True,text=True,timeout=3)
-            if proc.returncode==0 and proc.stdout.strip(): return proc.stdout.rstrip('\n').splitlines()[:height]
-        except (OSError,subprocess.SubprocessError): pass
     return []
+
+
+def _native_preview_block(path:Path, width:int, height:int)->str|None:
+    """Return a pixel preview confined to a dedicated Chafa viewport."""
+    if _PREVIEW_MODE not in {'auto','graphics'} or height<4 or width<20:
+        return None
+    native=_terminal_graphics_format()
+    chafa=shutil.which('chafa')
+    if not native or not chafa or not path.is_file():
+        return None
+    if path.suffix.casefold() not in {'.png','.jpg','.jpeg','.gif','.webp','.bmp','.tif','.tiff','.heic'}:
+        return None
+    try:
+        proc=subprocess.run(
+            [chafa,f'--format={native}',
+             '--relative','off','--align','bottom,center',
+             '--view-size',f'{max(20,width)}x{max(4,height)}',
+             '--size',f'{max(20,width)}x{max(4,height)}',
+             '--margin-bottom','0',str(path)],
+            capture_output=True,text=True,timeout=3
+        )
+        if proc.returncode==0 and proc.stdout:
+            return proc.stdout.rstrip('\n')
+    except (OSError,subprocess.SubprocessError):
+        pass
+    return None
 
 def _pdf_image_preview(path:Path, width:int, height:int)->list[str]:
     """Render PDF page 1 through an available local rasterizer, then chafa."""
@@ -492,7 +514,7 @@ def _pdf_image_preview(path:Path, width:int, height:int)->list[str]:
                     image=candidates[0]
             except (OSError,subprocess.SubprocessError):
                 pass
-        return _chafa_render(image,width,height) if image else []
+        return _chafa_render(image,width,height,allow_native=False) if image else []
 
 
 def preview_rows(path:Path, width:int, height:int)->list[str]:
@@ -523,7 +545,7 @@ def preview_rows(path:Path, width:int, height:int)->list[str]:
     suffix=path.suffix.casefold()
     image_suffixes={'.png','.jpg','.jpeg','.gif','.webp','.bmp','.tif','.tiff','.heic'}
     if suffix in image_suffixes:
-        art=_chafa_render(path,max(20,width),max(2,height-2))
+        art=_chafa_render(path,max(20,width),max(2,height-2),allow_native=False)
         if art:
             rows.append(f'{DIM}{human_size(st.st_size)} · image preview{RESET}')
             rows.extend(art)
@@ -923,15 +945,15 @@ def pager(rows:list[str],height:int,width:int,rebuild=None,browse_rebuild=None,f
                 selecting=True
                 break
 
-    def refresh_filter()->None:
+    def refresh_filter(*, reset_selection:bool=False)->None:
         nonlocal current,top,matches,selected
         current=rebuild(query,None,None,marked) if rebuild else rows
         matches=candidates(query) if candidates else []
-        selected=min(selected,max(0,len(matches)-1))
+        selected=0 if reset_selection else min(selected,max(0,len(matches)-1))
         top=0
 
     if query and rebuild and candidates:
-        refresh_filter()
+        refresh_filter(reset_selection=True)
 
     def selected_path()->Path|None:
         return matches[selected] if matches and 0<=selected<len(matches) else None
@@ -1095,7 +1117,17 @@ def pager(rows:list[str],height:int,width:int,rebuild=None,browse_rebuild=None,f
             if context_rows:
                 sys.stdout.write('\n'.join(fit(r,width) for r in context_rows)+'\n')
             if (selecting or filtering) and picked:
-                if width>=96:
+                # Pixel graphics get their own bounded viewport. They must never
+                # be concatenated into a list row: Kitty/iTerm/Sixel are drawing
+                # protocols, not printable row text.
+                native_h=max(4,min(12,list_usable//2))
+                native_blob=_native_preview_block(picked,width,native_h)
+                if native_blob:
+                    list_h=max(3,list_usable-native_h-1)
+                    rendered=[fit(r,width) for r in page[:list_h]]
+                    rendered.append(FAINT+('─'*width)+RESET)
+                    sys.stdout.write('\n'.join(rendered)+'\n'+native_blob)
+                elif width>=96:
                     left_w=max(38,int(width*0.58))
                     right_w=max(28,width-left_w-3)
                     left=[fit(r,left_w) for r in page]
@@ -1251,7 +1283,7 @@ def pager(rows:list[str],height:int,width:int,rebuild=None,browse_rebuild=None,f
                         sys.stdout.write(HIDE); sys.stdout.flush()
                         if not opened and message!='open-with cancelled': notice=message
                 elif key in {'\x7f','\b'}:
-                    if query: query=query[:-1]; refresh_filter()
+                    if query: query=query[:-1]; refresh_filter(reset_selection=True)
                 elif key=='\x03': break
                 elif len(key)==1 and key.isprintable():
                     # Capture the typing burst before rendering. Input stays ahead of redraws;
@@ -1270,7 +1302,7 @@ def pager(rows:list[str],height:int,width:int,rebuild=None,browse_rebuild=None,f
                         # Preserve a non-text key for the next input cycle.
                         pending=nxt
                         break
-                    refresh_filter()
+                    refresh_filter(reset_selection=True)
                 continue
 
             if cursoring:
@@ -1307,9 +1339,9 @@ def pager(rows:list[str],height:int,width:int,rebuild=None,browse_rebuild=None,f
                 # Typing or explicit filter enters the existing one-row filter
                 # contract, starting from a clean query rather than the grid.
                 if key=='/':
-                    cursoring=False; filtering=True; query=''; refresh_filter(); continue
+                    cursoring=False; filtering=True; query=''; refresh_filter(reset_selection=True); continue
                 if len(key)==1 and key.isprintable() and key not in {' ','b'}:
-                    cursoring=False; filtering=True; query=key; refresh_filter(); continue
+                    cursoring=False; filtering=True; query=key; refresh_filter(reset_selection=True); continue
                 if key in {' ','\x1b[6~'}:
                     selected=min(len(matches)-1,selected+usable); continue
                 if key in {'b','\x1b[5~'}:
@@ -1384,7 +1416,7 @@ def pager(rows:list[str],height:int,width:int,rebuild=None,browse_rebuild=None,f
             if key in {'q','Q','\x03'}: break
             if key in {'\r','\n','/','\x1b[C'}:
                 filtering=True
-                refresh_filter()
+                refresh_filter(reset_selection=True)
             elif key=='\x1b':
                 if query:
                     query=''; selecting=False; refresh_filter()

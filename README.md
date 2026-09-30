@@ -1,6 +1,6 @@
-# Future Crash + LOOK 7.5.7 — CONTEXT HELD
+# Future Crash + LOOK 7.5.8 — FILTER FRAME
 
-7.5.7 fixes default-voice audition semantics and introduces typed, endpoint-aware Fabric attention routing. Explicit alerts can target the origin node, a named node/browser endpoint, or all current speech-capable endpoints; active/follow-me targeting remains deliberately unresolved until trustworthy presence evidence exists.
+7.5.8 fixes filtered-list spatial stability: filtered results reset deterministically to the first visible match when the query changes, arrow navigation remains visibly synchronized, and native terminal image previews render only inside a bounded bottom viewport rather than corrupting the text grid.
 
 # Future Crash + LOOK 7.3.0 — LIVE STATE
 

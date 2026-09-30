@@ -1,3 +1,9 @@
+# 7.5.8 — FILTER FRAME
+
+- Keep filter selection deterministic and visibly synchronized with the filtered list.
+- Confine native image previews to a bounded bottom viewport; never splice pixel protocols into text rows.
+- Preserve the persistent LOOK directory header and filter status.
+
 # 7.5.5 — ATTENTION ROUTER
 
 - Fixes `lk voice preview` and the Settings preview row so they audition the configured default voice rather than a personality override.
