@@ -10,6 +10,7 @@ Normally installed by the repository's ./install.sh.
 """
 from __future__ import annotations
 import json
+import io
 
 import argparse
 import os
@@ -28,7 +29,6 @@ from datetime import datetime, timedelta
 from pathlib import Path
 
 RESET='\x1b[0m'; BOLD='\x1b[1m'; DIM='\x1b[2m'; ITALIC='\x1b[3m'; REVERSE='\x1b[7m'
-PREVIEW_SETTLE_SECONDS=0.18  # Long enough to outlast ordinary typing/arrow bursts.
 
 # LOOK 3 presentation layer. The behavioral core stays deliberately boring;
 # presentation scales up only when the terminal advertises truecolor.
@@ -382,6 +382,47 @@ def read_key(timeout:float|None=None)->str:
                     break
             return bytes(seq).decode('latin1')
         return ch.decode('utf-8','ignore')
+    finally:
+        termios.tcsetattr(fd,termios.TCSADRAIN,old)
+
+
+def read_key_or_preview(wake_fd:int)->str|None:
+    """Block for real keyboard input or one completed preview job.
+
+    None means preview completion. There is deliberately no clock here: an idle
+    LOOK process remains blocked forever until input or actual work completes.
+    """
+    try:
+        fd=sys.stdin.fileno(); old=termios.tcgetattr(fd)
+    except (AttributeError,io.UnsupportedOperation,OSError):
+        # Test/non-TTY streams can still observe a completed worker without
+        # manufacturing periodic pager wakeups in the real TTY path.
+        ready,_,_=select.select([wake_fd],[],[],0.05)
+        if ready:
+            try: os.read(wake_fd,4096)
+            except OSError: pass
+            return None
+        return read_key()
+    try:
+        tty.setcbreak(fd)
+        while True:
+            ready,_,_=select.select([fd,wake_fd],[],[])
+            # Keyboard always wins when both become ready together.
+            if fd in ready:
+                ch=os.read(fd,1)
+                if ch==b'\x1b':
+                    seq=bytearray(ch)
+                    while len(seq)<6:
+                        more,_,_=select.select([fd],[],[],0.025)
+                        if not more: break
+                        seq.extend(os.read(fd,1))
+                        if seq[-1:] in b'~ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz': break
+                    return bytes(seq).decode('latin1')
+                return ch.decode('utf-8','ignore')
+            if wake_fd in ready:
+                try: os.read(wake_fd,4096)
+                except OSError: pass
+                return None
     finally:
         termios.tcsetattr(fd,termios.TCSADRAIN,old)
 
@@ -976,6 +1017,17 @@ def pager(rows:list[str],height:int,width:int,rebuild=None,browse_rebuild=None,f
     notice=''
     pending=''
     native_visible=False
+    # Preview is an edge job, not pager state. Workers may prepare pixels, but
+    # only the pager owns terminal placement. A pipe wakes the blocking input
+    # loop exactly once when real preview work completes; there is no timer.
+    preview_r,preview_w=os.pipe()
+    os.set_blocking(preview_w,False)
+    preview_lock=threading.Lock()
+    preview_generation=0
+    preview_requested=None
+    preview_ready=None
+    closing=False
+    redraw=True
     marked:set[Path]=marked_set if marked_set is not None else set()
     shelf=clipboard_state if clipboard_state is not None else {}
 
@@ -1132,9 +1184,55 @@ def pager(rows:list[str],height:int,width:int,rebuild=None,browse_rebuild=None,f
         marked.clear()
         notice='done · lk undo' if proc.returncode==0 else 'action failed'
 
+    def request_native_preview(overlay)->None:
+        nonlocal preview_generation,preview_requested,preview_ready
+        if not overlay:
+            if preview_requested is not None:
+                preview_generation+=1; preview_requested=None; preview_ready=None
+            return
+        row,col,path,pw,ph=overlay
+        signature=(str(path),row,col,pw,min(ph,32))
+        if signature==preview_requested:
+            return
+        preview_generation+=1; generation=preview_generation
+        preview_requested=signature; preview_ready=None
+        def work():
+            nonlocal preview_ready
+            blob=_native_preview_block(path,pw,min(ph,32))
+            with preview_lock:
+                if closing or generation!=preview_generation:
+                    return
+                preview_ready=(generation,row,col,blob,signature)
+            try: os.write(preview_w,b'p')
+            except (BlockingIOError,OSError): pass
+        threading.Thread(target=work,name='look-preview',daemon=True).start()
+
+    def paint_ready_preview()->None:
+        nonlocal preview_ready,native_visible
+        with preview_lock:
+            ready=preview_ready; preview_ready=None
+        if not ready: return
+        generation,row,col,blob,signature=ready
+        if generation!=preview_generation or signature!=preview_requested: return
+        if blob:
+            try:
+                sys.stdout.write(_clear_native_preview()+f'\x1b7\x1b[{row};{col}H'+blob+'\x1b8')
+                sys.stdout.flush(); native_visible=True
+            except KeyboardInterrupt:
+                pass
+
     try:
         sys.stdout.write(HIDE)
         while True:
+            if not redraw:
+                key=read_key_or_preview(preview_r)
+                if key is None:
+                    paint_ready_preview()
+                    continue
+                redraw=True
+                if pending:
+                    # Pending is only used by the tiny typing-burst collector.
+                    pending=''
             picked=selected_path()
             if cursoring and browse_rebuild:
                 current=browse_rebuild(picked, marked)
@@ -1240,34 +1338,22 @@ def pager(rows:list[str],height:int,width:int,rebuild=None,browse_rebuild=None,f
             footer=action_footer(action_parts,width)
             sys.stdout.write('\n'+fit(status,width)+'\x1b[K\n'+'\n'.join(line+'\x1b[K' for line in footer)+'\x1b[J')
             sys.stdout.flush()
-            # Native graphics are a settled-state enhancement, never part of
-            # navigation itself. Give input priority: if another key arrives in
-            # this tiny window, process it immediately and skip this obsolete
-            # preview. Only an idle selection earns a native render.
-            settled_key=''
-            if native_overlay and not pending:
-                settled_key=read_key(PREVIEW_SETTLE_SECONDS)
-                if not settled_key:
-                    row,col,preview_path,preview_w,preview_h=native_overlay
-                    blob=_native_preview_block(preview_path,preview_w,min(preview_h,32))
-                    if blob:
-                        try:
-                            sys.stdout.write(_clear_native_preview()+f'\x1b7\x1b[{row};{col}H'+blob+'\x1b8')
-                            sys.stdout.flush()
-                            native_visible=True
-                        except KeyboardInterrupt:
-                            break
-            elif native_visible:
-                # Leaving a native-previewable selection must remove the old
-                # placement, but ordinary frame redraws do not erase graphics.
+            # Schedule at most one preparation job for this exact selection. The
+            # worker never writes the terminal; stale generations simply disappear.
+            request_native_preview(native_overlay)
+            if not native_overlay and native_visible:
                 sys.stdout.write(_clear_native_preview()); sys.stdout.flush()
                 native_visible=False
+            redraw=False
             if pending:
                 key,pending=pending,''
-            elif settled_key:
-                key=settled_key
+                redraw=True
             else:
-                key=read_key()
+                key=read_key_or_preview(preview_r)
+                if key is None:
+                    paint_ready_preview()
+                    continue
+                redraw=True
 
             if filtering:
                 if key in {'q','Q','\x03'}: break
@@ -1521,6 +1607,9 @@ def pager(rows:list[str],height:int,width:int,rebuild=None,browse_rebuild=None,f
     except KeyboardInterrupt:
         pass
     finally:
+        closing=True; preview_generation+=1
+        try: os.close(preview_r); os.close(preview_w)
+        except OSError: pass
         sys.stdout.write(_clear_native_preview()+SHOW+RESET+'\n'); sys.stdout.flush()
 
 def _global_catalog_stream(root:Path, catalog:list[Path], done:threading.Event)->None:

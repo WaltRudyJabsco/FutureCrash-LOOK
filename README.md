@@ -1,6 +1,6 @@
-# Future Crash + LOOK 7.6.2 — QUIET FRAME
+# Future Crash + LOOK 7.6.3 — STILL FRAME
 
-7.6.2 stabilizes the managed LOOK preview portal: filtered frames erase stale columns, selection moves visibly through the list, and graphical previews replace only after input has genuinely settled.
+7.6.3 removes preview timing from the pager. Filter navigation owns the text frame; preview preparation runs as a replaceable background edge job, stale jobs are discarded by generation, and completion paints only the fixed right pane once. With no keyboard or completed preview work, LOOK remains completely idle.
 
 # Future Crash + LOOK 7.3.0 — LIVE STATE
 

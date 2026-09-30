@@ -1,3 +1,10 @@
+# 7.6.3 — STILL FRAME
+
+- Remove preview deadlines and timed keyboard wakeups from the real interactive pager.
+- Prepare native previews off the input loop; stale selection generations are discarded before terminal output.
+- Preview completion paints only the fixed right pane once and never redraws the filtered text frame.
+- Preserve 7.6.2 filtered selection, stale-line erasure, right-side portal geometry, and graphical PDF previews.
+
 # 7.6.2 — QUIET FRAME
 
 - Erase stale right-side text on partial-frame redraws.
