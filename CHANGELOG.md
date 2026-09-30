@@ -1,4 +1,10 @@
-# 7.7.2 — PREVIEW PLANE
+# 7.7.3 — PREVIEW BRIDGE
+
+- Extends the proven ASCII-first native graphics plane from full Preview View into the ordinary wide filtered-list side preview.
+- Adds a Kitty graphics driver for Linux while retaining ASCII as the immediate and universal fallback.
+- Fixes macOS Albert installation: a bootstrapped LaunchAgent is explicitly kickstarted before health polling, and launchd state is printed on failure.
+- Linux terminal provisioning remains optional and non-fatal; Kitty plus local thumbnail helpers are offered through the distribution package manager.
+
 
 - Keeps the 7.7.1 filter-minus grammar and 7.7.0 Preview View behavior.
 - Preview View still paints its ordinary ASCII/Chafa frame immediately.

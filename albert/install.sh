@@ -27,7 +27,18 @@ elif [[ "$OS" == Darwin ]] && command -v launchctl >/dev/null 2>&1; then
 </dict></plist>
 EOF
   launchctl bootout "gui/$(id -u)/com.futurecrash.albert" >/dev/null 2>&1 || true
-  launchctl bootstrap "gui/$(id -u)" "$PLIST" || true
+  DOMAIN="gui/$(id -u)"
+  LABEL="com.futurecrash.albert"
+  if ! launchctl bootstrap "$DOMAIN" "$PLIST"; then
+    echo "Albert install failed: launchctl bootstrap failed" >&2
+    launchctl print "$DOMAIN/$LABEL" >&2 || true
+    exit 1
+  fi
+  if ! launchctl kickstart -k "$DOMAIN/$LABEL"; then
+    echo "Albert install failed: launchctl kickstart failed" >&2
+    launchctl print "$DOMAIN/$LABEL" >&2 || true
+    exit 1
+  fi
 fi
 ALBERT_HEALTH=0
 for _ in $(seq 1 20); do
@@ -43,8 +54,9 @@ if [[ $ALBERT_HEALTH != 1 ]]; then
   echo 'Albert install failed: http://127.0.0.1:7330/health did not become ready' >&2
   if [[ "$OS" == Linux ]] && command -v systemctl >/dev/null 2>&1; then
     systemctl --user --no-pager --full status albert.service >&2 || true
-  elif [[ "$OS" == Darwin ]] && [[ -f "$DST/albert.log" ]]; then
-    tail -40 "$DST/albert.log" >&2 || true
+  elif [[ "$OS" == Darwin ]]; then
+    launchctl print "gui/$(id -u)/com.futurecrash.albert" >&2 || true
+    [[ -f "$DST/albert.log" ]] && tail -40 "$DST/albert.log" >&2 || true
   fi
   exit 1
 fi

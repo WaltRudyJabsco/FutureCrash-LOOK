@@ -1,6 +1,6 @@
-# Future Crash + LOOK 7.7.2 — PREVIEW PLANE
+# Future Crash + LOOK 7.7.3 — PREVIEW BRIDGE
 
-7.7.2 preserves `V` Preview View to the stable 7.6.4 SIMPLE PREVIEW lineage. In a filtered list, `V` toggles a full-content preview of the same working set; arrows navigate the same selection, Space/Tab use the existing marked set, and Esc/V returns to the same filtered list. ASCII/Chafa remains the immediate canonical preview. On macOS iTerm2, Preview View can progressively overlay its known art rectangle with a native image prepared off-thread; unsupported terminals and failures remain ASCII, and the worker never paints or drives pager state.
+7.7.3 preserves `V` Preview View to the stable 7.6.4 SIMPLE PREVIEW lineage. In a filtered list, `V` toggles a full-content preview of the same working set; arrows navigate the same selection, Space/Tab use the existing marked set, and Esc/V returns to the same filtered list. ASCII/Chafa remains the immediate canonical preview. On macOS iTerm2 and Linux Kitty, Preview View and the ordinary wide side preview can progressively overlay their known art rectangles with native images prepared off-thread; unsupported terminals and failures remain ASCII, and the worker never paints or drives pager state.
 
 ## Inherited baseline: 7.6.4 — SIMPLE PREVIEW
 

@@ -470,11 +470,14 @@ PY
       if command -v kitty >/dev/null 2>&1; then
         echo "  ✓ Kitty"
       elif command -v apt-get >/dev/null 2>&1; then
-        run sudo apt-get install -y kitty
+        if [[ "${DRY_RUN:-0}" == "1" ]]; then echo "  [dry-run] sudo apt-get install -y kitty imagemagick poppler-utils";
+        else sudo apt-get install -y kitty imagemagick poppler-utils || echo "  Optional Kitty/preview helpers install failed; continuing with ASCII."; fi
       elif command -v dnf >/dev/null 2>&1; then
-        run sudo dnf install -y kitty
+        if [[ "${DRY_RUN:-0}" == "1" ]]; then echo "  [dry-run] sudo dnf install -y kitty ImageMagick poppler-utils";
+        else sudo dnf install -y kitty ImageMagick poppler-utils || echo "  Optional Kitty/preview helpers install failed; continuing with ASCII."; fi
       elif command -v pacman >/dev/null 2>&1; then
-        run sudo pacman -S --noconfirm kitty
+        if [[ "${DRY_RUN:-0}" == "1" ]]; then echo "  [dry-run] sudo pacman -S --noconfirm kitty imagemagick poppler";
+        else sudo pacman -S --noconfirm kitty imagemagick poppler || echo "  Optional Kitty/preview helpers install failed; continuing with ASCII."; fi
       else
         echo "  Kitty not found; install it with your distribution's package manager."
       fi

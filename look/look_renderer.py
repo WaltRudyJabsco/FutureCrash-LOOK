@@ -463,12 +463,19 @@ def _chafa_render(path:Path, width:int, height:int)->list[str]:
 
 
 class NativePreviewController:
-    """Prepare iTerm previews off-thread; only the pager thread may paint them."""
+    """Prepare native previews off-thread; only the pager thread may paint them."""
     IMAGE_SUFFIXES={'.png','.jpg','.jpeg','.gif','.webp','.bmp','.tif','.tiff','.heic'}
 
     def __init__(self)->None:
         disabled=os.environ.get('LOOK_NATIVE_PREVIEW','').casefold() in {'0','off','false','no'}
-        self.enabled=(not disabled and sys.platform=='darwin' and os.environ.get('TERM_PROGRAM')=='iTerm.app')
+        term=os.environ.get('TERM','')
+        if sys.platform=='darwin' and os.environ.get('TERM_PROGRAM')=='iTerm.app':
+            self.driver='iterm'
+        elif os.environ.get('KITTY_WINDOW_ID') or term=='xterm-kitty':
+            self.driver='kitty'
+        else:
+            self.driver=None
+        self.enabled=not disabled and self.driver is not None
         self._jobs=queue.Queue(maxsize=1)
         self._ready=None
         self._generation=0
@@ -504,8 +511,14 @@ class NativePreviewController:
         self._generation+=1; self._last_key=None; self._ready=None
 
     def frame_cleared(self)->None:
-        # CLEAR erased any prior inline image. Make this frame a fresh request and
-        # invalidate preparation belonging to the frame that just disappeared.
+        # The text frame remains canonical. Remove any Kitty placement before CLEAR;
+        # iTerm inline images are erased by the normal screen clear.
+        if self.enabled and self.driver=='kitty':
+            try:
+                sys.stdout.write('\x1b_Ga=d,d=a,q=2\x1b\\')
+                sys.stdout.flush()
+            except OSError:
+                pass
         self.invalidate()
 
     def _worker(self)->None:
@@ -520,7 +533,6 @@ class NativePreviewController:
 
     def _prepare(self,path:Path,stamp:int,rows:int,cols:int)->Path|None:
         cache=Path.home()/'.cache'/'look'/'previews'; cache.mkdir(parents=True,exist_ok=True)
-        # Bound raster size. iTerm performs the final aspect-fit into the cell rectangle.
         pixel_edge=max(320,min(1600,max(rows*36,cols*18)))
         token=hashlib.sha256(f'{path}|{stamp}|{pixel_edge}'.encode()).hexdigest()[:24]
         out=cache/f'{token}.png'
@@ -528,17 +540,34 @@ class NativePreviewController:
         temp=out.with_suffix('.tmp.png')
         try:
             if path.suffix.casefold()=='.pdf':
-                ql=shutil.which('qlmanage')
-                if not ql: return None
-                with tempfile.TemporaryDirectory(prefix='look-native-pdf-') as td:
-                    proc=subprocess.run([ql,'-t','-s',str(pixel_edge),'-o',td,str(path)],stdout=subprocess.DEVNULL,stderr=subprocess.DEVNULL,timeout=8)
-                    candidates=list(Path(td).glob('*.png'))
-                    if proc.returncode or not candidates: return None
-                    shutil.copy2(candidates[0],temp)
+                if sys.platform=='darwin':
+                    ql=shutil.which('qlmanage')
+                    if not ql: return None
+                    with tempfile.TemporaryDirectory(prefix='look-native-pdf-') as td:
+                        proc=subprocess.run([ql,'-t','-s',str(pixel_edge),'-o',td,str(path)],stdout=subprocess.DEVNULL,stderr=subprocess.DEVNULL,timeout=8)
+                        candidates=list(Path(td).glob('*.png'))
+                        if proc.returncode or not candidates: return None
+                        shutil.copy2(candidates[0],temp)
+                else:
+                    pdftoppm=shutil.which('pdftoppm')
+                    if not pdftoppm: return None
+                    base=temp.with_suffix('')
+                    proc=subprocess.run([pdftoppm,'-f','1','-singlefile','-scale-to',str(pixel_edge),'-png',str(path),str(base)],stdout=subprocess.DEVNULL,stderr=subprocess.DEVNULL,timeout=8)
+                    made=Path(str(base)+'.png')
+                    if proc.returncode or not made.exists(): return None
+                    made.replace(temp)
             else:
-                sips=shutil.which('sips')
-                if not sips: return None
-                proc=subprocess.run([sips,'-Z',str(pixel_edge),str(path),'--out',str(temp)],stdout=subprocess.DEVNULL,stderr=subprocess.DEVNULL,timeout=8)
+                if sys.platform=='darwin':
+                    sips=shutil.which('sips')
+                    if not sips: return None
+                    proc=subprocess.run([sips,'-Z',str(pixel_edge),str(path),'--out',str(temp)],stdout=subprocess.DEVNULL,stderr=subprocess.DEVNULL,timeout=8)
+                else:
+                    convert=shutil.which('magick') or shutil.which('convert')
+                    if not convert: return None
+                    cmd=[convert]
+                    if Path(convert).name=='magick': cmd+=['convert']
+                    cmd += [str(path),'[0]','-thumbnail',f'{pixel_edge}x{pixel_edge}>',str(temp)]
+                    proc=subprocess.run(cmd,stdout=subprocess.DEVNULL,stderr=subprocess.DEVNULL,timeout=8)
                 if proc.returncode or not temp.exists(): return None
             temp.replace(out); return out
         except (OSError,subprocess.SubprocessError):
@@ -552,14 +581,22 @@ class NativePreviewController:
         generation,image,row,col,rows,cols=ready
         if generation!=self._generation: return
         try:
-            raw=image.read_bytes()
-        except OSError: return
-        payload=base64.b64encode(raw).decode('ascii')
-        # Save/restore cursor: native pixels replace only the preview rectangle and
-        # cannot alter LOOK's current item, marks, query, or input state.
-        seq=(f'\x1b7\x1b[{row};{col}H\x1b]1337;File=inline=1;width={cols};height={rows};preserveAspectRatio=1:'
-             f'{payload}\x07\x1b8')
-        sys.stdout.write(seq); sys.stdout.flush()
+            if self.driver=='iterm':
+                raw=image.read_bytes()
+                payload=base64.b64encode(raw).decode('ascii')
+                seq=(f'\x1b7\x1b[{row};{col}H\x1b]1337;File=inline=1;width={cols};height={rows};preserveAspectRatio=1:'
+                     f'{payload}\x07\x1b8')
+            elif self.driver=='kitty':
+                # Kitty can consume a local PNG by filename; only the tiny filename
+                # payload crosses the terminal. Placement is bounded in cell units.
+                payload=base64.b64encode(str(image).encode()).decode('ascii')
+                seq=(f'\x1b7\x1b[{row};{col}H\x1b_Ga=T,t=f,f=100,c={cols},r={rows},q=2;'
+                     f'{payload}\x1b\\\x1b8')
+            else:
+                return
+            sys.stdout.write(seq); sys.stdout.flush()
+        except OSError:
+            return
 
 def _pdf_image_preview(path:Path, width:int, height:int)->list[str]:
     """Render PDF page 1 through an available local rasterizer, then chafa."""
@@ -1226,6 +1263,12 @@ def pager(rows:list[str],height:int,width:int,rebuild=None,browse_rebuild=None,f
                 # Rows 1-2 remain the instant text title/metadata; native pixels may
                 # progressively replace only the ASCII art beneath them.
                 native_preview.request(picked,len(context_rows)+3,1,max(2,list_usable-2),width)
+            elif filtering and picked and width>=96:
+                # List view uses the same proven graphics plane. The text frame and
+                # ASCII side preview are already complete before native pixels arrive.
+                left_w=max(38,int(width*0.58))
+                right_w=max(28,width-left_w-3)
+                native_preview.request(picked,len(context_rows)+3,left_w+4,max(2,list_usable-2),right_w)
             else:
                 native_preview.invalidate()
             last=min(len(current),top+usable)
