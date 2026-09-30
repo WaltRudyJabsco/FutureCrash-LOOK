@@ -568,9 +568,10 @@ class NativePreviewController:
                 else:
                     convert=shutil.which('magick') or shutil.which('convert')
                     if not convert: return None
-                    cmd=[convert]
-                    if Path(convert).name=='magick': cmd+=['convert']
-                    cmd += [str(path)+'[0]','-thumbnail',f'{pixel_edge}x{pixel_edge}>',str(temp)]
+                    # ImageMagick 7's `magick` binary is itself the conversion
+                    # command. `magick convert ...` is legacy/installation-sensitive
+                    # and was silently dropping JPEG native previews on Linux.
+                    cmd=[convert,str(path)+'[0]','-thumbnail',f'{pixel_edge}x{pixel_edge}>',str(temp)]
                     proc=subprocess.run(cmd,stdout=subprocess.DEVNULL,stderr=subprocess.DEVNULL,timeout=8)
                 if proc.returncode or not temp.exists(): return None
             temp.replace(out); return out

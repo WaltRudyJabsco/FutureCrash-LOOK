@@ -165,9 +165,9 @@ echo
 echo "LOOK WORKSTATION"
 core=(zsh python3 git zoxide fzf fd nvim bat fortune cowsay fastfetch chafa pdftotext ttyd lsof mpv qrencode)
 core+=(sox espeak-ng)
-# MPRIS is Linux's system-player transport edge (Spotify, browsers, VLC, etc.).
-# macOS uses AppleScript adapters for Music/Spotify and needs no helper.
-[[ "$(uname -s 2>/dev/null || true)" == "Linux" ]] && core+=(playerctl)
+# MPRIS is an optional Linux system-player adapter, not a LOOK core dependency.
+# Never feed playerctl through Linuxbrew: use the distribution package manager
+# later, non-fatally, and keep the rest of LOOK installable without it.
 missing=()
 for c in "${core[@]}"; do
   if have "$c"; then
@@ -492,6 +492,23 @@ PY
         fi
       else
         echo "  ✓ Image preview helpers"
+      fi
+
+      # Optional MPRIS bridge for Spotify/VLC/browser media keys. This is an
+      # edge capability: failure must never abort LOOK/Fabric installation.
+      if command -v playerctl >/dev/null 2>&1; then
+        echo "  ✓ playerctl · Linux system-media adapter"
+      else
+        echo "  playerctl not found · optional Linux system-media adapter"
+        if command -v apt-get >/dev/null 2>&1; then
+          [[ "${DRY_RUN:-0}" == "1" ]] && echo "  [dry-run] sudo apt-get install -y playerctl" || sudo apt-get install -y playerctl || echo "  Optional playerctl install failed; LOOK media remains available."
+        elif command -v dnf >/dev/null 2>&1; then
+          [[ "${DRY_RUN:-0}" == "1" ]] && echo "  [dry-run] sudo dnf install -y playerctl" || sudo dnf install -y playerctl || echo "  Optional playerctl install failed; LOOK media remains available."
+        elif command -v pacman >/dev/null 2>&1; then
+          [[ "${DRY_RUN:-0}" == "1" ]] && echo "  [dry-run] sudo pacman -S --noconfirm playerctl" || sudo pacman -S --noconfirm playerctl || echo "  Optional playerctl install failed; LOOK media remains available."
+        else
+          echo "  Install playerctl with your distribution package manager to control MPRIS players."
+        fi
       fi
       if command -v fc-list >/dev/null 2>&1 && fc-list | grep -qi "MesloLGS"; then
         echo "  ✓ MesloLGS NF"

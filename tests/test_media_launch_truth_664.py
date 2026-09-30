@@ -4,7 +4,7 @@ ROOT=Path(__file__).resolve().parents[1]
 LK=(ROOT/"look"/"lk").read_text(encoding="utf-8")
 
 def test_fresh_mpv_launch_requires_readiness_before_success_session():
-    assert "def _media_wait_for_mpv_start(proc, timeout=1.6):" in LK
+    assert "def _media_wait_for_mpv_start(proc, timeout=3.0):" in LK
     launch=LK.index("def _media_launch_session(session):")
     stream=LK.index("def _media_launch_stream(",launch)
     body=LK[launch:stream]

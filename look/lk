@@ -9929,7 +9929,7 @@ def _direct_searxng_search(query, limit=8):
     params=urllib.parse.urlencode({"q":query,"format":"json"})
     request=urllib.request.Request(base+"/search?"+params,headers={
         "Accept":"application/json",
-        "User-Agent":"Future-Crash-Fabric/7.7.6",
+        "User-Agent":"Future-Crash-Fabric/7.7.7",
     })
     with urllib.request.urlopen(request,timeout=12) as response:
         data=json.load(response)
@@ -15238,6 +15238,27 @@ def _media_system_control(action, owner=None):
     print(f"LOOK media · unsupported platform: {system}"); return 1
 
 
+def _media_pause_playing_system():
+    """Quietly hand transport ownership to LOOK after LOOK really starts.
+
+    This prevents two players from remaining active. Failure is intentionally
+    nonfatal: external-player control is an optional edge capability.
+    """
+    owner=_media_system_owner()
+    if not owner:
+        return
+    system,preferred=owner
+    try:
+        if system=="Darwin":
+            command={"Music":"pause","Spotify":"pause"}.get(preferred)
+            if command: _media_macos_run(preferred,command)
+        elif system=="Linux":
+            playerctl,_=_media_linux_players()
+            if playerctl: subprocess.run([playerctl,"-p",preferred,"pause"],stdout=subprocess.DEVNULL,stderr=subprocess.DEVNULL,timeout=2)
+    except (OSError,subprocess.SubprocessError):
+        pass
+
+
 def _media_fcl_node():
     exe=shutil.which("fcl-node") or str(HOME/".local/bin/fcl-node")
     return exe if Path(exe).exists() else ""
@@ -15737,10 +15758,33 @@ def _media_stop_owned_mpvs(*, except_pid=None):
 
 
 def _media_mpv_alive():
-    return bool(_media_mpv_request(["get_property","idle-active"]))
+    """True when LOOK's mpv IPC endpoint answers, regardless of idle state."""
+    result=_media_mpv_request(["get_property","idle-active"])
+    return bool(result and result.get("error")=="success")
 
 
-def _media_wait_for_mpv_start(proc, timeout=1.6):
+def _media_mpv_loaded():
+    """True only when LOOK's mpv owns an actually loaded media item.
+
+    An --idle=yes worker with a dead URL is infrastructure, not a media session.
+    It must never steal MM/MN/MP from Music, Spotify, or an MPRIS player.
+    """
+    if not _media_mpv_alive():
+        return False
+    idle=_media_mpv_property("idle-active")
+    return idle is False
+
+
+def _media_wait_for_mpv_loaded(timeout=3.0):
+    deadline=time.monotonic()+max(.2,float(timeout))
+    while time.monotonic()<deadline:
+        if _media_mpv_loaded():
+            return True
+        time.sleep(.035)
+    return _media_mpv_loaded()
+
+
+def _media_wait_for_mpv_start(proc, timeout=3.0):
     """Confirm our freshly spawned mpv actually became controllable.
 
     Popen only proves exec was attempted. A real playback receipt requires the
@@ -15753,10 +15797,10 @@ def _media_wait_for_mpv_start(proc, timeout=1.6):
             detail=" · ".join(line.strip() for line in _media_tail_player_log(6) if line.strip())
             print(f"LOOK media · mpv exited during startup · exit {proc.returncode}" + (f" · {detail[:500]}" if detail else ""))
             return False
-        if _media_mpv_alive():
+        if _media_mpv_loaded():
             return True
         time.sleep(.035)
-    if proc.poll() is None and _media_mpv_alive():
+    if proc.poll() is None and _media_mpv_loaded():
         return True
     detail=" · ".join(line.strip() for line in _media_tail_player_log(6) if line.strip())
     print("LOOK media · mpv did not become ready" + (f" · {detail[:500]}" if detail else ""))
@@ -15998,6 +16042,22 @@ def _media_doctor():
                     st=local.stat(); print(f"  bytes     {st.st_size:,}")
                 except OSError as exc:
                     print(f"  bytes     unavailable · {exc}")
+            if str(source).startswith(("http://","https://")):
+                try:
+                    req=urllib.request.Request(source,headers={"Range":"bytes=0-1023"})
+                    with urllib.request.urlopen(req,timeout=4) as response:
+                        status=getattr(response,"status",200)
+                        cr=response.headers.get("Content-Range") or ""
+                        cl=response.headers.get("Content-Length") or ""
+                        sample=response.read(32)
+                        detail=" · ".join(x for x in (cr,(f"{cl} bytes" if cl else "")) if x)
+                        print(f"  http      {status}" + (f" · {detail}" if detail else "") + f" · sample {len(sample)} bytes")
+                except urllib.error.HTTPError as exc:
+                    try: body=exc.read(300).decode("utf-8","replace").strip()
+                    except Exception: body=""
+                    print(f"  http      {exc.code} {exc.reason}" + (f" · {body[:220]}" if body else ""))
+                except Exception as exc:
+                    print(f"  http      error · {exc}")
             if mpv:
                 probe=[mpv,"--no-config","--no-terminal","--ao=null","--vo=null","--length=0.25",source]
                 try:
@@ -16095,11 +16155,17 @@ def _media_launch_session(session):
             if loaded and loaded.get("error")=="success":
                 _media_mpv_request(["set_property","playlist-pos",idx])
                 _media_mpv_request(["set_property","pause",False])
+                if not _media_wait_for_mpv_loaded():
+                    detail=" · ".join(line.strip() for line in _media_tail_player_log(6) if line.strip())
+                    print("LOOK media · media source did not load" + (f" · {detail[:500]}" if detail else ""))
+                    return 1
                 session["player"]="mpv"
                 session["owner"]="look"
+                session["owner_updated"]=time.time()
                 session["state"]="playing"
                 session["current_index"]=index_map[idx]
                 _media_save_session(session)
+                _media_pause_playing_system()
                 print(f"LOOK media · queue → existing mpv · {len(queue)} item{'s' if len(queue)!=1 else ''}")
                 return 0
 
@@ -16140,11 +16206,13 @@ def _media_launch_session(session):
     session["pid"]=proc.pid
     session["player"]="mpv"
     session["owner"]="look"
+    session["owner_updated"]=time.time()
     session["presentation"]="video" if _media_queue_has_video(queue) else "audio"
     session["launch_argv"]=[str(x) for x in cmd]
     session["state"]="playing"
     session["current_index"]=index_map[idx]
     _media_save_session(session)
+    _media_pause_playing_system()
     print(f"LOOK media · queue → mpv · {len(queue)} item{'s' if len(queue)!=1 else ''}")
     return 0
 
@@ -16159,11 +16227,16 @@ def _media_launch_stream(url,source="",session=None):
                 loaded=_media_mpv_request(["loadfile",url,"replace"])
                 if loaded and loaded.get("error")=="success":
                     _media_mpv_request(["set_property","pause",False])
+                    if not _media_wait_for_mpv_loaded():
+                        detail=" · ".join(line.strip() for line in _media_tail_player_log(6) if line.strip())
+                        print("LOOK media · media source did not load" + (f" · {detail[:500]}" if detail else ""))
+                        return 1
                     if session is None:
                         session=media_core.new_session([{"title":source or "Fabric media","digest":"stream"}])
                     session["url"]=url; session["source"]=source; session["started"]=time.time()
-                    session["player"]="mpv"; session["owner"]="look"; session["state"]="playing"
+                    session["player"]="mpv"; session["owner"]="look"; session["owner_updated"]=time.time(); session["state"]="playing"
                     _media_save_session(session)
+                    _media_pause_playing_system()
                     print(f"LOOK media · Fabric stream → existing mpv" + (f" · {source}" if source else ""))
                     return 0
         _media_stop_owned_mpvs()
@@ -16187,10 +16260,12 @@ def _media_launch_stream(url,source="",session=None):
         session["started"]=time.time()
         session["player"]="mpv"
         session["owner"]="look"
+        session["owner_updated"]=time.time()
         session["presentation"]="video" if stream_video else "audio"
         session["launch_argv"]=[str(x) for x in cmd]
         session["state"]="playing"
         _media_save_session(session)
+        _media_pause_playing_system()
         print(f"LOOK media · Fabric stream → mpv" + (f" · {source}" if source else ""))
         return 0
 
@@ -17202,25 +17277,41 @@ def media(args):
         print("                [add PATH|stream PATH|stream @NODE DIGEST|info [@NODE] DIGEST]")
         return 2
 
-    # Transport belongs to one active media session, not to a particular UI.
-    # A live LOOK/mpv worker owns transport. Otherwise a currently playing (or
-    # previously claimed paused) system player owns it. Only when neither owns
-    # transport may a saved LOOK queue be resumed.
-    if _media_mpv_alive():
+    # Transport follows a real player session, never mere queue metadata.
+    # A newly playing external app wins immediately. LOOK owns transport only
+    # while mpv has a loaded item (playing or paused). A previously claimed
+    # paused system player may retain ownership. A stopped LOOK queue does not.
+    playing_system=_media_system_owner(include_paused_owner=False)
+    if playing_system:
+        return _media_system_control(action,playing_system)
+
+    if _media_mpv_loaded():
         result=_media_control_session(action)
         if result is not None:
             if action not in {"status","stop"}: _media_control_session("status")
             return result
 
-    system_owner=_media_system_owner()
-    if system_owner:
-        return _media_system_control(action,system_owner)
+    remembered_system=_media_system_owner(include_paused_owner=True)
+    if remembered_system:
+        return _media_system_control(action,remembered_system)
 
-    result=_media_control_session(action)
-    if result is not None:
-        if action not in {"status","stop"}: _media_control_session("status")
-        return result
-    return _media_system_control(action)
+    # Explicit `lk media play` may intentionally resume a saved LOOK queue. The
+    # global transport keys (toggle/next/prev/pause/stop) may not manufacture a
+    # session from stale queue state.
+    if action=="play":
+        result=_media_control_session("play")
+        if result is not None:
+            if result==0: _media_control_session("status")
+            return result
+    if action=="status":
+        session=_media_session()
+        if session and session.get("queue"):
+            session=_media_sync_session(session) or session
+            entry=(session.get("queue") or [{}])[max(0,min(int(session.get("current_index") or 0),len(session.get("queue") or [{}])-1))]
+            print(f"LOOK media · {session.get('state') or 'stopped'} · {_media_entry_label(entry)} · {int(session.get('current_index') or 0)+1}/{len(session.get('queue') or [])}")
+            return 0
+    print("LOOK media · no active media session")
+    return 1
 
 
 # --- Starter control surfaces -------------------------------------------------

@@ -37,9 +37,11 @@ def test_transport_shortcuts_keep_human_grammar():
 
 
 def test_transport_uses_single_active_owner_before_saved_look_queue():
-    assert 'system_owner=_media_system_owner()' in LK
-    assert 'if system_owner:' in LK
-    assert 'return _media_system_control(action,system_owner)' in LK
+    assert 'playing_system=_media_system_owner(include_paused_owner=False)' in LK
+    assert 'if playing_system:' in LK
+    assert 'return _media_system_control(action,playing_system)' in LK
+    assert 'if _media_mpv_loaded():' in LK
+    assert 'if action=="play":' in LK
     assert 'session["owner"]="look"' in LK
     assert '_media_claim_owner("system:"+app)' in LK
     assert '_media_claim_owner("system:"+chosen)' in LK

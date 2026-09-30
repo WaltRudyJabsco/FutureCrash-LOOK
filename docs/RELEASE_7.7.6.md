@@ -1,4 +1,4 @@
-# 7.7.6 — MEDIA SESSION
+# 7.7.7 — MEDIA SESSION
 
 A narrow media-boundary repair on top of 7.7.5 TRUE FRAME.
 
