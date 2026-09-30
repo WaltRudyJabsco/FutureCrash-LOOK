@@ -19,7 +19,9 @@ def test_renderer_preferences_are_bounded_and_nerd_is_default():
     assert "data={'icons':'nerd','preview':'auto'}" in RENDERER
     assert "{'auto','graphics','ascii','off'}" in RENDERER
     assert "def _terminal_graphics_format()" in RENDERER
-    assert "'kitty'" in RENDERER and "'iterm'" in RENDERER and "'sixels'" in RENDERER
+    assert "return 'kitty'" in RENDERER
+    assert "program in {'iterm.app','iterm2'}" in RENDERER
+    assert 'Sixel has no equivalent placement lifecycle' in RENDERER
 
 
 def test_feedback_is_semantic_not_keypress_sound():

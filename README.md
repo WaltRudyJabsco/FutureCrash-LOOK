@@ -1,6 +1,6 @@
-# Future Crash + LOOK 7.5.9 — SIDE FRAME
+# Future Crash + LOOK 7.6.0 — PREVIEW PORTAL
 
-7.5.9 restores LOOK’s wide-terminal left-list/right-preview geometry while bounding native image graphics inside the right pane and removing full-screen-clear flicker during cursor movement.
+7.6.0 restores LOOK’s wide-terminal left-list/right-preview geometry while bounding native image graphics inside the right pane and removing full-screen-clear flicker during cursor movement.
 
 # Future Crash + LOOK 7.3.0 — LIVE STATE
 

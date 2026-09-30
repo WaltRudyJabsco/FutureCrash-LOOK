@@ -420,9 +420,11 @@ def _terminal_graphics_format()->str|None:
     if os.environ.get('KITTY_WINDOW_ID') or 'kitty' in term:
         return 'kitty'
     if program in {'iterm.app','iterm2'}:
-        return 'iterm'
-    if 'sixel' in term or os.environ.get('DEC_SIXEL') in {'1','true','yes'}:
-        return 'sixels'
+        # Modern iTerm2 implements Kitty graphics. Use one protocol with an
+        # explicit delete-placement lifecycle instead of persistent OSC images.
+        return 'kitty'
+    # Sixel has no equivalent placement lifecycle in LOOK yet; symbol mode is
+    # safer than leaving stale graphics behind while navigating.
     return None
 
 
@@ -466,22 +468,62 @@ def _native_preview_block(path:Path, width:int, height:int)->str|None:
     chafa=shutil.which('chafa')
     if not native or not chafa or not path.is_file():
         return None
-    if path.suffix.casefold() not in {'.png','.jpg','.jpeg','.gif','.webp','.bmp','.tif','.tiff','.heic'}:
+    suffix=path.suffix.casefold()
+    images={'.png','.jpg','.jpeg','.gif','.webp','.bmp','.tif','.tiff','.heic'}
+    if suffix not in images|{'.pdf'}:
         return None
-    try:
-        proc=subprocess.run(
-            [chafa,f'--format={native}',
-             '--relative','off','--align','bottom,center',
-             '--view-size',f'{max(20,width)}x{max(4,height)}',
-             '--size',f'{max(20,width)}x{max(4,height)}',
-             '--margin-bottom','0',str(path)],
-            capture_output=True,text=True,timeout=3
-        )
-        if proc.returncode==0 and proc.stdout:
-            return proc.stdout.rstrip('\n')
-    except (OSError,subprocess.SubprocessError):
-        pass
-    return None
+
+    def render(source:Path)->str|None:
+        try:
+            proc=subprocess.run(
+                [chafa,f'--format={native}',
+                 '--relative','on','--align','bottom,center',
+                 '--view-size',f'{max(20,width)}x{max(4,height)}',
+                 '--size',f'{max(20,width)}x{max(4,height)}',
+                 '--margin-bottom','0',str(source)],
+                capture_output=True,text=True,timeout=4
+            )
+            if proc.returncode==0 and proc.stdout:
+                return proc.stdout.rstrip('\n')
+        except (OSError,subprocess.SubprocessError):
+            pass
+        return None
+
+    if suffix in images:
+        return render(path)
+
+    # PDFs use the exact same managed portal: rasterize page 1, then hand the
+    # resulting image to Chafa. The temporary file only needs to survive until
+    # Chafa has encoded the graphics payload returned by this function.
+    with tempfile.TemporaryDirectory(prefix='look-pdf-native-') as td:
+        temp=Path(td); image=None
+        pdftoppm=shutil.which('pdftoppm')
+        if pdftoppm:
+            out=temp/'page'
+            try:
+                proc=subprocess.run([pdftoppm,'-f','1','-singlefile','-png','-r','120',str(path),str(out)],
+                                    capture_output=True,text=True,timeout=6)
+                candidate=temp/'page.png'
+                if proc.returncode==0 and candidate.exists(): image=candidate
+            except (OSError,subprocess.SubprocessError):
+                pass
+        elif sys.platform=='darwin' and shutil.which('qlmanage'):
+            try:
+                proc=subprocess.run(['qlmanage','-t','-s','1000','-o',str(temp),str(path)],
+                                    stdout=subprocess.DEVNULL,stderr=subprocess.DEVNULL,timeout=6)
+                candidates=list(temp.glob('*.png'))
+                if proc.returncode==0 and candidates: image=candidates[0]
+            except (OSError,subprocess.SubprocessError):
+                pass
+        return render(image) if image else None
+
+def _clear_native_preview()->str:
+    """Delete LOOK's visible Kitty graphics before drawing the next frame."""
+    if _terminal_graphics_format()=='kitty':
+        # Kitty delete action, uppercase A also releases associated image data.
+        return '\x1b_Ga=d,d=A\x1b\\'
+    return ''
+
 
 def _pdf_image_preview(path:Path, width:int, height:int)->list[str]:
     """Render PDF page 1 through an available local rasterizer, then chafa."""
@@ -1116,7 +1158,7 @@ def pager(rows:list[str],height:int,width:int,rebuild=None,browse_rebuild=None,f
             # HOME + erase-below avoids the visible blank-frame flash caused by
             # a full 2J clear on every cursor move. The complete frame is still
             # deterministic and stale rows are erased after the footer below.
-            sys.stdout.write('\x1b[H')
+            sys.stdout.write(_clear_native_preview()+'\x1b[H')
             if context_rows:
                 sys.stdout.write('\n'.join(fit(r,width) for r in context_rows)+'\n')
             native_overlay=None

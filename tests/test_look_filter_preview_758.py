@@ -75,7 +75,7 @@ def test_typing_filter_resets_selection_to_first_match(monkeypatch,tmp_path):
 def test_native_preview_is_a_dedicated_bounded_viewport(monkeypatch,tmp_path):
     r=load_renderer(); img=tmp_path/'x.png'; img.write_bytes(b'x')
     monkeypatch.setattr(r,'_PREVIEW_MODE','auto')
-    monkeypatch.setattr(r,'_terminal_graphics_format',lambda:'iterm')
+    monkeypatch.setattr(r,'_terminal_graphics_format',lambda:'kitty')
     monkeypatch.setattr(r.shutil,'which',lambda name:'/usr/bin/chafa' if name=='chafa' else None)
     calls=[]
     class P:
@@ -88,13 +88,13 @@ def test_native_preview_is_a_dedicated_bounded_viewport(monkeypatch,tmp_path):
     assert '--view-size' in args and '80x10' in args
     assert '--size' in args and '80x10' in args
     assert '--align' in args and 'bottom,center' in args
-    assert '--relative' in args and 'off' in args
+    assert '--relative' in args and 'on' in args
 
 
 def test_embedded_preview_never_uses_native_pixel_protocol(monkeypatch,tmp_path):
     r=load_renderer(); img=tmp_path/'x.png'; img.write_bytes(b'x')
     monkeypatch.setattr(r,'_PREVIEW_MODE','auto')
-    monkeypatch.setattr(r,'_terminal_graphics_format',lambda:'iterm')
+    monkeypatch.setattr(r,'_terminal_graphics_format',lambda:'kitty')
     monkeypatch.setattr(r.shutil,'which',lambda name:'/usr/bin/chafa' if name=='chafa' else None)
     calls=[]
     class P:

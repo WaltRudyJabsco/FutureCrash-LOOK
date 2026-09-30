@@ -1,4 +1,10 @@
-# 7.5.9 — SIDE FRAME
+# 7.6.0 — PREVIEW PORTAL
+
+- Managed right-side native preview lifecycle: erase old placement, then draw one current image.
+- PDF page 1 uses the same native preview portal.
+- iTerm2 uses its Kitty graphics support for explicit placement deletion.
+
+# 7.6.0 — PREVIEW PORTAL
 
 - Restore right-side native image previews with bounded bottom alignment.
 - Remove full-screen clear flicker during interactive selection.
