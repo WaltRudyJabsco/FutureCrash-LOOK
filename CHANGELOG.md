@@ -1,10 +1,27 @@
+# 7.7.2 — PREVIEW PLANE
+
+- Keeps the 7.7.1 filter-minus grammar and 7.7.0 Preview View behavior.
+- Preview View still paints its ordinary ASCII/Chafa frame immediately.
+- On macOS iTerm2, image/PDF previews are prepared off-thread and progressively replace only the known Preview View art rectangle using iTerm2 inline images.
+- The worker never writes to the terminal. Completion wakes the existing blocking input read; the pager thread paints the result without a redraw or state transition.
+- Latest selection wins: queued stale work is discarded rather than accumulated.
+- Raster previews are bounded and cached under `~/.cache/look/previews` by path, mtime, and target scale.
+- `LOOK_NATIVE_PREVIEW=0` is a hard kill switch. Unsupported terminals remain exactly ASCII.
+
 # 7.7.1 — FILTER MINUS
 
-- Adds `V` to toggle Preview View while filtering.
+- Interactive filter terms prefixed with `\` exclude matching names.
+- Positive terms retain the existing AND-substring behavior; multiple exclusions compose.
+- Negative-only filters work. `\.` specially excludes dot-prefixed names without excluding ordinary extension-bearing files.
+- Existing `lk match GLOB v|t|n [--all]` wildcard/ranking behavior is unchanged.
+
+# 7.7.0 — PREVIEW VIEW
+
+- `V` toggles Preview View while filtering.
 - Preview View uses the same filtered candidates, current item, and marked set as List View.
 - Space marks/unmarks the current item; existing LOOK actions continue to use marked files, otherwise current.
 - Esc leaves Preview View first, preserving the filter; `V` toggles back to List View.
-- Preserves 7.6.4 SIMPLE PREVIEW's synchronous ASCII/Chafa-symbol renderer; native graphics machinery remains absent.
+- Preserves 7.6.4 SIMPLE PREVIEW's synchronous ASCII/Chafa-symbol renderer.
 
 # 7.6.4 — SIMPLE PREVIEW
 

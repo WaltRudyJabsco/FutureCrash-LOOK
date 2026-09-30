@@ -12,6 +12,9 @@ from __future__ import annotations
 import json
 
 import argparse
+import base64
+import hashlib
+import queue
 import os
 import shutil
 import stat
@@ -376,17 +379,25 @@ def build_view(target:Path, mode:str, hidden:bool, width:int, tree_depth:int, qu
     return rows
 
 
-def read_key(timeout:float|None=None)->str:
+def read_key(timeout:float|None=None,wakeup_fd:int|None=None,on_wakeup=None)->str:
     fd=sys.stdin.fileno(); old=termios.tcgetattr(fd)
     try:
         # cbreak gives us immediate keystrokes without changing terminal output
-        # processing. A short readiness check distinguishes bare Esc from an
-        # arrow/PageUp/PageDown escape sequence.
+        # processing. Native preview preparation may wake this same blocking read;
+        # painting then happens on the pager thread, never from a worker thread.
         tty.setcbreak(fd)
-        if timeout is not None:
-            ready,_,_=select.select([fd],[],[],timeout)
+        while True:
+            watched=[fd] + ([wakeup_fd] if wakeup_fd is not None else [])
+            ready,_,_=select.select(watched,[],[],timeout)
             if not ready:
                 return ''
+            if wakeup_fd is not None and wakeup_fd in ready:
+                try: os.read(wakeup_fd,4096)
+                except OSError: pass
+                if on_wakeup: on_wakeup()
+                # A preview completion is not a pager event. Stay blocked for input.
+                continue
+            break
         ch=os.read(fd,1)
         if ch==b'\x1b':
             seq=bytearray(ch)
@@ -449,6 +460,106 @@ def _chafa_render(path:Path, width:int, height:int)->list[str]:
         pass
     return []
 
+
+
+class NativePreviewController:
+    """Prepare iTerm previews off-thread; only the pager thread may paint them."""
+    IMAGE_SUFFIXES={'.png','.jpg','.jpeg','.gif','.webp','.bmp','.tif','.tiff','.heic'}
+
+    def __init__(self)->None:
+        disabled=os.environ.get('LOOK_NATIVE_PREVIEW','').casefold() in {'0','off','false','no'}
+        self.enabled=(not disabled and sys.platform=='darwin' and os.environ.get('TERM_PROGRAM')=='iTerm.app')
+        self._jobs=queue.Queue(maxsize=1)
+        self._ready=None
+        self._generation=0
+        self._last_key=None
+        self._rfd=self._wfd=None
+        if self.enabled:
+            self._rfd,self._wfd=os.pipe()
+            os.set_blocking(self._rfd,False); os.set_blocking(self._wfd,False)
+            threading.Thread(target=self._worker,name='look-native-preview',daemon=True).start()
+
+    @property
+    def wakeup_fd(self):
+        return self._rfd
+
+    def request(self,path:Path,row:int,col:int,rows:int,cols:int)->None:
+        if not self.enabled or rows<2 or cols<8 or not path.is_file(): return
+        suffix=path.suffix.casefold()
+        if suffix not in self.IMAGE_SUFFIXES|{'.pdf'}: return
+        try: stamp=path.stat().st_mtime_ns
+        except OSError: return
+        key=(str(path.resolve()),stamp,row,col,rows,cols)
+        if key==self._last_key: return
+        self._last_key=key; self._generation+=1
+        job=(self._generation,path.resolve(),stamp,row,col,rows,cols)
+        # Latest selection wins. Never build a backlog while the user arrows quickly.
+        try:
+            while True: self._jobs.get_nowait()
+        except queue.Empty: pass
+        try: self._jobs.put_nowait(job)
+        except queue.Full: pass
+
+    def invalidate(self)->None:
+        self._generation+=1; self._last_key=None; self._ready=None
+
+    def frame_cleared(self)->None:
+        # CLEAR erased any prior inline image. Make this frame a fresh request and
+        # invalidate preparation belonging to the frame that just disappeared.
+        self.invalidate()
+
+    def _worker(self)->None:
+        while True:
+            job=self._jobs.get()
+            generation,path,stamp,row,col,rows,cols=job
+            prepared=self._prepare(path,stamp,rows,cols)
+            if prepared is None or generation!=self._generation: continue
+            self._ready=(generation,prepared,row,col,rows,cols)
+            try: os.write(self._wfd,b'1')
+            except (OSError,BlockingIOError): pass
+
+    def _prepare(self,path:Path,stamp:int,rows:int,cols:int)->Path|None:
+        cache=Path.home()/'.cache'/'look'/'previews'; cache.mkdir(parents=True,exist_ok=True)
+        # Bound raster size. iTerm performs the final aspect-fit into the cell rectangle.
+        pixel_edge=max(320,min(1600,max(rows*36,cols*18)))
+        token=hashlib.sha256(f'{path}|{stamp}|{pixel_edge}'.encode()).hexdigest()[:24]
+        out=cache/f'{token}.png'
+        if out.exists(): return out
+        temp=out.with_suffix('.tmp.png')
+        try:
+            if path.suffix.casefold()=='.pdf':
+                ql=shutil.which('qlmanage')
+                if not ql: return None
+                with tempfile.TemporaryDirectory(prefix='look-native-pdf-') as td:
+                    proc=subprocess.run([ql,'-t','-s',str(pixel_edge),'-o',td,str(path)],stdout=subprocess.DEVNULL,stderr=subprocess.DEVNULL,timeout=8)
+                    candidates=list(Path(td).glob('*.png'))
+                    if proc.returncode or not candidates: return None
+                    shutil.copy2(candidates[0],temp)
+            else:
+                sips=shutil.which('sips')
+                if not sips: return None
+                proc=subprocess.run([sips,'-Z',str(pixel_edge),str(path),'--out',str(temp)],stdout=subprocess.DEVNULL,stderr=subprocess.DEVNULL,timeout=8)
+                if proc.returncode or not temp.exists(): return None
+            temp.replace(out); return out
+        except (OSError,subprocess.SubprocessError):
+            try: temp.unlink(missing_ok=True)
+            except OSError: pass
+            return None
+
+    def paint_ready(self)->None:
+        ready=self._ready; self._ready=None
+        if not ready: return
+        generation,image,row,col,rows,cols=ready
+        if generation!=self._generation: return
+        try:
+            raw=image.read_bytes()
+        except OSError: return
+        payload=base64.b64encode(raw).decode('ascii')
+        # Save/restore cursor: native pixels replace only the preview rectangle and
+        # cannot alter LOOK's current item, marks, query, or input state.
+        seq=(f'\x1b7\x1b[{row};{col}H\x1b]1337;File=inline=1;width={cols};height={rows};preserveAspectRatio=1:'
+             f'{payload}\x07\x1b8')
+        sys.stdout.write(seq); sys.stdout.flush()
 
 def _pdf_image_preview(path:Path, width:int, height:int)->list[str]:
     """Render PDF page 1 through an available local rasterizer, then chafa."""
@@ -901,6 +1012,7 @@ def pager(rows:list[str],height:int,width:int,rebuild=None,browse_rebuild=None,f
     pending=''
     marked:set[Path]=marked_set if marked_set is not None else set()
     shelf=clipboard_state if clipboard_state is not None else {}
+    native_preview=NativePreviewController()
 
     if initial_select is not None and candidates:
         matches=candidates('')
@@ -1080,6 +1192,7 @@ def pager(rows:list[str],height:int,width:int,rebuild=None,browse_rebuild=None,f
                 context_rows=list(filter_context(query,width) or [])[:2]
                 list_usable=max(1,usable-len(context_rows))
             page=current[top:top+list_usable]
+            native_preview.frame_cleared()
             sys.stdout.write(CLEAR)
             if context_rows:
                 sys.stdout.write('\n'.join(fit(r,width) for r in context_rows)+'\n')
@@ -1109,6 +1222,12 @@ def pager(rows:list[str],height:int,width:int,rebuild=None,browse_rebuild=None,f
                     sys.stdout.write('\n'.join(rendered[:list_usable]))
             else:
                 sys.stdout.write('\n'.join(fit(r,width) for r in page))
+            if preview_view and filtering and picked:
+                # Rows 1-2 remain the instant text title/metadata; native pixels may
+                # progressively replace only the ASCII art beneath them.
+                native_preview.request(picked,len(context_rows)+3,1,max(2,list_usable-2),width)
+            else:
+                native_preview.invalidate()
             last=min(len(current),top+usable)
             action_parts=[]
             if filtering:
@@ -1160,7 +1279,7 @@ def pager(rows:list[str],height:int,width:int,rebuild=None,browse_rebuild=None,f
             if pending:
                 key,pending=pending,''
             else:
-                key=read_key()
+                key=read_key(wakeup_fd=native_preview.wakeup_fd,on_wakeup=native_preview.paint_ready)
 
             if filtering:
                 if key in {'q','Q','\x03'}: break

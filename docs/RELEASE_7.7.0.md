@@ -1,4 +1,4 @@
-# 7.7.1 — PREVIEW VIEW
+# 7.7.0 — PREVIEW VIEW
 
 Parent: 7.6.4 — SIMPLE PREVIEW.
 

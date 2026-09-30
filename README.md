@@ -1,6 +1,6 @@
-# Future Crash + LOOK 7.7.1 — FILTER MINUS
+# Future Crash + LOOK 7.7.2 — PREVIEW PLANE
 
-7.7.1 adds `V` Preview View to the stable 7.6.4 SIMPLE PREVIEW lineage. In a filtered list, `V` toggles a full-content preview of the same working set; arrows navigate the same selection, Space/Tab use the existing marked set, and Esc/V returns to the same filtered list. The renderer remains ASCII/Chafa-symbol only: no Kitty/iTerm/Sixel overlays, preview workers, timers, or asynchronous terminal painting are reintroduced.
+7.7.2 preserves `V` Preview View to the stable 7.6.4 SIMPLE PREVIEW lineage. In a filtered list, `V` toggles a full-content preview of the same working set; arrows navigate the same selection, Space/Tab use the existing marked set, and Esc/V returns to the same filtered list. ASCII/Chafa remains the immediate canonical preview. On macOS iTerm2, Preview View can progressively overlay its known art rectangle with a native image prepared off-thread; unsupported terminals and failures remain ASCII, and the worker never paints or drives pager state.
 
 ## Inherited baseline: 7.6.4 — SIMPLE PREVIEW
 
