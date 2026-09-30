@@ -1,13 +1,13 @@
 #!/usr/bin/env bash
 set -euo pipefail
 ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
-echo "Future Crash + LOOK 7.7.3 · PREVIEW BRIDGE"
+echo "Future Crash + LOOK 7.7.4 · PREVIEW BRIDGE"
 echo "────────────────────────────────────────"
 
 # Refuse a mixed bundle before mutating the machine. A unified release must move
 # LOOK and the node together.
 EXPECTED_RELEASE="$(tr -d '[:space:]' < "$ROOT/VERSION")"
-[[ "$EXPECTED_RELEASE" == "7.7.3" ]] || { echo "BUNDLE ERROR: expected release 7.7.3, found $EXPECTED_RELEASE"; exit 4; }
+[[ "$EXPECTED_RELEASE" == "7.7.4" ]] || { echo "BUNDLE ERROR: expected release 7.7.4, found $EXPECTED_RELEASE"; exit 4; }
 echo "BUNDLE SOURCE  $ROOT"
 echo "BUNDLE RELEASE $EXPECTED_RELEASE · SIMPLE PREVIEW"
 for vf in "$ROOT/look/VERSION" "$ROOT/albert/VERSION" "$ROOT/future-crash/VERSION"; do
@@ -50,7 +50,7 @@ FCL_UNIFIED_INSTALL_CHILD=1 "$ROOT/install-look.sh" "$@"
 ((UNINSTALL)) && exit 0
 if ((DRY_RUN)); then
   echo
-  echo "[dry-run] would install/restart Unified Node 7.7.3 · PREVIEW BRIDGE with signed Fabric rendezvous, Tailcat direct transport, ONE BRAIN cognition, LIVING MIND memory, browser endpoints, SearXNG, Media, Artifacts, and Signal Window 1.11.0"
+  echo "[dry-run] would install/restart Unified Node 7.7.4 · PREVIEW BRIDGE with signed Fabric rendezvous, Tailcat direct transport, ONE BRAIN cognition, LIVING MIND memory, browser endpoints, SearXNG, Media, Artifacts, and Signal Window 1.11.0"
   echo "[dry-run] OpenJev mode: $OPENJEV_MODE (auto provisions on capable nodes; absence/failure is non-fatal)"
   echo "[dry-run] would initialize Tailcat :7443, install optional signed rendezvous discovery, keep Tailscale :7332 → fcl-ingress :7333 as fallback, and verify Fabric CLI wiring"
   exit 0
@@ -69,8 +69,8 @@ restore_node_on_failure() {
     if [[ "$(uname -s)" == "Linux" ]] && command -v systemctl >/dev/null 2>&1; then
       systemctl --user start future-crash-look-node.service >/dev/null 2>&1 || true
     elif [[ "$(uname -s)" == "Darwin" ]] && command -v launchctl >/dev/null 2>&1; then
-      launchctl bootstrap "gui/$(id -u)" "$HOME/Library/LaunchAgents/com.futurecrash.look.node.plist" >/dev/null 2>&1 || \
-        launchctl kickstart -k "gui/$(id -u)/com.futurecrash.look.node" >/dev/null 2>&1 || true
+      launchctl bootstrap "gui/$(id -u)" "$HOME/Library/LaunchAgents/com.futurecrash.look.node.plist" >/dev/null 2>&1 || true
+      launchctl kickstart -k "gui/$(id -u)/com.futurecrash.look.node" >/dev/null 2>&1 || true
     fi
   fi
   return "$status"
@@ -291,7 +291,16 @@ elif [[ "$OS" == "Darwin" ]] && command -v launchctl >/dev/null 2>&1; then
   launchctl bootout "gui/$(id -u)/com.futurecrash.look.tailcat" >/dev/null 2>&1 || true
   launchctl bootout "gui/$(id -u)/com.futurecrash.look.node" >/dev/null 2>&1 || true
   launchctl bootout "gui/$(id -u)/com.futurecrash.look.openjev" >/dev/null 2>&1 || true
-  launchctl bootstrap "gui/$(id -u)" "$HOME/Library/LaunchAgents/com.futurecrash.look.node.plist" || true
+  if ! launchctl bootstrap "gui/$(id -u)" "$HOME/Library/LaunchAgents/com.futurecrash.look.node.plist"; then
+    echo "INSTALL ERROR: Unified Node launchctl bootstrap failed" >&2
+    launchctl print "gui/$(id -u)/com.futurecrash.look.node" >&2 2>/dev/null || true
+    exit 5
+  fi
+  if ! launchctl kickstart -k "gui/$(id -u)/com.futurecrash.look.node"; then
+    echo "INSTALL ERROR: Unified Node launchctl kickstart failed" >&2
+    launchctl print "gui/$(id -u)/com.futurecrash.look.node" >&2 2>/dev/null || true
+    exit 5
+  fi
   if (( OPENJEV_READY )); then launchctl bootstrap "gui/$(id -u)" "$HOME/Library/LaunchAgents/com.futurecrash.look.openjev.plist" || true; fi
   launchctl bootstrap "gui/$(id -u)" "$HOME/Library/LaunchAgents/com.futurecrash.look.ingress.plist" || true
   if (( TAILCAT_READY )); then launchctl bootstrap "gui/$(id -u)" "$HOME/Library/LaunchAgents/com.futurecrash.look.tailcat.plist" || true; fi
@@ -365,8 +374,17 @@ for _ in {1..40}; do
 done
 if (( ! NODE_READY )); then
   echo "INSTALL ERROR: live Unified Node version '${CURRENT_NODE_VERSION:-unavailable}' does not match installed $EXPECTED_RELEASE" >&2
-  echo "  inspect: systemctl --user status future-crash-look-node.service --no-pager" >&2
-  echo "  inspect: lsof -nP -iTCP:7332 -sTCP:LISTEN" >&2
+  if [[ "$(uname -s)" == "Darwin" ]]; then
+    echo "  launchd state:" >&2
+    launchctl print "gui/$(id -u)/com.futurecrash.look.node" >&2 2>/dev/null || true
+    echo "  recent node log:" >&2
+    tail -40 "$HOME/.local/share/future-crash-look/node.log" >&2 2>/dev/null || true
+  else
+    echo "  systemd state:" >&2
+    systemctl --user status future-crash-look-node.service --no-pager >&2 2>/dev/null || true
+  fi
+  echo "  port owner:" >&2
+  lsof -nP -iTCP:7332 -sTCP:LISTEN >&2 2>/dev/null || true
   exit 5
 fi
 if ! python3 - <<'PY_CHECK' >/dev/null 2>&1

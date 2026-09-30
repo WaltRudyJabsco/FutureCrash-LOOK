@@ -1,3 +1,9 @@
+# 7.7.4 — CLEAN START
+
+- Hardens macOS Unified Node bootstrap/kickstart and platform-correct failure diagnostics.
+- Repairs Linux Kitty preview provisioning when Kitty is already installed; PNG also has a no-converter native path.
+- Kitty native placements no longer move the LOOK cursor.
+
 # 7.7.3 — PREVIEW BRIDGE
 
 - Extends the proven ASCII-first native graphics plane from full Preview View into the ordinary wide filtered-list side preview.

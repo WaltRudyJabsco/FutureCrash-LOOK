@@ -557,6 +557,8 @@ class NativePreviewController:
                     if proc.returncode or not made.exists(): return None
                     made.replace(temp)
             else:
+                if self.driver=='kitty' and path.suffix.casefold()=='.png':
+                    return path
                 if sys.platform=='darwin':
                     sips=shutil.which('sips')
                     if not sips: return None
@@ -590,7 +592,7 @@ class NativePreviewController:
                 # Kitty can consume a local PNG by filename; only the tiny filename
                 # payload crosses the terminal. Placement is bounded in cell units.
                 payload=base64.b64encode(str(image).encode()).decode('ascii')
-                seq=(f'\x1b7\x1b[{row};{col}H\x1b_Ga=T,t=f,f=100,c={cols},r={rows},q=2;'
+                seq=(f'\x1b7\x1b[{row};{col}H\x1b_Ga=T,t=f,f=100,c={cols},r={rows},C=1,q=2;'
                      f'{payload}\x1b\\\x1b8')
             else:
                 return

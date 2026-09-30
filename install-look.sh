@@ -467,19 +467,28 @@ PY
         fi
       fi
     elif [[ "$TERMINAL_OS" != "Darwin" ]]; then
-      if command -v kitty >/dev/null 2>&1; then
-        echo "  ✓ Kitty"
-      elif command -v apt-get >/dev/null 2>&1; then
-        if [[ "${DRY_RUN:-0}" == "1" ]]; then echo "  [dry-run] sudo apt-get install -y kitty imagemagick poppler-utils";
-        else sudo apt-get install -y kitty imagemagick poppler-utils || echo "  Optional Kitty/preview helpers install failed; continuing with ASCII."; fi
-      elif command -v dnf >/dev/null 2>&1; then
-        if [[ "${DRY_RUN:-0}" == "1" ]]; then echo "  [dry-run] sudo dnf install -y kitty ImageMagick poppler-utils";
-        else sudo dnf install -y kitty ImageMagick poppler-utils || echo "  Optional Kitty/preview helpers install failed; continuing with ASCII."; fi
-      elif command -v pacman >/dev/null 2>&1; then
-        if [[ "${DRY_RUN:-0}" == "1" ]]; then echo "  [dry-run] sudo pacman -S --noconfirm kitty imagemagick poppler";
-        else sudo pacman -S --noconfirm kitty imagemagick poppler || echo "  Optional Kitty/preview helpers install failed; continuing with ASCII."; fi
+      # Kitty and its raster helpers are independent dependencies. Do not skip
+      # ImageMagick/Poppler merely because Kitty was already present.
+      if command -v kitty >/dev/null 2>&1; then echo "  ✓ Kitty"; fi
+      NEED_KITTY=0; NEED_IMAGE=0; NEED_PDF=0
+      command -v kitty >/dev/null 2>&1 || NEED_KITTY=1
+      { command -v magick >/dev/null 2>&1 || command -v convert >/dev/null 2>&1; } || NEED_IMAGE=1
+      command -v pdftoppm >/dev/null 2>&1 || NEED_PDF=1
+      if (( NEED_KITTY || NEED_IMAGE || NEED_PDF )); then
+        if command -v apt-get >/dev/null 2>&1; then
+          PKGS=(); (( NEED_KITTY )) && PKGS+=(kitty); (( NEED_IMAGE )) && PKGS+=(imagemagick); (( NEED_PDF )) && PKGS+=(poppler-utils)
+          if [[ "${DRY_RUN:-0}" == "1" ]]; then echo "  [dry-run] sudo apt-get install -y ${PKGS[*]}"; else sudo apt-get install -y "${PKGS[@]}" || echo "  Optional terminal/preview helpers install failed; ASCII remains available."; fi
+        elif command -v dnf >/dev/null 2>&1; then
+          PKGS=(); (( NEED_KITTY )) && PKGS+=(kitty); (( NEED_IMAGE )) && PKGS+=(ImageMagick); (( NEED_PDF )) && PKGS+=(poppler-utils)
+          if [[ "${DRY_RUN:-0}" == "1" ]]; then echo "  [dry-run] sudo dnf install -y ${PKGS[*]}"; else sudo dnf install -y "${PKGS[@]}" || echo "  Optional terminal/preview helpers install failed; ASCII remains available."; fi
+        elif command -v pacman >/dev/null 2>&1; then
+          PKGS=(); (( NEED_KITTY )) && PKGS+=(kitty); (( NEED_IMAGE )) && PKGS+=(imagemagick); (( NEED_PDF )) && PKGS+=(poppler)
+          if [[ "${DRY_RUN:-0}" == "1" ]]; then echo "  [dry-run] sudo pacman -S --noconfirm ${PKGS[*]}"; else sudo pacman -S --noconfirm "${PKGS[@]}" || echo "  Optional terminal/preview helpers install failed; ASCII remains available."; fi
+        else
+          echo "  Optional Kitty/ImageMagick/Poppler components are incomplete; install them with your distribution's package manager."
+        fi
       else
-        echo "  Kitty not found; install it with your distribution's package manager."
+        echo "  ✓ Image preview helpers"
       fi
       if command -v fc-list >/dev/null 2>&1 && fc-list | grep -qi "MesloLGS"; then
         echo "  ✓ MesloLGS NF"
