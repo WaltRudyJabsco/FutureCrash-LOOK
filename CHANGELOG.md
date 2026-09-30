@@ -1,41 +1,9 @@
-# 7.6.3 — STILL FRAME
+# 7.6.4 — SIMPLE PREVIEW
 
-- Remove preview deadlines and timed keyboard wakeups from the real interactive pager.
-- Prepare native previews off the input loop; stale selection generations are discarded before terminal output.
-- Preview completion paints only the fixed right pane once and never redraws the filtered text frame.
-- Preserve 7.6.2 filtered selection, stale-line erasure, right-side portal geometry, and graphical PDF previews.
-
-# 7.6.2 — QUIET FRAME
-
-- Erase stale right-side text on partial-frame redraws.
-- Keep filter selection moving visibly before scrolling the list.
-- Replace native previews only after the new payload is ready.
-- Debounce graphical previews for 180 ms of input idle.
-
-# 7.6.2 — SETTLED PORTAL
-
-- Give navigation priority over native preview rendering.
-- Skip obsolete previews during arrow-key bursts.
-- Correct Kitty graphics deletion and bound native payload height.
-- Exit cleanly if native preview output is interrupted.
-
-# 7.6.0 — PREVIEW PORTAL
-
-- Managed right-side native preview lifecycle: erase old placement, then draw one current image.
-- PDF page 1 uses the same native preview portal.
-- iTerm2 uses its Kitty graphics support for explicit placement deletion.
-
-# 7.6.0 — PREVIEW PORTAL
-
-- Restore right-side native image previews with bounded bottom alignment.
-- Remove full-screen clear flicker during interactive selection.
-- Preserve deterministic filter selection and persistent context header.
-
-# 7.5.8 — FILTER FRAME
-
-- Keep filter selection deterministic and visibly synchronized with the filtered list.
-- Confine native image previews to a bounded bottom viewport; never splice pixel protocols into text rows.
-- Preserve the persistent LOOK directory header and filter status.
+- Restores LOOK renderer/pager lineage to 7.5.7.
+- Removes native terminal graphics from LOOK previews.
+- Uses synchronous Chafa symbol previews for images and PDF page 1.
+- Simplifies preview settings to ASCII/Off; legacy Auto/Graphics migrate to ASCII.
 
 # 7.5.5 — ATTENTION ROUTER
 

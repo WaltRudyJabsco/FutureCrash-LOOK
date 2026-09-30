@@ -16,12 +16,12 @@ def test_navigation_contract_is_preserved_while_personalization_grows():
 
 
 def test_renderer_preferences_are_bounded_and_nerd_is_default():
-    assert "data={'icons':'nerd','preview':'auto'}" in RENDERER
-    assert "{'auto','graphics','ascii','off'}" in RENDERER
-    assert "def _terminal_graphics_format()" in RENDERER
-    assert "return 'kitty'" in RENDERER
-    assert "program in {'iterm.app','iterm2'}" in RENDERER
-    assert 'Sixel has no equivalent placement lifecycle' in RENDERER
+    assert "data={'icons':'nerd','preview':'ascii'}" in RENDERER
+    assert "--format=symbols" in RENDERER
+    assert "def _terminal_graphics_format()" not in RENDERER
+    assert "--format=kitty" not in RENDERER
+    assert "--format=iterm" not in RENDERER
+    assert "--format=sixels" not in RENDERER
 
 
 def test_feedback_is_semantic_not_keypress_sound():

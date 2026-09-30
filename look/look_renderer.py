@@ -10,7 +10,6 @@ Normally installed by the repository's ./install.sh.
 """
 from __future__ import annotations
 import json
-import io
 
 import argparse
 import os
@@ -67,14 +66,15 @@ CLEAR='\x1b[2J\x1b[H'; HIDE='\x1b[?25l'; SHOW='\x1b[?25h'
 _RENDERER_CONFIG=Path.home()/'.config'/'look'/'renderer.json'
 
 def _renderer_config()->dict:
-    data={'icons':'nerd','preview':'auto'}
+    data={'icons':'nerd','preview':'ascii'}
     try:
         loaded=json.loads(_RENDERER_CONFIG.read_text(encoding='utf-8'))
         if isinstance(loaded,dict):
             icons=str(loaded.get('icons','nerd')).casefold()
-            preview=str(loaded.get('preview','auto')).casefold()
+            preview=str(loaded.get('preview','ascii')).casefold()
             if icons in {'classic','nerd'}: data['icons']=icons
-            if preview in {'auto','graphics','ascii','off'}: data['preview']=preview
+            if preview=='off': data['preview']='off'
+            elif preview in {'auto','graphics','ascii'}: data['preview']='ascii'
     except (OSError,ValueError,TypeError):
         pass
     return data
@@ -386,47 +386,6 @@ def read_key(timeout:float|None=None)->str:
         termios.tcsetattr(fd,termios.TCSADRAIN,old)
 
 
-def read_key_or_preview(wake_fd:int)->str|None:
-    """Block for real keyboard input or one completed preview job.
-
-    None means preview completion. There is deliberately no clock here: an idle
-    LOOK process remains blocked forever until input or actual work completes.
-    """
-    try:
-        fd=sys.stdin.fileno(); old=termios.tcgetattr(fd)
-    except (AttributeError,io.UnsupportedOperation,OSError):
-        # Test/non-TTY streams can still observe a completed worker without
-        # manufacturing periodic pager wakeups in the real TTY path.
-        ready,_,_=select.select([wake_fd],[],[],0.05)
-        if ready:
-            try: os.read(wake_fd,4096)
-            except OSError: pass
-            return None
-        return read_key()
-    try:
-        tty.setcbreak(fd)
-        while True:
-            ready,_,_=select.select([fd,wake_fd],[],[])
-            # Keyboard always wins when both become ready together.
-            if fd in ready:
-                ch=os.read(fd,1)
-                if ch==b'\x1b':
-                    seq=bytearray(ch)
-                    while len(seq)<6:
-                        more,_,_=select.select([fd],[],[],0.025)
-                        if not more: break
-                        seq.extend(os.read(fd,1))
-                        if seq[-1:] in b'~ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz': break
-                    return bytes(seq).decode('latin1')
-                return ch.decode('utf-8','ignore')
-            if wake_fd in ready:
-                try: os.read(wake_fd,4096)
-                except OSError: pass
-                return None
-    finally:
-        termios.tcsetattr(fd,termios.TCSADRAIN,old)
-
-
 def matching_paths(target:Path, mode:str, hidden:bool, query:str='', tree_depth:int=2)->list[Path]:
 
     if mode=='tree':
@@ -455,116 +414,23 @@ def matching_paths(target:Path, mode:str, hidden:bool, query:str='', tree_depth:
 
 
 
-def _terminal_graphics_format()->str|None:
-    """Return a Chafa graphics backend only when the terminal clearly advertises one."""
-    term=os.environ.get('TERM','').casefold()
-    program=os.environ.get('TERM_PROGRAM','').casefold()
-    if os.environ.get('KITTY_WINDOW_ID') or 'kitty' in term:
-        return 'kitty'
-    if program in {'iterm.app','iterm2'}:
-        # Modern iTerm2 implements Kitty graphics. Use one protocol with an
-        # explicit delete-placement lifecycle instead of persistent OSC images.
-        return 'kitty'
-    # Sixel has no equivalent placement lifecycle in LOOK yet; symbol mode is
-    # safer than leaving stale graphics behind while navigating.
-    return None
-
-
-def _chafa_render(path:Path, width:int, height:int, *, allow_native:bool=False)->list[str]:
-    """Render composable preview rows. Pixel protocols are never spliced into text."""
+def _chafa_render(path:Path, width:int, height:int)->list[str]:
+    """Render a preview as ordinary terminal rows; never emit native graphics."""
     if _PREVIEW_MODE=='off':
         return []
     chafa=shutil.which('chafa')
     if not chafa or height<4 or width<20:
         return []
-    # Embedded preview_rows() must remain ordinary terminal rows. Native Kitty,
-    # iTerm and Sixel payloads position pixels relative to the terminal cursor and
-    # cannot safely be concatenated beside list text.
-    fmt='symbols'
-    native=_terminal_graphics_format() if allow_native else None
-    if allow_native and _PREVIEW_MODE in {'auto','graphics'} and native:
-        fmt=native
-    elif _PREVIEW_MODE=='graphics' and not allow_native:
-        # A native-only preference still needs a stable embedded fallback. The
-        # dedicated viewport below will provide the pixel preview when possible.
-        fmt='symbols'
     try:
         proc=subprocess.run(
-            [chafa,f'--format={fmt}','--size',f'{max(8,width)}x{max(2,height)}',str(path)],
+            [chafa,'--format=symbols','--size',f'{max(8,width)}x{max(2,height)}',str(path)],
             capture_output=True,text=True,timeout=3
         )
-        if proc.returncode==0 and proc.stdout:
-            if fmt!='symbols':
-                return [proc.stdout.rstrip('\n')]
+        if proc.returncode==0 and proc.stdout.strip():
             return proc.stdout.rstrip('\n').splitlines()[:height]
     except (OSError,subprocess.SubprocessError):
         pass
     return []
-
-
-def _native_preview_block(path:Path, width:int, height:int)->str|None:
-    """Return a pixel preview confined to a dedicated Chafa viewport."""
-    if _PREVIEW_MODE not in {'auto','graphics'} or height<4 or width<20:
-        return None
-    native=_terminal_graphics_format()
-    chafa=shutil.which('chafa')
-    if not native or not chafa or not path.is_file():
-        return None
-    suffix=path.suffix.casefold()
-    images={'.png','.jpg','.jpeg','.gif','.webp','.bmp','.tif','.tiff','.heic'}
-    if suffix not in images|{'.pdf'}:
-        return None
-
-    def render(source:Path)->str|None:
-        try:
-            proc=subprocess.run(
-                [chafa,f'--format={native}',
-                 '--relative','on','--align','bottom,center',
-                 '--view-size',f'{max(20,width)}x{max(4,height)}',
-                 '--size',f'{max(20,width)}x{max(4,height)}',
-                 '--margin-bottom','0',str(source)],
-                capture_output=True,text=True,timeout=4
-            )
-            if proc.returncode==0 and proc.stdout:
-                return proc.stdout.rstrip('\n')
-        except (OSError,subprocess.SubprocessError):
-            pass
-        return None
-
-    if suffix in images:
-        return render(path)
-
-    # PDFs use the exact same managed portal: rasterize page 1, then hand the
-    # resulting image to Chafa. The temporary file only needs to survive until
-    # Chafa has encoded the graphics payload returned by this function.
-    with tempfile.TemporaryDirectory(prefix='look-pdf-native-') as td:
-        temp=Path(td); image=None
-        pdftoppm=shutil.which('pdftoppm')
-        if pdftoppm:
-            out=temp/'page'
-            try:
-                proc=subprocess.run([pdftoppm,'-f','1','-singlefile','-png','-r','120',str(path),str(out)],
-                                    capture_output=True,text=True,timeout=6)
-                candidate=temp/'page.png'
-                if proc.returncode==0 and candidate.exists(): image=candidate
-            except (OSError,subprocess.SubprocessError):
-                pass
-        elif sys.platform=='darwin' and shutil.which('qlmanage'):
-            try:
-                proc=subprocess.run(['qlmanage','-t','-s','1000','-o',str(temp),str(path)],
-                                    stdout=subprocess.DEVNULL,stderr=subprocess.DEVNULL,timeout=6)
-                candidates=list(temp.glob('*.png'))
-                if proc.returncode==0 and candidates: image=candidates[0]
-            except (OSError,subprocess.SubprocessError):
-                pass
-        return render(image) if image else None
-
-def _clear_native_preview()->str:
-    """Delete LOOK's visible Kitty graphics before drawing the next frame."""
-    if _terminal_graphics_format()=='kitty':
-        # Kitty delete action, uppercase A also releases associated image data.
-        return '\x1b_Ga=d,d=A,q=2;\x1b\\'
-    return ''
 
 
 def _pdf_image_preview(path:Path, width:int, height:int)->list[str]:
@@ -598,7 +464,7 @@ def _pdf_image_preview(path:Path, width:int, height:int)->list[str]:
                     image=candidates[0]
             except (OSError,subprocess.SubprocessError):
                 pass
-        return _chafa_render(image,width,height,allow_native=False) if image else []
+        return _chafa_render(image,width,height) if image else []
 
 
 def preview_rows(path:Path, width:int, height:int)->list[str]:
@@ -629,7 +495,7 @@ def preview_rows(path:Path, width:int, height:int)->list[str]:
     suffix=path.suffix.casefold()
     image_suffixes={'.png','.jpg','.jpeg','.gif','.webp','.bmp','.tif','.tiff','.heic'}
     if suffix in image_suffixes:
-        art=_chafa_render(path,max(20,width),max(2,height-2),allow_native=False)
+        art=_chafa_render(path,max(20,width),max(2,height-2))
         if art:
             rows.append(f'{DIM}{human_size(st.st_size)} · image preview{RESET}')
             rows.extend(art)
@@ -1016,18 +882,6 @@ def pager(rows:list[str],height:int,width:int,rebuild=None,browse_rebuild=None,f
     matches:list[Path]=[]
     notice=''
     pending=''
-    native_visible=False
-    # Preview is an edge job, not pager state. Workers may prepare pixels, but
-    # only the pager owns terminal placement. A pipe wakes the blocking input
-    # loop exactly once when real preview work completes; there is no timer.
-    preview_r,preview_w=os.pipe()
-    os.set_blocking(preview_w,False)
-    preview_lock=threading.Lock()
-    preview_generation=0
-    preview_requested=None
-    preview_ready=None
-    closing=False
-    redraw=True
     marked:set[Path]=marked_set if marked_set is not None else set()
     shelf=clipboard_state if clipboard_state is not None else {}
 
@@ -1041,15 +895,15 @@ def pager(rows:list[str],height:int,width:int,rebuild=None,browse_rebuild=None,f
                 selecting=True
                 break
 
-    def refresh_filter(*, reset_selection:bool=False)->None:
+    def refresh_filter()->None:
         nonlocal current,top,matches,selected
         current=rebuild(query,None,None,marked) if rebuild else rows
         matches=candidates(query) if candidates else []
-        selected=0 if reset_selection else min(selected,max(0,len(matches)-1))
+        selected=min(selected,max(0,len(matches)-1))
         top=0
 
     if query and rebuild and candidates:
-        refresh_filter(reset_selection=True)
+        refresh_filter()
 
     def selected_path()->Path|None:
         return matches[selected] if matches and 0<=selected<len(matches) else None
@@ -1184,55 +1038,9 @@ def pager(rows:list[str],height:int,width:int,rebuild=None,browse_rebuild=None,f
         marked.clear()
         notice='done · lk undo' if proc.returncode==0 else 'action failed'
 
-    def request_native_preview(overlay)->None:
-        nonlocal preview_generation,preview_requested,preview_ready
-        if not overlay:
-            if preview_requested is not None:
-                preview_generation+=1; preview_requested=None; preview_ready=None
-            return
-        row,col,path,pw,ph=overlay
-        signature=(str(path),row,col,pw,min(ph,32))
-        if signature==preview_requested:
-            return
-        preview_generation+=1; generation=preview_generation
-        preview_requested=signature; preview_ready=None
-        def work():
-            nonlocal preview_ready
-            blob=_native_preview_block(path,pw,min(ph,32))
-            with preview_lock:
-                if closing or generation!=preview_generation:
-                    return
-                preview_ready=(generation,row,col,blob,signature)
-            try: os.write(preview_w,b'p')
-            except (BlockingIOError,OSError): pass
-        threading.Thread(target=work,name='look-preview',daemon=True).start()
-
-    def paint_ready_preview()->None:
-        nonlocal preview_ready,native_visible
-        with preview_lock:
-            ready=preview_ready; preview_ready=None
-        if not ready: return
-        generation,row,col,blob,signature=ready
-        if generation!=preview_generation or signature!=preview_requested: return
-        if blob:
-            try:
-                sys.stdout.write(_clear_native_preview()+f'\x1b7\x1b[{row};{col}H'+blob+'\x1b8')
-                sys.stdout.flush(); native_visible=True
-            except KeyboardInterrupt:
-                pass
-
     try:
         sys.stdout.write(HIDE)
         while True:
-            if not redraw:
-                key=read_key_or_preview(preview_r)
-                if key is None:
-                    paint_ready_preview()
-                    continue
-                redraw=True
-                if pending:
-                    # Pending is only used by the tiny typing-burst collector.
-                    pending=''
             picked=selected_path()
             if cursoring and browse_rebuild:
                 current=browse_rebuild(picked, marked)
@@ -1255,49 +1063,31 @@ def pager(rows:list[str],height:int,width:int,rebuild=None,browse_rebuild=None,f
                 context_rows=list(filter_context(query,width) or [])[:2]
                 list_usable=max(1,usable-len(context_rows))
             page=current[top:top+list_usable]
-            # HOME + erase-below avoids the visible blank-frame flash caused by
-            # a full 2J clear on every cursor move. The complete frame is still
-            # deterministic and stale rows are erased after the footer below.
-            sys.stdout.write('\x1b[H')
+            sys.stdout.write(CLEAR)
             if context_rows:
-                sys.stdout.write('\n'.join(fit(r,width)+'\x1b[K' for r in context_rows)+'\n')
-            native_overlay=None
+                sys.stdout.write('\n'.join(fit(r,width) for r in context_rows)+'\n')
             if (selecting or filtering) and picked:
                 if width>=96:
                     left_w=max(38,int(width*0.58))
                     right_w=max(28,width-left_w-3)
                     left=[fit(r,left_w) for r in page]
-                    native_candidate=(
-                        _PREVIEW_MODE in {'auto','graphics'}
-                        and _terminal_graphics_format()=='kitty'
-                        and picked.is_file()
-                        and picked.suffix.casefold() in {'.png','.jpg','.jpeg','.gif','.webp','.bmp','.tif','.tiff','.heic','.pdf'}
-                    )
-                    # Native rendering is deliberately deferred until after the
-                    # text frame is on screen and input has been idle briefly.
-                    # Arrow-key bursts therefore never queue obsolete megabyte
-                    # graphics payloads behind the pager.
-                    right=[] if native_candidate else preview_rows(picked,right_w,list_usable)
+                    right=preview_rows(picked,right_w,list_usable)
                     rendered=[]
-                    for i in range(max(len(left),len(right),list_usable)):
+                    for i in range(max(len(left),len(right))):
                         l=left[i] if i<len(left) else ''
                         r=right[i] if i<len(right) else ''
                         pad=max(0,left_w-len(strip_ansi(l)))
                         rendered.append(l+' '*pad+FAINT+' │ '+RESET+r)
-                    sys.stdout.write('\n'.join(r+'\x1b[K' for r in rendered[:list_usable]))
-                    if native_candidate:
-                        # Store geometry/path only. The expensive Chafa payload
-                        # is created later, after a short input-idle gate.
-                        native_overlay=(len(context_rows)+1,left_w+4,picked,right_w,list_usable)
+                    sys.stdout.write('\n'.join(rendered[:list_usable]))
                 else:
                     preview_h=max(4,list_usable//3)
                     list_h=max(3,list_usable-preview_h-1)
                     rendered=[fit(r,width) for r in page[:list_h]]
                     rendered.append(FAINT+('─'*width)+RESET)
                     rendered.extend(preview_rows(picked,width,preview_h))
-                    sys.stdout.write('\n'.join(r+'\x1b[K' for r in rendered[:list_usable]))
+                    sys.stdout.write('\n'.join(rendered[:list_usable]))
             else:
-                sys.stdout.write('\n'.join(fit(r,width)+'\x1b[K' for r in page))
+                sys.stdout.write('\n'.join(fit(r,width) for r in page))
             last=min(len(current),top+usable)
             action_parts=[]
             if filtering:
@@ -1336,24 +1126,11 @@ def pager(rows:list[str],height:int,width:int,rebuild=None,browse_rebuild=None,f
                 status=f'{status}  {YELLOW}{notice}{RESET}'
                 notice=''
             footer=action_footer(action_parts,width)
-            sys.stdout.write('\n'+fit(status,width)+'\x1b[K\n'+'\n'.join(line+'\x1b[K' for line in footer)+'\x1b[J')
-            sys.stdout.flush()
-            # Schedule at most one preparation job for this exact selection. The
-            # worker never writes the terminal; stale generations simply disappear.
-            request_native_preview(native_overlay)
-            if not native_overlay and native_visible:
-                sys.stdout.write(_clear_native_preview()); sys.stdout.flush()
-                native_visible=False
-            redraw=False
+            sys.stdout.write('\n'+fit(status,width)+'\n'+'\n'.join(footer)); sys.stdout.flush()
             if pending:
                 key,pending=pending,''
-                redraw=True
             else:
-                key=read_key_or_preview(preview_r)
-                if key is None:
-                    paint_ready_preview()
-                    continue
-                redraw=True
+                key=read_key()
 
             if filtering:
                 if key in {'q','Q','\x03'}: break
@@ -1371,16 +1148,16 @@ def pager(rows:list[str],height:int,width:int,rebuild=None,browse_rebuild=None,f
                     continue
                 elif key in {'\x1b[B','J'} and matches:
                     selected=min(len(matches)-1,selected+1)
-                    if selected>=top+list_usable: top=selected-list_usable+1
+                    top=min(max(0,len(current)-list_usable),top+1)
                 elif key in {'\x1b[A','K'} and matches:
                     selected=max(0,selected-1)
-                    if selected<top: top=selected
+                    top=max(0,top-1)
                 elif key in {'\x1b[6~','\x1b[1;2B'} and matches:
                     selected=min(len(matches)-1,selected+list_usable)
-                    top=min(max(0,len(current)-list_usable),max(top,selected-list_usable+1))
+                    top=min(max(0,len(current)-list_usable),top+list_usable)
                 elif key in {'\x1b[5~','\x1b[1;2A'} and matches:
                     selected=max(0,selected-list_usable)
-                    top=min(top,selected)
+                    top=max(0,top-list_usable)
                 elif key=='\x1b[1;2D' and matches:
                     selected=0; top=0
                 elif key=='\x1b[1;2C' and matches:
@@ -1446,7 +1223,7 @@ def pager(rows:list[str],height:int,width:int,rebuild=None,browse_rebuild=None,f
                         sys.stdout.write(HIDE); sys.stdout.flush()
                         if not opened and message!='open-with cancelled': notice=message
                 elif key in {'\x7f','\b'}:
-                    if query: query=query[:-1]; refresh_filter(reset_selection=True)
+                    if query: query=query[:-1]; refresh_filter()
                 elif key=='\x03': break
                 elif len(key)==1 and key.isprintable():
                     # Capture the typing burst before rendering. Input stays ahead of redraws;
@@ -1465,7 +1242,7 @@ def pager(rows:list[str],height:int,width:int,rebuild=None,browse_rebuild=None,f
                         # Preserve a non-text key for the next input cycle.
                         pending=nxt
                         break
-                    refresh_filter(reset_selection=True)
+                    refresh_filter()
                 continue
 
             if cursoring:
@@ -1502,9 +1279,9 @@ def pager(rows:list[str],height:int,width:int,rebuild=None,browse_rebuild=None,f
                 # Typing or explicit filter enters the existing one-row filter
                 # contract, starting from a clean query rather than the grid.
                 if key=='/':
-                    cursoring=False; filtering=True; query=''; refresh_filter(reset_selection=True); continue
+                    cursoring=False; filtering=True; query=''; refresh_filter(); continue
                 if len(key)==1 and key.isprintable() and key not in {' ','b'}:
-                    cursoring=False; filtering=True; query=key; refresh_filter(reset_selection=True); continue
+                    cursoring=False; filtering=True; query=key; refresh_filter(); continue
                 if key in {' ','\x1b[6~'}:
                     selected=min(len(matches)-1,selected+usable); continue
                 if key in {'b','\x1b[5~'}:
@@ -1579,7 +1356,7 @@ def pager(rows:list[str],height:int,width:int,rebuild=None,browse_rebuild=None,f
             if key in {'q','Q','\x03'}: break
             if key in {'\r','\n','/','\x1b[C'}:
                 filtering=True
-                refresh_filter(reset_selection=True)
+                refresh_filter()
             elif key=='\x1b':
                 if query:
                     query=''; selecting=False; refresh_filter()
@@ -1604,13 +1381,8 @@ def pager(rows:list[str],height:int,width:int,rebuild=None,browse_rebuild=None,f
             elif key in {'<','\x1b[D'} and on_parent:
                 on_parent()
                 return
-    except KeyboardInterrupt:
-        pass
     finally:
-        closing=True; preview_generation+=1
-        try: os.close(preview_r); os.close(preview_w)
-        except OSError: pass
-        sys.stdout.write(_clear_native_preview()+SHOW+RESET+'\n'); sys.stdout.flush()
+        sys.stdout.write(SHOW+RESET+'\n'); sys.stdout.flush()
 
 def _global_catalog_stream(root:Path, catalog:list[Path], done:threading.Event)->None:
     """Populate catalog progressively; caller may read it while discovery runs."""

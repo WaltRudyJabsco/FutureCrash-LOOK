@@ -24,7 +24,7 @@ def test_filter_selection_keeps_one_candidate_per_row_contract():
 
 
 def test_nerd_icons_are_default_and_classic_remains_optional():
-    assert 'data={"icons":"nerd","preview":"auto"}' in LK
+    assert 'data={"icons":"nerd","preview":"ascii"}' in LK
     assert '("icons","FILES","File icons"' in LK
     assert "if _ICON_MODE!='nerd':" in RENDERER
     assert "return '◆'" in RENDERER

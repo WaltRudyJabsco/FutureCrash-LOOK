@@ -378,14 +378,15 @@ def _save_feedback(data):
 
 
 def _load_renderer_config():
-    data={"icons":"nerd","preview":"auto"}
+    data={"icons":"nerd","preview":"ascii"}
     try:
         loaded=json.loads(RENDERER_CONFIG_FILE.read_text(encoding="utf-8"))
         if isinstance(loaded,dict):
             icons=str(loaded.get("icons","nerd")).casefold()
-            preview=str(loaded.get("preview","auto")).casefold()
+            preview=str(loaded.get("preview","ascii")).casefold()
             if icons in {"classic","nerd"}: data["icons"]=icons
-            if preview in {"auto","graphics","ascii","off"}: data["preview"]=preview
+            if preview=="off": data["preview"]="off"
+            elif preview in {"auto","graphics","ascii"}: data["preview"]="ascii"
     except (OSError,ValueError,TypeError): pass
     return data
 
@@ -395,9 +396,9 @@ def _save_renderer_config(data):
     current=_load_renderer_config()
     current.update(data or {})
     icons=str(current.get("icons","nerd")).casefold()
-    preview=str(current.get("preview","auto")).casefold()
+    preview=str(current.get("preview","ascii")).casefold()
     payload={"icons":icons if icons in {"classic","nerd"} else "nerd",
-             "preview":preview if preview in {"auto","graphics","ascii","off"} else "auto"}
+             "preview":"off" if preview=="off" else "ascii"}
     tmp=RENDERER_CONFIG_FILE.with_name(RENDERER_CONFIG_FILE.name+f".{os.getpid()}.tmp")
     tmp.write_text(json.dumps(payload,indent=2)+"\n",encoding="utf-8")
     try: os.chmod(tmp,0o600)
@@ -424,16 +425,14 @@ def _settings_set_icons(value):
 def _settings_pick_preview():
     current=_load_renderer_config()["preview"]
     return _settings_pick_choice("image preview",current,[
-        ("auto","terminal graphics when supported · ASCII fallback"),
-        ("graphics","prefer native terminal image protocol"),
-        ("ascii","always use Chafa symbol rendering"),
+        ("ascii","Chafa symbol preview · stable text-frame renderer"),
         ("off","metadata only"),
     ],lambda args:_settings_set_preview(args[0] if args else current))
 
 
 def _settings_set_preview(value):
     value=str(value).casefold()
-    if value not in {"auto","graphics","ascii","off"}: return 2
+    if value not in {"ascii","off"}: return 2
     _save_renderer_config({"preview":value})
     print(f"LOOK image preview · {value} · applies next time LOOK opens")
     return 0
@@ -9930,7 +9929,7 @@ def _direct_searxng_search(query, limit=8):
     params=urllib.parse.urlencode({"q":query,"format":"json"})
     request=urllib.request.Request(base+"/search?"+params,headers={
         "Accept":"application/json",
-        "User-Agent":"Future-Crash-Fabric/7.6.3",
+        "User-Agent":"Future-Crash-Fabric/7.6.4",
     })
     with urllib.request.urlopen(request,timeout=12) as response:
         data=json.load(response)
@@ -13799,8 +13798,8 @@ def _settings_rows():
          "Choose Nerd Font file-type glyphs or classic LOOK markers.",
          "icons nerd font glyph folder file type symbols appearance classic"),
         ("preview","FILES","Image preview",_load_renderer_config()["preview"],
-         "Auto uses terminal-native graphics when clearly supported and falls back to the classic Chafa symbol preview.",
-         "image preview graphics ascii chafa kitty sixel iterm terminal photo picture"),
+         "Stable Chafa symbol preview composed into the same text frame as the filtered file list.",
+         "image preview ascii chafa terminal photo picture"),
         ("apps","DESKTOP","Preferred apps",f"{len(_load_apps())} overrides",
          "Choose preferred apps for browser, editor, images, PDF, video, and audio. System defaults remain available.",
          "apps applications desktop open preview video vlc mpv pdf image editor browser audio"),

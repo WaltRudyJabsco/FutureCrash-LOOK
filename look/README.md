@@ -128,7 +128,7 @@ The design rule is simple: **dangerous operations should be obvious, and mistake
 
 ## Preview what you found
 
-LOOK previews text and code directly. If `chafa` is present, common images render inside the terminal. `lk settings` offers Auto/Graphics/ASCII/Off; Auto prefers a clearly advertised Kitty/iTerm2/Sixel protocol and otherwise uses Chafa symbols. PDFs can render page one when a local rasterizer is available; `pdftotext` also lets LOOK and LO extract text from text-bearing PDFs.
+LOOK previews text and code directly. If `chafa` is present, common images render inside the terminal. `lk settings` offers ASCII/Off. ASCII uses Chafa symbol rows inside LOOK’s normal text frame; native terminal graphics are intentionally disabled. PDFs can render page one when a local rasterizer is available; `pdftotext` also lets LOOK and LO extract text from text-bearing PDFs.
 
 These are capabilities, not alternate interfaces. A missing preview helper degrades gracefully to text or metadata.
 

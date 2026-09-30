@@ -1,6 +1,9 @@
-# Future Crash + LOOK 7.6.3 — STILL FRAME
+# Future Crash + LOOK 7.6.4 — SIMPLE PREVIEW
 
-7.6.3 removes preview timing from the pager. Filter navigation owns the text frame; preview preparation runs as a replaceable background edge job, stale jobs are discarded by generation, and completion paints only the fixed right pane once. With no keyboard or completed preview work, LOOK remains completely idle.
+7.6.4 deliberately restores LOOK's 7.5.7 pager architecture after the native terminal-graphics experiment destabilized filtering and navigation. Image and PDF previews are ordinary Chafa symbol rows composed synchronously into the filtered frame. There are no Kitty/iTerm/Sixel graphics payloads, preview workers, preview timers, or asynchronous terminal painting in LOOK. Existing Auto/Graphics preview preferences migrate safely to ASCII; the settings surface now exposes only ASCII or Off.
+
+
+7.6.4 fixes default-voice audition semantics and introduces typed, endpoint-aware Fabric attention routing. Explicit alerts can target the origin node, a named node/browser endpoint, or all current speech-capable endpoints; active/follow-me targeting remains deliberately unresolved until trustworthy presence evidence exists.
 
 # Future Crash + LOOK 7.3.0 — LIVE STATE
 
