@@ -103,3 +103,24 @@ def test_embedded_preview_never_uses_native_pixel_protocol(monkeypatch,tmp_path)
     rows=r._chafa_render(img,40,8,allow_native=False)
     assert rows==['row1','row2']
     assert '--format=symbols' in calls[0]
+
+
+def test_native_preview_stays_in_right_pane_and_frame_does_not_full_clear(monkeypatch,tmp_path):
+    r=load_renderer(); a=tmp_path/'a.png'; a.write_bytes(b'x')
+    seq=iter(['\r'])
+    monkeypatch.setattr(r,'read_key',lambda timeout=None: next(seq))
+    monkeypatch.setattr(r,'_native_preview_block',lambda path,w,h:'PIXELS')
+    monkeypatch.setattr(r.sys,'stdin',TTYIn()); out=TTYOut(); monkeypatch.setattr(r.sys,'stdout',out)
+    def candidates(q): return [a]
+    def rebuild(q,picked=None,w=None,marked=None): return [('>> ' if picked==a else '')+'a.png']
+    activated=[]
+    r.pager(['LOOK'],20,120,rebuild=rebuild,
+            filter_context=lambda q,w:['LOOK  ~/Desktop  0 dirs · 1 files','---'],
+            candidates=candidates,on_activate=lambda p:activated.append(p),
+            force_interactive=True,initial_query='png')
+    screen=out.getvalue()
+    # 58% of 120 => left pane 69 cols, separator consumes 3; native pane starts at col 73.
+    assert '\x1b[3;73HPIXELS' in screen
+    assert '\x1b[2J' not in screen
+    assert 'LOOK  ~/Desktop' in screen
+    assert activated==[a]

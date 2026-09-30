@@ -1,3 +1,9 @@
+# 7.5.9 — SIDE FRAME
+
+- Restore right-side native image previews with bounded bottom alignment.
+- Remove full-screen clear flicker during interactive selection.
+- Preserve deterministic filter selection and persistent context header.
+
 # 7.5.8 — FILTER FRAME
 
 - Keep filter selection deterministic and visibly synchronized with the filtered list.

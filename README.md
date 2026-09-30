@@ -1,6 +1,6 @@
-# Future Crash + LOOK 7.5.8 — FILTER FRAME
+# Future Crash + LOOK 7.5.9 — SIDE FRAME
 
-7.5.8 fixes filtered-list spatial stability: filtered results reset deterministically to the first visible match when the query changes, arrow navigation remains visibly synchronized, and native terminal image previews render only inside a bounded bottom viewport rather than corrupting the text grid.
+7.5.9 restores LOOK’s wide-terminal left-list/right-preview geometry while bounding native image graphics inside the right pane and removing full-screen-clear flicker during cursor movement.
 
 # Future Crash + LOOK 7.3.0 — LIVE STATE
 

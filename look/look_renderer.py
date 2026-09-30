@@ -1113,32 +1113,36 @@ def pager(rows:list[str],height:int,width:int,rebuild=None,browse_rebuild=None,f
                 context_rows=list(filter_context(query,width) or [])[:2]
                 list_usable=max(1,usable-len(context_rows))
             page=current[top:top+list_usable]
-            sys.stdout.write(CLEAR)
+            # HOME + erase-below avoids the visible blank-frame flash caused by
+            # a full 2J clear on every cursor move. The complete frame is still
+            # deterministic and stale rows are erased after the footer below.
+            sys.stdout.write('\x1b[H')
             if context_rows:
                 sys.stdout.write('\n'.join(fit(r,width) for r in context_rows)+'\n')
+            native_overlay=None
             if (selecting or filtering) and picked:
-                # Pixel graphics get their own bounded viewport. They must never
-                # be concatenated into a list row: Kitty/iTerm/Sixel are drawing
-                # protocols, not printable row text.
-                native_h=max(4,min(12,list_usable//2))
-                native_blob=_native_preview_block(picked,width,native_h)
-                if native_blob:
-                    list_h=max(3,list_usable-native_h-1)
-                    rendered=[fit(r,width) for r in page[:list_h]]
-                    rendered.append(FAINT+('─'*width)+RESET)
-                    sys.stdout.write('\n'.join(rendered)+'\n'+native_blob)
-                elif width>=96:
+                if width>=96:
                     left_w=max(38,int(width*0.58))
                     right_w=max(28,width-left_w-3)
                     left=[fit(r,left_w) for r in page]
-                    right=preview_rows(picked,right_w,list_usable)
+                    native_blob=_native_preview_block(picked,right_w,list_usable)
+                    # Native graphics and symbol/text previews share exactly the
+                    # same right-hand pane. Pixel protocols are drawn *after* the
+                    # text frame at an absolute pane origin; they are never
+                    # concatenated into a text row. Chafa bottom-aligns inside the
+                    # pane, so graphics cannot escape above the LOOK header.
+                    right=[] if native_blob else preview_rows(picked,right_w,list_usable)
                     rendered=[]
-                    for i in range(max(len(left),len(right))):
+                    for i in range(max(len(left),len(right),list_usable)):
                         l=left[i] if i<len(left) else ''
                         r=right[i] if i<len(right) else ''
                         pad=max(0,left_w-len(strip_ansi(l)))
                         rendered.append(l+' '*pad+FAINT+' │ '+RESET+r)
                     sys.stdout.write('\n'.join(rendered[:list_usable]))
+                    if native_blob:
+                        # Terminal rows/columns are 1-based. Context rows sit
+                        # above the list; the preview begins beside list row 1.
+                        native_overlay=(len(context_rows)+1,left_w+4,native_blob)
                 else:
                     preview_h=max(4,list_usable//3)
                     list_h=max(3,list_usable-preview_h-1)
@@ -1186,7 +1190,11 @@ def pager(rows:list[str],height:int,width:int,rebuild=None,browse_rebuild=None,f
                 status=f'{status}  {YELLOW}{notice}{RESET}'
                 notice=''
             footer=action_footer(action_parts,width)
-            sys.stdout.write('\n'+fit(status,width)+'\n'+'\n'.join(footer)); sys.stdout.flush()
+            sys.stdout.write('\n'+fit(status,width)+'\n'+'\n'.join(footer)+'\x1b[J')
+            if native_overlay:
+                row,col,blob=native_overlay
+                sys.stdout.write(f'\x1b7\x1b[{row};{col}H'+blob+'\x1b8')
+            sys.stdout.flush()
             if pending:
                 key,pending=pending,''
             else:
