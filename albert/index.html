@@ -41,7 +41,7 @@ button:focus-visible,input:focus-visible,textarea:focus-visible{outline:2px soli
 .receipt{border:1px solid var(--ink);padding:11px 12px;margin-top:10px;font-size:11px;line-height:1.6}.receipt strong{font-size:9px;letter-spacing:.12em;text-transform:uppercase}
 .dropzone{border:1px dashed transparent;border-radius:12px;transition:.18s}.dropzone.drag{border-color:var(--ink);background:rgba(255,255,255,.28)}
 .composer-wrap{position:fixed;left:0;right:0;bottom:0;z-index:10;padding:32px 14px calc(12px + env(safe-area-inset-bottom));background:linear-gradient(to top,var(--paper) 72%,rgba(243,239,227,.95) 82%,rgba(243,239,227,0))}
-.composer{max-width:var(--measure);margin:auto;border-top:1px solid var(--ink);padding-top:10px;display:grid;grid-template-columns:auto 1fr auto auto;gap:8px;align-items:center}
+.composer{max-width:var(--measure);margin:auto;border-top:1px solid var(--ink);padding-top:10px;display:grid;grid-template-columns:auto 1fr auto auto auto;gap:8px;align-items:center}
 .prompt{font-size:19px}.ask{border:0;background:transparent;outline:0;width:100%;font-size:16px;padding:9px 0}.icon{border:0;background:transparent;color:var(--muted);padding:8px;font-size:15px}.icon.on{color:var(--ink);font-weight:700}
 .nav{max-width:var(--measure);margin:7px auto 0;display:flex;gap:4px;justify-content:space-between}.nav button{border:0;background:transparent;color:var(--muted);font-size:9px;padding:5px 6px}.nav button.active{color:var(--ink);font-weight:700}
 .sheet{position:fixed;z-index:30;left:50%;bottom:88px;transform:translate(-50%,18px);width:min(720px,calc(100vw - 28px));max-height:min(68vh,680px);overflow:auto;background:var(--paper);border:1px solid var(--line);box-shadow:0 20px 80px var(--shadow);padding:16px;opacity:0;pointer-events:none;transition:.2s}.sheet.open{opacity:1;pointer-events:auto;transform:translate(-50%,0)}
@@ -49,7 +49,7 @@ button:focus-visible,input:focus-visible,textarea:focus-visible{outline:2px soli
 .saved-note{color:var(--muted);font-size:10px;line-height:1.5}
 @media(min-width:800px){.shell{max-width:1040px;margin:24px auto;min-height:calc(100vh - 48px);border:1px solid var(--line);border-radius:28px;box-shadow:0 22px 80px var(--shadow)}.paper{padding:36px 42px 165px}.composer-wrap{left:50%;transform:translateX(-50%);width:min(1040px,100%);bottom:24px;border-radius:0 0 28px 28px}.media-grid{display:grid;grid-template-columns:minmax(0,1.5fr) minmax(220px,.7fr);gap:14px}.media-grid .media{margin:0}.media-grid .side{align-self:start}}
 @media(min-width:1100px){:root{--measure:900px}.title{font-size:16px}.prose{font-size:16px}}
-@media(max-width:480px){.paper{padding-left:18px;padding-right:18px}.composer-wrap{padding-left:10px;padding-right:10px}.composer{grid-template-columns:auto 1fr auto auto}.nav button{font-size:8px}.media-viewport{min-height:190px}.media-grid.expanded .media-viewport{height:62vh}}
+@media(max-width:480px){.paper{padding-left:18px;padding-right:18px}.composer-wrap{padding-left:10px;padding-right:10px}.composer{grid-template-columns:auto 1fr auto auto auto}.nav button{font-size:8px}.media-viewport{min-height:190px}.media-grid.expanded .media-viewport{height:62vh}}
 @media(prefers-reduced-motion:reduce){*{scroll-behavior:auto!important;animation:none!important;transition:none!important}}
 body.dark{--paper:#11110f;--ink:#f0eee7;--muted:#99948b;--line:#34312c;--wash:rgba(255,255,255,.04);--shadow:rgba(0,0,0,.4);background:#070706}
 body.terminal{--paper:#050905;--ink:#a8f0aa;--muted:#5c9c66;--line:#1c3f25;--wash:rgba(168,240,170,.03);--shadow:rgba(0,0,0,.55);background:#020402}
@@ -86,6 +86,8 @@ body.dark .beacon-layer,body.terminal .beacon-layer{mix-blend-mode:screen}
     <div class="composer">
       <span class="prompt">›</span>
       <input class="ask" id="ask" autocomplete="off" placeholder="ask, act, paste, or drop…" />
+      <button class="icon" id="cameraButton" title="Take photo">CAM</button>
+      <input id="cameraInput" type="file" accept="image/*" capture="environment" hidden />
       <button class="icon" id="mic" title="Speak">◉</button>
       <button class="icon" id="tools" title="Capabilities">＋</button>
     </div>
@@ -276,6 +278,8 @@ async function attachFile(file){
 function renderAttachments(){attachmentTray.classList.toggle('live',!!state.attachments.length);attachmentTray.innerHTML=state.attachments.map((a,i)=>`<div class="attachment">${String(a.mime||'').startsWith('image/')?`<img src="${esc(a.preview)}" alt="">`:''}<span>${esc(a.name||'object')}<br><span class="meta">${esc(a.mime||'object')}</span></span><button title="Remove" onclick="removeAttachment(${i})">×</button></div>`).join('')}
 function removeAttachment(i){state.attachments.splice(i,1);renderAttachments()}
 function clearAttachments(){state.attachments=[];renderAttachments()}
+cameraButton?.addEventListener('click',()=>cameraInput?.click());
+cameraInput?.addEventListener('change',async()=>{const file=cameraInput.files?.[0];if(!file)return;try{await attachFile(file);if(!ask.value.trim()){ask.value='what am I looking at?';ask.focus();ask.select()}else ask.focus()}finally{cameraInput.value=''}});
 function formatBytes(n){if(n<1024)return n+' B';if(n<1048576)return (n/1024).toFixed(1)+' KB';return (n/1048576).toFixed(1)+' MB'}
 // Speech stays on-device when the browser exposes Web Speech; otherwise the control simply explains the missing capability.
 let recognition=null;mic.addEventListener('click',()=>{const SR=window.SpeechRecognition||window.webkitSpeechRecognition;if(!SR){addFold({type:'answer',title:'Microphone',meta:'endpoint capability unavailable',badge:'info',text:'This browser does not expose Web Speech recognition. Fabric can supply another speech adapter when installed.'});return}if(recognition){recognition.stop();return}recognition=new SR();recognition.interimResults=true;recognition.continuous=false;recognition.onstart=()=>mic.classList.add('on');recognition.onresult=e=>{ask.value=[...e.results].map(r=>r[0].transcript).join('')};recognition.onend=()=>{mic.classList.remove('on');recognition=null;if(ask.value.trim())submit()};recognition.start()});

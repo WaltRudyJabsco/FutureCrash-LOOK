@@ -9930,7 +9930,7 @@ def _direct_searxng_search(query, limit=8):
     params=urllib.parse.urlencode({"q":query,"format":"json"})
     request=urllib.request.Request(base+"/search?"+params,headers={
         "Accept":"application/json",
-        "User-Agent":"Future-Crash-Fabric/7.5.5",
+        "User-Agent":"Future-Crash-Fabric/7.5.6",
     })
     with urllib.request.urlopen(request,timeout=12) as response:
         data=json.load(response)
@@ -16663,6 +16663,17 @@ def _media_resolve_targets(args):
             raise ValueError(f"no Fabric media match for {label!r}")
 
     match_kind,rows=_media_query_matches(text,match_mode="literal" if exact else "fuzzy")
+    # Human playback language often uses "some X" to mean "play X". Preserve
+    # exact/full-phrase matches first (so real titles beginning with Some still win),
+    # then retry the catalog without the conversational determiner when the full
+    # phrase is unresolved or ambiguous. This repair belongs at the shared media
+    # edge so Albert, LO, Signal and `lk play` cannot disagree.
+    if not exact and text.casefold().startswith("some ") and match_kind in {"none","ambiguous"}:
+        repaired=text[5:].strip()
+        if repaired:
+            repaired_kind,repaired_rows=_media_query_matches(repaired,match_mode="fuzzy")
+            if repaired_kind!="none" and repaired_rows:
+                match_kind,rows=repaired_kind,repaired_rows
     if match_kind=="none" or not rows:
         # Rank below execution threshold only as assistance; never silently guess.
         suggestions=media_core.rank_entries({"entries":catalog},text,limit=3)

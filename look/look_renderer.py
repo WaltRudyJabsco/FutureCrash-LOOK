@@ -900,7 +900,7 @@ def resolve_action_destination(dest:str,current_dir:Path|None)->Path:
     return raw.resolve()
 
 
-def pager(rows:list[str],height:int,width:int,rebuild=None,browse_rebuild=None,candidates=None,on_browse=None,on_back=None,on_parent=None,on_go=None,on_activate=None,force_interactive=False,initial_select:Path|None=None,initial_query:str='',marked_set:set[Path]|None=None,current_dir:Path|None=None,clipboard_state:dict|None=None)->None:
+def pager(rows:list[str],height:int,width:int,rebuild=None,browse_rebuild=None,filter_context=None,candidates=None,on_browse=None,on_back=None,on_parent=None,on_go=None,on_activate=None,force_interactive=False,initial_select:Path|None=None,initial_query:str='',marked_set:set[Path]|None=None,current_dir:Path|None=None,clipboard_state:dict|None=None)->None:
     # Interactive state machine: browse -> filter -> select.
     usable=max(3,height-5)
     if (len(rows)<=height-1 and not force_interactive) or not (sys.stdin.isatty() and sys.stdout.isatty()):
@@ -1085,28 +1085,35 @@ def pager(rows:list[str],height:int,width:int,rebuild=None,browse_rebuild=None,c
                 # the preview in an off-screen column.
                 render_width=max(38,int(width*0.58)) if picked and width>=96 else width
                 current=rebuild(query, picked, render_width, marked)
-            page=current[top:top+usable]
+            context_rows=[]
+            list_usable=usable
+            if filtering and filter_context:
+                context_rows=list(filter_context(query,width) or [])[:2]
+                list_usable=max(1,usable-len(context_rows))
+            page=current[top:top+list_usable]
             sys.stdout.write(CLEAR)
+            if context_rows:
+                sys.stdout.write('\n'.join(fit(r,width) for r in context_rows)+'\n')
             if (selecting or filtering) and picked:
                 if width>=96:
                     left_w=max(38,int(width*0.58))
                     right_w=max(28,width-left_w-3)
                     left=[fit(r,left_w) for r in page]
-                    right=preview_rows(picked,right_w,usable)
+                    right=preview_rows(picked,right_w,list_usable)
                     rendered=[]
                     for i in range(max(len(left),len(right))):
                         l=left[i] if i<len(left) else ''
                         r=right[i] if i<len(right) else ''
                         pad=max(0,left_w-len(strip_ansi(l)))
                         rendered.append(l+' '*pad+FAINT+' │ '+RESET+r)
-                    sys.stdout.write('\n'.join(rendered[:usable]))
+                    sys.stdout.write('\n'.join(rendered[:list_usable]))
                 else:
-                    preview_h=max(4,usable//3)
-                    list_h=max(3,usable-preview_h-1)
+                    preview_h=max(4,list_usable//3)
+                    list_h=max(3,list_usable-preview_h-1)
                     rendered=[fit(r,width) for r in page[:list_h]]
                     rendered.append(FAINT+('─'*width)+RESET)
                     rendered.extend(preview_rows(picked,width,preview_h))
-                    sys.stdout.write('\n'.join(rendered[:usable]))
+                    sys.stdout.write('\n'.join(rendered[:list_usable]))
             else:
                 sys.stdout.write('\n'.join(fit(r,width) for r in page))
             last=min(len(current),top+usable)
@@ -1169,20 +1176,20 @@ def pager(rows:list[str],height:int,width:int,rebuild=None,browse_rebuild=None,c
                     continue
                 elif key in {'\x1b[B','J'} and matches:
                     selected=min(len(matches)-1,selected+1)
-                    top=min(max(0,len(current)-usable),top+1)
+                    top=min(max(0,len(current)-list_usable),top+1)
                 elif key in {'\x1b[A','K'} and matches:
                     selected=max(0,selected-1)
                     top=max(0,top-1)
                 elif key in {'\x1b[6~','\x1b[1;2B'} and matches:
-                    selected=min(len(matches)-1,selected+usable)
-                    top=min(max(0,len(current)-usable),top+usable)
+                    selected=min(len(matches)-1,selected+list_usable)
+                    top=min(max(0,len(current)-list_usable),top+list_usable)
                 elif key in {'\x1b[5~','\x1b[1;2A'} and matches:
-                    selected=max(0,selected-usable)
-                    top=max(0,top-usable)
+                    selected=max(0,selected-list_usable)
+                    top=max(0,top-list_usable)
                 elif key=='\x1b[1;2D' and matches:
                     selected=0; top=0
                 elif key=='\x1b[1;2C' and matches:
-                    selected=len(matches)-1; top=max(0,len(current)-usable)
+                    selected=len(matches)-1; top=max(0,len(current)-list_usable)
                 elif key=='\x1b':
                     query=''; filtering=False; selecting=False; refresh_filter()
                 elif key=='\x1b[D' and on_parent:
@@ -1594,6 +1601,7 @@ def main():
         pager(rows,sz.lines,sz.columns,
               rebuild=lambda q,h=None,w=None,m=None: build_view(target,args.mode,hidden,w or sz.columns,args.depth,q,h,m,interactive_rows=True),
               browse_rebuild=lambda h=None,m=None: build_view(target,args.mode,hidden,sz.columns,args.depth,'',h,m,interactive_rows=False),
+              filter_context=lambda q,w=None: build_view(target,args.mode,hidden,w or sz.columns,args.depth,q,None,marked,interactive_rows=False)[:2],
               candidates=lambda q: matching_paths(target,args.mode,hidden,q,args.depth),
               on_browse=choose_dir,
               on_back=choose_back if history else None,

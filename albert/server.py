@@ -4,7 +4,7 @@ from __future__ import annotations
 import json, mimetypes, os, urllib.request, urllib.error, importlib.util, threading, time, hashlib, re, sys
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
-from urllib.parse import urlparse, unquote, urlencode, parse_qs
+from urllib.parse import urlparse, unquote, urlencode, parse_qs, quote
 
 ROOT=Path(__file__).resolve().parent
 # Installed Albert lives beside Future Crash rather than inside the source tree.
@@ -144,7 +144,7 @@ def _place_query(text):
 
 def places_search(query,limit=6):
     params=urlencode({'q':query,'format':'jsonv2','limit':max(1,min(int(limit),8)),'addressdetails':1})
-    req=urllib.request.Request('https://nominatim.openstreetmap.org/search?'+params,headers={'User-Agent':'FutureCrash-Albert/7.5.5 (local personal assistant)','Accept':'application/json'})
+    req=urllib.request.Request('https://nominatim.openstreetmap.org/search?'+params,headers={'User-Agent':'FutureCrash-Albert/7.5.6 (local personal assistant)','Accept':'application/json'})
     with urllib.request.urlopen(req,timeout=5.0) as r: raw=json.loads(r.read().decode())
     places=[]
     for x in raw:
@@ -207,6 +207,30 @@ TOOLS=[
 def node_json(path, payload=None, timeout=1.25):
     req=urllib.request.Request(NODE+path, data=(json.dumps(payload).encode() if payload is not None else None), headers={"Content-Type":"application/json"})
     with urllib.request.urlopen(req,timeout=timeout) as r: return json.loads(r.read().decode())
+
+
+def _proxy_media_item(handler,node,item_id,*,head=False):
+    """Browser-safe range proxy for one prepared Fabric media item."""
+    query="?node="+quote(str(node or ""),safe="")+"&id="+quote(str(item_id or ""),safe="")
+    req=urllib.request.Request(NODE+"/v1/media/item"+query,method="HEAD" if head else "GET")
+    if handler.headers.get("Range"):
+        req.add_header("Range",handler.headers.get("Range"))
+    try:
+        with urllib.request.urlopen(req,timeout=12.0) as r:
+            handler.send_response(getattr(r,"status",200))
+            for key in ("Content-Type","Content-Length","Accept-Ranges","Content-Range","Cache-Control"):
+                value=r.headers.get(key)
+                if value: handler.send_header(key,value)
+            handler.end_headers()
+            if not head:
+                while True:
+                    chunk=r.read(256*1024)
+                    if not chunk: break
+                    handler.wfile.write(chunk)
+    except urllib.error.HTTPError as exc:
+        handler.send_response(exc.code); handler.send_header("Content-Length","0"); handler.end_headers()
+    except Exception:
+        handler.send_response(502); handler.send_header("Content-Length","0"); handler.end_headers()
 
 
 def _needs_live_search(text):
@@ -283,11 +307,19 @@ def action(text, session="", context=None):
             if query.casefold().startswith(prefix): query=query[len(prefix):].strip(); break
         try:
             prepared=node_json('/v1/media/route',{"operation":"prepare","query":query},timeout=8.0)
-            state=prepared.get('prepared') or prepared.get('session') or prepared.get('state') or prepared
+            state=prepared.get('prepared') or prepared.get('session') or prepared
             queue=(state.get('queue') if isinstance(state,dict) else None) or []
             if queue:
                 first=queue[0]; title=first.get('title') or first.get('name') or query
-                return {"type":"answer","title":title,"meta":f"media.prepare · {len(queue)} item(s)","badge":"prepared","kind":"things","text":"Fabric resolved the request without stealing playback from this browser endpoint.","pipeline":{"intent":"media.play","source":"Fabric media catalog","target":"origin endpoint","next":"browser playback adapter"}}
+                media_type=str(first.get('media_type') or '').casefold()
+                item_id=str(first.get('id') or first.get('digest') or '')
+                media_node=str(first.get('node') or prepared.get('node') or '')
+                if item_id:
+                    src='/v1/media/item?'+urlencode({'node':media_node,'id':item_id})
+                    result_type='video' if media_type.startswith('video/') else 'audio'
+                    subtitle=' · '.join(x for x in (str(first.get('artist') or ''),str(first.get('album') or '')) if x)
+                    return {"type":result_type,"title":title,"subtitle":subtitle,"meta":f"media.play · {len(queue)} item(s)","badge":"live","kind":"things","src":src,"note":f"Fabric media · {len(queue)} resolved item(s)","pipeline":{"intent":"media.play","source":"Fabric media catalog","target":"origin endpoint","effect":"browser playback"}}
+                return {"type":"answer","title":title,"meta":f"media.prepare · {len(queue)} item(s)","badge":"prepared","kind":"things","text":"Fabric resolved the request, but this item has no stream identity for browser playback.","pipeline":{"intent":"media.play","source":"Fabric media catalog","target":"origin endpoint"}}
         except Exception:
             pass
     # Anything not handled by a deterministic fast path goes to the *same* LO
@@ -421,6 +453,13 @@ class Handler(BaseHTTPRequestHandler):
             if not matches: return self.send_error(404)
             target=matches[0]; data=target.read_bytes()
             self.send_response(200); self.send_header('Content-Type',mimetypes.guess_type(target.name)[0] or 'application/octet-stream'); self.send_header('Cache-Control','private, max-age=3600'); self.send_header('Content-Length',str(len(data))); self.end_headers(); self.wfile.write(data); return
+        if path=='/v1/media/item':
+            if not self._require_endpoint('lo.use'): return
+            params=parse_qs(urlparse(self.path).query)
+            node=str(params.get('node',[''])[0] or '')
+            item_id=str(params.get('id',[''])[0] or '')
+            if not item_id: return self.send_json(400,{'ok':False,'error':'media item id required'})
+            return _proxy_media_item(self,node,item_id)
         rel='index.html' if path in {'/','/index.html'} else path.lstrip('/')
         target=(ROOT/rel).resolve()
         if ROOT not in target.parents and target!=ROOT: return self.send_error(403)

@@ -1,3 +1,9 @@
+# 7.5.6 — CONTEXT HELD
+
+- Keep LOOK directory identity visible during filter mode.
+- Complete Albert natural-language Fabric media playback in the browser.
+- Preserve installed 7.5.5 voice and attention-routing behavior.
+
 # 7.5.5 — ATTENTION ROUTER
 
 - Fixes `lk voice preview` and the Settings preview row so they audition the configured default voice rather than a personality override.
