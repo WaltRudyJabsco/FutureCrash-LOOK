@@ -1,3 +1,11 @@
+# 7.7.0 — PREVIEW VIEW
+
+- Adds `V` to toggle Preview View while filtering.
+- Preview View uses the same filtered candidates, current item, and marked set as List View.
+- Space marks/unmarks the current item; existing LOOK actions continue to use marked files, otherwise current.
+- Esc leaves Preview View first, preserving the filter; `V` toggles back to List View.
+- Preserves 7.6.4 SIMPLE PREVIEW's synchronous ASCII/Chafa-symbol renderer; native graphics machinery remains absent.
+
 # 7.6.4 — SIMPLE PREVIEW
 
 - Restores LOOK renderer/pager lineage to 7.5.7.

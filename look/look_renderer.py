@@ -877,7 +877,7 @@ def pager(rows:list[str],height:int,width:int,rebuild=None,browse_rebuild=None,f
     usable=max(3,height-5)
     if (len(rows)<=height-1 and not force_interactive) or not (sys.stdin.isatty() and sys.stdout.isatty()):
         print('\n'.join(rows)); return
-    top=0; query=initial_query or ''; filtering=bool(query); selecting=False; cursoring=False; selected=0
+    top=0; query=initial_query or ''; filtering=bool(query); selecting=False; cursoring=False; preview_view=False; selected=0
     current=rows
     matches:list[Path]=[]
     notice=''
@@ -1066,7 +1066,11 @@ def pager(rows:list[str],height:int,width:int,rebuild=None,browse_rebuild=None,f
             sys.stdout.write(CLEAR)
             if context_rows:
                 sys.stdout.write('\n'.join(fit(r,width) for r in context_rows)+'\n')
-            if (selecting or filtering) and picked:
+            if preview_view and filtering and picked:
+                # Preview View is only another presentation of the current filtered
+                # set. The pager, query, current item, and marked set stay authoritative.
+                sys.stdout.write('\n'.join(preview_rows(picked,width,list_usable)[:list_usable]))
+            elif (selecting or filtering) and picked:
                 if width>=96:
                     left_w=max(38,int(width*0.58))
                     right_w=max(28,width-left_w-3)
@@ -1093,12 +1097,21 @@ def pager(rows:list[str],height:int,width:int,rebuild=None,browse_rebuild=None,f
             if filtering:
                 match_word='match' if len(matches)==1 else 'matches'
                 sel=selection_status()
-                status=(f'  {CYAN}{BOLD}FILTER{RESET} {WHITE}{query}█{RESET}'
-                        f'  {GRAY}{len(matches)} {match_word}{RESET}'
-                        + (f'  · {sel}' if sel else ''))
-                action_parts=['J/K move','Tab mark','A all','Enter/→ open','B clipboard',
-                              'B Copy','T Cut','P Paste','C Copy To','M Move To','R remove',
-                              'L LO context','X clear set','E edit','O open with','Y path','G go','← parent','Esc clear']
+                if preview_view:
+                    name=picked.name if picked else '(no matches)'
+                    status=(f'  {CYAN}{BOLD}PREVIEW{RESET} {WHITE}{name}{RESET}'
+                            f'  {GRAY}{selected+1 if matches else 0}/{len(matches)} · filter {query}{RESET}'
+                            + (f'  · {sel}' if sel else ''))
+                    action_parts=['J/K move','Space/Tab mark','V list','Enter/→ open','B Copy','T Cut','P Paste',
+                                  'C Copy To','M Move To','R remove','L LO context','X clear set','E edit',
+                                  'O open with','Y path','G go','Esc list']
+                else:
+                    status=(f'  {CYAN}{BOLD}FILTER{RESET} {WHITE}{query}█{RESET}'
+                            f'  {GRAY}{len(matches)} {match_word}{RESET}'
+                            + (f'  · {sel}' if sel else ''))
+                    action_parts=['J/K move','Tab mark','A all','V Preview','Enter/→ open','B clipboard',
+                                  'B Copy','T Cut','P Paste','C Copy To','M Move To','R remove',
+                                  'L LO context','X clear set','E edit','O open with','Y path','G go','← parent','Esc clear']
             elif selecting:
                 name=picked.name if picked else '(no matches)'
                 kind='folder' if picked and picked.is_dir() else 'file'
@@ -1134,6 +1147,16 @@ def pager(rows:list[str],height:int,width:int,rebuild=None,browse_rebuild=None,f
 
             if filtering:
                 if key in {'q','Q','\x03'}: break
+                if key=='V' and matches:
+                    preview_view=not preview_view
+                    continue
+                if preview_view and key==' ' and matches:
+                    picked=selected_path()
+                    if picked:
+                        rp=picked.resolve()
+                        if rp in marked: marked.remove(rp)
+                        else: marked.add(rp)
+                    continue
                 if key in {'\r','\n','\x1b[C'}:
                     picked=selected_path()
                     if picked:
@@ -1163,7 +1186,10 @@ def pager(rows:list[str],height:int,width:int,rebuild=None,browse_rebuild=None,f
                 elif key=='\x1b[1;2C' and matches:
                     selected=len(matches)-1; top=max(0,len(current)-list_usable)
                 elif key=='\x1b':
-                    query=''; filtering=False; selecting=False; refresh_filter()
+                    if preview_view:
+                        preview_view=False
+                    else:
+                        query=''; filtering=False; selecting=False; refresh_filter()
                 elif key=='\x1b[D' and on_parent:
                     on_parent(); return
                 elif key.startswith('\x1b[') and key!='\x1b[Z':

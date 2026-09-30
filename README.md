@@ -1,4 +1,8 @@
-# Future Crash + LOOK 7.6.4 — SIMPLE PREVIEW
+# Future Crash + LOOK 7.7.0 — PREVIEW VIEW
+
+7.7.0 adds `V` Preview View to the stable 7.6.4 SIMPLE PREVIEW lineage. In a filtered list, `V` toggles a full-content preview of the same working set; arrows navigate the same selection, Space/Tab use the existing marked set, and Esc/V returns to the same filtered list. The renderer remains ASCII/Chafa-symbol only: no Kitty/iTerm/Sixel overlays, preview workers, timers, or asynchronous terminal painting are reintroduced.
+
+## Inherited baseline: 7.6.4 — SIMPLE PREVIEW
 
 7.6.4 deliberately restores LOOK's 7.5.7 pager architecture after the native terminal-graphics experiment destabilized filtering and navigation. Image and PDF previews are ordinary Chafa symbol rows composed synchronously into the filtered frame. There are no Kitty/iTerm/Sixel graphics payloads, preview workers, preview timers, or asynchronous terminal painting in LOOK. Existing Auto/Graphics preview preferences migrate safely to ASCII; the settings surface now exposes only ASCII or Off.
 
