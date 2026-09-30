@@ -1,6 +1,6 @@
-# Future Crash + LOOK 7.7.0 — PREVIEW VIEW
+# Future Crash + LOOK 7.7.1 — FILTER MINUS
 
-7.7.0 adds `V` Preview View to the stable 7.6.4 SIMPLE PREVIEW lineage. In a filtered list, `V` toggles a full-content preview of the same working set; arrows navigate the same selection, Space/Tab use the existing marked set, and Esc/V returns to the same filtered list. The renderer remains ASCII/Chafa-symbol only: no Kitty/iTerm/Sixel overlays, preview workers, timers, or asynchronous terminal painting are reintroduced.
+7.7.1 adds `V` Preview View to the stable 7.6.4 SIMPLE PREVIEW lineage. In a filtered list, `V` toggles a full-content preview of the same working set; arrows navigate the same selection, Space/Tab use the existing marked set, and Esc/V returns to the same filtered list. The renderer remains ASCII/Chafa-symbol only: no Kitty/iTerm/Sixel overlays, preview workers, timers, or asynchronous terminal painting are reintroduced.
 
 ## Inherited baseline: 7.6.4 — SIMPLE PREVIEW
 

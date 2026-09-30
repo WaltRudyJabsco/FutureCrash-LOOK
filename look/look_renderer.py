@@ -254,10 +254,27 @@ def detail_rows(entries:list[Entry], width:int, highlight_path:Path|None=None, m
 
 
 def query_matches(name:str, query:str)->bool:
-    """AND-match whitespace-separated terms anywhere in a name."""
-    terms=query.casefold().split()
+    """AND positive terms and subtract backslash-prefixed terms.
+
+    The filter stays deliberately simple: every token uses the same casefolded
+    substring rule.  ``\\foo`` subtracts names matching ``foo``; ``\\.`` is
+    the useful exception, subtracting only dot-prefixed names rather than every
+    filename containing an extension dot.
+    """
+    include=[]
+    exclude=[]
+    hide_dotfiles=False
+    for raw in query.casefold().split():
+        if raw == r"\.":
+            hide_dotfiles=True
+        elif raw.startswith("\\") and len(raw)>1:
+            exclude.append(raw[1:])
+        else:
+            include.append(raw)
     folded=name.casefold()
-    return all(term in folded for term in terms)
+    if hide_dotfiles and folded.startswith('.'):
+        return False
+    return all(term in folded for term in include) and not any(term in folded for term in exclude)
 
 
 def tree_rows(target:Path, depth:int, width:int, hidden:bool, query:str='', highlight_path:Path|None=None, marked:set[Path]|None=None)->list[str]:

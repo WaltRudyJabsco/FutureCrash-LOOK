@@ -1,4 +1,4 @@
-# 7.7.0 — PREVIEW VIEW
+# 7.7.1 — FILTER MINUS
 
 - Adds `V` to toggle Preview View while filtering.
 - Preview View uses the same filtered candidates, current item, and marked set as List View.
