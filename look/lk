@@ -487,6 +487,43 @@ def _resolve_voice_profile(requested="default"):
     return cfg["voice"]
 
 
+def _alert_command(args):
+    """Route one explicit attention event through Fabric.
+
+    Named targets use @target so ordinary message text is never stolen as routing.
+    `active` and `follow-me` are accepted by Fabric but intentionally unresolved
+    until trustworthy presence evidence exists.
+    """
+    rest=list(args or [])
+    target="origin"; importance="normal"; voice="default"
+    if rest and rest[0].startswith("@") and len(rest[0])>1:
+        target=rest.pop(0)[1:]
+    while rest and rest[0].startswith("--"):
+        flag=rest.pop(0)
+        if flag in {"--important","--urgent","--low"}:
+            importance=flag[2:]
+        elif flag=="--voice" and rest:
+            voice=rest.pop(0).casefold()
+        else:
+            print("usage: lk alert [@TARGET] [--important|--urgent|--low] [--voice PROFILE] MESSAGE"); return 2
+    if not rest:
+        print("usage: lk alert [@TARGET] [--important|--urgent|--low] [--voice PROFILE] MESSAGE"); return 2
+    if voice!="default" and voice not in _speech_profiles():
+        print("voice profiles · "+", ".join(_speech_profiles())); return 2
+    argv=["alert","--target",target,"--importance",importance,"--channel","voice","--voice-profile",voice," ".join(rest)]
+    try:
+        result=_media_fabric_cli(argv)
+    except Exception as exc:
+        print(f"LOOK alert failed · {exc}"); return 1
+    plan=result.get("plan") or {}
+    if plan.get("status")=="presence-unresolved":
+        print(f"LOOK alert · {target} · presence unresolved · no delivery guessed"); return 1
+    delivered=sum(1 for row in result.get("delivery") or [] if row.get("ok"))
+    attempted=len(result.get("delivery") or [])
+    print(f"LOOK alert · {target} · {delivered}/{attempted} delivered")
+    return 0 if result.get("ok") else 1
+
+
 def _voice_command(args):
     cfg=_load_speech_config()
     if not args or args[0] in {"status","show"}:
@@ -508,7 +545,7 @@ def _voice_command(args):
         _save_speech_config({"personality_voices":args[1].casefold()=="on"})
         print(f"LOOK personality voices · {args[1].casefold()}"); return 0
     if cmd=="preview":
-        voice=args[1].casefold() if len(args)>=2 else _resolve_voice_profile()
+        voice=args[1].casefold() if len(args)>=2 else cfg["voice"]
         if voice not in _speech_profiles(): print(f"unknown voice profile: {voice}"); return 2
         try:
             result=_media_fabric_cli(["speak","--voice-profile",voice,"Albert is awake. The signal is clear."])
@@ -1742,6 +1779,8 @@ SYSTEM
   lk feedback sound on|off
   lk feedback motion off|subtle|normal
   lk sound             quick sound toggle
+  lk alert [@TARGET] MESSAGE
+                       route an explicit Fabric voice attention event
   lk config            show installed paths + state
   lk secrets           secrets status (never contents)
   lk undo              undo last safe local filesystem action
@@ -9891,7 +9930,7 @@ def _direct_searxng_search(query, limit=8):
     params=urllib.parse.urlencode({"q":query,"format":"json"})
     request=urllib.request.Request(base+"/search?"+params,headers={
         "Accept":"application/json",
-        "User-Agent":"Future-Crash-Fabric/7.5.3",
+        "User-Agent":"Future-Crash-Fabric/7.5.4",
     })
     with urllib.request.urlopen(request,timeout=12) as response:
         data=json.load(response)
@@ -13784,7 +13823,7 @@ def _settings_rows():
         ("personalityvoices","SPEECH","Personality voices","on" if _load_speech_config()["personality_voices"] else "off",
          "Allow Max, Robot, Philosopher and Pirate personalities to select their matching voice preset.",
          "speech voice personality max robot philosopher pirate preset"),
-        ("voicepreview","SPEECH","Preview voice",_resolve_voice_profile(),
+        ("voicepreview","SPEECH","Preview voice",_load_speech_config()["voice"],
          "Speak a fixed audition line through the canonical Fabric speech primitive.",
          "speech voice preview test audition listen"),
         ("motion","FEEL","Feedback motion",_load_feedback()["motion"],
@@ -18385,12 +18424,18 @@ def _fabric_command(args):
     aliases={"list":"nodes","node":"status","model":"models"}
     sub=aliases.get(sub,sub)
     if sub=="dash": sub="dashboard"
-    if sub not in {"fabric","watch","dashboard","dash","beacon","lights","nodes","activity","pulse","models","status","qualify","services","service","jobs","job","submit","packet","cancel","events","http","decisions","decision","answer","ask","decision-shadow","decision-provider","identity","trust","untrust","pair-code","pair","transport","rendezvous","endpoints","endpoint-code","allow","revoke-endpoint","speak","route"}:
-        print("usage: lk fabric [identity|trust|pair-code [URL]|pair NODE CODE|untrust NODE_ID|transport|rendezvous [status|set URL|off|sync]|endpoints|endpoint-code URL [once|trust]|allow CODE [once|trust]|revoke-endpoint ENDPOINT_ID|watch|dashboard|decisions [NODE]|decision [NODE] ID|answer [NODE] ID CHOICE|ask [NODE] QUESTION [CHOICE ...]|decision-shadow [NODE] STATE QUESTION CANDIDATE...|decision-provider [NODE]|beacon|lights|nodes|status|activity|pulse|models|route reflex|balanced|deep|jobs|events|submit|packet|cancel|qualify|services|service|speak [NODE] TEXT]")
+    if sub not in {"fabric","watch","dashboard","dash","beacon","lights","nodes","activity","pulse","models","status","qualify","services","service","jobs","job","submit","packet","cancel","events","http","decisions","decision","answer","ask","decision-shadow","decision-provider","identity","trust","untrust","pair-code","pair","transport","rendezvous","endpoints","endpoint-code","allow","revoke-endpoint","speak","alert","route"}:
+        print("usage: lk fabric [identity|trust|pair-code [URL]|pair NODE CODE|untrust NODE_ID|transport|rendezvous [status|set URL|off|sync]|endpoints|endpoint-code URL [once|trust]|allow CODE [once|trust]|revoke-endpoint ENDPOINT_ID|watch|dashboard|decisions [NODE]|decision [NODE] ID|answer [NODE] ID CHOICE|ask [NODE] QUESTION [CHOICE ...]|decision-shadow [NODE] STATE QUESTION CANDIDATE...|decision-provider [NODE]|beacon|lights|nodes|status|activity|pulse|models|route reflex|balanced|deep|jobs|events|submit|packet|cancel|qualify|services|service|speak [NODE] TEXT|alert [@TARGET] MESSAGE]")
         return 2
     argv=[exe,sub]
     rest=list(args[1:])
-    if sub=="speak":
+    if sub=="alert":
+        if not rest:
+            print("usage: lk fabric alert [@TARGET] MESSAGE"); return 2
+        if rest[0].startswith("@") and len(rest[0])>1:
+            argv += ["--target",rest.pop(0)[1:]]
+        argv += rest
+    elif sub=="speak":
         if not rest:
             print("usage: lk fabric speak [NODE] TEXT"); return 2
         # `@node` is unambiguous; otherwise one word means local speech.
@@ -18722,6 +18767,7 @@ def main():
     if cmd=="feedback": return _feedback_command(rest)
     if cmd=="sound": return _sound_command(rest)
     if cmd=="voice": return _voice_command(rest)
+    if cmd=="alert": return _alert_command(rest)
     if cmd=="personality": return lo_personality(rest)
     if cmd=="thinking": return lo_thinking(rest)
     if cmd in {"think-display","thinkdisplay"}: return lo_think_display(rest)

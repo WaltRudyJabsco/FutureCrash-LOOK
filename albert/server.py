@@ -144,7 +144,7 @@ def _place_query(text):
 
 def places_search(query,limit=6):
     params=urlencode({'q':query,'format':'jsonv2','limit':max(1,min(int(limit),8)),'addressdetails':1})
-    req=urllib.request.Request('https://nominatim.openstreetmap.org/search?'+params,headers={'User-Agent':'FutureCrash-Albert/7.5.3 (local personal assistant)','Accept':'application/json'})
+    req=urllib.request.Request('https://nominatim.openstreetmap.org/search?'+params,headers={'User-Agent':'FutureCrash-Albert/7.5.4 (local personal assistant)','Accept':'application/json'})
     with urllib.request.urlopen(req,timeout=5.0) as r: raw=json.loads(r.read().decode())
     places=[]
     for x in raw:

@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Future Crash + LOOK Unified Node 7.5.3.
+"""Future Crash + LOOK Unified Node 7.5.4.
 
 A small distributed supervisor for trusted personal machines. Immediate events stay
 asynchronous; a one-second fabric pulse reconciles presence, leases and stale work.
@@ -69,8 +69,12 @@ try:
     from . import capability_curator
 except ImportError:
     import capability_curator
+try:
+    from .attention import normalize_event as normalize_attention_event, plan_voice_targets
+except ImportError:
+    from attention import normalize_event as normalize_attention_event, plan_voice_targets
 
-VERSION = "7.5.3"
+VERSION = "7.5.4"
 RELEASE_NAME = "COGNITIVE FABRIC"
 DEFAULT_HOST = "127.0.0.1"
 DEFAULT_PORT = 7332
@@ -562,6 +566,64 @@ def _audio_speak_local(text: str, voice_profile: str = "default"):
         raise RuntimeError("no local speech synthesizer (install espeak-ng)")
     FABRIC_STORE.event(None,"audio","speak",clean[:160],node=identity()["name"],data={"profile":profile,"engine":engine})
     return {"ok":True,"node":identity()["name"],"profile":profile,"engine":engine,"text":clean}
+
+
+def _attention_inventory():
+    """Present speech-capable nodes/endpoints as observations for pure routing."""
+    local_info=node_info()
+    nodes=[{"name":identity()["name"],"capabilities":local_info.get("capabilities") or capabilities()}]
+    for peer in PEERS.public():
+        advertised=peer.get("node") or {}
+        name=((advertised.get("identity") or {}).get("name") or peer.get("name") or "")
+        if name:
+            nodes.append({"name":name,"identity":advertised.get("identity") or {},
+                          "capabilities":advertised.get("capabilities") or {}})
+    endpoints=[]
+    fabric_eps=_fabric_endpoints()
+    for owner in fabric_eps.get("nodes") or []:
+        owner_name=str(owner.get("node") or "")
+        for row in owner.get("active") or []:
+            item=dict(row); item["owner_node"]=owner_name; endpoints.append(item)
+    return nodes,endpoints
+
+
+def _attention_route(payload):
+    """Route an attention event without conflating the event with its transport."""
+    event=normalize_attention_event(payload)
+    nodes,endpoints=_attention_inventory()
+    plan=plan_voice_targets(event,local_node=identity()["name"],nodes=nodes,endpoints=endpoints)
+    result={"ok":plan.get("status")=="ready","event":event,"plan":plan,"delivery":[]}
+    if plan.get("status")!="ready":
+        return result
+    # The schema already admits other channels.  Voice is the first concrete
+    # adapter; future visual/sound/beacon adapters consume this same event.
+    unsupported=[c for c in event["channels"] if c!="voice"]
+    if unsupported:
+        result["unsupported_channels"]=unsupported
+    if "voice" not in event["channels"]:
+        return result
+    local=identity()["name"]
+    snapshot={"self":node_info(),"peers":PEERS.public()}
+    for target in plan.get("targets") or []:
+        row={"kind":target.get("kind"),"target":target.get("target"),"label":target.get("label")}
+        try:
+            if target.get("kind")=="endpoint":
+                spoken=_endpoint_dispatch_fabric(target.get("target"),"audio.speak",
+                    {"text":event["message"],"voice_profile":event["voice_profile"]})
+            elif str(target.get("target") or "").casefold()==local.casefold():
+                spoken=_audio_speak_local(event["message"],event["voice_profile"])
+            else:
+                spoken=http_json(_remote_url(snapshot,target.get("target"),"/v1/audio/speak"),
+                    {"text":event["message"],"voice_profile":event["voice_profile"]},timeout=4.0)
+            row.update({"ok":True,"result":spoken})
+        except Exception as exc:
+            row.update({"ok":False,"error":str(exc)})
+        result["delivery"].append(row)
+    result["ok"]=bool(result["delivery"]) and all(r.get("ok") for r in result["delivery"])
+    FABRIC_STORE.event(None,"attention","route",event["message"][:160],node=local,
+        data={"target":event["target"],"importance":event["importance"],"channels":event["channels"],
+              "delivered":sum(1 for r in result["delivery"] if r.get("ok")),"attempted":len(result["delivery"])})
+    return result
 
 def load_profiles():
     try:
@@ -2233,7 +2295,7 @@ def _local_web_search(query, limit=8):
     base=os.environ.get("FCL_SEARXNG_URL","http://127.0.0.1:8888").rstrip("/")
     request=urllib.request.Request(base+"/search?"+params,headers={
         "Accept":"application/json",
-        "User-Agent":"Future-Crash-Fabric/7.5.3",
+        "User-Agent":"Future-Crash-Fabric/7.5.4",
     })
     try:
         with urllib.request.urlopen(request,timeout=8) as response:
@@ -2967,7 +3029,7 @@ def _openjev_shadow(state, question, candidates, *, profile="workspace", consequ
 
 
 class API(BaseHTTPRequestHandler):
-    server_version = "FCLNode/7.5.3"
+    server_version = "FCLNode/7.5.4"
 
     def setup(self):
         self._metric_request_id = None
@@ -3590,6 +3652,14 @@ class API(BaseHTTPRequestHandler):
         if path == "/v1/audio/speak":
             try:
                 return self.sendj(200, _audio_speak_local(str(d.get("text") or ""), str(d.get("voice_profile") or "default")))
+            except ValueError as exc:
+                return self.sendj(400,{"ok":False,"error":str(exc)})
+            except Exception as exc:
+                return self.sendj(503,{"ok":False,"error":str(exc)})
+        if path == "/v1/attention/route":
+            try:
+                result=_attention_route(d)
+                return self.sendj(200 if result.get("ok") or result.get("plan",{}).get("status")=="presence-unresolved" else 409,result)
             except ValueError as exc:
                 return self.sendj(400,{"ok":False,"error":str(exc)})
             except Exception as exc:
@@ -4926,10 +4996,13 @@ def main():
     ap.add_argument("command",nargs="?",default="serve",
         choices=["serve","status","nodes","activity","pulse","fabric","watch","dashboard","models","route","qualify","services","service",
                  "jobs","job","submit","packet","cancel","events","http","beacon","lights","artifact-add","artifact","artifacts","file-catalog","file-find","media-catalog","media-identify",
-                 "decisions","decision","answer","ask","decision-shadow","decision-provider","identity","trust","untrust","pair-code","pair","transport","rendezvous","endpoints","endpoint-code","allow","revoke-endpoint","media-outputs","media-state","media-play","media-control","speak"])
+                 "decisions","decision","answer","ask","decision-shadow","decision-provider","identity","trust","untrust","pair-code","pair","transport","rendezvous","endpoints","endpoint-code","allow","revoke-endpoint","media-outputs","media-state","media-play","media-control","speak","alert"])
     ap.add_argument("args",nargs="*")
     ap.add_argument("--node",dest="node",default=None,help="target Fabric node name")
     ap.add_argument("--voice-profile",dest="voice_profile",default="default",choices=["default","albert","warm","crisp","deep","max","philosopher","pirate","wopr"],help="speech voice profile")
+    ap.add_argument("--target",dest="target",default="origin",help="attention target: origin, all, active, follow-me, node, or endpoint")
+    ap.add_argument("--importance",dest="importance",default="normal",choices=["low","normal","important","urgent"],help="attention importance")
+    ap.add_argument("--channel",dest="channels",action="append",choices=["voice","sound","visual","beacon"],help="attention delivery channel; repeatable")
     ap.add_argument("--json",action="store_true",help="raw JSON where a human view exists")
     ap.add_argument("--yes",action="store_true",help="confirm a mutating managed-service action")
     ap.add_argument("--host",default=DEFAULT_HOST); ap.add_argument("--port",type=int,default=DEFAULT_PORT)
@@ -5186,6 +5259,25 @@ def main():
                 if a.command=="models" and not a.json: _print_models(data,a.node or "local")
                 else: print(json.dumps(data,indent=2))
                 return 0
+            if a.command=="alert":
+                if not a.args: ap.error("alert requires MESSAGE")
+                payload={"message":" ".join(a.args),"target":a.target,"importance":a.importance,
+                         "channels":a.channels or ["voice"],"voice_profile":_resolve_voice_profile(a.voice_profile),
+                         "source":"cli"}
+                result=_daemon_post(a.host,a.port,"/v1/attention/route",payload)
+                if a.json:
+                    print(json.dumps(result,indent=2)); return 0 if result.get("ok") else 1
+                plan=result.get("plan") or {}
+                if plan.get("status")=="presence-unresolved":
+                    print(f"FABRIC ATTENTION · {a.target} · presence unresolved · no delivery guessed")
+                    return 1
+                delivered=sum(1 for row in result.get("delivery") or [] if row.get("ok"))
+                attempted=len(result.get("delivery") or [])
+                print(f"FABRIC ATTENTION · {a.target} · {delivered}/{attempted} delivered · {a.importance}")
+                for row in result.get("delivery") or []:
+                    mark="✓" if row.get("ok") else "×"
+                    print(f"  {mark} {row.get('kind')} · {row.get('label') or row.get('target')}" + (f" · {row.get('error')}" if row.get('error') else ""))
+                return 0 if result.get("ok") else 1
             if a.command=="speak":
                 if not a.args: ap.error("speak requires TEXT")
                 payload={"text":" ".join(a.args),"voice_profile":_resolve_voice_profile(a.voice_profile)}

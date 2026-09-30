@@ -1,6 +1,6 @@
-# Future Crash + LOOK 7.5.3 — LOOK FEEL
+# Future Crash + LOOK 7.5.4 — ATTENTION ROUTER
 
-7.5.3 polishes LOOK as a daily terminal interface: Nerd icons by default, capability-aware image previews, receipt-driven sound feedback, and shared Fabric voice presets.
+7.5.4 fixes default-voice audition semantics and introduces typed, endpoint-aware Fabric attention routing. Explicit alerts can target the origin node, a named node/browser endpoint, or all current speech-capable endpoints; active/follow-me targeting remains deliberately unresolved until trustworthy presence evidence exists.
 
 # Future Crash + LOOK 7.3.0 — LIVE STATE
 

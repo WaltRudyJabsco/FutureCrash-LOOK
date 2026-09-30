@@ -1,3 +1,11 @@
+# 7.5.4 — ATTENTION ROUTER
+
+- Fixes `lk voice preview` and the Settings preview row so they audition the configured default voice rather than a personality override.
+- Adds typed Fabric attention events and explicit endpoint-aware voice routing through `lk alert [@TARGET] MESSAGE`.
+- Supports origin, named nodes/endpoints, and `@all`; reserves `@active`/`@follow-me` without guessing presence.
+- Reuses canonical node speech and authorized browser endpoint receipts instead of creating a second delivery system.
+- Records Albert map consistency and natural-media parity as dedicated follow-up targets rather than patching them ad hoc.
+
 # 7.5.3 — LOOK FEEL
 
 - Makes Nerd Font file/folder glyphs the default LOOK presentation; Classic remains selectable.
