@@ -1601,7 +1601,7 @@ def main():
         pager(rows,sz.lines,sz.columns,
               rebuild=lambda q,h=None,w=None,m=None: build_view(target,args.mode,hidden,w or sz.columns,args.depth,q,h,m,interactive_rows=True),
               browse_rebuild=lambda h=None,m=None: build_view(target,args.mode,hidden,sz.columns,args.depth,'',h,m,interactive_rows=False),
-              filter_context=lambda q,w=None: build_view(target,args.mode,hidden,w or sz.columns,args.depth,q,None,marked,interactive_rows=False)[:2],
+              filter_context=lambda q,w=None: build_view(target,args.mode,hidden,w or sz.columns,args.depth,q,None,None,interactive_rows=False)[:2],
               candidates=lambda q: matching_paths(target,args.mode,hidden,q,args.depth),
               on_browse=choose_dir,
               on_back=choose_back if history else None,

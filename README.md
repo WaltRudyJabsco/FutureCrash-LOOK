@@ -1,6 +1,6 @@
-# Future Crash + LOOK 7.5.6 — CONTEXT HELD
+# Future Crash + LOOK 7.5.7 — CONTEXT HELD
 
-7.5.6 preserves the 7.5.5 installed-truth attention router while restoring LOOK directory context during filtering and completing Albert browser playback for natural-language Fabric media requests. Voice-preview semantics and endpoint-aware attention routing remain unchanged from installed 7.5.5.
+7.5.7 fixes default-voice audition semantics and introduces typed, endpoint-aware Fabric attention routing. Explicit alerts can target the origin node, a named node/browser endpoint, or all current speech-capable endpoints; active/follow-me targeting remains deliberately unresolved until trustworthy presence evidence exists.
 
 # Future Crash + LOOK 7.3.0 — LIVE STATE
 
