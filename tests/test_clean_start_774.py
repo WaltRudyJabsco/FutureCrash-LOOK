@@ -20,7 +20,7 @@ def test_kitty_helpers_are_checked_independently():
 
 def test_kitty_png_has_direct_fallback_and_does_not_move_cursor():
     assert "self.driver=='kitty' and path.suffix.casefold()=='.png'" in RENDERER
-    assert 'r={rows},C=1,q=2' in RENDERER
+    assert 'C=1,q=2' in RENDERER
 
 def test_prompt_capitalization_matches_default_semantics():
     assert '"$prompt [Y/n] "' in LOOK_INSTALL

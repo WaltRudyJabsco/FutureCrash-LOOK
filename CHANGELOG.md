@@ -1,3 +1,10 @@
+# 7.7.5 — TRUE FRAME
+
+- Makes macOS Fabric ingress a verified launchd lifecycle: bootstrap, kickstart, then :7333 health.
+- Adds ingress-specific launchd/systemd/log/port diagnostics instead of a generic readiness failure.
+- Native iTerm/Kitty previews now contain and center inside the established art rectangle while preserving source aspect ratio.
+- ASCII/Chafa remains the immediate fallback; native paint only replaces the art rectangle once ready.
+
 # 7.7.4 — CLEAN START
 
 - Hardens macOS Unified Node bootstrap/kickstart and platform-correct failure diagnostics.

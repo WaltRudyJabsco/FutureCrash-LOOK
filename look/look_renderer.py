@@ -15,6 +15,8 @@ import argparse
 import base64
 import hashlib
 import queue
+import fcntl
+import struct
 import os
 import shutil
 import stat
@@ -577,22 +579,65 @@ class NativePreviewController:
             except OSError: pass
             return None
 
+    @staticmethod
+    def _png_dimensions(path:Path)->tuple[int,int]|None:
+        # Every prepared native preview is PNG. Reading IHDR avoids importing a
+        # second image stack merely to preserve geometry at paint time.
+        try:
+            with path.open('rb') as fh:
+                header=fh.read(24)
+            if header[:8]!=b'\x89PNG\r\n\x1a\n' or header[12:16]!=b'IHDR': return None
+            width,height=struct.unpack('>II',header[16:24])
+            return (width,height) if width and height else None
+        except (OSError,struct.error):
+            return None
+
+    @staticmethod
+    def _cell_pixels()->tuple[float,float]:
+        # TIOCGWINSZ carries both character and pixel dimensions in terminals
+        # that know them (Kitty/iTerm do). Fall back to the conventional 1:2
+        # terminal-cell shape rather than ever stretching an image to the pane.
+        try:
+            packed=fcntl.ioctl(sys.stdout.fileno(),termios.TIOCGWINSZ,struct.pack('HHHH',0,0,0,0))
+            term_rows,term_cols,pixel_w,pixel_h=struct.unpack('HHHH',packed)
+            if term_cols and term_rows and pixel_w and pixel_h:
+                return pixel_w/term_cols,pixel_h/term_rows
+        except (OSError,ValueError):
+            pass
+        return 8.0,16.0
+
+    @classmethod
+    def _contained_rect(cls,image:Path,row:int,col:int,rows:int,cols:int)->tuple[int,int,int,int]:
+        dims=cls._png_dimensions(image)
+        if not dims: return row,col,rows,cols
+        image_w,image_h=dims
+        cell_w,cell_h=cls._cell_pixels()
+        scale=min((cols*cell_w)/image_w,(rows*cell_h)/image_h)
+        draw_cols=max(1,min(cols,round(image_w*scale/cell_w)))
+        draw_rows=max(1,min(rows,round(image_h*scale/cell_h)))
+        return row+(rows-draw_rows)//2,col+(cols-draw_cols)//2,draw_rows,draw_cols
+
     def paint_ready(self)->None:
         ready=self._ready; self._ready=None
         if not ready: return
         generation,image,row,col,rows,cols=ready
         if generation!=self._generation: return
+        draw_row,draw_col,draw_rows,draw_cols=self._contained_rect(image,row,col,rows,cols)
         try:
+            # ASCII remains the immediate fallback. Once native pixels are ready,
+            # blank only its art rectangle so letterboxing is clean rather than a
+            # native image floating over residual Chafa symbols.
+            blank=''.join(f'\x1b[{row+i};{col}H'+(' '*cols) for i in range(rows))
             if self.driver=='iterm':
                 raw=image.read_bytes()
                 payload=base64.b64encode(raw).decode('ascii')
-                seq=(f'\x1b7\x1b[{row};{col}H\x1b]1337;File=inline=1;width={cols};height={rows};preserveAspectRatio=1:'
+                seq=(f'\x1b7{blank}\x1b[{draw_row};{draw_col}H\x1b]1337;File=inline=1;width={draw_cols};height={draw_rows};preserveAspectRatio=1:'
                      f'{payload}\x07\x1b8')
             elif self.driver=='kitty':
                 # Kitty can consume a local PNG by filename; only the tiny filename
-                # payload crosses the terminal. Placement is bounded in cell units.
+                # payload crosses the terminal. Placement is contained and centered.
                 payload=base64.b64encode(str(image).encode()).decode('ascii')
-                seq=(f'\x1b7\x1b[{row};{col}H\x1b_Ga=T,t=f,f=100,c={cols},r={rows},C=1,q=2;'
+                seq=(f'\x1b7{blank}\x1b[{draw_row};{draw_col}H\x1b_Ga=T,t=f,f=100,c={draw_cols},r={draw_rows},C=1,q=2;'
                      f'{payload}\x1b\\\x1b8')
             else:
                 return
