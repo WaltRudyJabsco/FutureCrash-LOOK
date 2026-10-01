@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Future Crash + LOOK Unified Node 7.7.9.
+"""Future Crash + LOOK Unified Node 7.7.10.
 
 A small distributed supervisor for trusted personal machines. Immediate events stay
 asynchronous; a one-second fabric pulse reconciles presence, leases and stale work.
@@ -11,6 +11,7 @@ import base64
 import errno
 import sys
 import faulthandler
+import hashlib
 import signal
 import json
 import mimetypes
@@ -74,7 +75,7 @@ try:
 except ImportError:
     from attention import normalize_event as normalize_attention_event, plan_voice_targets
 
-VERSION = "7.7.9"
+VERSION = "7.7.10"
 RELEASE_NAME = "COGNITIVE FABRIC"
 DEFAULT_HOST = "127.0.0.1"
 DEFAULT_PORT = 7332
@@ -2295,7 +2296,7 @@ def _local_web_search(query, limit=8):
     base=os.environ.get("FCL_SEARXNG_URL","http://127.0.0.1:8888").rstrip("/")
     request=urllib.request.Request(base+"/search?"+params,headers={
         "Accept":"application/json",
-        "User-Agent":"Future-Crash-Fabric/7.7.9",
+        "User-Agent":"Future-Crash-Fabric/7.7.10",
     })
     try:
         with urllib.request.urlopen(request,timeout=8) as response:
@@ -2359,6 +2360,17 @@ def _write_media_library(data):
         MEDIA_CATALOG_CACHE["local_mtime_ns"] = -1
 
 
+def _media_catalog_id(path):
+    """Return the cheap deterministic identity used by LOOK for un-hashed media.
+
+    Older media_library.json files predate stored entry ids.  Advertising a row
+    without backfilling its id lets a consumer invent an id that the source node
+    later cannot resolve.  Keep the derivation here identical to media_core._stable_id.
+    """
+    value=str(path or "")
+    return hashlib.sha1(value.encode("utf-8", "surrogatepass")).hexdigest()[:16]
+
+
 def _local_media_catalog():
     """Publish discovered media as catalog rows; bytes remain owned by their source node."""
     library = _read_media_library()
@@ -2368,6 +2380,9 @@ def _local_media_catalog():
         if not isinstance(raw, dict) or not raw.get("path"):
             continue
         row = dict(raw)
+        # Catalog identity is established by the source node, not invented later
+        # by a consumer. This also repairs pre-id media libraries in memory.
+        row["id"] = str(row.get("id") or _media_catalog_id(row.get("path")))
         row["node"] = node
         row["identified"] = bool(str(row.get("digest") or "").startswith("sha256:"))
         rows.append(row)
@@ -2394,10 +2409,35 @@ def _local_media_entry(entry_id, path_hint=""):
     path_hint=str(path_hint or "").strip()
     if not entry_id and not path_hint:
         raise ValueError("media entry id or catalog path required")
-    entries=[row for row in (_read_media_library().get("entries") or []) if isinstance(row,dict)]
-    selected=next((row for row in entries if entry_id and str(row.get("id") or "") == entry_id),None)
+    entries=[row for row in (_read_media_library().get("entries") or []) if isinstance(row,dict) and row.get("path")]
+
+    def row_id(row):
+        return str(row.get("id") or _media_catalog_id(row.get("path")))
+
+    # The source node must resolve exactly the identity it advertised, including
+    # rows from old scans that never persisted an id field.
+    selected=next((row for row in entries if entry_id and row_id(row) == entry_id),None)
+
     if selected is None and path_hint:
         selected=next((row for row in entries if str(row.get("path") or "") == path_hint),None)
+
+    # A catalog path may cross a symlink spelling boundary between discovery and
+    # playback. Canonical-path matching is still bounded to an existing catalog row.
+    if selected is None and path_hint:
+        try:
+            hinted=Path(path_hint).expanduser().resolve(strict=False)
+        except (OSError,RuntimeError):
+            hinted=None
+        if hinted is not None:
+            for row in entries:
+                try:
+                    candidate=Path(str(row.get("path") or "")).expanduser().resolve(strict=False)
+                except (OSError,RuntimeError):
+                    continue
+                if candidate == hinted:
+                    selected=row
+                    break
+
     if selected is None:
         raise FileNotFoundError(entry_id or path_hint)
     path=Path(str(selected.get("path") or "")).expanduser()
@@ -3039,7 +3079,7 @@ def _openjev_shadow(state, question, candidates, *, profile="workspace", consequ
 
 
 class API(BaseHTTPRequestHandler):
-    server_version = "FCLNode/7.7.9"
+    server_version = "FCLNode/7.7.10"
 
     def setup(self):
         self._metric_request_id = None

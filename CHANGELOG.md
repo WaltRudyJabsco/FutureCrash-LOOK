@@ -1,3 +1,10 @@
+# 7.7.10 — REMOTE PLAYBACK
+
+- Freeze the field-proven local LOOK/mpv path and Media Session transport controls.
+- Make every source node assign deterministic catalog ids to legacy idless media rows before advertising them.
+- Resolve those same derived ids server-side, so an advertised `(node,id)` is always retrievable.
+- Keep path repair catalog-bounded, with canonical-path matching only against rows already in the media library.
+
 # 7.7.9 — MEDIA IDENTITY
 
 - Base: the uploaded 7.7.8 MEDIA SESSION package that was field-tested on the user's machines.

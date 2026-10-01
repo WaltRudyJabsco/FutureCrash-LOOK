@@ -1,6 +1,6 @@
-# Future Crash + LOOK 7.7.9 — MEDIA IDENTITY
+# Future Crash + LOOK 7.7.10 — REMOTE PLAYBACK
 
-7.7.9 MEDIA IDENTITY preserves `V` Preview View to the stable 7.6.4 SIMPLE PREVIEW lineage. In a filtered list, `V` toggles a full-content preview of the same working set; arrows navigate the same selection, Space/Tab use the existing marked set, and Esc/V returns to the same filtered list. ASCII/Chafa remains the immediate canonical preview. On macOS iTerm2 and Linux Kitty, Preview View and the ordinary wide side preview can progressively overlay their known art rectangles with native images prepared off-thread; unsupported terminals and failures remain ASCII, and the worker never paints or drives pager state.
+7.7.10 REMOTE PLAYBACK preserves `V` Preview View to the stable 7.6.4 SIMPLE PREVIEW lineage. In a filtered list, `V` toggles a full-content preview of the same working set; arrows navigate the same selection, Space/Tab use the existing marked set, and Esc/V returns to the same filtered list. ASCII/Chafa remains the immediate canonical preview. On macOS iTerm2 and Linux Kitty, Preview View and the ordinary wide side preview can progressively overlay their known art rectangles with native images prepared off-thread; unsupported terminals and failures remain ASCII, and the worker never paints or drives pager state.
 
 ## Inherited baseline: 7.6.4 — SIMPLE PREVIEW
 
