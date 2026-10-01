@@ -1,4 +1,4 @@
-# 8.1.0 — VIEW
+# 8.2.0 — VIEW
 
 - Albert audio cards use an explicit high-contrast dark-player palette for titles, metadata, queue position, EQ, and transport controls.
 - LOOK interactive browse keeps its existing two-line header pinned while the directory body scrolls.
@@ -1084,3 +1084,8 @@ Signal media output routing is now explicit: browser playback is a local browser
 - Trust/evidence badges derived from LO receipts and provenance; model synthesis is never verified.
 - Additive typed clarification and Signal presentation fields in Albert's response envelope.
 - Removed the mandatory startup greeting fold; status remains visible without polluting conversation history.
+
+## 8.2.0 — FABRIC EVERYWHERE
+- Bounded/failure-safe LOOK previews and clean interrupt handling.
+- Zero-touch removable-drive media discovery on every Fabric node.
+- Larger old-school terminal game boards; GTNW behavior frozen.

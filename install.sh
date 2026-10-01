@@ -1,13 +1,13 @@
 #!/usr/bin/env bash
 set -euo pipefail
 ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
-echo "Future Crash + LOOK 8.1.0 · VIEW"
+echo "Future Crash + LOOK 8.2.0 · VIEW"
 echo "────────────────────────────────────────"
 
 # Refuse a mixed bundle before mutating the machine. A unified release must move
 # LOOK and the node together.
 EXPECTED_RELEASE="$(tr -d '[:space:]' < "$ROOT/VERSION")"
-[[ "$EXPECTED_RELEASE" == "8.1.0" ]] || { echo "BUNDLE ERROR: expected release 8.1.0, found $EXPECTED_RELEASE"; exit 4; }
+[[ "$EXPECTED_RELEASE" == "8.2.0" ]] || { echo "BUNDLE ERROR: expected release 8.2.0, found $EXPECTED_RELEASE"; exit 4; }
 echo "BUNDLE SOURCE  $ROOT"
 echo "BUNDLE RELEASE $EXPECTED_RELEASE · MEDIA SESSION"
 for vf in "$ROOT/look/VERSION" "$ROOT/albert/VERSION" "$ROOT/future-crash/VERSION"; do
@@ -50,7 +50,7 @@ FCL_UNIFIED_INSTALL_CHILD=1 "$ROOT/install-look.sh" "$@"
 ((UNINSTALL)) && exit 0
 if ((DRY_RUN)); then
   echo
-  echo "[dry-run] would install/restart Unified Node 8.1.0 · VIEW with signed Fabric rendezvous, Tailcat direct transport, ONE BRAIN cognition, LIVING MIND memory, browser endpoints, SearXNG, Media, Artifacts, and Signal Window 1.11.0"
+  echo "[dry-run] would install/restart Unified Node 8.2.0 · VIEW with signed Fabric rendezvous, Tailcat direct transport, ONE BRAIN cognition, LIVING MIND memory, browser endpoints, SearXNG, Media, Artifacts, and Signal Window 1.11.0"
   echo "[dry-run] OpenJev mode: $OPENJEV_MODE (auto provisions on capable nodes; absence/failure is non-fatal)"
   echo "[dry-run] would initialize Tailcat :7443, install optional signed rendezvous discovery, keep Tailscale :7332 → fcl-ingress :7333 as fallback, and verify Fabric CLI wiring"
   exit 0
@@ -85,6 +85,7 @@ retire_resident_node() {
     MANAGED_NODE_RETIRED=1
   elif [[ "$os" == "Darwin" ]] && command -v launchctl >/dev/null 2>&1; then
     launchctl bootout "gui/$(id -u)/com.futurecrash.look.node" >/dev/null 2>&1 || true
+  launchctl bootout "gui/$(id -u)/com.futurecrash.look.media-watch" >/dev/null 2>&1 || true
     MANAGED_NODE_RETIRED=1
   fi
 }
@@ -294,10 +295,11 @@ if [[ "$OS" == "Linux" ]] && command -v systemctl >/dev/null 2>&1; then
   mkdir -p "$HOME/.config/systemd/user"
   install -m 0644 "$ROOT/core/future-crash-look-node.service" "$HOME/.config/systemd/user/future-crash-look-node.service"
   install -m 0644 "$ROOT/core/future-crash-look-ingress.service" "$HOME/.config/systemd/user/future-crash-look-ingress.service"
+  install -m 0644 "$ROOT/core/future-crash-look-media-watch.service" "$HOME/.config/systemd/user/future-crash-look-media-watch.service"
   install -m 0644 "$ROOT/core/future-crash-look-tailcat.service" "$HOME/.config/systemd/user/future-crash-look-tailcat.service"
   install -m 0644 "$ROOT/core/future-crash-look-openjev.service" "$HOME/.config/systemd/user/future-crash-look-openjev.service"
   systemctl --user daemon-reload
-  systemctl --user enable future-crash-look-node.service future-crash-look-ingress.service >/dev/null 2>&1 || true
+  systemctl --user enable future-crash-look-node.service future-crash-look-ingress.service future-crash-look-media-watch.service >/dev/null 2>&1 || true
   if (( TAILCAT_READY )); then systemctl --user enable future-crash-look-tailcat.service >/dev/null 2>&1 || true; else systemctl --user disable --now future-crash-look-tailcat.service >/dev/null 2>&1 || true; fi
   if (( OPENJEV_READY )); then
     systemctl --user enable future-crash-look-openjev.service >/dev/null 2>&1 || true
@@ -323,16 +325,19 @@ PY_JEV
   fi
   systemctl --user restart future-crash-look-node.service || systemctl --user start future-crash-look-node.service || true
   systemctl --user restart future-crash-look-ingress.service || systemctl --user start future-crash-look-ingress.service || true
+  systemctl --user restart future-crash-look-media-watch.service || systemctl --user start future-crash-look-media-watch.service || true
   if (( TAILCAT_READY )); then systemctl --user restart future-crash-look-tailcat.service || systemctl --user start future-crash-look-tailcat.service || true; fi
 elif [[ "$OS" == "Darwin" ]] && command -v launchctl >/dev/null 2>&1; then
   mkdir -p "$HOME/Library/LaunchAgents" "$HOME/.local/state/future-crash-look"
   sed "s|__HOME__|$HOME|g" "$ROOT/core/com.futurecrash.look.node.plist" > "$HOME/Library/LaunchAgents/com.futurecrash.look.node.plist"
   sed "s|__HOME__|$HOME|g" "$ROOT/core/com.futurecrash.look.ingress.plist" > "$HOME/Library/LaunchAgents/com.futurecrash.look.ingress.plist"
+  sed "s|__HOME__|$HOME|g" "$ROOT/core/com.futurecrash.look.media-watch.plist" > "$HOME/Library/LaunchAgents/com.futurecrash.look.media-watch.plist"
   if (( TAILCAT_READY )); then sed "s|__HOME__|$HOME|g" "$ROOT/core/com.futurecrash.look.tailcat.plist" > "$HOME/Library/LaunchAgents/com.futurecrash.look.tailcat.plist"; fi
   if (( OPENJEV_READY )); then sed "s|__HOME__|$HOME|g" "$ROOT/core/com.futurecrash.look.openjev.plist" > "$HOME/Library/LaunchAgents/com.futurecrash.look.openjev.plist"; fi
   launchctl bootout "gui/$(id -u)/com.futurecrash.look.ingress" >/dev/null 2>&1 || true
   launchctl bootout "gui/$(id -u)/com.futurecrash.look.tailcat" >/dev/null 2>&1 || true
   launchctl bootout "gui/$(id -u)/com.futurecrash.look.node" >/dev/null 2>&1 || true
+  launchctl bootout "gui/$(id -u)/com.futurecrash.look.media-watch" >/dev/null 2>&1 || true
   launchctl bootout "gui/$(id -u)/com.futurecrash.look.openjev" >/dev/null 2>&1 || true
   if ! launchctl bootstrap "gui/$(id -u)" "$HOME/Library/LaunchAgents/com.futurecrash.look.node.plist"; then
     echo "INSTALL ERROR: Unified Node launchctl bootstrap failed" >&2
@@ -355,6 +360,8 @@ elif [[ "$OS" == "Darwin" ]] && command -v launchctl >/dev/null 2>&1; then
     launchctl print "gui/$(id -u)/com.futurecrash.look.ingress" >&2 2>/dev/null || true
     exit 5
   fi
+  launchctl bootstrap "gui/$(id -u)" "$HOME/Library/LaunchAgents/com.futurecrash.look.media-watch.plist" || true
+  launchctl kickstart -k "gui/$(id -u)/com.futurecrash.look.media-watch" >/dev/null 2>&1 || true
   if (( TAILCAT_READY )); then launchctl bootstrap "gui/$(id -u)" "$HOME/Library/LaunchAgents/com.futurecrash.look.tailcat.plist" || true; fi
 else
   echo "Node installed; start with: fcl-node serve"
@@ -481,6 +488,10 @@ if ! cmp -s "$ROOT/look/lk" "$HOME/.local/share/look/lk"; then
 fi
 if ! cmp -s "$ROOT/look/file_catalog.py" "$HOME/.local/share/look/file_catalog.py"; then
   echo "INSTALL ERROR: installed file catalog core does not match this checkout" >&2
+  exit 5
+fi
+if ! cmp -s "$ROOT/look/media_watch.py" "$HOME/.local/share/look/media_watch.py"; then
+  echo "INSTALL ERROR: installed removable media watcher does not match this checkout" >&2
   exit 5
 fi
 if ! cmp -s "$ROOT/look/media_core.py" "$HOME/.local/share/look/media_core.py"; then

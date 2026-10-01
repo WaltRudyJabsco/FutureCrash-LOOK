@@ -57,3 +57,21 @@ Prefer boundary tests over guesses. For browser media, verify in order: queue id
 ## LOOK live view (8.1)
 
 Interactive LOOK pins the directory header above the scrolling file viewport. `Shift-F` cycles NAME, MODIFIED, SIZE, KIND, and ADDED sorting for the current LOOK session; the highlighted object is preserved across a reorder. A new LOOK process begins with its launch/default sort.
+
+## 8.2 removable media and startup contract
+
+Future Crash + LOOK is zero-touch after a normal reboot: the Unified Node, guarded ingress,
+and removable-media watcher are configured as user services (`systemd --user` on Linux,
+LaunchAgents on macOS). Tailscale remains its own system-managed service.
+
+The removable-media watcher detects user-mounted volumes (`/Volumes` on macOS and the
+usual per-user `/run/media` or `/media` roots on Linux). A newly attached volume receives
+a fast metadata-only media scan. Files remain on that physical disk; Fabric publishes the
+owning node plus catalog identity and streams bytes from that node on demand. If an explicit
+media root already exists inside a volume, it wins and the whole volume is not rescanned,
+which prevents duplicate catalog rows. Unplugging a volume makes its files temporarily
+unavailable but does not pretend they moved to another node.
+
+LOOK previews are bounded edge work: regular-file text sniffing reads at most 64 KiB,
+special files are not opened for preview, and Ctrl-C exits cleanly without nested Python
+tracebacks.

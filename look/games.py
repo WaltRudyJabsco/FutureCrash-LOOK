@@ -212,9 +212,9 @@ def ttt_ai(board:list[str], player:str) -> int|None:
 
 def render_ttt(board, mode, turn, notice=""):
     def c(i): return (BRIGHT+board[i]+RESET) if board[i] else str(i+1)
-    rows=[f"       {c(0)} │ {c(1)} │ {c(2)}", "      ───┼───┼───",
-          f"       {c(3)} │ {c(4)} │ {c(5)}", "      ───┼───┼───",
-          f"       {c(6)} │ {c(7)} │ {c(8)}"]
+    rows=[f"        {c(0)}   │   {c(1)}   │   {c(2)}", "      ──────┼───────┼──────",
+          f"        {c(3)}   │   {c(4)}   │   {c(5)}", "      ──────┼───────┼──────",
+          f"        {c(6)}   │   {c(7)}   │   {c(8)}"]
     sys.stdout.write("\n".join(chrome("Tic-Tac-Toe",mode,f"TURN {turn}",notice)+rows+["",footer(mode)])); sys.stdout.flush()
 
 
@@ -413,7 +413,7 @@ def chess_ai(board, who:str, depth:int=2):
 
 def render_chess(board, mode, who, status=""):
     glyph={"K":"K","Q":"Q","R":"R","B":"B","N":"N","P":"P","k":"k","q":"q","r":"r","b":"b","n":"n","p":"p"}
-    lines=["      a  b  c  d  e  f  g  h"]
+    lines=["        a    b    c    d    e    f    g    h"]
     for y in range(7,-1,-1):
         row=[]
         for x in range(8):
@@ -421,13 +421,13 @@ def render_chess(board, mode, who, status=""):
             bg=BG_LIGHT if (x+y)%2==0 else BG_DARK
             if p.strip():
                 fg=BRIGHT if p.isupper() else CYAN
-                cell=bg+fg+" "+glyph.get(p,p)+" "+RESET
+                cell=bg+fg+"  "+glyph.get(p,p)+"  "+RESET
             else:
                 mark="·" if (x+y)%2==0 else " "
-                cell=bg+DIM+" "+mark+" "+RESET
+                cell=bg+DIM+"  "+mark+"  "+RESET
             row.append(cell)
-        lines.append(f" {y+1}   "+"".join(row)+f"  {y+1}")
-    lines += ["      a  b  c  d  e  f  g  h", "", footer(mode)]
+        lines.append(f" {y+1}    "+"".join(row)+f"   {y+1}")
+    lines += ["        a    b    c    d    e    f    g    h", "", footer(mode)]
     sys.stdout.write("\n".join(chrome("Chess",mode,"WHITE" if who=="W" else "BLACK",status)+lines)); sys.stdout.flush()
 
 
@@ -561,7 +561,7 @@ def checkers_ai(board, who, depth=3):
 
 
 def render_checkers(board, mode, who, status=""):
-    lines=["      a  b  c  d  e  f  g  h"]
+    lines=["        a    b    c    d    e    f    g    h"]
     for y in range(7,-1,-1):
         row=[]
         for x in range(8):
@@ -571,13 +571,13 @@ def render_checkers(board, mode, who, status=""):
                 if p.lower()=="w": piece="◎" if p.isupper() else "○"
                 else: piece="◉" if p.isupper() else "●"
                 fg=BRIGHT if p.lower()=="w" else RED
-                cell=bg+fg+" "+piece+" "+RESET
+                cell=bg+fg+"  "+piece+"  "+RESET
             else:
                 mark="·" if (x+y)%2==0 else " "
-                cell=bg+DIM+" "+mark+" "+RESET
+                cell=bg+DIM+"  "+mark+"  "+RESET
             row.append(cell)
-        lines.append(f" {y+1}   "+"".join(row)+f"  {y+1}")
-    lines += ["      a  b  c  d  e  f  g  h", "", footer(mode)]
+        lines.append(f" {y+1}    "+"".join(row)+f"   {y+1}")
+    lines += ["        a    b    c    d    e    f    g    h", "", footer(mode)]
     sys.stdout.write("\n".join(chrome("Checkers",mode,"WHITE" if who=="W" else "BLACK",status)+lines)); sys.stdout.flush()
 
 

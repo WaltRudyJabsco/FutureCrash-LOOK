@@ -19,6 +19,7 @@ import fcntl
 import struct
 import os
 import shutil
+import stat as statmod
 import stat
 import select
 import subprocess
@@ -726,10 +727,14 @@ def preview_rows(path:Path, width:int, height:int)->list[str]:
             rows.extend(art)
             return rows[:height]
 
-    # Prefer actual text when the file looks textual. Avoid dumping binary bytes.
+    # Preview is optional UI: never ingest an entire file merely to inspect it.
+    # Also refuse devices/FIFOs/sockets, which can block an interactive pager forever.
+    if not statmod.S_ISREG(st.st_mode):
+        return rows+[fit(f'{DIM}{human_size(st.st_size)} · preview unavailable for special file{RESET}',width)]
     try:
-        sample=path.read_bytes()[:65536]
-    except OSError as exc:
+        with path.open('rb', buffering=0) as handle:
+            sample=handle.read(65536)
+    except (OSError, ValueError) as exc:
         return rows+[fit(f'{DIM}{exc}{RESET}',width)]
 
     textual=(b'\x00' not in sample)
@@ -1901,4 +1906,6 @@ def main():
         target=browsed
         browsed_once=True
 
-if __name__=='__main__': raise SystemExit(main())
+if __name__=='__main__':
+    try: raise SystemExit(main())
+    except KeyboardInterrupt: raise SystemExit(130)

@@ -9930,7 +9930,7 @@ def _direct_searxng_search(query, limit=8):
     params=urllib.parse.urlencode({"q":query,"format":"json"})
     request=urllib.request.Request(base+"/search?"+params,headers={
         "Accept":"application/json",
-        "User-Agent":"Future-Crash-Fabric/8.1.0",
+        "User-Agent":"Future-Crash-Fabric/8.2.0",
     })
     with urllib.request.urlopen(request,timeout=12) as response:
         data=json.load(response)
@@ -19189,4 +19189,6 @@ def main():
         return inspect_command(rest[0])
     if len(a)==1: return inspect_anything(cmd)
     return render(a)
-if __name__=="__main__": raise SystemExit(main())
+if __name__=="__main__":
+    try: raise SystemExit(main())
+    except KeyboardInterrupt: raise SystemExit(130)
