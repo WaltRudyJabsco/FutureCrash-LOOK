@@ -1,3 +1,9 @@
+# 7.7.12 — FABRIC ITEM ROUTE
+
+- Remote catalog-item proxying now remains `/v1/media/item` across Fabric hops instead of being rewritten to the active-queue `/v1/media/audio` endpoint.
+- The working `lk media classics`, Classic Arts, mpv, queue, and Media Session paths are unchanged.
+- Regression coverage freezes the item/audio routing boundary and the special working media commands.
+
 # 7.7.11 — FABRIC AUDIO RESTORE
 
 - Restore the proven Fabric media contract: catalog items stream through `/v1/media/item`; `/v1/media/audio` remains the queue/index stream.

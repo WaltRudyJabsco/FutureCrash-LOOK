@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Future Crash + LOOK Unified Node 7.7.11.
+"""Future Crash + LOOK Unified Node 7.7.12.
 
 A small distributed supervisor for trusted personal machines. Immediate events stay
 asynchronous; a one-second fabric pulse reconciles presence, leases and stale work.
@@ -75,7 +75,7 @@ try:
 except ImportError:
     from attention import normalize_event as normalize_attention_event, plan_voice_targets
 
-VERSION = "7.7.11"
+VERSION = "7.7.12"
 RELEASE_NAME = "COGNITIVE FABRIC"
 DEFAULT_HOST = "127.0.0.1"
 DEFAULT_PORT = 7332
@@ -2296,7 +2296,7 @@ def _local_web_search(query, limit=8):
     base=os.environ.get("FCL_SEARXNG_URL","http://127.0.0.1:8888").rstrip("/")
     request=urllib.request.Request(base+"/search?"+params,headers={
         "Accept":"application/json",
-        "User-Agent":"Future-Crash-Fabric/7.7.11",
+        "User-Agent":"Future-Crash-Fabric/7.7.12",
     })
     try:
         with urllib.request.urlopen(request,timeout=8) as response:
@@ -3079,7 +3079,7 @@ def _openjev_shadow(state, question, candidates, *, profile="workspace", consequ
 
 
 class API(BaseHTTPRequestHandler):
-    server_version = "FCLNode/7.7.11"
+    server_version = "FCLNode/7.7.12"
 
     def setup(self):
         self._metric_request_id = None
@@ -3224,7 +3224,7 @@ class API(BaseHTTPRequestHandler):
             for base in _peer_bases(peer):
                 params={"id":entry_id}
                 if path_hint: params["path"]=path_hint
-                url=base+"/v1/media/audio?"+urllib.parse.urlencode(params)
+                url=base+"/v1/media/item?"+urllib.parse.urlencode(params)
                 headers=FABRIC_IDENTITY.auth_headers_for_url(url)
                 if self.headers.get("Range"): headers["Range"]=self.headers.get("Range")
                 req=urllib.request.Request(url,headers=headers,method="HEAD" if head else "GET")
