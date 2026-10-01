@@ -480,7 +480,6 @@ class Handler(BaseHTTPRequestHandler):
             return self.send_json(200,{'ok':True,'items':_read_saved()})
         if path=='/api/thread':
             if not self._require_endpoint('lo.use'): return
-            from urllib.parse import parse_qs
             sid=str(parse_qs(urlparse(self.path).query).get('session',['main'])[0] or 'main')[:120]
             return self.send_json(200,{"ok":True,"session":sid,"turns":_session_history(sid)})
         if path in {'/v1/actions','/api/capabilities'}:
