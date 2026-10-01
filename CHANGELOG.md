@@ -1,37 +1,3 @@
-## 7.7.13 — CATALOG TRANSPORT
-
-- Fix remote catalog playback choosing `/v1/media/artifact` merely because a media row had a checksum.
-- Prefer the catalog `node + id` locator and reserve artifact transport for artifact-only queue entries.
-- Preserve the existing Classics/Arts and player execution paths unchanged.
-
-# 7.7.12 — FABRIC ITEM ROUTE
-
-- Remote catalog-item proxying now remains `/v1/media/item` across Fabric hops instead of being rewritten to the active-queue `/v1/media/audio` endpoint.
-- The working `lk media classics`, Classic Arts, mpv, queue, and Media Session paths are unchanged.
-- Regression coverage freezes the item/audio routing boundary and the special working media commands.
-
-# 7.7.11 — FABRIC AUDIO RESTORE
-
-- Restore the proven Fabric media contract: catalog items stream through `/v1/media/item`; `/v1/media/audio` remains the queue/index stream.
-- Restore Signal's browser-facing `/api/media/audio` facade to translate catalog item IDs to `/v1/media/item`, matching the known-working implementation.
-- Restore LOOK remote catalog playback to the same `/v1/media/item?node=...&id=...` edge.
-- Preserve later Range-capable ingress streaming, Media Session transport controls, native preview fixes, and local mpv behavior.
-
-# 7.7.10 — REMOTE PLAYBACK
-
-- Freeze the field-proven local LOOK/mpv path and Media Session transport controls.
-- Make every source node assign deterministic catalog ids to legacy idless media rows before advertising them.
-- Resolve those same derived ids server-side, so an advertised `(node,id)` is always retrievable.
-- Keep path repair catalog-bounded, with canonical-path matching only against rows already in the media library.
-
-# 7.7.9 — MEDIA IDENTITY
-
-- Base: the uploaded 7.7.8 MEDIA SESSION package that was field-tested on the user's machines.
-- Unify Signal browser playback and LOOK/mpv on the canonical Range-capable `/v1/media/audio` Fabric edge.
-- Carry catalog `id` plus exact scanned `path` as a bounded repair hint; arbitrary filesystem paths remain rejected.
-- Prefer content-addressed artifact streaming when a digest is already present.
-- Preserve Media Session ownership, MM/MN/MP system-player control, native previews, and installer behavior from 7.7.8.
-
 # 7.7.8 — MEDIA IDENTITY
 
 Surgical media identity and transport dispatch repair.

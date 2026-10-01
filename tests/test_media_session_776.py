@@ -58,7 +58,7 @@ def test_media_state_exposes_owner_and_source_playback_nodes():
     assert '"source_node":str((snap.get("entry") or {}).get("node") or "")' in LK
     assert '"playback_node":socket.gethostname()' in LK
 
-def test_ingress_media_audio_range_round_trip(monkeypatch):
+def test_ingress_media_item_range_round_trip(monkeypatch):
     import threading, urllib.request
     from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 
@@ -66,7 +66,7 @@ def test_ingress_media_audio_range_round_trip(monkeypatch):
     class Backend(BaseHTTPRequestHandler):
         def log_message(self,*args): pass
         def do_GET(self):
-            assert self.path.startswith('/v1/media/audio')
+            assert self.path.startswith('/v1/media/item')
             assert self.headers.get('Range')=='bytes=4-9'
             body=payload[4:10]
             self.send_response(206)
@@ -83,7 +83,7 @@ def test_ingress_media_audio_range_round_trip(monkeypatch):
     tg=threading.Thread(target=guard.serve_forever,daemon=True); tg.start()
     try:
         req=urllib.request.Request(
-            f'http://127.0.0.1:{guard.server_port}/v1/media/audio?id=test',
+            f'http://127.0.0.1:{guard.server_port}/v1/media/item?id=test',
             headers={'Range':'bytes=4-9','X-Fabric-Node':'peer','Authorization':'Bearer test'})
         with urllib.request.urlopen(req,timeout=2) as response:
             assert response.status==206

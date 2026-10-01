@@ -36,6 +36,38 @@ ENDPOINT_AUTH = EndpointAuth()
 ENDPOINT_COOKIE = "fcl_endpoint"
 PENDING_COOKIE = "fcl_pending"
 
+_MEDIA_TICKETS = {}
+_MEDIA_TICKET_LOCK = threading.Lock()
+_MEDIA_TICKET_TTL = 600
+
+def _media_ticket_key(kind, node="", item_id="", digest="", index=0):
+    return (str(kind or ""), str(node or ""), str(item_id or ""), str(digest or ""), int(index or 0))
+
+def _media_ticket_issue(key):
+    token = secrets.token_urlsafe(24)
+    now = time.time()
+    with _MEDIA_TICKET_LOCK:
+        for old, (expires, _key) in list(_MEDIA_TICKETS.items()):
+            if expires <= now:
+                _MEDIA_TICKETS.pop(old, None)
+        _MEDIA_TICKETS[token] = (now + _MEDIA_TICKET_TTL, tuple(key))
+    return token
+
+def _media_ticket_valid(token, key):
+    token = str(token or "")
+    if not token:
+        return False
+    now = time.time()
+    with _MEDIA_TICKET_LOCK:
+        row = _MEDIA_TICKETS.get(token)
+        if not row:
+            return False
+        expires, expected = row
+        if expires <= now:
+            _MEDIA_TICKETS.pop(token, None)
+            return False
+        return expected == tuple(key)
+
 SURFACE_CONTRACT = r"""
 Return ONLY compact JSON for Signal's persistent 256x256 graphics world, or {} when no visual is useful.
 
@@ -803,15 +835,12 @@ def _proxy_artifact(handler,node,digest,*,head=False):
             handler.send_response(502); handler.send_header("Content-Length","0"); handler.end_headers()
         else: handler.json(502,{"error":str(exc)})
 
-def _proxy_media_audio(handler,node,index=0,*,item_id="",path_hint="",head=False):
-    # Browser-facing /api/media/audio is a facade. Catalog objects are served
-    # by /v1/media/item; /v1/media/audio is reserved for active queue indexes.
+def _proxy_media_audio(handler,node,index=0,*,item_id="",head=False):
     if item_id:
-        params={"node":str(node or ""),"id":str(item_id)}
-        query="?"+urlencode(params)
+        query="?node="+quote(str(node or ""),safe="")+"&id="+quote(str(item_id),safe="")
         path="/v1/media/item"
     else:
-        query="?"+urlencode({"node":str(node or ""),"index":str(int(index))})
+        query="?node="+quote(str(node or ""),safe="")+"&index="+str(int(index))
         path="/v1/media/audio"
     req=urllib.request.Request(NODE_URL+path+query,method="HEAD" if head else "GET")
     if handler.headers.get("Range"):
@@ -955,22 +984,57 @@ class App(BaseHTTPRequestHandler):
         row=ENDPOINT_AUTH.request(user_agent=str(self.headers.get("User-Agent") or ""),remote=str(self.client_address[0]))
         return self.json(200,{"authorized":False,"pending":{k:v for k,v in row.items() if k!="id"}},
                          [self._set_cookie(PENDING_COOKIE,row["id"],300)])
+    def _media_ticket_request(self, parsed):
+        if not self._require_endpoint("media.output"):
+            return
+        q=parse_qs(parsed.query)
+        kind=str((q.get("kind") or [""])[0])
+        node=str((q.get("node") or [""])[0])
+        item_id=str((q.get("id") or [""])[0])
+        digest=str((q.get("digest") or [""])[0])
+        try: index=int((q.get("index") or [0])[0] or 0)
+        except Exception: index=0
+        if kind=="audio" and item_id:
+            key=_media_ticket_key("audio",node,item_id,"",index)
+            token=_media_ticket_issue(key)
+            url="/api/media/audio?"+urllib.parse.urlencode({"node":node,"id":item_id,"index":index,"ticket":token})
+            return self.json(200,{"ok":True,"url":url,"expires_in":_MEDIA_TICKET_TTL})
+        if kind=="artifact" and digest:
+            key=_media_ticket_key("artifact",node,"",digest,0)
+            token=_media_ticket_issue(key)
+            url="/api/artifact?"+urllib.parse.urlencode({"node":node,"digest":digest,"ticket":token})
+            return self.json(200,{"ok":True,"url":url,"expires_in":_MEDIA_TICKET_TTL})
+        return self.json(400,{"ok":False,"error":"media ticket requires audio id or artifact digest"})
+
+    def _media_ticket_allows(self, parsed):
+        q=parse_qs(parsed.query); token=str((q.get("ticket") or [""])[0])
+        if parsed.path=="/api/media/audio":
+            node=str((q.get("node") or [""])[0]); item_id=str((q.get("id") or [""])[0])
+            try: index=int((q.get("index") or [0])[0] or 0)
+            except Exception: index=0
+            return _media_ticket_valid(token,_media_ticket_key("audio",node,item_id,"",index))
+        if parsed.path=="/api/artifact":
+            node=str((q.get("node") or [""])[0]); digest=str((q.get("digest") or [""])[0])
+            return _media_ticket_valid(token,_media_ticket_key("artifact",node,"",digest,0))
+        return False
+
     def do_HEAD(self):
         parsed=urlparse(self.path)
-        if parsed.path.startswith("/api/") and not self._require_endpoint("media.output"): return
+        if parsed.path.startswith("/api/") and not self._media_ticket_allows(parsed) and not self._require_endpoint("media.output"): return
         if parsed.path=="/api/artifact":
             q=parse_qs(parsed.query); node=str((q.get("node") or [""])[0]); digest=str((q.get("digest") or [""])[0])
             return _proxy_artifact(self,node,digest,head=True)
         if parsed.path=="/api/media/audio":
-            q=parse_qs(parsed.query); node=str((q.get("node") or [""])[0]); item_id=str((q.get("id") or [""])[0]); path_hint=str((q.get("path") or [""])[0])
+            q=parse_qs(parsed.query); node=str((q.get("node") or [""])[0]); item_id=str((q.get("id") or [""])[0])
             try: index=int((q.get("index") or [0])[0] or 0)
             except Exception: index=0
-            return _proxy_media_audio(self,node,index,item_id=item_id,path_hint=path_hint,head=True)
+            return _proxy_media_audio(self,node,index,item_id=item_id,head=True)
         self.send_response(404); self.send_header("Content-Length","0"); self.end_headers()
 
     def do_GET(self):
         parsed=urlparse(self.path); path=parsed.path
         if path=="/api/auth/status": return self._auth_status()
+        if path=="/api/media/ticket": return self._media_ticket_request(parsed)
         if path in ("/",""):
             invite=str((parse_qs(parsed.query).get("fcl_invite") or [""])[0])
             if invite:
@@ -979,7 +1043,7 @@ class App(BaseHTTPRequestHandler):
                 self.send_response(303); self.send_header("Location","/"); self.send_header(*self._set_cookie(ENDPOINT_COOKIE,issued["token"],31536000 if issued.get("mode")=="trust" else 43200)); self.end_headers(); return
         if path.startswith("/api/"):
             scope="media.output" if path.startswith("/api/media") else "signal.view"
-            if not self._require_endpoint(scope): return
+            if not self._media_ticket_allows(parsed) and not self._require_endpoint(scope): return
         if self.path.startswith("/api/present/"):
             token=self.path.split("/api/present/",1)[1].split("?",1)[0]
             p=_present_get(token)
@@ -1002,10 +1066,10 @@ class App(BaseHTTPRequestHandler):
             q=parse_qs(urlparse(self.path).query); node=str((q.get("node") or [""])[0]); digest=str((q.get("digest") or [""])[0])
             return _proxy_artifact(self,node,digest)
         if self.path.startswith("/api/media/audio"):
-            q=parse_qs(urlparse(self.path).query); node=str((q.get("node") or [""])[0]); item_id=str((q.get("id") or [""])[0]); path_hint=str((q.get("path") or [""])[0])
+            q=parse_qs(urlparse(self.path).query); node=str((q.get("node") or [""])[0]); item_id=str((q.get("id") or [""])[0])
             try: index=int((q.get("index") or [0])[0] or 0)
             except Exception: index=0
-            return _proxy_media_audio(self,node,index,item_id=item_id,path_hint=path_hint)
+            return _proxy_media_audio(self,node,index,item_id=item_id)
         if self.path.startswith("/api/media/outputs"):
             return self.json(200,_media_outputs())
         if self.path=="/api/media":

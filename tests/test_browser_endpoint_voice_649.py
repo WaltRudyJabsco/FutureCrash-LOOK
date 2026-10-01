@@ -39,7 +39,7 @@ def test_surfaces_advertise_and_execute_browser_speech():
 
 
 def test_release_649_contract():
-    assert (ROOT/'VERSION').read_text().strip()=='7.7.13'
+    assert (ROOT/'VERSION').read_text().strip()=='7.7.14'
     node=(ROOT/'core/node.py').read_text()
-    assert 'VERSION = "7.7.13"' in node
+    assert 'VERSION = "7.7.14"' in node
     assert 'RELEASE_NAME = "COGNITIVE FABRIC"' in node

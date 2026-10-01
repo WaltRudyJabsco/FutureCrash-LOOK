@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 """Albert 5: quiet browser surface for the local Future Crash Fabric."""
 from __future__ import annotations
-import json, mimetypes, os, urllib.request, urllib.error, importlib.util, threading, time, hashlib, re, sys
+import json, mimetypes, os, urllib.request, urllib.error, importlib.util, threading, time, hashlib, re, sys, secrets
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
 from urllib.parse import urlparse, unquote, urlencode, parse_qs, quote
@@ -18,6 +18,28 @@ from endpoint_auth import EndpointAuth
 ENDPOINT_AUTH=EndpointAuth()
 ENDPOINT_COOKIE="fcl_endpoint"
 PENDING_COOKIE="fcl_pending"
+_MEDIA_TICKETS={}
+_MEDIA_TICKET_LOCK=threading.Lock()
+_MEDIA_TICKET_TTL=600
+
+def _media_ticket_issue(node,item_id):
+    token=secrets.token_urlsafe(24); now=time.time(); key=(str(node or ''),str(item_id or ''))
+    with _MEDIA_TICKET_LOCK:
+        for old,(expires,_key) in list(_MEDIA_TICKETS.items()):
+            if expires<=now:_MEDIA_TICKETS.pop(old,None)
+        _MEDIA_TICKETS[token]=(now+_MEDIA_TICKET_TTL,key)
+    return token
+
+def _media_ticket_valid(token,node,item_id):
+    token=str(token or ''); now=time.time(); key=(str(node or ''),str(item_id or ''))
+    if not token:return False
+    with _MEDIA_TICKET_LOCK:
+        row=_MEDIA_TICKETS.get(token)
+        if not row:return False
+        expires,expected=row
+        if expires<=now:
+            _MEDIA_TICKETS.pop(token,None); return False
+        return expected==key
 ARTIFACT_DIR=Path.home()/".local/share/future-crash-look/albert-artifacts"
 ARTIFACT_DIR.mkdir(parents=True,exist_ok=True)
 HOST=os.environ.get("ALBERT_HOST","127.0.0.1")
@@ -144,7 +166,7 @@ def _place_query(text):
 
 def places_search(query,limit=6):
     params=urlencode({'q':query,'format':'jsonv2','limit':max(1,min(int(limit),8)),'addressdetails':1})
-    req=urllib.request.Request('https://nominatim.openstreetmap.org/search?'+params,headers={'User-Agent':'FutureCrash-Albert/7.7.13 (local personal assistant)','Accept':'application/json'})
+    req=urllib.request.Request('https://nominatim.openstreetmap.org/search?'+params,headers={'User-Agent':'FutureCrash-Albert/7.7.14 (local personal assistant)','Accept':'application/json'})
     with urllib.request.urlopen(req,timeout=5.0) as r: raw=json.loads(r.read().decode())
     places=[]
     for x in raw:
@@ -312,10 +334,11 @@ def action(text, session="", context=None):
             if queue:
                 first=queue[0]; title=first.get('title') or first.get('name') or query
                 media_type=str(first.get('media_type') or '').casefold()
-                item_id=str(first.get('id') or first.get('digest') or '')
+                item_id=str(first.get('id') or '')
                 media_node=str(first.get('node') or prepared.get('node') or '')
                 if item_id:
-                    src='/v1/media/item?'+urlencode({'node':media_node,'id':item_id})
+                    ticket=_media_ticket_issue(media_node,item_id)
+                    src='/v1/media/item?'+urlencode({'node':media_node,'id':item_id,'ticket':ticket})
                     result_type='video' if media_type.startswith('video/') else 'audio'
                     subtitle=' · '.join(x for x in (str(first.get('artist') or ''),str(first.get('album') or '')) if x)
                     return {"type":result_type,"title":title,"subtitle":subtitle,"meta":f"media.play · {len(queue)} item(s)","badge":"live","kind":"things","src":src,"note":f"Fabric media · {len(queue)} resolved item(s)","pipeline":{"intent":"media.play","source":"Fabric media catalog","target":"origin endpoint","effect":"browser playback"}}
@@ -454,10 +477,11 @@ class Handler(BaseHTTPRequestHandler):
             target=matches[0]; data=target.read_bytes()
             self.send_response(200); self.send_header('Content-Type',mimetypes.guess_type(target.name)[0] or 'application/octet-stream'); self.send_header('Cache-Control','private, max-age=3600'); self.send_header('Content-Length',str(len(data))); self.end_headers(); self.wfile.write(data); return
         if path=='/v1/media/item':
-            if not self._require_endpoint('lo.use'): return
             params=parse_qs(urlparse(self.path).query)
             node=str(params.get('node',[''])[0] or '')
             item_id=str(params.get('id',[''])[0] or '')
+            ticket=str(params.get('ticket',[''])[0] or '')
+            if not _media_ticket_valid(ticket,node,item_id) and not self._require_endpoint('lo.use'): return
             if not item_id: return self.send_json(400,{'ok':False,'error':'media item id required'})
             return _proxy_media_item(self,node,item_id)
         rel='index.html' if path in {'/','/index.html'} else path.lstrip('/')

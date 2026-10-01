@@ -42,6 +42,7 @@ def test_signal_video_uses_generic_artifact_stream_when_identified():
     js=(Path(__file__).resolve().parents[1]/'signal-window'/'app.js').read_text()
     server=(Path(__file__).resolve().parents[1]/'signal-window'/'server.py').read_text()
     assert "document.createElement('video')" in js
-    assert '/api/artifact?node=' in js
+    assert "kind:'artifact'" in js
+    assert '/api/artifact?' in server
     assert 'def _proxy_artifact(' in server
     assert 'NODE_URL+"/v1/media/artifact"' in server
