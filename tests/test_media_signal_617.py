@@ -6,7 +6,7 @@ ROOT=Path(__file__).resolve().parents[1]
 def test_playback_uses_catalog_id_proxy_not_nested_fabric_cli():
     text=(ROOT/'look'/'lk').read_text()
     block=text[text.index('def _media_entry_source'):text.index('def _media_write_m3u')]
-    assert '/v1/media/item?' in block
+    assert '/v1/media/audio?' in block
     assert '_media_identify_catalog_entry' not in block
     assert '_media_fabric_cli' not in block
 

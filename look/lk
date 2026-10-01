@@ -9929,7 +9929,7 @@ def _direct_searxng_search(query, limit=8):
     params=urllib.parse.urlencode({"q":query,"format":"json"})
     request=urllib.request.Request(base+"/search?"+params,headers={
         "Accept":"application/json",
-        "User-Agent":"Future-Crash-Fabric/7.7.8",
+        "User-Agent":"Future-Crash-Fabric/7.7.9",
     })
     with urllib.request.urlopen(request,timeout=12) as response:
         data=json.load(response)
@@ -15908,8 +15908,12 @@ def _media_entry_source(entry):
             if path:
                 stale_local.append(path)
             continue
-        if node and entry_id:
-            return "http://127.0.0.1:7332/v1/media/item?"+urllib.parse.urlencode({"node":node,"id":entry_id,"path":path})
+        if node and _digest:
+            return "http://127.0.0.1:7332/v1/media/artifact?"+urllib.parse.urlencode({"node":node,"digest":_digest})
+        if node and (entry_id or path):
+            params={"node":node,"id":entry_id}
+            if path: params["path"]=path
+            return "http://127.0.0.1:7332/v1/media/audio?"+urllib.parse.urlencode(params)
 
     if stale_local:
         raise FileNotFoundError(

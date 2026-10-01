@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Future Crash + LOOK Unified Node 7.7.8.
+"""Future Crash + LOOK Unified Node 7.7.9.
 
 A small distributed supervisor for trusted personal machines. Immediate events stay
 asynchronous; a one-second fabric pulse reconciles presence, leases and stale work.
@@ -74,7 +74,7 @@ try:
 except ImportError:
     from attention import normalize_event as normalize_attention_event, plan_voice_targets
 
-VERSION = "7.7.8"
+VERSION = "7.7.9"
 RELEASE_NAME = "COGNITIVE FABRIC"
 DEFAULT_HOST = "127.0.0.1"
 DEFAULT_PORT = 7332
@@ -2295,7 +2295,7 @@ def _local_web_search(query, limit=8):
     base=os.environ.get("FCL_SEARXNG_URL","http://127.0.0.1:8888").rstrip("/")
     request=urllib.request.Request(base+"/search?"+params,headers={
         "Accept":"application/json",
-        "User-Agent":"Future-Crash-Fabric/7.7.8",
+        "User-Agent":"Future-Crash-Fabric/7.7.9",
     })
     try:
         with urllib.request.urlopen(request,timeout=8) as response:
@@ -2383,29 +2383,27 @@ def _local_media_catalog():
 
 
 def _local_media_entry(entry_id, path_hint=""):
-    """Resolve only media that exists in this node's current catalog.
+    """Resolve one scanned local media row by catalog identity.
 
-    ID is canonical. path_hint is a migration locator, accepted only when that exact
-    path is itself present in the current catalog; it never opens arbitrary paths.
+    Catalog ids are the normal identity.  The exact catalog path is carried as a
+    repair hint so a caller holding a row emitted by this node can still retrieve
+    it if an older scan/version computed a different cheap id.  The hint is never
+    an arbitrary-file escape: it must exactly match a row in the current catalog.
     """
     entry_id=str(entry_id or "").strip()
-    if not entry_id:
-        raise ValueError("media entry id required")
-    for row in (_read_media_library().get("entries") or []):
-        if isinstance(row,dict) and str(row.get("id") or "") == entry_id:
-            path=Path(str(row.get("path") or "")).expanduser()
-            if not path.is_file():
-                raise FileNotFoundError(str(path))
-            return dict(row),path
-    hint=str(path_hint or "").strip()
-    if hint:
-        for row in (_read_media_library().get("entries") or []):
-            if isinstance(row,dict) and str(row.get("path") or "") == hint:
-                path=Path(hint).expanduser()
-                if not path.is_file():
-                    raise FileNotFoundError(str(path))
-                return dict(row),path
-    raise FileNotFoundError(entry_id)
+    path_hint=str(path_hint or "").strip()
+    if not entry_id and not path_hint:
+        raise ValueError("media entry id or catalog path required")
+    entries=[row for row in (_read_media_library().get("entries") or []) if isinstance(row,dict)]
+    selected=next((row for row in entries if entry_id and str(row.get("id") or "") == entry_id),None)
+    if selected is None and path_hint:
+        selected=next((row for row in entries if str(row.get("path") or "") == path_hint),None)
+    if selected is None:
+        raise FileNotFoundError(entry_id or path_hint)
+    path=Path(str(selected.get("path") or "")).expanduser()
+    if not path.is_file():
+        raise FileNotFoundError(str(path))
+    return dict(selected),path
 
 
 def _identify_media_entry(entry_id):
@@ -3041,7 +3039,7 @@ def _openjev_shadow(state, question, candidates, *, profile="workspace", consequ
 
 
 class API(BaseHTTPRequestHandler):
-    server_version = "FCLNode/7.7.8"
+    server_version = "FCLNode/7.7.9"
 
     def setup(self):
         self._metric_request_id = None
@@ -3166,7 +3164,7 @@ class API(BaseHTTPRequestHandler):
         This is the ordinary playback path. Hashing remains an explicit identity/artifact
         operation rather than a prerequisite for listening to already-scanned music.
         """
-        target=str(target or "").strip(); entry_id=str(entry_id or "").strip(); local=identity()["name"]
+        target=str(target or "").strip(); entry_id=str(entry_id or "").strip(); path_hint=str(path_hint or "").strip(); local=identity()["name"]
         if not entry_id:
             if head:
                 self.send_response(400); self.send_header("Content-Length","0"); self.end_headers(); return
@@ -3184,7 +3182,9 @@ class API(BaseHTTPRequestHandler):
         try:
             peer=_peer_for_target(snapshot,target); last_exc=None
             for base in _peer_bases(peer):
-                url=base+"/v1/media/item?"+urllib.parse.urlencode({"id":entry_id,"path":path_hint})
+                params={"id":entry_id}
+                if path_hint: params["path"]=path_hint
+                url=base+"/v1/media/audio?"+urllib.parse.urlencode(params)
                 headers=FABRIC_IDENTITY.auth_headers_for_url(url)
                 if self.headers.get("Range"): headers["Range"]=self.headers.get("Range")
                 req=urllib.request.Request(url,headers=headers,method="HEAD" if head else "GET")
@@ -3263,11 +3263,21 @@ class API(BaseHTTPRequestHandler):
                 self.send_response(502); self.send_header("Content-Length","0"); self.end_headers(); return
             self.sendj(502,{"error":str(exc)})
 
-    def _serve_media_audio(self,target,index,*,head=False):
-        target=str(target or "").strip(); local=identity()["name"]
+    def _serve_media_audio(self,target,index=0,*,entry_id="",path_hint="",head=False):
+        """Canonical Fabric media byte stream.
+
+        New callers identify a catalog row with id/path.  The legacy queue-index
+        form remains for session handoff compatibility.  Both forms share the same
+        Range-capable streaming edge.
+        """
+        target=str(target or "").strip(); entry_id=str(entry_id or "").strip(); path_hint=str(path_hint or "").strip(); local=identity()["name"]
         if not target or target==local:
             try:
-                source,ctype=_local_media_audio_path(index)
+                if entry_id or path_hint:
+                    row,source=_local_media_entry(entry_id,path_hint)
+                    ctype=str(row.get("media_type") or mimetypes.guess_type(str(source))[0] or "application/octet-stream")
+                else:
+                    source,ctype=_local_media_audio_path(index)
                 return self._serve_file_range(source,ctype,head=head)
             except Exception as exc:
                 if head:
@@ -3277,7 +3287,12 @@ class API(BaseHTTPRequestHandler):
         try:
             peer=_peer_for_target(snapshot,target); last_exc=None
             for base in _peer_bases(peer):
-                url=base+"/v1/media/audio?index="+str(int(index))
+                if entry_id or path_hint:
+                    params={"id":entry_id}
+                    if path_hint: params["path"]=path_hint
+                    url=base+"/v1/media/audio?"+urllib.parse.urlencode(params)
+                else:
+                    url=base+"/v1/media/audio?index="+str(int(index))
                 headers=FABRIC_IDENTITY.auth_headers_for_url(url)
                 if self.headers.get("Range"): headers["Range"]=self.headers.get("Range")
                 req=urllib.request.Request(url,headers=headers,method="HEAD" if head else "GET")
@@ -3314,8 +3329,8 @@ class API(BaseHTTPRequestHandler):
             q=parse_qs(parsed.query); target=str((q.get("node") or [""])[0]); entry_id=str((q.get("id") or [""])[0]); path_hint=str((q.get("path") or [""])[0])
             return self._serve_media_item(target,entry_id,path_hint,head=True)
         if path == "/v1/media/audio":
-            q=parse_qs(parsed.query); target=str((q.get("node") or [""])[0]); index=int((q.get("index") or [0])[0] or 0)
-            return self._serve_media_audio(target,index,head=True)
+            q=parse_qs(parsed.query); target=str((q.get("node") or [""])[0]); entry_id=str((q.get("id") or [""])[0]); path_hint=str((q.get("path") or [""])[0]); index=int((q.get("index") or [0])[0] or 0)
+            return self._serve_media_audio(target,index,entry_id=entry_id,path_hint=path_hint,head=True)
         if path == "/v1/media/artifact":
             q=parse_qs(parsed.query); target=str((q.get("node") or [""])[0]); digest=str((q.get("digest") or [""])[0])
             return self._serve_media_artifact(target,digest,head=True)
@@ -3463,10 +3478,10 @@ class API(BaseHTTPRequestHandler):
             q=parse_qs(urlparse(self.path).query); target=str((q.get("node") or [""])[0]); entry_id=str((q.get("id") or [""])[0]); path_hint=str((q.get("path") or [""])[0])
             return self._serve_media_item(target,entry_id,path_hint)
         if path == "/v1/media/audio":
-            q=parse_qs(urlparse(self.path).query); target=str((q.get("node") or [""])[0])
+            q=parse_qs(urlparse(self.path).query); target=str((q.get("node") or [""])[0]); entry_id=str((q.get("id") or [""])[0]); path_hint=str((q.get("path") or [""])[0])
             try: index=int((q.get("index") or [0])[0] or 0)
             except Exception: index=0
-            return self._serve_media_audio(target,index)
+            return self._serve_media_audio(target,index,entry_id=entry_id,path_hint=path_hint)
         if path == "/v1/media/artifact":
             q=parse_qs(urlparse(self.path).query); target=str((q.get("node") or [""])[0]); digest=str((q.get("digest") or [""])[0])
             return self._serve_media_artifact(target,digest)

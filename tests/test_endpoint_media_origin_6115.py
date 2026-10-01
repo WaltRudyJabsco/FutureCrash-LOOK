@@ -21,7 +21,8 @@ def test_browser_streams_prepared_items_by_identity_not_source_session_index():
     assert "const itemId=String(entry.id||entry.digest||'')" in js
     assert 'id=${encodeURIComponent(itemId)}' in js
     py=(ROOT/'signal-window/server.py').read_text()
-    assert 'path="/v1/media/item"' in py
+    assert 'path="/v1/media/audio"' in py
+    assert "path_hint" in py
 
 def test_signal_attaches_origin_endpoint_to_media_receipt():
     py=(ROOT/'signal-window/server.py').read_text()
