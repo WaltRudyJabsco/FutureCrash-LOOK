@@ -9929,7 +9929,7 @@ def _direct_searxng_search(query, limit=8):
     params=urllib.parse.urlencode({"q":query,"format":"json"})
     request=urllib.request.Request(base+"/search?"+params,headers={
         "Accept":"application/json",
-        "User-Agent":"Future-Crash-Fabric/7.7.7",
+        "User-Agent":"Future-Crash-Fabric/7.7.8",
     })
     with urllib.request.urlopen(request,timeout=12) as response:
         data=json.load(response)
@@ -15220,12 +15220,13 @@ def _media_linux(action, preferred=None):
         print(f"LOOK media · {e}"); return 1
 
 
-def _media_system_owner():
+def _media_system_owner(*, include_paused_owner=True):
+    """Return the real transport owner, never mere queue state."""
     if platform.system()=="Darwin":
-        row=_media_macos_owner()
+        row=_media_macos_owner(include_paused_owner=include_paused_owner)
         return ("Darwin",row["player"]) if row else None
     if platform.system()=="Linux":
-        player=_media_linux_owner()
+        player=_media_linux_owner(include_paused_owner=include_paused_owner)
         return ("Linux",player) if player else None
     return None
 
@@ -15908,7 +15909,7 @@ def _media_entry_source(entry):
                 stale_local.append(path)
             continue
         if node and entry_id:
-            return "http://127.0.0.1:7332/v1/media/item?"+urllib.parse.urlencode({"node":node,"id":entry_id})
+            return "http://127.0.0.1:7332/v1/media/item?"+urllib.parse.urlencode({"node":node,"id":entry_id,"path":path})
 
     if stale_local:
         raise FileNotFoundError(

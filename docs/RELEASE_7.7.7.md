@@ -1,4 +1,4 @@
-# 7.7.7 — CLEAN HANDOFF
+# 7.7.8 — CLEAN HANDOFF
 
 - Linux `playerctl` is optional and distribution-owned; its absence or install failure can never abort LOOK/Fabric installation.
 - Repair mpv liveness: IPC reachability is distinct from `idle-active`; a loaded playing/paused item is the only LOOK transport owner.

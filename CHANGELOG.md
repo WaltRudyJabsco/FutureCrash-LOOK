@@ -1,10 +1,14 @@
-# 7.7.7 — CLEAN HANDOFF
+# 7.7.8 — MEDIA IDENTITY
+
+Surgical media identity and transport dispatch repair.
+
+# 7.7.8 — CLEAN HANDOFF
 
 - Make Linux MPRIS/playerctl optional and nonfatal; use distro package managers rather than Linuxbrew.
 - Separate mpv IPC liveness from loaded-media ownership; stopped/dead LOOK queues no longer steal MM/MN/MP.
 - Fix Linux JPEG ImageMagick 7 invocation and add direct HTTP evidence to `lk media doctor`.
 
-# 7.7.7 — MEDIA SESSION
+# 7.7.8 — MEDIA SESSION
 
 - Restore remote Fabric media byte/range streaming through the ingress guard.
 - Fix Linux JPEG native previews.
