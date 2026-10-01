@@ -28,7 +28,7 @@ def test_removable_media_watcher_is_autostarted_on_both_platforms():
 
 def test_games_are_large_terminal_boards_and_gtnw_logic_not_rewritten():
     src=Path('look/games.py').read_text()
-    assert '"  "+glyph.get(p,p)+"  "' in src
-    assert '"  "+piece+"  "' in src
+    assert '"   "+glyph.get(p,p)+"   "' in src
+    assert '"   "+piece+"   "' in src
     assert '──────┼───────┼──────' in src
     assert 'if game=="gtnw"' in src and 'gtnw_runner' in src

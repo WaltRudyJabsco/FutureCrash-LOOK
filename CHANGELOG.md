@@ -1,3 +1,11 @@
+# 8.2.1 — INSTRUMENT PANEL
+
+- Visible removable-media scan state in Media Library and Dash.
+- Full Media Find provenance panel for diagnosing duplicates.
+- Larger Chess/Checkers CRT boards and repaired bare `lk games` WOPR doorway.
+- Existing Dash extended with Media + tiny Signal heartbeat; responsive layouts preserved.
+- 589 tests.
+
 # 8.2.0 — VIEW
 
 - Albert audio cards use an explicit high-contrast dark-player palette for titles, metadata, queue position, EQ, and transport controls.

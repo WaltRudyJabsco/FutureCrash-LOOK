@@ -10,13 +10,13 @@ def test_board_renderers_are_visually_structured(capsys):
     g.render_chess(g.chess_initial(),'1p','W')
     chess=capsys.readouterr().out
     assert g.BG_LIGHT in chess and g.BG_DARK in chess
-    assert chess.count('a    b    c    d    e    f    g    h') == 2
+    assert chess.count('a      b      c      d      e      f      g      h') == 2
 
     g.render_checkers(g.checkers_initial(),'1p','W')
     checkers=capsys.readouterr().out
     assert '●' in checkers
     assert g.BG_LIGHT in checkers and g.BG_DARK in checkers
-    assert checkers.count('a    b    c    d    e    f    g    h') == 2
+    assert checkers.count('a      b      c      d      e      f      g      h') == 2
 
     g.render_bg(g.backgammon_initial(),'1p','W',[3,5])
     bg=capsys.readouterr().out
@@ -39,7 +39,6 @@ def test_wopr_login_is_ritual_not_remembered_state():
     assert '_provisioned()' not in block
     assert 'LOOK_GAMES_SKIP_LOGON' in block
     assert 'wopr_say("GREETINGS PROFESSOR FALKEN. SHALL WE PLAY A GAME?")' in block
-    assert 'NO GAMES INSTALLED.' in source
 
 
 def test_voice_dependencies_and_platform_adapters():

@@ -13,6 +13,7 @@ if str(HERE) not in sys.path: sys.path.insert(0,str(HERE))
 import media_core
 
 LIBRARY=Path.home()/'.local/share/look/media_library.json'
+STATUS=Path.home()/'.local/share/look/media_watch.json'
 INTERVAL=15.0
 
 
@@ -47,23 +48,42 @@ def covered(volume:Path, roots:list[str]):
     return any(r==str(volume) or str(r).startswith(prefix) for r in roots)
 
 
+def write_status(**fields):
+    STATUS.parent.mkdir(parents=True,exist_ok=True)
+    current={}
+    try: current=json.loads(STATUS.read_text(encoding='utf-8'))
+    except (OSError,ValueError,TypeError): pass
+    current.update(fields); current['updated']=time.time()
+    tmp=STATUS.with_suffix('.json.tmp')
+    tmp.write_text(json.dumps(current,indent=2,sort_keys=True)+'\n',encoding='utf-8')
+    os.chmod(tmp,0o600); tmp.replace(STATUS)
+
+
 def scan_new(seen:set[str]):
     lib=load(); changed=False
     for volume in candidates():
         key=str(volume)
         if key in seen: continue
         seen.add(key)
-        if covered(volume,lib.get('roots') or []): continue
+        if covered(volume,lib.get('roots') or []):
+            count=sum(1 for row in lib.get('entries') or [] if str(row.get('root') or '').startswith(key))
+            write_status(state='indexed',volume=key,count=count,message='covered by explicit media root')
+            continue
         try:
+            write_status(state='scanning',volume=key,count=0,message='discovering removable media')
+            before=len(lib.get('entries') or [])
             lib=media_core.scan_root(volume,lib); changed=True
-        except (OSError,NotADirectoryError):
+            count=sum(1 for row in lib.get('entries') or [] if row.get('root')==key)
+            write_status(state='indexed',volume=key,count=count,added=max(0,len(lib.get('entries') or [])-before),message='removable media ready')
+        except (OSError,NotADirectoryError) as exc:
+            write_status(state='error',volume=key,count=0,message=str(exc))
             continue
     if changed: save(lib)
     return seen
 
 
 def main():
-    seen=set()
+    seen=set(); write_status(state='watching',volume='',count=0,message='waiting for removable media')
     while True:
         live={str(p) for p in candidates()}
         seen.intersection_update(live)

@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Future Crash + LOOK Unified Node 8.2.0.
+"""Future Crash + LOOK Unified Node 8.2.1.
 
 A small distributed supervisor for trusted personal machines. Immediate events stay
 asynchronous; a one-second fabric pulse reconciles presence, leases and stale work.
@@ -74,7 +74,7 @@ try:
 except ImportError:
     from attention import normalize_event as normalize_attention_event, plan_voice_targets
 
-VERSION = "8.2.0"
+VERSION = "8.2.1"
 RELEASE_NAME = "COGNITIVE FABRIC"
 DEFAULT_HOST = "127.0.0.1"
 DEFAULT_PORT = 7332
@@ -2295,7 +2295,7 @@ def _local_web_search(query, limit=8):
     base=os.environ.get("FCL_SEARXNG_URL","http://127.0.0.1:8888").rstrip("/")
     request=urllib.request.Request(base+"/search?"+params,headers={
         "Accept":"application/json",
-        "User-Agent":"Future-Crash-Fabric/8.2.0",
+        "User-Agent":"Future-Crash-Fabric/8.2.1",
     })
     try:
         with urllib.request.urlopen(request,timeout=8) as response:
@@ -3041,7 +3041,7 @@ def _openjev_shadow(state, question, candidates, *, profile="workspace", consequ
 
 
 class API(BaseHTTPRequestHandler):
-    server_version = "FCLNode/8.2.0"
+    server_version = "FCLNode/8.2.1"
 
     def setup(self):
         self._metric_request_id = None
@@ -4353,7 +4353,7 @@ def _dash_render_mini(data, width=44, ansi=False):
     name = str(local.get("name") or "local")
     model = _dash_model(local)
     lines = [f"FABRIC · {name[:max(8,width-12)]}", rule,
-             f"{_dash_state(local)[:18]} · {model[:max(8,width-23)]}", "", "RECENT"]
+             f"{_dash_state(local)[:18]} · {model[:max(8,width-23)]}", _dash_media_line()[:width], "", "RECENT"]
     if events:
         for e in _dash_recent_events(events, 5):
             # Mini favors semantic signal over verbose detail.
@@ -4415,6 +4415,33 @@ def _dash_decision_summary(data):
     return {"ready":bool(((data.get("nodes") or {}).get("self") or {}).get("capabilities",{}).get("decision.openjev")),
             "last":info.get("choice"),"confidence":info.get("confidence"),"margin":info.get("margin"),
             "latency_ms":info.get("elapsed_ms"),"judged":len(judges),"pending":pending}
+
+
+def _dash_media_status():
+    """Cheap local media truth for Dash; never scans or touches media bytes."""
+    base=Path.home()/".local/share/look"
+    try: lib=json.loads((base/"media_library.json").read_text(encoding="utf-8"))
+    except (OSError,ValueError,TypeError): lib={}
+    entries=lib.get("entries") or []; roots=lib.get("roots") or []
+    try: watch=json.loads((base/"media_watch.json").read_text(encoding="utf-8"))
+    except (OSError,ValueError,TypeError): watch={}
+    return {"items":len(entries),"roots":len(roots),"watch":watch}
+
+
+def _dash_signal(data, width=24):
+    """Tiny deterministic heartbeat: alive, useful, and essentially free."""
+    events=(data.get("events") or {}).get("events") or []
+    phase=int(time.time())%max(4,width-4)
+    cells=["·"]*max(8,width-2); cells[phase]="●"
+    if events and now()-float(events[-1].get("ts") or 0)<3: cells[max(0,phase-1)]="•"
+    return "SIGNAL  ["+"".join(cells)+"]"
+
+
+def _dash_media_line():
+    m=_dash_media_status(); w=m.get("watch") or {}; state=str(w.get("state") or "watching")
+    vol=Path(str(w.get("volume") or "")).name or "removable"
+    extra=f" · {vol} {state}" if w else ""
+    return f"MEDIA · {m['items']:,} items · {m['roots']} roots{extra}"
 
 
 def _dash_render_full(data, width=92, ansi=False):
@@ -4543,9 +4570,11 @@ def _dash_render_full(data, width=92, ansi=False):
     else:
         lines.append("service status pending…")
 
+    lines += ["", "MEDIA / SIGNAL", rule, _dash_media_line(), _dash_signal(data,min(32,width-10))]
+
     lines += ["", "RECENT · OBSERVED BY THIS NODE", rule]
     if events:
-        for e in _dash_recent_events(events, 6):
+        for e in _dash_recent_events(events, 4):
             lines.append(_dash_recent_line(e, local.get("name"), width, ansi=ansi))
     else:
         lines.append("no recent Fabric events observed here")
@@ -4648,6 +4677,7 @@ def _dash_render_wide(data, width=120, height=28, ansi=False):
     for left,right in ops:
         lines.append(f"{left[:left_w]:<{left_w}}{gap}{right[:right_w]}")
 
+    lines += ["", _dash_media_line()+"   "+_dash_signal(data,min(28,width//3))]
     lines += ["", "RECENT · OBSERVED BY THIS NODE", rule]
     # Fill the rectangle instead of using a fixed six-row ceiling.  RECENT is the
     # most useful spare-space consumer because every extra row carries real state.
@@ -4699,6 +4729,10 @@ def _dash_render_condensed(data, width=92, height=30, ansi=False):
         spare-=1
     if spare>0:
         lines.append(_dash_ingress_summary(data))
+        spare-=1
+
+    if spare>0:
+        lines.append(_dash_media_line()+"   "+_dash_signal(data,min(24,width//3)))
         spare-=1
 
     lines += ["","RECENT · OBSERVED BY THIS NODE",rule]

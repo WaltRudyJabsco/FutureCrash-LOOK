@@ -413,7 +413,7 @@ def chess_ai(board, who:str, depth:int=2):
 
 def render_chess(board, mode, who, status=""):
     glyph={"K":"K","Q":"Q","R":"R","B":"B","N":"N","P":"P","k":"k","q":"q","r":"r","b":"b","n":"n","p":"p"}
-    lines=["        a    b    c    d    e    f    g    h"]
+    lines=["        a      b      c      d      e      f      g      h"]
     for y in range(7,-1,-1):
         row=[]
         for x in range(8):
@@ -421,13 +421,14 @@ def render_chess(board, mode, who, status=""):
             bg=BG_LIGHT if (x+y)%2==0 else BG_DARK
             if p.strip():
                 fg=BRIGHT if p.isupper() else CYAN
-                cell=bg+fg+"  "+glyph.get(p,p)+"  "+RESET
+                cell=bg+fg+"   "+glyph.get(p,p)+"   "+RESET
             else:
                 mark="·" if (x+y)%2==0 else " "
-                cell=bg+DIM+"  "+mark+"  "+RESET
+                cell=bg+DIM+"   "+mark+"   "+RESET
             row.append(cell)
         lines.append(f" {y+1}    "+"".join(row)+f"   {y+1}")
-    lines += ["        a    b    c    d    e    f    g    h", "", footer(mode)]
+        lines.append("      "+"".join((BG_LIGHT if (x+y)%2==0 else BG_DARK)+"       "+RESET for x in range(8)))
+    lines += ["        a      b      c      d      e      f      g      h", "", footer(mode)]
     sys.stdout.write("\n".join(chrome("Chess",mode,"WHITE" if who=="W" else "BLACK",status)+lines)); sys.stdout.flush()
 
 
@@ -561,7 +562,7 @@ def checkers_ai(board, who, depth=3):
 
 
 def render_checkers(board, mode, who, status=""):
-    lines=["        a    b    c    d    e    f    g    h"]
+    lines=["        a      b      c      d      e      f      g      h"]
     for y in range(7,-1,-1):
         row=[]
         for x in range(8):
@@ -571,13 +572,14 @@ def render_checkers(board, mode, who, status=""):
                 if p.lower()=="w": piece="◎" if p.isupper() else "○"
                 else: piece="◉" if p.isupper() else "●"
                 fg=BRIGHT if p.lower()=="w" else RED
-                cell=bg+fg+"  "+piece+"  "+RESET
+                cell=bg+fg+"   "+piece+"   "+RESET
             else:
                 mark="·" if (x+y)%2==0 else " "
-                cell=bg+DIM+"  "+mark+"  "+RESET
+                cell=bg+DIM+"   "+mark+"   "+RESET
             row.append(cell)
         lines.append(f" {y+1}    "+"".join(row)+f"   {y+1}")
-    lines += ["        a    b    c    d    e    f    g    h", "", footer(mode)]
+        lines.append("      "+"".join((BG_LIGHT if (x+y)%2==0 else BG_DARK)+"       "+RESET for x in range(8)))
+    lines += ["        a      b      c      d      e      f      g      h", "", footer(mode)]
     sys.stdout.write("\n".join(chrome("Checkers",mode,"WHITE" if who=="W" else "BLACK",status)+lines)); sys.stdout.flush()
 
 
@@ -896,12 +898,15 @@ def run(args:list[str], *, gtnw_runner=None) -> int:
         try:
             with terminal() as fd:
                 if not provision_login(fd): return 0
-                sys.stdout.write(_clear()+BRIGHT+"WOPR ACCESS TERMINAL"+RESET+"\n\n"+DIM+"NO GAMES INSTALLED."+RESET+"\n")
-                sys.stdout.flush(); time.sleep(.9)
+                game=launcher(fd)
+                if not game: return 0
+                mode=choose_mode(fd,game,"0p" if game=="gtnw" else "1p")
+                if not mode: return 0
+            title=next((name for _,name,g in _GAME_ITEMS if g==game),game)
+            if game!="gtnw": wopr_say(title)
+            return _dispatch(game,mode,gtnw_runner)
         except RuntimeError as exc:
             print(f"LOOK games · {exc}"); return 1
-        print("No games installed.")
-        return 0
 
     game=aliases.get(args[0].casefold(),args[0].casefold())
     if game in {"help","list","ls"}:
