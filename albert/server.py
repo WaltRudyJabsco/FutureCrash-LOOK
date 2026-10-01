@@ -166,7 +166,7 @@ def _place_query(text):
 
 def places_search(query,limit=6):
     params=urlencode({'q':query,'format':'jsonv2','limit':max(1,min(int(limit),8)),'addressdetails':1})
-    req=urllib.request.Request('https://nominatim.openstreetmap.org/search?'+params,headers={'User-Agent':'FutureCrash-Albert/7.7.15 (local personal assistant)','Accept':'application/json'})
+    req=urllib.request.Request('https://nominatim.openstreetmap.org/search?'+params,headers={'User-Agent':'FutureCrash-Albert/7.7.16 (local personal assistant)','Accept':'application/json'})
     with urllib.request.urlopen(req,timeout=5.0) as r: raw=json.loads(r.read().decode())
     places=[]
     for x in raw:
@@ -338,7 +338,10 @@ def action(text, session="", context=None):
                 media_node=str(first.get('node') or prepared.get('node') or '')
                 if item_id:
                     ticket=_media_ticket_issue(media_node,item_id)
-                    src='/v1/media/item?'+urlencode({'node':media_node,'id':item_id,'ticket':ticket})
+                    # Match Signal's working browser contract: the browser consumes
+                    # an Albert API media URL, while this server proxies the exact
+                    # Fabric catalog item with Range support behind the ticket.
+                    src='/api/media/audio?'+urlencode({'node':media_node,'id':item_id,'ticket':ticket})
                     result_type='video' if media_type.startswith('video/') else 'audio'
                     subtitle=' · '.join(x for x in (str(first.get('artist') or ''),str(first.get('album') or '')) if x)
                     return {"type":result_type,"title":title,"subtitle":subtitle,"meta":f"media.play · {len(queue)} item(s)","badge":"live","kind":"things","src":src,"note":f"Fabric media · {len(queue)} resolved item(s)","pipeline":{"intent":"media.play","source":"Fabric media catalog","target":"origin endpoint","effect":"browser playback"}}
@@ -446,7 +449,7 @@ class Handler(BaseHTTPRequestHandler):
         return self.send_json(200,{"authorized":False,"pending":{k:v for k,v in row.items() if k!="id"}},[self._set_cookie(PENDING_COOKIE,row["id"],300)])
     def do_HEAD(self):
         parsed=urlparse(self.path); path=parsed.path
-        if path=='/v1/media/item':
+        if path in {'/api/media/audio','/v1/media/item'}:
             params=parse_qs(parsed.query)
             node=str(params.get('node',[''])[0] or '')
             item_id=str(params.get('id',[''])[0] or '')
@@ -488,7 +491,7 @@ class Handler(BaseHTTPRequestHandler):
             if not matches: return self.send_error(404)
             target=matches[0]; data=target.read_bytes()
             self.send_response(200); self.send_header('Content-Type',mimetypes.guess_type(target.name)[0] or 'application/octet-stream'); self.send_header('Cache-Control','private, max-age=3600'); self.send_header('Content-Length',str(len(data))); self.end_headers(); self.wfile.write(data); return
-        if path=='/v1/media/item':
+        if path in {'/api/media/audio','/v1/media/item'}:
             params=parse_qs(urlparse(self.path).query)
             node=str(params.get('node',[''])[0] or '')
             item_id=str(params.get('id',[''])[0] or '')

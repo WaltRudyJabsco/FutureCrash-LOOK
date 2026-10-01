@@ -1,13 +1,13 @@
 #!/usr/bin/env bash
 set -euo pipefail
 ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
-echo "Future Crash + LOOK 7.7.15 · MEDIA SESSION"
+echo "Future Crash + LOOK 7.7.16 · MEDIA SESSION"
 echo "────────────────────────────────────────"
 
 # Refuse a mixed bundle before mutating the machine. A unified release must move
 # LOOK and the node together.
 EXPECTED_RELEASE="$(tr -d '[:space:]' < "$ROOT/VERSION")"
-[[ "$EXPECTED_RELEASE" == "7.7.15" ]] || { echo "BUNDLE ERROR: expected release 7.7.15, found $EXPECTED_RELEASE"; exit 4; }
+[[ "$EXPECTED_RELEASE" == "7.7.16" ]] || { echo "BUNDLE ERROR: expected release 7.7.16, found $EXPECTED_RELEASE"; exit 4; }
 echo "BUNDLE SOURCE  $ROOT"
 echo "BUNDLE RELEASE $EXPECTED_RELEASE · MEDIA SESSION"
 for vf in "$ROOT/look/VERSION" "$ROOT/albert/VERSION" "$ROOT/future-crash/VERSION"; do
@@ -50,7 +50,7 @@ FCL_UNIFIED_INSTALL_CHILD=1 "$ROOT/install-look.sh" "$@"
 ((UNINSTALL)) && exit 0
 if ((DRY_RUN)); then
   echo
-  echo "[dry-run] would install/restart Unified Node 7.7.15 · MEDIA SESSION with signed Fabric rendezvous, Tailcat direct transport, ONE BRAIN cognition, LIVING MIND memory, browser endpoints, SearXNG, Media, Artifacts, and Signal Window 1.11.0"
+  echo "[dry-run] would install/restart Unified Node 7.7.16 · MEDIA SESSION with signed Fabric rendezvous, Tailcat direct transport, ONE BRAIN cognition, LIVING MIND memory, browser endpoints, SearXNG, Media, Artifacts, and Signal Window 1.11.0"
   echo "[dry-run] OpenJev mode: $OPENJEV_MODE (auto provisions on capable nodes; absence/failure is non-fatal)"
   echo "[dry-run] would initialize Tailcat :7443, install optional signed rendezvous discovery, keep Tailscale :7332 → fcl-ingress :7333 as fallback, and verify Fabric CLI wiring"
   exit 0
@@ -90,6 +90,49 @@ retire_resident_node() {
 }
 
 retire_resident_node
+
+# launchd can occasionally leave the previous Python child alive after bootout.
+# Retire only a listener we can prove belongs to this install; never kill an
+# arbitrary process just because it owns the Fabric port.
+retire_stale_macos_node_listener() {
+  [[ "$(uname -s)" == "Darwin" ]] || return 0
+  command -v lsof >/dev/null 2>&1 || return 0
+  local deadline=$((SECONDS+5)) pid cmd
+  while (( SECONDS < deadline )); do
+    pid="$(lsof -nP -t -iTCP@127.0.0.1:7332 -sTCP:LISTEN 2>/dev/null | head -n1 || true)"
+    [[ -z "$pid" ]] && return 0
+    sleep 0.2
+  done
+  pid="$(lsof -nP -t -iTCP@127.0.0.1:7332 -sTCP:LISTEN 2>/dev/null | head -n1 || true)"
+  [[ -z "$pid" ]] && return 0
+  cmd="$(ps -p "$pid" -o command= 2>/dev/null || true)"
+  case "$cmd" in
+    *"$HOME/.local/bin/fcl-node"*|*"$HOME/.local/share/future-crash-look/core/node.py"*)
+      echo "  retiring stale Unified Node pid $pid from :7332"
+      kill -TERM "$pid" >/dev/null 2>&1 || true
+      for _ in {1..25}; do
+        kill -0 "$pid" >/dev/null 2>&1 || break
+        sleep 0.2
+      done
+      if kill -0 "$pid" >/dev/null 2>&1; then
+        echo "  stale Unified Node ignored TERM; forcing pid $pid"
+        kill -KILL "$pid" >/dev/null 2>&1 || true
+      fi
+      ;;
+    *)
+      echo "INSTALL ERROR: localhost :7332 is owned by an unmanaged process" >&2
+      echo "  pid $pid · $cmd" >&2
+      exit 5
+      ;;
+  esac
+  for _ in {1..25}; do
+    if ! lsof -nP -t -iTCP@127.0.0.1:7332 -sTCP:LISTEN >/dev/null 2>&1; then return 0; fi
+    sleep 0.2
+  done
+  echo "INSTALL ERROR: stale Unified Node did not release localhost :7332" >&2
+  exit 5
+}
+retire_stale_macos_node_listener
 
 mkdir -p "$HOME/.local/share/future-crash-look/core" "$HOME/.local/bin"
 install -m 0755 "$ROOT/core/node.py" "$HOME/.local/share/future-crash-look/core/node.py"

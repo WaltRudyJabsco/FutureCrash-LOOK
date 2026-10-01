@@ -20,6 +20,6 @@ def test_filtered_header_reports_directory_and_filtered_counts(tmp_path):
 def test_albert_media_and_camera_contracts_present():
     server=(ROOT/'albert'/'server.py').read_text(); html=(ROOT/'albert'/'index.html').read_text(); lk=(ROOT/'look'/'lk').read_text()
     assert "state=prepared.get('prepared') or prepared.get('session') or prepared" in server
-    assert "if path=='/v1/media/item':" in server
+    assert "if path in {'/api/media/audio','/v1/media/item'}:" in server
     assert 'capture="environment"' in html and 'what am I looking at?' in html
     assert 'text.casefold().startswith("some ")' in lk

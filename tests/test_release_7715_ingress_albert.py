@@ -14,6 +14,6 @@ def test_albert_supports_browser_head_probe_for_ticketed_media():
     start=text.index('    def do_HEAD(self):')
     end=text.index('    def do_GET(self):',start)
     block=text[start:end]
-    assert "if path=='/v1/media/item':" in block
+    assert "if path in {'/api/media/audio','/v1/media/item'}:" in block
     assert '_media_ticket_valid(ticket,node,item_id)' in block
     assert '_proxy_media_item(self,node,item_id,head=True)' in block

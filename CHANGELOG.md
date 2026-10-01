@@ -1,3 +1,9 @@
+## 7.7.16 — EDGE OWNERSHIP
+
+- macOS upgrades now retire only a provably stale Future Crash Unified Node listener before restarting :7332.
+- Albert catalog playback now uses Signal's working `/api/media/audio` browser boundary with ticketed Range proxying.
+- Media core, LOOK/mpv, transport shortcuts, Classics/Arts, and Signal playback remain unchanged.
+
 ## 7.7.15 — BROWSER EDGE
 
 - Retry ingress readiness before installer rollback on macOS.

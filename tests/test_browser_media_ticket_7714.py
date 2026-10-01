@@ -24,7 +24,7 @@ def test_albert_catalog_media_uses_ticketed_item_url():
     py = (ROOT / 'albert/server.py').read_text()
     assert "item_id=str(first.get('id') or '')" in py
     assert "ticket=_media_ticket_issue(media_node,item_id)" in py
-    assert "'ticket':ticket" in py
+    assert "src='/api/media/audio?'+urlencode({'node':media_node,'id':item_id,'ticket':ticket})" in py
     assert "not _media_ticket_valid(ticket,node,item_id) and not self._require_endpoint('lo.use')" in py
 
 
