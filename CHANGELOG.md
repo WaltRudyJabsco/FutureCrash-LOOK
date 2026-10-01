@@ -1,3 +1,15 @@
+# Changelog
+
+## 8.0.0 — CONSOLIDATION
+
+- Albert now consumes the complete Fabric media queue, auto-advances, and exposes previous/next/clear with queue position.
+- A new Albert audio request replaces the prior Albert audio queue; endpoint queues remain local to their surface.
+- `lk media find` now supports LOOK-style backslash exclusion and Shift-A select-all-visible; Queue/Play/Save operate on the selection.
+- `lk media clear` is documented in built-in help.
+- Added canonical current-system and media documentation.
+- Distribution packaging excludes Python bytecode and pytest/build caches; source, tests, documentation, and release history remain.
+- Media transport and known-good Signal/LOOK playback paths are unchanged.
+
 ## 7.7.18 — Albert Native Audio
 
 - Albert Fabric audio stays on the native media-element playback path.

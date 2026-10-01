@@ -3415,3 +3415,8 @@ This release closes the busy-cycle escape hatch. Filesystem discovery has one ed
 `lk locator-test` exercises the POWER access decision and locator directly without involving an LLM. This separates agent reasoning problems from filesystem/tool problems.
 
 Interactive shell work now has a short default time budget, and busy indicators explicitly show Ctrl-C cancellation.
+
+
+## 8.0.0 — CONSOLIDATION
+
+8.0 marks the point where LOOK, LO, Fabric, Signal and Albert are documented as one coherent system rather than a sequence of plumbing releases. Albert gained real queue traversal without changing Fabric transport; Media Find gained selection-oriented playlist ergonomics and negative filtering; generated caches were removed from distribution packaging; canonical current-system/media documentation was added.

@@ -1674,6 +1674,7 @@ MEDIA
   lk media play TARGET --shuffle
                        construct a shuffled LOOK-owned queue
   lk media queue       inspect the canonical queue
+  lk media clear       stop playback + empty the canonical queue
   lk media scan ROOT   fast dependency-free local discovery index
   lk media save NAME   save current queue as a playlist
   lk media load NAME   restore + play a saved playlist
@@ -9929,7 +9930,7 @@ def _direct_searxng_search(query, limit=8):
     params=urllib.parse.urlencode({"q":query,"format":"json"})
     request=urllib.request.Request(base+"/search?"+params,headers={
         "Accept":"application/json",
-        "User-Agent":"Future-Crash-Fabric/7.7.19",
+        "User-Agent":"Future-Crash-Fabric/8.0.0",
     })
     with urllib.request.urlopen(request,timeout=12) as response:
         data=json.load(response)
@@ -16484,6 +16485,19 @@ def _media_queue_append(rows):
     return len(rows)
 
 
+def _media_filter_rows(rows,query):
+    """Apply LOOK include/exclude terms to media catalog rows."""
+    terms=str(query or "").casefold().split()
+    positive=[term for term in terms if not term.startswith("\\")]
+    negative=[term[1:] for term in terms if term.startswith("\\") and len(term)>1]
+    visible=[]
+    for row in rows:
+        hay=media_core._haystack(row)
+        if all(term in hay for term in positive) and not any(term in hay for term in negative):
+            visible.append(row)
+    return visible
+
+
 def _media_selector(rows,title="FABRIC MEDIA",initial_query=""):
     """LOOK filter semantics over Fabric media rows, with media-specific actions.
 
@@ -16516,8 +16530,10 @@ def _media_selector(rows,title="FABRIC MEDIA",initial_query=""):
     try:
         tty.setcbreak(fd)
         while True:
-            terms=query.casefold().split()
-            visible=[row for row in rows if all(term in media_core._haystack(row) for term in terms)]
+            # LOOK filter grammar: ordinary terms include; a leading backslash
+            # excludes.  This makes broad catalog searches useful for playlist work,
+            # e.g. `clash \live \remix`.
+            visible=_media_filter_rows(rows,query)
             idx=max(0,min(idx,max(0,len(visible)-1)))
             selected_rows=[row for row in rows if row_id(row) in selected_ids]
             terminal=shutil.get_terminal_size((110,32))
@@ -16546,7 +16562,7 @@ def _media_selector(rows,title="FABRIC MEDIA",initial_query=""):
                 print("  no matches")
 
             filter_text=f"{_c('FILTER','1;36')} {query}█" if query else f"{_c('FILTER','1;36')} █"
-            actions=_c("Tab select · Enter/P play · Q queue · A queue matches · I info · S save · C clear · Esc exit","2")
+            actions=_c("Tab select · A select all · Enter/P play · Q queue · S save · I info · C clear · Esc exit","2")
             footer=f"{filter_text}  {actions}"
             if notice:
                 footer+="  "+_c(notice,"33")
@@ -16590,8 +16606,11 @@ def _media_selector(rows,title="FABRIC MEDIA",initial_query=""):
                 notice=f"queued {count}"
                 continue
             if key=="A" and visible:
-                count=_media_queue_append(visible)
-                notice=f"queued {count} visible"
+                visible_ids={row_id(row) for row in visible}
+                if visible_ids and visible_ids.issubset(selected_ids):
+                    selected_ids.difference_update(visible_ids); notice=f"unselected {len(visible_ids)} visible"
+                else:
+                    selected_ids.update(visible_ids); notice=f"selected {len(visible_ids)} visible"
                 continue
             if key=="C":
                 selected_ids.clear(); notice="selection cleared"

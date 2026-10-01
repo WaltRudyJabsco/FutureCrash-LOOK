@@ -414,3 +414,10 @@ The WOPR profile uses the same offline `espeak-ng` + SoX chain on macOS and Linu
 ## LOOK Games — WOPR recreation channel
 
 `lk games` performs the theatrical `LOGON: JOSHUA` ritual, then denies that games are installed. Named simulations (`lk games ttt`, `checkers`, `chess`, `backgammon`, `gtnw`) enter the WOPR selector. Board games support 0p/1p/2p and return to the selector with `q`; `s` stops. WOPR speech is lightweight and offline: macOS uses `say`/Zarvox, Linux uses `espeak-ng` with SoX when available. Set `LOOK_GAMES_VOICE=0` to mute it.
+
+## Current documentation
+
+- `docs/CURRENT-SYSTEM.md` — canonical ownership, ports, queues and invariants.
+- `docs/MEDIA.md` — catalog/queue/playlist model and current media controls.
+- `docs/ARCHITECTURE.md` — deeper architecture notes.
+- `docs/RELEASE-HISTORY.md` — historical record.
