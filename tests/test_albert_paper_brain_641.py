@@ -4,9 +4,9 @@ ROOT=Path(__file__).resolve().parents[1]
 
 
 def test_release_is_paper_brain():
-    assert (ROOT/'VERSION').read_text().strip() == '7.7.16'
+    assert (ROOT/'VERSION').read_text().strip() == '7.7.17'
     node=(ROOT/'core/node.py').read_text()
-    assert 'VERSION = "7.7.16"' in node
+    assert 'VERSION = "7.7.17"' in node
     assert 'RELEASE_NAME = "COGNITIVE FABRIC"' in node
 
 

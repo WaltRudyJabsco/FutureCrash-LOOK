@@ -155,7 +155,7 @@ function renderBody(f){
   if(f.type==='progress') return `<div class="progress"><span class="dot"></span><span>${esc(f.text||'Working…')}</span></div>`;
   if(f.type==='answer') return `${(!f.turns?.length&&f.text)?`<div class="prose">${esc(f.text)}</div>`:''}${renderTrust(f.evidence)}${renderChoices(f)}${renderSignal(f.signal)}${renderSources(f.sources)}${renderThread(f)}`;
   if(f.type==='receipt') return `<div class="receipt"><strong>${esc(f.label||'Done')}</strong><br>${esc(f.text||'')}</div>`;
-  if(f.type==='audio') return `<div class="media"><div class="audio-card"><div class="now">${esc(f.title)}</div><div class="sub">${esc(f.subtitle||'')}</div><div class="audio-eq" id="eq-${f.id}" aria-label="live audio visualizer">${'<i></i>'.repeat(16)}</div></div><audio data-eq="eq-${f.id}" controls autoplay src="${esc(f.src)}"></audio></div>${f.note?`<div class="meta">${esc(f.note)}</div>`:''}`;
+  if(f.type==='audio'){const media=f.media||{};const attrs=media.id?` data-media-node="${esc(media.node||'')}" data-media-id="${esc(media.id)}" data-media-index="${Number(media.index||0)}"`:` src="${esc(f.src||'')}"`;return `<div class="media"><div class="audio-card"><div class="now">${esc(f.title)}</div><div class="sub">${esc(f.subtitle||'')}</div><div class="audio-eq" id="eq-${f.id}" aria-label="live audio visualizer">${'<i></i>'.repeat(16)}</div></div><audio data-eq="eq-${f.id}" controls autoplay${attrs}></audio></div>${f.note?`<div class="meta">${esc(f.note)}</div>`:''}`};
   if(f.type==='video') return `<div class="media-grid" id="media-grid-${f.id}"><div class="media"><div class="media-viewport" id="media-view-${f.id}"><button class="media-expand" onclick="toggleMediaExpand('${f.id}',event)">expand</button>${f.src?`<video controls autoplay playsinline data-fallback="${esc(f.embed||'')}" onerror="videoFallback(this)" src="${esc(f.src)}"></video>`:`${scaledPage(f.embed||CLASSIC_ARTS,f.id)}`}</div></div><div class="side"><div class="prose">${esc(f.text||'')}</div>${f.external?`<div class="actions"><button class="action primary" onclick="window.open('${esc(f.external)}','_blank','noopener')">open official feed</button></div>`:''}</div></div>`;
   if(f.type==='image') return `<div class="media"><img src="${esc(f.src)}" alt="${esc(f.title||'image')}" /></div>${f.text?`<div class="prose">${esc(f.text)}</div>`:''}`;
   if(f.type==='file') return `<div class="object"><div class="object-label">${esc(f.mime||'object')}</div>${esc(f.name||f.title)}${f.detail?`<div class="meta">${esc(f.detail)}</div>`:''}</div>`;
@@ -205,7 +205,19 @@ function teardownMedia(root=stream){
   });
   root.querySelectorAll('iframe').forEach(frame=>{try{frame.src='about:blank'}catch{}});
 }
-function render(){teardownMedia(stream);stream.innerHTML=state.folds.filter(f=>!f.dismissed).map(f=>foldShell(f,renderBody(f))).join('');savedStream.innerHTML=state.saved.map(savedShell).join('');savedLabel.hidden=!state.saved.length;updateQuiet();requestAnimationFrame(()=>{initAudioEQ();fitScaledPages()})}
+function render(){teardownMedia(stream);stream.innerHTML=state.folds.filter(f=>!f.dismissed).map(f=>foldShell(f,renderBody(f))).join('');savedStream.innerHTML=state.saved.map(savedShell).join('');savedLabel.hidden=!state.saved.length;updateQuiet();requestAnimationFrame(async()=>{await hydrateFabricMedia();initAudioEQ();fitScaledPages()})}
+async function hydrateFabricMedia(){
+  for(const media of document.querySelectorAll('audio[data-media-id],video[data-media-id]')){
+    if(media.dataset.mediaReady)return;media.dataset.mediaReady='loading';
+    const qs=new URLSearchParams({node:media.dataset.mediaNode||'',id:media.dataset.mediaId||''});
+    try{
+      const r=await fetch('/api/media/ticket?'+qs.toString(),{cache:'no-store'});let d={};try{d=await r.json()}catch{}
+      if(!r.ok||!d.url)throw new Error(d.error||`media ticket ${r.status}`);
+      media.src=d.url+`&t=${Date.now()}`;media.dataset.mediaReady='1';media.load();
+      try{await media.play()}catch(err){if(err?.name!=='NotAllowedError'&&err?.name!=='AbortError')throw err}
+    }catch(err){media.dataset.mediaReady='error';statusLine('media error · '+(err?.message||'source unavailable'))}
+  }
+}
 const AUDIO_EQ=new WeakMap();
 function eqFallback(audio,bars){
   let raf=0;
@@ -249,7 +261,7 @@ async function askFabric(query,context={},targetFold=null){
 }
 function consumeFabric(payload,context={}){const items=Array.isArray(payload)?payload:(payload.items||[payload]);items.filter(Boolean).forEach(x=>{const f=normalizeResult(x);if(context.query&&f.type==='answer'){f.prompt=context.query;f.turns=[{role:'user',text:context.query},{role:'assistant',text:f.text||''}];f.text='';if(!f.title||f.title==='Albert')f.title=topicTitle(context.query)}if(context.attachments?.length)f.attachments=context.attachments;addFold(f)})}
 function topicTitle(q){const t=String(q||'').trim().replace(/[?!.]+$/,'');if(!t)return 'Thought';return t.length>48?t.slice(0,47)+'…':t[0].toUpperCase()+t.slice(1)}
-function normalizeResult(x){if(x.fold)return x.fold;if(x.result)return normalizeResult(x.result);return {type:x.type||'answer',title:x.title||'Albert',meta:x.meta||x.tool||'Fabric',badge:x.badge||'ready',kind:x.kind||'thing',text:x.text||x.message||'',src:x.src,embed:x.embed,external:x.external,subtitle:x.subtitle,sources:x.sources,pipeline:x.pipeline,pills:x.pills,evidence:x.evidence,clarification:x.clarification,signal:x.signal,places:x.places,prompt:x.prompt}}
+function normalizeResult(x){if(x.fold)return x.fold;if(x.result)return normalizeResult(x.result);return {type:x.type||'answer',title:x.title||'Albert',meta:x.meta||x.tool||'Fabric',badge:x.badge||'ready',kind:x.kind||'thing',text:x.text||x.message||'',src:x.src,media:x.media,queue:x.queue,note:x.note,embed:x.embed,external:x.external,subtitle:x.subtitle,sources:x.sources,pipeline:x.pipeline,pills:x.pills,evidence:x.evidence,clarification:x.clarification,signal:x.signal,places:x.places,prompt:x.prompt}}
 function localCognition(raw){const q=raw.trim(),s=q.toLowerCase();
   if(/^(play |put on )?(some )?(classics|classical|classical music)$/.test(s)||s.includes('all classical')) return {type:'audio',title:'All Classical Radio',subtitle:'Portland · live',meta:'media.play · this endpoint',badge:'live',kind:'thing',src:ALL_CLASSICAL,note:'Built-in open stream alias · classics / classical',pipeline:{intent:'media.play',selector:'stream:all-classical',target:'origin endpoint',player:'browser'}};
   if(s.includes('classic arts')||s.includes('arts showcase')||s==='showcase'||s==='play arts') return {type:'video',title:'Classic Arts Showcase',meta:'media.play · this endpoint',badge:'live',kind:'thing',src:CLASSIC_ARTS_STREAM,embed:CLASSIC_ARTS,external:CLASSIC_ARTS,text:'A permanent arts channel: performance, visual arts, film and classical music.',pipeline:{intent:'media.play',selector:'stream:classic-arts-showcase',target:'origin endpoint',preferred:'direct HLS',fallback:'official web feed'}};

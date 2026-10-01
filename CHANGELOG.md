@@ -1,3 +1,9 @@
+## 7.7.17 — Albert Media Path
+
+- Albert Ask responses now carry durable `node + id` media identity instead of a pre-minted stream URL.
+- Albert browsers acquire the short-lived media ticket at playback time, matching Signal's working browser contract.
+- Preserves Range proxying and the existing Fabric/native media stack unchanged.
+
 ## 7.7.16 — EDGE OWNERSHIP
 
 - macOS upgrades now retire only a provably stale Future Crash Unified Node listener before restarting :7332.

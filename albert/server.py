@@ -166,7 +166,7 @@ def _place_query(text):
 
 def places_search(query,limit=6):
     params=urlencode({'q':query,'format':'jsonv2','limit':max(1,min(int(limit),8)),'addressdetails':1})
-    req=urllib.request.Request('https://nominatim.openstreetmap.org/search?'+params,headers={'User-Agent':'FutureCrash-Albert/7.7.16 (local personal assistant)','Accept':'application/json'})
+    req=urllib.request.Request('https://nominatim.openstreetmap.org/search?'+params,headers={'User-Agent':'FutureCrash-Albert/7.7.17 (local personal assistant)','Accept':'application/json'})
     with urllib.request.urlopen(req,timeout=5.0) as r: raw=json.loads(r.read().decode())
     places=[]
     for x in raw:
@@ -337,14 +337,13 @@ def action(text, session="", context=None):
                 item_id=str(first.get('id') or '')
                 media_node=str(first.get('node') or prepared.get('node') or '')
                 if item_id:
-                    ticket=_media_ticket_issue(media_node,item_id)
-                    # Match Signal's working browser contract: the browser consumes
-                    # an Albert API media URL, while this server proxies the exact
-                    # Fabric catalog item with Range support behind the ticket.
-                    src='/api/media/audio?'+urlencode({'node':media_node,'id':item_id,'ticket':ticket})
+                    # Return durable media identity, not a pre-minted stream URL.
+                    # Signal's working browser path acquires a short-lived ticket at
+                    # playback time; Albert must do the same so a rendered/re-rendered
+                    # fold never depends on an already-issued URL or cookie behavior.
                     result_type='video' if media_type.startswith('video/') else 'audio'
                     subtitle=' · '.join(x for x in (str(first.get('artist') or ''),str(first.get('album') or '')) if x)
-                    return {"type":result_type,"title":title,"subtitle":subtitle,"meta":f"media.play · {len(queue)} item(s)","badge":"live","kind":"things","src":src,"note":f"Fabric media · {len(queue)} resolved item(s)","pipeline":{"intent":"media.play","source":"Fabric media catalog","target":"origin endpoint","effect":"browser playback"}}
+                    return {"type":result_type,"title":title,"subtitle":subtitle,"meta":f"media.play · {len(queue)} item(s)","badge":"live","kind":"things","media":{"node":media_node,"id":item_id,"index":0},"queue":queue,"note":f"Fabric media · {len(queue)} resolved item(s)","pipeline":{"intent":"media.play","source":"Fabric media catalog","target":"origin endpoint","effect":"browser playback"}}
                 return {"type":"answer","title":title,"meta":f"media.prepare · {len(queue)} item(s)","badge":"prepared","kind":"things","text":"Fabric resolved the request, but this item has no stream identity for browser playback.","pipeline":{"intent":"media.play","source":"Fabric media catalog","target":"origin endpoint"}}
         except Exception:
             pass
@@ -447,6 +446,18 @@ class Handler(BaseHTTPRequestHandler):
             if row:return self.send_json(200,{"authorized":False,"pending":{k:v for k,v in row.items() if k!="id"}})
         row=ENDPOINT_AUTH.request(user_agent=str(self.headers.get("User-Agent") or ""),remote=str(self.client_address[0]))
         return self.send_json(200,{"authorized":False,"pending":{k:v for k,v in row.items() if k!="id"}},[self._set_cookie(PENDING_COOKIE,row["id"],300)])
+    def _media_ticket_request(self, parsed):
+        if not self._require_endpoint('lo.use'):
+            return
+        params=parse_qs(parsed.query)
+        node=str(params.get('node',[''])[0] or '')
+        item_id=str(params.get('id',[''])[0] or '')
+        if not item_id:
+            return self.send_json(400,{'ok':False,'error':'media item id required'})
+        token=_media_ticket_issue(node,item_id)
+        url='/api/media/audio?'+urlencode({'node':node,'id':item_id,'ticket':token})
+        return self.send_json(200,{'ok':True,'url':url,'expires_in':_MEDIA_TICKET_TTL})
+
     def do_HEAD(self):
         parsed=urlparse(self.path); path=parsed.path
         if path in {'/api/media/audio','/v1/media/item'}:
@@ -462,6 +473,7 @@ class Handler(BaseHTTPRequestHandler):
     def do_GET(self):
         path=urlparse(self.path).path
         if path=='/api/auth/status': return self._auth_status()
+        if path=='/api/media/ticket': return self._media_ticket_request(urlparse(self.path))
         if path in {'/health','/v1/health'}: return self.send_json(200,{"ok":True,"surface":"albert","version":"1.4.0","fabric":NODE})
         if path=='/api/saved':
             if not self._require_endpoint('lo.use'): return
