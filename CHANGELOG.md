@@ -1,3 +1,10 @@
+# 7.7.11 — FABRIC AUDIO RESTORE
+
+- Restore the proven Fabric media contract: catalog items stream through `/v1/media/item`; `/v1/media/audio` remains the queue/index stream.
+- Restore Signal's browser-facing `/api/media/audio` facade to translate catalog item IDs to `/v1/media/item`, matching the known-working implementation.
+- Restore LOOK remote catalog playback to the same `/v1/media/item?node=...&id=...` edge.
+- Preserve later Range-capable ingress streaming, Media Session transport controls, native preview fixes, and local mpv behavior.
+
 # 7.7.10 — REMOTE PLAYBACK
 
 - Freeze the field-proven local LOOK/mpv path and Media Session transport controls.

@@ -804,12 +804,15 @@ def _proxy_artifact(handler,node,digest,*,head=False):
         else: handler.json(502,{"error":str(exc)})
 
 def _proxy_media_audio(handler,node,index=0,*,item_id="",path_hint="",head=False):
-    params={"node":str(node or "")}
-    if item_id: params["id"]=str(item_id)
-    if path_hint: params["path"]=str(path_hint)
-    if not item_id and not path_hint: params["index"]=str(int(index))
-    query="?"+urlencode(params)
-    path="/v1/media/audio"
+    # Browser-facing /api/media/audio is a facade. Catalog objects are served
+    # by /v1/media/item; /v1/media/audio is reserved for active queue indexes.
+    if item_id:
+        params={"node":str(node or ""),"id":str(item_id)}
+        query="?"+urlencode(params)
+        path="/v1/media/item"
+    else:
+        query="?"+urlencode({"node":str(node or ""),"index":str(int(index))})
+        path="/v1/media/audio"
     req=urllib.request.Request(NODE_URL+path+query,method="HEAD" if head else "GET")
     if handler.headers.get("Range"):
         req.add_header("Range",handler.headers.get("Range"))

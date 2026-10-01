@@ -80,7 +80,7 @@ def test_advertised_legacy_id_streams_over_audio_endpoint_with_range(tmp_path,mo
     server=node.FabricHTTPServer(('127.0.0.1',0),node.API,plane='local')
     thread=threading.Thread(target=server.serve_forever,daemon=True); thread.start()
     try:
-        url=f"http://127.0.0.1:{server.server_port}/v1/media/audio?id={advertised['id']}"
+        url=f"http://127.0.0.1:{server.server_port}/v1/media/item?id={advertised['id']}"
         req=urllib.request.Request(url,headers={'Range':'bytes=4-9'})
         with urllib.request.urlopen(req,timeout=2) as response:
             assert response.status==206

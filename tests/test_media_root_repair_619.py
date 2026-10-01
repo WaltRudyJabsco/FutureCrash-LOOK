@@ -6,7 +6,7 @@ def test_stale_local_media_does_not_proxy_to_itself():
     block=text[text.index('def _media_entry_source'):text.index('def _media_write_m3u')]
     assert '_media_local_node_names' in text
     assert 'stale local catalog path:' in block
-    assert '/v1/media/audio?' in block
+    assert '/v1/media/item?' in block
 
 def test_media_root_relocation_is_explicit_and_deduplicating():
     text=(ROOT/'look'/'lk').read_text()
