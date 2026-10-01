@@ -1,3 +1,12 @@
+# 8.1.0 — VIEW
+
+- Albert audio cards use an explicit high-contrast dark-player palette for titles, metadata, queue position, EQ, and transport controls.
+- LOOK interactive browse keeps its existing two-line header pinned while the directory body scrolls.
+- Shift-F cycles session-local sort order: NAME → MODIFIED → SIZE → KIND → ADDED → NAME.
+- Live sorting preserves the highlighted filesystem object in browse/filter mode.
+- Added KIND and ADDED renderer modes; ADDED uses birth time where available and ctime as a fallback.
+- Media transport and Signal playback paths are unchanged.
+
 # Changelog
 
 ## 8.0.0 — CONSOLIDATION

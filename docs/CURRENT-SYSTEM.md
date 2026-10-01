@@ -53,3 +53,7 @@ The native Fabric item route, LOOK/mpv playback, Signal browser playback, transp
 ## Diagnostics
 
 Prefer boundary tests over guesses. For browser media, verify in order: queue identity → ticket `200` → media request → HTTP `200/206` → `Content-Type`/Range headers → bytes. `ERR_EMPTY_RESPONSE` means the server closed the request before writing HTTP headers and should be debugged server-side.
+
+## LOOK live view (8.1)
+
+Interactive LOOK pins the directory header above the scrolling file viewport. `Shift-F` cycles NAME, MODIFIED, SIZE, KIND, and ADDED sorting for the current LOOK session; the highlighted object is preserved across a reorder. A new LOOK process begins with its launch/default sort.

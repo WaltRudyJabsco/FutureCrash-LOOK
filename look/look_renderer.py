@@ -336,12 +336,15 @@ def build_view(target:Path, mode:str, hidden:bool, width:int, tree_depth:int, qu
     elif mode=='files': entries=files
     elif mode=='recent': entries=sorted(entries,key=lambda e:e.mtime,reverse=True)
     elif mode=='size': entries=sorted(entries,key=lambda e:(e.is_dir,-e.size,e.name.lower()))
+    elif mode=='kind': entries=sorted(entries,key=lambda e:(not e.is_dir, '' if e.is_dir else e.path.suffix.casefold(), e.name.casefold()))
+    elif mode=='added': entries=sorted(entries,key=lambda e:getattr(e.path.stat(),'st_birthtime',e.path.stat().st_ctime),reverse=True)
     else: entries=dirs+files
 
     try: display=str(target.resolve().relative_to(Path.home()))
     except ValueError: display=str(target.resolve())
     if not display.startswith('/'): display='~/'+display if display!='.' else '~'
-    mode_label='' if mode=='smart' else f' · {mode}'
+    sort_labels={'smart':'NAME','recent':'MODIFIED','size':'SIZE','kind':'KIND','added':'ADDED'}
+    mode_label=f" · SORT {sort_labels[mode]}" if mode in sort_labels else ('' if mode=='smart' else f' · {mode}')
     header=(f'{BOLD}{CYAN}LOOK{RESET}  {WHITE}{display}{RESET}'
             f'  {FAINT}{tree_dir_count} dirs · {tree_file_count} files{mode_label}{RESET}')
     rule=FAINT+('─'*min(width, max(24,len(strip_ansi(header)))))+RESET
@@ -365,7 +368,7 @@ def build_view(target:Path, mode:str, hidden:bool, width:int, tree_depth:int, qu
     rows=[header,rule]
     if mode=='tree':
         rows+=tree_rows(target,tree_depth,width,hidden,query,highlight_path,marked)
-    elif mode in {'detail','recent','size'}:
+    elif mode in {'detail','recent','size','kind','added'}:
         rows+=detail_rows(entries,width,highlight_path,marked)
     else:
         # Static display may use columns; interactive display never does.
@@ -439,6 +442,8 @@ def matching_paths(target:Path, mode:str, hidden:bool, query:str='', tree_depth:
     elif mode=='files': entries=files
     elif mode=='recent': entries=sorted(entries,key=lambda e:e.mtime,reverse=True)
     elif mode=='size': entries=sorted(entries,key=lambda e:(e.is_dir,-e.size,e.name.lower()))
+    elif mode=='kind': entries=sorted(entries,key=lambda e:(not e.is_dir, '' if e.is_dir else e.path.suffix.casefold(), e.name.casefold()))
+    elif mode=='added': entries=sorted(entries,key=lambda e:getattr(e.path.stat(),'st_birthtime',e.path.stat().st_ctime),reverse=True)
     else: entries=dirs+files
     return [e.path for e in entries]
 
@@ -1085,13 +1090,14 @@ def resolve_action_destination(dest:str,current_dir:Path|None)->Path:
     return raw.resolve()
 
 
-def pager(rows:list[str],height:int,width:int,rebuild=None,browse_rebuild=None,filter_context=None,candidates=None,on_browse=None,on_back=None,on_parent=None,on_go=None,on_activate=None,force_interactive=False,initial_select:Path|None=None,initial_query:str='',marked_set:set[Path]|None=None,current_dir:Path|None=None,clipboard_state:dict|None=None)->None:
+def pager(rows:list[str],height:int,width:int,rebuild=None,browse_rebuild=None,filter_context=None,candidates=None,on_browse=None,on_back=None,on_parent=None,on_go=None,on_activate=None,on_sort=None,header_rows=None,force_interactive=False,initial_select:Path|None=None,initial_query:str='',marked_set:set[Path]|None=None,current_dir:Path|None=None,clipboard_state:dict|None=None)->None:
     # Interactive state machine: browse -> filter -> select.
     usable=max(3,height-5)
     if (len(rows)<=height-1 and not force_interactive) or not (sys.stdin.isatty() and sys.stdout.isatty()):
         print('\n'.join(rows)); return
     top=0; query=initial_query or ''; filtering=bool(query); selecting=False; cursoring=False; preview_view=False; selected=0
-    current=rows
+    current=browse_rebuild(None,marked_set or set()) if browse_rebuild else rows
+    rows=current
     matches:list[Path]=[]
     notice=''
     pending=''
@@ -1272,7 +1278,9 @@ def pager(rows:list[str],height:int,width:int,rebuild=None,browse_rebuild=None,f
                 render_width=max(38,int(width*0.58)) if picked and width>=96 else width
                 current=rebuild(query, picked, render_width, marked)
             context_rows=[]
-            list_usable=usable
+            if header_rows:
+                context_rows=list(header_rows(width) or [])[:2]
+            list_usable=max(1,usable-len(context_rows))
             if filtering and filter_context:
                 context_rows=list(filter_context(query,width) or [])[:2]
                 list_usable=max(1,usable-len(context_rows))
@@ -1351,7 +1359,7 @@ def pager(rows:list[str],height:int,width:int,rebuild=None,browse_rebuild=None,f
             elif cursoring:
                 name=picked.name if picked else '(empty)'
                 status=f'  {CYAN}{BOLD}BROWSE{RESET} {WHITE}{name}{RESET}  {GRAY}{selected+1 if matches else 0}/{len(matches)}{RESET}'
-                action_parts=['↑/↓ choose','Enter/→ open','Space/PgDn next','b/PgUp back',
+                action_parts=['↑/↓ choose','⇧F sort','Enter/→ open','Space/PgDn next','b/PgUp back',
                               'g ends','G go','⇧↑/↓ page','⇧←/→ ends','←/< parent','Esc clear','q quit']
             elif query:
                 status=(f'  {CYAN}{BOLD}FILTER{RESET} {WHITE}{query}{RESET}'
@@ -1360,7 +1368,7 @@ def pager(rows:list[str],height:int,width:int,rebuild=None,browse_rebuild=None,f
             else:
                 back_hint='Esc back' if on_back else 'Esc exit'
                 status=f'  {FAINT}{last}/{len(current)}{RESET}'
-                action_parts=['Enter/→ filter','Space/PgDn next','b/PgUp back',
+                action_parts=['⇧F sort','Enter/→ filter','Space/PgDn next','b/PgUp back',
                               'g ends','G go','⇧↑/↓ page','⇧←/→ ends','←/< parent',back_hint,'q quit']
             if notice:
                 status=f'{status}  {YELLOW}{notice}{RESET}'
@@ -1374,6 +1382,14 @@ def pager(rows:list[str],height:int,width:int,rebuild=None,browse_rebuild=None,f
 
             if filtering:
                 if key in {'q','Q','\x03'}: break
+                if key=='F' and on_sort:
+                    picked=selected_path(); notice=on_sort()
+                    current=rebuild(query,picked,None,marked) if rebuild else current
+                    matches=candidates(query) if candidates else []
+                    if picked and matches:
+                        wanted=picked.resolve()
+                        selected=next((i for i,p in enumerate(matches) if p.resolve()==wanted),min(selected,len(matches)-1))
+                    top=0; continue
                 if key=='V' and matches:
                     preview_view=not preview_view
                     continue
@@ -1500,6 +1516,14 @@ def pager(rows:list[str],height:int,width:int,rebuild=None,browse_rebuild=None,f
 
             if cursoring:
                 if key in {'q','Q','\x03'}: break
+                if key=='F' and on_sort:
+                    picked=selected_path(); notice=on_sort()
+                    matches=candidates('') if candidates else []
+                    if picked and matches:
+                        wanted=picked.resolve()
+                        selected=next((i for i,p in enumerate(matches) if p.resolve()==wanted),min(selected,len(matches)-1))
+                    current=browse_rebuild(picked,marked) if browse_rebuild else current
+                    top=0; continue
                 if key=='\x1b':
                     cursoring=False; matches=[]; selected=0
                     current=browse_rebuild(None,marked) if browse_rebuild else rows
@@ -1607,6 +1631,10 @@ def pager(rows:list[str],height:int,width:int,rebuild=None,browse_rebuild=None,f
                 continue
 
             if key in {'q','Q','\x03'}: break
+            if key=='F' and on_sort:
+                notice=on_sort()
+                current=browse_rebuild(None,marked) if browse_rebuild else current
+                top=0; continue
             if key in {'\r','\n','/','\x1b[C'}:
                 filtering=True
                 refresh_filter()
@@ -1742,7 +1770,7 @@ def _catalog_view(paths:list[Path],root:Path,width:int,query:str='',highlight_pa
 def main():
     ap=argparse.ArgumentParser(add_help=False)
     ap.add_argument('path',nargs='?',default='.')
-    ap.add_argument('--mode',choices=['smart','detail','dirs','files','tree','recent','size'],default='smart')
+    ap.add_argument('--mode',choices=['smart','detail','dirs','files','tree','recent','size','kind','added'],default='smart')
     ap.add_argument('--depth',type=int,default=2)
     ap.add_argument('--no-hidden',action='store_true')
     ap.add_argument('--interactive',action='store_true')
@@ -1798,6 +1826,9 @@ def main():
         return 0
 
     browsed_once=False
+    sort_state={'mode':args.mode}
+    sort_cycle=['smart','recent','size','kind','added']
+    sort_names={'smart':'NAME','recent':'MODIFIED','size':'SIZE','kind':'KIND','added':'ADDED','detail':'DETAIL','dirs':'DIRS','files':'FILES','tree':'TREE'}
     initial_select=Path(os.path.expanduser(args.select)).resolve() if args.select else None
     history:list[Path]=[]
     working_set:set[Path]=set()
@@ -1806,7 +1837,7 @@ def main():
         if not target.is_dir():
             print(f'look: not a directory: {target}',file=sys.stderr); return 1
         sz=shutil.get_terminal_size((100,30))
-        rows=build_view(target,args.mode,hidden,sz.columns,args.depth)
+        rows=build_view(target,sort_state['mode'],hidden,sz.columns,args.depth)
         browsed:Path|None=None
         went_back=False
         went_parent=False
@@ -1823,11 +1854,22 @@ def main():
         def choose_go(path:Path)->None:
             nonlocal go_to
             go_to=path.resolve()
+        def cycle_sort()->str:
+            current=sort_state['mode']
+            try: idx=sort_cycle.index(current)
+            except ValueError: idx=-1
+            sort_state['mode']=sort_cycle[(idx+1)%len(sort_cycle)]
+            return f"sort {sort_names[sort_state['mode']]}"
+        def sticky_header(w=None):
+            header=build_view(target,sort_state['mode'],hidden,w or sz.columns,args.depth)[:2]
+            return header
         pager(rows,sz.lines,sz.columns,
-              rebuild=lambda q,h=None,w=None,m=None: build_view(target,args.mode,hidden,w or sz.columns,args.depth,q,h,m,interactive_rows=True),
-              browse_rebuild=lambda h=None,m=None: build_view(target,args.mode,hidden,sz.columns,args.depth,'',h,m,interactive_rows=False),
-              filter_context=lambda q,w=None: build_view(target,args.mode,hidden,w or sz.columns,args.depth,q,None,None,interactive_rows=False)[:2],
-              candidates=lambda q: matching_paths(target,args.mode,hidden,q,args.depth),
+              rebuild=lambda q,h=None,w=None,m=None: build_view(target,sort_state['mode'],hidden,w or sz.columns,args.depth,q,h,m,interactive_rows=True),
+              browse_rebuild=lambda h=None,m=None: build_view(target,sort_state['mode'],hidden,sz.columns,args.depth,'',h,m,interactive_rows=True),
+              filter_context=lambda q,w=None: build_view(target,sort_state['mode'],hidden,w or sz.columns,args.depth,q,None,None,interactive_rows=False)[:2],
+              candidates=lambda q: matching_paths(target,sort_state['mode'],hidden,q,args.depth),
+              on_sort=cycle_sort,
+              header_rows=sticky_header,
               on_browse=choose_dir,
               on_back=choose_back if history else None,
               on_parent=choose_parent if target.resolve()!=target.resolve().parent else None,
