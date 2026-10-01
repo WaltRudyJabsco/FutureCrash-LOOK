@@ -412,24 +412,23 @@ def chess_ai(board, who:str, depth:int=2):
 
 
 def render_chess(board, mode, who, status=""):
-    glyph={"K":"K","Q":"Q","R":"R","B":"B","N":"N","P":"P","k":"k","q":"q","r":"r","b":"b","n":"n","p":"p"}
-    lines=["        a      b      c      d      e      f      g      h"]
+    # Large terminal sprites: the engine still deals only in squares/pieces.
+    sprites={
+      "P":["  ██  "," ████ ","██████"], "R":["█ █ █ ","██████"," ████ "],
+      "N":[" ███  ","██ ██ ","██  ██"], "B":["  ██  "," ████ ","██ ██ "],
+      "Q":["█ █ █ "," ████ ","██████"], "K":[" ███  ","██████"," ████ "],
+    }
+    lines=["       a      b      c      d      e      f      g      h"]
     for y in range(7,-1,-1):
-        row=[]
+        rendered=[[],[],[]]
         for x in range(8):
-            p=board[sq(x,y)] or " "
-            bg=BG_LIGHT if (x+y)%2==0 else BG_DARK
-            if p.strip():
-                fg=BRIGHT if p.isupper() else CYAN
-                cell=bg+fg+"   "+glyph.get(p,p)+"   "+RESET
-            else:
-                mark="·" if (x+y)%2==0 else " "
-                cell=bg+DIM+"   "+mark+"   "+RESET
-            row.append(cell)
-        lines.append(f" {y+1}    "+"".join(row)+f"   {y+1}")
-        lines.append("      "+"".join((BG_LIGHT if (x+y)%2==0 else BG_DARK)+"       "+RESET for x in range(8)))
-    lines += ["        a      b      c      d      e      f      g      h", "", footer(mode)]
-    sys.stdout.write("\n".join(chrome("Chess",mode,"WHITE" if who=="W" else "BLACK",status)+lines)); sys.stdout.flush()
+            p=board[sq(x,y)] or ""; bg=BG_LIGHT if (x+y)%2==0 else BG_DARK
+            fg=BRIGHT if p.isupper() else RED
+            sprite=sprites.get(p.upper(),["      "]*3) if p else ["      "]*3
+            for n,line in enumerate(sprite): rendered[n].append(bg+(fg if p else DIM)+line+RESET)
+        for n,row in enumerate(rendered): lines.append((f" {y+1}   " if n==1 else "     ")+"".join(row)+(f"  {y+1}" if n==1 else ""))
+    lines += ["       a      b      c      d      e      f      g      h", "", footer(mode)]
+    sys.stdout.write("\n".join(chrome("Chess",mode,"BLUE" if who=="W" else "RED",status)+lines)); sys.stdout.flush()
 
 
 def play_chess(mode="1p"):
@@ -562,25 +561,19 @@ def checkers_ai(board, who, depth=3):
 
 
 def render_checkers(board, mode, who, status=""):
-    lines=["        a      b      c      d      e      f      g      h"]
+    lines=["       a      b      c      d      e      f      g      h"]
     for y in range(7,-1,-1):
-        row=[]
+        rendered=[[],[],[]]
         for x in range(8):
-            p=board[sq(x,y)]
-            bg=BG_LIGHT if (x+y)%2==0 else BG_DARK
+            p=board[sq(x,y)]; bg=BG_LIGHT if (x+y)%2==0 else BG_DARK
+            fg=BRIGHT if p and p.lower()=="w" else RED
             if p:
-                if p.lower()=="w": piece="◎" if p.isupper() else "○"
-                else: piece="◉" if p.isupper() else "●"
-                fg=BRIGHT if p.lower()=="w" else RED
-                cell=bg+fg+"   "+piece+"   "+RESET
-            else:
-                mark="·" if (x+y)%2==0 else " "
-                cell=bg+DIM+"   "+mark+"   "+RESET
-            row.append(cell)
-        lines.append(f" {y+1}    "+"".join(row)+f"   {y+1}")
-        lines.append("      "+"".join((BG_LIGHT if (x+y)%2==0 else BG_DARK)+"       "+RESET for x in range(8)))
-    lines += ["        a      b      c      d      e      f      g      h", "", footer(mode)]
-    sys.stdout.write("\n".join(chrome("Checkers",mode,"WHITE" if who=="W" else "BLACK",status)+lines)); sys.stdout.flush()
+                sprite=[" ▄●▄  ","██████"," ▀●▀  "] if p.islower() else ["▄████▄","██▀▀██","▀████▀"]
+            else: sprite=["      "]*3
+            for n,line in enumerate(sprite): rendered[n].append(bg+(fg if p else DIM)+line+RESET)
+        for n,row in enumerate(rendered): lines.append((f" {y+1}   " if n==1 else "     ")+"".join(row)+(f"  {y+1}" if n==1 else ""))
+    lines += ["       a      b      c      d      e      f      g      h", "", footer(mode)]
+    sys.stdout.write("\n".join(chrome("Checkers",mode,"BLUE" if who=="W" else "RED",status)+lines)); sys.stdout.flush()
 
 
 def play_checkers(mode="1p"):

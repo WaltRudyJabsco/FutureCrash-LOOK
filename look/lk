@@ -9930,7 +9930,7 @@ def _direct_searxng_search(query, limit=8):
     params=urllib.parse.urlencode({"q":query,"format":"json"})
     request=urllib.request.Request(base+"/search?"+params,headers={
         "Accept":"application/json",
-        "User-Agent":"Future-Crash-Fabric/8.2.1",
+        "User-Agent":"Future-Crash-Fabric/8.3.0",
     })
     with urllib.request.urlopen(request,timeout=12) as response:
         data=json.load(response)
@@ -16500,7 +16500,14 @@ def _media_detail_lines(row, width=110):
         ("Identity", digest),
         ("Available", "yes" if (row.get("node") and row.get("id")) or Path(path).exists() else "unknown"),
     ]
-    return [f"{name:<10} {value}"[:max(20,width-2)] for name,value in bits]
+    lines=[f"{name:<10} {value}"[:max(20,width-2)] for name,value in bits]
+    sources=row.get("sources") or []
+    if len(sources)>1:
+        lines.append(f"Sources    {len(sources)} physical copies")
+        for src in sources[:5]:
+            lines.append((f"  {src.get('node') or 'local'} · {src.get('path') or '—'}")[:max(20,width-2)])
+    if row.get("hidden"): lines.append("Visibility HIDDEN")
+    return lines
 
 
 def _media_queue_append(rows):
@@ -16528,6 +16535,61 @@ def _media_filter_rows(rows,query):
             visible.append(row)
     return visible
 
+
+def _media_visibility_path():
+    return STATE_DIR/"media_visibility.json"
+
+
+def _media_visibility():
+    return _media_read_json(_media_visibility_path(), {"hidden_paths":[],"hidden_trees":[]})
+
+
+def _media_save_visibility(data):
+    _atomic_json(_media_visibility_path(), data)
+
+
+def _media_is_hidden(row, rules=None):
+    rules=rules or _media_visibility()
+    path=str(row.get("path") or "")
+    if path in set(rules.get("hidden_paths") or []): return True
+    for root in rules.get("hidden_trees") or []:
+        root=str(root).rstrip(os.sep)
+        if path==root or path.startswith(root+os.sep): return True
+    return False
+
+
+def _media_logical_key(row):
+    if row.get("digest"): return "sha:"+str(row["digest"])
+    # Metadata identity deliberately ignores physical path/node. It is only a view
+    # collapse; the catalog keeps every source.
+    parts=[str(row.get(k) or "").casefold().strip() for k in ("artist","album","title","track","bytes")]
+    return "meta:"+"|".join(parts)
+
+
+def _media_collapse(rows, show_all=False, show_hidden=False):
+    rules=_media_visibility(); groups={}
+    for row in rows:
+        r=dict(row); r["hidden"]=_media_is_hidden(r,rules)
+        if r["hidden"] and not show_hidden: continue
+        if show_all:
+            r["source_count"]=1; r["sources"]=[r]; groups[f"src:{r.get('node')}:{r.get('id')}:{r.get('path')}"]=r; continue
+        key=_media_logical_key(r); bucket=groups.setdefault(key,[]); bucket.append(r)
+    if show_all: return list(groups.values())
+    out=[]
+    for bucket in groups.values():
+        # Prefer a visible source and a path that exists locally; preserve all provenance.
+        bucket.sort(key=lambda r:(bool(r.get("hidden")), not Path(str(r.get("path") or "")).exists(), str(r.get("path") or "").casefold()))
+        row=dict(bucket[0]); row["sources"]=bucket; row["source_count"]=len(bucket); out.append(row)
+    return out
+
+
+def _media_hide(rows, tree=False):
+    rules=_media_visibility(); key="hidden_trees" if tree else "hidden_paths"; values=set(rules.get(key) or [])
+    for row in rows:
+        value=str(row.get("root") if tree else row.get("path") or "")
+        if value: values.add(value)
+    rules[key]=sorted(values,key=str.casefold); _media_save_visibility(rules)
+    return len(rows)
 
 def _media_selector(rows,title="FABRIC MEDIA",initial_query=""):
     """LOOK filter semantics over Fabric media rows, with media-specific actions.
@@ -16558,6 +16620,8 @@ def _media_selector(rows,title="FABRIC MEDIA",initial_query=""):
     notice=""
     selected_ids=set()
     info_mode=False
+    show_all=False
+    show_hidden=False
     action=("none",None)
     try:
         tty.setcbreak(fd)
@@ -16565,7 +16629,8 @@ def _media_selector(rows,title="FABRIC MEDIA",initial_query=""):
             # LOOK filter grammar: ordinary terms include; a leading backslash
             # excludes.  This makes broad catalog searches useful for playlist work,
             # e.g. `clash \live \remix`.
-            visible=_media_filter_rows(rows,query)
+            base_rows=_media_filter_rows(rows,query)
+            visible=_media_collapse(base_rows,show_all=show_all,show_hidden=show_hidden)
             idx=max(0,min(idx,max(0,len(visible)-1)))
             selected_rows=[row for row in rows if row_id(row) in selected_ids]
             terminal=shutil.get_terminal_size((110,32))
@@ -16577,7 +16642,8 @@ def _media_selector(rows,title="FABRIC MEDIA",initial_query=""):
             page=visible[top:top+usable]
 
             sys.stdout.write("\033[2J\033[H")
-            suffix=f"{len(visible):,} of {len(rows):,} · {len(selected_rows)} selected"
+            mode=("ALL SOURCES" if show_all else "LOGICAL")+(" + HIDDEN" if show_hidden else "")
+            suffix=f"{len(visible):,} shown · {len(rows):,} locations · {len(selected_rows)} selected · {mode}"
             _title(title,suffix)
             for n,row in enumerate(page,start=top):
                 rid=row_id(row)
@@ -16585,7 +16651,8 @@ def _media_selector(rows,title="FABRIC MEDIA",initial_query=""):
                 mark=_c("✓","32") if rid in selected_ids else " "
                 node=str(row.get("node") or "local")
                 identity="◆" if row.get("digest") else "·"
-                right=f"{identity} {node}"
+                count=int(row.get("source_count") or 1)
+                right=f"{identity} {node}"+(f" · {count} SOURCES" if count>1 else "")
                 label=_media_row_label(row)
                 max_label=max(12,width-len(right)-7)
                 if len(label)>max_label:
@@ -16600,7 +16667,7 @@ def _media_selector(rows,title="FABRIC MEDIA",initial_query=""):
                     print(detail)
 
             filter_text=f"{_c('FILTER','1;36')} {query}█" if query else f"{_c('FILTER','1;36')} █"
-            actions=_c("Tab select · A select all · Enter/P play · Q queue · S save · I info · C clear · Esc exit","2")
+            actions=_c("Tab select · A select all · Enter/P play · Q queue · I info · V sources · H hidden · X hide · D hide tree · Esc exit","2")
             footer=f"{filter_text}  {actions}"
             if notice:
                 footer+="  "+_c(notice,"33")
@@ -16658,6 +16725,14 @@ def _media_selector(rows,title="FABRIC MEDIA",initial_query=""):
             if key=="I" and visible:
                 info_mode=not info_mode
                 continue
+            if key=="V":
+                show_all=not show_all; idx=0; notice="all physical sources" if show_all else "logical media"; continue
+            if key=="H":
+                show_hidden=not show_hidden; idx=0; notice="hidden shown" if show_hidden else "hidden suppressed"; continue
+            if key=="X" and chosen:
+                notice=f"hidden {_media_hide(chosen)} item(s)"; selected_ids.clear(); continue
+            if key=="D" and chosen:
+                notice=f"hidden {_media_hide(chosen,tree=True)} root/tree(s)"; selected_ids.clear(); continue
 
             # LOOK filter style: ordinary printable characters immediately refine
             # the view. Uppercase letters above are reserved for contextual actions.

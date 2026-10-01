@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Future Crash + LOOK Unified Node 8.2.1.
+"""Future Crash + LOOK Unified Node 8.3.0.
 
 A small distributed supervisor for trusted personal machines. Immediate events stay
 asynchronous; a one-second fabric pulse reconciles presence, leases and stale work.
@@ -74,7 +74,7 @@ try:
 except ImportError:
     from attention import normalize_event as normalize_attention_event, plan_voice_targets
 
-VERSION = "8.2.1"
+VERSION = "8.3.0"
 RELEASE_NAME = "COGNITIVE FABRIC"
 DEFAULT_HOST = "127.0.0.1"
 DEFAULT_PORT = 7332
@@ -2295,7 +2295,7 @@ def _local_web_search(query, limit=8):
     base=os.environ.get("FCL_SEARXNG_URL","http://127.0.0.1:8888").rstrip("/")
     request=urllib.request.Request(base+"/search?"+params,headers={
         "Accept":"application/json",
-        "User-Agent":"Future-Crash-Fabric/8.2.1",
+        "User-Agent":"Future-Crash-Fabric/8.3.0",
     })
     try:
         with urllib.request.urlopen(request,timeout=8) as response:
@@ -3041,7 +3041,7 @@ def _openjev_shadow(state, question, candidates, *, profile="workspace", consequ
 
 
 class API(BaseHTTPRequestHandler):
-    server_version = "FCLNode/8.2.1"
+    server_version = "FCLNode/8.3.0"
 
     def setup(self):
         self._metric_request_id = None
@@ -4345,27 +4345,16 @@ def _dash_visual_rows(text, width):
 
 
 def _dash_render_mini(data, width=44, ansi=False):
-    snap = data.get("nodes") or {}
-    local = snap.get("self") or {}
-    events = (data.get("events") or {}).get("events") or []
-    width = max(30, min(int(width or 44), 64))
-    rule = "─" * width
-    name = str(local.get("name") or "local")
-    model = _dash_model(local)
-    lines = [f"FABRIC · {name[:max(8,width-12)]}", rule,
-             f"{_dash_state(local)[:18]} · {model[:max(8,width-23)]}", _dash_media_line()[:width], "", "RECENT"]
+    snap=data.get("nodes") or {}; local=snap.get("self") or {}; events=(data.get("events") or {}).get("events") or []
+    width=max(34,min(int(width or 44),64)); rule="─"*width; name=str(local.get("name") or "local")
+    rows=_dash_summary_rows(data); health=data.get("health") or {}
+    lines=[f"FUTURE CRASH · {time.strftime('%I:%M %p')}", time.strftime("%a %b %d").upper(), rule,
+           f"{name[:18]} ● · {len(rows)} NODE{'S' if len(rows)!=1 else ''} · {'OK' if health.get('ok') else 'DEGRADED'}",
+           _dash_media_line()[:width], _dash_signal(data,min(width,36)), "", "RECENT"]
     if events:
-        for e in _dash_recent_events(events, 5):
-            # Mini favors semantic signal over verbose detail.
-            _, fg = _dash_event_color(e)
-            phase = str(e.get("phase") or e.get("type") or "event")[:10]
-            scope = "L" if _dash_event_scope(e, name) == "LOCAL" else "R"
-            detail = str(e.get("detail") or "")[:max(6, width-23)]
-            row = f"{'●' if fg else '·'} {_dash_event_stamp(e.get('ts'))[-8:]} {scope} {phase:<10} {detail}"
-            lines.append(f"\033[{fg}m{row}\033[0m" if ansi and fg else row)
-    else:
-        lines.append("· no recent events")
-    lines += [rule, _dash_controls(width, mini=True)]
+        for e in _dash_recent_events(events,2): lines.append(_dash_recent_line(e,name,width,ansi=ansi))
+    else: lines.append("· no recent Fabric events")
+    lines += [rule,_dash_controls(width,mini=True)]
     return "\n".join(lines)
 
 
@@ -4428,13 +4417,21 @@ def _dash_media_status():
     return {"items":len(entries),"roots":len(roots),"watch":watch}
 
 
-def _dash_signal(data, width=24):
-    """Tiny deterministic heartbeat: alive, useful, and essentially free."""
+def _dash_signal(data, width=30):
+    """Small event-reactive ASCII vocabulary; no model call and no extra polling."""
     events=(data.get("events") or {}).get("events") or []
-    phase=int(time.time())%max(4,width-4)
-    cells=["·"]*max(8,width-2); cells[phase]="●"
-    if events and now()-float(events[-1].get("ts") or 0)<3: cells[max(0,phase-1)]="•"
-    return "SIGNAL  ["+"".join(cells)+"]"
+    width=max(18,int(width)); t=int(time.time()); recent=events[-1] if events else {}
+    detail=(str(recent.get("detail") or recent.get("phase") or "").upper())
+    if recent and now()-float(recent.get("ts") or 0)<8:
+        if "MEDIA" in detail or "PLAY" in detail: art="▂▄▆█▆▄▂  MEDIA"
+        elif "SCAN" in detail or "INDEX" in detail: art="· : + * + : ·  SCAN"
+        elif "JOIN" in detail or "NODE" in detail: art="●────→●  FABRIC"
+        elif "ERROR" in detail or "FAIL" in detail: art="! ! !  CHECK SYSTEM"
+        else: art="·──●──·  ACTIVITY"
+    else:
+        phrases=("·    ●    ·  AWAKE","·  +  ·  IDLE","●──────●  FABRIC")
+        art=phrases[(t//7)%len(phrases)]
+    return "SIGNAL  "+art[:max(8,width-8)]
 
 
 def _dash_media_line():
