@@ -1,3 +1,9 @@
+## 7.7.18 — Albert Native Audio
+
+- Albert Fabric audio stays on the native media-element playback path.
+- Removed Web Audio `createMediaElementSource()` from the decorative EQ path; the lightweight activity visualizer remains.
+- Signal, LOOK/mpv, Fabric media transport, MM/MN/MP, Classics, and Arts are unchanged.
+
 ## 7.7.17 — Albert Media Path
 
 - Albert Ask responses now carry durable `node + id` media identity instead of a pre-minted stream URL.

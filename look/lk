@@ -9929,7 +9929,7 @@ def _direct_searxng_search(query, limit=8):
     params=urllib.parse.urlencode({"q":query,"format":"json"})
     request=urllib.request.Request(base+"/search?"+params,headers={
         "Accept":"application/json",
-        "User-Agent":"Future-Crash-Fabric/7.7.17",
+        "User-Agent":"Future-Crash-Fabric/7.7.18",
     })
     with urllib.request.urlopen(request,timeout=12) as response:
         data=json.load(response)

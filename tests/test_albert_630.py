@@ -36,7 +36,8 @@ def test_audio_visualizers_are_audio_only():
     lk=(ROOT/'look/lk').read_text()
     assert 'class="audio-eq"' in html
     assert 'data-eq=' in html
-    assert 'createAnalyser()' in html
+    assert 'eqFallback(audio,[...box.children])' in html
+    assert 'createMediaElementSource' not in html
     video_line=next(line for line in html.splitlines() if "f.type==='video'" in line)
     assert 'audio-eq' not in video_line
     assert 'def _media_player_visualizer' in lk

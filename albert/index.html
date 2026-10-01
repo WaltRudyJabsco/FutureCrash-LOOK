@@ -226,11 +226,12 @@ function eqFallback(audio,bars){
   draw(); AUDIO_EQ.set(audio,{stop:()=>cancelAnimationFrame(raf),mode:'activity'});
 }
 function initAudioEQ(){
+  // Never insert Web Audio into the playback graph. Safari/WebKit can suspend a
+  // MediaElementSource created after autoplay starts, which made same-origin
+  // Fabric tracks fail while cross-origin Classics kept working. The EQ is
+  // presentation only; playback must remain a plain native <audio> element.
   document.querySelectorAll('audio[data-eq]').forEach(audio=>{
-    if(audio.dataset.eqReady)return;audio.dataset.eqReady='1';const box=document.getElementById(audio.dataset.eq);if(!box)return;const bars=[...box.children];
-    let same=false;try{const u=new URL(audio.currentSrc||audio.src,location.href);same=u.protocol==='blob:'||u.origin===location.origin}catch{}
-    if(!same||!(window.AudioContext||window.webkitAudioContext)){eqFallback(audio,bars);return}
-    try{const AC=window.AudioContext||window.webkitAudioContext,ctx=new AC(),source=ctx.createMediaElementSource(audio),an=ctx.createAnalyser();an.fftSize=128;an.smoothingTimeConstant=.72;source.connect(an);an.connect(ctx.destination);const bins=new Uint8Array(an.frequencyBinCount);let raf=0;const draw=()=>{an.getByteFrequencyData(bins);const step=Math.max(1,Math.floor(bins.length/bars.length));bars.forEach((bar,i)=>{let sum=0;for(let j=0;j<step;j++)sum+=bins[Math.min(bins.length-1,i*step+j)];const v=sum/(step*255);bar.style.height=(audio.paused?8:8+v*88)+'%'});raf=requestAnimationFrame(draw)};audio.addEventListener('play',()=>ctx.resume(),{passive:true});draw();AUDIO_EQ.set(audio,{stop:()=>{cancelAnimationFrame(raf);ctx.close()},mode:'spectrum'})}catch{eqFallback(audio,bars)}
+    if(audio.dataset.eqReady)return;audio.dataset.eqReady='1';const box=document.getElementById(audio.dataset.eq);if(!box)return;eqFallback(audio,[...box.children])
   })
 }
 function addFold(f,{front=false}={}){f={id:uid(),open:true,kind:'thing',...f};front?state.folds.unshift(f):state.folds.push(f);render();setTimeout(()=>document.getElementById(f.id)?.scrollIntoView({behavior:'smooth',block:'center'}),30);return f.id}
