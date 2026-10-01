@@ -166,7 +166,7 @@ def _place_query(text):
 
 def places_search(query,limit=6):
     params=urlencode({'q':query,'format':'jsonv2','limit':max(1,min(int(limit),8)),'addressdetails':1})
-    req=urllib.request.Request('https://nominatim.openstreetmap.org/search?'+params,headers={'User-Agent':'FutureCrash-Albert/7.7.14 (local personal assistant)','Accept':'application/json'})
+    req=urllib.request.Request('https://nominatim.openstreetmap.org/search?'+params,headers={'User-Agent':'FutureCrash-Albert/7.7.15 (local personal assistant)','Accept':'application/json'})
     with urllib.request.urlopen(req,timeout=5.0) as r: raw=json.loads(r.read().decode())
     places=[]
     for x in raw:
@@ -444,6 +444,18 @@ class Handler(BaseHTTPRequestHandler):
             if row:return self.send_json(200,{"authorized":False,"pending":{k:v for k,v in row.items() if k!="id"}})
         row=ENDPOINT_AUTH.request(user_agent=str(self.headers.get("User-Agent") or ""),remote=str(self.client_address[0]))
         return self.send_json(200,{"authorized":False,"pending":{k:v for k,v in row.items() if k!="id"}},[self._set_cookie(PENDING_COOKIE,row["id"],300)])
+    def do_HEAD(self):
+        parsed=urlparse(self.path); path=parsed.path
+        if path=='/v1/media/item':
+            params=parse_qs(parsed.query)
+            node=str(params.get('node',[''])[0] or '')
+            item_id=str(params.get('id',[''])[0] or '')
+            ticket=str(params.get('ticket',[''])[0] or '')
+            if not _media_ticket_valid(ticket,node,item_id) and not self._require_endpoint('lo.use'): return
+            if not item_id:
+                self.send_response(400); self.send_header('Content-Length','0'); self.end_headers(); return
+            return _proxy_media_item(self,node,item_id,head=True)
+        self.send_response(404); self.send_header('Content-Length','0'); self.end_headers()
     def do_GET(self):
         path=urlparse(self.path).path
         if path=='/api/auth/status': return self._auth_status()

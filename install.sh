@@ -1,13 +1,13 @@
 #!/usr/bin/env bash
 set -euo pipefail
 ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
-echo "Future Crash + LOOK 7.7.14 · MEDIA SESSION"
+echo "Future Crash + LOOK 7.7.15 · MEDIA SESSION"
 echo "────────────────────────────────────────"
 
 # Refuse a mixed bundle before mutating the machine. A unified release must move
 # LOOK and the node together.
 EXPECTED_RELEASE="$(tr -d '[:space:]' < "$ROOT/VERSION")"
-[[ "$EXPECTED_RELEASE" == "7.7.14" ]] || { echo "BUNDLE ERROR: expected release 7.7.14, found $EXPECTED_RELEASE"; exit 4; }
+[[ "$EXPECTED_RELEASE" == "7.7.15" ]] || { echo "BUNDLE ERROR: expected release 7.7.15, found $EXPECTED_RELEASE"; exit 4; }
 echo "BUNDLE SOURCE  $ROOT"
 echo "BUNDLE RELEASE $EXPECTED_RELEASE · MEDIA SESSION"
 for vf in "$ROOT/look/VERSION" "$ROOT/albert/VERSION" "$ROOT/future-crash/VERSION"; do
@@ -50,7 +50,7 @@ FCL_UNIFIED_INSTALL_CHILD=1 "$ROOT/install-look.sh" "$@"
 ((UNINSTALL)) && exit 0
 if ((DRY_RUN)); then
   echo
-  echo "[dry-run] would install/restart Unified Node 7.7.14 · MEDIA SESSION with signed Fabric rendezvous, Tailcat direct transport, ONE BRAIN cognition, LIVING MIND memory, browser endpoints, SearXNG, Media, Artifacts, and Signal Window 1.11.0"
+  echo "[dry-run] would install/restart Unified Node 7.7.15 · MEDIA SESSION with signed Fabric rendezvous, Tailcat direct transport, ONE BRAIN cognition, LIVING MIND memory, browser endpoints, SearXNG, Media, Artifacts, and Signal Window 1.11.0"
   echo "[dry-run] OpenJev mode: $OPENJEV_MODE (auto provisions on capable nodes; absence/failure is non-fatal)"
   echo "[dry-run] would initialize Tailcat :7443, install optional signed rendezvous discovery, keep Tailscale :7332 → fcl-ingress :7333 as fallback, and verify Fabric CLI wiring"
   exit 0
@@ -396,13 +396,22 @@ if (( ! NODE_READY )); then
   lsof -nP -iTCP:7332 -sTCP:LISTEN >&2 2>/dev/null || true
   exit 5
 fi
-if ! python3 - <<'PY_CHECK' >/dev/null 2>&1
+INGRESS_READY=0
+for _ in {1..40}; do
+  if python3 - <<'PY_CHECK' >/dev/null 2>&1
 import json, urllib.request
 with urllib.request.urlopen("http://127.0.0.1:7333/_fcl/metrics", timeout=1.0) as response:
     data = json.loads(response.read() or b"{}")
+    assert response.status == 200
     assert data.get("ok") is True
 PY_CHECK
-then
+  then
+    INGRESS_READY=1
+    break
+  fi
+  sleep 0.2
+done
+if (( ! INGRESS_READY )); then
   echo "INSTALL ERROR: Fabric ingress guard did not become ready on localhost :7333" >&2
   if [[ "$(uname -s)" == "Darwin" ]]; then
     echo "  launchd state:" >&2

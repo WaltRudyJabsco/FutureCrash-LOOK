@@ -1,3 +1,9 @@
+## 7.7.15 — BROWSER EDGE
+
+- Retry ingress readiness before installer rollback on macOS.
+- Add ticket-aware HEAD support to Albert's browser media proxy.
+- Leave working LOOK/Fabric/Signal media paths unchanged.
+
 # 7.7.8 — MEDIA IDENTITY
 
 Surgical media identity and transport dispatch repair.
