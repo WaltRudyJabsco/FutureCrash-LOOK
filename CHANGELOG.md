@@ -1,3 +1,9 @@
+## 7.7.13 — CATALOG TRANSPORT
+
+- Fix remote catalog playback choosing `/v1/media/artifact` merely because a media row had a checksum.
+- Prefer the catalog `node + id` locator and reserve artifact transport for artifact-only queue entries.
+- Preserve the existing Classics/Arts and player execution paths unchanged.
+
 # 7.7.12 — FABRIC ITEM ROUTE
 
 - Remote catalog-item proxying now remains `/v1/media/item` across Fabric hops instead of being rewritten to the active-queue `/v1/media/audio` endpoint.
