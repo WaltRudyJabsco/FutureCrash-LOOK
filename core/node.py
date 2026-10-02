@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Future Crash + LOOK Unified Node 8.3.8.
+"""Future Crash + LOOK Unified Node 8.3.9.
 
 A small distributed supervisor for trusted personal machines. Immediate events stay
 asynchronous; a one-second fabric pulse reconciles presence, leases and stale work.
@@ -75,7 +75,7 @@ try:
 except ImportError:
     from attention import normalize_event as normalize_attention_event, plan_voice_targets
 
-VERSION = "8.3.8"
+VERSION = "8.3.9"
 RELEASE_NAME = "GTD"
 DEFAULT_HOST = "127.0.0.1"
 DEFAULT_PORT = 7332
@@ -992,6 +992,9 @@ class ModelRegistry:
 MODELS = ModelRegistry()
 
 
+DEFAULT_TAILCAT_PORT = 7443
+
+
 def peer_rows():
     """Return transport candidates for trusted Fabric peers.
 
@@ -1023,6 +1026,18 @@ def peer_rows():
                 key=str(name).casefold()
                 row=merged.get(key,{"name":name,"tailcat_endpoints":[],"trusted":False})
                 row.update({"dns":dns,"ips":ips,"online":bool(peer.get("Online")),"tailscale":True})
+                # A trusted peer's Tailscale address is a discovery fact, not a new
+                # identity. Bind it temporarily to the certificate/token learned at
+                # pairing so Tailcat can recover from stale DHCP/.local endpoints.
+                if row.get("trusted") and row.get("node_id") and peer.get("Online"):
+                    overlay=[]
+                    if dns: overlay.append(f"https://{dns}:{DEFAULT_TAILCAT_PORT}")
+                    overlay.extend(f"https://{ip}:{DEFAULT_TAILCAT_PORT}" for ip in ips if str(ip) and ":" not in str(ip))
+                    if overlay:
+                        try:
+                            FABRIC_IDENTITY.learn_discovered_endpoints(row["node_id"],overlay,expires_at=now()+300,source="tailscale")
+                            row["tailcat_endpoints"]=list(dict.fromkeys(list(row.get("tailcat_endpoints") or [])+overlay))
+                        except Exception: pass
                 merged[key]=row
     return sorted(merged.values(), key=lambda x:(not x.get("online",True),str(x.get("name") or "").lower()))
 
@@ -2296,7 +2311,7 @@ def _local_web_search(query, limit=8):
     base=os.environ.get("FCL_SEARXNG_URL","http://127.0.0.1:8888").rstrip("/")
     request=urllib.request.Request(base+"/search?"+params,headers={
         "Accept":"application/json",
-        "User-Agent":"Future-Crash-Fabric/8.3.8",
+        "User-Agent":"Future-Crash-Fabric/8.3.9",
     })
     try:
         with urllib.request.urlopen(request,timeout=8) as response:
@@ -3048,7 +3063,7 @@ def _openjev_shadow(state, question, candidates, *, profile="workspace", consequ
 
 
 class API(BaseHTTPRequestHandler):
-    server_version = "FCLNode/8.3.8"
+    server_version = "FCLNode/8.3.9"
 
     def setup(self):
         self._metric_request_id = None

@@ -65,7 +65,11 @@ def _broad_video_prompt(text):
 def _signal_video_choices(session):
     try:
         data=_node_call("/v1/media/fabric",timeout=8.0)
-        videos=[r for r in (data.get("entries") or []) if _video_row(r)] if isinstance(data,dict) else []
+        junk={'application support','caches','cache','node_modules','site-packages','library/developer','library/frameworks','library/python','contents/resources'}
+        def human_video(r):
+            path=str(r.get('path') or '').replace('\\','/').casefold()
+            return _video_row(r) and not any(part in path for part in junk) and int(r.get('bytes') or 0) >= 512*1024
+        videos=[r for r in (data.get("entries") or []) if human_video(r)] if isinstance(data,dict) else []
     except Exception:
         videos=[]
     random.shuffle(videos); picks=videos[:3]

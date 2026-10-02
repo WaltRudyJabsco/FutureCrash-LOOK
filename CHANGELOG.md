@@ -1,4 +1,9 @@
-# 8.3.8 — BOUNDARY
+# 8.3.9 — OPEN FABRIC
+
+- Learns a trusted peer's live Tailscale DNS/IP addresses as short-lived Tailcat endpoints, retaining the certificate and auth token established at pairing. This lets Mac peers recover from stale LAN/.local advertisements without weakening Fabric identity.
+- Broad `play a video` / `play a movie` choices now exclude obvious application/cache/developer trees and tiny video-shaped assets under 512 KiB. They remain searchable in the catalog; they simply do not compete with human videos for conversational random choices.
+- Leaves the now-working Albert/Signal owner+item video byte path unchanged.
+
 
 - Broad video choices now require a real video filename extension; stale MIME metadata can no longer surface source/system files as movies.
 - Pending Albert/Signal media choices understand natural continuations such as “you choose”, “you pick”, “choose for me”, “anything”, and “whatever”.

@@ -315,7 +315,15 @@ def _broad_video_choices(session):
     # video filename extension so stale/bad MIME metadata can never offer source
     # files such as .d/.ts as something to watch.
     exts={'.mp4','.m4v','.mov','.mkv','.webm','.avi','.wmv','.flv','.vob','.mts','.m2ts'}
-    videos=[r for r in entries if isinstance(r,dict) and Path(str(r.get('path') or '')).suffix.casefold() in exts]
+    junk={'application support','caches','cache','node_modules','site-packages','library/developer','library/frameworks','library/python','contents/resources'}
+    def human_video(r):
+        if not isinstance(r,dict) or Path(str(r.get('path') or '')).suffix.casefold() not in exts: return False
+        path=str(r.get('path') or '').replace('\\','/').casefold()
+        if any(part in path for part in junk): return False
+        # Tiny clips inside software trees dominate broad random selection. Keep
+        # them searchable, but don't offer them as "something to watch".
+        return int(r.get('bytes') or 0) >= 512*1024
+    videos=[r for r in entries if human_video(r)]
     random.shuffle(videos); picks=videos[:3]
     if picks:
         with _PENDING_CHOICES_LOCK: _PENDING_CHOICES[str(session or 'albert')]=(time.time()+300,videos,picks)
