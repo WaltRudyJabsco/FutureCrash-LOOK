@@ -12,7 +12,7 @@ def test_fabric_doctor_is_local_first_and_peer_specific():
 def test_browser_video_daemon_path_and_encoder_fallback():
     node=(ROOT/'core/node.py').read_text()
     assert '"/opt/homebrew/bin"' in node
-    assert 'ffmpeg is required for browser video conversion' in node
+    assert 'return source,media_type' in node
     assert 'h264_videotoolbox' in node
     assert 'browser video conversion failed' in node
 

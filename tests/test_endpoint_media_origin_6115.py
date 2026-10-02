@@ -23,7 +23,8 @@ def test_browser_streams_prepared_items_by_identity_not_source_session_index():
     assert "kind:'artifact'" in js
     assert "fetch('/api/media/ticket?'" in js
     py=(ROOT/'signal-window/server.py').read_text()
-    assert 'path="/v1/media/browser" if browser else "/v1/media/item"' in py
+    assert 'path="/v1/media/item"' in py
+    assert 'representation=browser' in py
 
 def test_signal_attaches_origin_endpoint_to_media_receipt():
     py=(ROOT/'signal-window/server.py').read_text()

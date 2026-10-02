@@ -4,9 +4,9 @@ ROOT=Path(__file__).resolve().parents[1]
 
 
 def test_release_is_paper_brain():
-    assert (ROOT/'VERSION').read_text().strip() == '8.3.6'
+    assert (ROOT/'VERSION').read_text().strip() == '8.3.7'
     node=(ROOT/'core/node.py').read_text()
-    assert 'VERSION = "8.3.6"' in node
+    assert 'VERSION = "8.3.7"' in node
     assert 'RELEASE_NAME = "GTD"' in node
 
 

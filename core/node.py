@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Future Crash + LOOK Unified Node 8.3.6.
+"""Future Crash + LOOK Unified Node 8.3.7.
 
 A small distributed supervisor for trusted personal machines. Immediate events stay
 asynchronous; a one-second fabric pulse reconciles presence, leases and stale work.
@@ -75,7 +75,7 @@ try:
 except ImportError:
     from attention import normalize_event as normalize_attention_event, plan_voice_targets
 
-VERSION = "8.3.6"
+VERSION = "8.3.7"
 RELEASE_NAME = "GTD"
 DEFAULT_HOST = "127.0.0.1"
 DEFAULT_PORT = 7332
@@ -2296,7 +2296,7 @@ def _local_web_search(query, limit=8):
     base=os.environ.get("FCL_SEARXNG_URL","http://127.0.0.1:8888").rstrip("/")
     request=urllib.request.Request(base+"/search?"+params,headers={
         "Accept":"application/json",
-        "User-Agent":"Future-Crash-Fabric/8.3.6",
+        "User-Agent":"Future-Crash-Fabric/8.3.7",
     })
     try:
         with urllib.request.urlopen(request,timeout=8) as response:
@@ -3048,7 +3048,7 @@ def _openjev_shadow(state, question, candidates, *, profile="workspace", consequ
 
 
 class API(BaseHTTPRequestHandler):
-    server_version = "FCLNode/8.3.6"
+    server_version = "FCLNode/8.3.7"
 
     def setup(self):
         self._metric_request_id = None
@@ -3183,7 +3183,10 @@ class API(BaseHTTPRequestHandler):
             return ""
         ffmpeg=media_tool("ffmpeg"); ffprobe=media_tool("ffprobe")
         if not ffmpeg:
-            raise RuntimeError("ffmpeg is required for browser video conversion")
+            # The original owner+item stream is still valid. Safari/WebKit can
+            # consume many camera MOV/MP4 files directly, so lack of ffmpeg must
+            # degrade representation quality rather than break transport.
+            return source,media_type
         compatible=False
         if ffprobe:
             try:
@@ -3223,60 +3226,41 @@ class API(BaseHTTPRequestHandler):
         return target,"video/mp4"
 
     def _serve_media_browser(self,target,entry_id,path_hint="",*,head=False):
-        target=str(target or "").strip(); entry_id=str(entry_id or "").strip(); local=identity()["name"]
-        if not entry_id:
-            self.send_response(400); self.send_header("Content-Length","0"); self.end_headers(); return
-        if not target or target==local:
-            try:
-                source,ctype=self._browser_media_source(entry_id,path_hint); return self._serve_file_range(source,ctype,head=head)
-            except Exception as exc:
-                if head: self.send_response(415); self.send_header("Content-Length","0"); self.end_headers(); return
-                return self.sendj(415,{"error":f"browser media unavailable: {exc}"})
-        snapshot={"self":node_info(),"peers":PEERS.public()}
-        try:
-            peer=_peer_for_target(snapshot,target); last_exc=None
-            for base in _peer_bases(peer):
-                url=base+"/v1/media/browser?"+urllib.parse.urlencode({"id":entry_id,"path":path_hint})
-                headers=FABRIC_IDENTITY.auth_headers_for_url(url)
-                if self.headers.get("Range"): headers["Range"]=self.headers.get("Range")
-                req=urllib.request.Request(url,headers=headers,method="HEAD" if head else "GET")
-                context=FABRIC_IDENTITY.ssl_context_for_url(url) if url.lower().startswith("https://") else None
-                try:
-                    kwargs={"timeout":1800.0}
-                    if context is not None: kwargs["context"]=context
-                    with urllib.request.urlopen(req,**kwargs) as r:
-                        self.send_response(getattr(r,"status",200))
-                        for key in ("Content-Type","Content-Length","Accept-Ranges","Content-Range","Cache-Control"):
-                            value=r.headers.get(key)
-                            if value: self.send_header(key,value)
-                        self.end_headers()
-                        if not head:
-                            while True:
-                                chunk=r.read(256*1024)
-                                if not chunk: break
-                                self.wfile.write(chunk)
-                        return
-                except Exception as exc: last_exc=exc
-            raise RuntimeError(f"browser media transport failed: {last_exc}")
-        except Exception as exc:
-            if head: self.send_response(502); self.send_header("Content-Length","0"); self.end_headers(); return
-            return self.sendj(502,{"error":str(exc)})
+        """Compatibility alias for the browser representation of one media item.
 
-    def _serve_media_item(self,target,entry_id,path_hint="",*,head=False):
-        """Serve one catalog item by owner+entry id without requiring SHA promotion.
+        Browser playback now uses the same owner+item transport as ordinary media.
+        Keeping this route avoids breaking older Signal/Albert clients.
+        """
+        return self._serve_media_item(target,entry_id,path_hint,head=head,representation="browser")
 
-        This is the ordinary playback path. Hashing remains an explicit identity/artifact
-        operation rather than a prerequisite for listening to already-scanned music.
+    def _serve_media_item(self,target,entry_id,path_hint="",*,head=False,representation="original"):
+        """Serve one catalog item by owner+entry id.
+
+        ``representation=browser`` changes only the local representation chosen by
+        the owning node. Identity, authorization, remote routing and Range handling
+        remain exactly the same as ordinary audio playback.
         """
         target=str(target or "").strip(); entry_id=str(entry_id or "").strip(); local=identity()["name"]
+        representation=str(representation or "original").strip().casefold()
+        browser=representation=="browser"
         if not entry_id:
             if head:
                 self.send_response(400); self.send_header("Content-Length","0"); self.end_headers(); return
             return self.sendj(400,{"error":"media entry id required"})
         if not target or target==local:
             try:
-                row,source=_local_media_entry(entry_id,path_hint)
-                ctype=str(row.get("media_type") or mimetypes.guess_type(str(source))[0] or "application/octet-stream")
+                if browser:
+                    try:
+                        source,ctype=self._browser_media_source(entry_id,path_hint)
+                    except Exception:
+                        # Delivery must not fail merely because ffmpeg is absent or a
+                        # conversion failed. The original item is still authoritative
+                        # and browsers such as Safari can consume many MOV/MP4 sources.
+                        row,source=_local_media_entry(entry_id,path_hint)
+                        ctype=str(row.get("media_type") or mimetypes.guess_type(str(source))[0] or "application/octet-stream")
+                else:
+                    row,source=_local_media_entry(entry_id,path_hint)
+                    ctype=str(row.get("media_type") or mimetypes.guess_type(str(source))[0] or "application/octet-stream")
                 return self._serve_file_range(source,ctype,head=head)
             except Exception as exc:
                 if head:
@@ -3286,19 +3270,24 @@ class API(BaseHTTPRequestHandler):
         try:
             peer=_peer_for_target(snapshot,target); last_exc=None
             for base in _peer_bases(peer):
-                url=base+"/v1/media/item?"+urllib.parse.urlencode({"id":entry_id,"path":path_hint})
+                params={"id":entry_id,"path":path_hint}
+                if browser: params["representation"]="browser"
+                url=base+"/v1/media/item?"+urllib.parse.urlencode(params)
                 headers=FABRIC_IDENTITY.auth_headers_for_url(url)
                 if self.headers.get("Range"): headers["Range"]=self.headers.get("Range")
                 req=urllib.request.Request(url,headers=headers,method="HEAD" if head else "GET")
                 context=FABRIC_IDENTITY.ssl_context_for_url(url) if url.lower().startswith("https://") else None
                 try:
-                    kwargs={"timeout":8.0}
+                    kwargs={"timeout":1800.0 if browser else 8.0}
                     if context is not None: kwargs["context"]=context
                     with urllib.request.urlopen(req,**kwargs) as r:
                         self.send_response(getattr(r,"status",200))
                         for key in ("Content-Type","Content-Length","Accept-Ranges","Content-Range","Cache-Control"):
                             value=r.headers.get(key)
                             if value: self.send_header(key,value)
+                        self.send_header("X-Fabric-Media-Owner",target)
+                        self.send_header("X-Fabric-Media-Id",entry_id)
+                        self.send_header("X-Fabric-Media-Representation",representation)
                         self.end_headers()
                         if not head:
                             while True:
@@ -3413,8 +3402,8 @@ class API(BaseHTTPRequestHandler):
         parsed=urlparse(self.path); path=parsed.path
         if not self._authorized_ingress(path): return
         if path == "/v1/media/item":
-            q=parse_qs(parsed.query); target=str((q.get("node") or [""])[0]); entry_id=str((q.get("id") or [""])[0]); path_hint=str((q.get("path") or [""])[0])
-            return self._serve_media_item(target,entry_id,path_hint,head=True)
+            q=parse_qs(parsed.query); target=str((q.get("node") or [""])[0]); entry_id=str((q.get("id") or [""])[0]); path_hint=str((q.get("path") or [""])[0]); representation=str((q.get("representation") or ["original"])[0])
+            return self._serve_media_item(target,entry_id,path_hint,head=True,representation=representation)
         if path == "/v1/media/browser":
             q=parse_qs(parsed.query); target=str((q.get("node") or [""])[0]); entry_id=str((q.get("id") or [""])[0]); path_hint=str((q.get("path") or [""])[0])
             return self._serve_media_browser(target,entry_id,path_hint,head=True)
@@ -3565,8 +3554,8 @@ class API(BaseHTTPRequestHandler):
         if path == "/v1/media/fabric":
             return self.sendj(200, _fabric_media_catalog())
         if path == "/v1/media/item":
-            q=parse_qs(urlparse(self.path).query); target=str((q.get("node") or [""])[0]); entry_id=str((q.get("id") or [""])[0]); path_hint=str((q.get("path") or [""])[0])
-            return self._serve_media_item(target,entry_id,path_hint)
+            q=parse_qs(urlparse(self.path).query); target=str((q.get("node") or [""])[0]); entry_id=str((q.get("id") or [""])[0]); path_hint=str((q.get("path") or [""])[0]); representation=str((q.get("representation") or ["original"])[0])
+            return self._serve_media_item(target,entry_id,path_hint,representation=representation)
         if path == "/v1/media/browser":
             q=parse_qs(urlparse(self.path).query); target=str((q.get("node") or [""])[0]); entry_id=str((q.get("id") or [""])[0]); path_hint=str((q.get("path") or [""])[0])
             return self._serve_media_browser(target,entry_id,path_hint)

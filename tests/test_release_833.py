@@ -31,7 +31,7 @@ def test_browsers_request_video_representation():
 
 def test_albert_broad_video_is_pending_choice_not_random_execution():
     assert 'def _broad_video_choices(session):' in ALBERT
-    assert '"play a movie","play a video"' in ALBERT
+    assert 'broad_video=bool(re.fullmatch' in ALBERT
     assert '"R  Surprise me"' in ALBERT
     assert 'pending choice' in ALBERT
-    assert 'low in {"1","2","3","r","random","surprise me"}' in ALBERT
+    assert 'low in {"1","2","3","r","random","surprise me","m","more"' in ALBERT

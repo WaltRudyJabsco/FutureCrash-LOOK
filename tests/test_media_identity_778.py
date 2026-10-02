@@ -43,6 +43,7 @@ def test_local_media_path_recovery_is_catalog_bounded(tmp_path, monkeypatch):
 
 def test_proxy_forwards_path_locator_and_range_contract():
     src=(ROOT/'core/node.py').read_text()
-    assert 'urllib.parse.urlencode({"id":entry_id,"path":path_hint})' in src
+    assert 'params={"id":entry_id,"path":path_hint}' in src
+    assert 'params["representation"]="browser"' in src
     assert 'headers["Range"]=self.headers.get("Range")' in src
     assert '_local_media_entry(entry_id,path_hint)' in src

@@ -236,7 +236,8 @@ def node_json(path, payload=None, timeout=1.25):
 def _proxy_media_item(handler,node,item_id,*,head=False,browser=False):
     """Browser-safe range proxy for one prepared Fabric media item."""
     query="?node="+quote(str(node or ""),safe="")+"&id="+quote(str(item_id or ""),safe="")
-    req=urllib.request.Request(NODE+("/v1/media/browser" if browser else "/v1/media/item")+query,method="HEAD" if head else "GET")
+    if browser: query += "&representation=browser"
+    req=urllib.request.Request(NODE+"/v1/media/item"+query,method="HEAD" if head else "GET")
     if handler.headers.get("Range"):
         req.add_header("Range",handler.headers.get("Range"))
     try:
@@ -296,11 +297,14 @@ def cognition_json(text, session="", selected_paths=None):
 def _albert_media_fold(queue, query="media"):
     queue=list(queue or [])
     if not queue: return None
-    first=queue[0]; title=first.get("title") or first.get("name") or query
+    first=queue[0]; title=str(first.get("title") or first.get("name") or query)
     media_type=str(first.get("media_type") or "").casefold(); item_id=str(first.get("id") or "")
     if not item_id: return None
     video_exts={".mp4",".m4v",".mov",".mkv",".webm",".avi",".wmv",".flv",".vob",".mts",".m2ts",".ts"}
     result_type="video" if media_type.startswith("video/") or Path(str(first.get("path") or "")).suffix.casefold() in video_exts else "audio"
+    if result_type=="video":
+        suffix=Path(str(first.get("path") or "")).suffix
+        if suffix and not title.casefold().endswith(suffix.casefold()): title += suffix
     subtitle=" · ".join(x for x in (str(first.get("artist") or ""),str(first.get("album") or "")) if x)
     return {"type":result_type,"title":title,"subtitle":subtitle,"meta":f"media.play · {len(queue)} item(s)","badge":"live","kind":"things","media":{"node":str(first.get("node") or ""),"id":item_id,"index":0},"queue":queue,"note":f"Fabric media · {len(queue)} resolved item(s)","pipeline":{"intent":"media.play","source":"Fabric media catalog","target":"origin endpoint","effect":"browser playback"}}
 
@@ -322,16 +326,27 @@ def action(text, session="", context=None):
     if pending and pending[0] < time.time():
         with _PENDING_CHOICES_LOCK: _PENDING_CHOICES.pop(sid,None)
         pending=None
-    if pending and low in {"1","2","3","r","random","surprise me"}:
+    if pending and low in {"1","2","3","r","random","surprise me","m","more","never mind","cancel"}:
         videos,picks=pending[1],pending[2]
+        if low in {"never mind","cancel"}:
+            with _PENDING_CHOICES_LOCK: _PENDING_CHOICES.pop(sid,None)
+            return {"type":"answer","title":"Cancelled","meta":"Fabric media · choice","kind":"things","text":"Okay."}
+        if low in {"m","more"}:
+            random.shuffle(videos); picks=videos[:3]
+            with _PENDING_CHOICES_LOCK: _PENDING_CHOICES[sid]=(time.time()+300,videos,picks)
+            choices=[{"label":f"{i+1}  {Path(str(row.get('path') or '')).name or str(row.get('title') or row.get('name') or 'Video')}","value":str(i+1)} for i,row in enumerate(picks)]
+            choices += [{"label":"R  Surprise me","value":"r"},{"label":"M  More","value":"m"}]
+            return {"type":"answer","title":"Three more","meta":"Fabric media · choice","badge":"choose","kind":"things","text":"Pick one, or let me choose.","clarification":{"choices":choices}}
         row=random.choice(videos) if low in {"r","random","surprise me"} else picks[int(low)-1]
         with _PENDING_CHOICES_LOCK: _PENDING_CHOICES.pop(sid,None)
         return _albert_media_fold([row],str(row.get("title") or "video"))
-    if low in {"play a movie","play a video","play any movie","play any video","play some video","play something to watch"}:
+    broad_video=bool(re.fullmatch(r"play(?: me)?(?: (?:a|any|some))? (?:movie|video)s?",low)) or low=="play something to watch"
+    if broad_video:
         picks=_broad_video_choices(sid)
         if picks:
             choices=[{"label":f"{i+1}  {str(row.get('title') or row.get('name') or Path(str(row.get('path') or '')).name)}","value":str(i+1)} for i,row in enumerate(picks)]
             choices.append({"label":"R  Surprise me","value":"r"})
+            choices.append({"label":"M  More","value":"m"})
             return {"type":"answer","title":"Pick something to watch","meta":"Fabric media · choice","badge":"choose","kind":"things","text":"I found plenty. Pick one, or let me choose.","clarification":{"choices":choices},"pipeline":{"intent":"media.play","state":"pending choice","target":"origin endpoint"}}
     if low in {"classics","classical","classical music","play classics","play classical","put on classical music"} or "all classical" in low:
         return {"type":"audio","title":"All Classical Radio","subtitle":"Portland · live","meta":"media.play · this endpoint","badge":"live","kind":"things","src":ALL_CLASSICAL,"note":"Fabric built-in · classics","pipeline":{"intent":"media.play","selector":"stream:all-classical","target":"origin endpoint","effect":"local"}}

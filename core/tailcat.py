@@ -25,7 +25,7 @@ try:
 except ImportError:
     from ingress import GuardServer, Handler, watchdog
 
-VERSION = "8.3.6"
+VERSION = "8.3.7"
 DEFAULT_HOST = "0.0.0.0"
 DEFAULT_PORT = 7443
 DEFAULT_BACKEND_HOST = "127.0.0.1"
@@ -74,6 +74,35 @@ def _local_ipv4() -> list[str]:
     return sorted(values)
 
 
+def _tailscale_endpoints(port: int) -> list[str]:
+    """Return this node's reachable Tailscale addresses as Tailcat endpoints.
+
+    Tailcat listens on all interfaces. Advertising the overlay address as well as
+    LAN/mDNS avoids asymmetric Mac-to-Mac reachability when Bonjour or Wi-Fi
+    client isolation makes ``host.local`` unusable between otherwise trusted peers.
+    """
+    ts = shutil.which("tailscale")
+    if not ts:
+        return []
+    try:
+        proc = subprocess.run([ts, "status", "--json"], capture_output=True, text=True, timeout=3)
+        if proc.returncode:
+            return []
+        data = json.loads(proc.stdout or "{}")
+        me = data.get("Self") or {}
+        out = []
+        dns = str(me.get("DNSName") or "").rstrip(".")
+        if dns:
+            out.append(f"https://{dns}:{int(port)}")
+        for ip in me.get("TailscaleIPs") or []:
+            ip = str(ip or "").strip()
+            if ip and ":" not in ip:
+                out.append(f"https://{ip}:{int(port)}")
+        return list(dict.fromkeys(out))
+    except Exception:
+        return []
+
+
 def _cert_fingerprint(cert_pem: str) -> str:
     der = ssl.PEM_cert_to_DER_cert(cert_pem)
     digest = hashlib.sha256(der).hexdigest()
@@ -106,6 +135,8 @@ def ensure_identity(port: int = DEFAULT_PORT) -> dict:
     if host:
         endpoints.append(f"https://{host}.local:{int(port)}")
     endpoints.extend(f"https://{ip}:{int(port)}" for ip in _local_ipv4())
+    # The overlay endpoint is often the only symmetric path between Macs.
+    endpoints.extend(_tailscale_endpoints(port))
     endpoints=list(dict.fromkeys(endpoints))
     ad = {
         "schema": "tailcat-transport-v1",

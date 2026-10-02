@@ -10,6 +10,7 @@ import json
 import mimetypes
 import os
 import queue
+import random
 import re
 import shutil
 import signal
@@ -39,6 +40,76 @@ PENDING_COOKIE = "fcl_pending"
 _MEDIA_TICKETS = {}
 _MEDIA_TICKET_LOCK = threading.Lock()
 _MEDIA_TICKET_TTL = 600
+
+_SIGNAL_PENDING_MEDIA = {}
+_SIGNAL_PENDING_MEDIA_LOCK = threading.Lock()
+_SIGNAL_PENDING_MEDIA_TTL = 300
+
+def _video_row(row):
+    if not isinstance(row,dict): return False
+    mt=str(row.get("media_type") or "").casefold()
+    ext=Path(str(row.get("path") or "")).suffix.casefold()
+    return mt.startswith("video/") or ext in {".mp4",".m4v",".mov",".mkv",".webm",".avi",".wmv",".flv",".vob",".mts",".m2ts",".ts"}
+
+def _video_label(row):
+    path=Path(str(row.get("path") or ""))
+    title=str(row.get("title") or row.get("name") or path.name or "Video")
+    if path.suffix and not title.casefold().endswith(path.suffix.casefold()):
+        title += path.suffix
+    return title
+
+def _broad_video_prompt(text):
+    low=" ".join(str(text or "").casefold().strip(" .!? ").split())
+    return bool(re.fullmatch(r"play(?: me)?(?: (?:a|any|some))? (?:movie|video)s?",low)) or low=="play something to watch"
+
+def _signal_video_choices(session):
+    try:
+        data=_node_call("/v1/media/fabric",timeout=8.0)
+        videos=[r for r in (data.get("entries") or []) if _video_row(r)] if isinstance(data,dict) else []
+    except Exception:
+        videos=[]
+    random.shuffle(videos); picks=videos[:3]
+    if picks:
+        with _SIGNAL_PENDING_MEDIA_LOCK:
+            _SIGNAL_PENDING_MEDIA[str(session or "signal")]=(time.time()+_SIGNAL_PENDING_MEDIA_TTL,videos,picks)
+    return picks
+
+def _signal_pending_media(session,text):
+    sid=str(session or "signal"); low=" ".join(str(text or "").casefold().strip(" .!? ").split())
+    with _SIGNAL_PENDING_MEDIA_LOCK:
+        pending=_SIGNAL_PENDING_MEDIA.get(sid)
+        if pending and pending[0] < time.time():
+            _SIGNAL_PENDING_MEDIA.pop(sid,None); pending=None
+    if not pending: return None
+    videos,picks=pending[1],pending[2]
+    if low in {"cancel","never mind"}:
+        with _SIGNAL_PENDING_MEDIA_LOCK: _SIGNAL_PENDING_MEDIA.pop(sid,None)
+        return {"cancelled":True}
+    if low in {"m","more"}:
+        random.shuffle(videos); picks=videos[:3]
+        with _SIGNAL_PENDING_MEDIA_LOCK: _SIGNAL_PENDING_MEDIA[sid]=(time.time()+_SIGNAL_PENDING_MEDIA_TTL,videos,picks)
+        return {"choices":picks}
+    if low in {"r","random","surprise me"}:
+        row=random.choice(videos)
+    elif low in {"1","2","3"} and int(low)<=len(picks):
+        row=picks[int(low)-1]
+    else:
+        # A title fragment is also a natural continuation of the pending choice.
+        matches=[r for r in picks if low and low in _video_label(r).casefold()]
+        if len(matches)!=1: return None
+        row=matches[0]
+    with _SIGNAL_PENDING_MEDIA_LOCK: _SIGNAL_PENDING_MEDIA.pop(sid,None)
+    return {"row":row}
+
+def _signal_choice_text(picks, heading="What sounds good?"):
+    lines=[heading]
+    for i,row in enumerate(picks[:3],1): lines.append(f"{i}  {_video_label(row)}")
+    lines += ["R  Surprise me","M  More"]
+    return "\n".join(lines)
+
+def _prepared_single_media(row):
+    return {"ok":True,"node":str(row.get("node") or ""),"state":"prepared","active":False,"index":0,"queue":[row],"count":1}
+
 
 def _media_ticket_key(kind, node="", item_id="", digest="", index=0):
     return (str(kind or ""), str(node or ""), str(item_id or ""), str(digest or ""), int(index or 0))
@@ -838,7 +909,8 @@ def _proxy_artifact(handler,node,digest,*,head=False):
 def _proxy_media_audio(handler,node,index=0,*,item_id="",head=False,browser=False):
     if item_id:
         query="?node="+quote(str(node or ""),safe="")+"&id="+quote(str(item_id),safe="")
-        path="/v1/media/browser" if browser else "/v1/media/item"
+        if browser: query += "&representation=browser"
+        path="/v1/media/item"
     else:
         query="?node="+quote(str(node or ""),safe="")+"&index="+str(int(index))
         path="/v1/media/audio"
@@ -1215,13 +1287,39 @@ class App(BaseHTTPRequestHandler):
                 return self.json(400,{"error":"empty message"})
 
             # Obvious natural-language media requests are normalized once at the
-            # edge. Fabric receives selectors, never fake filenames like "any movie".
+            # edge. Broad harmless requests get a compact deterministic continuation
+            # instead of silently choosing one arbitrary catalog item.
             media_node=str(d.get("media_node") or "").strip()
             media_endpoint=str(d.get("media_endpoint") or "").strip()
+            session_id=str(d.get("session") or "").strip()[:120]
+            pending=_signal_pending_media(session_id,prompt) if not files else None
+            if pending:
+                if pending.get("cancelled"):
+                    text="Okay."
+                    _session_append(session_id,prompt,text)
+                    return self.json(200,{"text":text,"signal":None,"visual":{"kind":"nochange"},"mode":self.mode,"model":"deterministic-media-choice","endpoint":"fabric","resolution":"media.choice.cancelled","files":[],"artifacts":[]})
+                if pending.get("choices"):
+                    text=_signal_choice_text(pending["choices"],"Three more:")
+                    _session_append(session_id,prompt,text)
+                    return self.json(200,{"text":text,"signal":None,"visual":{"kind":"nochange"},"mode":self.mode,"model":"deterministic-media-choice","endpoint":"fabric","resolution":"media.choice","files":[],"artifacts":[]})
+                row=pending.get("row")
+                if isinstance(row,dict):
+                    state=_prepared_single_media(row)
+                    origin=self._endpoint() or {}
+                    state["origin_endpoint"]={"endpoint_id":origin.get("endpoint_id"),"label":origin.get("label")}
+                    state["output_target"]="browser"
+                    text=f"Playing {_video_label(row)} on this device."
+                    _session_append(session_id,prompt,text)
+                    return self.json(200,{"text":text,"signal":None,"visual":{"kind":"nochange"},"mode":self.mode,"model":"deterministic-media-choice","endpoint":"fabric","resolution":"media.playback","files":[],"artifacts":[],"media":state})
+            if not files and _broad_video_prompt(prompt):
+                picks=_signal_video_choices(session_id)
+                if picks:
+                    text=_signal_choice_text(picks)
+                    _session_append(session_id,prompt,text)
+                    return self.json(200,{"text":text,"signal":None,"visual":{"kind":"nochange"},"mode":self.mode,"model":"deterministic-media-choice","endpoint":"fabric","resolution":"media.choice","files":[],"artifacts":[]})
             intent_resolution=resolve_intent(prompt) if not files else {"status":"no_match"}
             if intent_resolution.get("status")=="clarify":
                 text="Which one do you mean?"
-                session_id=str(d.get("session") or "").strip()[:120]
                 _session_append(session_id,prompt,text)
                 return self.json(200,{"text":text,"signal":None,"visual":{"kind":"nochange"},"mode":self.mode,"model":"deterministic-clarify","endpoint":"fabric","resolution":"clarify","intent_resolution":intent_resolution,"lo_events":[{"event":"intent_clarify","reason":intent_resolution.get("reason")}],"files":[],"artifacts":[]})
             normalized=intent_resolution.get("intent") if intent_resolution.get("status")=="resolved" else None
@@ -1238,7 +1336,6 @@ class App(BaseHTTPRequestHandler):
                     text=f"Playing {query} on this device." if browser_target else f"Playing {query} on {target}."
                 else:
                     text=f"Playing {label} on this device." if browser_target else f"Playing {label} on {target}."
-                session_id=str(d.get("session") or "").strip()[:120]
                 _session_append(session_id,prompt,text)
                 return self.json(200,{"text":text,"signal":None,"visual":{"kind":"nochange"},"mode":self.mode,"model":"deterministic-media","endpoint":"fabric","resolution":"media.playback","intent":normalized,"lo_events":[{"event":"intent_normalized","intent":normalized},{"event":"media_play","tool":"media.play","node":target}],"files":[],"artifacts":[],"media":state})
 
