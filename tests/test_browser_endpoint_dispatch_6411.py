@@ -14,7 +14,7 @@ def test_cli_delegates_browser_speech_resolution_to_resident_daemon():
 
 
 def test_release_6411_contract():
-    assert (ROOT/'VERSION').read_text().strip()=='8.3.4'
+    assert (ROOT/'VERSION').read_text().strip()=='8.3.5'
     node=(ROOT/'core/node.py').read_text()
-    assert 'VERSION = "8.3.4"' in node
+    assert 'VERSION = "8.3.5"' in node
     assert 'RELEASE_NAME = "COGNITIVE FABRIC"' in node

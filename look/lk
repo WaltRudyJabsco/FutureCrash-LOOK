@@ -9930,7 +9930,7 @@ def _direct_searxng_search(query, limit=8):
     params=urllib.parse.urlencode({"q":query,"format":"json"})
     request=urllib.request.Request(base+"/search?"+params,headers={
         "Accept":"application/json",
-        "User-Agent":"Future-Crash-Fabric/8.3.4",
+        "User-Agent":"Future-Crash-Fabric/8.3.5",
     })
     with urllib.request.urlopen(request,timeout=12) as response:
         data=json.load(response)
@@ -16797,7 +16797,7 @@ def _media_selector(rows,title="FABRIC MEDIA",initial_query="",catalog_meta=None
                     print(detail)
 
             filter_text=f"{_c('FILTER','1;36')} {query}█" if query else f"{_c('FILTER','1;36')} █"
-            actions=_c("Tab select · A select all · Enter/P play · Q queue · I info · V sources · H hidden · X hide · D hide by directory · U unhide · Esc exit","2")
+            actions=_c("Tab select · A select all · Enter/P play · Q queue · I info · V sources · H hidden · X hide · D hide by directory · U unhide · ◆ SHA · · scanned · Esc exit","2")
             footer=f"{filter_text}  {actions}"
             if notice:
                 footer+="  "+_c(notice,"33")
@@ -18866,6 +18866,60 @@ def _run_lo_job(path):
     return 0 if job["status"]=="done" else 1
 
 
+def _fabric_doctor():
+    """Diagnose the local Unified Node first, then every advertised peer."""
+    print("LOOK FABRIC DOCTOR")
+    base="http://127.0.0.1:7332"
+    try:
+        with urllib.request.urlopen(base+"/v1/node",timeout=2.0) as response:
+            local=json.loads(response.read().decode("utf-8"))
+        print(f"  local node       ✓ {local.get('name') or platform.node() or 'local'} · {local.get('version') or '?'}")
+    except Exception as exc:
+        print(f"  local node       × 127.0.0.1:7332 · {exc}")
+        print("  diagnosis        Unified Node is not reachable locally; peer/media tests cannot run")
+        return 1
+    try:
+        with urllib.request.urlopen(base+"/v1/media/catalog",timeout=8.0) as response:
+            catalog=json.loads(response.read().decode("utf-8"))
+        print(f"  local media      ✓ {int(catalog.get('count') or len(catalog.get('entries') or [])):,} locations")
+    except Exception as exc:
+        print(f"  local media      × {exc}")
+    try:
+        with urllib.request.urlopen(base+"/v1/nodes",timeout=3.0) as response:
+            snap=json.loads(response.read().decode("utf-8"))
+    except Exception as exc:
+        print(f"  peer discovery   × {exc}"); return 1
+    peers=[p for p in (snap.get('peers') or []) if p.get('node')]
+    print(f"  peer discovery   ✓ {len(peers)} peer{'s' if len(peers)!=1 else ''}")
+    failures=0
+    for peer in peers:
+        ad=peer.get('node') or {}; name=str((ad.get('identity') or {}).get('name') or peer.get('name') or '?')
+        bases=[]
+        if peer.get('url'): bases.append(str(peer['url']).rstrip('/'))
+        bases += [str(x).rstrip('/') for x in (peer.get('tailcat_endpoints') or []) if x]
+        if peer.get('dns'): bases.append('https://'+str(peer['dns'])+':7332')
+        seen=[]; bases=[x for x in bases if not (x in seen or seen.append(x))]
+        if not bases:
+            print(f"  {name:<16} × discovered, no advertised endpoint"); failures+=1; continue
+        ok=False; reasons=[]
+        exe=_media_fcl_node()
+        try:
+            cp=subprocess.run([exe,"media-catalog","--node",name,"--json"],capture_output=True,text=True,timeout=12)
+            if cp.returncode==0:
+                data=json.loads((cp.stdout or "{}").strip())
+                count=int(data.get('count') or len(data.get('entries') or []))
+                endpoint=bases[0] if bases else "Fabric route"
+                print(f"  {name:<16} ✓ media {count:,} · {endpoint}"); ok=True
+            else:
+                reasons.append((cp.stderr or cp.stdout or f"exit {cp.returncode}").strip())
+        except Exception as exc:
+            reasons.append(str(exc))
+        if not ok:
+            failures+=1; print(f"  {name:<16} × media catalog unreachable")
+            for reason in reasons: print(f"    {reason[:240]}")
+    return 1 if failures else 0
+
+
 def _fabric_command(args):
     """Human CLI over the shared Fabric. Remote actions stay capability-scoped."""
     exe=shutil.which("fcl-node") or str(HOME/".local/bin/fcl-node")
@@ -18876,8 +18930,9 @@ def _fabric_command(args):
     aliases={"list":"nodes","node":"status","model":"models"}
     sub=aliases.get(sub,sub)
     if sub=="dash": sub="dashboard"
-    if sub not in {"fabric","watch","dashboard","dash","beacon","lights","nodes","activity","pulse","models","status","qualify","services","service","jobs","job","submit","packet","cancel","events","http","decisions","decision","answer","ask","decision-shadow","decision-provider","identity","trust","untrust","pair-code","pair","transport","rendezvous","endpoints","endpoint-code","allow","revoke-endpoint","speak","alert","route"}:
-        print("usage: lk fabric [identity|trust|pair-code [URL]|pair NODE CODE|untrust NODE_ID|transport|rendezvous [status|set URL|off|sync]|endpoints|endpoint-code URL [once|trust]|allow CODE [once|trust]|revoke-endpoint ENDPOINT_ID|watch|dashboard|decisions [NODE]|decision [NODE] ID|answer [NODE] ID CHOICE|ask [NODE] QUESTION [CHOICE ...]|decision-shadow [NODE] STATE QUESTION CANDIDATE...|decision-provider [NODE]|beacon|lights|nodes|status|activity|pulse|models|route reflex|balanced|deep|jobs|events|submit|packet|cancel|qualify|services|service|speak [NODE] TEXT|alert [@TARGET] MESSAGE]")
+    if sub in {"doctor","diagnose","debug"}: return _fabric_doctor()
+    if sub not in {"fabric","doctor","watch","dashboard","dash","beacon","lights","nodes","activity","pulse","models","status","qualify","services","service","jobs","job","submit","packet","cancel","events","http","decisions","decision","answer","ask","decision-shadow","decision-provider","identity","trust","untrust","pair-code","pair","transport","rendezvous","endpoints","endpoint-code","allow","revoke-endpoint","speak","alert","route"}:
+        print("usage: lk fabric [doctor|identity|trust|pair-code [URL]|pair NODE CODE|untrust NODE_ID|transport|rendezvous [status|set URL|off|sync]|endpoints|endpoint-code URL [once|trust]|allow CODE [once|trust]|revoke-endpoint ENDPOINT_ID|watch|dashboard|decisions [NODE]|decision [NODE] ID|answer [NODE] ID CHOICE|ask [NODE] QUESTION [CHOICE ...]|decision-shadow [NODE] STATE QUESTION CANDIDATE...|decision-provider [NODE]|beacon|lights|nodes|status|activity|pulse|models|route reflex|balanced|deep|jobs|events|submit|packet|cancel|qualify|services|service|speak [NODE] TEXT|alert [@TARGET] MESSAGE]")
         return 2
     argv=[exe,sub]
     rest=list(args[1:])

@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Future Crash + LOOK Unified Node 8.3.4.
+"""Future Crash + LOOK Unified Node 8.3.5.
 
 A small distributed supervisor for trusted personal machines. Immediate events stay
 asynchronous; a one-second fabric pulse reconciles presence, leases and stale work.
@@ -75,7 +75,7 @@ try:
 except ImportError:
     from attention import normalize_event as normalize_attention_event, plan_voice_targets
 
-VERSION = "8.3.4"
+VERSION = "8.3.5"
 RELEASE_NAME = "COGNITIVE FABRIC"
 DEFAULT_HOST = "127.0.0.1"
 DEFAULT_PORT = 7332
@@ -2296,7 +2296,7 @@ def _local_web_search(query, limit=8):
     base=os.environ.get("FCL_SEARXNG_URL","http://127.0.0.1:8888").rstrip("/")
     request=urllib.request.Request(base+"/search?"+params,headers={
         "Accept":"application/json",
-        "User-Agent":"Future-Crash-Fabric/8.3.4",
+        "User-Agent":"Future-Crash-Fabric/8.3.5",
     })
     try:
         with urllib.request.urlopen(request,timeout=8) as response:
@@ -3042,7 +3042,7 @@ def _openjev_shadow(state, question, candidates, *, profile="workspace", consequ
 
 
 class API(BaseHTTPRequestHandler):
-    server_version = "FCLNode/8.3.4"
+    server_version = "FCLNode/8.3.5"
 
     def setup(self):
         self._metric_request_id = None
@@ -3167,8 +3167,17 @@ class API(BaseHTTPRequestHandler):
         media_type=str(row.get("media_type") or mimetypes.guess_type(str(source))[0] or "application/octet-stream")
         video_exts={".mov",".avi",".mkv",".wmv",".flv",".mts",".m2ts",".vob",".ts",".mp4",".m4v",".webm"}
         if not (media_type.startswith("video/") or source.suffix.casefold() in video_exts): return source,media_type
-        ffmpeg=shutil.which("ffmpeg"); ffprobe=shutil.which("ffprobe")
-        if not ffmpeg: return source,media_type
+        # Daemon PATHs are often smaller than interactive shell PATHs.
+        def media_tool(name):
+            found=shutil.which(name)
+            if found: return found
+            for base in ("/opt/homebrew/bin","/usr/local/bin","/usr/bin","/home/linuxbrew/.linuxbrew/bin"):
+                candidate=Path(base)/name
+                if candidate.is_file() and os.access(candidate,os.X_OK): return str(candidate)
+            return ""
+        ffmpeg=media_tool("ffmpeg"); ffprobe=media_tool("ffprobe")
+        if not ffmpeg:
+            raise RuntimeError("ffmpeg is required for browser video conversion")
         compatible=False
         if ffprobe:
             try:
@@ -3184,9 +3193,23 @@ class API(BaseHTTPRequestHandler):
         target=cache/(key+".mp4")
         if not target.exists() or target.stat().st_size==0:
             tmp=target.with_name(key+f".{os.getpid()}.{threading.get_ident()}.tmp.mp4")
-            cmd=[ffmpeg,"-nostdin","-v","error","-y","-i",str(source),"-map","0:v:0","-map","0:a:0?","-c:v","libx264","-preset","veryfast","-crf","21","-pix_fmt","yuv420p","-c:a","aac","-b:a","160k","-movflags","+faststart",str(tmp)]
+            # H.264/AAC MP4 is the common browser representation. Apple ffmpeg
+            # builds do not always expose libx264, so retain a VideoToolbox fallback.
+            encoders=[("libx264",["-preset","veryfast","-crf","21"])]
+            if platform.system()=="Darwin": encoders.append(("h264_videotoolbox",["-b:v","6M"]))
+            last_error=""
             try:
-                subprocess.run(cmd,check=True,timeout=1800); os.replace(tmp,target)
+                for encoder,video_args in encoders:
+                    cmd=[ffmpeg,"-nostdin","-v","error","-y","-i",str(source),"-map","0:v:0","-map","0:a:0?","-c:v",encoder,*video_args,"-pix_fmt","yuv420p","-c:a","aac","-b:a","160k","-movflags","+faststart",str(tmp)]
+                    cp=subprocess.run(cmd,capture_output=True,text=True,timeout=1800)
+                    if cp.returncode==0 and tmp.exists() and tmp.stat().st_size>0:
+                        os.replace(tmp,target); last_error=""; break
+                    last_error=(cp.stderr or cp.stdout or f"ffmpeg exit {cp.returncode}").strip()[-800:]
+                    try:
+                        if tmp.exists(): tmp.unlink()
+                    except OSError: pass
+                if not target.exists() or target.stat().st_size==0:
+                    raise RuntimeError("browser video conversion failed"+(f": {last_error}" if last_error else ""))
             finally:
                 try:
                     if tmp.exists(): tmp.unlink()
