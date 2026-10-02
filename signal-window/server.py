@@ -49,7 +49,7 @@ def _video_row(row):
     if not isinstance(row,dict): return False
     mt=str(row.get("media_type") or "").casefold()
     ext=Path(str(row.get("path") or "")).suffix.casefold()
-    return mt.startswith("video/") or ext in {".mp4",".m4v",".mov",".mkv",".webm",".avi",".wmv",".flv",".vob",".mts",".m2ts",".ts"}
+    return ext in {".mp4",".m4v",".mov",".mkv",".webm",".avi",".wmv",".flv",".vob",".mts",".m2ts"}
 
 def _video_label(row):
     path=Path(str(row.get("path") or ""))
@@ -89,14 +89,14 @@ def _signal_pending_media(session,text):
         random.shuffle(videos); picks=videos[:3]
         with _SIGNAL_PENDING_MEDIA_LOCK: _SIGNAL_PENDING_MEDIA[sid]=(time.time()+_SIGNAL_PENDING_MEDIA_TTL,videos,picks)
         return {"choices":picks}
-    if low in {"r","random","surprise me"}:
+    if low in {"r","random","surprise me","you choose","you pick","pick one","choose one","choose for me","pick for me","anything","whatever"}:
         row=random.choice(videos)
     elif low in {"1","2","3"} and int(low)<=len(picks):
         row=picks[int(low)-1]
     else:
         # A title fragment is also a natural continuation of the pending choice.
         matches=[r for r in picks if low and low in _video_label(r).casefold()]
-        if len(matches)!=1: return None
+        if len(matches)!=1: return {"reprompt":True,"choices":picks}
         row=matches[0]
     with _SIGNAL_PENDING_MEDIA_LOCK: _SIGNAL_PENDING_MEDIA.pop(sid,None)
     return {"row":row}

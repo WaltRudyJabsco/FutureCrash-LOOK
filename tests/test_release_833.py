@@ -34,4 +34,4 @@ def test_albert_broad_video_is_pending_choice_not_random_execution():
     assert 'broad_video=bool(re.fullmatch' in ALBERT
     assert '"R  Surprise me"' in ALBERT
     assert 'pending choice' in ALBERT
-    assert 'low in {"1","2","3","r","random","surprise me","m","more"' in ALBERT
+    assert 'choose_random={"r","random","surprise me","you choose"' in ALBERT

@@ -1,3 +1,10 @@
+# 8.3.8 — BOUNDARY
+
+- Broad video choices now require a real video filename extension; stale MIME metadata can no longer surface source/system files as movies.
+- Pending Albert/Signal media choices understand natural continuations such as “you choose”, “you pick”, “choose for me”, “anything”, and “whatever”.
+- While a media choice is pending, an unrecognized reply is reprompted instead of leaking into unrelated general cognition.
+- Retains the unified owner+item browser-media transport introduced in 8.3.7.
+
 # 8.3.6 — GTD
 
 - Fixed Albert video ticket generation: the video/audio kind was referenced before it was parsed.

@@ -311,8 +311,11 @@ def _albert_media_fold(queue, query="media"):
 def _broad_video_choices(session):
     try: entries=(node_json('/v1/media/fabric',timeout=4.0).get('entries') or [])
     except Exception: return []
-    exts={'.mp4','.m4v','.mov','.mkv','.webm','.avi','.wmv','.flv','.vob','.mts','.m2ts','.ts'}
-    videos=[r for r in entries if isinstance(r,dict) and (str(r.get('media_type') or '').startswith('video/') or Path(str(r.get('path') or '')).suffix.casefold() in exts)]
+    # Choices are an execution boundary, not a fuzzy search.  Require a known
+    # video filename extension so stale/bad MIME metadata can never offer source
+    # files such as .d/.ts as something to watch.
+    exts={'.mp4','.m4v','.mov','.mkv','.webm','.avi','.wmv','.flv','.vob','.mts','.m2ts'}
+    videos=[r for r in entries if isinstance(r,dict) and Path(str(r.get('path') or '')).suffix.casefold() in exts]
     random.shuffle(videos); picks=videos[:3]
     if picks:
         with _PENDING_CHOICES_LOCK: _PENDING_CHOICES[str(session or 'albert')]=(time.time()+300,videos,picks)
@@ -326,7 +329,18 @@ def action(text, session="", context=None):
     if pending and pending[0] < time.time():
         with _PENDING_CHOICES_LOCK: _PENDING_CHOICES.pop(sid,None)
         pending=None
-    if pending and low in {"1","2","3","r","random","surprise me","m","more","never mind","cancel"}:
+    if pending:
+        choose_random={"r","random","surprise me","you choose","you pick","pick one","choose one","choose for me","pick for me","anything","whatever"}
+        recognized=low in ({"1","2","3","m","more","never mind","cancel"} | choose_random)
+        if not recognized:
+            # Do not leak a plausible reply to general cognition while a media
+            # interaction is pending.  A unique title fragment is also valid.
+            matches=[r for r in pending[2] if low and low in str(r.get("title") or r.get("name") or Path(str(r.get("path") or "")).name).casefold()]
+            if len(matches)==1:
+                with _PENDING_CHOICES_LOCK: _PENDING_CHOICES.pop(sid,None)
+                return _albert_media_fold([matches[0]],str(matches[0].get("title") or "video"))
+            return {"type":"answer","title":"Pick something to watch","meta":"Fabric media · choice","badge":"choose","kind":"things","text":"Choose 1–3, say ‘you choose’, ask for more, or cancel."}
+        
         videos,picks=pending[1],pending[2]
         if low in {"never mind","cancel"}:
             with _PENDING_CHOICES_LOCK: _PENDING_CHOICES.pop(sid,None)
@@ -337,7 +351,7 @@ def action(text, session="", context=None):
             choices=[{"label":f"{i+1}  {Path(str(row.get('path') or '')).name or str(row.get('title') or row.get('name') or 'Video')}","value":str(i+1)} for i,row in enumerate(picks)]
             choices += [{"label":"R  Surprise me","value":"r"},{"label":"M  More","value":"m"}]
             return {"type":"answer","title":"Three more","meta":"Fabric media · choice","badge":"choose","kind":"things","text":"Pick one, or let me choose.","clarification":{"choices":choices}}
-        row=random.choice(videos) if low in {"r","random","surprise me"} else picks[int(low)-1]
+        row=random.choice(videos) if low in choose_random else picks[int(low)-1]
         with _PENDING_CHOICES_LOCK: _PENDING_CHOICES.pop(sid,None)
         return _albert_media_fold([row],str(row.get("title") or "video"))
     broad_video=bool(re.fullmatch(r"play(?: me)?(?: (?:a|any|some))? (?:movie|video)s?",low)) or low=="play something to watch"
