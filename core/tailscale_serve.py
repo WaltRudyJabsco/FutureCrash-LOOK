@@ -13,11 +13,12 @@ import os
 import shutil
 import subprocess
 import sys
+import time
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Iterable, Sequence
 
-VERSION = "8.3.14"
+VERSION = "8.3.15"
 
 
 @dataclass(frozen=True)
@@ -76,6 +77,50 @@ def _attempt(argv: Sequence[str]) -> tuple[bool, str]:
             return True, detail2
         detail = detail2 or detail
     return False, detail
+
+
+
+def backend_ready(binary: str) -> tuple[bool, str]:
+    """Return whether the Tailscale networking backend is actually running."""
+    cp = _run([binary, "status", "--json"], timeout=5.0)
+    text = (cp.stderr or cp.stdout or "").strip()
+    if cp.returncode != 0:
+        return False, text or "Tailscale status unavailable"
+    try:
+        import json
+        data = json.loads(cp.stdout or "{}")
+        state = str(data.get("BackendState") or "").casefold()
+        online = bool((data.get("Self") or {}).get("Online", False))
+        return state == "running" or online, state or "offline"
+    except Exception:
+        return True, "status available"
+
+
+def ensure_backend(binary: str) -> tuple[bool, str]:
+    """Wake Tailscale before reconciling routes. A stopped VPN is not a Fabric bug."""
+    ok, detail = backend_ready(binary)
+    if ok:
+        return True, detail
+    if sys.platform == "darwin":
+        opener = shutil.which("open") or "/usr/bin/open"
+        _run([opener, "-gja", "Tailscale"], timeout=8.0)
+        for _ in range(30):
+            time.sleep(0.25)
+            ok, detail = backend_ready(binary)
+            if ok:
+                return True, detail
+        return False, detail or "Tailscale app did not start"
+    # Linux installations normally run tailscaled as a system service. Try the
+    # non-interactive service path; never block an installer on a sudo prompt.
+    systemctl = shutil.which("systemctl")
+    if systemctl:
+        _run(_as_sudo([systemctl, "start", "tailscaled"]), timeout=8.0)
+        for _ in range(12):
+            time.sleep(0.25)
+            ok, detail = backend_ready(binary)
+            if ok:
+                return True, detail
+    return False, detail or "Tailscale backend is stopped"
 
 
 def set_route(binary: str, route: Route) -> tuple[bool, str]:
@@ -138,6 +183,11 @@ def main(argv: Sequence[str] | None = None) -> int:
         print(text or "Tailscale Serve: no routes")
         return 0 if ok else 4
 
+    backend_ok, backend_detail = ensure_backend(binary)
+    if not backend_ok:
+        print(f"Tailscale backend: FAILED · {backend_detail}")
+        return 6
+    print(f"Tailscale backend: ready · {backend_detail}")
     ok, messages, serve_status = reconcile(binary)
     print("Future Crash Tailscale Serve")
     for message in messages:

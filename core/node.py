@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Future Crash + LOOK Unified Node 8.3.14.
+"""Future Crash + LOOK Unified Node 8.3.15.
 
 A small distributed supervisor for trusted personal machines. Immediate events stay
 asynchronous; a one-second fabric pulse reconciles presence, leases and stale work.
@@ -75,7 +75,7 @@ try:
 except ImportError:
     from attention import normalize_event as normalize_attention_event, plan_voice_targets
 
-VERSION = "8.3.14"
+VERSION = "8.3.15"
 RELEASE_NAME = "GTD"
 DEFAULT_HOST = "127.0.0.1"
 DEFAULT_PORT = 7332
@@ -1009,7 +1009,7 @@ def peer_rows():
         endpoints=FABRIC_IDENTITY._active_tailcat_endpoints(row)
         name=str(row.get("name") or row.get("hostname") or node_id)
         key=name.casefold()
-        merged[key]={"name":name,"dns":"","ips":[],"online":True,"node_id":node_id,
+        merged[key]={"name":name,"hostname":str(row.get("hostname") or ""),"dns":"","ips":[],"online":True,"node_id":node_id,
                      "tailcat_endpoints":endpoints,"tailcat_cert_sha256":tc.get("cert_sha256"),
                      "trusted":bool(row.get("authorized")),"transport":"tailcat" if endpoints else "trusted"}
 
@@ -1024,6 +1024,20 @@ def peer_rows():
                 ips=peer.get("TailscaleIPs") or []
                 name=(dns.split(".",1)[0] if dns else "") or peer.get("HostName") or (ips[0] if ips else "peer")
                 key=str(name).casefold()
+                # Tailscale's device label is transport metadata, not Fabric identity.
+                # Match it to an existing trusted peer by advertised host/IP before
+                # creating a second peer row (e.g. trusted "3090" vs TS "sasha-linux-pc").
+                matched_key=None
+                ts_hosts={str(dns).casefold(), str(name).casefold(), str(peer.get("HostName") or "").casefold(), *(str(ip).casefold() for ip in ips)}
+                for candidate_key,candidate in merged.items():
+                    hosts={str(candidate.get("hostname") or "").casefold()}
+                    for endpoint in candidate.get("tailcat_endpoints") or []:
+                        try: hosts.add((urllib.parse.urlparse(str(endpoint)).hostname or "").casefold())
+                        except Exception: pass
+                    if ts_hosts & hosts:
+                        matched_key=candidate_key; break
+                if matched_key is not None:
+                    key=matched_key
                 row=merged.get(key,{"name":name,"tailcat_endpoints":[],"trusted":False})
                 row.update({"dns":dns,"ips":ips,"online":bool(peer.get("Online")),"tailscale":True})
                 # A trusted peer's Tailscale address is a discovery fact, not a new
@@ -2068,7 +2082,8 @@ def _beacon_broadcast(pattern: str = "rgb", lead_pulses: int = 3) -> dict:
     deliveries = [{"node": local, "ok": True, "received_pulse": local_result.get("received_pulse")}]
     for peer in snapshot.get("peers") or []:
         ad = peer.get("node") or {}
-        name = ((ad.get("identity") or {}).get("name") or peer.get("name"))
+        # The paired Fabric label is canonical; transport/DNS labels may change.
+        name = (peer.get("name") or (ad.get("identity") or {}).get("name"))
         if not name:
             continue
         try:
@@ -2321,7 +2336,7 @@ def _local_web_search(query, limit=8):
     base=os.environ.get("FCL_SEARXNG_URL","http://127.0.0.1:8888").rstrip("/")
     request=urllib.request.Request(base+"/search?"+params,headers={
         "Accept":"application/json",
-        "User-Agent":"Future-Crash-Fabric/8.3.14",
+        "User-Agent":"Future-Crash-Fabric/8.3.15",
     })
     try:
         with urllib.request.urlopen(request,timeout=8) as response:
@@ -2474,6 +2489,10 @@ def _fabric_media_catalog(force=False):
         if cached is not None and not force and age < 3.0 and same_local:
             return cached
 
+    # A catalog request is an explicit user action: refresh discovery now instead
+    # of serving a topology snapshot that may predate Tailscale waking up.
+    try: PEERS.refresh()
+    except Exception: pass
     local = _local_media_catalog()
     entries = list(local.get("entries") or [])
     nodes = [{"node": local.get("node"), "count": local.get("count", 0),
@@ -2482,7 +2501,7 @@ def _fabric_media_catalog(force=False):
     snapshot = {"self": node_info(), "peers": PEERS.public()}
     for peer in snapshot.get("peers") or []:
         ad = peer.get("node") or {}
-        name = ((ad.get("identity") or {}).get("name") or peer.get("name"))
+        name = (peer.get("name") or (ad.get("identity") or {}).get("name"))
         if not name:
             continue
         if not ad:
@@ -2492,8 +2511,12 @@ def _fabric_media_catalog(force=False):
             errors.append({"node": name, "error": "peer has no usable transport endpoint"})
             continue
         try:
-            remote = http_json(_remote_url(snapshot, name, "/v1/media/catalog"), timeout=12.0)
+            remote = _peer_json(peer, "/v1/media/catalog", timeout=12.0)
             remote_rows = [dict(row) for row in (remote.get("entries") or []) if isinstance(row, dict)]
+            # Catalog ownership follows stable Fabric peer identity, never a mutable
+            # Tailscale hostname returned by the remote machine.
+            for row in remote_rows:
+                row["node"] = name
             entries.extend(remote_rows)
             nodes.append({"node": name, "count": len(remote_rows),
                           "identified": sum(1 for row in remote_rows if row.get("digest")), "online": True})
@@ -3073,7 +3096,7 @@ def _openjev_shadow(state, question, candidates, *, profile="workspace", consequ
 
 
 class API(BaseHTTPRequestHandler):
-    server_version = "FCLNode/8.3.14"
+    server_version = "FCLNode/8.3.15"
 
     def setup(self):
         self._metric_request_id = None
@@ -4022,6 +4045,17 @@ def _peer_bases(peer):
         value=f"https://{peer['dns']}:7332"
         if value not in out: out.append(value)
     return out
+
+
+def _peer_json(peer, path, timeout=12.0):
+    """Try every authenticated route for a peer; one stale preferred URL must not hide a catalog."""
+    last=None
+    for base in _peer_bases(peer):
+        try:
+            return http_json(base+path, timeout=timeout)
+        except Exception as exc:
+            last=exc
+    raise RuntimeError(str(last or "peer has no reachable endpoint"))
 
 
 def _fabric_route_diagnostics(timeout=2.0):
