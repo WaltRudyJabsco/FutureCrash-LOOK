@@ -1,4 +1,4 @@
-# 8.3.18 — ALBUM ART
+# 8.3.19 — ALBUM ART
 
 - Automatic LOOK inspection is now a bounded thumbnail: narrower and at most 12 ASCII rows / 10 native rows, so selection can never turn the side preview into the dominant surface or cover footer controls. Explicit `V` Preview remains full-size.
 - Adds one shared local media-art resolver. Embedded M4A/MP3/FLAC/etc. cover streams are extracted through optional ffmpeg into `~/.cache/look/media-art`; conventional cover/folder/front/album images remain the fallback.
@@ -1194,3 +1194,7 @@ Signal media output routing is now explicit: browser playback is a local browser
 - Bounded/failure-safe LOOK previews and clean interrupt handling.
 - Zero-touch removable-drive media discovery on every Fabric node.
 - Larger old-school terminal game boards; GTNW behavior frozen.
+
+## 8.3.19 — PACKAGE REPAIR
+- Fixes 8.3.18 installer omission of `media_art.py`, which caused installed `lk` to fail at startup and post-install verification to report `unavailable`.
+- Adds install-manifest regression coverage for LOOK Python module imports.

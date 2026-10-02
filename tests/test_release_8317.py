@@ -5,7 +5,7 @@ SRC=(ROOT/'look/look_renderer.py').read_text()
 LK=(ROOT/'look/lk').read_text()
 
 def test_release_version():
-    assert (ROOT/'VERSION').read_text().strip()=='8.3.18'
+    assert (ROOT/'VERSION').read_text().strip()=='8.3.19'
 
 def test_selected_browse_item_uses_inspection_pane():
     assert 'elif (cursoring or selecting or filtering) and picked:' in SRC
