@@ -489,6 +489,9 @@ class Handler(BaseHTTPRequestHandler):
         params=parse_qs(parsed.query)
         node=str(params.get('node',[''])[0] or '')
         item_id=str(params.get('id',[''])[0] or '')
+        kind=str(params.get('kind',['audio'])[0] or 'audio').casefold()
+        if kind not in {'audio','video'}:
+            return self.send_json(400,{'ok':False,'error':'media kind must be audio or video'})
         if not item_id:
             return self.send_json(400,{'ok':False,'error':'media item id required'})
         token=_media_ticket_issue(node,item_id)

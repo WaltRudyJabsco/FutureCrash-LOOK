@@ -5,7 +5,8 @@ def test_fabric_doctor_is_local_first_and_peer_specific():
     lk=(ROOT/'look/lk').read_text()
     assert 'def _fabric_doctor()' in lk
     assert '127.0.0.1:7332' in lk
-    assert '[exe,"media-catalog","--node",name,"--json"]' in lk
+    assert '"/v1/media/fabric"' in lk
+    assert "errors={str(x.get('node') or '')" in lk
     assert 'if sub in {"doctor","diagnose","debug"}: return _fabric_doctor()' in lk
 
 def test_browser_video_daemon_path_and_encoder_fallback():

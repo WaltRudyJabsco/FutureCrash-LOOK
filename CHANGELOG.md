@@ -1,3 +1,10 @@
+# 8.3.6 — GTD
+
+- Fixed Albert video ticket generation: the video/audio kind was referenced before it was parsed.
+- Increased authenticated peer advertisement tolerance for sleeping/waking Macs.
+- Fabric media aggregation now reports trusted/discovered peers whose advertisement is unavailable instead of silently omitting them.
+- Added transport-focused diagnostics/tests around browser video ticket routing and partial Fabric catalogs.
+
 # 8.3.3 — FOLLOW / CHOICE
 
 - Media Find Shift-D now opens an ancestor-directory chooser with affected-item counts; media-root hiding requires explicit confirmation and Shift-U remains reversible.

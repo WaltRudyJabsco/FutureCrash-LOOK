@@ -4,7 +4,7 @@ LK=(ROOT/'look/lk').read_text()
 NODE=(ROOT/'core/node.py').read_text()
 
 def test_fabric_catalog_allows_remote_library_time():
-    assert '"/v1/media/catalog"), timeout=8.0' in NODE
+    assert '"/v1/media/catalog"), timeout=12.0' in NODE
 
 def test_find_surfaces_partial_fabric_state():
     assert 'FABRIC PARTIAL' in LK

@@ -37,4 +37,4 @@ def test_simple_preview_architecture_stays_canonical():
 
 
 def test_release_version():
-    assert (ROOT/'VERSION').read_text().strip()=='8.3.5'
+    assert (ROOT/'VERSION').read_text().strip()=='8.3.6'

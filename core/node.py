@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Future Crash + LOOK Unified Node 8.3.5.
+"""Future Crash + LOOK Unified Node 8.3.6.
 
 A small distributed supervisor for trusted personal machines. Immediate events stay
 asynchronous; a one-second fabric pulse reconciles presence, leases and stale work.
@@ -75,8 +75,8 @@ try:
 except ImportError:
     from attention import normalize_event as normalize_attention_event, plan_voice_targets
 
-VERSION = "8.3.5"
-RELEASE_NAME = "COGNITIVE FABRIC"
+VERSION = "8.3.6"
+RELEASE_NAME = "GTD"
 DEFAULT_HOST = "127.0.0.1"
 DEFAULT_PORT = 7332
 DEFAULT_INGRESS_PORT = 0
@@ -1053,7 +1053,7 @@ class PeerRegistry:
                 last_exc=None; success=None
                 for transport,base in candidates:
                     try:
-                        ad=http_json(base+"/v1/advertisement",timeout=.75)
+                        ad=http_json(base+"/v1/advertisement",timeout=3.0)
                         success=(transport,base,ad); break
                     except Exception as exc:
                         last_exc=exc
@@ -2296,7 +2296,7 @@ def _local_web_search(query, limit=8):
     base=os.environ.get("FCL_SEARXNG_URL","http://127.0.0.1:8888").rstrip("/")
     request=urllib.request.Request(base+"/search?"+params,headers={
         "Accept":"application/json",
-        "User-Agent":"Future-Crash-Fabric/8.3.5",
+        "User-Agent":"Future-Crash-Fabric/8.3.6",
     })
     try:
         with urllib.request.urlopen(request,timeout=8) as response:
@@ -2458,10 +2458,16 @@ def _fabric_media_catalog(force=False):
     for peer in snapshot.get("peers") or []:
         ad = peer.get("node") or {}
         name = ((ad.get("identity") or {}).get("name") or peer.get("name"))
-        if not name or not (peer.get("url") or peer.get("tailcat_endpoints") or peer.get("dns")) or not ad:
+        if not name:
+            continue
+        if not ad:
+            errors.append({"node": name, "error": str(peer.get("node_error") or "peer discovered/trusted but advertisement unavailable")})
+            continue
+        if not (peer.get("url") or peer.get("tailcat_endpoints") or peer.get("dns")):
+            errors.append({"node": name, "error": "peer has no usable transport endpoint"})
             continue
         try:
-            remote = http_json(_remote_url(snapshot, name, "/v1/media/catalog"), timeout=8.0)
+            remote = http_json(_remote_url(snapshot, name, "/v1/media/catalog"), timeout=12.0)
             remote_rows = [dict(row) for row in (remote.get("entries") or []) if isinstance(row, dict)]
             entries.extend(remote_rows)
             nodes.append({"node": name, "count": len(remote_rows),
@@ -3042,7 +3048,7 @@ def _openjev_shadow(state, question, candidates, *, profile="workspace", consequ
 
 
 class API(BaseHTTPRequestHandler):
-    server_version = "FCLNode/8.3.5"
+    server_version = "FCLNode/8.3.6"
 
     def setup(self):
         self._metric_request_id = None

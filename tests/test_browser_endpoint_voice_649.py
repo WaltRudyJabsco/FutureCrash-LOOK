@@ -39,7 +39,7 @@ def test_surfaces_advertise_and_execute_browser_speech():
 
 
 def test_release_649_contract():
-    assert (ROOT/'VERSION').read_text().strip()=='8.3.5'
+    assert (ROOT/'VERSION').read_text().strip()=='8.3.6'
     node=(ROOT/'core/node.py').read_text()
-    assert 'VERSION = "8.3.5"' in node
-    assert 'RELEASE_NAME = "COGNITIVE FABRIC"' in node
+    assert 'VERSION = "8.3.6"' in node
+    assert 'RELEASE_NAME = "GTD"' in node
