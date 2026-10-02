@@ -6,7 +6,7 @@ ROOT = Path(__file__).resolve().parents[1]
 def test_signal_catalog_id_beats_digest_and_uses_ticket():
     js = (ROOT / 'signal-window/app.js').read_text()
     assert "const itemId=String(entry?.id||'')" in js
-    assert "if(itemId){qs=new URLSearchParams({kind:'audio'" in js
+    assert "if(itemId){qs=new URLSearchParams({kind:browserIsVideo(entry)?'video':'audio'" in js
     assert "else if(digest){qs=new URLSearchParams({kind:'artifact'" in js
     assert "fetch('/api/media/ticket?'" in js
     assert 'browserElement.src=await browserMediaUrl(entry,index)' in js
@@ -23,7 +23,7 @@ def test_signal_media_ticket_is_scoped_and_does_not_make_media_public():
 def test_albert_catalog_media_uses_ticketed_item_url():
     py = (ROOT / 'albert/server.py').read_text()
     assert "item_id=str(first.get('id') or '')" in py
-    assert '"media":{"node":media_node,"id":item_id,"index":0}' in py
+    assert 'return _albert_media_fold(queue,query)' in py
     assert "if path=='/api/media/ticket': return self._media_ticket_request(urlparse(self.path))" in py
     assert "not _media_ticket_valid(ticket,node,item_id) and not self._require_endpoint('lo.use')" in py
 

@@ -3,7 +3,7 @@ ROOT=Path(__file__).resolve().parents[1]
 
 def test_media_logical_view_and_visibility_controls_are_shipped():
     s=(ROOT/'look'/'lk').read_text()
-    for token in ('def _media_collapse(', 'source_count', 'ALL SOURCES', 'hidden_trees', 'hidden_paths', 'V sources', 'H hidden', 'X hide', 'D hide tree'):
+    for token in ('def _media_collapse(', 'source_count', 'ALL SOURCES', 'hidden_trees', 'hidden_paths', 'V sources', 'H hidden', 'X hide', 'D hide by directory'):
         assert token in s
 
 def test_large_game_sprites_and_red_blue_vocabulary():

@@ -25,7 +25,7 @@ def test_signal_output_selector_lives_on_media_card_and_routes_media():
     assert "target:nodeTarget(row.node)" in js
     assert '/api/media/outputs' in js
     assert '/api/media/move' in js
-    assert "kind:'audio'" in js
+    assert "kind:browserIsVideo(entry)?'video':'audio'" in js
     assert "fetch('/api/media/ticket?'" in js
     assert 'media_node:mediaNode' in js
     assert '/v1/media/route' in server

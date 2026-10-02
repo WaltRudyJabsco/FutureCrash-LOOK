@@ -1,3 +1,12 @@
+# 8.3.3 — FOLLOW / CHOICE
+
+- Media Find Shift-D now opens an ancestor-directory chooser with affected-item counts; media-root hiding requires explicit confirmation and Shift-U remains reversible.
+- Media Find supports LOOK modern navigation and caches its 100k-row logical view instead of rebuilding/statting paths on every arrow press.
+- LOOK browse/filter/select now follows the focused row inside the real sticky-header viewport.
+- Fabric browser video uses an on-demand cached H.264/AAC MP4 representation when the original container/codec is not browser-safe; originals remain authoritative and untouched.
+- Albert and Signal request browser video representations while retaining ticketed Range delivery.
+- Albert broad video requests offer three choices plus Surprise me and retain pending choice state for numeric replies.
+
 # 8.3.1 — MEDIA MEMORY
 
 - Media Find Shift-D now hides only the selected item’s immediate parent directory; Shift-U removes the applicable item/directory visibility rule. Info reports the rule hiding an item.

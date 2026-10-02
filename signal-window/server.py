@@ -835,10 +835,10 @@ def _proxy_artifact(handler,node,digest,*,head=False):
             handler.send_response(502); handler.send_header("Content-Length","0"); handler.end_headers()
         else: handler.json(502,{"error":str(exc)})
 
-def _proxy_media_audio(handler,node,index=0,*,item_id="",head=False):
+def _proxy_media_audio(handler,node,index=0,*,item_id="",head=False,browser=False):
     if item_id:
         query="?node="+quote(str(node or ""),safe="")+"&id="+quote(str(item_id),safe="")
-        path="/v1/media/item"
+        path="/v1/media/browser" if browser else "/v1/media/item"
     else:
         query="?node="+quote(str(node or ""),safe="")+"&index="+str(int(index))
         path="/v1/media/audio"
@@ -846,7 +846,7 @@ def _proxy_media_audio(handler,node,index=0,*,item_id="",head=False):
     if handler.headers.get("Range"):
         req.add_header("Range",handler.headers.get("Range"))
     try:
-        with urllib.request.urlopen(req,timeout=12.0) as r:
+        with urllib.request.urlopen(req,timeout=1800.0 if browser else 12.0) as r:
             handler.send_response(getattr(r,"status",200))
             for key in ("Content-Type","Content-Length","Accept-Ranges","Content-Range","Cache-Control"):
                 value=r.headers.get(key)
@@ -994,10 +994,11 @@ class App(BaseHTTPRequestHandler):
         digest=str((q.get("digest") or [""])[0])
         try: index=int((q.get("index") or [0])[0] or 0)
         except Exception: index=0
-        if kind=="audio" and item_id:
-            key=_media_ticket_key("audio",node,item_id,"",index)
+        if kind in {"audio","video"} and item_id:
+            key=_media_ticket_key(kind,node,item_id,"",index)
             token=_media_ticket_issue(key)
-            url="/api/media/audio?"+urllib.parse.urlencode({"node":node,"id":item_id,"index":index,"ticket":token})
+            route="/api/media/browser" if kind=="video" else "/api/media/audio"
+            url=route+"?"+urllib.parse.urlencode({"node":node,"id":item_id,"index":index,"ticket":token})
             return self.json(200,{"ok":True,"url":url,"expires_in":_MEDIA_TICKET_TTL})
         if kind=="artifact" and digest:
             key=_media_ticket_key("artifact",node,"",digest,0)
@@ -1008,11 +1009,12 @@ class App(BaseHTTPRequestHandler):
 
     def _media_ticket_allows(self, parsed):
         q=parse_qs(parsed.query); token=str((q.get("ticket") or [""])[0])
-        if parsed.path=="/api/media/audio":
+        if parsed.path in {"/api/media/audio","/api/media/browser"}:
             node=str((q.get("node") or [""])[0]); item_id=str((q.get("id") or [""])[0])
             try: index=int((q.get("index") or [0])[0] or 0)
             except Exception: index=0
-            return _media_ticket_valid(token,_media_ticket_key("audio",node,item_id,"",index))
+            kind="video" if parsed.path=="/api/media/browser" else "audio"
+            return _media_ticket_valid(token,_media_ticket_key(kind,node,item_id,"",index))
         if parsed.path=="/api/artifact":
             node=str((q.get("node") or [""])[0]); digest=str((q.get("digest") or [""])[0])
             return _media_ticket_valid(token,_media_ticket_key("artifact",node,"",digest,0))
@@ -1024,11 +1026,11 @@ class App(BaseHTTPRequestHandler):
         if parsed.path=="/api/artifact":
             q=parse_qs(parsed.query); node=str((q.get("node") or [""])[0]); digest=str((q.get("digest") or [""])[0])
             return _proxy_artifact(self,node,digest,head=True)
-        if parsed.path=="/api/media/audio":
+        if parsed.path in {"/api/media/audio","/api/media/browser"}:
             q=parse_qs(parsed.query); node=str((q.get("node") or [""])[0]); item_id=str((q.get("id") or [""])[0])
             try: index=int((q.get("index") or [0])[0] or 0)
             except Exception: index=0
-            return _proxy_media_audio(self,node,index,item_id=item_id,head=True)
+            return _proxy_media_audio(self,node,index,item_id=item_id,head=True,browser=(parsed.path=="/api/media/browser"))
         self.send_response(404); self.send_header("Content-Length","0"); self.end_headers()
 
     def do_GET(self):
@@ -1065,11 +1067,11 @@ class App(BaseHTTPRequestHandler):
         if self.path.startswith("/api/artifact"):
             q=parse_qs(urlparse(self.path).query); node=str((q.get("node") or [""])[0]); digest=str((q.get("digest") or [""])[0])
             return _proxy_artifact(self,node,digest)
-        if self.path.startswith("/api/media/audio"):
-            q=parse_qs(urlparse(self.path).query); node=str((q.get("node") or [""])[0]); item_id=str((q.get("id") or [""])[0])
+        if self.path.startswith("/api/media/audio") or self.path.startswith("/api/media/browser"):
+            parsed=urlparse(self.path); q=parse_qs(parsed.query); node=str((q.get("node") or [""])[0]); item_id=str((q.get("id") or [""])[0])
             try: index=int((q.get("index") or [0])[0] or 0)
             except Exception: index=0
-            return _proxy_media_audio(self,node,index,item_id=item_id)
+            return _proxy_media_audio(self,node,index,item_id=item_id,browser=(parsed.path=="/api/media/browser"))
         if self.path.startswith("/api/media/outputs"):
             return self.json(200,_media_outputs())
         if self.path=="/api/media":

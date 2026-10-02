@@ -15,7 +15,7 @@ def test_shift_u_removes_visibility_rule_and_info_explains_rule():
     assert 'def _media_unhide(rows):' in LK
     assert 'if key=="U" and chosen:' in LK
     assert 'Hidden by' in LK
-    assert 'D hide tree (dir) · U unhide' in LK
+    assert 'D hide by directory · U unhide' in LK
 
 def test_tic_tac_toe_uses_large_sprites_and_red_blue_turns():
     block=GAMES.split('def render_ttt',1)[1].split('def play_ttt',1)[0]

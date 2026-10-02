@@ -9930,7 +9930,7 @@ def _direct_searxng_search(query, limit=8):
     params=urllib.parse.urlencode({"q":query,"format":"json"})
     request=urllib.request.Request(base+"/search?"+params,headers={
         "Accept":"application/json",
-        "User-Agent":"Future-Crash-Fabric/8.3.1",
+        "User-Agent":"Future-Crash-Fabric/8.3.3",
     })
     with urllib.request.urlopen(request,timeout=12) as response:
         data=json.load(response)
@@ -12549,6 +12549,12 @@ def _read_tty_key(fd, timeout=None):
         b"\x1b[D":"left",
         b"\x1b[5~":"pageup",
         b"\x1b[6~":"pagedown",
+        b"\x1b[1;2A":"shiftup",
+        b"\x1b[1;2B":"shiftdown",
+        b"\x1b[1;2C":"shiftright",
+        b"\x1b[1;2D":"shiftleft",
+        b"\x1b[H":"home", b"\x1b[1~":"home",
+        b"\x1b[F":"end", b"\x1b[4~":"end",
     }.get(bytes(seq),"esc")
 
 
@@ -16589,11 +16595,65 @@ def _media_collapse(rows, show_all=False, show_hidden=False):
     if show_all: return list(groups.values())
     out=[]
     for bucket in groups.values():
-        # Prefer a visible source and a path that exists locally; preserve all provenance.
-        bucket.sort(key=lambda r:(bool(r.get("hidden")), not Path(str(r.get("path") or "")).exists(), str(r.get("path") or "").casefold()))
+        # Catalog collapse must be pure metadata work. Playback resolves reachability.
+        bucket.sort(key=lambda r:(bool(r.get("hidden")), str(r.get("path") or "").casefold()))
         row=dict(bucket[0]); row["sources"]=bucket; row["source_count"]=len(bucket); out.append(row)
     return out
 
+
+def _media_tree_candidates(row, rows):
+    """Selectable ancestors, nearest first, with affected catalog-location counts."""
+    path=str(row.get("path") or "")
+    if not path: return []
+    parent=Path(path).parent
+    root_text=str(row.get("root") or "").rstrip(os.sep)
+    root=Path(root_text) if root_text else None
+    out=[]; seen=set(); current=parent
+    while str(current) not in seen:
+        seen.add(str(current)); prefix=str(current).rstrip(os.sep)+os.sep
+        count=sum(1 for candidate in rows if (cp:=str(candidate.get("path") or ""))==str(current) or cp.startswith(prefix))
+        out.append({"path":str(current),"count":count,"media_root":bool(root and current==root)})
+        if root and current==root: break
+        nxt=current.parent
+        if nxt==current: break
+        current=nxt
+    return out
+
+def _media_choose_hide_directory(row, rows, fd):
+    """Let the human choose the semantic directory boundary instead of guessing it."""
+    choices=_media_tree_candidates(row,rows)
+    if not choices: return None
+    pick=0
+    while True:
+        terminal=shutil.get_terminal_size((110,32)); width=max(56,terminal.columns)
+        sys.stdout.write("\033[2J\033[H")
+        _title("HIDE BY DIRECTORY",Path(str(row.get("path") or "")).name)
+        print(_c("Hide everything under:","2")+"\n")
+        for i,item in enumerate(choices):
+            focus=_c("›","1;36") if i==pick else " "
+            label=item["path"]
+            if len(label)>max(20,width-32): label="…"+label[-max(19,width-33):]
+            root=" · MEDIA ROOT" if item["media_root"] else ""
+            tone="33" if item["media_root"] else "2"
+            print(f"{focus} {label}  {_c(f'{item['count']:,} items{root}',tone)}")
+        print("\n"+_c("↑↓ choose · Enter hide · Esc cancel","2"),end="",flush=True)
+        key=_read_tty_key(fd)
+        if key=="esc": return None
+        if key in {"up","K"}: pick=max(0,pick-1); continue
+        if key in {"down","J"}: pick=min(len(choices)-1,pick+1); continue
+        if key in {"\r","\n"}:
+            chosen=choices[pick]
+            if chosen["media_root"]:
+                sys.stdout.write("\n"+_c(f"MEDIA ROOT · hide all {chosen['count']:,} catalog items here? Y/N","1;31")+" "); sys.stdout.flush()
+                if str(_read_tty_key(fd)).casefold()!="y": continue
+            return chosen
+
+def _media_hide_tree_path(path):
+    rules=_media_visibility(); values=set(rules.get("hidden_trees") or [])
+    value=str(path or "").rstrip(os.sep)
+    if value: values.add(value)
+    rules["hidden_trees"]=sorted(values,key=str.casefold); _media_save_visibility(rules)
+    return bool(value)
 
 def _media_hide(rows, tree=False):
     """Hide exact items or, for tree mode, only each item's immediate parent directory."""
@@ -16654,14 +16714,16 @@ def _media_selector(rows,title="FABRIC MEDIA",initial_query=""):
     show_all=False
     show_hidden=False
     action=("none",None)
+    view_key=None; visible=[]
     try:
         tty.setcbreak(fd)
         while True:
-            # LOOK filter grammar: ordinary terms include; a leading backslash
-            # excludes.  This makes broad catalog searches useful for playlist work,
-            # e.g. `clash \live \remix`.
-            base_rows=_media_filter_rows(rows,query)
-            visible=_media_collapse(base_rows,show_all=show_all,show_hidden=show_hidden)
+            # A 100k-row catalog view changes on query/mode changes, not cursor moves.
+            next_view_key=(query,show_all,show_hidden)
+            if next_view_key != view_key:
+                base_rows=_media_filter_rows(rows,query)
+                visible=_media_collapse(base_rows,show_all=show_all,show_hidden=show_hidden)
+                view_key=next_view_key
             idx=max(0,min(idx,max(0,len(visible)-1)))
             selected_rows=[row for row in rows if row_id(row) in selected_ids]
             terminal=shutil.get_terminal_size((110,32))
@@ -16698,7 +16760,7 @@ def _media_selector(rows,title="FABRIC MEDIA",initial_query=""):
                     print(detail)
 
             filter_text=f"{_c('FILTER','1;36')} {query}█" if query else f"{_c('FILTER','1;36')} █"
-            actions=_c("Tab select · A select all · Enter/P play · Q queue · I info · V sources · H hidden · X hide · D hide tree (dir) · U unhide · Esc exit","2")
+            actions=_c("Tab select · A select all · Enter/P play · Q queue · I info · V sources · H hidden · X hide · D hide by directory · U unhide · Esc exit","2")
             footer=f"{filter_text}  {actions}"
             if notice:
                 footer+="  "+_c(notice,"33")
@@ -16716,10 +16778,14 @@ def _media_selector(rows,title="FABRIC MEDIA",initial_query=""):
                 idx=max(0,idx-1); continue
             if key in {"down","J"} and visible:
                 idx=min(len(visible)-1,idx+1); continue
-            if key=="pageup" and visible:
+            if key in {"pageup","shiftup"} and visible:
                 idx=max(0,idx-usable); continue
-            if key=="pagedown" and visible:
+            if key in {"pagedown","shiftdown"} and visible:
                 idx=min(len(visible)-1,idx+usable); continue
+            if key in {"home","shiftleft"} and visible:
+                idx=0; continue
+            if key in {"end","shiftright"} and visible:
+                idx=len(visible)-1; continue
             if key=="\t" and visible:
                 rid=row_id(visible[idx])
                 if rid in selected_ids:
@@ -16761,12 +16827,15 @@ def _media_selector(rows,title="FABRIC MEDIA",initial_query=""):
             if key=="H":
                 show_hidden=not show_hidden; idx=0; notice="hidden shown" if show_hidden else "hidden suppressed"; continue
             if key=="X" and chosen:
-                notice=f"hidden {_media_hide(chosen)} item(s)"; selected_ids.clear(); continue
-            if key=="D" and chosen:
-                parents={str(Path(str(row.get("path") or "")).parent) for row in chosen if row.get("path")}
-                notice=f"hidden {_media_hide(chosen,tree=True)} item parent(s) · {len(parents)} dir(s)"; selected_ids.clear(); continue
+                notice=f"hidden {_media_hide(chosen)} item(s)"; selected_ids.clear(); view_key=None; continue
+            if key=="D" and visible:
+                picked=_media_choose_hide_directory(visible[idx],rows,fd)
+                if picked and _media_hide_tree_path(picked["path"]):
+                    notice=f"hidden directory · {picked['count']:,} item(s)"; selected_ids.clear(); idx=0; view_key=None
+                else: notice="hide directory cancelled"
+                continue
             if key=="U" and chosen:
-                notice=f"removed {_media_unhide(chosen)} visibility rule(s)"; selected_ids.clear(); continue
+                notice=f"removed {_media_unhide(chosen)} visibility rule(s)"; selected_ids.clear(); view_key=None; continue
 
             # LOOK filter style: ordinary printable characters immediately refine
             # the view. Uppercase letters above are reserved for contextual actions.

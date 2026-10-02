@@ -1289,6 +1289,16 @@ def pager(rows:list[str],height:int,width:int,rebuild=None,browse_rebuild=None,f
             if filtering and filter_context:
                 context_rows=list(filter_context(query,width) or [])[:2]
                 list_usable=max(1,usable-len(context_rows))
+            # Sticky headers shrink the real list viewport. Follow the focus inside it.
+            if matches:
+                if cursoring:
+                    cols=max(1,max(1,width)//max(1,min(38,max((len(p.name)+6 for p in matches),default=1))))
+                    focus_row=selected//cols
+                else:
+                    focus_row=selected
+                if focus_row < top: top=focus_row
+                elif focus_row >= top+list_usable: top=max(0,focus_row-list_usable+1)
+                top=max(0,min(top,max(0,len(current)-list_usable)))
             page=current[top:top+list_usable]
             native_preview.frame_cleared()
             sys.stdout.write(CLEAR)

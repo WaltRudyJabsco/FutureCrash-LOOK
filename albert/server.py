@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 """Albert 5: quiet browser surface for the local Future Crash Fabric."""
 from __future__ import annotations
-import json, mimetypes, os, urllib.request, urllib.error, importlib.util, threading, time, hashlib, re, sys, secrets
+import json, mimetypes, os, random, urllib.request, urllib.error, importlib.util, threading, time, hashlib, re, sys, secrets
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
 from urllib.parse import urlparse, unquote, urlencode, parse_qs, quote
@@ -21,6 +21,8 @@ PENDING_COOKIE="fcl_pending"
 _MEDIA_TICKETS={}
 _MEDIA_TICKET_LOCK=threading.Lock()
 _MEDIA_TICKET_TTL=600
+_PENDING_CHOICES={}
+_PENDING_CHOICES_LOCK=threading.Lock()
 
 def _media_ticket_issue(node,item_id):
     token=secrets.token_urlsafe(24); now=time.time(); key=(str(node or ''),str(item_id or ''))
@@ -231,14 +233,14 @@ def node_json(path, payload=None, timeout=1.25):
     with urllib.request.urlopen(req,timeout=timeout) as r: return json.loads(r.read().decode())
 
 
-def _proxy_media_item(handler,node,item_id,*,head=False):
+def _proxy_media_item(handler,node,item_id,*,head=False,browser=False):
     """Browser-safe range proxy for one prepared Fabric media item."""
     query="?node="+quote(str(node or ""),safe="")+"&id="+quote(str(item_id or ""),safe="")
-    req=urllib.request.Request(NODE+"/v1/media/item"+query,method="HEAD" if head else "GET")
+    req=urllib.request.Request(NODE+("/v1/media/browser" if browser else "/v1/media/item")+query,method="HEAD" if head else "GET")
     if handler.headers.get("Range"):
         req.add_header("Range",handler.headers.get("Range"))
     try:
-        with urllib.request.urlopen(req,timeout=12.0) as r:
+        with urllib.request.urlopen(req,timeout=1800.0 if browser else 12.0) as r:
             handler.send_response(getattr(r,"status",200))
             for key in ("Content-Type","Content-Length","Accept-Ranges","Content-Range","Cache-Control"):
                 value=r.headers.get(key)
@@ -291,9 +293,46 @@ def cognition_json(text, session="", selected_paths=None):
     _session_append(sid,text,answer)
     return {"text":answer,"lo_events":list(result.get("events") or []),"provenance":result.get("provenance"),"receipts":list(result.get("receipts") or []),"route":result.get("route")}
 
+def _albert_media_fold(queue, query="media"):
+    queue=list(queue or [])
+    if not queue: return None
+    first=queue[0]; title=first.get("title") or first.get("name") or query
+    media_type=str(first.get("media_type") or "").casefold(); item_id=str(first.get("id") or "")
+    if not item_id: return None
+    video_exts={".mp4",".m4v",".mov",".mkv",".webm",".avi",".wmv",".flv",".vob",".mts",".m2ts",".ts"}
+    result_type="video" if media_type.startswith("video/") or Path(str(first.get("path") or "")).suffix.casefold() in video_exts else "audio"
+    subtitle=" · ".join(x for x in (str(first.get("artist") or ""),str(first.get("album") or "")) if x)
+    return {"type":result_type,"title":title,"subtitle":subtitle,"meta":f"media.play · {len(queue)} item(s)","badge":"live","kind":"things","media":{"node":str(first.get("node") or ""),"id":item_id,"index":0},"queue":queue,"note":f"Fabric media · {len(queue)} resolved item(s)","pipeline":{"intent":"media.play","source":"Fabric media catalog","target":"origin endpoint","effect":"browser playback"}}
+
+def _broad_video_choices(session):
+    try: entries=(node_json('/v1/media/fabric',timeout=4.0).get('entries') or [])
+    except Exception: return []
+    exts={'.mp4','.m4v','.mov','.mkv','.webm','.avi','.wmv','.flv','.vob','.mts','.m2ts','.ts'}
+    videos=[r for r in entries if isinstance(r,dict) and (str(r.get('media_type') or '').startswith('video/') or Path(str(r.get('path') or '')).suffix.casefold() in exts)]
+    random.shuffle(videos); picks=videos[:3]
+    if picks:
+        with _PENDING_CHOICES_LOCK: _PENDING_CHOICES[str(session or 'albert')]=(time.time()+300,videos,picks)
+    return picks
+
 def action(text, session="", context=None):
     context=context or {}
     q=" ".join(str(text or "").strip().split()); low=q.casefold().strip(" .!?")
+    sid=str(session or "albert")
+    with _PENDING_CHOICES_LOCK: pending=_PENDING_CHOICES.get(sid)
+    if pending and pending[0] < time.time():
+        with _PENDING_CHOICES_LOCK: _PENDING_CHOICES.pop(sid,None)
+        pending=None
+    if pending and low in {"1","2","3","r","random","surprise me"}:
+        videos,picks=pending[1],pending[2]
+        row=random.choice(videos) if low in {"r","random","surprise me"} else picks[int(low)-1]
+        with _PENDING_CHOICES_LOCK: _PENDING_CHOICES.pop(sid,None)
+        return _albert_media_fold([row],str(row.get("title") or "video"))
+    if low in {"play a movie","play a video","play any movie","play any video","play some video","play something to watch"}:
+        picks=_broad_video_choices(sid)
+        if picks:
+            choices=[{"label":f"{i+1}  {str(row.get('title') or row.get('name') or Path(str(row.get('path') or '')).name)}","value":str(i+1)} for i,row in enumerate(picks)]
+            choices.append({"label":"R  Surprise me","value":"r"})
+            return {"type":"answer","title":"Pick something to watch","meta":"Fabric media · choice","badge":"choose","kind":"things","text":"I found plenty. Pick one, or let me choose.","clarification":{"choices":choices},"pipeline":{"intent":"media.play","state":"pending choice","target":"origin endpoint"}}
     if low in {"classics","classical","classical music","play classics","play classical","put on classical music"} or "all classical" in low:
         return {"type":"audio","title":"All Classical Radio","subtitle":"Portland · live","meta":"media.play · this endpoint","badge":"live","kind":"things","src":ALL_CLASSICAL,"note":"Fabric built-in · classics","pipeline":{"intent":"media.play","selector":"stream:all-classical","target":"origin endpoint","effect":"local"}}
     if low in {"arts","showcase","play arts"} or "classic arts" in low or "arts showcase" in low:
@@ -341,9 +380,7 @@ def action(text, session="", context=None):
                     # Signal's working browser path acquires a short-lived ticket at
                     # playback time; Albert must do the same so a rendered/re-rendered
                     # fold never depends on an already-issued URL or cookie behavior.
-                    result_type='video' if media_type.startswith('video/') else 'audio'
-                    subtitle=' · '.join(x for x in (str(first.get('artist') or ''),str(first.get('album') or '')) if x)
-                    return {"type":result_type,"title":title,"subtitle":subtitle,"meta":f"media.play · {len(queue)} item(s)","badge":"live","kind":"things","media":{"node":media_node,"id":item_id,"index":0},"queue":queue,"note":f"Fabric media · {len(queue)} resolved item(s)","pipeline":{"intent":"media.play","source":"Fabric media catalog","target":"origin endpoint","effect":"browser playback"}}
+                    return _albert_media_fold(queue,query)
                 return {"type":"answer","title":title,"meta":f"media.prepare · {len(queue)} item(s)","badge":"prepared","kind":"things","text":"Fabric resolved the request, but this item has no stream identity for browser playback.","pipeline":{"intent":"media.play","source":"Fabric media catalog","target":"origin endpoint"}}
         except Exception:
             pass
@@ -455,12 +492,12 @@ class Handler(BaseHTTPRequestHandler):
         if not item_id:
             return self.send_json(400,{'ok':False,'error':'media item id required'})
         token=_media_ticket_issue(node,item_id)
-        url='/api/media/audio?'+urlencode({'node':node,'id':item_id,'ticket':token})
+        url=('/api/media/browser' if kind=='video' else '/api/media/audio')+'?'+urlencode({'node':node,'id':item_id,'ticket':token})
         return self.send_json(200,{'ok':True,'url':url,'expires_in':_MEDIA_TICKET_TTL})
 
     def do_HEAD(self):
         parsed=urlparse(self.path); path=parsed.path
-        if path in {'/api/media/audio','/v1/media/item'}:
+        if path in {'/api/media/audio','/api/media/browser','/v1/media/item'}:
             params=parse_qs(parsed.query)
             node=str(params.get('node',[''])[0] or '')
             item_id=str(params.get('id',[''])[0] or '')
@@ -468,7 +505,7 @@ class Handler(BaseHTTPRequestHandler):
             if not _media_ticket_valid(ticket,node,item_id) and not self._require_endpoint('lo.use'): return
             if not item_id:
                 self.send_response(400); self.send_header('Content-Length','0'); self.end_headers(); return
-            return _proxy_media_item(self,node,item_id,head=True)
+            return _proxy_media_item(self,node,item_id,head=True,browser=(path=='/api/media/browser'))
         self.send_response(404); self.send_header('Content-Length','0'); self.end_headers()
     def do_GET(self):
         path=urlparse(self.path).path
@@ -502,14 +539,14 @@ class Handler(BaseHTTPRequestHandler):
             if not matches: return self.send_error(404)
             target=matches[0]; data=target.read_bytes()
             self.send_response(200); self.send_header('Content-Type',mimetypes.guess_type(target.name)[0] or 'application/octet-stream'); self.send_header('Cache-Control','private, max-age=3600'); self.send_header('Content-Length',str(len(data))); self.end_headers(); self.wfile.write(data); return
-        if path in {'/api/media/audio','/v1/media/item'}:
+        if path in {'/api/media/audio','/api/media/browser','/v1/media/item'}:
             params=parse_qs(urlparse(self.path).query)
             node=str(params.get('node',[''])[0] or '')
             item_id=str(params.get('id',[''])[0] or '')
             ticket=str(params.get('ticket',[''])[0] or '')
             if not _media_ticket_valid(ticket,node,item_id) and not self._require_endpoint('lo.use'): return
             if not item_id: return self.send_json(400,{'ok':False,'error':'media item id required'})
-            return _proxy_media_item(self,node,item_id)
+            return _proxy_media_item(self,node,item_id,browser=(path=='/api/media/browser'))
         rel='index.html' if path in {'/','/index.html'} else path.lstrip('/')
         target=(ROOT/rel).resolve()
         if ROOT not in target.parents and target!=ROOT: return self.send_error(403)

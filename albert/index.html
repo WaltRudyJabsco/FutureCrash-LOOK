@@ -240,7 +240,7 @@ function mediaStep(id,delta){
 async function hydrateFabricMedia(){
   for(const media of document.querySelectorAll('audio[data-media-id],video[data-media-id]')){
     if(media.dataset.mediaReady)return;media.dataset.mediaReady='loading';
-    const qs=new URLSearchParams({node:media.dataset.mediaNode||'',id:media.dataset.mediaId||''});
+    const qs=new URLSearchParams({node:media.dataset.mediaNode||'',id:media.dataset.mediaId||'',kind:media.tagName==='VIDEO'?'video':'audio'});
     try{
       const r=await fetch('/api/media/ticket?'+qs.toString(),{cache:'no-store'});let d={};try{d=await r.json()}catch{}
       if(!r.ok||!d.url)throw new Error(d.error||`media ticket ${r.status}`);

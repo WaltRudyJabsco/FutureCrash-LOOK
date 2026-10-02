@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Future Crash + LOOK Unified Node 8.3.1.
+"""Future Crash + LOOK Unified Node 8.3.3.
 
 A small distributed supervisor for trusted personal machines. Immediate events stay
 asynchronous; a one-second fabric pulse reconciles presence, leases and stale work.
@@ -9,6 +9,7 @@ from __future__ import annotations
 import argparse
 import base64
 import errno
+import hashlib
 import sys
 import faulthandler
 import signal
@@ -74,7 +75,7 @@ try:
 except ImportError:
     from attention import normalize_event as normalize_attention_event, plan_voice_targets
 
-VERSION = "8.3.1"
+VERSION = "8.3.3"
 RELEASE_NAME = "COGNITIVE FABRIC"
 DEFAULT_HOST = "127.0.0.1"
 DEFAULT_PORT = 7332
@@ -2295,7 +2296,7 @@ def _local_web_search(query, limit=8):
     base=os.environ.get("FCL_SEARXNG_URL","http://127.0.0.1:8888").rstrip("/")
     request=urllib.request.Request(base+"/search?"+params,headers={
         "Accept":"application/json",
-        "User-Agent":"Future-Crash-Fabric/8.3.1",
+        "User-Agent":"Future-Crash-Fabric/8.3.3",
     })
     try:
         with urllib.request.urlopen(request,timeout=8) as response:
@@ -3041,7 +3042,7 @@ def _openjev_shadow(state, question, candidates, *, profile="workspace", consequ
 
 
 class API(BaseHTTPRequestHandler):
-    server_version = "FCLNode/8.3.1"
+    server_version = "FCLNode/8.3.3"
 
     def setup(self):
         self._metric_request_id = None
@@ -3159,6 +3160,78 @@ class API(BaseHTTPRequestHandler):
                 chunk=fh.read(min(1024*1024,remaining))
                 if not chunk: break
                 self.wfile.write(chunk); remaining-=len(chunk)
+
+    def _browser_media_source(self, entry_id, path_hint=""):
+        """Return a browser-safe local representation; never mutate the source."""
+        row,source=_local_media_entry(entry_id,path_hint)
+        media_type=str(row.get("media_type") or mimetypes.guess_type(str(source))[0] or "application/octet-stream")
+        video_exts={".mov",".avi",".mkv",".wmv",".flv",".mts",".m2ts",".vob",".ts",".mp4",".m4v",".webm"}
+        if not (media_type.startswith("video/") or source.suffix.casefold() in video_exts): return source,media_type
+        ffmpeg=shutil.which("ffmpeg"); ffprobe=shutil.which("ffprobe")
+        if not ffmpeg: return source,media_type
+        compatible=False
+        if ffprobe:
+            try:
+                probe=subprocess.run([ffprobe,"-v","error","-show_entries","stream=codec_type,codec_name","-of","json",str(source)],capture_output=True,text=True,timeout=12,check=True)
+                streams=json.loads(probe.stdout or "{}").get("streams") or []
+                video={str(x.get("codec_name") or "") for x in streams if x.get("codec_type")=="video"}
+                audio={str(x.get("codec_name") or "") for x in streams if x.get("codec_type")=="audio"}
+                compatible=source.suffix.casefold() in {".mp4",".m4v"} and video.issubset({"h264"}) and audio.issubset({"aac","mp3"})
+            except Exception: compatible=False
+        if compatible: return source,"video/mp4"
+        cache=Path.home()/".cache"/"future-crash-look"/"browser-media"; cache.mkdir(parents=True,exist_ok=True)
+        stat=source.stat(); key=hashlib.sha256(f"{source}:{stat.st_size}:{stat.st_mtime_ns}".encode()).hexdigest()[:24]
+        target=cache/(key+".mp4")
+        if not target.exists() or target.stat().st_size==0:
+            tmp=target.with_name(key+f".{os.getpid()}.{threading.get_ident()}.tmp.mp4")
+            cmd=[ffmpeg,"-nostdin","-v","error","-y","-i",str(source),"-map","0:v:0","-map","0:a:0?","-c:v","libx264","-preset","veryfast","-crf","21","-pix_fmt","yuv420p","-c:a","aac","-b:a","160k","-movflags","+faststart",str(tmp)]
+            try:
+                subprocess.run(cmd,check=True,timeout=1800); os.replace(tmp,target)
+            finally:
+                try:
+                    if tmp.exists(): tmp.unlink()
+                except OSError: pass
+        return target,"video/mp4"
+
+    def _serve_media_browser(self,target,entry_id,path_hint="",*,head=False):
+        target=str(target or "").strip(); entry_id=str(entry_id or "").strip(); local=identity()["name"]
+        if not entry_id:
+            self.send_response(400); self.send_header("Content-Length","0"); self.end_headers(); return
+        if not target or target==local:
+            try:
+                source,ctype=self._browser_media_source(entry_id,path_hint); return self._serve_file_range(source,ctype,head=head)
+            except Exception as exc:
+                if head: self.send_response(415); self.send_header("Content-Length","0"); self.end_headers(); return
+                return self.sendj(415,{"error":f"browser media unavailable: {exc}"})
+        snapshot={"self":node_info(),"peers":PEERS.public()}
+        try:
+            peer=_peer_for_target(snapshot,target); last_exc=None
+            for base in _peer_bases(peer):
+                url=base+"/v1/media/browser?"+urllib.parse.urlencode({"id":entry_id,"path":path_hint})
+                headers=FABRIC_IDENTITY.auth_headers_for_url(url)
+                if self.headers.get("Range"): headers["Range"]=self.headers.get("Range")
+                req=urllib.request.Request(url,headers=headers,method="HEAD" if head else "GET")
+                context=FABRIC_IDENTITY.ssl_context_for_url(url) if url.lower().startswith("https://") else None
+                try:
+                    kwargs={"timeout":1800.0}
+                    if context is not None: kwargs["context"]=context
+                    with urllib.request.urlopen(req,**kwargs) as r:
+                        self.send_response(getattr(r,"status",200))
+                        for key in ("Content-Type","Content-Length","Accept-Ranges","Content-Range","Cache-Control"):
+                            value=r.headers.get(key)
+                            if value: self.send_header(key,value)
+                        self.end_headers()
+                        if not head:
+                            while True:
+                                chunk=r.read(256*1024)
+                                if not chunk: break
+                                self.wfile.write(chunk)
+                        return
+                except Exception as exc: last_exc=exc
+            raise RuntimeError(f"browser media transport failed: {last_exc}")
+        except Exception as exc:
+            if head: self.send_response(502); self.send_header("Content-Length","0"); self.end_headers(); return
+            return self.sendj(502,{"error":str(exc)})
 
     def _serve_media_item(self,target,entry_id,path_hint="",*,head=False):
         """Serve one catalog item by owner+entry id without requiring SHA promotion.
@@ -3313,6 +3386,9 @@ class API(BaseHTTPRequestHandler):
         if path == "/v1/media/item":
             q=parse_qs(parsed.query); target=str((q.get("node") or [""])[0]); entry_id=str((q.get("id") or [""])[0]); path_hint=str((q.get("path") or [""])[0])
             return self._serve_media_item(target,entry_id,path_hint,head=True)
+        if path == "/v1/media/browser":
+            q=parse_qs(parsed.query); target=str((q.get("node") or [""])[0]); entry_id=str((q.get("id") or [""])[0]); path_hint=str((q.get("path") or [""])[0])
+            return self._serve_media_browser(target,entry_id,path_hint,head=True)
         if path == "/v1/media/audio":
             q=parse_qs(parsed.query); target=str((q.get("node") or [""])[0]); index=int((q.get("index") or [0])[0] or 0)
             return self._serve_media_audio(target,index,head=True)
@@ -3462,6 +3538,9 @@ class API(BaseHTTPRequestHandler):
         if path == "/v1/media/item":
             q=parse_qs(urlparse(self.path).query); target=str((q.get("node") or [""])[0]); entry_id=str((q.get("id") or [""])[0]); path_hint=str((q.get("path") or [""])[0])
             return self._serve_media_item(target,entry_id,path_hint)
+        if path == "/v1/media/browser":
+            q=parse_qs(urlparse(self.path).query); target=str((q.get("node") or [""])[0]); entry_id=str((q.get("id") or [""])[0]); path_hint=str((q.get("path") or [""])[0])
+            return self._serve_media_browser(target,entry_id,path_hint)
         if path == "/v1/media/audio":
             q=parse_qs(urlparse(self.path).query); target=str((q.get("node") or [""])[0])
             try: index=int((q.get("index") or [0])[0] or 0)

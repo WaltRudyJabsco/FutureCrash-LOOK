@@ -5,7 +5,7 @@ ROOT=Path(__file__).resolve().parents[1]
 
 def test_albert_ask_returns_durable_media_identity_not_ephemeral_ticket():
     server=(ROOT/'albert/server.py').read_text()
-    assert '"media":{"node":media_node,"id":item_id,"index":0}' in server
+    assert 'return _albert_media_fold(queue,query)' in server
     action_block=server[server.index("if shared_intent!=\"games\""):server.index("# Anything not handled", server.index("if shared_intent!=\"games\""))]
     assert "ticket=_media_ticket_issue(media_node,item_id)" not in action_block
     assert "src='/api/media/audio?'" not in action_block

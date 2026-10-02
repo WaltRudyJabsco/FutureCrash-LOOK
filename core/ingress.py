@@ -26,7 +26,7 @@ try:
 except ImportError:
     from fabric_identity import FabricIdentity
 
-VERSION = "8.3.1"
+VERSION = "8.3.3"
 DEFAULT_HOST = "127.0.0.1"
 DEFAULT_PORT = 7333
 DEFAULT_BACKEND_HOST = "127.0.0.1"
@@ -47,7 +47,7 @@ HOP_HEADERS = {
 def _is_stream_path(path: str) -> bool:
     """Routes whose response bytes must never be buffered by the guard."""
     return (
-        path in {"/v1/infer/stream", "/v1/media/audio", "/v1/media/item", "/v1/media/artifact"}
+        path in {"/v1/infer/stream", "/v1/media/audio", "/v1/media/item", "/v1/media/browser", "/v1/media/artifact"}
         or path.startswith("/v1/artifacts/")
     )
 
@@ -181,7 +181,7 @@ class GuardServer(ThreadingHTTPServer):
 
 
 class Handler(BaseHTTPRequestHandler):
-    server_version = "FCLIngress/8.3.1"
+    server_version = "FCLIngress/8.3.3"
     protocol_version = "HTTP/1.0"  # response EOF is the stream boundary; no keep-alive pool.
 
     def log_message(self, *args):
