@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Future Crash + LOOK Unified Node 8.3.15.
+"""Future Crash + LOOK Unified Node 8.3.16.
 
 A small distributed supervisor for trusted personal machines. Immediate events stay
 asynchronous; a one-second fabric pulse reconciles presence, leases and stale work.
@@ -75,7 +75,7 @@ try:
 except ImportError:
     from attention import normalize_event as normalize_attention_event, plan_voice_targets
 
-VERSION = "8.3.15"
+VERSION = "8.3.16"
 RELEASE_NAME = "GTD"
 DEFAULT_HOST = "127.0.0.1"
 DEFAULT_PORT = 7332
@@ -2336,7 +2336,7 @@ def _local_web_search(query, limit=8):
     base=os.environ.get("FCL_SEARXNG_URL","http://127.0.0.1:8888").rstrip("/")
     request=urllib.request.Request(base+"/search?"+params,headers={
         "Accept":"application/json",
-        "User-Agent":"Future-Crash-Fabric/8.3.15",
+        "User-Agent":"Future-Crash-Fabric/8.3.16",
     })
     try:
         with urllib.request.urlopen(request,timeout=8) as response:
@@ -3096,7 +3096,7 @@ def _openjev_shadow(state, question, candidates, *, profile="workspace", consequ
 
 
 class API(BaseHTTPRequestHandler):
-    server_version = "FCLNode/8.3.15"
+    server_version = "FCLNode/8.3.16"
 
     def setup(self):
         self._metric_request_id = None
@@ -3957,9 +3957,9 @@ def _daemon_url(host: str, port: int, path: str) -> str:
     return f"http://{host}:{port}{path}"
 
 
-def _daemon_get(host: str, port: int, path: str):
+def _daemon_get(host: str, port: int, path: str, timeout=2.5):
     try:
-        return http_json(_daemon_url(host, port, path), timeout=2.5)
+        return http_json(_daemon_url(host, port, path), timeout=timeout)
     except Exception as exc:
         raise RuntimeError(
             f"Unified Node is not reachable at {host}:{port}. "
@@ -5580,7 +5580,7 @@ def main():
                     for row in payload.get("nodes") or []: print(f"  {str(row.get('node') or '?'):<20} {int(row.get('count') or 0):>9,} files")
                 return 0
             if a.command=="media-catalog":
-                payload = _target_get(a.host, a.port, a.node, "/v1/media/catalog") if a.node else _daemon_get(a.host, a.port, "/v1/media/fabric")
+                payload = _target_get(a.host, a.port, a.node, "/v1/media/catalog") if a.node else _daemon_get(a.host, a.port, "/v1/media/fabric", timeout=45.0)
                 if a.json:
                     print(json.dumps(payload, indent=2))
                 else:
