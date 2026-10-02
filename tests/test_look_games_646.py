@@ -22,7 +22,7 @@ def test_board_renderers_are_visually_structured(capsys):
     bg=capsys.readouterr().out
     assert '┌' in bg and '└' in bg and '│BAR│' in bg
     assert '○' in bg and '●' in bg
-    assert 'OFF  WHITE:' in bg and 'DICE' in bg
+    assert 'OFF  BLUE:' in bg and 'DICE' in bg
 
 
 def test_game_footer_and_menu_return_contract():

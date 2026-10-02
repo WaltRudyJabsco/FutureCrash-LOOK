@@ -1,3 +1,9 @@
+# 8.3.1 — MEDIA MEMORY
+
+- Media Find Shift-D now hides only the selected item’s immediate parent directory; Shift-U removes the applicable item/directory visibility rule. Info reports the rule hiding an item.
+- Tic-Tac-Toe gains large red/blue terminal sprites; Backgammon adopts the red/blue game language; GTNW scales its existing renderer to larger terminals without changing simulation behavior.
+- Albert now hydrates Fabric video items through the same ticketed Range-capable browser path as audio, including video queues. Signal’s existing browser video path is regression-tested.
+
 # 8.2.1 — INSTRUMENT PANEL
 
 - Visible removable-media scan state in Media Library and Dash.

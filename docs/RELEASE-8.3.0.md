@@ -1,4 +1,4 @@
-# 8.3.0 — LIVING FABRIC
+# 8.3.1 — LIVING FABRIC
 
 - Media Find defaults to logical media: equivalent physical sources collapse into one row while provenance remains intact.
 - `V` toggles all physical sources; `H` toggles hidden media; `X` hides selected paths; `D` hides selected source trees.

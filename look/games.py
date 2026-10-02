@@ -211,11 +211,20 @@ def ttt_ai(board:list[str], player:str) -> int|None:
 
 
 def render_ttt(board, mode, turn, notice=""):
-    def c(i): return (BRIGHT+board[i]+RESET) if board[i] else str(i+1)
-    rows=[f"        {c(0)}   │   {c(1)}   │   {c(2)}", "      ──────┼───────┼──────",
-          f"        {c(3)}   │   {c(4)}   │   {c(5)}", "      ──────┼───────┼──────",
-          f"        {c(6)}   │   {c(7)}   │   {c(8)}"]
-    sys.stdout.write("\n".join(chrome("Tic-Tac-Toe",mode,f"TURN {turn}",notice)+rows+["",footer(mode)])); sys.stdout.flush()
+    # Three-line sprites make the smallest game use the terminal like a game board.
+    x=["██   ██","  ███  ","██   ██"]
+    o=[" █████ ","██   ██"," █████ "]
+    blank=["       ","       ","       "]
+    def sprite(i):
+        if board[i]=="X": return [BRIGHT+v+RESET for v in x]
+        if board[i]=="O": return [RED+v+RESET for v in o]
+        n=str(i+1); return ["       ",DIM+f"   {n}   "+RESET,"       "]
+    rows=[]
+    for rank in range(3):
+        cells=[sprite(rank*3+n) for n in range(3)]
+        for line in range(3): rows.append("       "+" │ ".join(cell[line] for cell in cells))
+        if rank<2: rows.append("       "+"─────────┼─────────┼─────────")
+    sys.stdout.write("\n".join(chrome("Tic-Tac-Toe",mode,f"TURN {'BLUE' if turn=='X' else 'RED'}",notice)+rows+["",footer(mode)])); sys.stdout.flush()
 
 
 def play_ttt(mode="1p"):
@@ -703,7 +712,7 @@ def render_bg(g,mode,who,dice,status=""):
     def piece_for(point:int):
         v=g.points[point]
         if v>0: return BRIGHT+"○"+RESET, v
-        if v<0: return CYAN+"●"+RESET, -v
+        if v<0: return RED+"●"+RESET, -v
         return " ", 0
     def stack_row(points, level:int, top_half:bool):
         cells=[]
@@ -727,10 +736,10 @@ def render_bg(g,mode,who,dice,status=""):
     lines += [
         "   └──────────────────┴───┴──────────────────┘",
         "     "+" ".join(f"{p:>2}" for p in bottom[:6])+" │BAR│ "+" ".join(f"{p:>2}" for p in bottom[6:]),
-        f"   OFF  WHITE:{g.off_w:>2}  BLACK:{g.off_b:>2}       DICE  {' '.join('⚄' if d==5 else '⚅' if d==6 else str(d) for d in dice) if dice else '—'}",
+        f"   OFF  BLUE:{g.off_w:>2}  RED:{g.off_b:>2}         DICE  {' '.join('⚄' if d==5 else '⚅' if d==6 else str(d) for d in dice) if dice else '—'}",
         "",footer(mode)
     ]
-    sys.stdout.write("\n".join(chrome("Backgammon",mode,"WHITE" if who=="W" else "BLACK",status)+lines)); sys.stdout.flush()
+    sys.stdout.write("\n".join(chrome("Backgammon",mode,"BLUE" if who=="W" else "RED",status)+lines)); sys.stdout.flush()
 
 
 def play_backgammon(mode="1p"):

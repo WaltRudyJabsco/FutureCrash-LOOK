@@ -9930,7 +9930,7 @@ def _direct_searxng_search(query, limit=8):
     params=urllib.parse.urlencode({"q":query,"format":"json"})
     request=urllib.request.Request(base+"/search?"+params,headers={
         "Accept":"application/json",
-        "User-Agent":"Future-Crash-Fabric/8.3.0",
+        "User-Agent":"Future-Crash-Fabric/8.3.1",
     })
     with urllib.request.urlopen(request,timeout=12) as response:
         data=json.load(response)
@@ -14980,11 +14980,15 @@ _GTNW_MAP=(
 
 
 def _gtnw_canvas(width=74,height=22):
+    """Scale the old WOPR map to the available terminal while preserving its shape."""
+    base_w=74; base_h=22
     grid=[list(" "*width) for _ in range(height)]
+    sx=max(1.0,width/base_w); sy=max(1.0,height/base_h)
     for y,line in enumerate(_GTNW_MAP):
-        if y+3>=height: break
-        for x,ch in enumerate(line[:width]):
-            if ch!=" ": grid[y+3][x]=ch
+        yy=min(height-1,int(round((y+3)*sy)))
+        for x,ch in enumerate(line[:base_w]):
+            if ch!=" ":
+                xx=min(width-1,int(round(x*sx))); grid[yy][xx]=ch
     return grid
 
 
@@ -15003,7 +15007,10 @@ def _gtnw_arc(start,end,steps=22,bend=None):
 
 def _gtnw_render(arcs, frame, sim_no, speed, outcome=None):
     blue="\033[38;5;45m"; red="\033[38;5;196m"; dim="\033[38;5;31m"; white="\033[1;38;5;255m"; reset="\033[0m"
-    grid=_gtnw_canvas()
+    terminal=shutil.get_terminal_size((80,32))
+    canvas_w=max(74,min(118,terminal.columns-2)); canvas_h=max(22,min(32,terminal.lines-9))
+    grid=_gtnw_canvas(canvas_w,canvas_h)
+    sx=canvas_w/74; sy=canvas_h/22
     us_launch=ru_launch=us_impact=ru_impact=0
     for side,pts,delay in arcs:
         age=frame-delay
@@ -15015,6 +15022,7 @@ def _gtnw_render(arcs, frame, sim_no, speed, outcome=None):
             if side=="US": ru_impact+=1
             else: us_impact+=1
         for j,(x,y) in enumerate(pts[:upto]):
+            x=int(round(x*sx)); y=int(round(y*sy))
             if 0<=y<len(grid) and 0<=x<len(grid[y]):
                 marker="•" if j==upto-1 and upto<len(pts) else "."
                 grid[y][x]=(blue+marker+reset) if side=="US" else (red+marker+reset)
@@ -16506,7 +16514,11 @@ def _media_detail_lines(row, width=110):
         lines.append(f"Sources    {len(sources)} physical copies")
         for src in sources[:5]:
             lines.append((f"  {src.get('node') or 'local'} · {src.get('path') or '—'}")[:max(20,width-2)])
-    if row.get("hidden"): lines.append("Visibility HIDDEN")
+    if row.get("hidden"):
+        rules=_media_visibility(); path=str(row.get("path") or "")
+        cause=next((root for root in sorted(rules.get("hidden_trees") or [],key=len,reverse=True) if path==str(root).rstrip(os.sep) or path.startswith(str(root).rstrip(os.sep)+os.sep)),"")
+        lines.append("Visibility HIDDEN")
+        lines.append(("Hidden by  "+(f"directory · {cause}" if cause else "item rule"))[:max(20,width-2)])
     return lines
 
 
@@ -16584,12 +16596,31 @@ def _media_collapse(rows, show_all=False, show_hidden=False):
 
 
 def _media_hide(rows, tree=False):
+    """Hide exact items or, for tree mode, only each item's immediate parent directory."""
     rules=_media_visibility(); key="hidden_trees" if tree else "hidden_paths"; values=set(rules.get(key) or [])
     for row in rows:
-        value=str(row.get("root") if tree else row.get("path") or "")
+        path=str(row.get("path") or "")
+        value=str(Path(path).parent) if tree and path else path
         if value: values.add(value)
     rules[key]=sorted(values,key=str.casefold); _media_save_visibility(rules)
     return len(rows)
+
+
+def _media_unhide(rows):
+    """Remove the exact item rule or nearest directory rule hiding each row."""
+    rules=_media_visibility(); paths=set(rules.get("hidden_paths") or []); trees=set(rules.get("hidden_trees") or [])
+    removed=0
+    for row in rows:
+        path=str(row.get("path") or "")
+        if path in paths:
+            paths.remove(path); removed+=1
+        matches=[root for root in trees if path==str(root).rstrip(os.sep) or path.startswith(str(root).rstrip(os.sep)+os.sep)]
+        if matches:
+            # The most specific matching rule is the one a user looking at this item means to undo.
+            root=max(matches,key=len); trees.remove(root); removed+=1
+    rules["hidden_paths"]=sorted(paths,key=str.casefold); rules["hidden_trees"]=sorted(trees,key=str.casefold)
+    _media_save_visibility(rules)
+    return removed
 
 def _media_selector(rows,title="FABRIC MEDIA",initial_query=""):
     """LOOK filter semantics over Fabric media rows, with media-specific actions.
@@ -16667,7 +16698,7 @@ def _media_selector(rows,title="FABRIC MEDIA",initial_query=""):
                     print(detail)
 
             filter_text=f"{_c('FILTER','1;36')} {query}█" if query else f"{_c('FILTER','1;36')} █"
-            actions=_c("Tab select · A select all · Enter/P play · Q queue · I info · V sources · H hidden · X hide · D hide tree · Esc exit","2")
+            actions=_c("Tab select · A select all · Enter/P play · Q queue · I info · V sources · H hidden · X hide · D hide tree (dir) · U unhide · Esc exit","2")
             footer=f"{filter_text}  {actions}"
             if notice:
                 footer+="  "+_c(notice,"33")
@@ -16732,7 +16763,10 @@ def _media_selector(rows,title="FABRIC MEDIA",initial_query=""):
             if key=="X" and chosen:
                 notice=f"hidden {_media_hide(chosen)} item(s)"; selected_ids.clear(); continue
             if key=="D" and chosen:
-                notice=f"hidden {_media_hide(chosen,tree=True)} root/tree(s)"; selected_ids.clear(); continue
+                parents={str(Path(str(row.get("path") or "")).parent) for row in chosen if row.get("path")}
+                notice=f"hidden {_media_hide(chosen,tree=True)} item parent(s) · {len(parents)} dir(s)"; selected_ids.clear(); continue
+            if key=="U" and chosen:
+                notice=f"removed {_media_unhide(chosen)} visibility rule(s)"; selected_ids.clear(); continue
 
             # LOOK filter style: ordinary printable characters immediately refine
             # the view. Uppercase letters above are reserved for contextual actions.

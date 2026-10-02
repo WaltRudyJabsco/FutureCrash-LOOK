@@ -30,5 +30,5 @@ def test_games_are_large_terminal_boards_and_gtnw_logic_not_rewritten():
     src=Path('look/games.py').read_text()
     assert 'sprites={' in src and '██████' in src
     assert '" ▄●▄  "' in src
-    assert '──────┼───────┼──────' in src
+    assert '─────────┼─────────┼─────────' in src
     assert 'if game=="gtnw"' in src and 'gtnw_runner' in src
