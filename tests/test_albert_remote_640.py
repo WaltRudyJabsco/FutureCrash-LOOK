@@ -7,8 +7,9 @@ def test_albert_stays_loopback_only():
 
 def test_installer_publishes_albert_over_tailscale_serve():
     installer=(ROOT/'install.sh').read_text()
-    assert 'tailscale serve --bg --https=7330 "$ALBERT_BACKEND"' in installer
-    assert 'ALBERT_BACKEND="http://127.0.0.1:7330"' in installer
+    assert 'core/tailscale_serve.py' in installer
+    helper=(ROOT/'core/tailscale_serve.py').read_text()
+    assert 'Route("Albert", 7330, "http://127.0.0.1:7330")' in helper
 
 def test_node_advertises_albert_urls():
     node=(ROOT/'core/node.py').read_text()

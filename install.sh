@@ -1,15 +1,15 @@
 #!/usr/bin/env bash
 set -euo pipefail
 ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
-echo "Future Crash + LOOK 8.3.13 · ROUTE FIX"
+echo "Future Crash + LOOK 8.3.14 · SERVE OWNER"
 echo "────────────────────────────────────────"
 
 # Refuse a mixed bundle before mutating the machine. A unified release must move
 # LOOK and the node together.
 EXPECTED_RELEASE="$(tr -d '[:space:]' < "$ROOT/VERSION")"
-[[ "$EXPECTED_RELEASE" == "8.3.13" ]] || { echo "BUNDLE ERROR: expected release 8.3.13, found $EXPECTED_RELEASE"; exit 4; }
+[[ "$EXPECTED_RELEASE" == "8.3.14" ]] || { echo "BUNDLE ERROR: expected release 8.3.14, found $EXPECTED_RELEASE"; exit 4; }
 echo "BUNDLE SOURCE  $ROOT"
-echo "BUNDLE RELEASE $EXPECTED_RELEASE · MEDIA SESSION"
+echo "BUNDLE RELEASE $EXPECTED_RELEASE · SERVE OWNER"
 for vf in "$ROOT/look/VERSION" "$ROOT/albert/VERSION" "$ROOT/future-crash/VERSION"; do
   component_version="$(tr -d '[:space:]' < "$vf")"
   [[ "$component_version" == "$EXPECTED_RELEASE" ]] || { echo "BUNDLE ERROR: $vf reports $component_version, expected $EXPECTED_RELEASE"; exit 4; }
@@ -53,7 +53,7 @@ FCL_UNIFIED_INSTALL_CHILD=1 "$ROOT/install-look.sh" "$@"
 ((UNINSTALL)) && exit 0
 if ((DRY_RUN)); then
   echo
-  echo "[dry-run] would install/restart Unified Node 8.3.13 · ROUTE FIX with signed Fabric rendezvous, Tailcat direct transport, ONE BRAIN cognition, LIVING MIND memory, browser endpoints, SearXNG, Media, Artifacts, and Signal Window 1.11.0"
+  echo "[dry-run] would install/restart Unified Node 8.3.14 · SERVE OWNER with signed Fabric rendezvous, Tailcat direct transport, ONE BRAIN cognition, LIVING MIND memory, browser endpoints, SearXNG, Media, Artifacts, and Signal Window 1.11.0"
   echo "[dry-run] OpenJev mode: $OPENJEV_MODE (auto provisions on capable nodes; absence/failure is non-fatal)"
   echo "[dry-run] would initialize Tailcat :7443, install optional signed rendezvous discovery, keep Tailscale :7332 → fcl-ingress :7333 as fallback, and verify Fabric CLI wiring"
   exit 0
@@ -375,33 +375,16 @@ else
   echo "Node installed; start with: fcl-node serve"
 fi
 
-# Keep Tailscale ingress in a different PROCESS, not merely a second socket in the
-# node process. fcl-ingress bounds remote concurrency before relaying to localhost.
-# Public Fabric remains https://<node>:7332; Tailscale targets localhost:7333.
-if command -v tailscale >/dev/null 2>&1; then
-  TAILSCALE_BACKEND="http://127.0.0.1:7333"
-  if tailscale serve --bg --https=7332 "$TAILSCALE_BACKEND" >/dev/null 2>&1; then
-    echo "  Tailscale node API: :7332 → guarded ingress process :7333"
-  elif command -v sudo >/dev/null 2>&1 && sudo -n true >/dev/null 2>&1 && sudo -n tailscale serve --bg --https=7332 "$TAILSCALE_BACKEND" >/dev/null 2>&1; then
-    echo "  Tailscale node API: :7332 → guarded ingress process :7333"
-  else
-    echo "  Tailscale node API: backend could not be reconciled automatically"
-    echo "    run once: sudo tailscale serve --bg --https=7332 http://127.0.0.1:7333"
-  fi
-fi
-
-# Albert remains loopback-only. Tailscale Serve is the remote browser edge, so an
-# iPad on the tailnet can use HTTPS without exposing Albert directly to the LAN.
-if command -v tailscale >/dev/null 2>&1; then
-  ALBERT_BACKEND="http://127.0.0.1:7330"
-  if tailscale serve --bg --https=7330 "$ALBERT_BACKEND" >/dev/null 2>&1; then
-    echo "  Albert tailnet: :7330 → localhost:7330"
-  elif command -v sudo >/dev/null 2>&1 && sudo -n true >/dev/null 2>&1 && sudo -n tailscale serve --bg --https=7330 "$ALBERT_BACKEND" >/dev/null 2>&1; then
-    echo "  Albert tailnet: :7330 → localhost:7330"
-  else
-    echo "  Albert tailnet: backend could not be reconciled automatically"
-    echo "    run once: sudo tailscale serve --bg --https=7330 http://127.0.0.1:7330"
-  fi
+# Future Crash owns its Tailscale Serve routes as one unit.  The reconciler
+# touches only 7330/7331/7332 and never resets unrelated user Serve state.
+# --yes is intentional: upgrades must replace stale backends without hanging on
+# an interactive confirmation that an installer cannot answer.
+if python3 "$ROOT/core/tailscale_serve.py"; then
+  echo "  Tailscale Serve: Future Crash routes reconciled"
+else
+  echo "INSTALL ERROR: Future Crash Tailscale Serve routes are inconsistent" >&2
+  echo "  No unrelated Tailscale Serve mappings were reset or removed." >&2
+  exit 5
 fi
 
 # Verify the live daemon, not merely the files on disk. Upgrade lifecycle above

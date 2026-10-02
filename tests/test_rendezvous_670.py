@@ -84,7 +84,7 @@ def test_registry_is_ephemeral_slot_scoped(monkeypatch):
 
 def test_670_bundle_installs_rendezvous_and_keeps_tailscale_fallback():
     root=Path(__file__).resolve().parents[1]
-    assert (root/'VERSION').read_text().strip()=='8.3.13'
+    assert (root/'VERSION').read_text().strip()=='8.3.14'
     install=(root/'install.sh').read_text()
     lk=(root/'look/lk').read_text()
     node_text=(root/'core/node.py').read_text()
@@ -93,4 +93,6 @@ def test_670_bundle_installs_rendezvous_and_keeps_tailscale_fallback():
     assert 'import fabric_identity, endpoint_auth, intent_normalizer, tailcat, rendezvous' in install
     assert 'rendezvous' in node_text
     assert 'rendezvous [status|set URL|off|sync]' in lk
-    assert 'tailscale serve --bg --https=7332' in install
+    assert 'core/tailscale_serve.py' in install
+    serve=(root/'core/tailscale_serve.py').read_text()
+    assert 'Route("Node API", 7332, "http://127.0.0.1:7333")' in serve

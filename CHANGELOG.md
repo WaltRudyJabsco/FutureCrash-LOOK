@@ -1,4 +1,12 @@
-# 8.3.13 — ROUTE FIX
+# 8.3.14 — SERVE OWNER
+
+- Future Crash now owns its Tailscale Serve configuration from one reconciler instead of letting Node API and Albert mutate persistent Serve state independently.
+- The reconciler manages only Future Crash ports 7330 (Albert), 7331 (Signal), and 7332 (guarded Node API), preserving unrelated user Tailscale Serve mappings.
+- Serve updates use `--yes`, so stale backends are replaced deterministically instead of failing behind a hidden interactive confirmation.
+- If a managed port still conflicts, only that Future Crash port is turned off and rebuilt; global `tailscale serve reset` is never used.
+- Installation now fails with the actual Serve status and exact privileged repair commands if Tailscale permissions prevent reconciliation.
+
+# 8.3.14 — ROUTE FIX
 
 - Fixes macOS Tailcat advertisements that could become `host.local.local`; mDNS names are normalized to exactly one `.local` suffix.
 - Tailcat now finds Tailscale from launchd's sparse PATH, including Homebrew and the macOS app bundle, and records why Tailscale discovery failed instead of silently omitting overlay endpoints.
@@ -6,22 +14,22 @@
 - Installer now verifies the live :7443 Tailcat advertisement is the current release and rejects stale or malformed `.local.local` advertisements before reporting success.
 - Media playback remains unchanged.
 
-# 8.3.13 — ROUTE TRUTH
+# 8.3.14 — ROUTE TRUTH
 
 - Fabric Doctor now probes every trusted peer endpoint independently and reports exact success/failure, latency, and the currently selected route.
 - Peer discovery gives the last successful authenticated route first refusal instead of repeatedly stalling on a dead `.local` or stale DHCP address.
 - Route diagnostics are local-control only and reuse existing pinned Tailcat certificates and Fabric authorization; no trust boundary is weakened.
 - Media playback and browser representation paths are unchanged.
 
-# 8.3.13 — LOCKSTEP
+# 8.3.14 — LOCKSTEP
 
 - Fixes the upgrade split-brain revealed by 8.3.10: LOOK, installed release metadata, and the resident Unified Node are now verified as one release before install success.
 - `lk --version` now reports both the LOOK version and installed Future Crash + LOOK release, so a stale install is visible immediately.
 - The installer rejects a bundle whose embedded LOOK version disagrees with its installer declaration.
-- After installation, the installer requires the installed LOOK command to report the exact release and requires the live node on :7332 to report 8.3.13.
+- After installation, the installer requires the installed LOOK command to report the exact release and requires the live node on :7332 to report 8.3.14.
 - Keeps the 8.3.10 macOS launchd restart/listener diagnostics; media playback code is unchanged.
 
-# 8.3.13 — LISTEN
+# 8.3.14 — LISTEN
 
 - Mac installer now explicitly kickstarts Tailcat after launchd bootstrap.
 - Fabric Doctor separates local :7443 listener health, advertised endpoints, trust, and peer catalog reachability.
