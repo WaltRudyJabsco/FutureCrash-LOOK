@@ -26,7 +26,7 @@ try:
 except Exception:
     readline = None
 
-VERSION="4.50.0"
+VERSION="4.51.6"
 
 LOOK_WORDMARK = r"""       ██╗      ██╗  ██╗
        ██║      ██║ ██╔╝
@@ -9930,7 +9930,7 @@ def _direct_searxng_search(query, limit=8):
     params=urllib.parse.urlencode({"q":query,"format":"json"})
     request=urllib.request.Request(base+"/search?"+params,headers={
         "Accept":"application/json",
-        "User-Agent":"Future-Crash-Fabric/8.3.9",
+        "User-Agent":"Future-Crash-Fabric/8.3.11",
     })
     with urllib.request.urlopen(request,timeout=12) as response:
         data=json.load(response)
@@ -18867,7 +18867,10 @@ def _run_lo_job(path):
 
 
 def _fabric_doctor():
-    """Diagnose local control, trust/discovery, and the actual aggregated media route."""
+    """Diagnose each Fabric layer separately: listener, advertisement, trust, peers."""
+    import socket as _socket
+    import urllib.parse as _urlparse
+
     print("LOOK FABRIC DOCTOR")
     base="http://127.0.0.1:7332"
     try:
@@ -18878,6 +18881,30 @@ def _fabric_doctor():
         print(f"  local node       × 127.0.0.1:7332 · {exc}")
         print("  diagnosis        Unified Node is not reachable locally; peer/media tests cannot run")
         return 1
+
+    # A node must never advertise encrypted ingress unless something is actually
+    # listening. This catches the Mac launchd failure that peer diagnostics alone
+    # misleadingly report as an advertisement/auth problem.
+    tailcat_listening=False
+    try:
+        sock=_socket.create_connection(("127.0.0.1",7443),timeout=1.0)
+        sock.close(); tailcat_listening=True
+        print("  Tailcat listen   ✓ 0.0.0.0:7443 (local probe 127.0.0.1:7443)")
+    except Exception as exc:
+        print(f"  Tailcat listen   × :7443 not accepting connections · {exc}")
+        print("  diagnosis        encrypted Fabric ingress is not running on this machine")
+
+    ad_path=Path.home()/".config/future-crash-look/tailcat/advertisement.json"
+    endpoints=[]
+    try:
+        ad=json.loads(ad_path.read_text(encoding="utf-8")); endpoints=list(ad.get("endpoints") or [])
+    except Exception:
+        pass
+    if endpoints:
+        print("  advertise        " + ("✓ " if tailcat_listening else "× ") + ", ".join(endpoints[:4]))
+    else:
+        print("  advertise        × no Tailcat endpoints published")
+
     try:
         with urllib.request.urlopen(base+"/v1/media/catalog",timeout=8.0) as response:
             catalog=json.loads(response.read().decode("utf-8"))
@@ -18899,17 +18926,18 @@ def _fabric_doctor():
     for peer in peers:
         ad=peer.get('node') or {}; name=str((ad.get('identity') or {}).get('name') or peer.get('name') or '?')
         endpoint=str(peer.get('url') or ((peer.get('tailcat_endpoints') or [''])[0]) or (('https://'+str(peer.get('dns'))+':7332') if peer.get('dns') else ''))
+        trust='AUTH' if peer.get('trusted') else 'UNTRUSTED'
         if name in counts:
-            print(f"  {name:<16} ✓ media {counts[name]:,} · {endpoint or 'Fabric route'}")
+            print(f"  {name:<16} ✓ {trust} · media {counts[name]:,} · {endpoint or 'Fabric route'}")
         else:
             failures+=1
             state='advertisement unavailable' if not ad else 'media catalog unreachable'
-            print(f"  {name:<16} × {state}")
+            print(f"  {name:<16} × {trust} · {state} · {endpoint or 'no endpoint'}")
             reason=errors.get(name) or str(peer.get('node_error') or 'no successful authenticated catalog response')
             print(f"    {reason[:500]}")
     if not peers:
         print("  diagnosis        no peers are discovered/trusted on this node")
-    return 1 if failures else 0
+    return 1 if failures or not tailcat_listening else 0
 
 def _fabric_command(args):
     """Human CLI over the shared Fabric. Remote actions stay capability-scoped."""
@@ -19342,7 +19370,15 @@ def main():
     if cmd=="match": return _match_command(rest)
     if cmd in {"translate","translation"}: return _translate_command(rest)
     if cmd=="access": return _access_command(rest)
-    if cmd in ("version","--version","-V"): print(f"LOOK {VERSION}"); return 0
+    if cmd in ("version","--version","-V"):
+        release_path=Path.home()/".local/share/future-crash-look/RELEASE"
+        try:
+            product_release=release_path.read_text(encoding="utf-8").strip()
+        except OSError:
+            product_release=""
+        suffix=f" · Future Crash + LOOK {product_release}" if product_release else ""
+        print(f"LOOK {VERSION}{suffix}")
+        return 0
     if cmd=="home": return home()
     if cmd=="undo":
         if rest and rest[0] in {"list","history"}: return _undo_list()

@@ -1,3 +1,17 @@
+# 8.3.11 — LOCKSTEP
+
+- Fixes the upgrade split-brain revealed by 8.3.10: LOOK, installed release metadata, and the resident Unified Node are now verified as one release before install success.
+- `lk --version` now reports both the LOOK version and installed Future Crash + LOOK release, so a stale install is visible immediately.
+- The installer rejects a bundle whose embedded LOOK version disagrees with its installer declaration.
+- After installation, the installer requires the installed LOOK command to report the exact release and requires the live node on :7332 to report 8.3.11.
+- Keeps the 8.3.10 macOS launchd restart/listener diagnostics; media playback code is unchanged.
+
+# 8.3.11 — LISTEN
+
+- Mac installer now explicitly kickstarts Tailcat after launchd bootstrap.
+- Fabric Doctor separates local :7443 listener health, advertised endpoints, trust, and peer catalog reachability.
+- Media/video transport remains unchanged from the working 8.3.9 path.
+
 # 8.3.9 — OPEN FABRIC
 
 - Learns a trusted peer's live Tailscale DNS/IP addresses as short-lived Tailcat endpoints, retaining the certificate and auth token established at pairing. This lets Mac peers recover from stale LAN/.local advertisements without weakening Fabric identity.

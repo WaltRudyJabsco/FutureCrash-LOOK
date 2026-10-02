@@ -1,13 +1,13 @@
 #!/usr/bin/env bash
 set -euo pipefail
 ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
-echo "Future Crash + LOOK 8.3.9 · FABRIC DOCTOR"
+echo "Future Crash + LOOK 8.3.11 · LOCKSTEP"
 echo "────────────────────────────────────────"
 
 # Refuse a mixed bundle before mutating the machine. A unified release must move
 # LOOK and the node together.
 EXPECTED_RELEASE="$(tr -d '[:space:]' < "$ROOT/VERSION")"
-[[ "$EXPECTED_RELEASE" == "8.3.9" ]] || { echo "BUNDLE ERROR: expected release 8.3.9, found $EXPECTED_RELEASE"; exit 4; }
+[[ "$EXPECTED_RELEASE" == "8.3.11" ]] || { echo "BUNDLE ERROR: expected release 8.3.11, found $EXPECTED_RELEASE"; exit 4; }
 echo "BUNDLE SOURCE  $ROOT"
 echo "BUNDLE RELEASE $EXPECTED_RELEASE · MEDIA SESSION"
 for vf in "$ROOT/look/VERSION" "$ROOT/albert/VERSION" "$ROOT/future-crash/VERSION"; do
@@ -31,6 +31,9 @@ for path,pat,label in checks:
         raise SystemExit(f'BUNDLE ERROR: {label} reports {got}, expected {expected}')
 PY_BUNDLE
 grep -q 'def _fabric_command' "$ROOT/look/lk" || { echo "BUNDLE ERROR: LOOK source has no Fabric command"; exit 4; }
+LOOK_SOURCE_VERSION="$(sed -n 's/^VERSION="\([^"]*\)"/\1/p' "$ROOT/look/lk" | head -n1)"
+LOOK_DECLARED_VERSION="$(sed -n 's/^LOOK_VERSION="\([^"]*\)"/\1/p' "$ROOT/install-look.sh" | head -n1)"
+[[ -n "$LOOK_SOURCE_VERSION" && "$LOOK_SOURCE_VERSION" == "$LOOK_DECLARED_VERSION" ]] || { echo "BUNDLE ERROR: LOOK source reports ${LOOK_SOURCE_VERSION:-missing}, installer declares ${LOOK_DECLARED_VERSION:-missing}"; exit 4; }
 grep -q 'choices=.*serve.*fabric' "$ROOT/core/node.py" || { echo "BUNDLE ERROR: node source has no Fabric CLI"; exit 4; }
 
 DRY_RUN=0
@@ -50,7 +53,7 @@ FCL_UNIFIED_INSTALL_CHILD=1 "$ROOT/install-look.sh" "$@"
 ((UNINSTALL)) && exit 0
 if ((DRY_RUN)); then
   echo
-  echo "[dry-run] would install/restart Unified Node 8.3.9 · FABRIC DOCTOR with signed Fabric rendezvous, Tailcat direct transport, ONE BRAIN cognition, LIVING MIND memory, browser endpoints, SearXNG, Media, Artifacts, and Signal Window 1.11.0"
+  echo "[dry-run] would install/restart Unified Node 8.3.11 · LOCKSTEP with signed Fabric rendezvous, Tailcat direct transport, ONE BRAIN cognition, LIVING MIND memory, browser endpoints, SearXNG, Media, Artifacts, and Signal Window 1.11.0"
   echo "[dry-run] OpenJev mode: $OPENJEV_MODE (auto provisions on capable nodes; absence/failure is non-fatal)"
   echo "[dry-run] would initialize Tailcat :7443, install optional signed rendezvous discovery, keep Tailscale :7332 → fcl-ingress :7333 as fallback, and verify Fabric CLI wiring"
   exit 0
@@ -362,7 +365,12 @@ elif [[ "$OS" == "Darwin" ]] && command -v launchctl >/dev/null 2>&1; then
   fi
   launchctl bootstrap "gui/$(id -u)" "$HOME/Library/LaunchAgents/com.futurecrash.look.media-watch.plist" || true
   launchctl kickstart -k "gui/$(id -u)/com.futurecrash.look.media-watch" >/dev/null 2>&1 || true
-  if (( TAILCAT_READY )); then launchctl bootstrap "gui/$(id -u)" "$HOME/Library/LaunchAgents/com.futurecrash.look.tailcat.plist" || true; fi
+  if (( TAILCAT_READY )); then
+    launchctl bootstrap "gui/$(id -u)" "$HOME/Library/LaunchAgents/com.futurecrash.look.tailcat.plist" || true
+    # bootstrap+RunAtLoad is normally enough, but explicitly kick the encrypted
+    # ingress so a freshly installed Mac cannot advertise :7443 without listening.
+    launchctl kickstart -k "gui/$(id -u)/com.futurecrash.look.tailcat" >/dev/null 2>&1 || true
+  fi
 else
   echo "Node installed; start with: fcl-node serve"
 fi
@@ -422,6 +430,16 @@ if [[ "$CLI_NODE_VERSION" != "$EXPECTED_RELEASE" ]]; then
   exit 5
 fi
 rm -f "$CLI_NODE_ERROR"
+
+INSTALLED_LOOK_VERSION="$("$HOME/.local/bin/lk" --version 2>/dev/null || true)"
+case "$INSTALLED_LOOK_VERSION" in
+  "LOOK $LOOK_SOURCE_VERSION · Future Crash + LOOK $EXPECTED_RELEASE") ;;
+  *)
+    echo "INSTALL ERROR: installed LOOK reports '${INSTALLED_LOOK_VERSION:-unavailable}'" >&2
+    echo "  expected: LOOK $LOOK_SOURCE_VERSION · Future Crash + LOOK $EXPECTED_RELEASE" >&2
+    exit 5
+    ;;
+esac
 
 # A release is ready only when the process actually answering :7332 reports this
 # exact release. This closes the old 'new files / old daemon' split-brain hole.
