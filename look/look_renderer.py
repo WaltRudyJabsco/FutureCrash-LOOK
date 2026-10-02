@@ -1318,7 +1318,7 @@ def pager(rows:list[str],height:int,width:int,rebuild=None,browse_rebuild=None,f
         while True:
             picked=selected_path()
             if cursoring and browse_rebuild:
-                render_width=max(38,int(width*0.58)) if picked and width>=96 else width
+                render_width=max(48,width-min(34,max(26,width//4))-3) if picked and width>=96 else width
                 current=browse_rebuild(picked, marked, render_width)
                 # Keep the highlighted grid row visible without converting the
                 # ordinary browse surface into the one-row filter surface.
@@ -1331,7 +1331,7 @@ def pager(rows:list[str],height:int,width:int,rebuild=None,browse_rebuild=None,f
                 # Side previews consume terminal width. Reflow the grid to the
                 # visible list pane so highlighted matches cannot live beneath
                 # the preview in an off-screen column.
-                render_width=max(38,int(width*0.58)) if picked and width>=96 else width
+                render_width=max(48,width-min(34,max(26,width//4))-3) if picked and width>=96 else width
                 current=rebuild(query, picked, render_width, marked)
             context_rows=[]
             if header_rows:
@@ -1361,10 +1361,11 @@ def pager(rows:list[str],height:int,width:int,rebuild=None,browse_rebuild=None,f
                 sys.stdout.write('\n'.join(preview_rows(picked,width,list_usable)[:list_usable]))
             elif (cursoring or selecting or filtering) and picked:
                 if width>=96:
-                    left_w=max(38,int(width*0.58))
-                    right_w=max(28,width-left_w-3)
+                    right_w=min(34,max(26,width//4))
+                    left_w=max(48,width-right_w-3)
                     left=[fit(r,left_w) for r in page]
-                    right=preview_rows(picked,right_w,list_usable)
+                    thumb_h=min(12,list_usable)
+                    right=preview_rows(picked,right_w,thumb_h)
                     rendered=[]
                     for i in range(max(len(left),len(right))):
                         l=left[i] if i<len(left) else ''
@@ -1373,7 +1374,7 @@ def pager(rows:list[str],height:int,width:int,rebuild=None,browse_rebuild=None,f
                         rendered.append(l+' '*pad+FAINT+' │ '+RESET+r)
                     sys.stdout.write('\n'.join(rendered[:list_usable]))
                 else:
-                    preview_h=max(4,list_usable//3)
+                    preview_h=max(4,min(8,list_usable//3))
                     list_h=max(3,list_usable-preview_h-1)
                     rendered=[fit(r,width) for r in page[:list_h]]
                     rendered.append(FAINT+('─'*width)+RESET)
@@ -1388,9 +1389,10 @@ def pager(rows:list[str],height:int,width:int,rebuild=None,browse_rebuild=None,f
             elif (cursoring or filtering or selecting) and picked and width>=96:
                 # List view uses the same proven graphics plane. The text frame and
                 # ASCII side preview are already complete before native pixels arrive.
-                left_w=max(38,int(width*0.58))
-                right_w=max(28,width-left_w-3)
-                native_preview.request(picked,len(context_rows)+3,left_w+4,max(2,list_usable-2),right_w)
+                right_w=min(34,max(26,width//4))
+                left_w=max(48,width-right_w-3)
+                native_rows=max(2,min(10,list_usable-2))
+                native_preview.request(picked,len(context_rows)+3,left_w+4,native_rows,right_w)
             else:
                 native_preview.invalidate()
             last=min(len(current),top+usable)

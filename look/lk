@@ -11,6 +11,7 @@ _LOOK_MODULE_DIR=Path(__file__).resolve().parent
 if str(_LOOK_MODULE_DIR) not in sys.path:
     sys.path.insert(0,str(_LOOK_MODULE_DIR))
 import media_core
+import media_art
 import file_catalog
 import games as look_games
 
@@ -9930,7 +9931,7 @@ def _direct_searxng_search(query, limit=8):
     params=urllib.parse.urlencode({"q":query,"format":"json"})
     request=urllib.request.Request(base+"/search?"+params,headers={
         "Accept":"application/json",
-        "User-Agent":"Future-Crash-Fabric/8.3.17",
+        "User-Agent":"Future-Crash-Fabric/8.3.18",
     })
     with urllib.request.urlopen(request,timeout=12) as response:
         data=json.load(response)
@@ -16530,39 +16531,13 @@ def _strip_ansi(text):
 
 
 def _media_cover_path(row):
-    """Best-effort local album art. Never blocks on the network."""
-    raw=str(row.get("path") or "")
-    path=Path(raw).expanduser()
-    if not path.exists():
-        return None
-    folder=path.parent if path.is_file() else path
-    preferred=("cover.jpg","cover.jpeg","cover.png","folder.jpg","folder.png","front.jpg","front.png","album.jpg","album.png")
-    try:
-        by_name={x.name.casefold():x for x in folder.iterdir() if x.is_file()}
-    except OSError:
-        return None
-    for name in preferred:
-        if name in by_name: return by_name[name]
-    for x in by_name.values():
-        if x.suffix.casefold() in {".jpg",".jpeg",".png",".webp"} and any(k in x.stem.casefold() for k in ("cover","folder","front","album")):
-            return x
-    return None
+    """Shared local artwork resolver: embedded cover first, sidecar fallback."""
+    return media_art.artwork_for(str(row.get("path") or ""))
 
 
 def _media_cover_lines(row,width,height=11):
-    """Cheap terminal cover preview; metadata remains useful when art is absent."""
-    cover=_media_cover_path(row)
-    chafa=shutil.which("chafa")
-    if not cover or not chafa or width<16 or height<4:
-        return []
-    try:
-        proc=subprocess.run([chafa,"--format=symbols","--size",f"{width}x{height}",str(cover)],capture_output=True,text=True,timeout=0.35)
-        if proc.returncode==0:
-            return proc.stdout.rstrip("\n").splitlines()[:height]
-    except (OSError,subprocess.SubprocessError):
-        pass
-    return []
-
+    """Bounded terminal art. Artwork failure never affects media navigation."""
+    return media_art.symbol_lines(str(row.get("path") or ""),width,height)
 
 def _media_detail_lines(row, width=110):
     """Human-readable provenance for one catalog location."""
@@ -16833,7 +16808,7 @@ def _media_selector(rows,title="FABRIC MEDIA",initial_query="",catalog_meta=None
                 print("\n"+_c("MEDIA INFO","1;36"))
                 print("─"*min(width,110))
                 info_height=11
-                art_w=min(28,max(18,width//4)) if width>=86 else 0
+                art_w=min(22,max(14,width//5)) if width>=78 else 0
                 detail_w=max(32,width-art_w-4) if art_w else width
                 details=_media_detail_lines(visible[idx],detail_w)[:info_height]
                 art=_media_cover_lines(visible[idx],art_w,info_height) if art_w else []
@@ -17425,16 +17400,26 @@ def _media_player_render():
                 f"Shuffle {'on' if snap['session'].get('shuffle') else 'off'}  ·  "
                 f"Repeat {snap['session'].get('repeat','off')}")
         eq=_media_player_visualizer(entry,snap["state"],inner)
-        body=[
-            _media_player_line(f"{artist} — {title}" if artist else title,inner),
-            _media_player_line(album,inner),
-            _media_player_line(eq,inner) if eq else _media_player_line("",inner),
-            _media_player_line(f"{bar}  {_media_time(pos)} / {_media_time(duration)}",inner),
-            _media_player_line(f"{state}  ·  {footer}",inner),
-            _media_player_line("",inner),
-            _media_player_line("space play/pause   ←/→ seek 10s   p/n previous/next",inner),
-            _media_player_line("r repeat   x stop   q close player",inner),
+        raw_body=[
+            f"{artist} — {title}" if artist else title, album, eq or "",
+            f"{bar}  {_media_time(pos)} / {_media_time(duration)}",
+            f"{state}  ·  {footer}", "",
+            "space play/pause   ←/→ seek 10s   p/n previous/next",
+            "r repeat   x stop   q close player",
         ]
+        # Same shared art primitive as Media Find. Keep the player dimensions fixed:
+        # artwork occupies spare right-hand cells and can never move the controls.
+        art_w=min(18,max(12,inner//4)) if inner>=58 else 0
+        art=_media_cover_lines(entry,art_w,6) if art_w else []
+        if art:
+            text_w=inner-art_w-2
+            body=[]
+            for i,line in enumerate(raw_body):
+                left=_media_player_line(line,text_w)
+                right=art[i] if i<len(art) else ""
+                body.append(left+"  "+_media_player_line(right,art_w))
+        else:
+            body=[_media_player_line(line,inner) for line in raw_body]
     top="┌"+"─"*(width-2)+"┐"
     bottom="└"+"─"*(width-2)+"┘"
     title=" LOOK PLAYER "

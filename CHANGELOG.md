@@ -1,3 +1,10 @@
+# 8.3.18 — ALBUM ART
+
+- Automatic LOOK inspection is now a bounded thumbnail: narrower and at most 12 ASCII rows / 10 native rows, so selection can never turn the side preview into the dominant surface or cover footer controls. Explicit `V` Preview remains full-size.
+- Adds one shared local media-art resolver. Embedded M4A/MP3/FLAC/etc. cover streams are extracted through optional ffmpeg into `~/.cache/look/media-art`; conventional cover/folder/front/album images remain the fallback.
+- Media Find `I` and `lk player` consume the same resolver and keep fixed layouts; artwork failure never blocks navigation or playback.
+- Artwork extraction is bounded, local-only, cached by path+mtime, and negative-cached when a file has no embedded cover.
+
 # 8.3.17 — DESTINATION
 
 - Selecting an item in ordinary LOOK browse now immediately engages the side inspection/preview pane; there is no longer a selected-but-uninspectable state.
