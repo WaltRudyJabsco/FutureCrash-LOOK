@@ -4,12 +4,12 @@ import re
 ROOT = Path(__file__).resolve().parents[1]
 
 def test_release_versions_are_lockstep():
-    assert (ROOT / "VERSION").read_text().strip() == "8.3.16"
+    assert (ROOT / "VERSION").read_text().strip() == "8.3.17"
     for rel in ("look/VERSION", "albert/VERSION", "future-crash/VERSION"):
-        assert (ROOT / rel).read_text().strip() == "8.3.16"
+        assert (ROOT / rel).read_text().strip() == "8.3.17"
     for rel in ("core/node.py", "core/ingress.py", "core/tailcat.py", "core/rendezvous.py"):
         text = (ROOT / rel).read_text()
-        assert re.search(r'^VERSION = "8\.3\.16"$', text, re.M)
+        assert re.search(r'^VERSION = "8\.3\.17"$', text, re.M)
 
 def test_look_version_matches_installer_and_reports_product_release():
     lk = (ROOT / "look/lk").read_text()

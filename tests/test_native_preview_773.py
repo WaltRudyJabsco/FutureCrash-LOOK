@@ -4,7 +4,7 @@ SRC=(ROOT/'look'/'look_renderer.py').read_text()
 ALBERT=(ROOT/'albert'/'install.sh').read_text()
 
 def test_side_pane_reuses_native_adapter():
-    assert "elif filtering and picked and width>=96:" in SRC
+    assert "elif (cursoring or filtering or selecting) and picked and width>=96:" in SRC
     assert "left_w+4,max(2,list_usable-2),right_w" in SRC
 
 def test_kitty_is_a_native_driver_with_ascii_fallback():

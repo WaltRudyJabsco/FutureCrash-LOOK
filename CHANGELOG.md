@@ -1,3 +1,10 @@
+# 8.3.17 — DESTINATION
+
+- Selecting an item in ordinary LOOK browse now immediately engages the side inspection/preview pane; there is no longer a selected-but-uninspectable state.
+- Copy To / Move To keep the editable destination line as the canonical destination. Tab still completes paths; Down/Right opens an arrow-driven LOOK Destination picker; Enter returns the chosen directory to the line so a new child directory can be appended before execution.
+- Destination picker preserves LOOK navigation: arrows move, Shift-Up/Down page, Shift-Left/Right jump to ends, Left ascends, Right descends, Enter commits, Esc cancels.
+- Media Find `I` info now discovers local cover/folder/front artwork and renders a compact right-justified terminal cover beside metadata when Chafa is available, with metadata-only fallback.
+
 # 8.3.16 — CATALOG CLOCK
 
 - Fixes `lk media find` falling back to the local library even while the Unified Node and peers are healthy.

@@ -9930,7 +9930,7 @@ def _direct_searxng_search(query, limit=8):
     params=urllib.parse.urlencode({"q":query,"format":"json"})
     request=urllib.request.Request(base+"/search?"+params,headers={
         "Accept":"application/json",
-        "User-Agent":"Future-Crash-Fabric/8.3.16",
+        "User-Agent":"Future-Crash-Fabric/8.3.17",
     })
     with urllib.request.urlopen(request,timeout=12) as response:
         data=json.load(response)
@@ -16525,6 +16525,45 @@ def _media_row_label(row):
     return main
 
 
+def _strip_ansi(text):
+    return re.sub(r"\x1b\[[0-9;?]*[ -/]*[@-~]", "", str(text))
+
+
+def _media_cover_path(row):
+    """Best-effort local album art. Never blocks on the network."""
+    raw=str(row.get("path") or "")
+    path=Path(raw).expanduser()
+    if not path.exists():
+        return None
+    folder=path.parent if path.is_file() else path
+    preferred=("cover.jpg","cover.jpeg","cover.png","folder.jpg","folder.png","front.jpg","front.png","album.jpg","album.png")
+    try:
+        by_name={x.name.casefold():x for x in folder.iterdir() if x.is_file()}
+    except OSError:
+        return None
+    for name in preferred:
+        if name in by_name: return by_name[name]
+    for x in by_name.values():
+        if x.suffix.casefold() in {".jpg",".jpeg",".png",".webp"} and any(k in x.stem.casefold() for k in ("cover","folder","front","album")):
+            return x
+    return None
+
+
+def _media_cover_lines(row,width,height=11):
+    """Cheap terminal cover preview; metadata remains useful when art is absent."""
+    cover=_media_cover_path(row)
+    chafa=shutil.which("chafa")
+    if not cover or not chafa or width<16 or height<4:
+        return []
+    try:
+        proc=subprocess.run([chafa,"--format=symbols","--size",f"{width}x{height}",str(cover)],capture_output=True,text=True,timeout=0.35)
+        if proc.returncode==0:
+            return proc.stdout.rstrip("\n").splitlines()[:height]
+    except (OSError,subprocess.SubprocessError):
+        pass
+    return []
+
+
 def _media_detail_lines(row, width=110):
     """Human-readable provenance for one catalog location."""
     path=str(row.get("path") or "—")
@@ -16793,8 +16832,19 @@ def _media_selector(rows,title="FABRIC MEDIA",initial_query="",catalog_meta=None
             if info_mode and visible:
                 print("\n"+_c("MEDIA INFO","1;36"))
                 print("─"*min(width,110))
-                for detail in _media_detail_lines(visible[idx],width):
-                    print(detail)
+                info_height=11
+                art_w=min(28,max(18,width//4)) if width>=86 else 0
+                detail_w=max(32,width-art_w-4) if art_w else width
+                details=_media_detail_lines(visible[idx],detail_w)[:info_height]
+                art=_media_cover_lines(visible[idx],art_w,info_height) if art_w else []
+                for line_no in range(max(len(details),len(art))):
+                    left=details[line_no] if line_no<len(details) else ""
+                    if art:
+                        pad=max(1,detail_w-len(_strip_ansi(left)))
+                        right=art[line_no] if line_no<len(art) else ""
+                        print(left+" "*pad+"  "+right)
+                    else:
+                        print(left)
 
             filter_text=f"{_c('FILTER','1;36')} {query}█" if query else f"{_c('FILTER','1;36')} █"
             actions=_c("Tab select · A select all · Enter/P play · Q queue · I info · V sources · H hidden · X hide · D hide by directory · U unhide · ◆ SHA · · scanned · Esc exit","2")

@@ -13,7 +13,7 @@ def test_unfiltered_arrows_enter_browse_cursor_instead_of_scrolling_lines():
 
 
 def test_browse_cursor_preserves_static_grid_renderer():
-    assert "browse_rebuild=lambda h=None,m=None: build_view" in RENDERER
+    assert "browse_rebuild=lambda h=None,m=None,w=None: build_view" in RENDERER
     assert "interactive_rows=False" in RENDERER
     assert "if cursoring and browse_rebuild:" in RENDERER
 

@@ -954,49 +954,98 @@ def _complete_path_text(value:str)->str:
     return base+completed
 
 
-def prompt_line(prompt:str)->tuple[str,bool]:
-    """Tiny line editor for LOOK action prompts. Esc cancels immediately."""
+def _destination_picker(start_dir:Path)->Path|None:
+    """Arrow-driven directory chooser. Enter commits; right descends; left ascends."""
     fd=sys.stdin.fileno()
     old=termios.tcgetattr(fd)
-    chars:list[str]=[]
+    here=start_dir.expanduser().resolve()
+    if not here.is_dir():
+        here=here.parent if here.parent.is_dir() else Path.home()
+    query=''; selected=0
     try:
         tty.setcbreak(fd)
-        sys.stdout.write(prompt)
-        sys.stdout.flush()
+        while True:
+            try:
+                dirs=sorted((x for x in here.iterdir() if x.is_dir()),key=lambda x:x.name.casefold())
+            except OSError:
+                dirs=[]
+            terms=query.casefold().split()
+            visible=[x for x in dirs if all(t in x.name.casefold() for t in terms)]
+            selected=max(0,min(selected,max(0,len(visible)-1)))
+            terminal=shutil.get_terminal_size((100,30)); width=max(56,terminal.columns); height=max(12,terminal.lines)
+            usable=max(4,height-6); top=max(0,min(max(0,len(visible)-usable),selected-usable+1))
+            sys.stdout.write(CLEAR)
+            sys.stdout.write(f'{CYAN}{BOLD}LOOK DESTINATION{RESET}  {WHITE}{here}{RESET}\n')
+            sys.stdout.write(f'{FAINT}← parent · → descend · Enter choose · arrows move · Shift-arrows page/ends · type filter · Esc cancel{RESET}\n\n')
+            for n,path in enumerate(visible[top:top+usable],start=top):
+                focus=f'{CYAN}{BOLD}›{RESET}' if n==selected else ' '
+                sys.stdout.write(f'{focus} {path.name}/\n')
+            if not visible: sys.stdout.write('  (no matching directories)\n')
+            sys.stdout.write(f'\n{CYAN}{BOLD}FILTER{RESET} {WHITE}{query}█{RESET}')
+            sys.stdout.flush()
+            key=read_key()
+            if key in {'\x03','q','Q','\x1b'}: return None
+            if key in {'\x1b[B','j'} and visible: selected=min(len(visible)-1,selected+1); continue
+            if key in {'\x1b[A','k'} and visible: selected=max(0,selected-1); continue
+            if key in {'\x1b[6~','\x1b[1;2B'} and visible: selected=min(len(visible)-1,selected+usable); continue
+            if key in {'\x1b[5~','\x1b[1;2A'} and visible: selected=max(0,selected-usable); continue
+            if key=='\x1b[1;2D' and visible: selected=0; continue
+            if key=='\x1b[1;2C' and visible: selected=len(visible)-1; continue
+            if key=='\x1b[D': here=here.parent; query=''; selected=0; continue
+            if key=='\x1b[C' and visible: here=visible[selected]; query=''; selected=0; continue
+            if key in {'\r','\n'} and visible: return visible[selected].resolve()
+            if key in {'\x7f','\b'}:
+                if query: query=query[:-1]; selected=0
+                continue
+            if len(key)==1 and key.isprintable(): query+=key; selected=0
+    finally:
+        termios.tcsetattr(fd,termios.TCSADRAIN,old)
+
+
+def prompt_line(prompt:str, *, initial:str='', picker_root:Path|None=None)->tuple[str,bool]:
+    """Tiny line editor. Tab completes paths; down/right opens LOOK Destination."""
+    fd=sys.stdin.fileno()
+    old=termios.tcgetattr(fd)
+    chars:list[str]=list(initial)
+    def redraw():
+        sys.stdout.write('\r\x1b[2K'+prompt+''.join(chars)); sys.stdout.flush()
+    try:
+        tty.setcbreak(fd)
+        sys.stdout.write(prompt+initial); sys.stdout.flush()
         while True:
             ch=os.read(fd,1)
             if ch==b'\x1b':
-                sys.stdout.write('\n')
-                sys.stdout.flush()
-                return '',True
+                seq=bytearray(ch)
+                while len(seq)<8:
+                    ready,_,_=select.select([fd],[],[],0.035)
+                    if not ready: break
+                    seq.extend(os.read(fd,1))
+                    if seq[-1:] in b'~ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz': break
+                if bytes(seq) in {b'\x1b[B',b'\x1b[C'} and picker_root is not None:
+                    typed=''.join(chars).strip()
+                    candidate=resolve_action_destination(typed,picker_root) if typed else picker_root.resolve()
+                    start=candidate if candidate.is_dir() else candidate.parent
+                    termios.tcsetattr(fd,termios.TCSADRAIN,old)
+                    picked=_destination_picker(start)
+                    tty.setcbreak(fd)
+                    if picked is not None:
+                        value=str(picked)+os.sep
+                        chars[:]=list(value)
+                    redraw(); continue
+                sys.stdout.write('\n'); sys.stdout.flush(); return '',True
             if ch in {b'\r',b'\n'}:
-                sys.stdout.write('\n')
-                sys.stdout.flush()
-                return ''.join(chars),False
+                sys.stdout.write('\n'); sys.stdout.flush(); return ''.join(chars),False
             if ch in {b'\x7f',b'\b'}:
-                if chars:
-                    chars.pop()
-                    sys.stdout.write('\b \b')
-                    sys.stdout.flush()
+                if chars: chars.pop(); redraw()
                 continue
             if ch==b'\t':
-                before=''.join(chars)
-                after=_complete_path_text(before)
-                if after!=before:
-                    # Redraw only the editable field after the prompt.
-                    sys.stdout.write('\r\x1b[2K'+prompt+after)
-                    sys.stdout.flush()
-                    chars=list(after)
-                else:
-                    sys.stdout.write('\a'); sys.stdout.flush()
+                before=''.join(chars); after=_complete_path_text(before)
+                if after!=before: chars[:]=list(after); redraw()
+                else: sys.stdout.write('\a'); sys.stdout.flush()
                 continue
-            if ch==b'\x03':
-                raise KeyboardInterrupt
+            if ch==b'\x03': raise KeyboardInterrupt
             text=ch.decode('utf-8','ignore')
-            if text and text.isprintable():
-                chars.append(text)
-                sys.stdout.write(text)
-                sys.stdout.flush()
+            if text and text.isprintable(): chars.append(text); sys.stdout.write(text); sys.stdout.flush()
     finally:
         termios.tcsetattr(fd,termios.TCSADRAIN,old)
 
@@ -1210,6 +1259,7 @@ def pager(rows:list[str],height:int,width:int,rebuild=None,browse_rebuild=None,f
             try:
                 dest,cancelled=prompt_line(
                     f"{kind.upper()} {len(paths)} item{'s' if len(paths)!=1 else ''} · to › "
+                    , picker_root=current_dir
                 )
             except KeyboardInterrupt:
                 dest=''; cancelled=True
@@ -1268,7 +1318,8 @@ def pager(rows:list[str],height:int,width:int,rebuild=None,browse_rebuild=None,f
         while True:
             picked=selected_path()
             if cursoring and browse_rebuild:
-                current=browse_rebuild(picked, marked)
+                render_width=max(38,int(width*0.58)) if picked and width>=96 else width
+                current=browse_rebuild(picked, marked, render_width)
                 # Keep the highlighted grid row visible without converting the
                 # ordinary browse surface into the one-row filter surface.
                 if picked and matches:
@@ -1308,7 +1359,7 @@ def pager(rows:list[str],height:int,width:int,rebuild=None,browse_rebuild=None,f
                 # Preview View is only another presentation of the current filtered
                 # set. The pager, query, current item, and marked set stay authoritative.
                 sys.stdout.write('\n'.join(preview_rows(picked,width,list_usable)[:list_usable]))
-            elif (selecting or filtering) and picked:
+            elif (cursoring or selecting or filtering) and picked:
                 if width>=96:
                     left_w=max(38,int(width*0.58))
                     right_w=max(28,width-left_w-3)
@@ -1334,7 +1385,7 @@ def pager(rows:list[str],height:int,width:int,rebuild=None,browse_rebuild=None,f
                 # Rows 1-2 remain the instant text title/metadata; native pixels may
                 # progressively replace only the ASCII art beneath them.
                 native_preview.request(picked,len(context_rows)+3,1,max(2,list_usable-2),width)
-            elif filtering and picked and width>=96:
+            elif (cursoring or filtering or selecting) and picked and width>=96:
                 # List view uses the same proven graphics plane. The text frame and
                 # ASCII side preview are already complete before native pixels arrive.
                 left_w=max(38,int(width*0.58))
@@ -1880,7 +1931,7 @@ def main():
             return header
         pager(rows,sz.lines,sz.columns,
               rebuild=lambda q,h=None,w=None,m=None: build_view(target,sort_state['mode'],hidden,w or sz.columns,args.depth,q,h,m,interactive_rows=True),
-              browse_rebuild=lambda h=None,m=None: build_view(target,sort_state['mode'],hidden,sz.columns,args.depth,'',h,m,interactive_rows=True),
+              browse_rebuild=lambda h=None,m=None,w=None: build_view(target,sort_state['mode'],hidden,w or sz.columns,args.depth,'',h,m,interactive_rows=True),
               filter_context=lambda q,w=None: build_view(target,sort_state['mode'],hidden,w or sz.columns,args.depth,q,None,None,interactive_rows=False)[:2],
               candidates=lambda q: matching_paths(target,sort_state['mode'],hidden,q,args.depth),
               on_sort=cycle_sort,
