@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Future Crash + LOOK Unified Node 8.3.3.
+"""Future Crash + LOOK Unified Node 8.3.4.
 
 A small distributed supervisor for trusted personal machines. Immediate events stay
 asynchronous; a one-second fabric pulse reconciles presence, leases and stale work.
@@ -75,7 +75,7 @@ try:
 except ImportError:
     from attention import normalize_event as normalize_attention_event, plan_voice_targets
 
-VERSION = "8.3.3"
+VERSION = "8.3.4"
 RELEASE_NAME = "COGNITIVE FABRIC"
 DEFAULT_HOST = "127.0.0.1"
 DEFAULT_PORT = 7332
@@ -2296,7 +2296,7 @@ def _local_web_search(query, limit=8):
     base=os.environ.get("FCL_SEARXNG_URL","http://127.0.0.1:8888").rstrip("/")
     request=urllib.request.Request(base+"/search?"+params,headers={
         "Accept":"application/json",
-        "User-Agent":"Future-Crash-Fabric/8.3.3",
+        "User-Agent":"Future-Crash-Fabric/8.3.4",
     })
     try:
         with urllib.request.urlopen(request,timeout=8) as response:
@@ -2461,7 +2461,7 @@ def _fabric_media_catalog(force=False):
         if not name or not (peer.get("url") or peer.get("tailcat_endpoints") or peer.get("dns")) or not ad:
             continue
         try:
-            remote = http_json(_remote_url(snapshot, name, "/v1/media/catalog"), timeout=1.0)
+            remote = http_json(_remote_url(snapshot, name, "/v1/media/catalog"), timeout=8.0)
             remote_rows = [dict(row) for row in (remote.get("entries") or []) if isinstance(row, dict)]
             entries.extend(remote_rows)
             nodes.append({"node": name, "count": len(remote_rows),
@@ -3042,7 +3042,7 @@ def _openjev_shadow(state, question, candidates, *, profile="workspace", consequ
 
 
 class API(BaseHTTPRequestHandler):
-    server_version = "FCLNode/8.3.3"
+    server_version = "FCLNode/8.3.4"
 
     def setup(self):
         self._metric_request_id = None

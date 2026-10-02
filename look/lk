@@ -9930,7 +9930,7 @@ def _direct_searxng_search(query, limit=8):
     params=urllib.parse.urlencode({"q":query,"format":"json"})
     request=urllib.request.Request(base+"/search?"+params,headers={
         "Accept":"application/json",
-        "User-Agent":"Future-Crash-Fabric/8.3.3",
+        "User-Agent":"Future-Crash-Fabric/8.3.4",
     })
     with urllib.request.urlopen(request,timeout=12) as response:
         data=json.load(response)
@@ -16424,9 +16424,38 @@ def _media_scan_command(args):
         print(f"  index {MEDIA_LIBRARY_FILE}")
         return 0
     if not args:
-        print("usage: lk media scan ROOT")
-        print("       lk media scan --relocate OLD_ROOT NEW_ROOT")
-        return 2
+        # No-argument scan means "find my normal media", not "walk all of HOME".
+        # The latter drags caches/Application Support into the catalog and made the
+        # useful local library hard to see.  Keep roots explicit and predictable.
+        home=Path.home()
+        candidates=[home/"Music", home/"Movies"]
+        if sys.platform=="darwin":
+            # Apple Music commonly stores local downloads below this hierarchy.
+            candidates += [home/"Music"/"Music"/"Media.localized", home/"Music"/"Music"/"Media"]
+        roots=[]
+        for candidate in candidates:
+            try:
+                resolved=candidate.expanduser().resolve()
+            except OSError:
+                continue
+            if resolved.is_dir() and not any(resolved==r or r in resolved.parents for r in roots):
+                roots.append(resolved)
+        if not roots:
+            print("LOOK media · no standard local media folders found")
+            print("  use: lk media scan /path/to/media")
+            return 1
+        started=time.monotonic(); library=_media_library()
+        for scan_root in roots:
+            try:
+                library=media_core.scan_root(scan_root,library)
+            except (OSError,NotADirectoryError):
+                continue
+        _media_save_library(library)
+        print(f"LOOK MEDIA DISCOVERY · {len(library.get('entries') or []):,} local items · {time.monotonic()-started:.2f}s")
+        for scan_root in roots:
+            count=sum(1 for row in library.get("entries") or [] if row.get("root")==str(scan_root))
+            print(f"  {count:>7,}  {scan_root}")
+        return 0
     root=Path(" ".join(args)).expanduser()
     started=time.monotonic()
     try:
@@ -16682,7 +16711,7 @@ def _media_unhide(rows):
     _media_save_visibility(rules)
     return removed
 
-def _media_selector(rows,title="FABRIC MEDIA",initial_query=""):
+def _media_selector(rows,title="FABRIC MEDIA",initial_query="",catalog_meta=None):
     """LOOK filter semantics over Fabric media rows, with media-specific actions.
 
     Navigation/filtering/selection belong to LOOK. Media contributes only actions.
@@ -16730,7 +16759,7 @@ def _media_selector(rows,title="FABRIC MEDIA",initial_query=""):
             height=max(10,terminal.lines)
             width=max(56,terminal.columns)
             info_rows=13 if info_mode else 0
-            usable=max(4,height-7-info_rows)
+            usable=max(4,height-7-info_rows-(1 if catalog_meta and (catalog_meta.get("errors") or catalog_meta.get("fallback")) else 0))
             top=max(0,min(max(0,len(visible)-usable),idx-usable+1))
             page=visible[top:top+usable]
 
@@ -16738,6 +16767,14 @@ def _media_selector(rows,title="FABRIC MEDIA",initial_query=""):
             mode=("ALL SOURCES" if show_all else "LOGICAL")+(" + HIDDEN" if show_hidden else "")
             suffix=f"{len(visible):,} shown · {len(rows):,} locations · {len(selected_rows)} selected · {mode}"
             _title(title,suffix)
+            if catalog_meta:
+                nodes=catalog_meta.get("nodes") or []
+                errors=catalog_meta.get("errors") or []
+                if errors:
+                    failed=", ".join(str(e.get("node") or "?") for e in errors)
+                    print(_c(f"FABRIC PARTIAL · {len(nodes)} node(s) available · unavailable: {failed}","1;33"))
+                elif catalog_meta.get("fallback"):
+                    print(_c("FABRIC LOCAL FALLBACK · Unified Node catalog unavailable","1;33"))
             for n,row in enumerate(page,start=top):
                 rid=row_id(row)
                 focus=_c("›","1;36") if n==idx else " "
@@ -16878,18 +16915,18 @@ def _media_selector_finish(action,payload):
 
 def _media_find_command(args):
     query=" ".join(args).strip()
-    entries,_=_media_catalog_entries()
+    entries,catalog_meta=_media_catalog_entries()
     rows=media_core.search_entries({"entries":entries},query) if query else entries
-    action,payload=_media_selector(rows,"FABRIC MEDIA FIND",query)
+    action,payload=_media_selector(rows,"FABRIC MEDIA FIND",query,catalog_meta)
     result=_media_selector_finish(action,payload)
     return result if result is not None else (0 if rows else 1)
 
 
 def _media_browse_command(args):
     query=" ".join(args).strip()
-    entries,_=_media_catalog_entries()
+    entries,catalog_meta=_media_catalog_entries()
     rows=media_core.search_entries({"entries":entries},query) if query else entries
-    action,payload=_media_selector(rows,"FABRIC MEDIA",query)
+    action,payload=_media_selector(rows,"FABRIC MEDIA",query,catalog_meta)
     result=_media_selector_finish(action,payload)
     return result if result is not None else 0
 
