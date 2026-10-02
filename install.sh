@@ -1,13 +1,13 @@
 #!/usr/bin/env bash
 set -euo pipefail
 ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
-echo "Future Crash + LOOK 8.3.11 · LOCKSTEP"
+echo "Future Crash + LOOK 8.3.13 · ROUTE FIX"
 echo "────────────────────────────────────────"
 
 # Refuse a mixed bundle before mutating the machine. A unified release must move
 # LOOK and the node together.
 EXPECTED_RELEASE="$(tr -d '[:space:]' < "$ROOT/VERSION")"
-[[ "$EXPECTED_RELEASE" == "8.3.11" ]] || { echo "BUNDLE ERROR: expected release 8.3.11, found $EXPECTED_RELEASE"; exit 4; }
+[[ "$EXPECTED_RELEASE" == "8.3.13" ]] || { echo "BUNDLE ERROR: expected release 8.3.13, found $EXPECTED_RELEASE"; exit 4; }
 echo "BUNDLE SOURCE  $ROOT"
 echo "BUNDLE RELEASE $EXPECTED_RELEASE · MEDIA SESSION"
 for vf in "$ROOT/look/VERSION" "$ROOT/albert/VERSION" "$ROOT/future-crash/VERSION"; do
@@ -53,7 +53,7 @@ FCL_UNIFIED_INSTALL_CHILD=1 "$ROOT/install-look.sh" "$@"
 ((UNINSTALL)) && exit 0
 if ((DRY_RUN)); then
   echo
-  echo "[dry-run] would install/restart Unified Node 8.3.11 · LOCKSTEP with signed Fabric rendezvous, Tailcat direct transport, ONE BRAIN cognition, LIVING MIND memory, browser endpoints, SearXNG, Media, Artifacts, and Signal Window 1.11.0"
+  echo "[dry-run] would install/restart Unified Node 8.3.13 · ROUTE FIX with signed Fabric rendezvous, Tailcat direct transport, ONE BRAIN cognition, LIVING MIND memory, browser endpoints, SearXNG, Media, Artifacts, and Signal Window 1.11.0"
   echo "[dry-run] OpenJev mode: $OPENJEV_MODE (auto provisions on capable nodes; absence/failure is non-fatal)"
   echo "[dry-run] would initialize Tailcat :7443, install optional signed rendezvous discovery, keep Tailscale :7332 → fcl-ingress :7333 as fallback, and verify Fabric CLI wiring"
   exit 0
@@ -464,6 +464,42 @@ if (( ! NODE_READY )); then
   lsof -nP -iTCP:7332 -sTCP:LISTEN >&2 2>/dev/null || true
   exit 5
 fi
+# Verify Tailcat separately: node lockstep is not enough if launchd kept an old
+# transport daemon or if its daemon PATH cannot discover Tailscale.
+TAILCAT_CLI_VERSION="$(PYTHONPATH="$HOME/.local/share/future-crash-look/core${PYTHONPATH:+:$PYTHONPATH}" "$HOME/.local/bin/fcl-tailcat" --version 2>/dev/null || true)"
+case "$TAILCAT_CLI_VERSION" in
+  *" $EXPECTED_RELEASE") ;;
+  *)
+    echo "INSTALL ERROR: installed Tailcat reports '${TAILCAT_CLI_VERSION:-unavailable}', expected $EXPECTED_RELEASE" >&2
+    exit 5
+    ;;
+esac
+
+TAILCAT_READY_LIVE=0
+for _ in {1..40}; do
+  if python3 - <<PY_TAILCAT >/dev/null 2>&1
+import json, socket
+from pathlib import Path
+expected="$EXPECTED_RELEASE"
+with socket.create_connection(("127.0.0.1",7443),timeout=.35):
+    pass
+ad=json.loads((Path.home()/".config/future-crash-look/tailcat/advertisement.json").read_text())
+assert str(ad.get("version") or "") == expected
+assert all(".local.local:" not in str(x).casefold() for x in (ad.get("endpoints") or []))
+PY_TAILCAT
+  then TAILCAT_READY_LIVE=1; break; fi
+  sleep 0.2
+done
+if (( ! TAILCAT_READY_LIVE )); then
+  echo "INSTALL ERROR: live Tailcat :7443 / advertisement is not release $EXPECTED_RELEASE" >&2
+  if [[ "$(uname -s)" == "Darwin" ]]; then
+    launchctl print "gui/$(id -u)/com.futurecrash.look.tailcat" >&2 2>/dev/null || true
+  else
+    systemctl --user status future-crash-look-tailcat.service --no-pager >&2 2>/dev/null || true
+  fi
+  exit 5
+fi
+
 INGRESS_READY=0
 for _ in {1..40}; do
   if python3 - <<'PY_CHECK' >/dev/null 2>&1

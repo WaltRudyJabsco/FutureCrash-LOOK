@@ -9930,7 +9930,7 @@ def _direct_searxng_search(query, limit=8):
     params=urllib.parse.urlencode({"q":query,"format":"json"})
     request=urllib.request.Request(base+"/search?"+params,headers={
         "Accept":"application/json",
-        "User-Agent":"Future-Crash-Fabric/8.3.11",
+        "User-Agent":"Future-Crash-Fabric/8.3.13",
     })
     with urllib.request.urlopen(request,timeout=12) as response:
         data=json.load(response)
@@ -18901,9 +18901,18 @@ def _fabric_doctor():
     except Exception:
         pass
     if endpoints:
-        print("  advertise        " + ("✓ " if tailcat_listening else "× ") + ", ".join(endpoints[:4]))
+        ad_version=str(ad.get("version") or "?") if isinstance(ad,dict) else "?"
+        print("  advertise        " + ("✓ " if tailcat_listening else "× ") + f"Tailcat {ad_version} · " + ", ".join(endpoints[:6]))
     else:
         print("  advertise        × no Tailcat endpoints published")
+    ts=(ad.get("tailscale") or {}) if isinstance(ad,dict) else {}
+    if ts.get("ok"):
+        detail=[]
+        if ts.get("dns"): detail.append(str(ts.get("dns")))
+        detail.extend(str(x) for x in (ts.get("ips") or []) if ":" not in str(x))
+        print("  Tailscale route  ✓ " + (", ".join(detail) or str(ts.get("binary") or "available")))
+    else:
+        print(f"  Tailscale route  × {str(ts.get('error') or 'not published')}" + (f" · {ts.get('binary')}" if ts.get('binary') else ""))
 
     try:
         with urllib.request.urlopen(base+"/v1/media/catalog",timeout=8.0) as response:
@@ -18937,6 +18946,31 @@ def _fabric_doctor():
             print(f"    {reason[:500]}")
     if not peers:
         print("  diagnosis        no peers are discovered/trusted on this node")
+
+    # Route matrix: test each trusted address separately so a dead .local route
+    # cannot hide a healthy LAN/Tailscale route behind one generic timeout.
+    try:
+        with urllib.request.urlopen(base+"/v1/fabric/routes",timeout=30.0) as response:
+            routes=json.loads(response.read().decode("utf-8"))
+        rows=list(routes.get("peers") or [])
+        if rows:
+            print("  route matrix")
+        for row in rows:
+            print(f"    {str(row.get('name') or '?'):<16} {'AUTH' if row.get('trusted') else 'UNTRUSTED'}")
+            selected=str(row.get("selected") or "")
+            for probe in row.get("probes") or []:
+                endpoint=str(probe.get("endpoint") or "?")
+                marker="✓" if probe.get("ok") else "×"
+                chosen=" · SELECTED" if endpoint == selected else ""
+                if probe.get("ok"):
+                    who=str(probe.get("name") or probe.get("node_id") or "identity ok")
+                    detail=f"{int(probe.get('ms') or 0)}ms · {who}"
+                else:
+                    detail=str(probe.get("error") or "failed")
+                print(f"      {marker} {endpoint}{chosen}")
+                print(f"        {detail[:500]}")
+    except Exception as exc:
+        print(f"  route matrix     × {exc}")
     return 1 if failures or not tailcat_listening else 0
 
 def _fabric_command(args):

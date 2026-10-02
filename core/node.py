@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Future Crash + LOOK Unified Node 8.3.11.
+"""Future Crash + LOOK Unified Node 8.3.13.
 
 A small distributed supervisor for trusted personal machines. Immediate events stay
 asynchronous; a one-second fabric pulse reconciles presence, leases and stale work.
@@ -75,7 +75,7 @@ try:
 except ImportError:
     from attention import normalize_event as normalize_attention_event, plan_voice_targets
 
-VERSION = "8.3.11"
+VERSION = "8.3.13"
 RELEASE_NAME = "GTD"
 DEFAULT_HOST = "127.0.0.1"
 DEFAULT_PORT = 7332
@@ -1058,12 +1058,22 @@ class PeerRegistry:
             q=dict(p); q["node"]=prior.get("node"); q["node_seen_at"]=prior.get("node_seen_at"); q["node_error"]=prior.get("error")
             next_due=float(prior.get("next_due") or 0)
             candidates=[]
+            # A route that worked last refresh gets first refusal. This avoids
+            # repeatedly paying for a dead .local/DHCP endpoint before reaching
+            # the peer's known-good LAN or Tailscale address.
+            preferred=str(prior.get("url") or "").rstrip("/")
+            if preferred:
+                candidates.append((str(prior.get("active_transport") or "preferred"),preferred))
             # Native direct TLS is preferred. Each endpoint is certificate-pinned
             # by FabricIdentity using material learned during pairing.
             for base in p.get("tailcat_endpoints") or []:
-                candidates.append(("tailcat",str(base).rstrip('/')))
+                base=str(base).rstrip('/')
+                if base and all(base != existing for _,existing in candidates):
+                    candidates.append(("tailcat",base))
             if p.get("online") and p.get("dns"):
-                candidates.append(("tailscale",f"https://{p['dns']}:7332"))
+                base=f"https://{p['dns']}:7332"
+                if all(base != existing for _,existing in candidates):
+                    candidates.append(("tailscale",base))
             if candidates and t >= next_due:
                 last_exc=None; success=None
                 for transport,base in candidates:
@@ -2311,7 +2321,7 @@ def _local_web_search(query, limit=8):
     base=os.environ.get("FCL_SEARXNG_URL","http://127.0.0.1:8888").rstrip("/")
     request=urllib.request.Request(base+"/search?"+params,headers={
         "Accept":"application/json",
-        "User-Agent":"Future-Crash-Fabric/8.3.11",
+        "User-Agent":"Future-Crash-Fabric/8.3.13",
     })
     try:
         with urllib.request.urlopen(request,timeout=8) as response:
@@ -3063,7 +3073,7 @@ def _openjev_shadow(state, question, candidates, *, profile="workspace", consequ
 
 
 class API(BaseHTTPRequestHandler):
-    server_version = "FCLNode/8.3.11"
+    server_version = "FCLNode/8.3.13"
 
     def setup(self):
         self._metric_request_id = None
@@ -3519,6 +3529,10 @@ class API(BaseHTTPRequestHandler):
             return self.sendj(200, {"services": managed_services()})
         if path == "/v1/nodes":
             return self.sendj(200, {"self": node_info(), "peers": PEERS.public()})
+        if path == "/v1/fabric/routes":
+            if getattr(self.server,"plane","local") != "local":
+                return self.sendj(403,{"error":"Fabric route diagnostics are local-control only"})
+            return self.sendj(200,_fabric_route_diagnostics())
         if path == "/v1/jobs":
             return self.sendj(200, {"jobs": FABRIC_STORE.jobs()})
         if path.startswith("/v1/jobs/"):
@@ -4008,6 +4022,42 @@ def _peer_bases(peer):
         value=f"https://{peer['dns']}:7332"
         if value not in out: out.append(value)
     return out
+
+
+def _fabric_route_diagnostics(timeout=2.0):
+    """Probe every known peer endpoint independently; never collapse route errors."""
+    rows=[]
+    for peer in PEERS.public():
+        if not peer.get("trusted"):
+            continue
+        ad=peer.get("node") or {}
+        name=str((ad.get("identity") or {}).get("name") or peer.get("name") or "?")
+        candidates=[]
+        if peer.get("url"):
+            candidates.append(("selected",str(peer["url"]).rstrip("/")))
+        for value in peer.get("tailcat_endpoints") or []:
+            value=str(value).rstrip("/")
+            if value and all(value != u for _,u in candidates): candidates.append(("tailcat",value))
+        if peer.get("dns"):
+            value=f"https://{peer['dns']}:7332"
+            if all(value != u for _,u in candidates): candidates.append(("tailscale",value))
+        probes=[]
+        for source,base in candidates:
+            started=time.monotonic()
+            try:
+                remote=http_json(base+"/v1/identity",timeout=timeout)
+                ident=(remote.get("identity") or {}) if isinstance(remote,dict) else {}
+                probes.append({"endpoint":base,"source":source,"ok":True,
+                               "ms":int((time.monotonic()-started)*1000),
+                               "node_id":str(ident.get("node_id") or ""),
+                               "name":str(ident.get("name") or "")})
+            except Exception as exc:
+                probes.append({"endpoint":base,"source":source,"ok":False,
+                               "ms":int((time.monotonic()-started)*1000),"error":str(exc)[:300]})
+        rows.append({"name":name,"node_id":str(peer.get("node_id") or ""),
+                     "trusted":bool(peer.get("trusted")),"selected":str(peer.get("url") or ""),
+                     "probes":probes})
+    return {"schema":"fabric-route-diagnostics-v1","peers":rows}
 
 
 def _peer_for_target(snapshot,target):

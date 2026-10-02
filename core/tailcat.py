@@ -18,6 +18,7 @@ import subprocess
 import tempfile
 import threading
 import time
+from typing import Optional
 from pathlib import Path
 
 try:
@@ -25,7 +26,7 @@ try:
 except ImportError:
     from ingress import GuardServer, Handler, watchdog
 
-VERSION = "8.3.11"
+VERSION = "8.3.13"
 DEFAULT_HOST = "0.0.0.0"
 DEFAULT_PORT = 7443
 DEFAULT_BACKEND_HOST = "127.0.0.1"
@@ -74,33 +75,67 @@ def _local_ipv4() -> list[str]:
     return sorted(values)
 
 
-def _tailscale_endpoints(port: int) -> list[str]:
-    """Return this node's reachable Tailscale addresses as Tailcat endpoints.
+def _tailscale_binary() -> Optional[str]:
+    """Find Tailscale even inside launchd's deliberately sparse PATH.
 
-    Tailcat listens on all interfaces. Advertising the overlay address as well as
-    LAN/mDNS avoids asymmetric Mac-to-Mac reachability when Bonjour or Wi-Fi
-    client isolation makes ``host.local`` unusable between otherwise trusted peers.
+    Interactive shells usually find ``tailscale`` through Homebrew or a user PATH,
+    while launchd often does not.  Tailcat is a daemon, so relying only on
+    ``shutil.which`` made overlay endpoints silently disappear on Macs.
     """
-    ts = shutil.which("tailscale")
+    candidates = [
+        shutil.which("tailscale"),
+        "/opt/homebrew/bin/tailscale",
+        "/usr/local/bin/tailscale",
+        "/usr/bin/tailscale",
+        "/Applications/Tailscale.app/Contents/MacOS/Tailscale",
+    ]
+    for item in candidates:
+        if item and Path(item).is_file() and os.access(item, os.X_OK):
+            return item
+    return None
+
+
+def _tailscale_state(port: int) -> tuple[list[str], dict]:
+    """Return overlay endpoints plus diagnostic state; never fail silently."""
+    ts = _tailscale_binary()
     if not ts:
-        return []
+        return [], {"ok": False, "error": "tailscale binary not found", "binary": ""}
     try:
-        proc = subprocess.run([ts, "status", "--json"], capture_output=True, text=True, timeout=3)
+        proc = subprocess.run([ts, "status", "--json"], capture_output=True, text=True, timeout=5)
         if proc.returncode:
-            return []
+            detail=(proc.stderr or proc.stdout or f"exit {proc.returncode}").strip()
+            return [], {"ok": False, "error": detail[:500], "binary": ts}
         data = json.loads(proc.stdout or "{}")
         me = data.get("Self") or {}
         out = []
         dns = str(me.get("DNSName") or "").rstrip(".")
         if dns:
             out.append(f"https://{dns}:{int(port)}")
+        ips=[]
         for ip in me.get("TailscaleIPs") or []:
             ip = str(ip or "").strip()
+            if ip:
+                ips.append(ip)
             if ip and ":" not in ip:
                 out.append(f"https://{ip}:{int(port)}")
-        return list(dict.fromkeys(out))
-    except Exception:
-        return []
+        return list(dict.fromkeys(out)), {
+            "ok": bool(out), "binary": ts, "dns": dns, "ips": ips,
+            "error": "" if out else "Tailscale Self record has no DNSName or IPv4 address",
+        }
+    except Exception as exc:
+        return [], {"ok": False, "error": f"{type(exc).__name__}: {exc}"[:500], "binary": ts}
+
+
+def _tailscale_endpoints(port: int) -> list[str]:
+    return _tailscale_state(port)[0]
+
+
+def _mdns_hostname() -> str:
+    """Return exactly one .local suffix, regardless of OS hostname spelling."""
+    host=socket.gethostname().strip().rstrip(".")
+    while host.casefold().endswith(".local"):
+        host=host[:-6].rstrip(".")
+    return f"{host}.local" if host else ""
 
 
 def _cert_fingerprint(cert_pem: str) -> str:
@@ -130,13 +165,14 @@ def ensure_identity(port: int = DEFAULT_PORT) -> dict:
             raise RuntimeError((proc.stderr or proc.stdout or "openssl certificate generation failed").strip())
         KEY_PATH.chmod(0o600); CERT_PATH.chmod(0o644)
     cert = CERT_PATH.read_text(encoding="utf-8")
-    host=socket.gethostname().strip().rstrip(".")
+    host=_mdns_hostname()
     endpoints=[]
     if host:
-        endpoints.append(f"https://{host}.local:{int(port)}")
+        endpoints.append(f"https://{host}:{int(port)}")
     endpoints.extend(f"https://{ip}:{int(port)}" for ip in _local_ipv4())
     # The overlay endpoint is often the only symmetric path between Macs.
-    endpoints.extend(_tailscale_endpoints(port))
+    tailscale_endpoints, tailscale = _tailscale_state(port)
+    endpoints.extend(tailscale_endpoints)
     endpoints=list(dict.fromkeys(endpoints))
     ad = {
         "schema": "tailcat-transport-v1",
@@ -145,6 +181,7 @@ def ensure_identity(port: int = DEFAULT_PORT) -> dict:
         "endpoints": endpoints,
         "cert_pem": cert,
         "cert_sha256": _cert_fingerprint(cert),
+        "tailscale": tailscale,
     }
     _atomic_json(AD_PATH, ad)
     return ad

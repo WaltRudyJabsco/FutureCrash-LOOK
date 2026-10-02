@@ -7,7 +7,8 @@ def test_tailcat_advertises_overlay_endpoints():
     assert 'def _tailscale_endpoints(port: int)' in src
     assert 'TailscaleIPs' in src
     assert 'DNSName' in src
-    assert 'endpoints.extend(_tailscale_endpoints(port))' in src
+    assert 'tailscale_endpoints, tailscale = _tailscale_state(port)' in src
+    assert 'endpoints.extend(tailscale_endpoints)' in src
 
 def test_browser_media_reuses_item_transport():
     node=(ROOT/'core/node.py').read_text()

@@ -1,12 +1,27 @@
-# 8.3.11 — LOCKSTEP
+# 8.3.13 — ROUTE FIX
+
+- Fixes macOS Tailcat advertisements that could become `host.local.local`; mDNS names are normalized to exactly one `.local` suffix.
+- Tailcat now finds Tailscale from launchd's sparse PATH, including Homebrew and the macOS app bundle, and records why Tailscale discovery failed instead of silently omitting overlay endpoints.
+- Fabric Doctor reports the live Tailcat release and Tailscale DNS/IP discovery state so missing overlay routes are explicit.
+- Installer now verifies the live :7443 Tailcat advertisement is the current release and rejects stale or malformed `.local.local` advertisements before reporting success.
+- Media playback remains unchanged.
+
+# 8.3.13 — ROUTE TRUTH
+
+- Fabric Doctor now probes every trusted peer endpoint independently and reports exact success/failure, latency, and the currently selected route.
+- Peer discovery gives the last successful authenticated route first refusal instead of repeatedly stalling on a dead `.local` or stale DHCP address.
+- Route diagnostics are local-control only and reuse existing pinned Tailcat certificates and Fabric authorization; no trust boundary is weakened.
+- Media playback and browser representation paths are unchanged.
+
+# 8.3.13 — LOCKSTEP
 
 - Fixes the upgrade split-brain revealed by 8.3.10: LOOK, installed release metadata, and the resident Unified Node are now verified as one release before install success.
 - `lk --version` now reports both the LOOK version and installed Future Crash + LOOK release, so a stale install is visible immediately.
 - The installer rejects a bundle whose embedded LOOK version disagrees with its installer declaration.
-- After installation, the installer requires the installed LOOK command to report the exact release and requires the live node on :7332 to report 8.3.11.
+- After installation, the installer requires the installed LOOK command to report the exact release and requires the live node on :7332 to report 8.3.13.
 - Keeps the 8.3.10 macOS launchd restart/listener diagnostics; media playback code is unchanged.
 
-# 8.3.11 — LISTEN
+# 8.3.13 — LISTEN
 
 - Mac installer now explicitly kickstarts Tailcat after launchd bootstrap.
 - Fabric Doctor separates local :7443 listener health, advertised endpoints, trust, and peer catalog reachability.
