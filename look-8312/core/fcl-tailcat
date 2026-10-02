@@ -1,0 +1,4 @@
+#!/usr/bin/env bash
+set -euo pipefail
+ROOT="$HOME/.local/share/future-crash-look/core"
+exec python3 "$ROOT/tailcat.py" "$@"
