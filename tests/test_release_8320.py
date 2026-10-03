@@ -8,18 +8,18 @@ def test_cursor_selection_uses_object_action_footer():
         assert label in block
     assert "BROWSE{RESET}" not in block
 
-def test_player_uses_ascii_safe_art_renderer():
+def test_player_restores_known_good_8319_art_renderer():
     lk=(ROOT/'look/lk').read_text()
-    art=(ROOT/'look/media_art.py').read_text()
-    assert '_media_player_art_lines(entry,art_w,6)' in lk
-    assert "def _ascii_via_ffmpeg" in art
-    assert "ramp=' .:-=+*#%@'" in art
+    assert 'art=_media_cover_lines(entry,art_w,6) if art_w else []' in lk
 
-def test_media_info_progresses_to_native_art_without_blocking():
+def test_media_find_does_not_overlay_art_asynchronously():
     lk=(ROOT/'look/lk').read_text()
-    assert 'native_art.request(cover' in lk
-    assert 'native_art.paint_ready()' in lk
-    assert 'watched=[fd]+' in lk
+    start=lk.index('def _media_selector(')
+    end=lk.index('def _media_find_command', start)
+    selector=lk[start:end]
+    assert 'native_art=NativePreviewController()' not in selector
+    assert 'native_art.request(' not in selector
+    assert 'native_art.paint_ready()' not in selector
 
 def test_auto_preview_is_mid_sized_not_original_or_tiny():
     text=(ROOT/'look/look_renderer.py').read_text()

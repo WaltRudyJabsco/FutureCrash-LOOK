@@ -75,7 +75,7 @@ try:
 except ImportError:
     from attention import normalize_event as normalize_attention_event, plan_voice_targets
 
-VERSION = "8.4.1"
+VERSION = "8.4.2"
 RELEASE_NAME = "GTD"
 DEFAULT_HOST = "127.0.0.1"
 DEFAULT_PORT = 7332

@@ -28,7 +28,7 @@ try:
 except Exception:
     readline = None
 
-VERSION="4.52.1"
+VERSION="4.52.2"
 
 LOOK_WORDMARK = r"""       ██╗      ██╗  ██╗
        ██║      ██║ ██╔╝
@@ -9933,7 +9933,7 @@ def _direct_searxng_search(query, limit=8):
     params=urllib.parse.urlencode({"q":query,"format":"json"})
     request=urllib.request.Request(base+"/search?"+params,headers={
         "Accept":"application/json",
-        "User-Agent":"Future-Crash-Fabric/8.4.1",
+        "User-Agent":"Future-Crash-Fabric/8.4.2",
     })
     with urllib.request.urlopen(request,timeout=12) as response:
         data=json.load(response)
@@ -16846,7 +16846,6 @@ def _media_selector(rows,title="FABRIC MEDIA",initial_query="",catalog_meta=None
     show_hidden=False
     action=("none",None)
     view_key=None; visible=[]
-    native_art=NativePreviewController()
     try:
         tty.setcbreak(fd)
         while True:
@@ -16866,7 +16865,6 @@ def _media_selector(rows,title="FABRIC MEDIA",initial_query="",catalog_meta=None
             top=max(0,min(max(0,len(visible)-usable),idx-usable+1))
             page=visible[top:top+usable]
 
-            native_art.frame_cleared()
             sys.stdout.write("\033[2J\033[H")
             mode=("ALL SOURCES" if show_all else "LOGICAL")+(" + HIDDEN" if show_hidden else "")
             suffix=f"{len(visible):,} shown · {len(rows):,} locations · {len(selected_rows)} selected · {mode}"
@@ -16919,27 +16917,9 @@ def _media_selector(rows,title="FABRIC MEDIA",initial_query="",catalog_meta=None
                 notice=""
             print("\n"+footer,end="",flush=True)
 
-            # ASCII artwork is canonical and immediate. On supported native-image
-            # terminals, progressively replace only that art rectangle after the
-            # frame is complete; never block selector input waiting for artwork.
-            if info_mode and visible and art_w:
-                cover=_media_cover_path(visible[idx])
-                if cover:
-                    warning_rows=1 if catalog_meta and (catalog_meta.get("errors") or catalog_meta.get("fallback")) else 0
-                    art_row=2+warning_rows+len(page)+3
-                    art_col=detail_w+3
-                    native_art.request(cover,art_row,art_col,info_height,art_w)
-            while True:
-                watched=[fd]+([native_art.wakeup_fd] if native_art.wakeup_fd is not None else [])
-                ready,_,_=select.select(watched,[],[])
-                if native_art.wakeup_fd is not None and native_art.wakeup_fd in ready:
-                    try: os.read(native_art.wakeup_fd,4096)
-                    except (OSError,BlockingIOError): pass
-                    native_art.paint_ready()
-                    if fd not in ready:
-                        continue
-                key=_read_tty_key(fd)
-                break
+            # 8.3.19 contract: terminal artwork is part of the synchronous frame.
+            # Do not overlay or repaint the Media Find info rectangle asynchronously.
+            key=_read_tty_key(fd)
             if key in {"\x03","q"} and not query:
                 break
             if key=="esc":
@@ -17525,7 +17505,7 @@ def _media_player_render():
         # Same shared art primitive as Media Find. Keep the player dimensions fixed:
         # artwork occupies spare right-hand cells and can never move the controls.
         art_w=min(18,max(12,inner//4)) if inner>=42 else 0
-        art=_media_player_art_lines(entry,art_w,6) if art_w else []
+        art=_media_cover_lines(entry,art_w,6) if art_w else []
         if art:
             text_w=inner-art_w-2
             body=[]

@@ -4,19 +4,19 @@ import re
 ROOT = Path(__file__).resolve().parents[1]
 
 def test_release_versions_are_lockstep():
-    assert (ROOT / "VERSION").read_text().strip() == "8.4.1"
+    assert (ROOT / "VERSION").read_text().strip() == "8.4.2"
     for rel in ("look/VERSION", "albert/VERSION", "future-crash/VERSION"):
-        assert (ROOT / rel).read_text().strip() == "8.4.1"
+        assert (ROOT / rel).read_text().strip() == "8.4.2"
     for rel in ("core/node.py", "core/ingress.py", "core/tailcat.py", "core/rendezvous.py"):
         text = (ROOT / rel).read_text()
-        assert re.search(r'^VERSION = "8\.4\.1"$', text, re.M)
+        assert re.search(r'^VERSION = "8\.4\.2"$', text, re.M)
 
 def test_look_version_matches_installer_and_reports_product_release():
     lk = (ROOT / "look/lk").read_text()
     installer = (ROOT / "install-look.sh").read_text()
     lk_version = re.search(r'^VERSION="([^"]+)"$', lk, re.M).group(1)
     declared = re.search(r'^LOOK_VERSION="([^"]+)"$', installer, re.M).group(1)
-    assert lk_version == declared == "4.52.1"
+    assert lk_version == declared == "4.52.2"
     assert 'Future Crash + LOOK {product_release}' in lk
 
 def test_unified_installer_verifies_live_and_cli_versions():
