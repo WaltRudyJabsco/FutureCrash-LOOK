@@ -1,3 +1,10 @@
+# 8.5.4 — MEDIA POLISH
+
+- Media Find now composes each frame off-screen and swaps it in with one terminal write; arrow navigation no longer clears to a blank screen before redraw.
+- Unified Node media helpers find `chafa` and `ffmpeg` in Homebrew/Linuxbrew/system paths even from sparse service environments.
+- Remote preview identity falls back to the exact owner/id/path selected by the working playback route, so artwork cannot drift from audio routing.
+- `lk player`: `s` toggles mpv playlist shuffle/unshuffle and preserves LOOK's runtime queue map; `r` remains repeat.
+
 # 8.5.3 — TERMINAL PREVIEW
 
 - Remote LOOK Player/Media Find artwork can now be rendered on the Fabric node that owns the media and returned as tiny Chafa terminal rows; endpoint disks are not filled with preview images.

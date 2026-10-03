@@ -1,10 +1,10 @@
 #!/usr/bin/env python3
-import os, platform, re, select, shutil, subprocess, sys, termios, tty, threading, time, hashlib, json, uuid, signal, tempfile, wave, math, struct, zipfile, socket, shlex
+import os, platform, re, select, shutil, subprocess, sys, termios, tty, threading, time, hashlib, json, uuid, signal, tempfile, wave, math, struct, zipfile, socket, shlex, io
 from datetime import datetime
 import http.client
 import urllib.request, urllib.parse, urllib.error
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
-from contextlib import contextmanager
+from contextlib import contextmanager, redirect_stdout
 from pathlib import Path
 
 _LOOK_MODULE_DIR=Path(__file__).resolve().parent
@@ -28,7 +28,7 @@ try:
 except Exception:
     readline = None
 
-VERSION="4.53.3"
+VERSION="4.53.4"
 
 LOOK_WORDMARK = r"""       ██╗      ██╗  ██╗
        ██║      ██║ ██╔╝
@@ -9937,7 +9937,7 @@ def _direct_searxng_search(query, limit=8):
     params=urllib.parse.urlencode({"q":query,"format":"json"})
     request=urllib.request.Request(base+"/search?"+params,headers={
         "Accept":"application/json",
-        "User-Agent":"Future-Crash-Fabric/8.5.3",
+        "User-Agent":"Future-Crash-Fabric/8.5.4",
     })
     with urllib.request.urlopen(request,timeout=12) as response:
         data=json.load(response)
@@ -12583,6 +12583,8 @@ def _select_values(title, rows):
     notice=""
     try:
         tty.setcbreak(fd)
+        sys.stdout.write("\033[2J\033[H")
+        sys.stdout.flush()
         while True:
             terms=query.casefold().split()
             visible=[
@@ -16607,7 +16609,13 @@ def _media_art_source(row):
 
 
 def _media_remote_preview_identity(row):
-    """Return the remote owner identity needed for a source-local terminal preview."""
+    """Return the remote owner identity needed for a source-local terminal preview.
+
+    Artwork must follow the same routing decision as playback.  Prefer explicit
+    catalog metadata, then derive identity from the exact loopback media URL that
+    `_media_entry_source()` would hand to mpv.  If remote audio can play, this keeps
+    preview routing from independently choosing (or losing) a different owner.
+    """
     if not isinstance(row,dict): return None
     candidates=[]
     art=row.get("art")
@@ -16626,6 +16634,22 @@ def _media_remote_preview_identity(row):
         if node and entry_id and node.casefold() not in local:
             return {"node":node,"id":entry_id,"path":str(item.get("path") or ""),
                     "mtime":item.get("mtime") or row.get("mtime") or ""}
+
+    # Last authority: use the very source resolution that already makes playback
+    # work.  This is especially important for normalized queue rows where the small
+    # artwork envelope may be absent/stale but Fabric streaming still resolves.
+    try:
+        source=_media_entry_source(row)
+        parsed=urllib.parse.urlparse(source)
+        if parsed.hostname in {"127.0.0.1","localhost"} and parsed.path=="/v1/media/item":
+            q=urllib.parse.parse_qs(parsed.query)
+            node=str((q.get("node") or [""])[0]).strip()
+            entry_id=str((q.get("id") or [""])[0]).strip()
+            path=str((q.get("path") or [""])[0])
+            if node and entry_id and node.casefold() not in local:
+                return {"node":node,"id":entry_id,"path":path,"mtime":row.get("mtime") or ""}
+    except Exception:
+        pass
     return None
 
 def _media_remote_preview_key(row,width,height):
@@ -17028,61 +17052,73 @@ def _media_selector(rows,title="FABRIC MEDIA",initial_query="",catalog_meta=None
             top=max(0,min(max(0,len(visible)-usable),idx-usable+1))
             page=visible[top:top+usable]
 
-            sys.stdout.write("\033[2J\033[H")
-            mode=("ALL SOURCES" if show_all else "LOGICAL")+(" + HIDDEN" if show_hidden else "")
-            suffix=f"{len(visible):,} shown · {len(rows):,} locations · {len(selected_rows)} selected · {mode}"
-            _title(title,suffix)
-            if catalog_meta:
-                nodes=catalog_meta.get("nodes") or []
-                errors=catalog_meta.get("errors") or []
-                if errors:
-                    failed=", ".join(str(e.get("node") or "?") for e in errors)
-                    print(_c(f"FABRIC PARTIAL · {len(nodes)} node(s) available · unavailable: {failed}","1;33"))
-                elif catalog_meta.get("fallback"):
-                    print(_c("FABRIC LOCAL FALLBACK · Unified Node catalog unavailable","1;33"))
-            for n,row in enumerate(page,start=top):
-                rid=row_id(row)
-                focus=_c("›","1;36") if n==idx else " "
-                mark=_c("✓","32") if rid in selected_ids else " "
-                node=str(row.get("node") or "local")
-                identity="◆" if row.get("digest") else "·"
-                count=int(row.get("source_count") or 1)
-                right=f"{identity} {node}"+(f" · {count} SOURCES" if count>1 else "")
-                label=_media_row_label(row)
-                max_label=max(12,width-len(right)-7)
-                if len(label)>max_label:
-                    label=label[:max(1,max_label-1)]+"…"
-                print(f"{focus}{mark} {label:<{max_label}}  {_c(right,'2')}")
-            if not visible:
-                print("  no matches")
-            if info_mode and visible:
-                print("\n"+_c("MEDIA INFO","1;36"))
-                print("─"*min(width,110))
-                info_height=11
-                art_w=min(22,max(14,width//5)) if width>=78 else 0
-                detail_w=max(32,width-art_w-4) if art_w else width
-                details=_media_detail_lines(visible[idx],detail_w)[:info_height]
-                art=_media_cover_lines(visible[idx],art_w,info_height) if art_w else []
-                for line_no in range(max(len(details),len(art))):
-                    left=details[line_no] if line_no<len(details) else ""
-                    if art:
-                        pad=max(1,detail_w-len(_strip_ansi(left)))
-                        right=art[line_no] if line_no<len(art) else ""
-                        print(left+" "*pad+"  "+right)
-                    else:
-                        print(left)
+            # Build the complete next frame away from the terminal, then swap it in
+            # with one write.  Never clear to blank between arrow-key frames.
+            frame_io=io.StringIO()
+            with redirect_stdout(frame_io):
+                mode=("ALL SOURCES" if show_all else "LOGICAL")+(" + HIDDEN" if show_hidden else "")
+                suffix=f"{len(visible):,} shown · {len(rows):,} locations · {len(selected_rows)} selected · {mode}"
+                _title(title,suffix)
+                if catalog_meta:
+                    nodes=catalog_meta.get("nodes") or []
+                    errors=catalog_meta.get("errors") or []
+                    if errors:
+                        failed=", ".join(str(e.get("node") or "?") for e in errors)
+                        print(_c(f"FABRIC PARTIAL · {len(nodes)} node(s) available · unavailable: {failed}","1;33"))
+                    elif catalog_meta.get("fallback"):
+                        print(_c("FABRIC LOCAL FALLBACK · Unified Node catalog unavailable","1;33"))
+                for n,row in enumerate(page,start=top):
+                    rid=row_id(row)
+                    focus=_c("›","1;36") if n==idx else " "
+                    mark=_c("✓","32") if rid in selected_ids else " "
+                    node=str(row.get("node") or "local")
+                    identity="◆" if row.get("digest") else "·"
+                    count=int(row.get("source_count") or 1)
+                    right=f"{identity} {node}"+(f" · {count} SOURCES" if count>1 else "")
+                    label=_media_row_label(row)
+                    max_label=max(12,width-len(right)-7)
+                    if len(label)>max_label:
+                        label=label[:max(1,max_label-1)]+"…"
+                    print(f"{focus}{mark} {label:<{max_label}}  {_c(right,'2')}")
+                if not visible:
+                    print("  no matches")
+                art_pending=False
+                if info_mode and visible:
+                    print("\n"+_c("MEDIA INFO","1;36"))
+                    print("─"*min(width,110))
+                    info_height=11
+                    art_w=min(22,max(14,width//5)) if width>=78 else 0
+                    detail_w=max(32,width-art_w-4) if art_w else width
+                    details=_media_detail_lines(visible[idx],detail_w)[:info_height]
+                    art=_media_cover_lines(visible[idx],art_w,info_height,background_remote=True) if art_w else []
+                    art_pending=bool(art_w and not art and _media_remote_preview_pending(visible[idx],art_w,info_height))
+                    for line_no in range(max(len(details),len(art),1 if art_pending else 0)):
+                        left=details[line_no] if line_no<len(details) else ""
+                        if art:
+                            pad=max(1,detail_w-len(_strip_ansi(left)))
+                            right=_ansi_clip(art[line_no] if line_no<len(art) else "",art_w)
+                            print(left+" "*pad+"  "+right)
+                        elif art_pending and line_no==0:
+                            print(left+" "*max(1,detail_w-len(_strip_ansi(left)))+"  "+_c("ART…","2"))
+                        else:
+                            print(left)
 
-            filter_text=f"{_c('FILTER','1;36')} {query}█" if query else f"{_c('FILTER','1;36')} █"
-            actions=_c("Tab select · A select all · Enter/P play · Q queue · I info · V sources · H hidden · X hide · D hide by directory · U unhide · ◆ SHA · · scanned · Esc exit","2")
-            footer=f"{filter_text}  {actions}"
-            if notice:
-                footer+="  "+_c(notice,"33")
-                notice=""
-            print("\n"+footer,end="",flush=True)
+                filter_text=f"{_c('FILTER','1;36')} {query}█" if query else f"{_c('FILTER','1;36')} █"
+                actions=_c("Tab select · A select all · Enter/P play · Q queue · I info · V sources · H hidden · X hide · D hide by directory · U unhide · ◆ SHA · · scanned · Esc exit","2")
+                footer=f"{filter_text}  {actions}"
+                if notice:
+                    footer+="  "+_c(notice,"33")
+                    notice=""
+                print("\n"+footer,end="")
+            frame=frame_io.getvalue()
+            sys.stdout.write("\033[H"+frame+"\033[J")
+            sys.stdout.flush()
 
-            # 8.3.19 contract: terminal artwork is part of the synchronous frame.
-            # Do not overlay or repaint the Media Find info rectangle asynchronously.
-            key=_read_tty_key(fd)
+            # While remote art is resolving, poll briefly so it can appear without
+            # requiring another navigation key.  Otherwise block exactly as before.
+            key=_read_tty_key(fd,.08 if art_pending else None)
+            if not key and art_pending:
+                continue
             if key in {"\x03","q"} and not query:
                 break
             if key=="esc":
@@ -17592,6 +17628,39 @@ def _media_jump_index(target):
     return 0
 
 
+def _media_shuffle_command():
+    """Toggle mpv's active playlist shuffle while keeping LOOK's runtime map honest."""
+    session=_media_session()
+    if not session:
+        print("LOOK media · no active queue")
+        return 1
+    enabled=not bool(session.get("shuffle"))
+    if _media_mpv_alive():
+        command="playlist-shuffle" if enabled else "playlist-unshuffle"
+        result=_media_mpv_request([command])
+        if not result or result.get("error")!="success":
+            return 1
+        playlist=_media_mpv_property("playlist")
+        queue=session.get("queue") or []
+        if isinstance(playlist,list) and queue:
+            by_source={}
+            for idx,entry in enumerate(queue):
+                try: source=_media_entry_source(entry)
+                except Exception: continue
+                by_source.setdefault(source,[]).append(idx)
+            mapping=[]
+            for item in playlist:
+                filename=str(item.get("filename") or "") if isinstance(item,dict) else ""
+                choices=by_source.get(filename) or []
+                if choices:
+                    mapping.append(choices.pop(0))
+            if len(mapping)==len(playlist):
+                session["runtime_queue_indices"]=mapping
+    session["shuffle"]=enabled
+    _media_save_session(session)
+    return 0
+
+
 def _media_repeat_command(args):
     session=_media_session()
     if not session:
@@ -17664,7 +17733,7 @@ def _media_player_render():
             f"{time_text}  {bar}",
             f"{state}  ·  {footer}", "",
             "space play/pause   ←/→ seek 10s   p/n previous/next",
-            "r repeat   x stop   q close player",
+            "s shuffle   r repeat   x stop   q close player",
             "", "", "",
         ]
         # Use the exact same proven Chafa renderer as Media Find.  Art rows are
@@ -17716,6 +17785,7 @@ def media_player():
             elif key=="p": _media_control_session("prev")
             elif key=="left": _media_mpv_request(["seek",-10,"relative"])
             elif key=="right": _media_mpv_request(["seek",10,"relative"])
+            elif key=="s": _media_shuffle_command()
             elif key=="r": _media_repeat_command([])
             elif key=="x": _media_control_session("stop")
     except KeyboardInterrupt:

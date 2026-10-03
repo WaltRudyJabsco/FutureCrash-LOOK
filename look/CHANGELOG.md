@@ -1,3 +1,9 @@
+# 4.53.4 — MEDIA POLISH
+
+- Eliminate Media Find clear-to-blank navigation redraws.
+- Route remote terminal art through the same proven Fabric identity as playback.
+- Add `s` shuffle toggle to `lk player`.
+
 # 7.5.5 — ATTENTION ROUTER
 
 - Fixes `lk voice preview` and the Settings preview row so they audition the configured default voice rather than a personality override.

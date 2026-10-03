@@ -1,17 +1,17 @@
-# Future Crash + LOOK 8.5.3 — TERMINAL PREVIEW
+# Future Crash + LOOK 8.5.4 — MEDIA POLISH
 
-8.5.3 adds source-local terminal previews: the media-owning Fabric node renders Chafa artwork and sends tiny terminal rows directly to the listening endpoint. It also left-anchors elapsed/duration so the progress bar, not the timestamp, gives up width.
+8.5.4 tightens the 8.5 media experience: Media Find navigation swaps complete frames without blank-screen clears, remote artwork helpers are discoverable from systemd/launchd service environments, artwork inherits the exact Fabric owner that already streams the song, and `s` toggles Player shuffle.
 
 **One local-first personal computer made from the machines you already own.**
 
-8.5.3 is a narrow Fabric media bug-fix release on the locked 8.5 baseline. When a remote track is selected or playing, LOOK can fetch only its tiny cover-art asset from the owning Fabric node, cache it locally, and feed it to the same proven Media Find/Player renderer. It never downloads the whole remote song merely to discover artwork.
+8.5.4 remains a narrow bug-fix release on the locked 8.5 baseline. Remote terminal artwork is rendered on the media-owning node and returned as a tiny text/ANSI preview; the receiving endpoint does not need the whole song or a persistent cover cache.
 
 8.5.0 established the stabilization baseline: shared Media Find/Player artwork rendering, audited help/man/docs, and independent component version identities.
 
 | Layer | Version |
 | --- | ---: |
-| Future Crash + LOOK bundle | **8.5.3** |
-| LOOK component | **4.53.3** |
+| Future Crash + LOOK bundle | **8.5.4** |
+| LOOK component | **4.53.4** |
 | Future Crash component | **1.2.2** |
 
 Use `lk version` for installed LOOK/bundle identity, `lk help` for the live glossary, and `man lk` for the reference manual. Component versions intentionally advance independently.
@@ -22,9 +22,9 @@ Use `lk version` for installed LOOK/bundle identity, `lk help` for the live glos
 - `C` / `M`: Copy To / Move To with editable destination plus directory picker.
 - `Shift-D`: remove selected/marked objects with confirmation and journaled undo where supported.
 - `Shift-R`: rename one or many objects; `#`, `##`, `###` provide numbered batch patterns.
-- `lk media find QUERY`: Fabric media selector with immediate terminal album art when local cover bytes are available.
-- `lk player`: live queue/player with the same terminal-art renderer, EQ activity view, transport controls, and playback state.
-- Remote Fabric media currently advertises media identity/location, not a separate cover-art asset; remote covers therefore require a future small artwork-cache/endpoint rather than downloading whole tracks.
+- `lk media find QUERY`: Fabric media selector with local or owner-rendered remote terminal artwork; navigation repaints without clear-to-blank flashes.
+- `lk player`: live queue/player with terminal artwork, EQ activity view, transport controls, `s` shuffle, and `r` repeat.
+- Remote Fabric previews follow the same owner/id routing already proven by playback; the owning node renders Chafa and returns only the terminal preview rows.
 
 ---
 

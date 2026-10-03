@@ -3,12 +3,12 @@ import re
 ROOT=Path(__file__).resolve().parents[1]
 
 def test_850_component_versions_are_explicit():
-    assert (ROOT/'VERSION').read_text().strip()=='8.5.3'
-    assert (ROOT/'look/VERSION').read_text().strip()=='4.53.3'
+    assert (ROOT/'VERSION').read_text().strip()=='8.5.4'
+    assert (ROOT/'look/VERSION').read_text().strip()=='4.53.4'
     assert (ROOT/'future-crash/VERSION').read_text().strip()=='1.2.2'
-    assert (ROOT/'albert/VERSION').read_text().strip()=='8.5.3'
-    assert 'VERSION="4.53.3"' in (ROOT/'look/lk').read_text()
-    assert 'LOOK_VERSION="4.53.3"' in (ROOT/'install-look.sh').read_text()
+    assert (ROOT/'albert/VERSION').read_text().strip()=='8.5.4'
+    assert 'VERSION="4.53.4"' in (ROOT/'look/lk').read_text()
+    assert 'LOOK_VERSION="4.53.4"' in (ROOT/'install-look.sh').read_text()
 
 def test_850_player_shares_media_find_renderer():
     lk=(ROOT/'look/lk').read_text()
@@ -18,7 +18,7 @@ def test_850_player_shares_media_find_renderer():
     assert '_ansi_clip(art[i] if i<len(art) else "",art_w)' in block
 
 def test_850_docs_name_current_release():
-    assert (ROOT/'README.md').read_text().startswith('# Future Crash + LOOK 8.5.3 — TERMINAL PREVIEW')
+    assert (ROOT/'README.md').read_text().startswith('# Future Crash + LOOK 8.5.4 — MEDIA POLISH')
     man=(ROOT/'look/lk.1').read_text()
-    assert 'LOOK 4.53.3 / Future Crash + LOOK 8.5.3' in man
+    assert 'LOOK 4.53.4 / Future Crash + LOOK 8.5.4' in man
     assert 'Shift-R' in man and 'Shift-D' in man

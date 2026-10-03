@@ -1,6 +1,6 @@
-# LOOK 4.53.3
+# LOOK 4.53.4
 
-LOOK is the keyboard-first terminal/tool layer shipped in Future Crash + LOOK 8.5.3. `lk help` is the authoritative live glossary; `man lk` is the reference manual.
+LOOK is the keyboard-first terminal/tool layer shipped in Future Crash + LOOK 8.5.4. `lk help` is the authoritative live glossary; `man lk` is the reference manual.
 
 ### Interactive browser essentials
 
