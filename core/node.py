@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Future Crash + LOOK Unified Node 8.5.2.
+"""Future Crash + LOOK Unified Node 8.5.3.
 
 A small distributed supervisor for trusted personal machines. Immediate events stay
 asynchronous; a one-second fabric pulse reconciles presence, leases and stale work.
@@ -75,7 +75,7 @@ try:
 except ImportError:
     from attention import normalize_event as normalize_attention_event, plan_voice_targets
 
-VERSION = "8.5.2"
+VERSION = "8.5.3"
 RELEASE_NAME = "GTD"
 DEFAULT_HOST = "127.0.0.1"
 DEFAULT_PORT = 7332
@@ -2336,7 +2336,7 @@ def _local_web_search(query, limit=8):
     base=os.environ.get("FCL_SEARXNG_URL","http://127.0.0.1:8888").rstrip("/")
     request=urllib.request.Request(base+"/search?"+params,headers={
         "Accept":"application/json",
-        "User-Agent":"Future-Crash-Fabric/8.5.2",
+        "User-Agent":"Future-Crash-Fabric/8.5.3",
     })
     try:
         with urllib.request.urlopen(request,timeout=8) as response:
@@ -2492,6 +2492,31 @@ def _local_media_cover(entry_id, path_hint=""):
         if art.suffix.casefold() in {".jpg",".jpeg",".png",".webp"} and any(k in art.stem.casefold() for k in ("cover","folder","front","album")):
             return art,mimetypes.guess_type(str(art))[0] or "image/jpeg"
     raise FileNotFoundError(f"no artwork for {source}")
+
+
+
+def _local_media_terminal_preview(entry_id, path_hint="", width=22, height=11):
+    """Render a tiny terminal preview on the node that owns the source bytes.
+
+    This is deliberately a presentation artifact, not media transport: the owner
+    resolves/extracts cover art locally, runs Chafa locally, and returns only UTF-8
+    terminal rows. Remote endpoints never need the media file or cover image.
+    """
+    width=max(12,min(80,int(width or 22)))
+    height=max(3,min(24,int(height or 11)))
+    art,_ctype=_local_media_cover(entry_id,path_hint)
+    chafa=shutil.which("chafa")
+    if not chafa:
+        raise RuntimeError("chafa unavailable on media owner")
+    proc=subprocess.run([chafa,"--format=symbols","--size",f"{width}x{height}",str(art)],
+                        capture_output=True,text=True,timeout=1.5)
+    if proc.returncode:
+        raise RuntimeError((proc.stderr or "chafa preview failed").strip()[:300])
+    lines=proc.stdout.rstrip("\n").splitlines()[:height]
+    if not lines:
+        raise RuntimeError("terminal preview empty")
+    return {"ok":True,"kind":"terminal-symbols","width":width,"height":height,
+            "owner":identity()["name"],"id":str(entry_id),"lines":lines}
 
 def _identify_media_entry(entry_id):
     """Promote one already-scanned local path to content-addressed Fabric identity."""
@@ -3449,6 +3474,44 @@ class API(BaseHTTPRequestHandler):
                 self.send_response(502); self.send_header("Content-Length","0"); self.end_headers(); return
             self.sendj(502,{"error":str(exc)})
 
+
+    def _serve_media_terminal_preview(self,target,entry_id,path_hint="",width=22,height=11):
+        """Return owner-rendered terminal rows locally or relay them through Fabric."""
+        target=str(target or "").strip(); entry_id=str(entry_id or "").strip(); local=identity()["name"]
+        try:
+            width=max(12,min(80,int(width or 22))); height=max(3,min(24,int(height or 11)))
+        except Exception:
+            width,height=22,11
+        if not entry_id:
+            return self.sendj(400,{"error":"media entry id required"})
+        if not target or target==local:
+            try:
+                return self.sendj(200,_local_media_terminal_preview(entry_id,path_hint,width,height))
+            except Exception as exc:
+                return self.sendj(404,{"error":str(exc)})
+        snapshot={"self":node_info(),"peers":PEERS.public()}
+        try:
+            peer=_peer_for_target(snapshot,target); last_exc=None
+            for base in _peer_bases(peer):
+                url=base+"/v1/preview/terminal?"+urllib.parse.urlencode({"id":entry_id,"path":path_hint,"width":width,"height":height})
+                headers=FABRIC_IDENTITY.auth_headers_for_url(url)
+                req=urllib.request.Request(url,headers=headers)
+                context=FABRIC_IDENTITY.ssl_context_for_url(url) if url.lower().startswith("https://") else None
+                try:
+                    kwargs={"timeout":4.0}
+                    if context is not None: kwargs["context"]=context
+                    with urllib.request.urlopen(req,**kwargs) as r:
+                        payload=json.loads(r.read(256*1024).decode("utf-8"))
+                    if not isinstance(payload,dict) or not isinstance(payload.get("lines"),list):
+                        raise RuntimeError("invalid terminal preview response")
+                    payload["owner"]=target
+                    return self.sendj(200,payload)
+                except Exception as exc:
+                    last_exc=exc
+            raise RuntimeError(f"terminal preview transport failed: {last_exc}")
+        except Exception as exc:
+            return self.sendj(502,{"error":str(exc)})
+
     def _serve_media_artifact(self,target,digest,*,head=False):
         """Expose one artifact through the local control plane.
 
@@ -3712,6 +3775,11 @@ class API(BaseHTTPRequestHandler):
         if path == "/v1/media/cover":
             q=parse_qs(urlparse(self.path).query); target=str((q.get("node") or [""])[0]); entry_id=str((q.get("id") or [""])[0]); path_hint=str((q.get("path") or [""])[0])
             return self._serve_media_cover(target,entry_id,path_hint)
+        if path == "/v1/preview/terminal":
+            q=parse_qs(urlparse(self.path).query); target=str((q.get("node") or [""])[0]); entry_id=str((q.get("id") or [""])[0]); path_hint=str((q.get("path") or [""])[0])
+            try: width=int((q.get("width") or [22])[0]); height=int((q.get("height") or [11])[0])
+            except Exception: width,height=22,11
+            return self._serve_media_terminal_preview(target,entry_id,path_hint,width,height)
         if path == "/v1/media/audio":
             q=parse_qs(urlparse(self.path).query); target=str((q.get("node") or [""])[0])
             try: index=int((q.get("index") or [0])[0] or 0)

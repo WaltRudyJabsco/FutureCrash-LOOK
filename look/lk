@@ -28,7 +28,7 @@ try:
 except Exception:
     readline = None
 
-VERSION="4.53.2"
+VERSION="4.53.3"
 
 LOOK_WORDMARK = r"""       ██╗      ██╗  ██╗
        ██║      ██║ ██╔╝
@@ -63,6 +63,9 @@ MEDIA_LIBRARY_FILE=STATE_DIR/"media_library.json"
 MEDIA_PLAYLIST_DIR=STATE_DIR/"media_playlists"
 MEDIA_QUEUE_FILE=STATE_DIR/"media_queue.m3u8"
 _REMOTE_MEDIA_ART_MISS={}
+_REMOTE_MEDIA_PREVIEW_CACHE={}
+_REMOTE_MEDIA_PREVIEW_LOADING=set()
+_REMOTE_MEDIA_PREVIEW_MISS={}
 MEDIA_IPC_FILE=STATE_DIR/"media.sock"
 MEDIA_MPV_LOG=STATE_DIR/"media_mpv.log"
 FILE_CATALOG_DB=STATE_DIR/"file_catalog.sqlite3"
@@ -9934,7 +9937,7 @@ def _direct_searxng_search(query, limit=8):
     params=urllib.parse.urlencode({"q":query,"format":"json"})
     request=urllib.request.Request(base+"/search?"+params,headers={
         "Accept":"application/json",
-        "User-Agent":"Future-Crash-Fabric/8.5.2",
+        "User-Agent":"Future-Crash-Fabric/8.5.3",
     })
     with urllib.request.urlopen(request,timeout=12) as response:
         data=json.load(response)
@@ -16601,6 +16604,82 @@ def _media_art_source(row):
             continue
     return ""
 
+
+
+def _media_remote_preview_identity(row):
+    """Return the remote owner identity needed for a source-local terminal preview."""
+    if not isinstance(row,dict): return None
+    candidates=[]
+    art=row.get("art")
+    if isinstance(art,dict): candidates.append(dict(art))
+    candidates.append({k:row.get(k) for k in ("node","id","path","mtime")})
+    for key in ("sources","locations"):
+        for item in row.get(key) or []:
+            if isinstance(item,dict):
+                merged=dict(item)
+                if not merged.get("node"): merged["node"]=row.get("node")
+                if not merged.get("id"): merged["id"]=row.get("id")
+                candidates.append(merged)
+    local=_media_local_node_names()
+    for item in candidates:
+        node=str(item.get("node") or "").strip(); entry_id=str(item.get("id") or "").strip()
+        if node and entry_id and node.casefold() not in local:
+            return {"node":node,"id":entry_id,"path":str(item.get("path") or ""),
+                    "mtime":item.get("mtime") or row.get("mtime") or ""}
+    return None
+
+def _media_remote_preview_key(row,width,height):
+    ident=_media_remote_preview_identity(row)
+    if not ident: return None,None
+    raw=f"{ident['node']}|{ident['id']}|{ident['path']}|{ident['mtime']}|{int(width)}x{int(height)}"
+    return hashlib.sha256(raw.encode()).hexdigest()[:32],ident
+
+def _media_fetch_remote_preview(row,width,height):
+    key,ident=_media_remote_preview_key(row,width,height)
+    if not key or not ident: return []
+    now=time.monotonic()
+    cached=_REMOTE_MEDIA_PREVIEW_CACHE.get(key)
+    if cached: return list(cached)
+    if now-float(_REMOTE_MEDIA_PREVIEW_MISS.get(key) or 0)<20.0: return []
+    url='http://127.0.0.1:7332/v1/preview/terminal?'+urllib.parse.urlencode({
+        "node":ident["node"],"id":ident["id"],"path":ident["path"],"width":int(width),"height":int(height)})
+    try:
+        req=urllib.request.Request(url,headers={"User-Agent":"LOOK-terminal-preview"})
+        with urllib.request.urlopen(req,timeout=4.0) as response:
+            payload=json.loads(response.read(256*1024).decode("utf-8"))
+        lines=payload.get("lines") if isinstance(payload,dict) else None
+        if not isinstance(lines,list) or not lines:
+            raise ValueError("empty terminal preview")
+        clean=[str(line) for line in lines[:max(3,int(height))]]
+        _REMOTE_MEDIA_PREVIEW_CACHE[key]=clean
+        _REMOTE_MEDIA_PREVIEW_MISS.pop(key,None)
+        # Bound memory without creating disk cache on every endpoint.
+        while len(_REMOTE_MEDIA_PREVIEW_CACHE)>64:
+            _REMOTE_MEDIA_PREVIEW_CACHE.pop(next(iter(_REMOTE_MEDIA_PREVIEW_CACHE)))
+        return list(clean)
+    except Exception:
+        _REMOTE_MEDIA_PREVIEW_MISS[key]=now
+        return []
+
+def _media_remote_preview_lines(row,width,height,background=False):
+    key,ident=_media_remote_preview_key(row,width,height)
+    if not key or not ident: return []
+    cached=_REMOTE_MEDIA_PREVIEW_CACHE.get(key)
+    if cached: return list(cached)
+    if not background:
+        return _media_fetch_remote_preview(row,width,height)
+    if key not in _REMOTE_MEDIA_PREVIEW_LOADING:
+        _REMOTE_MEDIA_PREVIEW_LOADING.add(key)
+        def worker():
+            try: _media_fetch_remote_preview(row,width,height)
+            finally: _REMOTE_MEDIA_PREVIEW_LOADING.discard(key)
+        threading.Thread(target=worker,daemon=True,name="look-media-preview").start()
+    return []
+
+def _media_remote_preview_pending(row,width,height):
+    key,_ident=_media_remote_preview_key(row,width,height)
+    return bool(key and key in _REMOTE_MEDIA_PREVIEW_LOADING)
+
 def _media_remote_cover_path(row):
     """Fetch/cache a remote owner's tiny cover asset, never the whole media file."""
     if not isinstance(row,dict): return None
@@ -16669,8 +16748,8 @@ def _media_cover_path(row):
     return _media_remote_cover_path(row)
 
 
-def _media_cover_lines(row,width,height=11):
-    """Restore the proven 8.3.18 direct-path renderer before any Fabric logic."""
+def _media_cover_lines(row,width,height=11,background_remote=False):
+    """Render local art directly; ask the byte-owning Fabric node for remote terminal rows."""
     direct=str(row.get("path") or "") if isinstance(row,dict) else ""
     if direct:
         lines=media_art.symbol_lines(direct,width,height)
@@ -16679,6 +16758,12 @@ def _media_cover_lines(row,width,height=11):
     if source and source!=direct:
         lines=media_art.symbol_lines(source,width,height)
         if lines: return lines
+    # Prefer source-local terminal rendering: tiny text payload, no image/media copy.
+    lines=_media_remote_preview_lines(row,width,height,background=background_remote)
+    if lines: return lines
+    if background_remote and _media_remote_preview_pending(row,width,height):
+        return []
+    # Compatibility fallback for peers that only support 8.5.1/8.5.3 cover bytes.
     remote=_media_remote_cover_path(row)
     if remote:
         return media_art.symbol_lines(remote,width,height)
@@ -17563,7 +17648,8 @@ def _media_player_render():
         album=str(entry.get("album") or "").strip()
         pos=snap["position"] if isinstance(snap["position"],(int,float)) else 0
         duration=snap["duration"] if isinstance(snap["duration"],(int,float)) else 0
-        bar_width=max(12,inner-23)
+        time_text=f"{_media_time(pos)} / {_media_time(duration)}"
+        bar_width=max(4,inner-len(time_text)-2)
         ratio=max(0.0,min(1.0,(pos/duration) if duration else 0.0))
         filled=int(round(ratio*bar_width))
         bar="━"*filled+"─"*(bar_width-filled)
@@ -17575,7 +17661,7 @@ def _media_player_render():
         eq=_media_player_visualizer(entry,snap["state"],inner)
         raw_body=[
             f"{artist} — {title}" if artist else title, album, eq or "",
-            f"{bar}  {_media_time(pos)} / {_media_time(duration)}",
+            f"{time_text}  {bar}",
             f"{state}  ·  {footer}", "",
             "space play/pause   ←/→ seek 10s   p/n previous/next",
             "r repeat   x stop   q close player",
@@ -17585,7 +17671,8 @@ def _media_player_render():
         # terminal payloads, not ordinary text: never slice/pad inside their ANSI
         # sequences.  We only pad *after* measuring their stripped visible width.
         art_w=min(22,max(16,inner//4)) if inner>=42 else 0
-        art=_media_cover_lines(entry,art_w,11) if art_w else []
+        art=_media_cover_lines(entry,art_w,11,background_remote=True) if art_w else []
+        art_pending=bool(art_w and not art and _media_remote_preview_pending(entry,art_w,11))
         if art:
             text_w=inner-art_w-2
             body=[]
@@ -17596,6 +17683,8 @@ def _media_player_render():
                 right_pad=" "*max(0,art_w-visible)
                 body.append(left+"  "+right+right_pad)
         else:
+            if art_pending:
+                raw_body[9]="ART… loading remote preview"
             body=[_media_player_line(line,inner) for line in raw_body]
     top="┌"+"─"*(width-2)+"┐"
     bottom="└"+"─"*(width-2)+"┘"

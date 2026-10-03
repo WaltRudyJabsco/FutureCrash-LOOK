@@ -9,7 +9,7 @@ def test_real_player_renderer_shares_media_find_art_and_11_rows():
     start=LK.index('def _media_player_render')
     end=LK.index('\ndef media_player', start)
     block=LK[start:end]
-    assert '_media_cover_lines(entry,art_w,11)' in block
+    assert '_media_cover_lines(entry,art_w,11,background_remote=True)' in block
     assert '_media_player_art_lines(entry,art_w,11)' not in block
     assert '"", "", "",' in block
 

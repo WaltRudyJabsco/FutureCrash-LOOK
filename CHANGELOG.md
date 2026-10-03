@@ -1,3 +1,10 @@
+# 8.5.3 — TERMINAL PREVIEW
+
+- Remote LOOK Player/Media Find artwork can now be rendered on the Fabric node that owns the media and returned as tiny Chafa terminal rows; endpoint disks are not filled with preview images.
+- Player starts remote preview fetches in the background and shows `ART… loading remote preview` while the first frame settles.
+- The 8.5.1/8.5.2 cover-byte endpoint remains as compatibility fallback.
+- Player transport time is left-anchored; the progress bar now gives up width before elapsed/duration text.
+
 # 8.5.2 — REMOTE COVER FIX
 
 - Add `/v1/media/cover` to the Unified Node so remote endpoints can request only artwork for a catalog item.
