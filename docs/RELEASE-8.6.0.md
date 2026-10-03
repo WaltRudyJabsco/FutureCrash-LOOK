@@ -1,6 +1,6 @@
-# Future Crash + LOOK 8.6.0 — MEDIA PLAYER
+# Future Crash + LOOK 8.6.1 — MEDIA PLAYER
 
-8.6.0 introduces `lk mp`, an integrated terminal media workspace built on the 8.5.5 media/Fabric baseline.
+8.6.1 introduces `lk mp`, an integrated terminal media workspace built on the 8.5.5 media/Fabric baseline.
 
 - Library search, multi-select, metadata, local/remote terminal artwork, queue and transport share one screen.
 - `/` enters search mode so text entry never conflicts with transport shortcuts.

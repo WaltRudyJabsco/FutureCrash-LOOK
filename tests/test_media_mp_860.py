@@ -23,3 +23,11 @@ def test_lk_mp_is_reachable_both_ways():
 def test_lk_mp_controls_are_documented_in_surface():
     for text in ('A add queue','L library','Q queue','s shuffle','r repeat','/ search'):
         assert text in LK
+
+
+def test_media_mp_initializes_search_state_before_first_frame():
+    body=LK.split('def media_mp(initial_query=""):',1)[1].split('def _media_outputs_command():',1)[0]
+    init=body.split('def row_id(row):',1)[0]
+    assert 'search_mode=False' in init
+    assert 'search_before=query' in init
+    assert init.index('search_mode=False') < body.index('if search_mode:')

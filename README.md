@@ -1,7 +1,7 @@
-# Future Crash + LOOK 8.6.0 — MEDIA PLAYER
+# Future Crash + LOOK 8.6.1 — MEDIA PLAYER
 
 
-8.6.0 introduces `lk mp`, an integrated terminal media workspace over the stable 8.5.5 Fabric foundation: searchable library, selection, remote/local artwork, queue, now-playing state, and transport controls in one responsive view.
+8.6.1 introduces `lk mp`, an integrated terminal media workspace over the stable 8.5.5 Fabric foundation: searchable library, selection, remote/local artwork, queue, now-playing state, and transport controls in one responsive view.
 
 **One local-first personal computer made from the machines you already own.**
 
@@ -11,8 +11,8 @@ Remote and local media covers now use the same explicit full-RGB Chafa symbol co
 
 | Layer | Version |
 | --- | ---: |
-| Future Crash + LOOK bundle | **8.6.0** |
-| LOOK component | **4.54.0** |
+| Future Crash + LOOK bundle | **8.6.1** |
+| LOOK component | **4.54.1** |
 | Future Crash component | **1.2.2** |
 
 Use `lk version` for installed LOOK/bundle identity, `lk help` for the live glossary, and `man lk` for the reference manual. Component versions intentionally advance independently.

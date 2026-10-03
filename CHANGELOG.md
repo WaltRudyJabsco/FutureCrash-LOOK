@@ -1,4 +1,4 @@
-# 8.6.0 — MEDIA PLAYER
+# 8.6.1 — MEDIA PLAYER
 
 - Add `lk mp`, a unified terminal media workspace combining Fabric library search, selection, metadata/remote artwork, queue access, now-playing state, and transport controls.
 - Library and queue share LOOK navigation semantics; typing filters immediately, `Tab` marks, `Enter` plays, and `A` appends to the queue.
