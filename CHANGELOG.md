@@ -1,3 +1,9 @@
+# 8.4.1 — MEDIA ART RESTORE
+
+- Restores the proven 8.3.18 direct media-path artwork call as the primary path for Media Find and LOOK Player.
+- Fabric/physical-source resolution remains fallback-only.
+- Player uses the same art source, preferring rich terminal symbols and falling back to portable ASCII.
+
 # 8.4.0 — MEDIA CANON
 
 - Restore the proven local-first embedded album-art path before Fabric fallback.

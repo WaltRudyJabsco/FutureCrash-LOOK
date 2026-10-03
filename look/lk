@@ -28,7 +28,7 @@ try:
 except Exception:
     readline = None
 
-VERSION="4.52.0"
+VERSION="4.52.1"
 
 LOOK_WORDMARK = r"""       ██╗      ██╗  ██╗
        ██║      ██║ ██╔╝
@@ -9933,7 +9933,7 @@ def _direct_searxng_search(query, limit=8):
     params=urllib.parse.urlencode({"q":query,"format":"json"})
     request=urllib.request.Request(base+"/search?"+params,headers={
         "Accept":"application/json",
-        "User-Agent":"Future-Crash-Fabric/8.4.0",
+        "User-Agent":"Future-Crash-Fabric/8.4.1",
     })
     with urllib.request.urlopen(request,timeout=12) as response:
         data=json.load(response)
@@ -16580,20 +16580,42 @@ def _media_art_source(row):
     return ""
 
 def _media_cover_path(row):
-    """Shared local artwork resolver: embedded cover first, sidecar fallback."""
+    """8.3.18 fast path first; Fabric/source resolution is fallback only."""
+    direct=str(row.get("path") or "") if isinstance(row,dict) else ""
+    if direct:
+        art=media_art.artwork_for(direct)
+        if art: return art
     source=_media_art_source(row)
-    return media_art.artwork_for(source) if source else None
+    if source and source!=direct:
+        return media_art.artwork_for(source)
+    return None
 
 
 def _media_cover_lines(row,width,height=11):
-    """Bounded terminal art. Artwork failure never affects media navigation."""
+    """Restore the proven 8.3.18 direct-path renderer before any Fabric logic."""
+    direct=str(row.get("path") or "") if isinstance(row,dict) else ""
+    if direct:
+        lines=media_art.symbol_lines(direct,width,height)
+        if lines: return lines
     source=_media_art_source(row)
-    return media_art.symbol_lines(source,width,height) if source else []
+    if source and source!=direct:
+        return media_art.symbol_lines(source,width,height)
+    return []
 
 def _media_player_art_lines(row,width,height=6):
-    """ASCII-only player art: intentionally portable across terminal fonts."""
+    """Player uses the same proven art source; portable ASCII is fallback only."""
+    direct=str(row.get("path") or "") if isinstance(row,dict) else ""
+    if direct:
+        lines=media_art.symbol_lines(direct,width,height)
+        if lines: return lines
+        lines=media_art.ascii_lines(direct,width,height)
+        if lines: return lines
     source=_media_art_source(row)
-    return media_art.ascii_lines(source,width,height) if source else []
+    if source and source!=direct:
+        lines=media_art.symbol_lines(source,width,height)
+        if lines: return lines
+        return media_art.ascii_lines(source,width,height)
+    return []
 
 def _media_detail_lines(row, width=110):
     """Human-readable provenance for one catalog location."""
