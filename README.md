@@ -1,17 +1,18 @@
-# Future Crash + LOOK 8.5.4 — MEDIA POLISH
+# Future Crash + LOOK 8.5.5 — MEDIA FINISH
 
-8.5.4 tightens the 8.5 media experience: Media Find navigation swaps complete frames without blank-screen clears, remote artwork helpers are discoverable from systemd/launchd service environments, artwork inherits the exact Fabric owner that already streams the song, and `s` toggles Player shuffle.
+
+8.5.5 finishes the 8.5 media repair: Media Find clears every terminal row correctly without blank-screen flashes, remote artwork never blocks cursor navigation, only the newest selected preview is pursued, and the art pane reports `ART… requesting <node>` or `ART unavailable` instead of silently hanging.
 
 **One local-first personal computer made from the machines you already own.**
 
-8.5.4 remains a narrow bug-fix release on the locked 8.5 baseline. Remote terminal artwork is rendered on the media-owning node and returned as a tiny text/ANSI preview; the receiving endpoint does not need the whole song or a persistent cover cache.
+Remote and local media covers now use the same explicit full-RGB Chafa symbol contract. The media-owning node renders remote cover art and returns only terminal rows; Player and Media Find paint those rows directly without storing preview images on endpoint disks.
 
 8.5.0 established the stabilization baseline: shared Media Find/Player artwork rendering, audited help/man/docs, and independent component version identities.
 
 | Layer | Version |
 | --- | ---: |
-| Future Crash + LOOK bundle | **8.5.4** |
-| LOOK component | **4.53.4** |
+| Future Crash + LOOK bundle | **8.5.5** |
+| LOOK component | **4.53.5** |
 | Future Crash component | **1.2.2** |
 
 Use `lk version` for installed LOOK/bundle identity, `lk help` for the live glossary, and `man lk` for the reference manual. Component versions intentionally advance independently.

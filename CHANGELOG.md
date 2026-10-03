@@ -1,4 +1,9 @@
-# 8.5.4 — MEDIA POLISH
+# 8.5.5 — MEDIA FINISH
+
+- Media Find frame replacement clears the remainder of every terminal row, eliminating stale suffixes and duplicated footer/help artifacts without reintroducing blank-screen flashes.
+- Remote artwork is latest-selection-wins and nonblocking; interactive views never fall through to synchronous cover-image transport.
+- `ART… requesting <node>` / `ART unavailable` make remote preview state visible.
+- Local and owner-rendered remote cover art use explicit full-RGB Chafa symbol output for matching color behavior.
 
 - Media Find now composes each frame off-screen and swaps it in with one terminal write; arrow navigation no longer clears to a blank screen before redraw.
 - Unified Node media helpers find `chafa` and `ffmpeg` in Homebrew/Linuxbrew/system paths even from sparse service environments.

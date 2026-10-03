@@ -9,7 +9,7 @@ LK=(ROOT/'look/lk').read_text()
 
 def test_owner_exposes_source_local_terminal_preview_route():
     assert 'def _local_media_terminal_preview(entry_id, path_hint="", width=22, height=11):' in NODE
-    assert '[chafa,"--format=symbols","--size",f"{width}x{height}",str(art)]' in NODE
+    assert '[chafa,"--format=symbols","--colors","full","--color-space","rgb","--size",f"{width}x{height}",str(art)]' in NODE
     assert 'def _serve_media_terminal_preview(self,target,entry_id,path_hint="",width=22,height=11):' in NODE
     assert 'base+"/v1/preview/terminal?"' in NODE
     get_block=NODE[NODE.index('    def do_GET(self):'):]
@@ -21,7 +21,8 @@ def test_player_prefers_memory_only_remote_terminal_rows():
     assert 'while len(_REMOTE_MEDIA_PREVIEW_CACHE)>64:' in LK
     preview=LK[LK.index('def _media_fetch_remote_preview'):LK.index('def _media_remote_cover_path')]
     assert "7332/v1/preview/terminal?" in preview
-    assert 'threading.Thread(target=worker,daemon=True,name="look-media-preview").start()' in preview
+    assert '_REMOTE_MEDIA_PREVIEW_LATEST' in preview
+    assert '_media_remote_preview_worker_loop' in preview
     assert "write_bytes" not in preview
     cover=LK[LK.index('def _media_cover_lines'):LK.index('def _media_player_art_lines')]
     assert '_media_remote_preview_lines(row,width,height,background=background_remote)' in cover

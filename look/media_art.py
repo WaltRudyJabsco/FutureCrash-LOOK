@@ -61,7 +61,7 @@ def symbol_lines(pathlike:str|Path,width:int,height:int)->list[str]:
     art=artwork_for(pathlike); chafa=shutil.which('chafa')
     if not art or not chafa or width<12 or height<3: return []
     try:
-        proc=subprocess.run([chafa,'--format=symbols','--size',f'{width}x{height}',str(art)],capture_output=True,text=True,timeout=.4)
+        proc=subprocess.run([chafa,'--format=symbols','--colors','full','--color-space','rgb','--size',f'{width}x{height}',str(art)],capture_output=True,text=True,timeout=.4)
         if proc.returncode==0: return proc.stdout.rstrip('\n').splitlines()[:height]
     except (OSError,subprocess.SubprocessError): pass
     return []

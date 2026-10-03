@@ -24,7 +24,7 @@ def test_media_find_swaps_complete_frames_without_blank_clear_cycle():
     block=LK[LK.index('def _media_selector('):LK.index('def _media_selector_finish')]
     assert 'frame_io=io.StringIO()' in block
     assert 'with redirect_stdout(frame_io):' in block
-    assert 'sys.stdout.write("\\033[H"+frame+"\\033[J")' in block
+    assert 'sys.stdout.write(_terminal_frame_payload(frame))' in block
     # One initial clear is fine; navigation frames must not clear to blank first.
     assert block.count('sys.stdout.write("\\033[2J\\033[H")') == 0
 

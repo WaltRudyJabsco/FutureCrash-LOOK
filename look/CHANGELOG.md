@@ -1,4 +1,8 @@
-# 4.53.4 — MEDIA POLISH
+# 4.53.5 — MEDIA FINISH
+
+- Media Find row-by-row erase semantics fix stale terminal artifacts.
+- Remote artwork resolution is asynchronous, latest-selection-wins, and visibly reports loading/unavailable state.
+- Remote and local Chafa cover rendering use explicit full RGB output.
 
 - Eliminate Media Find clear-to-blank navigation redraws.
 - Route remote terminal art through the same proven Fabric identity as playback.

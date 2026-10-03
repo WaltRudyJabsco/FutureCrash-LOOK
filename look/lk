@@ -28,7 +28,7 @@ try:
 except Exception:
     readline = None
 
-VERSION="4.53.4"
+VERSION="4.53.5"
 
 LOOK_WORDMARK = r"""       ██╗      ██╗  ██╗
        ██║      ██║ ██╔╝
@@ -66,6 +66,9 @@ _REMOTE_MEDIA_ART_MISS={}
 _REMOTE_MEDIA_PREVIEW_CACHE={}
 _REMOTE_MEDIA_PREVIEW_LOADING=set()
 _REMOTE_MEDIA_PREVIEW_MISS={}
+_REMOTE_MEDIA_PREVIEW_LOCK=threading.Lock()
+_REMOTE_MEDIA_PREVIEW_LATEST=None
+_REMOTE_MEDIA_PREVIEW_WORKER=None
 MEDIA_IPC_FILE=STATE_DIR/"media.sock"
 MEDIA_MPV_LOG=STATE_DIR/"media_mpv.log"
 FILE_CATALOG_DB=STATE_DIR/"file_catalog.sqlite3"
@@ -9937,7 +9940,7 @@ def _direct_searxng_search(query, limit=8):
     params=urllib.parse.urlencode({"q":query,"format":"json"})
     request=urllib.request.Request(base+"/search?"+params,headers={
         "Accept":"application/json",
-        "User-Agent":"Future-Crash-Fabric/8.5.4",
+        "User-Agent":"Future-Crash-Fabric/8.5.5",
     })
     with urllib.request.urlopen(request,timeout=12) as response:
         data=json.load(response)
@@ -16558,6 +16561,15 @@ def _strip_ansi(text):
     return re.sub(r"\x1b\[[0-9;?]*[ -/]*[@-~]", "", str(text))
 
 
+def _terminal_frame_payload(frame):
+    """Replace a terminal frame without exposing blank/stale cells between frames.
+
+    Each logical row erases its own old remainder. Clearing only after the final
+    cursor position leaves suffixes like `LOGICALical` when a new row is shorter.
+    """
+    rows=str(frame or "").split("\n")
+    return "\033[H"+"\n".join(row+"\033[K" for row in rows)+"\033[J"
+
 def _ansi_clip(text,width):
     """Clip terminal-symbol art by visible cells without cutting ANSI CSI sequences."""
     width=max(0,int(width))
@@ -16685,6 +16697,43 @@ def _media_fetch_remote_preview(row,width,height):
         _REMOTE_MEDIA_PREVIEW_MISS[key]=now
         return []
 
+def _media_remote_preview_worker_loop():
+    """Resolve only the newest requested remote preview.
+
+    Cursor motion can outrun a network round-trip. One worker prevents an arrow-key
+    sweep from creating a convoy of obsolete requests; the pending slot is simply
+    replaced by the most recent selection while the current request finishes.
+    """
+    global _REMOTE_MEDIA_PREVIEW_LATEST,_REMOTE_MEDIA_PREVIEW_WORKER
+    while True:
+        with _REMOTE_MEDIA_PREVIEW_LOCK:
+            task=_REMOTE_MEDIA_PREVIEW_LATEST
+            _REMOTE_MEDIA_PREVIEW_LATEST=None
+            if task is None:
+                _REMOTE_MEDIA_PREVIEW_WORKER=None
+                return
+        key,row,width,height=task
+        _REMOTE_MEDIA_PREVIEW_LOADING.add(key)
+        try:
+            _media_fetch_remote_preview(row,width,height)
+        finally:
+            _REMOTE_MEDIA_PREVIEW_LOADING.discard(key)
+
+def _media_queue_remote_preview(row,width,height):
+    global _REMOTE_MEDIA_PREVIEW_LATEST,_REMOTE_MEDIA_PREVIEW_WORKER
+    key,ident=_media_remote_preview_key(row,width,height)
+    if not key or not ident: return False
+    if _REMOTE_MEDIA_PREVIEW_CACHE.get(key): return False
+    if time.monotonic()-float(_REMOTE_MEDIA_PREVIEW_MISS.get(key) or 0)<20.0: return False
+    with _REMOTE_MEDIA_PREVIEW_LOCK:
+        # Do not duplicate the in-flight request; otherwise latest selection wins.
+        if key not in _REMOTE_MEDIA_PREVIEW_LOADING:
+            _REMOTE_MEDIA_PREVIEW_LATEST=(key,dict(row),int(width),int(height))
+        if _REMOTE_MEDIA_PREVIEW_WORKER is None or not _REMOTE_MEDIA_PREVIEW_WORKER.is_alive():
+            _REMOTE_MEDIA_PREVIEW_WORKER=threading.Thread(target=_media_remote_preview_worker_loop,daemon=True,name="look-media-preview")
+            _REMOTE_MEDIA_PREVIEW_WORKER.start()
+    return True
+
 def _media_remote_preview_lines(row,width,height,background=False):
     key,ident=_media_remote_preview_key(row,width,height)
     if not key or not ident: return []
@@ -16692,17 +16741,24 @@ def _media_remote_preview_lines(row,width,height,background=False):
     if cached: return list(cached)
     if not background:
         return _media_fetch_remote_preview(row,width,height)
-    if key not in _REMOTE_MEDIA_PREVIEW_LOADING:
-        _REMOTE_MEDIA_PREVIEW_LOADING.add(key)
-        def worker():
-            try: _media_fetch_remote_preview(row,width,height)
-            finally: _REMOTE_MEDIA_PREVIEW_LOADING.discard(key)
-        threading.Thread(target=worker,daemon=True,name="look-media-preview").start()
+    _media_queue_remote_preview(row,width,height)
     return []
 
+def _media_remote_preview_state(row,width,height):
+    key,ident=_media_remote_preview_key(row,width,height)
+    if not key or not ident: return ("local","")
+    if _REMOTE_MEDIA_PREVIEW_CACHE.get(key): return ("ready",str(ident.get("node") or "remote"))
+    now=time.monotonic()
+    if now-float(_REMOTE_MEDIA_PREVIEW_MISS.get(key) or 0)<20.0:
+        return ("unavailable",str(ident.get("node") or "remote"))
+    with _REMOTE_MEDIA_PREVIEW_LOCK:
+        queued=bool(_REMOTE_MEDIA_PREVIEW_LATEST and _REMOTE_MEDIA_PREVIEW_LATEST[0]==key)
+    if key in _REMOTE_MEDIA_PREVIEW_LOADING or queued:
+        return ("loading",str(ident.get("node") or "remote"))
+    return ("idle",str(ident.get("node") or "remote"))
+
 def _media_remote_preview_pending(row,width,height):
-    key,_ident=_media_remote_preview_key(row,width,height)
-    return bool(key and key in _REMOTE_MEDIA_PREVIEW_LOADING)
+    return _media_remote_preview_state(row,width,height)[0]=="loading"
 
 def _media_remote_cover_path(row):
     """Fetch/cache a remote owner's tiny cover asset, never the whole media file."""
@@ -16785,9 +16841,11 @@ def _media_cover_lines(row,width,height=11,background_remote=False):
     # Prefer source-local terminal rendering: tiny text payload, no image/media copy.
     lines=_media_remote_preview_lines(row,width,height,background=background_remote)
     if lines: return lines
-    if background_remote and _media_remote_preview_pending(row,width,height):
+    if background_remote:
+        # Interactive surfaces must never block navigation on cover transport.
+        # Older peers can show no art until upgraded rather than freezing the UI.
         return []
-    # Compatibility fallback for peers that only support 8.5.1/8.5.3 cover bytes.
+    # Compatibility fallback for non-interactive callers and older peers.
     remote=_media_remote_cover_path(row)
     if remote:
         return media_art.symbol_lines(remote,width,height)
@@ -17091,15 +17149,18 @@ def _media_selector(rows,title="FABRIC MEDIA",initial_query="",catalog_meta=None
                     detail_w=max(32,width-art_w-4) if art_w else width
                     details=_media_detail_lines(visible[idx],detail_w)[:info_height]
                     art=_media_cover_lines(visible[idx],art_w,info_height,background_remote=True) if art_w else []
-                    art_pending=bool(art_w and not art and _media_remote_preview_pending(visible[idx],art_w,info_height))
-                    for line_no in range(max(len(details),len(art),1 if art_pending else 0)):
+                    art_state,art_owner=_media_remote_preview_state(visible[idx],art_w,info_height) if art_w else ("local","")
+                    art_pending=bool(art_w and not art and art_state=="loading")
+                    status=(f"ART… requesting {art_owner}" if art_state in {"loading","idle"} and art_owner else
+                            "ART unavailable" if art_state=="unavailable" else "")
+                    for line_no in range(max(len(details),len(art),1 if status else 0)):
                         left=details[line_no] if line_no<len(details) else ""
                         if art:
                             pad=max(1,detail_w-len(_strip_ansi(left)))
                             right=_ansi_clip(art[line_no] if line_no<len(art) else "",art_w)
                             print(left+" "*pad+"  "+right)
-                        elif art_pending and line_no==0:
-                            print(left+" "*max(1,detail_w-len(_strip_ansi(left)))+"  "+_c("ART…","2"))
+                        elif status and line_no==0:
+                            print(left+" "*max(1,detail_w-len(_strip_ansi(left)))+"  "+_c(status,"2" if art_pending else "33"))
                         else:
                             print(left)
 
@@ -17111,7 +17172,7 @@ def _media_selector(rows,title="FABRIC MEDIA",initial_query="",catalog_meta=None
                     notice=""
                 print("\n"+footer,end="")
             frame=frame_io.getvalue()
-            sys.stdout.write("\033[H"+frame+"\033[J")
+            sys.stdout.write(_terminal_frame_payload(frame))
             sys.stdout.flush()
 
             # While remote art is resolving, poll briefly so it can appear without
@@ -17741,7 +17802,8 @@ def _media_player_render():
         # sequences.  We only pad *after* measuring their stripped visible width.
         art_w=min(22,max(16,inner//4)) if inner>=42 else 0
         art=_media_cover_lines(entry,art_w,11,background_remote=True) if art_w else []
-        art_pending=bool(art_w and not art and _media_remote_preview_pending(entry,art_w,11))
+        art_state,art_owner=_media_remote_preview_state(entry,art_w,11) if art_w else ("local","")
+        art_pending=bool(art_w and not art and art_state=="loading")
         if art:
             text_w=inner-art_w-2
             body=[]
@@ -17753,7 +17815,9 @@ def _media_player_render():
                 body.append(left+"  "+right+right_pad)
         else:
             if art_pending:
-                raw_body[9]="ART… loading remote preview"
+                raw_body[9]=f"ART… requesting {art_owner}" if art_owner else "ART… loading remote preview"
+            elif art_state=="unavailable":
+                raw_body[9]="ART unavailable"
             body=[_media_player_line(line,inner) for line in raw_body]
     top="┌"+"─"*(width-2)+"┐"
     bottom="└"+"─"*(width-2)+"┘"

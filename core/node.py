@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Future Crash + LOOK Unified Node 8.5.4.
+"""Future Crash + LOOK Unified Node 8.5.5.
 
 A small distributed supervisor for trusted personal machines. Immediate events stay
 asynchronous; a one-second fabric pulse reconciles presence, leases and stale work.
@@ -75,7 +75,7 @@ try:
 except ImportError:
     from attention import normalize_event as normalize_attention_event, plan_voice_targets
 
-VERSION = "8.5.4"
+VERSION = "8.5.5"
 RELEASE_NAME = "GTD"
 DEFAULT_HOST = "127.0.0.1"
 DEFAULT_PORT = 7332
@@ -2336,7 +2336,7 @@ def _local_web_search(query, limit=8):
     base=os.environ.get("FCL_SEARXNG_URL","http://127.0.0.1:8888").rstrip("/")
     request=urllib.request.Request(base+"/search?"+params,headers={
         "Accept":"application/json",
-        "User-Agent":"Future-Crash-Fabric/8.5.4",
+        "User-Agent":"Future-Crash-Fabric/8.5.5",
     })
     try:
         with urllib.request.urlopen(request,timeout=8) as response:
@@ -2519,7 +2519,7 @@ def _local_media_terminal_preview(entry_id, path_hint="", width=22, height=11):
     chafa=_service_media_tool("chafa")
     if not chafa:
         raise RuntimeError("chafa unavailable on media owner")
-    proc=subprocess.run([chafa,"--format=symbols","--size",f"{width}x{height}",str(art)],
+    proc=subprocess.run([chafa,"--format=symbols","--colors","full","--color-space","rgb","--size",f"{width}x{height}",str(art)],
                         capture_output=True,text=True,timeout=1.5)
     if proc.returncode:
         raise RuntimeError((proc.stderr or "chafa preview failed").strip()[:300])
