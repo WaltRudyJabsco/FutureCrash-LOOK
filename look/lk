@@ -28,7 +28,7 @@ try:
 except Exception:
     readline = None
 
-VERSION="4.52.2"
+VERSION="4.53.0"
 
 LOOK_WORDMARK = r"""       ██╗      ██╗  ██╗
        ██║      ██║ ██╔╝
@@ -9933,7 +9933,7 @@ def _direct_searxng_search(query, limit=8):
     params=urllib.parse.urlencode({"q":query,"format":"json"})
     request=urllib.request.Request(base+"/search?"+params,headers={
         "Accept":"application/json",
-        "User-Agent":"Future-Crash-Fabric/8.4.3",
+        "User-Agent":"Future-Crash-Fabric/8.5.0",
     })
     with urllib.request.urlopen(request,timeout=12) as response:
         data=json.load(response)
@@ -17499,17 +17499,20 @@ def _media_player_render():
             "r repeat   x stop   q close player",
             "", "", "",
         ]
-        # Player owns a plain-text cell grid. Do not feed Chafa/ANSI/Unicode symbols
-        # through it: render the extracted cover as deterministic one-byte ASCII.
-        art_w=min(20,max(14,inner//4)) if inner>=42 else 0
-        art=_media_player_art_lines(entry,art_w,11) if art_w else []
+        # Use the exact same proven Chafa renderer as Media Find.  Art rows are
+        # terminal payloads, not ordinary text: never slice/pad inside their ANSI
+        # sequences.  We only pad *after* measuring their stripped visible width.
+        art_w=min(22,max(16,inner//4)) if inner>=42 else 0
+        art=_media_cover_lines(entry,art_w,11) if art_w else []
         if art:
             text_w=inner-art_w-2
             body=[]
             for i,line in enumerate(raw_body):
                 left=_media_player_line(line,text_w)
                 right=art[i] if i<len(art) else ""
-                body.append(left+"  "+_media_player_line(right,art_w))
+                visible=len(_strip_ansi(right))
+                right_pad=" "*max(0,art_w-visible)
+                body.append(left+"  "+right+"\x1b[0m"+right_pad)
         else:
             body=[_media_player_line(line,inner) for line in raw_body]
     top="┌"+"─"*(width-2)+"┐"

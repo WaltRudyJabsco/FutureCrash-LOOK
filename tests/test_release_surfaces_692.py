@@ -14,7 +14,7 @@ def declared_version(rel: str) -> str:
 def test_all_runtime_release_surfaces_match_root_version():
     expected = (ROOT / 'VERSION').read_text().strip()
 
-    for rel in ('look/VERSION', 'future-crash/VERSION', 'albert/VERSION'):
+    for rel in ('albert/VERSION',):
         assert (ROOT / rel).read_text().strip() == expected
 
     for rel in ('core/node.py', 'core/ingress.py', 'core/tailcat.py', 'core/rendezvous.py'):

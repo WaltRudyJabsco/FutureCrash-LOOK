@@ -1,4 +1,4 @@
-.TH LK 1 "September 2026" "LOOK 3.8.0 / Future Crash + LOOK 1.5.0" "User Commands"
+.TH LK 1 "October 2026" "LOOK 4.53.0 / Future Crash + LOOK 8.5.0" "User Commands"
 .SH NAME
 lk \- inspect, navigate, manipulate, and ask your computer
 .br
@@ -233,6 +233,16 @@ A trailing slash is directory intent. Names with a filename suffix and dotfiles 
 Extensionless names are prompted as directory or file. The choice is accepted immediately from a single key; Return is not required.
 Missing parent directories for file creation require confirmation.
 Undo removes only an unchanged empty created file or an empty created directory.
+.SH INTERACTIVE LOOK KEYS
+Arrow keys move the selection. Selection itself enters object inspection/preview state.
+Shift-arrow navigation provides fast top/page/bottom movement.
+Tab marks or unmarks objects. C opens Copy To; M opens Move To.
+Shift-D removes the selected or marked set after confirmation.
+Shift-R renames the selected or marked set; #, ##, and ### in a batch pattern expand to 1, 01, and 001 style numbering.
+In rename editing, Left/Right move the caret, Home/End jump, Backspace/Delete edit, Enter commits, and Esc alone cancels.
+.PP
+Copy To and Move To keep the editable destination line canonical. Tab completes paths; Down/Right opens the directory picker; Left moves to the parent; Right descends; Enter accepts the displayed destination; Esc cancels.
+
 .SH SHORTCUTS
 l/ls smart view; ll details; ld directories; lf files; lt tree; lr recent; lz sizes;
 zll fuzzy jump + look; cdl jump + details; f find anywhere; lh home; lo Ollama chat;
@@ -281,7 +291,7 @@ Historical installers predating this guard cannot be retroactively protected.
 .SH MEDIA
 .TP
 .B lk player
-Open the tiny live LOOK miniplayer for the current MediaSession. Closing it does not stop playback.
+Open the live LOOK terminal miniplayer for the current MediaSession. It shares Media Find's Chafa terminal-art renderer, shows playback/EQ state, and closing it does not stop playback.
 .TP
 .B lk scan [ROOT]
 Build or refresh the lightweight ordinary-file metadata catalog. With no ROOT, scan the user home with conservative cache/build/hidden-directory exclusions. File contents are not read or hashed.
@@ -308,7 +318,7 @@ Show the canonical queue around the current item.
 Open the LOOK-native Fabric media selector. Type to filter immediately, Tab multi-selects, Enter/P plays, Q queues, A queues visible matches, and exact display-name retyping is unnecessary.
 .TP
 .B lk media find QUERY
-Search the online Fabric media catalog and open the same selector when interactive.
+Search the online Fabric media catalog and open the same selector when interactive. Local embedded/sidecar cover art renders in terminal form when available. Fabric currently transports media identity/location, not a separate remote cover-art asset.
 .TP
 .B lk media fabric
 Show the union of scanned media on currently reachable Fabric nodes, including per-node scanned and SHA-identified counts.

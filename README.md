@@ -1,3 +1,31 @@
+# Future Crash + LOOK 8.5.0 — LOCKDOWN
+
+**One local-first personal computer made from the machines you already own.**
+
+8.5.0 is a stabilization release. It preserves the working 8.4 media/file baseline, makes `lk player` consume the same proven terminal artwork renderer as Media Find, audits the live command/help/man surfaces, and separates bundle identity from standalone component identity.
+
+| Layer | Version |
+| --- | ---: |
+| Future Crash + LOOK bundle | **8.5.0** |
+| LOOK component | **4.53.0** |
+| Future Crash component | **1.2.2** |
+
+Use `lk version` for installed LOOK/bundle identity, `lk help` for the live glossary, and `man lk` for the reference manual. Component versions intentionally advance independently.
+
+## Current high-value workflows
+
+- `l` / `lk PATH`: interactive LOOK browser. Arrow selection enters inspect mode; Tab marks; Shift-arrow navigation keeps fast top/page/bottom movement.
+- `C` / `M`: Copy To / Move To with editable destination plus directory picker.
+- `Shift-D`: remove selected/marked objects with confirmation and journaled undo where supported.
+- `Shift-R`: rename one or many objects; `#`, `##`, `###` provide numbered batch patterns.
+- `lk media find QUERY`: Fabric media selector with immediate terminal album art when local cover bytes are available.
+- `lk player`: live queue/player with the same terminal-art renderer, EQ activity view, transport controls, and playback state.
+- Remote Fabric media currently advertises media identity/location, not a separate cover-art asset; remote covers therefore require a future small artwork-cache/endpoint rather than downloading whole tracks.
+
+---
+
+## Historical release notes preserved below
+
 # Future Crash + LOOK 7.7.8 — MEDIA SESSION
 
 7.7.8 MEDIA SESSION preserves `V` Preview View to the stable 7.6.4 SIMPLE PREVIEW lineage. In a filtered list, `V` toggles a full-content preview of the same working set; arrows navigate the same selection, Space/Tab use the existing marked set, and Esc/V returns to the same filtered list. ASCII/Chafa remains the immediate canonical preview. On macOS iTerm2 and Linux Kitty, Preview View and the ordinary wide side preview can progressively overlay their known art rectangles with native images prepared off-thread; unsupported terminals and failures remain ASCII, and the worker never paints or drives pager state.

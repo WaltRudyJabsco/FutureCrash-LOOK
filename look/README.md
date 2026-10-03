@@ -1,3 +1,37 @@
+# LOOK 4.53.0
+
+LOOK is the keyboard-first terminal/tool layer shipped in Future Crash + LOOK 8.5.0. `lk help` is the authoritative live glossary; `man lk` is the reference manual.
+
+### Interactive browser essentials
+
+```text
+Arrow keys        select/navigate; selection enters inspect mode
+Shift-arrows      fast top/page/bottom navigation
+Tab               mark/unmark
+C / M             Copy To / Move To
+Shift-D           remove selection/marked set
+Shift-R           rename selection/marked set; #/##/### number batch names
+V                 explicit full preview
+Esc               cancel/back; in text editors, Esc alone cancels
+```
+
+### Media essentials
+
+```text
+lk media find QUERY   browse the Fabric media union
+lk player             live terminal player
+space                  play/pause
+← / →                  seek 10 seconds
+p / n                  previous / next
+r                      repeat
+x                      stop
+q                      close player without stopping playback
+```
+
+Media Find and Player share one Chafa terminal-art renderer. Local embedded/sidecar artwork can render immediately; remote Fabric rows do not yet transport a separate cover-art asset.
+
+---
+
 # JEV Fabric (7.1.0)
 
 LO now uses a two-tier local judgment front end: JEV-0 deterministic trees handle obvious structure at effectively zero model cost; optional JEV-1 (OpenJev 2B) handles bounded ambiguity locally before general cognition. Every installed node has JEV-0. Capable nodes can auto-provision JEV-1, preserving useful local cognition when disconnected from the wider Fabric.

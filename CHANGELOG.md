@@ -1,3 +1,10 @@
+# 8.5.0 — LOCKDOWN
+
+- `lk player` now uses the same Chafa terminal-art renderer as Media Find and preserves its ANSI/Unicode rows intact.
+- Release documentation, help, man pages, component identities, and installer version checks were audited.
+- Bundle and component versions are now explicit: bundle 8.5.0, LOOK 4.53.0, Future Crash 1.2.2.
+- Package hygiene and release-consistency checks are part of the release gate.
+
 # 8.4.3 — PLAYER ASCII
 
 - `lk player` now renders cover art through a strict one-byte ASCII path instead of Chafa/ANSI/Unicode symbols.
