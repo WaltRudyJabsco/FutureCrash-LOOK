@@ -1,3 +1,13 @@
+# 8.4.0 — MEDIA CANON
+
+- Restore the proven local-first embedded album-art path before Fabric fallback.
+- Remove permanent negative artwork-cache poisoning; successful covers remain cached.
+- Player album art now has a deterministic ffmpeg ASCII renderer and no Chafa dependency.
+- Media Find retains richer Chafa art when available and native progressive thumbnails.
+- Visibility state now separates endpoint-local hides from future explicit Fabric-wide exclusions.
+- Release packaging strips Python/test cache residue and enforces a lean bundle.
+- Preserve 8.3.22 object tools, destination picker, footer semantics, previews, and startup feedback.
+
 # 8.3.22 — CARET + ART
 
 - Rename is now a real inline editor: Left/Right move the caret, Home/End jump, Backspace/Delete edit, Enter commits, and Esc alone cancels. Up/Down are inert in rename mode.

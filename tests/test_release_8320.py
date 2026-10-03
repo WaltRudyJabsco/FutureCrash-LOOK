@@ -12,8 +12,8 @@ def test_player_uses_ascii_safe_art_renderer():
     lk=(ROOT/'look/lk').read_text()
     art=(ROOT/'look/media_art.py').read_text()
     assert '_media_player_art_lines(entry,art_w,6)' in lk
-    assert "--symbols=ascii" in art
-    assert "--colors=none" in art
+    assert "def _ascii_via_ffmpeg" in art
+    assert "ramp=' .:-=+*#%@'" in art
 
 def test_media_info_progresses_to_native_art_without_blocking():
     lk=(ROOT/'look/lk').read_text()

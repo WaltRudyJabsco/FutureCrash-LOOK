@@ -33,16 +33,14 @@ def _embedded(path:Path)->Path|None:
     except OSError: return None
     cache=Path.home()/'.cache'/'look'/'media-art'; cache.mkdir(parents=True,exist_ok=True)
     token=hashlib.sha256(f'{path.resolve()}|{stamp}'.encode()).hexdigest()[:28]
-    out=cache/f'{token}.jpg'; miss=cache/f'{token}.none'
+    out=cache/f'{token}.jpg'
     if out.exists(): return out
-    if miss.exists(): return None
     tmp=cache/f'.{token}.{os.getpid()}.jpg'
     try:
         proc=subprocess.run([ffmpeg,'-nostdin','-loglevel','error','-i',str(path),'-map','0:v:0','-frames:v','1','-q:v','3','-y',str(tmp)],
-                            stdout=subprocess.DEVNULL,stderr=subprocess.DEVNULL,timeout=.65)
+                            stdout=subprocess.DEVNULL,stderr=subprocess.DEVNULL,timeout=2.5)
         if proc.returncode==0 and tmp.exists() and tmp.stat().st_size>0:
             tmp.replace(out); return out
-        miss.touch(exist_ok=True)
     except (OSError,subprocess.SubprocessError):
         pass
     finally:
@@ -68,18 +66,42 @@ def symbol_lines(pathlike:str|Path,width:int,height:int)->list[str]:
     return []
 
 
-def ascii_lines(pathlike:str|Path,width:int,height:int)->list[str]:
-    """Portable player artwork: ASCII-only symbols, no color or wide glyphs."""
-    art=artwork_for(pathlike); chafa=shutil.which('chafa')
-    if not art or not chafa or width<10 or height<3: return []
+def _ascii_via_ffmpeg(art:Path,width:int,height:int)->list[str]:
+    """Portable dependency-light ASCII renderer. ffmpeg is already the cover extractor.
+
+    Terminal cells are taller than they are wide, so sample about half the requested
+    row count and duplicate nothing; this keeps album covers recognizably square.
+    """
+    ffmpeg=shutil.which('ffmpeg')
+    if not ffmpeg or width<8 or height<2: return []
+    sample_h=max(2,height)
     try:
-        proc=subprocess.run([chafa,'--format=symbols','--colors=none','--symbols=ascii','--size',f'{width}x{height}',str(art)],capture_output=True,text=True,timeout=.4)
-        if proc.returncode==0:
-            lines=[]
-            for line in proc.stdout.rstrip('\n').splitlines()[:height]:
-                # Belt-and-suspenders portability: the player must remain readable
-                # even when a Chafa build emits a symbol outside the requested set.
-                lines.append(''.join(ch if 32 <= ord(ch) < 127 else ' ' for ch in line))
-            return lines
-    except (OSError,subprocess.SubprocessError): pass
-    return []
+        proc=subprocess.run([ffmpeg,'-nostdin','-loglevel','error','-i',str(art),
+                             '-vf',f'scale={width}:{sample_h}:force_original_aspect_ratio=decrease',
+                             '-f','rawvideo','-pix_fmt','gray','-'],
+                            capture_output=True,timeout=1.0)
+        if proc.returncode!=0 or not proc.stdout: return []
+        raw=proc.stdout; pixels=len(raw)
+        # ffmpeg may preserve a smaller dimension; infer a conservative row width.
+        row_w=min(width,max(1,pixels//sample_h))
+        rows=max(1,min(sample_h,pixels//row_w))
+        ramp=' .:-=+*#%@'
+        out=[]
+        for y in range(rows):
+            chunk=raw[y*row_w:(y+1)*row_w]
+            if not chunk: break
+            line=''.join(ramp[min(len(ramp)-1,(v*(len(ramp)-1))//255)] for v in chunk)
+            out.append(line.ljust(width)[:width])
+        return out[:height]
+    except (OSError,subprocess.SubprocessError,ValueError):
+        return []
+
+
+def ascii_lines(pathlike:str|Path,width:int,height:int)->list[str]:
+    """Portable player artwork: ASCII only, with no Chafa dependency required."""
+    art=artwork_for(pathlike)
+    if not art or width<10 or height<3: return []
+    # Prefer our deterministic renderer. Chafa remains available to Media Find's
+    # richer symbol path, but the player should render on every machine with ffmpeg.
+    return _ascii_via_ffmpeg(art,width,height)
+

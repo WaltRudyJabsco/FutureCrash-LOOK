@@ -28,7 +28,7 @@ try:
 except Exception:
     readline = None
 
-VERSION="4.51.10"
+VERSION="4.52.0"
 
 LOOK_WORDMARK = r"""       ██╗      ██╗  ██╗
        ██║      ██║ ██╔╝
@@ -9933,7 +9933,7 @@ def _direct_searxng_search(query, limit=8):
     params=urllib.parse.urlencode({"q":query,"format":"json"})
     request=urllib.request.Request(base+"/search?"+params,headers={
         "Accept":"application/json",
-        "User-Agent":"Future-Crash-Fabric/8.3.22",
+        "User-Agent":"Future-Crash-Fabric/8.4.0",
     })
     with urllib.request.urlopen(request,timeout=12) as response:
         data=json.load(response)
@@ -16553,28 +16553,31 @@ def _strip_ansi(text):
 
 
 def _media_art_source(row):
-    """Return an existing local media path for artwork without fetching remote bytes."""
-    candidates=[]
-    if isinstance(row,dict):
-        candidates.append(row)
-        candidates.extend(x for x in (row.get("sources") or []) if isinstance(x,dict))
-        candidates.extend(x for x in (row.get("locations") or []) if isinstance(x,dict))
+    """Return the first real local media file represented by a catalog row.
+
+    Artwork must never depend on Fabric reachability when the bytes already exist
+    locally. The primary path gets the old 8.3.18 fast path; physical sources and
+    locations are fallbacks for collapsed logical rows and player queue entries.
+    """
+    if not isinstance(row,dict): return ""
+    ordered=[]
+    primary=str(row.get("path") or "").strip()
+    if primary: ordered.append(primary)
+    for key in ("sources","locations"):
+        for item in row.get(key) or []:
+            if isinstance(item,dict):
+                raw=str(item.get("path") or "").strip()
+                if raw: ordered.append(raw)
     seen=set()
-    local_names=_media_local_node_names()
-    for item in candidates:
-        raw=str(item.get("path") or "").strip()
-        node=str(item.get("node") or row.get("node") or "").strip().casefold()
-        if not raw or raw in seen or raw.startswith(("http://","https://")):
-            continue
+    for raw in ordered:
+        if raw in seen or raw.startswith(("http://","https://")): continue
         seen.add(raw)
-        # A path that exists locally is authoritative even if catalog node naming drifted.
-        path=Path(raw).expanduser()
-        if path.is_file():
-            return str(path.resolve())
-        if node and node in local_names:
+        try:
+            path=Path(raw).expanduser()
+            if path.is_file(): return str(path.resolve())
+        except (OSError,RuntimeError):
             continue
     return ""
-
 
 def _media_cover_path(row):
     """Shared local artwork resolver: embedded cover first, sidecar fallback."""
@@ -16655,7 +16658,15 @@ def _media_visibility_path():
 
 
 def _media_visibility():
-    return _media_read_json(_media_visibility_path(), {"hidden_paths":[],"hidden_trees":[]})
+    data=_media_read_json(_media_visibility_path(), {"hidden_paths":[],"hidden_trees":[],"fabric_hidden_paths":[],"fabric_hidden_trees":[]})
+    # Existing endpoint-local curation stays local. Fabric-wide rules are a separate
+    # namespace so a future explicit "hide everywhere" action can synchronize them
+    # without silently globalizing years of local choices.
+    data.setdefault("hidden_paths",[])
+    data.setdefault("hidden_trees",[])
+    data.setdefault("fabric_hidden_paths",[])
+    data.setdefault("fabric_hidden_trees",[])
+    return data
 
 
 def _media_save_visibility(data):
@@ -16665,10 +16676,12 @@ def _media_save_visibility(data):
 def _media_is_hidden(row, rules=None):
     rules=rules or _media_visibility()
     path=str(row.get("path") or "")
-    if path in set(rules.get("hidden_paths") or []): return True
-    for root in rules.get("hidden_trees") or []:
-        root=str(root).rstrip(os.sep)
-        if path==root or path.startswith(root+os.sep): return True
+    if path in set(rules.get("hidden_paths") or []) or path in set(rules.get("fabric_hidden_paths") or []):
+        return True
+    for key in ("hidden_trees","fabric_hidden_trees"):
+        for root in rules.get(key) or []:
+            root=str(root).rstrip(os.sep)
+            if path==root or path.startswith(root+os.sep): return True
     return False
 
 
