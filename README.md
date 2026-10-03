@@ -1,15 +1,17 @@
-# Future Crash + LOOK 8.5.1 — REMOTE COVER
+# Future Crash + LOOK 8.5.2 — REMOTE COVER FIX
+
+8.5.2 fixes remote cover propagation through normalized playback queues and hard-bounds terminal artwork so Player art cannot collide with transport time.
 
 **One local-first personal computer made from the machines you already own.**
 
-8.5.1 is a narrow Fabric media bug-fix release on the locked 8.5 baseline. When a remote track is selected or playing, LOOK can fetch only its tiny cover-art asset from the owning Fabric node, cache it locally, and feed it to the same proven Media Find/Player renderer. It never downloads the whole remote song merely to discover artwork.
+8.5.2 is a narrow Fabric media bug-fix release on the locked 8.5 baseline. When a remote track is selected or playing, LOOK can fetch only its tiny cover-art asset from the owning Fabric node, cache it locally, and feed it to the same proven Media Find/Player renderer. It never downloads the whole remote song merely to discover artwork.
 
 8.5.0 established the stabilization baseline: shared Media Find/Player artwork rendering, audited help/man/docs, and independent component version identities.
 
 | Layer | Version |
 | --- | ---: |
-| Future Crash + LOOK bundle | **8.5.1** |
-| LOOK component | **4.53.1** |
+| Future Crash + LOOK bundle | **8.5.2** |
+| LOOK component | **4.53.2** |
 | Future Crash component | **1.2.2** |
 
 Use `lk version` for installed LOOK/bundle identity, `lk help` for the live glossary, and `man lk` for the reference manual. Component versions intentionally advance independently.

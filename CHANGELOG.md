@@ -1,4 +1,4 @@
-# 8.5.1 — REMOTE COVER
+# 8.5.2 — REMOTE COVER FIX
 
 - Add `/v1/media/cover` to the Unified Node so remote endpoints can request only artwork for a catalog item.
 - Extract/cache embedded or conventional sidecar cover art on the owning node; never fetch the whole song just to discover artwork.

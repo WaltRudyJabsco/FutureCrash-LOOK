@@ -34,7 +34,7 @@ try:
 except ImportError:
     from fabric_identity import FabricIdentity, public_identity
 
-VERSION = "8.5.1"
+VERSION = "8.5.2"
 RELEASE_NAME = "HOME BASE"
 PRESENCE_SCHEMA = "fabric-rendezvous-presence-v1"
 RESPONSE_SCHEMA = "fabric-rendezvous-response-v1"
@@ -357,7 +357,7 @@ def _https_endpoint(host: str, port: int) -> str:
 
 
 class Handler(BaseHTTPRequestHandler):
-    server_version = "FCLRendezvous/8.5.1"
+    server_version = "FCLRendezvous/8.5.2"
 
     def log_message(self, fmt, *args):
         return

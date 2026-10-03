@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Future Crash + LOOK Unified Node 8.5.1.
+"""Future Crash + LOOK Unified Node 8.5.2.
 
 A small distributed supervisor for trusted personal machines. Immediate events stay
 asynchronous; a one-second fabric pulse reconciles presence, leases and stale work.
@@ -75,7 +75,7 @@ try:
 except ImportError:
     from attention import normalize_event as normalize_attention_event, plan_voice_targets
 
-VERSION = "8.5.1"
+VERSION = "8.5.2"
 RELEASE_NAME = "GTD"
 DEFAULT_HOST = "127.0.0.1"
 DEFAULT_PORT = 7332
@@ -2336,7 +2336,7 @@ def _local_web_search(query, limit=8):
     base=os.environ.get("FCL_SEARXNG_URL","http://127.0.0.1:8888").rstrip("/")
     request=urllib.request.Request(base+"/search?"+params,headers={
         "Accept":"application/json",
-        "User-Agent":"Future-Crash-Fabric/8.5.1",
+        "User-Agent":"Future-Crash-Fabric/8.5.2",
     })
     try:
         with urllib.request.urlopen(request,timeout=8) as response:

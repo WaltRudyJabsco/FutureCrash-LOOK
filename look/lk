@@ -28,7 +28,7 @@ try:
 except Exception:
     readline = None
 
-VERSION="4.53.1"
+VERSION="4.53.2"
 
 LOOK_WORDMARK = r"""       ██╗      ██╗  ██╗
        ██║      ██║ ██╔╝
@@ -9934,7 +9934,7 @@ def _direct_searxng_search(query, limit=8):
     params=urllib.parse.urlencode({"q":query,"format":"json"})
     request=urllib.request.Request(base+"/search?"+params,headers={
         "Accept":"application/json",
-        "User-Agent":"Future-Crash-Fabric/8.5.1",
+        "User-Agent":"Future-Crash-Fabric/8.5.2",
     })
     with urllib.request.urlopen(request,timeout=12) as response:
         data=json.load(response)
@@ -16553,6 +16553,27 @@ def _strip_ansi(text):
     return re.sub(r"\x1b\[[0-9;?]*[ -/]*[@-~]", "", str(text))
 
 
+def _ansi_clip(text,width):
+    """Clip terminal-symbol art by visible cells without cutting ANSI CSI sequences."""
+    width=max(0,int(width))
+    if width<=0: return ""
+    raw=str(text or "")
+    token_re=re.compile(r"\x1b\[[0-9;?]*[ -/]*[@-~]|.",re.S)
+    out=[]; visible=0; clipped=False
+    for match in token_re.finditer(raw):
+        token=match.group(0)
+        if token.startswith("\x1b["):
+            out.append(token)
+            continue
+        if visible>=width:
+            clipped=True
+            break
+        out.append(token); visible+=1
+    if clipped or "\x1b[" in raw:
+        out.append("\x1b[0m")
+    return "".join(out)
+
+
 def _media_art_source(row):
     """Return the first real local media file represented by a catalog row.
 
@@ -16584,6 +16605,11 @@ def _media_remote_cover_path(row):
     """Fetch/cache a remote owner's tiny cover asset, never the whole media file."""
     if not isinstance(row,dict): return None
     candidates=[]
+    # Queue entries retain this compact identity even after playback has been
+    # normalized to a Fabric stream. Prefer it because it names the byte owner.
+    art=row.get("art")
+    if isinstance(art,dict):
+        candidates.append(dict(art))
     primary={k:row.get(k) for k in ("node","id","path","mtime")}
     candidates.append(primary)
     for key in ("sources","locations"):
@@ -17565,10 +17591,10 @@ def _media_player_render():
             body=[]
             for i,line in enumerate(raw_body):
                 left=_media_player_line(line,text_w)
-                right=art[i] if i<len(art) else ""
-                visible=len(_strip_ansi(right))
+                right=_ansi_clip(art[i] if i<len(art) else "",art_w)
+                visible=min(art_w,len(_strip_ansi(right)))
                 right_pad=" "*max(0,art_w-visible)
-                body.append(left+"  "+right+"\x1b[0m"+right_pad)
+                body.append(left+"  "+right+right_pad)
         else:
             body=[_media_player_line(line,inner) for line in raw_body]
     top="┌"+"─"*(width-2)+"┐"

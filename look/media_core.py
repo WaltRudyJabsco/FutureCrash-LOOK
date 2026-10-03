@@ -362,8 +362,30 @@ def entries_under(library: Any, directory: str | Path) -> list[dict[str, Any]]:
 
 
 def queue_entry(row: dict[str, Any]) -> dict[str, Any]:
-    allowed = ("id", "path", "node", "digest", "artist", "album", "title", "track", "disc", "format", "media_type", "playability", "bytes", "locations")
+    allowed = ("id", "path", "node", "digest", "artist", "album", "title", "track", "disc", "format", "media_type", "playability", "bytes", "locations", "art")
     out = {key: row.get(key) for key in allowed if row.get(key) not in (None, "")}
+
+    # Playback normalization must not discard the identity needed for a remote
+    # endpoint to fetch a tiny cover asset from the node that owns the media.
+    # Keep this envelope intentionally small; it is metadata, never media bytes.
+    if not isinstance(out.get("art"), dict):
+        local_names={"local","localhost","127.0.0.1"}
+        candidates=[]
+        if row.get("node") or row.get("id") or row.get("path"):
+            candidates.append(row)
+        candidates.extend(x for x in (row.get("locations") or []) if isinstance(x,dict))
+        chosen=None
+        for item in candidates:
+            node=str(item.get("node") or row.get("node") or "").strip()
+            entry_id=str(item.get("id") or row.get("id") or "").strip()
+            path=str(item.get("path") or "").strip()
+            if node and entry_id and node.casefold() not in local_names:
+                chosen={"node":node,"id":entry_id,"path":path}
+                stamp=item.get("mtime") or row.get("mtime")
+                if stamp not in (None,""): chosen["mtime"]=stamp
+                break
+        if chosen:
+            out["art"]=chosen
     if not out.get("playability"):
         out["playability"] = media_playability(str(out.get("format") or ""), str(out.get("media_type") or ""))
     if not out.get("id"):
