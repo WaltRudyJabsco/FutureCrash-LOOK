@@ -9933,7 +9933,7 @@ def _direct_searxng_search(query, limit=8):
     params=urllib.parse.urlencode({"q":query,"format":"json"})
     request=urllib.request.Request(base+"/search?"+params,headers={
         "Accept":"application/json",
-        "User-Agent":"Future-Crash-Fabric/8.4.2",
+        "User-Agent":"Future-Crash-Fabric/8.4.3",
     })
     with urllib.request.urlopen(request,timeout=12) as response:
         data=json.load(response)
@@ -16602,18 +16602,14 @@ def _media_cover_lines(row,width,height=11):
         return media_art.symbol_lines(source,width,height)
     return []
 
-def _media_player_art_lines(row,width,height=6):
-    """Player uses the same proven art source; portable ASCII is fallback only."""
+def _media_player_art_lines(row,width,height=11):
+    """Render player art as strict ASCII; Media Find keeps the richer Chafa path."""
     direct=str(row.get("path") or "") if isinstance(row,dict) else ""
     if direct:
-        lines=media_art.symbol_lines(direct,width,height)
-        if lines: return lines
         lines=media_art.ascii_lines(direct,width,height)
         if lines: return lines
     source=_media_art_source(row)
     if source and source!=direct:
-        lines=media_art.symbol_lines(source,width,height)
-        if lines: return lines
         return media_art.ascii_lines(source,width,height)
     return []
 
@@ -17501,11 +17497,12 @@ def _media_player_render():
             f"{state}  ·  {footer}", "",
             "space play/pause   ←/→ seek 10s   p/n previous/next",
             "r repeat   x stop   q close player",
+            "", "", "",
         ]
-        # Same shared art primitive as Media Find. Keep the player dimensions fixed:
-        # artwork occupies spare right-hand cells and can never move the controls.
-        art_w=min(18,max(12,inner//4)) if inner>=42 else 0
-        art=_media_cover_lines(entry,art_w,6) if art_w else []
+        # Player owns a plain-text cell grid. Do not feed Chafa/ANSI/Unicode symbols
+        # through it: render the extracted cover as deterministic one-byte ASCII.
+        art_w=min(20,max(14,inner//4)) if inner>=42 else 0
+        art=_media_player_art_lines(entry,art_w,11) if art_w else []
         if art:
             text_w=inner-art_w-2
             body=[]

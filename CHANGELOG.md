@@ -1,10 +1,16 @@
+# 8.4.3 — PLAYER ASCII
+
+- `lk player` now renders cover art through a strict one-byte ASCII path instead of Chafa/ANSI/Unicode symbols.
+- Player artwork grows to an 11-row right-hand panel; playback controls, EQ, metadata, and Media Find rendering are otherwise unchanged.
+- Media Find keeps the restored 8.3.19 Chafa renderer.
+
 # 8.4.2 — ART ROLLBACK
 
 - Restores Media Find artwork rendering to the exact synchronous 8.3.19 contract; removes the 8.3.20 native-overlay path from Media Find.
 - Restores `lk player` to the same proven `_media_cover_lines()` renderer used by 8.3.19.
 - Leaves later navigation, rename/delete, Fabric catalog, preview, and startup-feedback work unchanged.
 
-# 8.4.2 — MEDIA ART RESTORE
+# 8.4.1 — MEDIA ART RESTORE
 
 - Restores the proven 8.3.18 direct media-path artwork call as the primary path for Media Find and LOOK Player.
 - Fabric/physical-source resolution remains fallback-only.

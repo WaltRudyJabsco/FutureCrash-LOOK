@@ -10,7 +10,7 @@ def test_cursor_selection_uses_object_action_footer():
 
 def test_player_restores_known_good_8319_art_renderer():
     lk=(ROOT/'look/lk').read_text()
-    assert 'art=_media_cover_lines(entry,art_w,6) if art_w else []' in lk
+    assert 'art=_media_player_art_lines(entry,art_w,11) if art_w else []' in lk
 
 def test_media_find_does_not_overlay_art_asynchronously():
     lk=(ROOT/'look/lk').read_text()
