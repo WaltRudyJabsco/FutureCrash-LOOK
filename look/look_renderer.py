@@ -1003,15 +1003,27 @@ def _destination_picker(start_dir:Path)->Path|None:
 
 
 def prompt_line(prompt:str, *, initial:str='', picker_root:Path|None=None)->tuple[str,bool]:
-    """Tiny line editor. Tab completes paths; down/right opens LOOK Destination."""
+    """Tiny one-line editor; down/right opens LOOK Destination when applicable.
+
+    Without a destination picker, left/right edit the caret and Esc alone cancels.
+    """
     fd=sys.stdin.fileno()
     old=termios.tcgetattr(fd)
     chars:list[str]=list(initial)
+    cursor=len(chars)
+
     def redraw():
-        sys.stdout.write('\r\x1b[2K'+prompt+''.join(chars)); sys.stdout.flush()
+        # Repaint the full line, then place the caret at the logical cursor position.
+        text=''.join(chars)
+        tail=len(chars)-cursor
+        sys.stdout.write('\r\x1b[2K'+prompt+text)
+        if tail:
+            sys.stdout.write(f'\x1b[{tail}D')
+        sys.stdout.flush()
+
     try:
         tty.setcbreak(fd)
-        sys.stdout.write(prompt+initial); sys.stdout.flush()
+        redraw()
         while True:
             ch=os.read(fd,1)
             if ch==b'\x1b':
@@ -1021,7 +1033,26 @@ def prompt_line(prompt:str, *, initial:str='', picker_root:Path|None=None)->tupl
                     if not ready: break
                     seq.extend(os.read(fd,1))
                     if seq[-1:] in b'~ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz': break
-                if bytes(seq) in {b'\x1b[B',b'\x1b[C'} and picker_root is not None:
+                key=bytes(seq)
+                if key==b'\x1b':
+                    sys.stdout.write('\n'); sys.stdout.flush(); return '',True
+                if key==b'\x1b[D':
+                    cursor=max(0,cursor-1); redraw(); continue
+                if key==b'\x1b[C':
+                    # Destination fields use right-arrow as an explicit visual picker.
+                    if picker_root is not None:
+                        typed=''.join(chars).strip()
+                        candidate=resolve_action_destination(typed,picker_root) if typed else picker_root.resolve()
+                        start=candidate if candidate.is_dir() else candidate.parent
+                        termios.tcsetattr(fd,termios.TCSADRAIN,old)
+                        picked=_destination_picker(start)
+                        tty.setcbreak(fd)
+                        if picked is not None:
+                            value=str(picked)+os.sep
+                            chars[:]=list(value); cursor=len(chars)
+                        redraw(); continue
+                    cursor=min(len(chars),cursor+1); redraw(); continue
+                if key==b'\x1b[B' and picker_root is not None:
                     typed=''.join(chars).strip()
                     candidate=resolve_action_destination(typed,picker_root) if typed else picker_root.resolve()
                     start=candidate if candidate.is_dir() else candidate.parent
@@ -1030,22 +1061,33 @@ def prompt_line(prompt:str, *, initial:str='', picker_root:Path|None=None)->tupl
                     tty.setcbreak(fd)
                     if picked is not None:
                         value=str(picked)+os.sep
-                        chars[:]=list(value)
+                        chars[:]=list(value); cursor=len(chars)
                     redraw(); continue
-                sys.stdout.write('\n'); sys.stdout.flush(); return '',True
+                if key in {b'\x1b[H',b'\x1b[1~',b'\x1b[7~'}:
+                    cursor=0; redraw(); continue
+                if key in {b'\x1b[F',b'\x1b[4~',b'\x1b[8~'}:
+                    cursor=len(chars); redraw(); continue
+                if key==b'\x1b[3~':
+                    if cursor < len(chars): chars.pop(cursor); redraw()
+                    continue
+                # Up/down and unknown terminal escape sequences are consumed here.
+                continue
             if ch in {b'\r',b'\n'}:
                 sys.stdout.write('\n'); sys.stdout.flush(); return ''.join(chars),False
             if ch in {b'\x7f',b'\b'}:
-                if chars: chars.pop(); redraw()
+                if cursor>0:
+                    cursor-=1; chars.pop(cursor); redraw()
                 continue
             if ch==b'\t':
                 before=''.join(chars); after=_complete_path_text(before)
-                if after!=before: chars[:]=list(after); redraw()
+                if after!=before:
+                    chars[:]=list(after); cursor=len(chars); redraw()
                 else: sys.stdout.write('\a'); sys.stdout.flush()
                 continue
             if ch==b'\x03': raise KeyboardInterrupt
             text=ch.decode('utf-8','ignore')
-            if text and text.isprintable(): chars.append(text); sys.stdout.write(text); sys.stdout.flush()
+            if text and text.isprintable():
+                chars[cursor:cursor]=list(text); cursor+=len(text); redraw()
     finally:
         termios.tcsetattr(fd,termios.TCSADRAIN,old)
 

@@ -1,12 +1,11 @@
-# 8.3.21 — OBJECT TOOLS
+# 8.3.22 — CARET + ART
 
-- Shift-R renames selected files/folders inline; marked sets support #/##/### numbering.
-- Shift-D is the explicit delete/remove command.
-- Cursor selection now uses the same object-action footer and handlers as filter selection.
-- Automatic previews are larger but remain bounded above the footer.
-- Media Find preserves instant ASCII art and progressively paints native art on supported terminals.
-- LOOK Player shows ASCII album art at normal compact widths.
-- Media Find reports catalog startup latency.
+- Rename is now a real inline editor: Left/Right move the caret, Home/End jump, Backspace/Delete edit, Enter commits, and Esc alone cancels. Up/Down are inert in rename mode.
+- Shift-R remains rename for files/folders and marked sets; #/##/### provide deterministic batch numbering. Shift-D remains explicit delete/remove.
+- Media artwork now resolves an existing local physical source from logical/Fabric catalog rows before extracting embedded or sidecar art.
+- Media Find therefore regains immediate ASCII album art plus progressive native thumbnails when supported; LOOK Player uses the same resolved source for portable ASCII art.
+- No remote media file is fetched merely to paint artwork.
+- Preserves 8.3.21 object-action footer, larger bounded preview, and startup feedback fixes.
 
 # 8.3.20 — INSPECT POLISH
 

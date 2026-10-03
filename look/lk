@@ -28,7 +28,7 @@ try:
 except Exception:
     readline = None
 
-VERSION="4.51.9"
+VERSION="4.51.10"
 
 LOOK_WORDMARK = r"""       ██╗      ██╗  ██╗
        ██║      ██║ ██╔╝
@@ -9933,7 +9933,7 @@ def _direct_searxng_search(query, limit=8):
     params=urllib.parse.urlencode({"q":query,"format":"json"})
     request=urllib.request.Request(base+"/search?"+params,headers={
         "Accept":"application/json",
-        "User-Agent":"Future-Crash-Fabric/8.3.21",
+        "User-Agent":"Future-Crash-Fabric/8.3.22",
     })
     with urllib.request.urlopen(request,timeout=12) as response:
         data=json.load(response)
@@ -16552,18 +16552,45 @@ def _strip_ansi(text):
     return re.sub(r"\x1b\[[0-9;?]*[ -/]*[@-~]", "", str(text))
 
 
+def _media_art_source(row):
+    """Return an existing local media path for artwork without fetching remote bytes."""
+    candidates=[]
+    if isinstance(row,dict):
+        candidates.append(row)
+        candidates.extend(x for x in (row.get("sources") or []) if isinstance(x,dict))
+        candidates.extend(x for x in (row.get("locations") or []) if isinstance(x,dict))
+    seen=set()
+    local_names=_media_local_node_names()
+    for item in candidates:
+        raw=str(item.get("path") or "").strip()
+        node=str(item.get("node") or row.get("node") or "").strip().casefold()
+        if not raw or raw in seen or raw.startswith(("http://","https://")):
+            continue
+        seen.add(raw)
+        # A path that exists locally is authoritative even if catalog node naming drifted.
+        path=Path(raw).expanduser()
+        if path.is_file():
+            return str(path.resolve())
+        if node and node in local_names:
+            continue
+    return ""
+
+
 def _media_cover_path(row):
     """Shared local artwork resolver: embedded cover first, sidecar fallback."""
-    return media_art.artwork_for(str(row.get("path") or ""))
+    source=_media_art_source(row)
+    return media_art.artwork_for(source) if source else None
 
 
 def _media_cover_lines(row,width,height=11):
     """Bounded terminal art. Artwork failure never affects media navigation."""
-    return media_art.symbol_lines(str(row.get("path") or ""),width,height)
+    source=_media_art_source(row)
+    return media_art.symbol_lines(source,width,height) if source else []
 
 def _media_player_art_lines(row,width,height=6):
     """ASCII-only player art: intentionally portable across terminal fonts."""
-    return media_art.ascii_lines(str(row.get("path") or ""),width,height)
+    source=_media_art_source(row)
+    return media_art.ascii_lines(source,width,height) if source else []
 
 def _media_detail_lines(row, width=110):
     """Human-readable provenance for one catalog location."""
