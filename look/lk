@@ -28,7 +28,7 @@ try:
 except Exception:
     readline = None
 
-VERSION="4.53.0"
+VERSION="4.53.1"
 
 LOOK_WORDMARK = r"""       ██╗      ██╗  ██╗
        ██║      ██║ ██╔╝
@@ -62,6 +62,7 @@ MEDIA_SESSION_FILE=STATE_DIR/"media_session.json"
 MEDIA_LIBRARY_FILE=STATE_DIR/"media_library.json"
 MEDIA_PLAYLIST_DIR=STATE_DIR/"media_playlists"
 MEDIA_QUEUE_FILE=STATE_DIR/"media_queue.m3u8"
+_REMOTE_MEDIA_ART_MISS={}
 MEDIA_IPC_FILE=STATE_DIR/"media.sock"
 MEDIA_MPV_LOG=STATE_DIR/"media_mpv.log"
 FILE_CATALOG_DB=STATE_DIR/"file_catalog.sqlite3"
@@ -9933,7 +9934,7 @@ def _direct_searxng_search(query, limit=8):
     params=urllib.parse.urlencode({"q":query,"format":"json"})
     request=urllib.request.Request(base+"/search?"+params,headers={
         "Accept":"application/json",
-        "User-Agent":"Future-Crash-Fabric/8.5.0",
+        "User-Agent":"Future-Crash-Fabric/8.5.1",
     })
     with urllib.request.urlopen(request,timeout=12) as response:
         data=json.load(response)
@@ -16579,6 +16580,56 @@ def _media_art_source(row):
             continue
     return ""
 
+def _media_remote_cover_path(row):
+    """Fetch/cache a remote owner's tiny cover asset, never the whole media file."""
+    if not isinstance(row,dict): return None
+    candidates=[]
+    primary={k:row.get(k) for k in ("node","id","path","mtime")}
+    candidates.append(primary)
+    for key in ("sources","locations"):
+        for item in row.get(key) or []:
+            if isinstance(item,dict):
+                merged=dict(item)
+                if not merged.get("node"): merged["node"]=row.get("node")
+                if not merged.get("id"): merged["id"]=row.get("id")
+                candidates.append(merged)
+    local_names=_media_local_node_names()
+    cache=Path.home()/'.cache'/'look'/'media-art'/'remote'
+    try: cache.mkdir(parents=True,exist_ok=True)
+    except OSError: return None
+    now=time.monotonic()
+    for item in candidates:
+        node=str(item.get("node") or "").strip()
+        entry_id=str(item.get("id") or "").strip()
+        path=str(item.get("path") or "").strip()
+        if not node or not entry_id or node.casefold() in local_names: continue
+        stamp=str(item.get("mtime") or row.get("mtime") or "")
+        token=hashlib.sha256(f"{node}|{entry_id}|{path}|{stamp}".encode()).hexdigest()[:28]
+        out=cache/f'{token}.jpg'
+        try:
+            if out.is_file() and out.stat().st_size>0: return out
+        except OSError: pass
+        miss_key=f"{node}|{entry_id}|{path}"
+        if now-float(_REMOTE_MEDIA_ART_MISS.get(miss_key) or 0)<20.0: continue
+        url='http://127.0.0.1:7332/v1/media/cover?'+urllib.parse.urlencode({"node":node,"id":entry_id,"path":path})
+        tmp=cache/f'.{token}.{os.getpid()}.jpg'
+        try:
+            req=urllib.request.Request(url,headers={"User-Agent":"LOOK-media-cover"})
+            with urllib.request.urlopen(req,timeout=2.0) as response:
+                data=response.read(2*1024*1024+1)
+            if not data or len(data)>2*1024*1024:
+                raise ValueError("invalid media cover size")
+            tmp.write_bytes(data)
+            tmp.replace(out)
+            _REMOTE_MEDIA_ART_MISS.pop(miss_key,None)
+            return out
+        except Exception:
+            _REMOTE_MEDIA_ART_MISS[miss_key]=now
+        finally:
+            try: tmp.unlink(missing_ok=True)
+            except OSError: pass
+    return None
+
 def _media_cover_path(row):
     """8.3.18 fast path first; Fabric/source resolution is fallback only."""
     direct=str(row.get("path") or "") if isinstance(row,dict) else ""
@@ -16587,8 +16638,9 @@ def _media_cover_path(row):
         if art: return art
     source=_media_art_source(row)
     if source and source!=direct:
-        return media_art.artwork_for(source)
-    return None
+        art=media_art.artwork_for(source)
+        if art: return art
+    return _media_remote_cover_path(row)
 
 
 def _media_cover_lines(row,width,height=11):
@@ -16599,7 +16651,11 @@ def _media_cover_lines(row,width,height=11):
         if lines: return lines
     source=_media_art_source(row)
     if source and source!=direct:
-        return media_art.symbol_lines(source,width,height)
+        lines=media_art.symbol_lines(source,width,height)
+        if lines: return lines
+    remote=_media_remote_cover_path(row)
+    if remote:
+        return media_art.symbol_lines(remote,width,height)
     return []
 
 def _media_player_art_lines(row,width,height=11):

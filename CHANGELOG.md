@@ -1,3 +1,11 @@
+# 8.5.1 — REMOTE COVER
+
+- Add `/v1/media/cover` to the Unified Node so remote endpoints can request only artwork for a catalog item.
+- Extract/cache embedded or conventional sidecar cover art on the owning node; never fetch the whole song just to discover artwork.
+- Cache received remote covers locally under `~/.cache/look/media-art/remote/`, keyed by Fabric identity and media mtime.
+- Bound remote cover fetches to 2 MB / 2 seconds and use only a short in-memory negative cache for misses.
+- Media Find and `lk player` continue to use the same proven Chafa renderer once the cover is local.
+
 # 8.5.0 — LOCKDOWN
 
 - `lk player` now uses the same Chafa terminal-art renderer as Media Find and preserves its ANSI/Unicode rows intact.

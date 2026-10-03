@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Future Crash + LOOK Unified Node 8.5.0.
+"""Future Crash + LOOK Unified Node 8.5.1.
 
 A small distributed supervisor for trusted personal machines. Immediate events stay
 asynchronous; a one-second fabric pulse reconciles presence, leases and stale work.
@@ -75,7 +75,7 @@ try:
 except ImportError:
     from attention import normalize_event as normalize_attention_event, plan_voice_targets
 
-VERSION = "8.5.0"
+VERSION = "8.5.1"
 RELEASE_NAME = "GTD"
 DEFAULT_HOST = "127.0.0.1"
 DEFAULT_PORT = 7332
@@ -2336,7 +2336,7 @@ def _local_web_search(query, limit=8):
     base=os.environ.get("FCL_SEARXNG_URL","http://127.0.0.1:8888").rstrip("/")
     request=urllib.request.Request(base+"/search?"+params,headers={
         "Accept":"application/json",
-        "User-Agent":"Future-Crash-Fabric/8.5.0",
+        "User-Agent":"Future-Crash-Fabric/8.5.1",
     })
     try:
         with urllib.request.urlopen(request,timeout=8) as response:
@@ -2448,6 +2448,50 @@ def _local_media_entry(entry_id, path_hint=""):
                 return dict(row),path
     raise FileNotFoundError(entry_id)
 
+
+
+def _local_media_cover(entry_id, path_hint=""):
+    """Return cached/extracted cover art for one catalog entry.
+
+    The owner performs extraction so remote endpoints never need to download the
+    whole song merely to discover its embedded artwork.
+    """
+    row, source = _local_media_entry(entry_id, path_hint)
+    source = Path(source)
+    preferred=("cover.jpg","cover.jpeg","cover.png","folder.jpg","folder.png","front.jpg","front.png","album.jpg","album.png")
+    try:
+        by_name={x.name.casefold():x for x in source.parent.iterdir() if x.is_file()}
+    except OSError:
+        by_name={}
+    ffmpeg=shutil.which("ffmpeg")
+    if ffmpeg:
+        try:
+            stat=source.stat()
+            cache=Path.home()/".cache"/"look"/"media-art"/"served"
+            cache.mkdir(parents=True,exist_ok=True)
+            token=hashlib.sha256(f"{source.resolve()}|{stat.st_size}|{stat.st_mtime_ns}".encode()).hexdigest()[:28]
+            out=cache/f"{token}.jpg"
+            if out.is_file() and out.stat().st_size>0:
+                return out,"image/jpeg"
+            tmp=cache/f".{token}.{os.getpid()}.jpg"
+            proc=subprocess.run([ffmpeg,"-nostdin","-loglevel","error","-i",str(source),"-map","0:v:0","-frames:v","1","-q:v","3","-y",str(tmp)],
+                                stdout=subprocess.DEVNULL,stderr=subprocess.DEVNULL,timeout=3.0)
+            if proc.returncode==0 and tmp.is_file() and tmp.stat().st_size>0:
+                tmp.replace(out)
+                return out,"image/jpeg"
+        except (OSError,subprocess.SubprocessError):
+            pass
+        finally:
+            try: tmp.unlink(missing_ok=True)
+            except Exception: pass
+    for name in preferred:
+        art=by_name.get(name)
+        if art:
+            return art,mimetypes.guess_type(str(art))[0] or "image/jpeg"
+    for art in by_name.values():
+        if art.suffix.casefold() in {".jpg",".jpeg",".png",".webp"} and any(k in art.stem.casefold() for k in ("cover","folder","front","album")):
+            return art,mimetypes.guess_type(str(art))[0] or "image/jpeg"
+    raise FileNotFoundError(f"no artwork for {source}")
 
 def _identify_media_entry(entry_id):
     """Promote one already-scanned local path to content-addressed Fabric identity."""
@@ -3354,6 +3398,57 @@ class API(BaseHTTPRequestHandler):
             self.sendj(502,{"error":str(exc)})
 
 
+
+    def _serve_media_cover(self,target,entry_id,path_hint="",*,head=False):
+        """Serve only cover-art bytes for a media row, local or through Fabric."""
+        target=str(target or "").strip(); entry_id=str(entry_id or "").strip(); local=identity()["name"]
+        if not entry_id:
+            if head:
+                self.send_response(400); self.send_header("Content-Length","0"); self.end_headers(); return
+            return self.sendj(400,{"error":"media entry id required"})
+        if not target or target==local:
+            try:
+                source,ctype=_local_media_cover(entry_id,path_hint)
+                return self._serve_file_range(source,ctype,head=head)
+            except Exception as exc:
+                if head:
+                    self.send_response(404); self.send_header("Content-Length","0"); self.end_headers(); return
+                return self.sendj(404,{"error":str(exc)})
+        snapshot={"self":node_info(),"peers":PEERS.public()}
+        try:
+            peer=_peer_for_target(snapshot,target); last_exc=None
+            for base in _peer_bases(peer):
+                url=base+"/v1/media/cover?"+urllib.parse.urlencode({"id":entry_id,"path":path_hint})
+                headers=FABRIC_IDENTITY.auth_headers_for_url(url)
+                req=urllib.request.Request(url,headers=headers,method="HEAD" if head else "GET")
+                context=FABRIC_IDENTITY.ssl_context_for_url(url) if url.lower().startswith("https://") else None
+                try:
+                    kwargs={"timeout":8.0}
+                    if context is not None: kwargs["context"]=context
+                    with urllib.request.urlopen(req,**kwargs) as r:
+                        self.send_response(getattr(r,"status",200))
+                        for key in ("Content-Type","Content-Length","Cache-Control"):
+                            value=r.headers.get(key)
+                            if value: self.send_header(key,value)
+                        self.send_header("X-Fabric-Media-Owner",target)
+                        self.send_header("X-Fabric-Media-Id",entry_id)
+                        self.end_headers()
+                        if not head:
+                            while True:
+                                chunk=r.read(64*1024)
+                                if not chunk: break
+                                self.wfile.write(chunk)
+                        return
+                except Exception as exc:
+                    last_exc=exc
+            raise RuntimeError(f"media cover transport failed: {last_exc}")
+        except urllib.error.HTTPError as exc:
+            self.send_response(exc.code); self.send_header("Content-Length","0"); self.end_headers()
+        except Exception as exc:
+            if head:
+                self.send_response(502); self.send_header("Content-Length","0"); self.end_headers(); return
+            self.sendj(502,{"error":str(exc)})
+
     def _serve_media_artifact(self,target,digest,*,head=False):
         """Expose one artifact through the local control plane.
 
@@ -3455,6 +3550,9 @@ class API(BaseHTTPRequestHandler):
         if path == "/v1/media/browser":
             q=parse_qs(parsed.query); target=str((q.get("node") or [""])[0]); entry_id=str((q.get("id") or [""])[0]); path_hint=str((q.get("path") or [""])[0])
             return self._serve_media_browser(target,entry_id,path_hint,head=True)
+        if path == "/v1/media/cover":
+            q=parse_qs(parsed.query); target=str((q.get("node") or [""])[0]); entry_id=str((q.get("id") or [""])[0]); path_hint=str((q.get("path") or [""])[0])
+            return self._serve_media_cover(target,entry_id,path_hint,head=True)
         if path == "/v1/media/audio":
             q=parse_qs(parsed.query); target=str((q.get("node") or [""])[0]); index=int((q.get("index") or [0])[0] or 0)
             return self._serve_media_audio(target,index,head=True)
@@ -3611,6 +3709,9 @@ class API(BaseHTTPRequestHandler):
         if path == "/v1/media/browser":
             q=parse_qs(urlparse(self.path).query); target=str((q.get("node") or [""])[0]); entry_id=str((q.get("id") or [""])[0]); path_hint=str((q.get("path") or [""])[0])
             return self._serve_media_browser(target,entry_id,path_hint)
+        if path == "/v1/media/cover":
+            q=parse_qs(urlparse(self.path).query); target=str((q.get("node") or [""])[0]); entry_id=str((q.get("id") or [""])[0]); path_hint=str((q.get("path") or [""])[0])
+            return self._serve_media_cover(target,entry_id,path_hint)
         if path == "/v1/media/audio":
             q=parse_qs(urlparse(self.path).query); target=str((q.get("node") or [""])[0])
             try: index=int((q.get("index") or [0])[0] or 0)

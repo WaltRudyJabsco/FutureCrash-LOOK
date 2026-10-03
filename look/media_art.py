@@ -53,6 +53,7 @@ def artwork_for(pathlike:str|Path)->Path|None:
     """Embedded art wins; conventional sidecar artwork is the fallback."""
     path=Path(pathlike).expanduser()
     if not path.exists(): return None
+    if path.is_file() and path.suffix.casefold() in IMAGE_SUFFIXES: return path
     return _embedded(path) or _external(path)
 
 

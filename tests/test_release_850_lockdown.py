@@ -3,12 +3,12 @@ import re
 ROOT=Path(__file__).resolve().parents[1]
 
 def test_850_component_versions_are_explicit():
-    assert (ROOT/'VERSION').read_text().strip()=='8.5.0'
-    assert (ROOT/'look/VERSION').read_text().strip()=='4.53.0'
+    assert (ROOT/'VERSION').read_text().strip()=='8.5.1'
+    assert (ROOT/'look/VERSION').read_text().strip()=='4.53.1'
     assert (ROOT/'future-crash/VERSION').read_text().strip()=='1.2.2'
-    assert (ROOT/'albert/VERSION').read_text().strip()=='8.5.0'
-    assert 'VERSION="4.53.0"' in (ROOT/'look/lk').read_text()
-    assert 'LOOK_VERSION="4.53.0"' in (ROOT/'install-look.sh').read_text()
+    assert (ROOT/'albert/VERSION').read_text().strip()=='8.5.1'
+    assert 'VERSION="4.53.1"' in (ROOT/'look/lk').read_text()
+    assert 'LOOK_VERSION="4.53.1"' in (ROOT/'install-look.sh').read_text()
 
 def test_850_player_shares_media_find_renderer():
     lk=(ROOT/'look/lk').read_text()
@@ -18,7 +18,7 @@ def test_850_player_shares_media_find_renderer():
     assert 'visible=len(_strip_ansi(right))' in block
 
 def test_850_docs_name_current_release():
-    assert (ROOT/'README.md').read_text().startswith('# Future Crash + LOOK 8.5.0 — LOCKDOWN')
+    assert (ROOT/'README.md').read_text().startswith('# Future Crash + LOOK 8.5.1 — REMOTE COVER')
     man=(ROOT/'look/lk.1').read_text()
-    assert 'LOOK 4.53.0 / Future Crash + LOOK 8.5.0' in man
+    assert 'LOOK 4.53.1 / Future Crash + LOOK 8.5.1' in man
     assert 'Shift-R' in man and 'Shift-D' in man

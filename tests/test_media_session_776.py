@@ -12,7 +12,7 @@ ingress=importlib.util.module_from_spec(spec); spec.loader.exec_module(ingress)
 
 
 def test_ingress_streams_media_bytes_instead_of_buffering_control_response():
-    for path in ('/v1/media/item','/v1/media/audio','/v1/media/artifact','/v1/artifacts/sha256:abc'):
+    for path in ('/v1/media/item','/v1/media/audio','/v1/media/cover','/v1/media/artifact','/v1/artifacts/sha256:abc'):
         assert ingress._is_stream_path(path)
     assert not ingress._is_stream_path('/v1/media/state')
     assert 'STREAM_TIMEOUT_SECONDS if is_stream else CONTROL_TIMEOUT_SECONDS' in (ROOT/'core/ingress.py').read_text()
