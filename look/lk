@@ -14,6 +14,7 @@ import media_core
 import media_art
 import file_catalog
 import games as look_games
+from look_renderer import NativePreviewController
 
 try:
     import readline
@@ -27,7 +28,7 @@ try:
 except Exception:
     readline = None
 
-VERSION="4.51.7"
+VERSION="4.51.9"
 
 LOOK_WORDMARK = r"""       ██╗      ██╗  ██╗
        ██║      ██║ ██╔╝
@@ -1827,7 +1828,8 @@ LIVE FILTER / SELECTION
   E          edit
   O          open with another application
   B          copy file object(s) to desktop clipboard
-  C / M / R  Copy To / Move To / remove
+  C / M      Copy To / Move To
+  ⇧R / ⇧D    rename / delete
   L          hand persistent working set to a new LO session
   X          clear persistent working set
   Y          copy absolute path(s) as text
@@ -9931,7 +9933,7 @@ def _direct_searxng_search(query, limit=8):
     params=urllib.parse.urlencode({"q":query,"format":"json"})
     request=urllib.request.Request(base+"/search?"+params,headers={
         "Accept":"application/json",
-        "User-Agent":"Future-Crash-Fabric/8.3.19",
+        "User-Agent":"Future-Crash-Fabric/8.3.21",
     })
     with urllib.request.urlopen(request,timeout=12) as response:
         data=json.load(response)
@@ -12617,7 +12619,27 @@ def _select_values(title, rows):
                 notice=""
             print("\n"+footer,end="",flush=True)
 
-            key=_read_tty_key(fd)
+            # Media Info is text-first: Chafa is already on screen. On terminals
+            # with a native graphics plane, progressively replace only the art box.
+            if info_mode and visible and art_w:
+                cover=_media_cover_path(visible[idx])
+                if cover:
+                    warning_rows=1 if catalog_meta and (catalog_meta.get("errors") or catalog_meta.get("fallback")) else 0
+                    art_row=2+warning_rows+len(page)+3
+                    art_col=detail_w+3
+                    native_art.request(cover,art_row,art_col,info_height,art_w)
+            # Keep waiting for a real key while allowing a completed thumbnail to
+            # paint asynchronously. Artwork can never delay selector input.
+            while True:
+                watched=[fd]+([native_art.wakeup_fd] if native_art.wakeup_fd is not None else [])
+                ready,_,_=select.select(watched,[],[])
+                if native_art.wakeup_fd is not None and native_art.wakeup_fd in ready:
+                    try: os.read(native_art.wakeup_fd,4096)
+                    except (OSError,BlockingIOError): pass
+                    native_art.paint_ready()
+                    if fd not in ready: continue
+                key=_read_tty_key(fd)
+                break
             if key in {"q","Q","\x03"}:
                 break
             if key=="esc":
@@ -16539,6 +16561,10 @@ def _media_cover_lines(row,width,height=11):
     """Bounded terminal art. Artwork failure never affects media navigation."""
     return media_art.symbol_lines(str(row.get("path") or ""),width,height)
 
+def _media_player_art_lines(row,width,height=6):
+    """ASCII-only player art: intentionally portable across terminal fonts."""
+    return media_art.ascii_lines(str(row.get("path") or ""),width,height)
+
 def _media_detail_lines(row, width=110):
     """Human-readable provenance for one catalog location."""
     path=str(row.get("path") or "—")
@@ -16758,6 +16784,7 @@ def _media_selector(rows,title="FABRIC MEDIA",initial_query="",catalog_meta=None
     show_hidden=False
     action=("none",None)
     view_key=None; visible=[]
+    native_art=NativePreviewController()
     try:
         tty.setcbreak(fd)
         while True:
@@ -16777,6 +16804,7 @@ def _media_selector(rows,title="FABRIC MEDIA",initial_query="",catalog_meta=None
             top=max(0,min(max(0,len(visible)-usable),idx-usable+1))
             page=visible[top:top+usable]
 
+            native_art.frame_cleared()
             sys.stdout.write("\033[2J\033[H")
             mode=("ALL SOURCES" if show_all else "LOGICAL")+(" + HIDDEN" if show_hidden else "")
             suffix=f"{len(visible):,} shown · {len(rows):,} locations · {len(selected_rows)} selected · {mode}"
@@ -16829,7 +16857,27 @@ def _media_selector(rows,title="FABRIC MEDIA",initial_query="",catalog_meta=None
                 notice=""
             print("\n"+footer,end="",flush=True)
 
-            key=_read_tty_key(fd)
+            # ASCII artwork is canonical and immediate. On supported native-image
+            # terminals, progressively replace only that art rectangle after the
+            # frame is complete; never block selector input waiting for artwork.
+            if info_mode and visible and art_w:
+                cover=_media_cover_path(visible[idx])
+                if cover:
+                    warning_rows=1 if catalog_meta and (catalog_meta.get("errors") or catalog_meta.get("fallback")) else 0
+                    art_row=2+warning_rows+len(page)+3
+                    art_col=detail_w+3
+                    native_art.request(cover,art_row,art_col,info_height,art_w)
+            while True:
+                watched=[fd]+([native_art.wakeup_fd] if native_art.wakeup_fd is not None else [])
+                ready,_,_=select.select(watched,[],[])
+                if native_art.wakeup_fd is not None and native_art.wakeup_fd in ready:
+                    try: os.read(native_art.wakeup_fd,4096)
+                    except (OSError,BlockingIOError): pass
+                    native_art.paint_ready()
+                    if fd not in ready:
+                        continue
+                key=_read_tty_key(fd)
+                break
             if key in {"\x03","q"} and not query:
                 break
             if key=="esc":
@@ -16940,7 +16988,12 @@ def _media_selector_finish(action,payload):
 
 def _media_find_command(args):
     query=" ".join(args).strip()
+    if sys.stdout.isatty():
+        print("LOOK MEDIA FIND · opening local + Fabric catalogs…",end="\r",flush=True)
+    started=time.monotonic()
     entries,catalog_meta=_media_catalog_entries()
+    if sys.stdout.isatty():
+        print(f"LOOK MEDIA FIND · {len(entries):,} locations ready · {time.monotonic()-started:.1f}s"+" "*16)
     rows=media_core.search_entries({"entries":entries},query) if query else entries
     action,payload=_media_selector(rows,"FABRIC MEDIA FIND",query,catalog_meta)
     result=_media_selector_finish(action,payload)
@@ -17409,8 +17462,8 @@ def _media_player_render():
         ]
         # Same shared art primitive as Media Find. Keep the player dimensions fixed:
         # artwork occupies spare right-hand cells and can never move the controls.
-        art_w=min(18,max(12,inner//4)) if inner>=58 else 0
-        art=_media_cover_lines(entry,art_w,6) if art_w else []
+        art_w=min(18,max(12,inner//4)) if inner>=42 else 0
+        art=_media_player_art_lines(entry,art_w,6) if art_w else []
         if art:
             text_w=inner-art_w-2
             body=[]

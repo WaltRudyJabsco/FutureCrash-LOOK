@@ -1,9 +1,19 @@
-# 8.3.19 — ALBUM ART
+# 8.3.21 — OBJECT TOOLS
 
-- Automatic LOOK inspection is now a bounded thumbnail: narrower and at most 12 ASCII rows / 10 native rows, so selection can never turn the side preview into the dominant surface or cover footer controls. Explicit `V` Preview remains full-size.
-- Adds one shared local media-art resolver. Embedded M4A/MP3/FLAC/etc. cover streams are extracted through optional ffmpeg into `~/.cache/look/media-art`; conventional cover/folder/front/album images remain the fallback.
-- Media Find `I` and `lk player` consume the same resolver and keep fixed layouts; artwork failure never blocks navigation or playback.
-- Artwork extraction is bounded, local-only, cached by path+mtime, and negative-cached when a file has no embedded cover.
+- Shift-R renames selected files/folders inline; marked sets support #/##/### numbering.
+- Shift-D is the explicit delete/remove command.
+- Cursor selection now uses the same object-action footer and handlers as filter selection.
+- Automatic previews are larger but remain bounded above the footer.
+- Media Find preserves instant ASCII art and progressively paints native art on supported terminals.
+- LOOK Player shows ASCII album art at normal compact widths.
+- Media Find reports catalog startup latency.
+
+# 8.3.20 — INSPECT POLISH
+
+- Arrow-selection now switches the footer to the same object-action command set as explicit selection; preview state and available file operations can no longer diverge.
+- Automatic LOOK side previews are enlarged to a middle-ground thumbnail while remaining hard-bounded above the footer; explicit `V` Preview remains the large view.
+- Media Find keeps instant Chafa artwork and progressively replaces only that art rectangle with native iTerm/Kitty pixels when available; navigation never waits for artwork.
+- `lk player` now uses a deliberately ASCII-only album-art renderer to avoid replacement glyphs and wide-symbol/font incompatibilities.
 
 # 8.3.17 — DESTINATION
 
@@ -1195,6 +1205,6 @@ Signal media output routing is now explicit: browser playback is a local browser
 - Zero-touch removable-drive media discovery on every Fabric node.
 - Larger old-school terminal game boards; GTNW behavior frozen.
 
-## 8.3.19 — PACKAGE REPAIR
+## 8.3.20 — PACKAGE REPAIR
 - Fixes 8.3.18 installer omission of `media_art.py`, which caused installed `lk` to fail at startup and post-install verification to report `unavailable`.
 - Adds install-manifest regression coverage for LOOK Python module imports.

@@ -66,3 +66,20 @@ def symbol_lines(pathlike:str|Path,width:int,height:int)->list[str]:
         if proc.returncode==0: return proc.stdout.rstrip('\n').splitlines()[:height]
     except (OSError,subprocess.SubprocessError): pass
     return []
+
+
+def ascii_lines(pathlike:str|Path,width:int,height:int)->list[str]:
+    """Portable player artwork: ASCII-only symbols, no color or wide glyphs."""
+    art=artwork_for(pathlike); chafa=shutil.which('chafa')
+    if not art or not chafa or width<10 or height<3: return []
+    try:
+        proc=subprocess.run([chafa,'--format=symbols','--colors=none','--symbols=ascii','--size',f'{width}x{height}',str(art)],capture_output=True,text=True,timeout=.4)
+        if proc.returncode==0:
+            lines=[]
+            for line in proc.stdout.rstrip('\n').splitlines()[:height]:
+                # Belt-and-suspenders portability: the player must remain readable
+                # even when a Chafa build emits a symbol outside the requested set.
+                lines.append(''.join(ch if 32 <= ord(ch) < 127 else ' ' for ch in line))
+            return lines
+    except (OSError,subprocess.SubprocessError): pass
+    return []

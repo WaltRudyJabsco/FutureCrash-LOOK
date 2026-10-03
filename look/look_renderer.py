@@ -1313,6 +1313,71 @@ def pager(rows:list[str],height:int,width:int,rebuild=None,browse_rebuild=None,f
         marked.clear()
         notice='done · lk undo' if proc.returncode==0 else 'action failed'
 
+    def run_rename()->None:
+        """Rename selected/marked objects. # runs are deterministic batch counters."""
+        nonlocal notice
+        paths=action_paths()
+        if not paths:
+            notice='nothing selected'; return
+        initial=paths[0].name if len(paths)==1 else ''
+        sys.stdout.write(SHOW+RESET+'\n'); sys.stdout.flush()
+        try:
+            value,cancelled=prompt_line(
+                f"RENAME {len(paths)} item{'s' if len(paths)!=1 else ''} · # numbers sequence › ",
+                initial=initial
+            )
+        except KeyboardInterrupt:
+            value=''; cancelled=True
+        sys.stdout.write(HIDE); sys.stdout.flush()
+        pattern=value.strip()
+        if cancelled or not pattern:
+            notice='cancelled'; return
+        if '/' in pattern or '\\' in pattern:
+            notice='rename is a basename, not a path'; return
+        if len(paths)>1 and '#' not in pattern:
+            notice='batch rename needs # numbering'; return
+
+        import re as _re
+        def target_name(src:Path,index:int)->str:
+            name=pattern
+            if len(paths)>1:
+                name=_re.sub(r'#+',lambda m:str(index).zfill(len(m.group(0))),name)
+            # Preserve each file extension unless the pattern explicitly supplies one.
+            if src.is_file() and not Path(name).suffix and src.suffix:
+                name+=src.suffix
+            return name
+
+        sources=[p.resolve() for p in paths]
+        targets=[src.with_name(target_name(src,i+1)) for i,src in enumerate(sources)]
+        if any(t.name in {'','.','..'} for t in targets):
+            notice='invalid target name'; return
+        if len({str(t) for t in targets}) != len(targets):
+            notice='rename would create duplicate names'; return
+        source_set=set(sources)
+        collision=next((t for t in targets if t.exists() and t.resolve() not in source_set),None)
+        if collision:
+            notice=f'already exists · {collision.name}'; return
+        if all(a==b for a,b in zip(sources,targets)):
+            notice='name unchanged'; return
+
+        temps=[]
+        try:
+            for i,src in enumerate(sources):
+                temp=src.with_name(f'.look-rename-{os.getpid()}-{i}-{src.name}')
+                while temp.exists(): temp=temp.with_name('.'+temp.name)
+                src.rename(temp); temps.append((src,temp))
+            for (src,temp),target in zip(temps,targets):
+                temp.rename(target)
+        except OSError as exc:
+            # Best-effort rollback: return any surviving temporary object to its source name.
+            for src,temp in reversed(temps):
+                try:
+                    if temp.exists() and not src.exists(): temp.rename(src)
+                except OSError: pass
+            notice=f'rename failed · {exc}'; return
+        marked.clear()
+        notice=f'renamed {len(paths)} item{'s' if len(paths)!=1 else ''}'
+
     try:
         sys.stdout.write(HIDE)
         while True:
@@ -1361,10 +1426,10 @@ def pager(rows:list[str],height:int,width:int,rebuild=None,browse_rebuild=None,f
                 sys.stdout.write('\n'.join(preview_rows(picked,width,list_usable)[:list_usable]))
             elif (cursoring or selecting or filtering) and picked:
                 if width>=96:
-                    right_w=min(34,max(26,width//4))
-                    left_w=max(48,width-right_w-3)
+                    right_w=min(60,max(40,(width*2)//5))
+                    left_w=max(44,width-right_w-3)
                     left=[fit(r,left_w) for r in page]
-                    thumb_h=min(12,list_usable)
+                    thumb_h=min(18,max(8,list_usable-2))
                     right=preview_rows(picked,right_w,thumb_h)
                     rendered=[]
                     for i in range(max(len(left),len(right))):
@@ -1389,9 +1454,9 @@ def pager(rows:list[str],height:int,width:int,rebuild=None,browse_rebuild=None,f
             elif (cursoring or filtering or selecting) and picked and width>=96:
                 # List view uses the same proven graphics plane. The text frame and
                 # ASCII side preview are already complete before native pixels arrive.
-                right_w=min(34,max(26,width//4))
-                left_w=max(48,width-right_w-3)
-                native_rows=max(2,min(10,list_usable-2))
+                right_w=min(60,max(40,(width*2)//5))
+                left_w=max(44,width-right_w-3)
+                native_rows=max(2,min(18,list_usable-2))
                 native_preview.request(picked,len(context_rows)+3,left_w+4,native_rows,right_w)
             else:
                 native_preview.invalidate()
@@ -1406,14 +1471,14 @@ def pager(rows:list[str],height:int,width:int,rebuild=None,browse_rebuild=None,f
                             f'  {GRAY}{selected+1 if matches else 0}/{len(matches)} · filter {query}{RESET}'
                             + (f'  · {sel}' if sel else ''))
                     action_parts=['J/K move','Space/Tab mark','V list','Enter/→ open','B Copy','T Cut','P Paste',
-                                  'C Copy To','M Move To','R remove','L LO context','X clear set','E edit',
+                                  'C Copy To','M Move To','⇧R rename','⇧D delete','L LO context','X clear set','E edit',
                                   'O open with','Y path','G go','Esc list']
                 else:
                     status=(f'  {CYAN}{BOLD}FILTER{RESET} {WHITE}{query}█{RESET}'
                             f'  {GRAY}{len(matches)} {match_word}{RESET}'
                             + (f'  · {sel}' if sel else ''))
                     action_parts=['J/K move','Tab mark','A all','V Preview','Enter/→ open','B clipboard',
-                                  'B Copy','T Cut','P Paste','C Copy To','M Move To','R remove',
+                                  'B Copy','T Cut','P Paste','C Copy To','M Move To','⇧R rename','⇧D delete',
                                   'L LO context','X clear set','E edit','O open with','Y path','G go','← parent','Esc clear']
             elif selecting:
                 name=picked.name if picked else '(no matches)'
@@ -1422,13 +1487,20 @@ def pager(rows:list[str],height:int,width:int,rebuild=None,browse_rebuild=None,f
                 status=(f'  {CYAN}{BOLD}SELECT{RESET} {WHITE}{name}{RESET} {GRAY}· {kind}{RESET}'
                         + (f'  · {sel}' if sel else ''))
                 action_parts=['j/k move','Tab mark','Enter/→ open','B clipboard',
-                              'B Copy','T Cut','P Paste','C Copy To','M Move To','R remove',
+                              'B Copy','T Cut','P Paste','C Copy To','M Move To','⇧R rename','⇧D delete',
                               'L LO context','X clear set','E edit','O open with','Y path','G go','← parent','Esc filter','q quit']
             elif cursoring:
+                # A cursor is a real object selection. Keep the footer in the same
+                # object-action grammar as SELECT so preview and available actions
+                # can never disagree about whether something is selected.
                 name=picked.name if picked else '(empty)'
-                status=f'  {CYAN}{BOLD}BROWSE{RESET} {WHITE}{name}{RESET}  {GRAY}{selected+1 if matches else 0}/{len(matches)}{RESET}'
-                action_parts=['↑/↓ choose','⇧F sort','Enter/→ open','Space/PgDn next','b/PgUp back',
-                              'g ends','G go','⇧↑/↓ page','⇧←/→ ends','←/< parent','Esc clear','q quit']
+                kind='folder' if picked and picked.is_dir() else 'file'
+                sel=selection_status()
+                status=(f'  {CYAN}{BOLD}SELECT{RESET} {WHITE}{name}{RESET} {GRAY}· {kind} · {selected+1 if matches else 0}/{len(matches)}{RESET}'
+                        + (f'  · {sel}' if sel else ''))
+                action_parts=['↑/↓ move','Tab mark','Enter/→ open','B clipboard',
+                              'B Copy','T Cut','P Paste','C Copy To','M Move To','⇧R rename','⇧D delete',
+                              'L LO context','X clear set','E edit','O open with','Y path','G go','← parent','Esc clear','q quit']
             elif query:
                 status=(f'  {CYAN}{BOLD}FILTER{RESET} {WHITE}{query}{RESET}'
                         f'  {GRAY}{last}/{len(current)}{RESET}')
@@ -1522,9 +1594,11 @@ def pager(rows:list[str],height:int,width:int,rebuild=None,browse_rebuild=None,f
                         if rp in marked: marked.remove(rp)
                         else: marked.add(rp)
                         current=rebuild(query,picked,None,marked) if rebuild else current
-                elif key in {'C','M','R'} and matches:
-                    run_action({'C':'copy','M':'move','R':'remove'}[key])
+                elif key in {'C','M','D'} and matches:
+                    run_action({'C':'copy','M':'move','D':'remove'}[key])
                     refresh_filter()
+                elif key=='R' and matches:
+                    run_rename(); refresh_filter()
                 elif key=='B' and matches:
                     stage_clipboard('copy')
                 elif key=='T' and matches:
@@ -1621,6 +1695,32 @@ def pager(rows:list[str],height:int,width:int,rebuild=None,browse_rebuild=None,f
                         if opened: break
                         notice=message
                     continue
+                if key in {'\t','\x1b[Z'} and matches:
+                    rp=selected_path().resolve()
+                    if rp in marked: marked.remove(rp)
+                    else: marked.add(rp)
+                    continue
+                if key in {'C','M','D'} and matches:
+                    run_action({'C':'copy','M':'move','D':'remove'}[key])
+                    matches=candidates('') if candidates else []
+                    selected=min(selected,max(0,len(matches)-1))
+                    current=browse_rebuild(selected_path(),marked) if browse_rebuild else current
+                    continue
+                if key=='R' and matches:
+                    run_rename()
+                    matches=candidates('') if candidates else []
+                    selected=min(selected,max(0,len(matches)-1))
+                    current=browse_rebuild(selected_path(),marked) if browse_rebuild else current
+                    continue
+                if key=='B': stage_clipboard('copy'); continue
+                if key=='T': stage_clipboard('move'); continue
+                if key=='P': paste_clipboard(); continue
+                if key=='Y' and matches:
+                    value='\n'.join(str(x) for x in action_paths())
+                    notice='copied paths' if value and copy_text(value) else 'clipboard unavailable'
+                    continue
+                if key=='L': run_lo_context(); continue
+                if key=='X': marked.clear(); notice='selection cleared'; continue
                 # Typing or explicit filter enters the existing one-row filter
                 # contract, starting from a clean query rather than the grid.
                 if key=='/':
@@ -1662,9 +1762,11 @@ def pager(rows:list[str],height:int,width:int,rebuild=None,browse_rebuild=None,f
                     if rp in marked: marked.remove(rp)
                     else: marked.add(rp)
                     continue
-                if key in {'c','C','m','M','r','R'}:
-                    run_action({'c':'copy','C':'copy','m':'move','M':'move','r':'remove','R':'remove'}[key])
+                if key in {'C','M','D'}:
+                    run_action({'C':'copy','M':'move','D':'remove'}[key])
                     refresh_filter(); continue
+                if key=='R':
+                    run_rename(); refresh_filter(); continue
                 if key=='B':
                     stage_clipboard('copy'); continue
                 if key=='T':
