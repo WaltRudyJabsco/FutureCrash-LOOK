@@ -1,3 +1,10 @@
+# 8.6.0 — MEDIA PLAYER
+
+- Add `lk mp`, a unified terminal media workspace combining Fabric library search, selection, metadata/remote artwork, queue access, now-playing state, and transport controls.
+- Library and queue share LOOK navigation semantics; typing filters immediately, `Tab` marks, `Enter` plays, and `A` appends to the queue.
+- `L` and `Q` switch Library/Queue views while Space, seek, previous/next, shuffle, repeat, and stop remain live everywhere.
+- `lk player` and `lk media find` remain focused views over the same MediaSession/Fabric machinery; `lk mp` introduces no second media backend.
+
 # 8.5.5 — MEDIA FINISH
 
 - Media Find frame replacement clears the remainder of every terminal row, eliminating stale suffixes and duplicated footer/help artifacts without reintroducing blank-screen flashes.

@@ -26,7 +26,7 @@ try:
 except ImportError:
     from fabric_identity import FabricIdentity
 
-VERSION = "8.5.5"
+VERSION = "8.6.0"
 DEFAULT_HOST = "127.0.0.1"
 DEFAULT_PORT = 7333
 DEFAULT_BACKEND_HOST = "127.0.0.1"

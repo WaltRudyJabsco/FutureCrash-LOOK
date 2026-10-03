@@ -1,6 +1,6 @@
-# LOOK 4.53.5
+# LOOK 4.54.0
 
-LOOK is the keyboard-first terminal/tool layer shipped in Future Crash + LOOK 8.5.5. `lk help` is the authoritative live glossary; `man lk` is the reference manual.
+LOOK is the keyboard-first terminal/tool layer shipped in Future Crash + LOOK 8.6.0. `lk help` is the authoritative live glossary; `man lk` is the reference manual.
 
 ### Interactive browser essentials
 
@@ -20,15 +20,17 @@ Esc               cancel/back; in text editors, Esc alone cancels
 ```text
 lk media find QUERY   browse the Fabric media union
 lk player             live terminal player
+lk mp                 integrated library + queue + player
 space                  play/pause
 ← / →                  seek 10 seconds
 p / n                  previous / next
+s                      shuffle
 r                      repeat
 x                      stop
 q                      close player without stopping playback
 ```
 
-Media Find and Player share one Chafa terminal-art renderer. Local embedded/sidecar artwork renders immediately. Remote Fabric rows fetch a bounded cover-only asset from the owning node and cache it locally; media bytes are never downloaded merely to discover artwork.
+Media Find and Player share one Chafa terminal-art renderer. Local embedded/sidecar artwork renders immediately. Remote Fabric rows can request owner-rendered full-color Chafa terminal rows asynchronously; endpoint disks are not filled with preview images, and browsing remains responsive while art arrives.
 
 ---
 

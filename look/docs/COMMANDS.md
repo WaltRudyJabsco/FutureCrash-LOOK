@@ -92,7 +92,7 @@ Extensionless ambiguous names prompt for `[d]irectory` or `[f]ile`. The ambiguit
 `lk <Tab>` completes LOOK commands contextually. `lmk <Tab>` completes explicit mode flags and existing parent directories for a new path. `lk ollama`, `lk memory`, and `lk skills` expose their subcommands; `lk ollama host` includes saved host names. `lo` completes access flags and `@host` choices, then leaves prompt text unconstrained.
 
 ## Media
-`lk player` · `lk media` · `lk media browse [QUERY]` · `lk media find QUERY` · `lk media fabric` · `lk media outputs` · `lk media on NODE play TARGET|toggle|next|prev|stop|state` · `lk media identify QUERY|PATH|--all` · `lk media play TARGET [--shuffle] [--exact]` · `lk media queue` · `lk media scan ROOT` · `lk media library` · `lk media artists` · `lk media albums` · `lk media save NAME` · `lk media load NAME` · `lk media playlists` · `lk media repeat [off|all]` · `lk media state` · `lk media jump INDEX` · `lk media stream PATH` · `lk media add PATH` · `lk media info [@NODE] DIGEST`
+`lk mp` · `lk player` · `lk media` · `lk media browse [QUERY]` · `lk media find QUERY` · `lk media fabric` · `lk media outputs` · `lk media on NODE play TARGET|toggle|next|prev|stop|state` · `lk media identify QUERY|PATH|--all` · `lk media play TARGET [--shuffle] [--exact]` · `lk media queue` · `lk media scan ROOT` · `lk media library` · `lk media artists` · `lk media albums` · `lk media save NAME` · `lk media load NAME` · `lk media playlists` · `lk media repeat [off|all]` · `lk media state` · `lk media jump INDEX` · `lk media stream PATH` · `lk media add PATH` · `lk media info [@NODE] DIGEST`
 
 Every successful transport action reports the resulting player state/track. macOS controls an already-open Music or Spotify instance; Linux uses MPRIS via `playerctl`.
 
@@ -164,3 +164,6 @@ The file catalog incrementally extracts bounded text from common text/source/con
 
 `lk voice` · `lk voice set PROFILE` · `lk voice personalities on|off` · `lk voice preview [PROFILE]`
 `lk alert [@TARGET] [--important|--urgent|--low] [--voice PROFILE] MESSAGE`
+
+
+For `lk mp`, use `/` to enter Search; `L`/`Q` switch Library/Queue, `Tab` marks, `Enter` plays, `A` appends to queue, and the usual Space/seek/previous/next/shuffle/repeat/stop controls remain live outside Search.

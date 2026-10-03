@@ -1,4 +1,4 @@
-# Future Crash + LOOK 8.5.5 — Current System
+# Future Crash + LOOK 8.6.0 — Current System
 
 This document describes the current system. Release history describes how it got here.
 

@@ -1,7 +1,7 @@
-# Future Crash + LOOK 8.5.5 — MEDIA FINISH
+# Future Crash + LOOK 8.6.0 — MEDIA PLAYER
 
 
-8.5.5 finishes the 8.5 media repair: Media Find clears every terminal row correctly without blank-screen flashes, remote artwork never blocks cursor navigation, only the newest selected preview is pursued, and the art pane reports `ART… requesting <node>` or `ART unavailable` instead of silently hanging.
+8.6.0 introduces `lk mp`, an integrated terminal media workspace over the stable 8.5.5 Fabric foundation: searchable library, selection, remote/local artwork, queue, now-playing state, and transport controls in one responsive view.
 
 **One local-first personal computer made from the machines you already own.**
 
@@ -11,8 +11,8 @@ Remote and local media covers now use the same explicit full-RGB Chafa symbol co
 
 | Layer | Version |
 | --- | ---: |
-| Future Crash + LOOK bundle | **8.5.5** |
-| LOOK component | **4.53.5** |
+| Future Crash + LOOK bundle | **8.6.0** |
+| LOOK component | **4.54.0** |
 | Future Crash component | **1.2.2** |
 
 Use `lk version` for installed LOOK/bundle identity, `lk help` for the live glossary, and `man lk` for the reference manual. Component versions intentionally advance independently.
@@ -25,6 +25,7 @@ Use `lk version` for installed LOOK/bundle identity, `lk help` for the live glos
 - `Shift-R`: rename one or many objects; `#`, `##`, `###` provide numbered batch patterns.
 - `lk media find QUERY`: Fabric media selector with local or owner-rendered remote terminal artwork; navigation repaints without clear-to-blank flashes.
 - `lk player`: live queue/player with terminal artwork, EQ activity view, transport controls, `s` shuffle, and `r` repeat.
+- `lk mp`: integrated Fabric media workspace: searchable library, queue, art/info, now playing, and transport in one terminal surface.
 - Remote Fabric previews follow the same owner/id routing already proven by playback; the owning node renders Chafa and returns only the terminal preview rows.
 
 ---

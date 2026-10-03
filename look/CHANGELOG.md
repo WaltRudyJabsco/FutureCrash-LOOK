@@ -1,3 +1,9 @@
+# 4.54.0 — MEDIA PLAYER
+
+- Add `lk mp`, the integrated LOOK media workspace over the existing Fabric catalog, MediaSession, remote preview and mpv transport layers.
+- `/` enters explicit search mode; Library/Queue switching and transport remain unambiguous outside text entry.
+- Preserve `lk media find` and `lk player` as focused views over the same backend.
+
 # 4.53.5 — MEDIA FINISH
 
 - Media Find row-by-row erase semantics fix stale terminal artifacts.

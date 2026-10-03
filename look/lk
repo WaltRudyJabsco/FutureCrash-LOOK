@@ -28,7 +28,7 @@ try:
 except Exception:
     readline = None
 
-VERSION="4.53.5"
+VERSION="4.54.0"
 
 LOOK_WORDMARK = r"""       ██╗      ██╗  ██╗
        ██║      ██║ ██╔╝
@@ -1667,6 +1667,7 @@ MAKE
 
 MEDIA
   lk player            tiny live miniplayer over LOOK MediaSession
+  lk mp                integrated library + queue + player
   lk albert            open Albert quiet Fabric surface
   lk albert url        print the iPad/tailnet URL
   lk albert qr         show QR when qrencode is available
@@ -9940,7 +9941,7 @@ def _direct_searxng_search(query, limit=8):
     params=urllib.parse.urlencode({"q":query,"format":"json"})
     request=urllib.request.Request(base+"/search?"+params,headers={
         "Accept":"application/json",
-        "User-Agent":"Future-Crash-Fabric/8.5.5",
+        "User-Agent":"Future-Crash-Fabric/8.6.0",
     })
     with urllib.request.urlopen(request,timeout=12) as response:
         data=json.load(response)
@@ -17083,6 +17084,8 @@ def _media_selector(rows,title="FABRIC MEDIA",initial_query="",catalog_meta=None
     fd=sys.stdin.fileno()
     old=termios.tcgetattr(fd)
     query=str(initial_query or "")
+    search_mode=False
+    search_before=query
     idx=0
     notice=""
     selected_ids=set()
@@ -17862,6 +17865,203 @@ def media_player():
 
 
 
+
+def _media_mp_rows(mode, library_rows, query):
+    """Return the current MP list without manufacturing a second media model."""
+    if mode == "queue":
+        session=_media_sync_session() or _media_session() or {}
+        rows=list(session.get("queue") or [])
+    else:
+        rows=list(library_rows)
+    return _media_filter_rows(rows,query) if query else rows
+
+
+def _media_mp_now_playing(width):
+    """One-line player status for the integrated media surface."""
+    snap=_media_status_snapshot()
+    if not snap:
+        return "STOPPED · no active LOOK media session"
+    entry=snap["entry"]
+    title=_media_entry_label(entry)
+    pos=snap["position"] if isinstance(snap["position"],(int,float)) else 0
+    duration=snap["duration"] if isinstance(snap["duration"],(int,float)) else 0
+    session=snap["session"]
+    text=(f"{str(snap['state']).upper()} · {title} · {_media_time(pos)} / {_media_time(duration)} · "
+          f"Queue {snap['index']+1}/{len(session.get('queue') or [])} · "
+          f"Shuffle {'on' if session.get('shuffle') else 'off'} · Repeat {session.get('repeat','off')}")
+    return _ansi_clip(text,max(20,width))
+
+
+def media_mp(initial_query=""):
+    """Integrated LOOK Media Player: library, queue, art/info and transport.
+
+    This is intentionally a presentation layer over the existing catalog,
+    MediaSession, Fabric preview and mpv controls.  It does not create a second
+    queue, player or artwork implementation.
+    """
+    if sys.stdout.isatty():
+        print("LOOK MP · opening local + Fabric catalogs…",end="\r",flush=True)
+    started=time.monotonic()
+    library_rows,catalog_meta=_media_catalog_entries()
+    if sys.stdout.isatty():
+        print(f"LOOK MP · {len(library_rows):,} locations ready · {time.monotonic()-started:.1f}s"+" "*20)
+    if not (sys.stdin.isatty() and sys.stdout.isatty()):
+        print("LOOK MP · integrated media player")
+        print(_media_mp_now_playing(100))
+        for row in _media_filter_rows(library_rows,initial_query)[:20]:
+            print("  "+_media_row_label(row))
+        return 0
+
+    fd=sys.stdin.fileno()
+    old=termios.tcgetattr(fd)
+    mode="library"
+    query=str(initial_query or "")
+    idx=0
+    selected_ids=set()
+    notice=""
+    view_key=None
+    visible=[]
+
+    def row_id(row):
+        return str(row.get("digest") or f"{row.get('node','')}:{row.get('id','')}:{row.get('path','')}")
+
+    try:
+        tty.setcbreak(fd)
+        sys.stdout.write("\033[2J\033[H")
+        while True:
+            next_key=(mode,query)
+            if next_key != view_key:
+                visible=_media_mp_rows(mode,library_rows,query)
+                view_key=next_key
+                idx=max(0,min(idx,max(0,len(visible)-1)))
+            terminal=shutil.get_terminal_size((120,34))
+            width=max(72,terminal.columns)
+            height=max(20,terminal.lines)
+            right_w=min(40,max(28,width//3)) if width>=96 else 0
+            left_w=width-right_w-3 if right_w else width
+            list_rows=max(6,height-10)
+            top=max(0,min(max(0,len(visible)-list_rows),idx-list_rows+1))
+            page=visible[top:top+list_rows]
+            chosen=visible[idx] if visible else None
+            selected=[row for row in visible if row_id(row) in selected_ids]
+
+            info_h=list_rows
+            art=[]; art_status=""
+            if chosen and right_w:
+                art_h=min(11,max(6,info_h//2))
+                art=_media_cover_lines(chosen,right_w,art_h,background_remote=True)
+                state,owner=_media_remote_preview_state(chosen,right_w,art_h)
+                if not art and state in {"loading","idle"}:
+                    art_status=f"ART… requesting {owner}" if owner else "ART… loading"
+                elif not art and state=="unavailable":
+                    art_status="ART unavailable"
+                details=_media_detail_lines(chosen,right_w)[:max(0,info_h-art_h-1)]
+            else:
+                details=[]
+
+            out=io.StringIO()
+            with redirect_stdout(out):
+                tab="LIBRARY" if mode=="library" else "QUEUE"
+                node_count=len((catalog_meta or {}).get("nodes") or [])
+                _title("LOOK MP",f"{tab} · {len(visible):,} shown · {node_count} node(s) · {len(selected_ids)} marked")
+                print(_c("MEDIA PLAYER", "1;36")+"  "+_c("Fabric library + queue + transport", "2"))
+                print("─"*min(width,140))
+                for line_no in range(list_rows):
+                    if line_no < len(page):
+                        n=top+line_no; row=page[line_no]
+                        rid=row_id(row)
+                        focus=_c("›","1;36") if n==idx else " "
+                        mark=_c("✓","32") if rid in selected_ids else " "
+                        label=_media_row_label(row)
+                        node=str(row.get("node") or "local")
+                        suffix=f" · {node}"
+                        max_label=max(12,left_w-len(suffix)-5)
+                        left=f"{focus}{mark} "+(label[:max_label-1]+"…" if len(label)>max_label else label.ljust(max_label))+_c(suffix,"2")
+                    else:
+                        left=""
+                    if right_w:
+                        right=""
+                        if line_no < len(art):
+                            right=_ansi_clip(art[line_no],right_w)
+                        elif line_no==0 and art_status:
+                            right=_c(art_status,"2" if "requesting" in art_status or "loading" in art_status else "33")
+                        else:
+                            di=line_no-max(len(art),1 if art_status else 0)
+                            if 0 <= di < len(details): right=details[di]
+                        print(_ansi_clip(left,left_w)+" "*max(0,left_w-len(_strip_ansi(_ansi_clip(left,left_w))))+" │ "+_ansi_clip(right,right_w))
+                    else:
+                        print(_ansi_clip(left,width))
+                print("─"*min(width,140))
+                print(_c(_media_mp_now_playing(width),"1"))
+                if search_mode:
+                    filter_text=f"SEARCH /{query}█"
+                else:
+                    filter_text=f"FILTER {query or 'all media'} · / search"
+                print(_c(filter_text,"1;36"))
+                controls="↑↓ select · ⇧ arrows page/top/bottom · Tab mark · Enter play · A add queue · L library · Q queue"
+                print(_c(controls,"2"))
+                print(_c("space pause · ←/→ seek · p/n prev/next · s shuffle · r repeat · x stop · Esc clear/exit","2"),end="")
+                if notice:
+                    print("  "+_c(notice,"33"),end="")
+                    notice=""
+            sys.stdout.write(_terminal_frame_payload(out.getvalue()))
+            sys.stdout.flush()
+
+            pending=bool(chosen and right_w and not art and art_status.startswith("ART…"))
+            key=_read_tty_key(fd,.10 if pending else .25)
+            if not key:
+                continue
+            if search_mode:
+                if key=="esc":
+                    query=search_before; search_mode=False; idx=0; view_key=None; continue
+                if key in {"\r","\n"}:
+                    search_mode=False; idx=0; view_key=None; continue
+                if key in {"\x7f","\b"}:
+                    if query: query=query[:-1]; idx=0; view_key=None
+                    continue
+                if len(key)==1 and key.isprintable():
+                    query+=key; idx=0; view_key=None
+                continue
+            if key=="esc":
+                if query:
+                    query=""; idx=0; view_key=None; continue
+                return 0
+            if key=="/":
+                search_before=query; search_mode=True; continue
+            if key in {"up","K"} and visible: idx=max(0,idx-1); continue
+            if key in {"down","J"} and visible: idx=min(len(visible)-1,idx+1); continue
+            if key in {"pageup","shiftup"} and visible: idx=max(0,idx-list_rows); continue
+            if key in {"pagedown","shiftdown"} and visible: idx=min(len(visible)-1,idx+list_rows); continue
+            if key in {"home","shiftleft"} and visible: idx=0; continue
+            if key in {"end","shiftright"} and visible: idx=len(visible)-1; continue
+            if key=="L": mode="library"; query=""; idx=0; selected_ids.clear(); view_key=None; continue
+            if key=="Q": mode="queue"; query=""; idx=0; selected_ids.clear(); view_key=None; continue
+            if key=="\t" and chosen:
+                rid=row_id(chosen)
+                if rid in selected_ids: selected_ids.remove(rid); notice="unmarked"
+                else: selected_ids.add(rid); notice="marked"
+                continue
+            picked=selected or ([chosen] if chosen else [])
+            if key in {"\r","\n"} and picked:
+                _media_launch_session(media_core.new_session(picked)); notice=f"playing {len(picked)} item(s)"; continue
+            if key=="A" and picked:
+                notice=f"queued {_media_queue_append(picked)}"; view_key=None if mode=="queue" else view_key; continue
+            if key==" ": _media_control_session("toggle"); continue
+            if key=="n": _media_control_session("next"); continue
+            if key=="p": _media_control_session("prev"); continue
+            if key=="left": _media_mpv_request(["seek",-10,"relative"]); continue
+            if key=="right": _media_mpv_request(["seek",10,"relative"]); continue
+            if key=="s": _media_shuffle_command(); continue
+            if key=="r": _media_repeat_command([]); continue
+            if key=="x": _media_control_session("stop"); continue
+    except KeyboardInterrupt:
+        return 0
+    finally:
+        try: termios.tcsetattr(fd,termios.TCSADRAIN,old)
+        except Exception: pass
+        sys.stdout.write("\n")
+        sys.stdout.flush()
+
 def _media_outputs_command():
     try:
         payload=_media_fabric_cli(["media-outputs"])
@@ -17929,6 +18129,7 @@ def media(args):
     if raw in {"fabric","catalog"}: return _media_fabric_command()
     if raw in {"outputs","output"}: return _media_outputs_command()
     if raw=="on": return _media_on_command(args[1:])
+    if raw=="mp": return media_mp(" ".join(args[1:]))
     if raw=="find": return _media_find_command(args[1:])
     if raw=="browse": return _media_browse_command(args[1:])
     if raw=="identify": return _media_identify_command(args[1:])
@@ -18493,6 +18694,7 @@ _COMMANDS = [
     ("lk budget", "[...]", "ai", "LO context/token budget"),
     ("lk media", "[...]", "media", "Media library, queue, playlists, transport", "lk music"),
     ("lk player", "", "media", "Live LOOK miniplayer"),
+    ("lk mp", "[QUERY]", "media", "Integrated Fabric media player"),
     ("lk albert", "[url|qr|ipad]", "fabric", "Open/share Albert browser surface"),
     ("mm", "", "media", "Toggle media playback", "lk media toggle"),
     ("mn", "", "media", "Next media item", "lk media next"),
@@ -19770,6 +19972,7 @@ def main():
     # Natural shorthand: `lk play TARGET` is the obvious media entry point.
     if cmd=="play": return media(["play",*rest]) if rest else media(["play"])
     if cmd=="player": return media_player()
+    if cmd=="mp": return media_mp(" ".join(rest))
     if cmd=="albert":
         def _albert_tailnet_url():
             ts=shutil.which("tailscale")
