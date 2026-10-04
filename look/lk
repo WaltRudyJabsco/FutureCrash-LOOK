@@ -28,7 +28,7 @@ try:
 except Exception:
     readline = None
 
-VERSION="4.56.1"
+VERSION="4.56.2"
 
 LOOK_WORDMARK = r"""       ██╗      ██╗  ██╗
        ██║      ██║ ██╔╝
@@ -9947,7 +9947,7 @@ def _direct_searxng_search(query, limit=8):
     params=urllib.parse.urlencode({"q":query,"format":"json"})
     request=urllib.request.Request(base+"/search?"+params,headers={
         "Accept":"application/json",
-        "User-Agent":"Future-Crash-Fabric/8.8.1",
+        "User-Agent":"Future-Crash-Fabric/8.8.2",
     })
     with urllib.request.urlopen(request,timeout=12) as response:
         data=json.load(response)
@@ -16217,13 +16217,18 @@ def _media_entry_source(entry):
         item=(str(loc.get("node") or ""),str(loc.get("path") or "").strip(),str(loc.get("id") or ""),str(loc.get("digest") or ""))
         if item not in candidates: candidates.append(item)
 
-    for _node,path,_entry_id,_digest in candidates:
+    local_names=_media_local_node_names()
+    for node,path,_entry_id,_digest in candidates:
         if not path: continue
         if path.startswith(("http://","https://")): return path
+        # A path is meaningful only on the node that advertised it.  Never let a
+        # coincidentally identical mount/path on this endpoint impersonate a remote
+        # Fabric location.
+        if node and str(node).casefold() not in local_names:
+            continue
         target=Path(path).expanduser()
         if target.is_file(): return str(target.resolve())
 
-    local_names=_media_local_node_names()
     stale_local=[]
     for node,path,entry_id,_digest in candidates:
         if node and str(node).casefold() in local_names:
@@ -16245,6 +16250,80 @@ def _media_entry_source(entry):
         if source_node: params["node"]=source_node
         return "http://127.0.0.1:7332/v1/media/artifact?"+urllib.parse.urlencode(params)
     raise FileNotFoundError(primary_path or "media queue entry has no path, catalog id, or digest")
+
+
+def _media_pin_playable_entry(entry, timeout=3.0):
+    """Return the same logical media row pinned to one reachable physical copy.
+
+    Catalog merge deliberately keeps all copies. Execution must choose a concrete
+    (node,id,path) tuple rather than trusting a stale preferred copy. Local files
+    are checked directly; remote copies are verified through Unified Node with a
+    cheap HEAD request. No media bytes are downloaded by this probe.
+    """
+    row=dict(entry or {})
+    local_names=_media_local_node_names()
+    local_name=platform.node() or socket.gethostname() or "local"
+    candidates=[]
+    if row.get("node") or row.get("id") or row.get("path"):
+        candidates.append({k:row.get(k) for k in ("node","id","path","digest") if row.get(k) not in (None,"")})
+    candidates.extend(dict(x) for x in (row.get("locations") or []) if isinstance(x,dict))
+    seen=set(); ordered=[]
+    for loc in candidates:
+        key=(str(loc.get("node") or ""),str(loc.get("id") or ""),str(loc.get("path") or ""))
+        if key in seen: continue
+        seen.add(key); ordered.append(loc)
+
+    errors=[]
+    for loc in ordered:
+        node=str(loc.get("node") or row.get("node") or "").strip()
+        entry_id=str(loc.get("id") or row.get("id") or "").strip()
+        path=str(loc.get("path") or "").strip()
+        is_local=(not node) or node.casefold() in local_names
+        if is_local and path:
+            try:
+                source=Path(path).expanduser()
+                if source.is_file():
+                    pinned=dict(row); pinned.update({"node":node or local_name,"path":str(source.resolve())})
+                    if entry_id: pinned["id"]=entry_id
+                    return pinned
+            except OSError as exc:
+                errors.append(str(exc)); continue
+        if node and entry_id and not is_local:
+            params={"node":node,"id":entry_id}
+            if path: params["path"]=path
+            url="http://127.0.0.1:7332/v1/media/item?"+urllib.parse.urlencode(params)
+            try:
+                req=urllib.request.Request(url,method="HEAD")
+                with urllib.request.urlopen(req,timeout=max(.5,float(timeout))) as response:
+                    if int(getattr(response,"status",200)) < 400:
+                        pinned=dict(row); pinned.update({"node":node,"id":entry_id})
+                        if path: pinned["path"]=path
+                        return pinned
+            except Exception as exc:
+                errors.append(f"{node}: {exc}")
+
+    # Digest-backed artifacts remain valid when no ordinary location envelope is
+    # available; _media_entry_source knows how to route these through Fabric.
+    if row.get("digest") and not ordered:
+        return row
+    detail="; ".join(errors[:3])
+    raise FileNotFoundError((_media_entry_label(row) or "media")+" has no reachable Fabric location"+(f" · {detail}" if detail else ""))
+
+
+def _media_pin_playable_rows(rows):
+    """Pin a logical result set concurrently so a dead copy cannot poison a queue."""
+    rows=list(rows or [])
+    if not rows: return [],[]
+    from concurrent.futures import ThreadPoolExecutor, as_completed
+    pinned=[None]*len(rows); failures=[]
+    workers=max(1,min(8,len(rows)))
+    with ThreadPoolExecutor(max_workers=workers,thread_name_prefix="media-pin") as pool:
+        future_map={pool.submit(_media_pin_playable_entry,row):i for i,row in enumerate(rows)}
+        for future in as_completed(future_map):
+            idx=future_map[future]
+            try: pinned[idx]=future.result()
+            except Exception as exc: failures.append((_media_entry_label(rows[idx]),str(exc)))
+    return [row for row in pinned if row is not None],failures
 
 
 def _media_wait_for_local_queue(queue, attempts=4):
@@ -16434,6 +16513,18 @@ def _media_launch_session(session):
     if not queue:
         print("LOOK media · queue is empty")
         return 1
+    # Re-validate at the final execution edge as well as prepare time. Saved
+    # playlists and older sessions may contain a stale preferred copy even when
+    # another Fabric location for the same logical item is healthy.
+    pinned,unreachable=_media_pin_playable_rows(queue)
+    if unreachable:
+        print(f"LOOK media · {len(unreachable)} unreachable queue item(s) skipped")
+    if not pinned:
+        print("LOOK media · no queue item has a reachable Fabric location")
+        return 1
+    queue=pinned
+    session["queue"]=queue
+    session["current_index"]=max(0,min(int(session.get("current_index") or 0),len(queue)-1))
     mpv=_media_mpv_binary()
     if not mpv:
         # A single item can still use the 5.2.15 fallback path. Multi-item queues
@@ -17729,15 +17820,29 @@ def _media_resolve_targets(args):
             intent=resolution.get("intent") if resolution.get("status")=="resolved" else None
         except Exception:
             intent=None
-        if isinstance(intent,dict) and intent.get("action")=="media.play" and not intent.get("query"):
-            rows=media_core.select_entries(
-                {"entries":catalog}, kind=str(intent.get("kind") or ""),
-                artist=str(intent.get("artist") or ""), selection=str(intent.get("selection") or "all"),
-                limit=int(intent.get("limit") or 0),
-            )
-            if rows: return rows,shuffle
-            label=intent.get("artist") or ("any "+str(intent.get("kind") or "media"))
-            raise ValueError(f"no Fabric media match for {label!r}")
+        if isinstance(intent,dict) and intent.get("action")=="media.play":
+            if not intent.get("query"):
+                rows=media_core.select_entries(
+                    {"entries":catalog}, kind=str(intent.get("kind") or ""),
+                    artist=str(intent.get("artist") or ""), selection=str(intent.get("selection") or "all"),
+                    limit=int(intent.get("limit") or 0),
+                )
+                if rows: return rows,shuffle
+                label=intent.get("artist") or ("any "+str(intent.get("kind") or "media"))
+                raise ValueError(f"no Fabric media match for {label!r}")
+            # Typed phrases such as "Catalina shark video" retain the media kind
+            # while searching only the semantic title words. This keeps obvious
+            # video requests on the deterministic path instead of leaking them
+            # into general cognition.
+            typed_query=str(intent.get("query") or "").strip()
+            typed_kind=str(intent.get("kind") or "").casefold()
+            typed_match,typed_rows=_media_query_matches(typed_query,match_mode=str(intent.get("match_mode") or "fuzzy"))
+            if typed_kind in {"audio","video"}:
+                typed_rows=[r for r in typed_rows if str(r.get("media_type") or "").casefold().startswith(typed_kind+"/")]
+            if typed_rows and typed_match!="ambiguous":
+                return typed_rows,shuffle
+            if not typed_rows:
+                raise ValueError(f"no Fabric {typed_kind or 'media'} match for {typed_query!r}")
 
     match_kind,rows=_media_query_matches(text,match_mode="literal" if exact else "fuzzy")
     # Human playback language often uses "some X" to mean "play X". Preserve
@@ -17771,8 +17876,15 @@ def _media_prepare_command(args):
     except (RuntimeError,ValueError,FileNotFoundError,OSError) as exc:
         print(json.dumps({"ok":False,"error":str(exc)},ensure_ascii=False,separators=(",",":")))
         return 1
+    rows,failures=_media_pin_playable_rows(rows)
+    if not rows:
+        detail="; ".join(f"{label}: {error}" for label,error in failures[:3])
+        print(json.dumps({"ok":False,"error":"no resolved media item has a reachable Fabric location"+(f" · {detail}" if detail else "")},ensure_ascii=False,separators=(",",":")))
+        return 1
     session=media_core.new_session(rows,shuffle=shuffle)
-    print(json.dumps({"ok":True,"session":session},ensure_ascii=False,separators=(",",":")))
+    payload={"ok":True,"session":session}
+    if failures: payload["skipped"]=[{"label":label,"error":error} for label,error in failures[:8]]
+    print(json.dumps(payload,ensure_ascii=False,separators=(",",":")))
     return 0
 
 
@@ -17782,6 +17894,12 @@ def _media_play_command(args):
         rows,shuffle=_media_resolve_targets(args)
     except (RuntimeError,ValueError,FileNotFoundError,OSError) as exc:
         print(f"LOOK media · {exc}")
+        return 1
+    rows,failures=_media_pin_playable_rows(rows)
+    if failures:
+        print(f"LOOK media · {len(failures)} unreachable item(s) skipped")
+    if not rows:
+        print("LOOK media · no resolved media item has a reachable Fabric location")
         return 1
     session=media_core.new_session(rows,shuffle=shuffle)
     return _media_launch_session(session)

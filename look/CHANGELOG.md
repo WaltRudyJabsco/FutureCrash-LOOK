@@ -1,3 +1,9 @@
+# 4.56.2 — PLAYABLE QUEUES
+
+- Pin media queue entries to reachable Fabric locations before prepare and final player launch.
+- Respect node ownership for local path resolution and preserve typed multiword video intent through execution.
+- Fix remote Vision TLS error handling import.
+
 # 4.56.1 — EXECUTION HOTFIX
 
 - Keep Resolve First intent behavior while hardening browser playback and Fabric Vision transport diagnostics.

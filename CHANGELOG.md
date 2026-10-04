@@ -1,3 +1,11 @@
+# 8.8.2 — PLAYABLE QUEUES
+
+- Fix Fabric Vision remote capture crash caused by the missing `ssl` import in TLS error handling.
+- Pin each logical media result to one reachable `(node, id, path)` location before prepare/play execution; try alternate Fabric copies and skip stale ones.
+- Respect node ownership before treating a filesystem path as local, preventing coincidentally identical mount paths from selecting the wrong source.
+- Keep multiword typed video requests such as `play Catalina shark video` on the deterministic media path instead of leaking them into cognition.
+- Revalidate saved/older queues at the final player edge so stale session metadata cannot bypass reachability checks.
+
 # 8.8.1 — EXECUTION HOTFIX
 
 - Preserve meaningful Fabric Vision peer capture errors instead of masking them with a later TLS fallback failure.
