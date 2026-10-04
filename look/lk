@@ -28,7 +28,7 @@ try:
 except Exception:
     readline = None
 
-VERSION="4.56.2"
+VERSION="4.56.3"
 
 LOOK_WORDMARK = r"""       ██╗      ██╗  ██╗
        ██║      ██║ ██╔╝
@@ -9947,7 +9947,7 @@ def _direct_searxng_search(query, limit=8):
     params=urllib.parse.urlencode({"q":query,"format":"json"})
     request=urllib.request.Request(base+"/search?"+params,headers={
         "Accept":"application/json",
-        "User-Agent":"Future-Crash-Fabric/8.8.2",
+        "User-Agent":"Future-Crash-Fabric/8.8.3",
     })
     with urllib.request.urlopen(request,timeout=12) as response:
         data=json.load(response)
@@ -12999,6 +12999,41 @@ def _vision_displays_fetch(node=""):
     return payload
 
 
+def _vision_arm_command(args):
+    """Temporarily arm foreground-authorized macOS remote screen capture.
+
+    This command intentionally stays in the user's terminal. The always-on node
+    has no permanent screen authority; it can borrow this broker only while the
+    user keeps the bounded arm session alive.
+    """
+    duration=600.0
+    if args:
+        if len(args)>1 or args[0] in {"-h","--help"}:
+            print("usage: lk vision arm [10m]")
+            return 0 if args and args[0] in {"-h","--help"} else 2
+        duration=_vision_parse_seconds(args[0],600.0)
+    duration=max(5.0,min(3600.0,float(duration)))
+    candidates=[Path.home()/".local/share/future-crash-look/core", ROOT.parent/"core"]
+    for path in candidates:
+        if (path/"fabric_vision.py").exists() and str(path) not in sys.path: sys.path.insert(0,str(path))
+    try:
+        from fabric_vision import run_vision_broker
+    except Exception as exc:
+        print(f"LOOK VISION · cannot arm capture broker: {exc}")
+        return 1
+    print(f"FABRIC VISION · ARMED · {duration:g}s · keep this terminal open · Ctrl-C disarms")
+    print("  remote Fabric nodes may request user-initiated screen captures during this window")
+    try:
+        run_vision_broker(duration)
+    except KeyboardInterrupt:
+        pass
+    except Exception as exc:
+        print(f"LOOK VISION · arm failed: {exc}")
+        return 1
+    print("FABRIC VISION · DISARMED")
+    return 0
+
+
 def _vision_displays_command(args):
     node=""
     for token in args:
@@ -13143,8 +13178,10 @@ def _vision_screen_command(args):
 def vision_command(args):
     """One-shot image understanding plus user-initiated Fabric screen vision."""
     if not args:
-        print("usage: lk vision IMAGE [QUESTION...] | lk vision displays [@NODE] | lk vision screen [@NODE] [OPTIONS]")
+        print("usage: lk vision IMAGE [QUESTION...] | lk vision arm [10m] | lk vision displays [@NODE] | lk vision screen [@NODE] [OPTIONS]")
         return 2
+    if str(args[0]).casefold() in {"arm","permit","authorize"}:
+        return _vision_arm_command(list(args[1:]))
     if str(args[0]).casefold() in {"displays","monitors"}:
         return _vision_displays_command(list(args[1:]))
     if str(args[0]).casefold() in {"screen","desktop","fabric"}:
@@ -17839,10 +17876,21 @@ def _media_resolve_targets(args):
             typed_match,typed_rows=_media_query_matches(typed_query,match_mode=str(intent.get("match_mode") or "fuzzy"))
             if typed_kind in {"audio","video"}:
                 typed_rows=[r for r in typed_rows if str(r.get("media_type") or "").casefold().startswith(typed_kind+"/")]
-            if typed_rows and typed_match!="ambiguous":
-                return typed_rows,shuffle
-            if not typed_rows:
-                raise ValueError(f"no Fabric {typed_kind or 'media'} match for {typed_query!r}")
+            if typed_rows:
+                # A typed playback request is an execution request, not a search
+                # diagnostics surface. Rank the already type-filtered candidates
+                # and choose one canonical logical item. Physical copies remain in
+                # that row's locations envelope and are resolved later by the
+                # playable-location pinning layer.
+                exact_norm=media_core.normalize_match_text(typed_query)
+                exact_title=[r for r in typed_rows if media_core.normalize_match_text(str(r.get("title") or Path(str(r.get("path") or "")).name))==exact_norm]
+                if exact_title:
+                    return [sorted(exact_title,key=media_core.entry_sort_key)[0]],shuffle
+                ranked_typed=media_core.rank_entries({"entries":typed_rows},typed_query,limit=max(1,len(typed_rows)))
+                if ranked_typed:
+                    return [ranked_typed[0][0]],shuffle
+                return [sorted(typed_rows,key=media_core.entry_sort_key)[0]],shuffle
+            raise ValueError(f"no Fabric {typed_kind or 'media'} match for {typed_query!r}")
 
     match_kind,rows=_media_query_matches(text,match_mode="literal" if exact else "fuzzy")
     # Human playback language often uses "some X" to mean "play X". Preserve

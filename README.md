@@ -1,7 +1,7 @@
-# Future Crash + LOOK 8.8.2 — PLAYABLE QUEUES
+# Future Crash + LOOK 8.8.3 — VISION ARM + MEDIA CHOICE
 
 
-8.8.2 keeps Resolve First intact while hardening the execution edges that actually deliver media and remote vision. Media language now resolves common artist/type phrases into canonical selectors before playback, Signal reports what actually resolved, and Fabric Vision gains explicit multi-display inventory and capture selection without creating a background capture service.
+8.8.3 keeps Resolve First and playable queues intact while adding explicit foreground authorization for remote macOS Fabric Vision and deterministic canonical choice for typed video playback.
 
 **One local-first personal computer made from the machines you already own.**
 
@@ -11,8 +11,8 @@ Remote and local media covers now use the same explicit full-RGB Chafa symbol co
 
 | Layer | Version |
 | --- | ---: |
-| Future Crash + LOOK bundle | **8.8.2** |
-| LOOK component | **4.56.2** |
+| Future Crash + LOOK bundle | **8.8.3** |
+| LOOK component | **4.56.3** |
 | Future Crash component | **1.2.2** |
 
 Use `lk version` for installed LOOK/bundle identity, `lk help` for the live glossary, and `man lk` for the reference manual. Component versions intentionally advance independently.

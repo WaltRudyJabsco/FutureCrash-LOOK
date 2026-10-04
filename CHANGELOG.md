@@ -1,3 +1,10 @@
+# 8.8.3 — VISION ARM + MEDIA CHOICE
+
+- Added explicit, bounded `lk vision arm [10m]` foreground capture authority for remote macOS Vision without granting the always-on Unified Node permanent Screen Recording access.
+- Unified Node falls back to the armed local broker only when ordinary macOS daemon capture is denied; the broker socket is user-only and disappears on timeout/Ctrl-C.
+- Typed video playback now ranks already type-filtered logical candidates and chooses a canonical item instead of leaking `multiple Fabric media matches` / `--exact` internals into Signal or Albert.
+- Preserved 8.8.2 playable-location pinning and 8.8 Resolve First intent behavior.
+
 # 8.8.2 — PLAYABLE QUEUES
 
 - Fix Fabric Vision remote capture crash caused by the missing `ssl` import in TLS error handling.

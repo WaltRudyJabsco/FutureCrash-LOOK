@@ -1,3 +1,8 @@
+# 4.56.3 — VISION ARM + MEDIA CHOICE
+
+- `lk vision arm [10m]` provides temporary foreground-authorized macOS remote capture.
+- Typed video execution ranks canonical video candidates instead of exposing ambiguous-search internals.
+
 # 4.56.2 — PLAYABLE QUEUES
 
 - Pin media queue entries to reachable Fabric locations before prepare and final player launch.

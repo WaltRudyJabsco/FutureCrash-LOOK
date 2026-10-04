@@ -17,11 +17,78 @@ import shutil
 import subprocess
 import sys
 import tempfile
+import socket
+import time
 from pathlib import Path
 
 MAX_FRAME_BYTES = 6 * 1024 * 1024
 DEFAULT_MAX_WIDTH = 1600
 DEFAULT_QUALITY = 72
+
+
+VISION_BROKER_SOCKET = Path.home()/".local/state/future-crash-look/vision-arm.sock"
+
+def _broker_socket_path() -> Path:
+    return VISION_BROKER_SOCKET
+
+def vision_broker_request(*, previous_hash="", max_width=DEFAULT_MAX_WIDTH, quality=DEFAULT_QUALITY, display="main", timeout=8.0):
+    """Ask an explicitly armed foreground capture broker for one frame.
+
+    The broker exists only while `lk vision arm` is running in an authorized user
+    terminal. This lets macOS keep Screen Recording permission attached to the
+    foreground user process instead of granting the always-on node daemon capture
+    authority.
+    """
+    path=_broker_socket_path()
+    if not path.exists():
+        raise FileNotFoundError("Fabric Vision is not armed on this Mac; run `lk vision arm 10m` locally")
+    request={"previous_hash":str(previous_hash or ""),"max_width":int(max_width),"quality":int(quality),"display":str(display or "main")}
+    data=(json.dumps(request,separators=(",",":"))+"\n").encode("utf-8")
+    client=socket.socket(socket.AF_UNIX,socket.SOCK_STREAM)
+    client.settimeout(float(timeout))
+    try:
+        client.connect(str(path)); client.sendall(data)
+        chunks=[]
+        while True:
+            part=client.recv(256*1024)
+            if not part: break
+            chunks.append(part)
+            if sum(map(len,chunks)) > MAX_FRAME_BYTES*2: raise RuntimeError("vision broker response too large")
+        payload=json.loads(b"".join(chunks).decode("utf-8","replace") or "{}")
+    finally:
+        client.close()
+    if not isinstance(payload,dict): raise RuntimeError("invalid vision broker response")
+    return payload
+
+def run_vision_broker(duration=600.0):
+    """Run a bounded foreground capture broker until timeout or Ctrl-C."""
+    duration=max(5.0,min(3600.0,float(duration)))
+    path=_broker_socket_path(); path.parent.mkdir(parents=True,exist_ok=True)
+    try: path.unlink(missing_ok=True)
+    except OSError: pass
+    server=socket.socket(socket.AF_UNIX,socket.SOCK_STREAM)
+    server.bind(str(path)); os.chmod(path,0o600); server.listen(4); server.settimeout(.5)
+    deadline=time.monotonic()+duration
+    try:
+        while time.monotonic() < deadline:
+            try: conn,_=server.accept()
+            except socket.timeout: continue
+            with conn:
+                conn.settimeout(5.0); raw=b""
+                while b"\n" not in raw and len(raw)<64*1024:
+                    chunk=conn.recv(8192)
+                    if not chunk: break
+                    raw+=chunk
+                try:
+                    req=json.loads(raw.split(b"\n",1)[0].decode("utf-8","replace") or "{}")
+                    payload=capture_screen(previous_hash=str(req.get("previous_hash") or ""), max_width=int(req.get("max_width") or DEFAULT_MAX_WIDTH), quality=int(req.get("quality") or DEFAULT_QUALITY), display=req.get("display") or "main")
+                except Exception as exc:
+                    payload={"ok":False,"error":str(exc)}
+                conn.sendall(json.dumps(payload,separators=(",",":"),ensure_ascii=False).encode("utf-8"))
+    finally:
+        server.close()
+        try: path.unlink(missing_ok=True)
+        except OSError: pass
 
 
 def _which(*names: str) -> str | None:
