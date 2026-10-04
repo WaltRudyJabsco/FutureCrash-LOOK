@@ -1,7 +1,7 @@
-# Future Crash + LOOK 8.8.0 — RESOLVE FIRST
+# Future Crash + LOOK 8.8.1 — EXECUTION HOTFIX
 
 
-8.8.0 makes Fabric actions more deterministic before they become expensive or ambiguous. Media language now resolves common artist/type phrases into canonical selectors before playback, Signal reports what actually resolved, and Fabric Vision gains explicit multi-display inventory and capture selection without creating a background capture service.
+8.8.1 keeps Resolve First intact while hardening the execution edges that actually deliver media and remote vision. Media language now resolves common artist/type phrases into canonical selectors before playback, Signal reports what actually resolved, and Fabric Vision gains explicit multi-display inventory and capture selection without creating a background capture service.
 
 **One local-first personal computer made from the machines you already own.**
 
@@ -11,8 +11,8 @@ Remote and local media covers now use the same explicit full-RGB Chafa symbol co
 
 | Layer | Version |
 | --- | ---: |
-| Future Crash + LOOK bundle | **8.8.0** |
-| LOOK component | **4.56.0** |
+| Future Crash + LOOK bundle | **8.8.1** |
+| LOOK component | **4.56.1** |
 | Future Crash component | **1.2.2** |
 
 Use `lk version` for installed LOOK/bundle identity, `lk help` for the live glossary, and `man lk` for the reference manual. Component versions intentionally advance independently.

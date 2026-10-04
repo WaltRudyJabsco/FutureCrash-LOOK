@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Future Crash + LOOK Unified Node 8.8.0.
+"""Future Crash + LOOK Unified Node 8.8.1.
 
 A small distributed supervisor for trusted personal machines. Immediate events stay
 asynchronous; a one-second fabric pulse reconciles presence, leases and stale work.
@@ -79,7 +79,7 @@ try:
 except ImportError:
     from fabric_vision import capture_provider as vision_capture_provider, capture_screen as vision_capture_screen, list_displays as vision_list_displays
 
-VERSION = "8.8.0"
+VERSION = "8.8.1"
 RELEASE_NAME = "FABRIC VISION"
 DEFAULT_HOST = "127.0.0.1"
 DEFAULT_PORT = 7332
@@ -2344,7 +2344,7 @@ def _local_web_search(query, limit=8):
     base=os.environ.get("FCL_SEARXNG_URL","http://127.0.0.1:8888").rstrip("/")
     request=urllib.request.Request(base+"/search?"+params,headers={
         "Accept":"application/json",
-        "User-Agent":"Future-Crash-Fabric/8.8.0",
+        "User-Agent":"Future-Crash-Fabric/8.8.1",
     })
     try:
         with urllib.request.urlopen(request,timeout=8) as response:
@@ -3304,12 +3304,19 @@ class API(BaseHTTPRequestHandler):
                 self.wfile.write(chunk); remaining-=len(chunk)
 
     def _browser_media_source(self, entry_id, path_hint=""):
-        """Return a browser-safe local representation; never mutate the source."""
+        """Return a browser-safe local representation; never mutate the source.
+
+        Native players get original bytes. Browser output gets a conservative
+        representation chosen by the owning node: H.264/AAC MP4 for video and
+        AAC/M4A for audio codecs/containers that browsers do not reliably share.
+        """
         row,source=_local_media_entry(entry_id,path_hint)
         media_type=str(row.get("media_type") or mimetypes.guess_type(str(source))[0] or "application/octet-stream")
         video_exts={".mov",".avi",".mkv",".wmv",".flv",".mts",".m2ts",".vob",".ts",".mp4",".m4v",".webm"}
-        if not (media_type.startswith("video/") or source.suffix.casefold() in video_exts): return source,media_type
-        # Daemon PATHs are often smaller than interactive shell PATHs.
+        is_video=media_type.startswith("video/") or source.suffix.casefold() in video_exts
+        is_audio=media_type.startswith("audio/") and not is_video
+        if not (is_video or is_audio): return source,media_type
+
         def media_tool(name):
             found=shutil.which(name)
             if found: return found
@@ -3317,49 +3324,65 @@ class API(BaseHTTPRequestHandler):
                 candidate=Path(base)/name
                 if candidate.is_file() and os.access(candidate,os.X_OK): return str(candidate)
             return ""
+
         ffmpeg=media_tool("ffmpeg"); ffprobe=media_tool("ffprobe")
+        # Formats deliberately kept original only when support is broadly reliable.
+        # Everything else is converted by the owner so browser endpoints never need
+        # to understand the source library's codec mix.
+        if is_audio and source.suffix.casefold() in {".mp3",".m4a",".aac",".wav"}:
+            return source, ("audio/mp4" if source.suffix.casefold()==".m4a" else media_type)
         if not ffmpeg:
-            # The original owner+item stream is still valid. Safari/WebKit can
-            # consume many camera MOV/MP4 files directly, so lack of ffmpeg must
-            # degrade representation quality rather than break transport.
-            return source,media_type
-        compatible=False
-        if ffprobe:
-            try:
-                probe=subprocess.run([ffprobe,"-v","error","-show_entries","stream=codec_type,codec_name","-of","json",str(source)],capture_output=True,text=True,timeout=12,check=True)
-                streams=json.loads(probe.stdout or "{}").get("streams") or []
-                video={str(x.get("codec_name") or "") for x in streams if x.get("codec_type")=="video"}
-                audio={str(x.get("codec_name") or "") for x in streams if x.get("codec_type")=="audio"}
-                compatible=source.suffix.casefold() in {".mp4",".m4v"} and video.issubset({"h264"}) and audio.issubset({"aac","mp3"})
-            except Exception: compatible=False
-        if compatible: return source,"video/mp4"
-        cache=Path.home()/".cache"/"future-crash-look"/"browser-media"; cache.mkdir(parents=True,exist_ok=True)
-        stat=source.stat(); key=hashlib.sha256(f"{source}:{stat.st_size}:{stat.st_mtime_ns}".encode()).hexdigest()[:24]
-        target=cache/(key+".mp4")
-        if not target.exists() or target.stat().st_size==0:
-            tmp=target.with_name(key+f".{os.getpid()}.{threading.get_ident()}.tmp.mp4")
-            # H.264/AAC MP4 is the common browser representation. Apple ffmpeg
-            # builds do not always expose libx264, so retain a VideoToolbox fallback.
-            encoders=[("libx264",["-preset","veryfast","-crf","21"])]
-            if platform.system()=="Darwin": encoders.append(("h264_videotoolbox",["-b:v","6M"]))
-            last_error=""
-            try:
-                for encoder,video_args in encoders:
-                    cmd=[ffmpeg,"-nostdin","-v","error","-y","-i",str(source),"-map","0:v:0","-map","0:a:0?","-c:v",encoder,*video_args,"-pix_fmt","yuv420p","-c:a","aac","-b:a","160k","-movflags","+faststart",str(tmp)]
-                    cp=subprocess.run(cmd,capture_output=True,text=True,timeout=1800)
-                    if cp.returncode==0 and tmp.exists() and tmp.stat().st_size>0:
-                        os.replace(tmp,target); last_error=""; break
-                    last_error=(cp.stderr or cp.stdout or f"ffmpeg exit {cp.returncode}").strip()[-800:]
-                    try:
-                        if tmp.exists(): tmp.unlink()
-                    except OSError: pass
-                if not target.exists() or target.stat().st_size==0:
-                    raise RuntimeError("browser video conversion failed"+(f": {last_error}" if last_error else ""))
-            finally:
+            raise RuntimeError("browser media conversion needs ffmpeg on the source node")
+
+        if is_video:
+            compatible=False
+            if ffprobe:
                 try:
-                    if tmp.exists(): tmp.unlink()
+                    probe=subprocess.run([ffprobe,"-v","error","-show_entries","stream=codec_type,codec_name","-of","json",str(source)],capture_output=True,text=True,timeout=12,check=True)
+                    streams=json.loads(probe.stdout or "{}").get("streams") or []
+                    video={str(x.get("codec_name") or "") for x in streams if x.get("codec_type")=="video"}
+                    audio={str(x.get("codec_name") or "") for x in streams if x.get("codec_type")=="audio"}
+                    compatible=source.suffix.casefold() in {".mp4",".m4v"} and video.issubset({"h264"}) and audio.issubset({"aac","mp3"})
+                except Exception: compatible=False
+            if compatible: return source,"video/mp4"
+            cache=Path.home()/".cache"/"future-crash-look"/"browser-media"; cache.mkdir(parents=True,exist_ok=True)
+            stat=source.stat(); key=hashlib.sha256(f"video:{source}:{stat.st_size}:{stat.st_mtime_ns}".encode()).hexdigest()[:24]
+            target=cache/(key+".mp4")
+            if not target.exists() or target.stat().st_size==0:
+                tmp=target.with_name(key+f".{os.getpid()}.{threading.get_ident()}.tmp.mp4")
+                encoders=[("libx264",["-preset","veryfast","-crf","21"])]
+                if platform.system()=="Darwin": encoders.append(("h264_videotoolbox",["-b:v","6M"]))
+                last_error=""
+                try:
+                    for encoder,video_args in encoders:
+                        cmd=[ffmpeg,"-nostdin","-v","error","-y","-i",str(source),"-map","0:v:0","-map","0:a:0?","-c:v",encoder,*video_args,"-pix_fmt","yuv420p","-c:a","aac","-b:a","160k","-movflags","+faststart",str(tmp)]
+                        cp=subprocess.run(cmd,capture_output=True,text=True,timeout=1800)
+                        if cp.returncode==0 and tmp.exists() and tmp.stat().st_size>0:
+                            os.replace(tmp,target); last_error=""; break
+                        last_error=(cp.stderr or cp.stdout or f"ffmpeg exit {cp.returncode}").strip()[-800:]
+                        try: tmp.unlink(missing_ok=True)
+                        except OSError: pass
+                    if not target.exists() or target.stat().st_size==0:
+                        raise RuntimeError("browser video conversion failed"+(f": {last_error}" if last_error else ""))
+                finally:
+                    try: tmp.unlink(missing_ok=True)
+                    except OSError: pass
+            return target,"video/mp4"
+
+        cache=Path.home()/".cache"/"future-crash-look"/"browser-media"; cache.mkdir(parents=True,exist_ok=True)
+        stat=source.stat(); key=hashlib.sha256(f"audio:{source}:{stat.st_size}:{stat.st_mtime_ns}".encode()).hexdigest()[:24]
+        target=cache/(key+".m4a")
+        if not target.exists() or target.stat().st_size==0:
+            tmp=target.with_name(key+f".{os.getpid()}.{threading.get_ident()}.tmp.m4a")
+            cmd=[ffmpeg,"-nostdin","-v","error","-y","-i",str(source),"-vn","-c:a","aac","-b:a","192k","-movflags","+faststart",str(tmp)]
+            cp=subprocess.run(cmd,capture_output=True,text=True,timeout=900)
+            if cp.returncode!=0 or not tmp.exists() or tmp.stat().st_size==0:
+                detail=(cp.stderr or cp.stdout or f"ffmpeg exit {cp.returncode}").strip()[-800:]
+                try: tmp.unlink(missing_ok=True)
                 except OSError: pass
-        return target,"video/mp4"
+                raise RuntimeError("browser audio conversion failed"+(f": {detail}" if detail else ""))
+            os.replace(tmp,target)
+        return target,"audio/mp4"
 
     def _serve_media_browser(self,target,entry_id,path_hint="",*,head=False):
         """Compatibility alias for the browser representation of one media item.
@@ -3386,14 +3409,7 @@ class API(BaseHTTPRequestHandler):
         if not target or target==local:
             try:
                 if browser:
-                    try:
-                        source,ctype=self._browser_media_source(entry_id,path_hint)
-                    except Exception:
-                        # Delivery must not fail merely because ffmpeg is absent or a
-                        # conversion failed. The original item is still authoritative
-                        # and browsers such as Safari can consume many MOV/MP4 sources.
-                        row,source=_local_media_entry(entry_id,path_hint)
-                        ctype=str(row.get("media_type") or mimetypes.guess_type(str(source))[0] or "application/octet-stream")
+                    source,ctype=self._browser_media_source(entry_id,path_hint)
                 else:
                     row,source=_local_media_entry(entry_id,path_hint)
                     ctype=str(row.get("media_type") or mimetypes.guess_type(str(source))[0] or "application/octet-stream")
@@ -3509,7 +3525,7 @@ class API(BaseHTTPRequestHandler):
 
         snapshot={"self":node_info(),"peers":PEERS.public()}
         try:
-            peer=_peer_for_target(snapshot,target); last_exc=None
+            peer=_peer_for_target(snapshot,target); failures=[]
             for base in _peer_bases(peer):
                 params={"previous_hash":previous_hash,"max_width":max_width,"quality":quality,"display":str(display or "main")}
                 url=base+"/v1/vision/screen?"+urllib.parse.urlencode(params)
@@ -3525,9 +3541,21 @@ class API(BaseHTTPRequestHandler):
                         raise RuntimeError("invalid Fabric Vision response")
                     payload["node"]=target
                     return self.sendj(200,payload)
+                except urllib.error.HTTPError as exc:
+                    try:
+                        body=exc.read(8192).decode("utf-8","replace")
+                        detail=json.loads(body or "{}").get("error") or body or str(exc)
+                    except Exception:
+                        detail=str(exc)
+                    failures.append((0,base,f"HTTP {exc.code}: {str(detail).strip()[:600]}"))
+                except ssl.SSLCertVerificationError as exc:
+                    failures.append((3,base,f"TLS certificate verification failed: {exc}"))
                 except Exception as exc:
-                    last_exc=exc
-            raise RuntimeError(f"screen vision transport failed: {last_exc}")
+                    failures.append((2,base,str(exc)))
+            failures.sort(key=lambda row:row[0])
+            primary=failures[0][2] if failures else "peer has no reachable endpoint"
+            routes="; ".join(f"{base}: {detail}" for _rank,base,detail in failures[:3])
+            raise RuntimeError(f"screen vision transport failed: {primary}"+(f" · routes: {routes}" if routes else ""))
         except urllib.error.HTTPError as exc:
             try: detail=exc.read(8192).decode("utf-8","replace")
             except Exception: detail=str(exc)

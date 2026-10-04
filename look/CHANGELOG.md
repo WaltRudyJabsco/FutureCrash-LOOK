@@ -1,3 +1,8 @@
+# 4.56.1 — EXECUTION HOTFIX
+
+- Keep Resolve First intent behavior while hardening browser playback and Fabric Vision transport diagnostics.
+- Browser output now requests owner-generated AAC/M4A for audio formats that are not broadly browser-safe.
+
 # 4.56.0 — RESOLVE FIRST
 
 - Add `lk vision displays [@NODE]` and explicit display selection for local/remote Fabric Vision.

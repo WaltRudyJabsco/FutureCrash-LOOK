@@ -1,3 +1,9 @@
+# 8.8.1 — EXECUTION HOTFIX
+
+- Preserve meaningful Fabric Vision peer capture errors instead of masking them with a later TLS fallback failure.
+- Add owner-side browser-safe AAC/M4A conversion for unsupported audio formats.
+- Stop silently returning an incompatible original media file when browser representation conversion fails.
+
 # 8.8.0 — RESOLVE FIRST
 
 - Normalize common media language into typed canonical intent before playback: artist shorthand, random artist selections, and video-type queries no longer become brittle literal catalog strings.
