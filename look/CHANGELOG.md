@@ -1,3 +1,8 @@
+# 4.55.2 — FOREGROUND CAPTURE
+
+- Local Fabric Vision capture now bypasses Unified Node and runs in the interactive LOOK process.
+- Remote Fabric Vision behavior is unchanged.
+
 # 4.55.1 — FABRIC VISION WAYLAND
 
 - Fix `lk vision screen` on modern Linux Wayland sessions by rejecting X11-only capture backends and using the desktop Screenshot portal when native compositor tools are unavailable.

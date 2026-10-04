@@ -1,3 +1,10 @@
+# 8.7.2 — FOREGROUND CAPTURE
+
+- Capture local `lk vision screen` frames directly in the foreground `lk` process instead of through Unified Node.
+- Local watch mode uses the same foreground capture path on every poll.
+- Preserve authenticated Unified Node relay only for actual remote `@node` screen capture.
+- Fix macOS Screen Recording permission/session ownership when Terminal is authorized but the background node service is not.
+
 # 8.7.1 — FABRIC VISION WAYLAND
 
 - Route Linux Wayland screen capture through compositor-native tools or the XDG Desktop Screenshot portal instead of X11-only ImageMagick/scrot fallbacks.

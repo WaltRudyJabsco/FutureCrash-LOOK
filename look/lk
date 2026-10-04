@@ -28,7 +28,7 @@ try:
 except Exception:
     readline = None
 
-VERSION="4.55.1"
+VERSION="4.55.2"
 
 LOOK_WORDMARK = r"""       ██╗      ██╗  ██╗
        ██║      ██║ ██╔╝
@@ -9947,7 +9947,7 @@ def _direct_searxng_search(query, limit=8):
     params=urllib.parse.urlencode({"q":query,"format":"json"})
     request=urllib.request.Request(base+"/search?"+params,headers={
         "Accept":"application/json",
-        "User-Agent":"Future-Crash-Fabric/8.7.1",
+        "User-Agent":"Future-Crash-Fabric/8.7.2",
     })
     with urllib.request.urlopen(request,timeout=12) as response:
         data=json.load(response)
@@ -12895,7 +12895,31 @@ def _vision_parse_seconds(value, default):
     return amount*(60.0 if unit=="m" else 1.0)
 
 
+def _vision_screen_local(previous_hash="", max_width=1600, quality=72):
+    """Capture this endpoint in the foreground lk process.
+
+    Local capture deliberately bypasses Unified Node. On desktop OSes, capture
+    permission/session ownership belongs to the interactive process the user
+    actually invoked; the daemon is only needed when there is a real Fabric hop.
+    """
+    candidates=[Path.home()/".local/share/future-crash-look/core", ROOT.parent/"core"]
+    for path in candidates:
+        if (path/"fabric_vision.py").exists() and str(path) not in sys.path:
+            sys.path.insert(0,str(path))
+    try:
+        from fabric_vision import capture_screen
+    except Exception as exc:
+        raise RuntimeError(f"local screen capture module unavailable: {exc}")
+    payload=capture_screen(previous_hash=previous_hash,max_width=max_width,quality=quality)
+    if not isinstance(payload,dict) or not payload.get("ok"):
+        raise RuntimeError(str((payload or {}).get("error") or "screen capture failed"))
+    payload.setdefault("node","local")
+    return payload
+
+
 def _vision_screen_fetch(node="", previous_hash="", max_width=1600, quality=72):
+    if not str(node or "").strip():
+        return _vision_screen_local(previous_hash,max_width,quality)
     params={"max_width":str(int(max_width)),"quality":str(int(quality))}
     if node:
         params["node"]=str(node)
