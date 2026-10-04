@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Future Crash + LOOK Unified Node 8.7.2.
+"""Future Crash + LOOK Unified Node 8.8.0.
 
 A small distributed supervisor for trusted personal machines. Immediate events stay
 asynchronous; a one-second fabric pulse reconciles presence, leases and stale work.
@@ -75,11 +75,11 @@ try:
 except ImportError:
     from attention import normalize_event as normalize_attention_event, plan_voice_targets
 try:
-    from .fabric_vision import capture_provider as vision_capture_provider, capture_screen as vision_capture_screen
+    from .fabric_vision import capture_provider as vision_capture_provider, capture_screen as vision_capture_screen, list_displays as vision_list_displays
 except ImportError:
-    from fabric_vision import capture_provider as vision_capture_provider, capture_screen as vision_capture_screen
+    from fabric_vision import capture_provider as vision_capture_provider, capture_screen as vision_capture_screen, list_displays as vision_list_displays
 
-VERSION = "8.7.2"
+VERSION = "8.8.0"
 RELEASE_NAME = "FABRIC VISION"
 DEFAULT_HOST = "127.0.0.1"
 DEFAULT_PORT = 7332
@@ -2344,7 +2344,7 @@ def _local_web_search(query, limit=8):
     base=os.environ.get("FCL_SEARXNG_URL","http://127.0.0.1:8888").rstrip("/")
     request=urllib.request.Request(base+"/search?"+params,headers={
         "Accept":"application/json",
-        "User-Agent":"Future-Crash-Fabric/8.7.2",
+        "User-Agent":"Future-Crash-Fabric/8.8.0",
     })
     try:
         with urllib.request.urlopen(request,timeout=8) as response:
@@ -3494,7 +3494,7 @@ class API(BaseHTTPRequestHandler):
             self.sendj(502,{"error":str(exc)})
 
 
-    def _serve_vision_screen(self,target="",previous_hash="",max_width=1600,quality=72):
+    def _serve_vision_screen(self,target="",previous_hash="",max_width=1600,quality=72,display="main"):
         """Capture one ephemeral screen frame locally or relay one trusted peer frame."""
         target=str(target or "").strip(); local=identity()["name"]
         try: max_width=max(320,min(3840,int(max_width or 1600)))
@@ -3503,7 +3503,7 @@ class API(BaseHTTPRequestHandler):
         except Exception: quality=72
         previous_hash=str(previous_hash or "").strip().lower()[:128]
         if not target or target==local:
-            payload=vision_capture_screen(previous_hash=previous_hash,max_width=max_width,quality=quality)
+            payload=vision_capture_screen(previous_hash=previous_hash,max_width=max_width,quality=quality,display=display)
             payload["node"]=local
             return self.sendj(200 if payload.get("ok") else 503,payload)
 
@@ -3511,7 +3511,7 @@ class API(BaseHTTPRequestHandler):
         try:
             peer=_peer_for_target(snapshot,target); last_exc=None
             for base in _peer_bases(peer):
-                params={"previous_hash":previous_hash,"max_width":max_width,"quality":quality}
+                params={"previous_hash":previous_hash,"max_width":max_width,"quality":quality,"display":str(display or "main")}
                 url=base+"/v1/vision/screen?"+urllib.parse.urlencode(params)
                 headers=FABRIC_IDENTITY.auth_headers_for_url(url)
                 req=urllib.request.Request(url,headers=headers)
@@ -3532,6 +3532,32 @@ class API(BaseHTTPRequestHandler):
             try: detail=exc.read(8192).decode("utf-8","replace")
             except Exception: detail=str(exc)
             return self.sendj(exc.code,{"ok":False,"error":detail[:1000],"node":target})
+        except Exception as exc:
+            return self.sendj(502,{"ok":False,"error":str(exc),"node":target})
+
+
+    def _serve_vision_displays(self,target=""):
+        """Return display inventory locally or relay it from a trusted Fabric peer."""
+        target=str(target or "").strip(); local=identity()["name"]
+        if not target or target==local:
+            return self.sendj(200,{"ok":True,"node":local,"displays":vision_list_displays()})
+        snapshot={"self":node_info(),"peers":PEERS.public()}
+        try:
+            peer=_peer_for_target(snapshot,target); last_exc=None
+            for base in _peer_bases(peer):
+                url=base+"/v1/vision/displays"
+                headers=FABRIC_IDENTITY.auth_headers_for_url(url)
+                req=urllib.request.Request(url,headers=headers)
+                context=FABRIC_IDENTITY.ssl_context_for_url(url) if url.lower().startswith("https://") else None
+                try:
+                    kwargs={"timeout":8.0}
+                    if context is not None: kwargs["context"]=context
+                    with urllib.request.urlopen(req,**kwargs) as r:
+                        payload=json.loads(r.read(256*1024).decode("utf-8"))
+                    payload["node"]=target
+                    return self.sendj(200,payload)
+                except Exception as exc: last_exc=exc
+            raise RuntimeError(f"display inventory transport failed: {last_exc}")
         except Exception as exc:
             return self.sendj(502,{"ok":False,"error":str(exc),"node":target})
 
@@ -3823,12 +3849,15 @@ class API(BaseHTTPRequestHandler):
             return self.sendj(200, _fabric_file_search(query,80))
         if path == "/v1/files/fabric":
             return self.sendj(200, _fabric_file_catalog())
+        if path == "/v1/vision/displays":
+            q=parse_qs(urlparse(self.path).query); target=str((q.get("node") or [""])[0])
+            return self._serve_vision_displays(target)
         if path == "/v1/vision/screen":
             q=parse_qs(urlparse(self.path).query)
-            target=str((q.get("node") or [""])[0]); previous_hash=str((q.get("previous_hash") or [""])[0])
+            target=str((q.get("node") or [""])[0]); previous_hash=str((q.get("previous_hash") or [""])[0]); display=str((q.get("display") or ["main"])[0])
             try: max_width=int((q.get("max_width") or [1600])[0]); quality=int((q.get("quality") or [72])[0])
             except Exception: max_width,quality=1600,72
-            return self._serve_vision_screen(target,previous_hash,max_width,quality)
+            return self._serve_vision_screen(target,previous_hash,max_width,quality,display)
         if path == "/v1/media/catalog":
             return self.sendj(200, _local_media_catalog())
         if path == "/v1/media/fabric":

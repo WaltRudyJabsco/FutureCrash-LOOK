@@ -1,3 +1,11 @@
+# 8.8.0 — RESOLVE FIRST
+
+- Normalize common media language into typed canonical intent before playback: artist shorthand, random artist selections, and video-type queries no longer become brittle literal catalog strings.
+- Resolve unique artist shorthand such as `Stones` to one canonical catalog artist without model inference; ambiguous shorthand is refused rather than guessed.
+- Enforce media type constraints before player launch and return canonical resolved labels through Signal where available.
+- Add Fabric Vision display inventory plus `--display`, `--displays`, and `--all`; multi-display capture remains user initiated and transfers each display as a separate ephemeral frame.
+- Preserve deterministic fast paths across Albert, Signal, and LO; model reasoning remains the fallback for genuinely ambiguous language.
+
 # 8.7.2 — FOREGROUND CAPTURE
 
 - Capture local `lk vision screen` frames directly in the foreground `lk` process instead of through Unified Node.

@@ -1,3 +1,9 @@
+# 4.56.0 — RESOLVE FIRST
+
+- Add `lk vision displays [@NODE]` and explicit display selection for local/remote Fabric Vision.
+- Add typed media resolution for casual artist and video requests before queue/player execution.
+- Keep multi-display Vision foreground/user initiated; `--all` enumerates separate frames instead of building a giant stitched desktop.
+
 # 4.55.2 — FOREGROUND CAPTURE
 
 - Local Fabric Vision capture now bypasses Unified Node and runs in the interactive LOOK process.

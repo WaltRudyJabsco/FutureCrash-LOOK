@@ -1,6 +1,8 @@
-# LOOK 4.55.2
+# LOOK 4.56.0
 
-LOOK is the keyboard-first terminal/tool layer shipped in Future Crash + LOOK 8.7.2. `lk help` is the authoritative live glossary; `man lk` is the reference manual.
+Resolve-first media language and multi-display Fabric Vision are new in 4.56.0.
+
+LOOK is the keyboard-first terminal/tool layer shipped in Future Crash + LOOK 8.8.0. `lk help` is the authoritative live glossary; `man lk` is the reference manual.
 
 ### Interactive browser essentials
 

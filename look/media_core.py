@@ -338,7 +338,19 @@ def select_entries(library: Any, *, kind: str = "", artist: str = "", selection:
         rows = [r for r in rows if str(r.get("media_type") or "").casefold().startswith(kind + "/")]
     artist_key = _artist_key(artist)
     if artist_key:
-        rows = [r for r in rows if _artist_key(str(r.get("artist") or "")) == artist_key]
+        exact = [r for r in rows if _artist_key(str(r.get("artist") or "")) == artist_key]
+        if exact:
+            rows = exact
+        else:
+            # Human shorthand is useful only when it identifies exactly one
+            # canonical artist. This admits "Stones" -> "The Rolling Stones"
+            # and refuses ambiguous fragments rather than guessing.
+            candidates = {}
+            for row in rows:
+                key = _artist_key(str(row.get("artist") or ""))
+                if key and (key.endswith(" " + artist_key) or key == artist_key):
+                    candidates.setdefault(key, []).append(row)
+            rows = next(iter(candidates.values())) if len(candidates) == 1 else []
     rows = sorted(rows, key=entry_sort_key)
     selection = str(selection or "all").casefold()
     if selection == "random" and rows:

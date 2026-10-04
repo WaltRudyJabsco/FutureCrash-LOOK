@@ -79,6 +79,30 @@ def normalize(prompt: str) -> dict[str, Any] | None:
     if m:
         return _intent("media.play", kind=_MEDIA_KIND[m.group(1)], selection="random", limit=1, match_mode="selector")
 
+    # Conversational artist selectors should resolve structurally instead of
+    # becoming fuzzy title strings. "some Stones" means a small random artist
+    # selection; the catalog resolver can expand unique shorthand such as
+    # "Stones" -> "The Rolling Stones" without involving a model.
+    m = re.fullmatch(r"(?:please\s+)?(?:play|put\s+on)\s+(?:me\s+)?some\s+(.+)", text, re.I)
+    if m:
+        artist = _clean(m.group(1).strip(" .!?"))
+        if artist and artist.casefold() not in _MEDIA_KIND:
+            return _intent("media.play", kind="audio", artist=artist, selection="random", limit=8)
+
+    # Media type can appear before or after the human query. Preserve the type
+    # as structured data so "Catalina video" searches video metadata for
+    # Catalina rather than searching the literal words "catalina video".
+    m = re.fullmatch(r"(?:please\s+)?(?:play|put\s+on)\s+(?:me\s+)?(?:the\s+)?(.+?)\s+(movie|film|video)", text, re.I)
+    if m:
+        query = _clean(m.group(1).strip(" .!?"))
+        if query:
+            return _intent("media.play", query=query, kind="video", match_mode="fuzzy")
+    m = re.fullmatch(r"(?:please\s+)?(?:play|put\s+on)\s+(?:me\s+)?(?:a\s+|the\s+)?(movie|film|video)\s+(.+)", text, re.I)
+    if m:
+        query = _clean(m.group(2).strip(" .!?"))
+        if query:
+            return _intent("media.play", query=query, kind="video", match_mode="fuzzy")
+
     # "play something by Talking Heads" is a selector over an artist rather
     # than a request for a title literally named "something".
     m = re.fullmatch(r"(?:please\s+)?(?:play|put\s+on)\s+(?:me\s+)?(?:something|anything|some\s+music)\s+by\s+(.+)", text, re.I)

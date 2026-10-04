@@ -9,7 +9,9 @@ from __future__ import annotations
 
 import base64
 import hashlib
+import json
 import os
+import re
 import platform
 import shutil
 import subprocess
@@ -61,6 +63,75 @@ def _portal_python() -> str | None:
             return python
     return None
 
+
+
+def list_displays() -> list[dict]:
+    """Best-effort stable display inventory for user-directed capture."""
+    system = platform.system().lower()
+    rows = []
+    if system == "darwin":
+        profiler = _which("/usr/sbin/system_profiler", "system_profiler")
+        if profiler:
+            try:
+                cp = subprocess.run([profiler, "SPDisplaysDataType", "-json"], capture_output=True, text=True, timeout=8)
+                data = json.loads(cp.stdout or "{}") if cp.returncode == 0 else {}
+                for gpu in data.get("SPDisplaysDataType") or []:
+                    for d in gpu.get("spdisplays_ndrvs") or []:
+                        idx = len(rows) + 1
+                        rows.append({
+                            "index": idx,
+                            "name": str(d.get("_name") or d.get("spdisplays_display_type") or f"Display {idx}"),
+                            "resolution": str(d.get("_spdisplays_resolution") or d.get("spdisplays_resolution") or ""),
+                            "main": str(d.get("spdisplays_main") or "").lower() in {"spdisplays_yes","yes","true"},
+                            "capture_id": str(idx),
+                        })
+            except Exception:
+                rows = []
+    elif system == "linux":
+        wlr = _which("wlr-randr")
+        if wlr:
+            try:
+                cp = subprocess.run([wlr, "--json"], capture_output=True, text=True, timeout=4)
+                data = json.loads(cp.stdout or "[]") if cp.returncode == 0 else []
+                for item in data if isinstance(data, list) else []:
+                    if not item.get("enabled", True):
+                        continue
+                    idx=len(rows)+1; mode=item.get("current_mode") or {}
+                    rows.append({"index":idx,"name":str(item.get("name") or f"Display {idx}"),
+                                 "resolution":f"{mode.get('width','')}x{mode.get('height','')}".strip('x'),
+                                 "main":idx==1,"capture_id":str(item.get("name") or idx)})
+            except Exception:
+                rows=[]
+        if not rows and os.environ.get("DISPLAY"):
+            xrandr=_which("xrandr")
+            if xrandr:
+                try:
+                    cp=subprocess.run([xrandr,"--query"],capture_output=True,text=True,timeout=4)
+                    for line in (cp.stdout or "").splitlines():
+                        m=re.match(r"^(\S+) connected(?: primary)? (\d+x\d+)",line)
+                        if not m: continue
+                        idx=len(rows)+1
+                        rows.append({"index":idx,"name":m.group(1),"resolution":m.group(2),
+                                     "main":" connected primary " in line,"capture_id":m.group(1)})
+                except Exception:
+                    rows=[]
+    if not rows:
+        rows=[{"index":1,"name":"Main display","resolution":"","main":True,"capture_id":"1"}]
+    if not any(r.get("main") for r in rows): rows[0]["main"]=True
+    return rows
+
+
+def _resolve_display(display) -> dict:
+    rows=list_displays()
+    value=str(display or "main").strip()
+    if value.casefold() in {"","main","primary","default"}:
+        return next((r for r in rows if r.get("main")),rows[0])
+    try: idx=int(value)
+    except ValueError: idx=-1
+    for row in rows:
+        if row.get("index")==idx or str(row.get("name") or "").casefold()==value.casefold():
+            return row
+    raise ValueError(f"display {value!r} not found")
 
 def capture_provider() -> dict:
     """Return the best screen-capture provider available on this node."""
@@ -117,13 +188,17 @@ def capture_provider() -> dict:
     return {"name": "", "tool": "", "platform": system or "unknown", "error": "screen capture is not supported on this platform"}
 
 
-def _capture_command(provider: dict, output: Path) -> list[str]:
+def _capture_command(provider: dict, output: Path, display: dict | None = None) -> list[str]:
     name = provider.get("name")
     tool = str(provider.get("tool") or "")
     if name == "screencapture":
-        return [tool, "-x", "-t", "png", str(output)]
+        cmd=[tool, "-x", "-t", "png"]
+        if display: cmd.extend(["-D", str(display.get("index") or 1)])
+        return cmd+[str(output)]
     if name == "grim":
-        return [tool, str(output)]
+        cmd=[tool]
+        if display and display.get("capture_id"): cmd.extend(["-o",str(display.get("capture_id"))])
+        return cmd+[str(output)]
     if name == "gnome-screenshot":
         return [tool, "-f", str(output)]
     if name == "spectacle":
@@ -259,11 +334,18 @@ def _compress(source: Path, dest: Path, max_width: int, quality: int) -> tuple[P
     return source, "image/png"
 
 
-def capture_screen(*, previous_hash: str = "", max_width: int = DEFAULT_MAX_WIDTH, quality: int = DEFAULT_QUALITY) -> dict:
+def capture_screen(*, previous_hash: str = "", max_width: int = DEFAULT_MAX_WIDTH, quality: int = DEFAULT_QUALITY, display: str | int = "main") -> dict:
     """Capture one screen frame and return a transport-ready ephemeral payload."""
     provider = capture_provider()
     if not provider.get("tool"):
         return {"ok": False, "available": False, "error": provider.get("error") or "screen capture unavailable", "provider": provider}
+
+    try:
+        selected=_resolve_display(display)
+    except ValueError as exc:
+        return {"ok":False,"available":True,"error":str(exc),"provider":provider,"displays":list_displays()}
+    if str(display or "main").casefold() not in {"","main","primary","default","1"} and provider.get("name") not in {"screencapture","grim"}:
+        return {"ok":False,"available":True,"error":f"{provider.get('name') or 'capture backend'} cannot target an individual display on this desktop", "provider":provider,"display":selected}
 
     with tempfile.TemporaryDirectory(prefix="fabric-vision-") as temp:
         root = Path(temp)
@@ -273,7 +355,8 @@ def capture_screen(*, previous_hash: str = "", max_width: int = DEFAULT_MAX_WIDT
             if provider.get("name") == "xdg-desktop-portal":
                 proc = _capture_portal(provider, raw)
             else:
-                proc = subprocess.run(_capture_command(provider, raw), stdout=subprocess.DEVNULL, stderr=subprocess.PIPE, timeout=12)
+                command=_capture_command(provider,raw,selected) if str(display or "main").casefold() not in {"","main","primary","default","1"} else _capture_command(provider,raw)
+                proc = subprocess.run(command, stdout=subprocess.DEVNULL, stderr=subprocess.PIPE, timeout=12)
         except subprocess.TimeoutExpired:
             return {"ok": False, "available": True, "error": "screen capture timed out", "provider": provider}
         except OSError as exc:
@@ -304,6 +387,7 @@ def capture_screen(*, previous_hash: str = "", max_width: int = DEFAULT_MAX_WIDT
             "provider": {k: provider.get(k) for k in ("name", "platform")},
             "ephemeral": True,
             "stored": False,
+            "display": selected,
         }
         if not unchanged:
             payload["image_base64"] = base64.b64encode(data).decode("ascii")

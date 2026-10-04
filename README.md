@@ -1,7 +1,7 @@
-# Future Crash + LOOK 8.7.2 — FOREGROUND CAPTURE
+# Future Crash + LOOK 8.8.0 — RESOLVE FIRST
 
 
-8.7.2 fixes local desktop capture ownership: `lk vision screen` and local watch sessions now capture directly in the foreground `lk` process instead of round-tripping through Unified Node. This lets macOS Screen Recording permission and Linux desktop/session ownership follow the interactive command the user actually launched, while remote `@node` capture continues to use authenticated Fabric transport.
+8.8.0 makes Fabric actions more deterministic before they become expensive or ambiguous. Media language now resolves common artist/type phrases into canonical selectors before playback, Signal reports what actually resolved, and Fabric Vision gains explicit multi-display inventory and capture selection without creating a background capture service.
 
 **One local-first personal computer made from the machines you already own.**
 
@@ -11,8 +11,8 @@ Remote and local media covers now use the same explicit full-RGB Chafa symbol co
 
 | Layer | Version |
 | --- | ---: |
-| Future Crash + LOOK bundle | **8.7.2** |
-| LOOK component | **4.55.2** |
+| Future Crash + LOOK bundle | **8.8.0** |
+| LOOK component | **4.56.0** |
 | Future Crash component | **1.2.2** |
 
 Use `lk version` for installed LOOK/bundle identity, `lk help` for the live glossary, and `man lk` for the reference manual. Component versions intentionally advance independently.

@@ -28,7 +28,7 @@ try:
 except Exception:
     readline = None
 
-VERSION="4.55.2"
+VERSION="4.56.0"
 
 LOOK_WORDMARK = r"""       ██╗      ██╗  ██╗
        ██║      ██║ ██╔╝
@@ -9947,7 +9947,7 @@ def _direct_searxng_search(query, limit=8):
     params=urllib.parse.urlencode({"q":query,"format":"json"})
     request=urllib.request.Request(base+"/search?"+params,headers={
         "Accept":"application/json",
-        "User-Agent":"Future-Crash-Fabric/8.7.2",
+        "User-Agent":"Future-Crash-Fabric/8.8.0",
     })
     with urllib.request.urlopen(request,timeout=12) as response:
         data=json.load(response)
@@ -12895,7 +12895,7 @@ def _vision_parse_seconds(value, default):
     return amount*(60.0 if unit=="m" else 1.0)
 
 
-def _vision_screen_local(previous_hash="", max_width=1600, quality=72):
+def _vision_screen_local(previous_hash="", max_width=1600, quality=72, display="main"):
     """Capture this endpoint in the foreground lk process.
 
     Local capture deliberately bypasses Unified Node. On desktop OSes, capture
@@ -12910,17 +12910,17 @@ def _vision_screen_local(previous_hash="", max_width=1600, quality=72):
         from fabric_vision import capture_screen
     except Exception as exc:
         raise RuntimeError(f"local screen capture module unavailable: {exc}")
-    payload=capture_screen(previous_hash=previous_hash,max_width=max_width,quality=quality)
+    payload=capture_screen(previous_hash=previous_hash,max_width=max_width,quality=quality,display=display)
     if not isinstance(payload,dict) or not payload.get("ok"):
         raise RuntimeError(str((payload or {}).get("error") or "screen capture failed"))
     payload.setdefault("node","local")
     return payload
 
 
-def _vision_screen_fetch(node="", previous_hash="", max_width=1600, quality=72):
+def _vision_screen_fetch(node="", previous_hash="", max_width=1600, quality=72, display="main"):
     if not str(node or "").strip():
-        return _vision_screen_local(previous_hash,max_width,quality)
-    params={"max_width":str(int(max_width)),"quality":str(int(quality))}
+        return _vision_screen_local(previous_hash,max_width,quality,display)
+    params={"max_width":str(int(max_width)),"quality":str(int(quality)),"display":str(display or "main")}
     if node:
         params["node"]=str(node)
     if previous_hash:
@@ -12984,8 +12984,50 @@ def _vision_terminal_preview(data, mime, node, meta=None, *, clear=False):
         subprocess.run([chafa,"--format=symbols","--colors","full","--color-space","rgb","--size",f"{width}x{height}",str(path)],check=False)
 
 
+def _vision_displays_fetch(node=""):
+    if not str(node or "").strip():
+        candidates=[Path.home()/".local/share/future-crash-look/core", ROOT.parent/"core"]
+        for path in candidates:
+            if (path/"fabric_vision.py").exists() and str(path) not in sys.path: sys.path.insert(0,str(path))
+        from fabric_vision import list_displays
+        return {"ok":True,"node":"local","displays":list_displays()}
+    params=urllib.parse.urlencode({"node":str(node)})
+    with urllib.request.urlopen("http://127.0.0.1:7332/v1/vision/displays?"+params,timeout=10) as response:
+        payload=json.loads(response.read(256*1024).decode("utf-8","replace"))
+    if not isinstance(payload,dict) or not payload.get("ok"):
+        raise RuntimeError(str((payload or {}).get("error") or "display inventory unavailable"))
+    return payload
+
+
+def _vision_displays_command(args):
+    node=""
+    for token in args:
+        if token.startswith("@") and len(token)>1 and not node: node=token[1:]
+        elif token not in {"local","self"} and not node: node=token
+        else:
+            print(f"LOOK VISION · unknown option: {token}"); return 2
+    try: payload=_vision_displays_fetch(node)
+    except Exception as exc:
+        print(f"LOOK VISION · {node or 'local'} · {exc}"); return 1
+    rows=payload.get("displays") or []
+    print(f"FABRIC VISION DISPLAYS · {node or payload.get('node') or 'local'} · {len(rows)}")
+    for row in rows:
+        marker="main" if row.get("main") else ""
+        resolution=str(row.get("resolution") or "").strip()
+        tail=" · ".join(x for x in (resolution,marker) if x)
+        print(f"  {int(row.get('index') or 0):>2}  {row.get('name') or 'Display'}" + (f" · {tail}" if tail else ""))
+    return 0
+
+
+def _vision_multi_save_name(destination, display_index, mime):
+    path=Path(destination).expanduser()
+    suffix=path.suffix or _vision_frame_suffix(mime)
+    stem=path.stem if path.suffix else path.name
+    return str(path.with_name(f"{stem}-display{display_index}{suffix}"))
+
+
 def _vision_screen_command(args):
-    node=""; ask=""; save=""; watch=None; every=5.0; max_width=1600; quality=72
+    node=""; ask=""; save=""; watch=None; every=5.0; max_width=1600; quality=72; display="main"; display_set=[]; all_displays=False
     i=0
     while i<len(args):
         token=args[i]
@@ -13013,12 +13055,29 @@ def _vision_screen_command(args):
             max_width=int(args[i+1]); i+=2; continue
         if token=="--quality" and i+1<len(args):
             quality=int(args[i+1]); i+=2; continue
+        if token=="--display" and i+1<len(args):
+            display=args[i+1]; i+=2; continue
+        if token=="--displays" and i+1<len(args):
+            display_set=[x.strip() for x in args[i+1].split(",") if x.strip()]; i+=2; continue
+        if token=="--all":
+            all_displays=True; i+=1; continue
         if token in {"-h","--help"}:
-            print("usage: lk vision screen [@NODE] [--ask QUESTION] [--save FILE] [--watch [30s]] [--every 5s] [--max-width 1600] [--quality 72]")
+            print("usage: lk vision screen [@NODE] [--display N|--displays 1,3|--all] [--ask QUESTION] [--save FILE] [--watch [30s]] [--every 5s] [--max-width 1600] [--quality 72]")
             return 0
         if not node and token not in {"local","self"}:
             node=token; i+=1; continue
         print(f"LOOK VISION · unknown option: {token}"); return 2
+
+    requested=[str(display)]
+    if all_displays or display_set:
+        try: inventory=_vision_displays_fetch(node).get("displays") or []
+        except Exception as exc:
+            print(f"LOOK VISION · {node or 'local'} · {exc}"); return 1
+        requested=[str(row.get("index") or 1) for row in inventory] if all_displays else list(display_set)
+        if not requested: requested=["main"]
+    if watch is not None and len(requested)!=1:
+        print("LOOK VISION · watch accepts one display; use --display N")
+        return 2
 
     if watch is not None:
         watch=max(2.0,min(600.0,float(watch))); every=max(2.0,min(60.0,float(every)))
@@ -13030,7 +13089,7 @@ def _vision_screen_command(args):
         try:
             while True:
                 polls+=1
-                payload=_vision_screen_fetch(node,previous,max_width,quality)
+                payload=_vision_screen_fetch(node,previous,max_width,quality,requested[0])
                 previous=str(payload.get("hash") or previous)
                 incoming=_vision_frame_bytes(payload)
                 if incoming is not None:
@@ -13051,38 +13110,43 @@ def _vision_screen_command(args):
         print(f"FABRIC VISION · stopped · {polls} polls · {changes} changed frame{'s' if changes!=1 else ''} · nothing retained remotely")
         return 0
 
-    try:
-        payload=_vision_screen_fetch(node,"",max_width,quality)
-        data=_vision_frame_bytes(payload)
-        if data is None:
-            raise RuntimeError("capture returned no frame")
-    except Exception as exc:
-        print(f"LOOK VISION · {node or 'local'} · {exc}")
-        return 1
-
-    label=node or str(payload.get("node") or "local")
-    mime=str(payload.get("mime") or "image/png")
-    if save:
-        saved=_vision_save_frame(data,mime,save)
-        print(f"FABRIC VISION · saved {label} → {saved}")
-    if ask:
+    rc=0
+    for position,requested_display in enumerate(requested,1):
         try:
-            text,model=_vision_model_answer(data,ask,label)
+            payload=_vision_screen_fetch(node,"",max_width,quality,requested_display)
+            data=_vision_frame_bytes(payload)
+            if data is None: raise RuntimeError("capture returned no frame")
         except Exception as exc:
-            print(f"LOOK VISION · {exc}")
-            return 1
-        print(f"{_ansi_label('vision ›','35')} {label} · {model}")
-        print(text or "(no response)")
-        return 0
-    _vision_terminal_preview(data,mime,label,payload)
-    return 0
+            print(f"LOOK VISION · {node or 'local'} · display {requested_display} · {exc}")
+            rc=1; continue
+        label=node or str(payload.get("node") or "local")
+        meta_display=payload.get("display") or {}
+        display_label=str(meta_display.get("index") or requested_display)
+        mime=str(payload.get("mime") or "image/png")
+        if save:
+            target=save if len(requested)==1 else _vision_multi_save_name(save,display_label,mime)
+            saved=_vision_save_frame(data,mime,target)
+            print(f"FABRIC VISION · saved {label} display {display_label} → {saved}")
+        if ask:
+            label=f"{label} display {display_label}"
+            try: text,model=_vision_model_answer(data,ask,label)
+            except Exception as exc:
+                print(f"LOOK VISION · {exc}"); rc=1; continue
+            print(f"{_ansi_label('vision ›','35')} {label} · {model}")
+            print(text or "(no response)")
+            continue
+        _vision_terminal_preview(data,mime,f"{label} · display {display_label}",payload)
+        if position < len(requested): print()
+    return rc
 
 
 def vision_command(args):
     """One-shot image understanding plus user-initiated Fabric screen vision."""
     if not args:
-        print("usage: lk vision IMAGE [QUESTION...] | lk vision screen [@NODE] [OPTIONS]")
+        print("usage: lk vision IMAGE [QUESTION...] | lk vision displays [@NODE] | lk vision screen [@NODE] [OPTIONS]")
         return 2
+    if str(args[0]).casefold() in {"displays","monitors"}:
+        return _vision_displays_command(list(args[1:]))
     if str(args[0]).casefold() in {"screen","desktop","fabric"}:
         return _vision_screen_command(list(args[1:]))
     image=Path(args[0]).expanduser()
@@ -15685,6 +15749,9 @@ def _media_tool_play(query,shuffle=False,kind="",artist="",selection="",limit=0,
     selection=str(selection or "").casefold()
     if query:
         match_kind,rows=_media_query_matches(query,match_mode=match_mode)
+        if kind_filter in {"audio","video"}:
+            rows=[row for row in rows if str(row.get("media_type") or "").casefold().startswith(kind_filter+"/")]
+            if not rows: match_kind="none"
     elif kind_filter or artist or selection:
         catalog,_=_media_catalog_entries()
         try: wanted_limit=max(0,min(100,int(limit or 0)))
@@ -15709,7 +15776,7 @@ def _media_tool_play(query,shuffle=False,kind="",artist="",selection="",limit=0,
     if rc!=0:
         detail=" · ".join(line.strip() for line in edge_log.getvalue().splitlines() if line.strip())
         suffix=f" · {detail[:500]}" if detail else ""
-        return _ToolResult(False,"failed",f"MEDIA PLAY FAILED · {query}{suffix}")
+        return _ToolResult(False,"failed",f"MEDIA PLAY FAILED · {label}{suffix}")
     if match_kind=="title" and len(rows)==1:
         label=_media_row_label(rows[0])
     return _ToolResult(True,"ok",f"MEDIA PLAY OK · {match_kind} · {label} · {len(rows)} item{'s' if len(rows)!=1 else ''}" + (" · shuffle" if shuffle else ""))

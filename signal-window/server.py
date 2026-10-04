@@ -1336,7 +1336,14 @@ class App(BaseHTTPRequestHandler):
                 state["origin_endpoint"]={"endpoint_id":origin.get("endpoint_id"),"label":origin.get("label")}
                 state["output_target"]="browser" if browser_target else media_endpoint
                 label=query or (str(normalized.get("artist") or "").strip() or ("a "+str(normalized.get("kind") or "media")))
-                if query:
+                queue=state.get("queue") or []
+                if queue:
+                    first=queue[0] or {}
+                    if normalized.get("artist") and first.get("artist"):
+                        label=str(first.get("artist"))
+                    elif normalized.get("kind")=="video" and first.get("title"):
+                        label=str(first.get("title"))
+                if query and label==query:
                     text=f"Playing {query} on this device." if browser_target else f"Playing {query} on {target}."
                 else:
                     text=f"Playing {label} on this device." if browser_target else f"Playing {label} on {target}."
