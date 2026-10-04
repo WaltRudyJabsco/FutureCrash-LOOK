@@ -1,3 +1,16 @@
+# 8.7.1 — FABRIC VISION WAYLAND
+
+- Route Linux Wayland screen capture through compositor-native tools or the XDG Desktop Screenshot portal instead of X11-only ImageMagick/scrot fallbacks.
+- Add explicit Wayland backend diagnostics so capture failures identify portal/tool availability or user cancellation rather than reporting a bogus missing filename.
+- Preserve Fabric Vision's user-initiated, ephemeral capture contract.
+
+# 8.7.0 — FABRIC VISION
+
+- Add user-initiated Fabric screen capture across trusted nodes through `/v1/vision/screen`.
+- Add `lk vision screen [@NODE]`, direct Chafa preview, explicit `--save`, and zero-file `--ask` analysis.
+- Add bounded foreground `--watch` observation; the node never schedules capture itself and unchanged frame hashes omit image bytes from transport.
+- Capture files are temporary, server responses declare ephemeral/non-persistent semantics, remote relays use existing Fabric authentication, and frames are compressed/bounded before transfer.
+
 # 8.6.1 — MEDIA PLAYER
 
 - Add `lk mp`, a unified terminal media workspace combining Fabric library search, selection, metadata/remote artwork, queue access, now-playing state, and transport controls.

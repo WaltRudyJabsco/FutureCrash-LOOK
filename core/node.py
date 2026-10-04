@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Future Crash + LOOK Unified Node 8.6.1.
+"""Future Crash + LOOK Unified Node 8.7.1.
 
 A small distributed supervisor for trusted personal machines. Immediate events stay
 asynchronous; a one-second fabric pulse reconciles presence, leases and stale work.
@@ -74,9 +74,13 @@ try:
     from .attention import normalize_event as normalize_attention_event, plan_voice_targets
 except ImportError:
     from attention import normalize_event as normalize_attention_event, plan_voice_targets
+try:
+    from .fabric_vision import capture_provider as vision_capture_provider, capture_screen as vision_capture_screen
+except ImportError:
+    from fabric_vision import capture_provider as vision_capture_provider, capture_screen as vision_capture_screen
 
-VERSION = "8.6.1"
-RELEASE_NAME = "GTD"
+VERSION = "8.7.1"
+RELEASE_NAME = "FABRIC VISION"
 DEFAULT_HOST = "127.0.0.1"
 DEFAULT_PORT = 7332
 DEFAULT_INGRESS_PORT = 0
@@ -479,6 +483,10 @@ def capabilities():
         # selected physical endpoint. The node owns synthesis so surfaces do not.
         "audio.speak": bool(binary("espeak-ng") or (sys.platform == "darwin" and binary("say"))),
         "audio.output": True,
+        # Screen vision is deliberately pull-only. Advertising capability does not
+        # start capture; each authorized request produces one ephemeral frame.
+        "vision.screen": bool(vision_capture_provider().get("tool")),
+        "vision.screen.provider": vision_capture_provider().get("name") or "",
         "node": True,
         "comfyui": probe("127.0.0.1", 8188),
         "mercury": probe("127.0.0.1", 8888),
@@ -2336,7 +2344,7 @@ def _local_web_search(query, limit=8):
     base=os.environ.get("FCL_SEARXNG_URL","http://127.0.0.1:8888").rstrip("/")
     request=urllib.request.Request(base+"/search?"+params,headers={
         "Accept":"application/json",
-        "User-Agent":"Future-Crash-Fabric/8.6.1",
+        "User-Agent":"Future-Crash-Fabric/8.7.1",
     })
     try:
         with urllib.request.urlopen(request,timeout=8) as response:
@@ -3486,6 +3494,48 @@ class API(BaseHTTPRequestHandler):
             self.sendj(502,{"error":str(exc)})
 
 
+    def _serve_vision_screen(self,target="",previous_hash="",max_width=1600,quality=72):
+        """Capture one ephemeral screen frame locally or relay one trusted peer frame."""
+        target=str(target or "").strip(); local=identity()["name"]
+        try: max_width=max(320,min(3840,int(max_width or 1600)))
+        except Exception: max_width=1600
+        try: quality=max(20,min(95,int(quality or 72)))
+        except Exception: quality=72
+        previous_hash=str(previous_hash or "").strip().lower()[:128]
+        if not target or target==local:
+            payload=vision_capture_screen(previous_hash=previous_hash,max_width=max_width,quality=quality)
+            payload["node"]=local
+            return self.sendj(200 if payload.get("ok") else 503,payload)
+
+        snapshot={"self":node_info(),"peers":PEERS.public()}
+        try:
+            peer=_peer_for_target(snapshot,target); last_exc=None
+            for base in _peer_bases(peer):
+                params={"previous_hash":previous_hash,"max_width":max_width,"quality":quality}
+                url=base+"/v1/vision/screen?"+urllib.parse.urlencode(params)
+                headers=FABRIC_IDENTITY.auth_headers_for_url(url)
+                req=urllib.request.Request(url,headers=headers)
+                context=FABRIC_IDENTITY.ssl_context_for_url(url) if url.lower().startswith("https://") else None
+                try:
+                    kwargs={"timeout":18.0}
+                    if context is not None: kwargs["context"]=context
+                    with urllib.request.urlopen(req,**kwargs) as r:
+                        payload=json.loads(r.read(9*1024*1024).decode("utf-8"))
+                    if not isinstance(payload,dict) or not payload.get("hash"):
+                        raise RuntimeError("invalid Fabric Vision response")
+                    payload["node"]=target
+                    return self.sendj(200,payload)
+                except Exception as exc:
+                    last_exc=exc
+            raise RuntimeError(f"screen vision transport failed: {last_exc}")
+        except urllib.error.HTTPError as exc:
+            try: detail=exc.read(8192).decode("utf-8","replace")
+            except Exception: detail=str(exc)
+            return self.sendj(exc.code,{"ok":False,"error":detail[:1000],"node":target})
+        except Exception as exc:
+            return self.sendj(502,{"ok":False,"error":str(exc),"node":target})
+
+
     def _serve_media_terminal_preview(self,target,entry_id,path_hint="",width=22,height=11):
         """Return owner-rendered terminal rows locally or relay them through Fabric."""
         target=str(target or "").strip(); entry_id=str(entry_id or "").strip(); local=identity()["name"]
@@ -3773,6 +3823,12 @@ class API(BaseHTTPRequestHandler):
             return self.sendj(200, _fabric_file_search(query,80))
         if path == "/v1/files/fabric":
             return self.sendj(200, _fabric_file_catalog())
+        if path == "/v1/vision/screen":
+            q=parse_qs(urlparse(self.path).query)
+            target=str((q.get("node") or [""])[0]); previous_hash=str((q.get("previous_hash") or [""])[0])
+            try: max_width=int((q.get("max_width") or [1600])[0]); quality=int((q.get("quality") or [72])[0])
+            except Exception: max_width,quality=1600,72
+            return self._serve_vision_screen(target,previous_hash,max_width,quality)
         if path == "/v1/media/catalog":
             return self.sendj(200, _local_media_catalog())
         if path == "/v1/media/fabric":

@@ -1,4 +1,4 @@
-.TH LK 1 "October 2026" "LOOK 4.54.1 / Future Crash + LOOK 8.6.1" "User Commands"
+.TH LK 1 "October 2026" "LOOK 4.55.1 / Future Crash + LOOK 8.7.1" "User Commands"
 .SH NAME
 lk \- inspect, navigate, manipulate, and ask your computer
 .br
@@ -256,6 +256,22 @@ Thinking-capable output is visually separated into
 and
 .B lo >
 sections; tool activity remains distinct.
+.SH FABRIC VISION
+.TP
+.B lk vision screen [@NODE]
+Capture one desktop frame from the local node or a trusted Fabric peer. The endpoint uses a temporary capture file only for the duration of the request; no screenshot history is maintained.
+.TP
+.B lk vision screen @NODE --ask QUESTION
+Capture one frame and pass it directly to the selected local vision model. The screenshot is not persisted.
+.TP
+.B lk vision screen @NODE --save FILE
+Explicitly persist the received frame at FILE.
+.TP
+.B lk vision screen @NODE --watch [DURATION] --every INTERVAL
+Run an explicit foreground observation session. Duration is bounded to ten minutes, interval to at least two seconds, Ctrl-C stops immediately, and unchanged hashes return metadata without retransmitting image bytes.
+.TP
+.B Security
+Remote screen capture uses normal authenticated Fabric peer transport. The Unified Node contains no autonomous capture scheduler.
 .SH FILES
 .I ~/.config/look/look.zsh
 .br

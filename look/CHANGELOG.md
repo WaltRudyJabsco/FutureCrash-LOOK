@@ -1,3 +1,14 @@
+# 4.55.1 — FABRIC VISION WAYLAND
+
+- Fix `lk vision screen` on modern Linux Wayland sessions by rejecting X11-only capture backends and using the desktop Screenshot portal when native compositor tools are unavailable.
+- Preserve one-shot/foreground-watch semantics and the existing Fabric Vision transport contract.
+
+# 4.55.0 — FABRIC VISION
+
+- Extend `lk vision` with local/remote desktop capture, terminal preview, explicit persistence, and in-memory model analysis.
+- Add foreground-only bounded watch sessions with hash-based unchanged-frame suppression.
+- Preserve the existing `lk vision IMAGE [QUESTION]` behavior.
+
 # 4.54.1 — MEDIA PLAYER
 
 - Add `lk mp`, the integrated LOOK media workspace over the existing Fabric catalog, MediaSession, remote preview and mpv transport layers.

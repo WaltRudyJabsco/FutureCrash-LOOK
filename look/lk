@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-import os, platform, re, select, shutil, subprocess, sys, termios, tty, threading, time, hashlib, json, uuid, signal, tempfile, wave, math, struct, zipfile, socket, shlex, io
+import os, platform, re, select, shutil, subprocess, sys, termios, tty, threading, time, hashlib, json, uuid, signal, tempfile, wave, math, struct, zipfile, socket, shlex, io, base64
 from datetime import datetime
 import http.client
 import urllib.request, urllib.parse, urllib.error
@@ -28,7 +28,7 @@ try:
 except Exception:
     readline = None
 
-VERSION="4.54.1"
+VERSION="4.55.1"
 
 LOOK_WORDMARK = r"""       ██╗      ██╗  ██╗
        ██║      ██║ ██╔╝
@@ -1736,6 +1736,12 @@ SERVICES + TAILNET SHARING
 VISION + GENERATIVE MEDIA
   lk vision IMAGE [QUESTION]
                        send a local image to the selected Ollama vision model
+  lk vision screen [@NODE]
+                       capture one ephemeral desktop frame locally or from a trusted Fabric node
+  lk vision screen @NODE --ask QUESTION
+                       capture once, analyze in memory, retain no screenshot
+  lk vision screen @NODE --watch 30s --every 5s
+                       bounded foreground observation; unchanged frames are not retransmitted
   lo ... IMAGE.png    vision-capable models attach explicit image paths automatically
   lk share            share all configured/running LOOK services over Tailscale
   lk services         inspect/configure/share local services
@@ -9941,7 +9947,7 @@ def _direct_searxng_search(query, limit=8):
     params=urllib.parse.urlencode({"q":query,"format":"json"})
     request=urllib.request.Request(base+"/search?"+params,headers={
         "Accept":"application/json",
-        "User-Agent":"Future-Crash-Fabric/8.6.1",
+        "User-Agent":"Future-Crash-Fabric/8.7.1",
     })
     with urllib.request.urlopen(request,timeout=12) as response:
         data=json.load(response)
@@ -12854,15 +12860,8 @@ def _encode_ollama_images(paths):
     return encoded
 
 
-def vision_command(args):
-    '''Direct one-shot image understanding through the selected vision model.'''
-    if not args:
-        print("usage: lk vision IMAGE [QUESTION...]")
-        return 2
-    image=Path(args[0]).expanduser()
-    if not image.exists():
-        print(f"LOOK VISION · not found: {image}")
-        return 1
+def _vision_model_answer(image_bytes, question, label="screen"):
+    """Run one ephemeral image payload through the selected local vision model."""
     base=_ollama_base()
     try:
         installed=_ollama_tags(base)
@@ -12872,27 +12871,211 @@ def vision_command(args):
     model=_preferred_model_for_base(base,installed=installed,running=running)
     caps=_ollama_capabilities(base,model) or []
     if "vision" not in caps:
-        print(f"LOOK VISION · {model} does not advertise vision")
-        print("  choose a vision-capable model with `lk ollama models`")
-        return 1
-    question=" ".join(args[1:]).strip() or "Describe this image carefully."
+        raise RuntimeError(f"{model} does not advertise vision")
     payload={
         "model":model,
-        "messages":[{"role":"user","content":question,"images":_encode_ollama_images([image])}],
+        "messages":[{"role":"user","content":question or "Describe this image carefully.",
+                     "images":[base64.b64encode(image_bytes).decode("ascii")]}],
         "stream":False,
         "keep_alive":-1,
     }
+    with _activity("looking"):
+        response=_ollama_post(base,"/api/chat",payload,timeout=180)
+    return str((response.get("message") or {}).get("content","")).strip(), model
+
+
+def _vision_parse_seconds(value, default):
+    if value is None:
+        return float(default)
+    text=str(value).strip().casefold()
+    match=re.fullmatch(r"(\d+(?:\.\d+)?)\s*([sm]?)",text)
+    if not match:
+        raise ValueError(f"invalid duration: {value}")
+    amount=float(match.group(1)); unit=match.group(2) or "s"
+    return amount*(60.0 if unit=="m" else 1.0)
+
+
+def _vision_screen_fetch(node="", previous_hash="", max_width=1600, quality=72):
+    params={"max_width":str(int(max_width)),"quality":str(int(quality))}
+    if node:
+        params["node"]=str(node)
+    if previous_hash:
+        params["previous_hash"]=str(previous_hash)
+    url="http://127.0.0.1:7332/v1/vision/screen?"+urllib.parse.urlencode(params)
     try:
-        with _activity("looking"):
-            response=_ollama_post(base,"/api/chat",payload,timeout=180)
+        with urllib.request.urlopen(url,timeout=22) as response:
+            payload=json.loads(response.read(10*1024*1024).decode("utf-8","replace"))
+    except urllib.error.HTTPError as exc:
+        try:
+            payload=json.loads(exc.read(8192).decode("utf-8","replace") or "{}")
+        except Exception:
+            payload={"error":str(exc)}
+        raise RuntimeError(str(payload.get("error") or exc))
+    if not isinstance(payload,dict) or not payload.get("ok"):
+        raise RuntimeError(str((payload or {}).get("error") or "screen capture failed"))
+    return payload
+
+
+def _vision_frame_bytes(payload):
+    encoded=str((payload or {}).get("image_base64") or "")
+    if not encoded:
+        return None
+    try:
+        return base64.b64decode(encoded,validate=True)
     except Exception as exc:
-        print(f"LOOK VISION · {exc}")
+        raise RuntimeError(f"invalid screen frame: {exc}")
+
+
+def _vision_frame_suffix(mime):
+    return ".webp" if str(mime)=="image/webp" else ".png"
+
+
+def _vision_save_frame(data, mime, destination):
+    path=Path(destination).expanduser()
+    if not path.suffix:
+        path=path.with_suffix(_vision_frame_suffix(mime))
+    path.parent.mkdir(parents=True,exist_ok=True)
+    path.write_bytes(data)
+    return path.resolve()
+
+
+def _vision_terminal_preview(data, mime, node, meta=None, *, clear=False):
+    """Render one frame with Chafa without retaining it after the call."""
+    chafa=(shutil.which("chafa") or
+           next((x for x in ("/opt/homebrew/bin/chafa","/usr/local/bin/chafa","/home/linuxbrew/.linuxbrew/bin/chafa") if Path(x).exists()),None))
+    if clear and sys.stdout.isatty():
+        sys.stdout.write("\033[2J\033[H"); sys.stdout.flush()
+    label=node or "local"
+    size=int((meta or {}).get("bytes") or len(data))
+    provider=((meta or {}).get("provider") or {}).get("name") or "screen"
+    print(f"FABRIC VISION · {label} · {provider} · {size/1024:.0f} KiB · ephemeral")
+    if not chafa:
+        print("  frame captured · install chafa for terminal preview, or use --save / --ask")
+        return
+    width=max(40,min(120,shutil.get_terminal_size((100,30)).columns-2))
+    height=max(12,min(38,shutil.get_terminal_size((100,30)).lines-4))
+    with tempfile.TemporaryDirectory(prefix="look-vision-") as temp:
+        path=Path(temp)/("frame"+_vision_frame_suffix(mime))
+        path.write_bytes(data)
+        subprocess.run([chafa,"--format=symbols","--colors","full","--color-space","rgb","--size",f"{width}x{height}",str(path)],check=False)
+
+
+def _vision_screen_command(args):
+    node=""; ask=""; save=""; watch=None; every=5.0; max_width=1600; quality=72
+    i=0
+    while i<len(args):
+        token=args[i]
+        if token.startswith("@") and len(token)>1 and not node:
+            node=token[1:]; i+=1; continue
+        if token=="--node" and i+1<len(args):
+            node=args[i+1].lstrip("@"); i+=2; continue
+        if token=="--ask":
+            i+=1; parts=[]
+            while i<len(args) and not args[i].startswith("--"):
+                parts.append(args[i]); i+=1
+            ask=" ".join(parts).strip() or "Describe what is happening on this screen and flag anything that looks wrong."
+            continue
+        if token=="--save" and i+1<len(args):
+            save=args[i+1]; i+=2; continue
+        if token=="--watch":
+            if i+1<len(args) and not args[i+1].startswith("-"):
+                watch=_vision_parse_seconds(args[i+1],30); i+=2
+            else:
+                watch=30.0; i+=1
+            continue
+        if token=="--every" and i+1<len(args):
+            every=_vision_parse_seconds(args[i+1],5); i+=2; continue
+        if token=="--max-width" and i+1<len(args):
+            max_width=int(args[i+1]); i+=2; continue
+        if token=="--quality" and i+1<len(args):
+            quality=int(args[i+1]); i+=2; continue
+        if token in {"-h","--help"}:
+            print("usage: lk vision screen [@NODE] [--ask QUESTION] [--save FILE] [--watch [30s]] [--every 5s] [--max-width 1600] [--quality 72]")
+            return 0
+        if not node and token not in {"local","self"}:
+            node=token; i+=1; continue
+        print(f"LOOK VISION · unknown option: {token}"); return 2
+
+    if watch is not None:
+        watch=max(2.0,min(600.0,float(watch))); every=max(2.0,min(60.0,float(every)))
+        if ask:
+            print("LOOK VISION · --ask is one-shot; omit --watch when asking the model")
+            return 2
+        deadline=time.monotonic()+watch; previous=""; mime="image/webp"; changes=0; polls=0
+        print(f"FABRIC VISION · watching {node or 'local'} for {watch:g}s · every {every:g}s · Ctrl-C stops")
+        try:
+            while True:
+                polls+=1
+                payload=_vision_screen_fetch(node,previous,max_width,quality)
+                previous=str(payload.get("hash") or previous)
+                incoming=_vision_frame_bytes(payload)
+                if incoming is not None:
+                    mime=str(payload.get("mime") or mime); changes+=1
+                    _vision_terminal_preview(incoming,mime,node or str(payload.get("node") or "local"),payload,clear=True)
+                    print(f"WATCH · changed frame {changes} · poll {polls} · Ctrl-C stops")
+                    if save:
+                        saved=_vision_save_frame(incoming,mime,save)
+                        print(f"LATEST · {saved}")
+                else:
+                    print(f"\rWATCH · unchanged · poll {polls} · Ctrl-C stops",end="",flush=True)
+                remaining=deadline-time.monotonic()
+                if remaining<=0:
+                    break
+                time.sleep(min(every,remaining))
+        except KeyboardInterrupt:
+            print()
+        print(f"FABRIC VISION · stopped · {polls} polls · {changes} changed frame{'s' if changes!=1 else ''} · nothing retained remotely")
+        return 0
+
+    try:
+        payload=_vision_screen_fetch(node,"",max_width,quality)
+        data=_vision_frame_bytes(payload)
+        if data is None:
+            raise RuntimeError("capture returned no frame")
+    except Exception as exc:
+        print(f"LOOK VISION · {node or 'local'} · {exc}")
         return 1
-    text=str((response.get("message") or {}).get("content","")).strip()
-    print(f"{_ansi_label('vision ›','35')} {image.resolve()}")
-    print(text or "(no response)")
+
+    label=node or str(payload.get("node") or "local")
+    mime=str(payload.get("mime") or "image/png")
+    if save:
+        saved=_vision_save_frame(data,mime,save)
+        print(f"FABRIC VISION · saved {label} → {saved}")
+    if ask:
+        try:
+            text,model=_vision_model_answer(data,ask,label)
+        except Exception as exc:
+            print(f"LOOK VISION · {exc}")
+            return 1
+        print(f"{_ansi_label('vision ›','35')} {label} · {model}")
+        print(text or "(no response)")
+        return 0
+    _vision_terminal_preview(data,mime,label,payload)
     return 0
 
+
+def vision_command(args):
+    """One-shot image understanding plus user-initiated Fabric screen vision."""
+    if not args:
+        print("usage: lk vision IMAGE [QUESTION...] | lk vision screen [@NODE] [OPTIONS]")
+        return 2
+    if str(args[0]).casefold() in {"screen","desktop","fabric"}:
+        return _vision_screen_command(list(args[1:]))
+    image=Path(args[0]).expanduser()
+    if not image.exists():
+        print(f"LOOK VISION · not found: {image}")
+        return 1
+    question=" ".join(args[1:]).strip() or "Describe this image carefully."
+    try:
+        text,model=_vision_model_answer(image.read_bytes(),question,str(image.resolve()))
+    except Exception as exc:
+        print(f"LOOK VISION · {exc}")
+        if "does not advertise vision" in str(exc):
+            print("  choose a vision-capable model with `lk ollama models`")
+        return 1
+    print(f"{_ansi_label('vision ›','35')} {image.resolve()} · {model}")
+    print(text or "(no response)")
+    return 0
 
 def _load_ollama_model_prefs():
     try:
@@ -17968,7 +18151,7 @@ def media_mp(initial_query=""):
                 tab="LIBRARY" if mode=="library" else "QUEUE"
                 node_count=len((catalog_meta or {}).get("nodes") or [])
                 _title("LOOK MP",f"{tab} · {len(visible):,} shown · {node_count} node(s) · {len(selected_ids)} marked")
-                print(_c("MEDIA PLAYER", "1;36")+"  "+_c("Fabric library + queue + transport", "2"))
+                print(_c("FABRIC VISION", "1;36")+"  "+_c("Fabric library + queue + transport", "2"))
                 print("─"*min(width,140))
                 for line_no in range(list_rows):
                     if line_no < len(page):

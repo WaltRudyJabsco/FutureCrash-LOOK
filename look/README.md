@@ -1,6 +1,6 @@
-# LOOK 4.54.1
+# LOOK 4.55.1
 
-LOOK is the keyboard-first terminal/tool layer shipped in Future Crash + LOOK 8.6.1. `lk help` is the authoritative live glossary; `man lk` is the reference manual.
+LOOK is the keyboard-first terminal/tool layer shipped in Future Crash + LOOK 8.7.1. `lk help` is the authoritative live glossary; `man lk` is the reference manual.
 
 ### Interactive browser essentials
 
@@ -59,6 +59,10 @@ Esc      back out
 ```
 
 LOOK began as a better `ls`. It became a semantic control layer for the terminal: **find something, understand it, act on it, and keep moving.**
+
+## Fabric Vision
+
+`lk vision screen` captures this node once. `lk vision screen @NODE` captures a trusted Fabric peer. Add `--ask QUESTION` to analyze the ephemeral frame with the selected local vision model, `--save FILE` to deliberately persist it, or `--watch 30s --every 5s` for a bounded foreground observation session. Watch mode is not a daemon: it stops on Ctrl-C/duration and unchanged frame hashes do not retransmit image bytes.
 
 ## Five minutes with LOOK
 
