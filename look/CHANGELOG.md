@@ -1,3 +1,8 @@
+# 4.56.5 — RESTORE CHANNELS
+
+- Fix nested f-string quoting that prevented `lk` from parsing.
+- Add executable compile regression coverage.
+
 # 4.56.3 — VISION ARM + MEDIA CHOICE
 
 - `lk vision arm [10m]` provides temporary foreground-authorized macOS remote capture.

@@ -1321,6 +1321,22 @@ class App(BaseHTTPRequestHandler):
                     text=_signal_choice_text(picks)
                     _session_append(session_id,prompt,text)
                     return self.json(200,{"text":text,"signal":None,"visual":{"kind":"nochange"},"mode":self.mode,"model":"deterministic-media-choice","endpoint":"fabric","resolution":"media.choice","files":[],"artifacts":[]})
+            # Named built-in stations are semantic commands, not Fabric catalog queries.
+            # Keep these ahead of the generic "play X" normalizer so a local sample
+            # named "classical" cannot steal the command.
+            station_low=" ".join(prompt.casefold().strip(" .!?").split()) if not files else ""
+            if station_low in {"classics","classical","classical music","play classics","play classical","play classical music","put on classical music"} or "all classical" in station_low:
+                stream="https://allclassical.streamguys1.com/ac128kmp3"
+                state={"active":True,"state":"loading","index":0,"count":1,"node":"builtin","queue":[{"title":"All Classical Radio","artist":"KQAC · Portland","path":stream,"url":stream,"media_type":"audio/mpeg","source_kind":"stream","node":"builtin"}]}
+                text="Playing All Classical Radio on this device."
+                _session_append(session_id,prompt,text)
+                return self.json(200,{"text":text,"signal":None,"visual":{"kind":"nochange"},"mode":self.mode,"model":"deterministic-station","endpoint":"builtin","resolution":"media.station","files":[],"artifacts":[],"media":state})
+            if station_low in {"arts","showcase","play arts","play arts channel","arts channel","classic arts","play classic arts","classic arts showcase","play classic arts showcase"} or "arts showcase" in station_low:
+                stream="https://classicarts.global.ssl.fastly.net/live/cas/master.m3u8"
+                state={"active":True,"state":"loading","index":0,"count":1,"node":"builtin","queue":[{"title":"Classic Arts Showcase","artist":"Classic Arts Showcase","path":stream,"url":stream,"media_type":"video/hls","source_kind":"stream","node":"builtin"}]}
+                text="Playing Classic Arts Showcase on this device."
+                _session_append(session_id,prompt,text)
+                return self.json(200,{"text":text,"signal":None,"visual":{"kind":"nochange"},"mode":self.mode,"model":"deterministic-station","endpoint":"builtin","resolution":"media.station","files":[],"artifacts":[],"media":state})
             intent_resolution=resolve_intent(prompt) if not files else {"status":"no_match"}
             if intent_resolution.get("status")=="clarify":
                 text="Which one do you mean?"

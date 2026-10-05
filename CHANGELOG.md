@@ -1,3 +1,8 @@
+# 8.8.5 — RESTORE CHANNELS
+
+- Fix LOOK executable syntax error in purpose-evidence TTFT/rate formatting.
+- Release gate now compiles the actual `look/lk` executable and verifies the installed copy.
+
 # 8.8.3 — VISION ARM + MEDIA CHOICE
 
 - Added explicit, bounded `lk vision arm [10m]` foreground capture authority for remote macOS Vision without granting the always-on Unified Node permanent Screen Recording access.

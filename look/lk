@@ -28,7 +28,7 @@ try:
 except Exception:
     readline = None
 
-VERSION="4.56.3"
+VERSION="4.56.5"
 
 LOOK_WORDMARK = r"""       ██╗      ██╗  ██╗
        ██║      ██║ ██╔╝
@@ -9947,7 +9947,7 @@ def _direct_searxng_search(query, limit=8):
     params=urllib.parse.urlencode({"q":query,"format":"json"})
     request=urllib.request.Request(base+"/search?"+params,headers={
         "Accept":"application/json",
-        "User-Agent":"Future-Crash-Fabric/8.8.3",
+        "User-Agent":"Future-Crash-Fabric/8.8.5",
     })
     with urllib.request.urlopen(request,timeout=12) as response:
         data=json.load(response)
@@ -14009,7 +14009,7 @@ def ollama_curate(args):
         print(f"  {'MODEL':<27} {'SIZE':>6} {'FIT':>10} {'RSN':>5} {'TOOLS':>6} {'AGENT':>6} {'TTFT':>7} {'TOK/S':>7}")
         for row in models:
             r=row.get("roles") or {}
-            print(f"  {str(row.get('name') or ''):<27.27} {_format_gib(row.get('size')):>6} {str(r.get('fit') or '—'):>10} {str(r.get('reasoning') if r.get('reasoning') is not None else '—'):>5} {str(r.get('tools') if r.get('tools') is not None else '—'):>6} {('yes' if r.get('agent') else 'no'):>6} {(f'{r.get('ttft'):.2f}s' if isinstance(r.get('ttft'),(int,float)) else '—'):>7} {(f'{r.get('rate'):.1f}' if isinstance(r.get('rate'),(int,float)) else '—'):>7}")
+            print(f"  {str(row.get('name') or ''):<27.27} {_format_gib(row.get('size')):>6} {str(r.get('fit') or '—'):>10} {str(r.get('reasoning') if r.get('reasoning') is not None else '—'):>5} {str(r.get('tools') if r.get('tools') is not None else '—'):>6} {('yes' if r.get('agent') else 'no'):>6} {((f"{r.get('ttft'):.2f}s") if isinstance(r.get('ttft'),(int,float)) else '—'):>7} {((f"{r.get('rate'):.1f}") if isinstance(r.get('rate'),(int,float)) else '—'):>7}")
     return 0 if data.get("ok",True) else 1
 
 
@@ -15779,6 +15779,16 @@ def _media_tool_search(query,limit=12):
     return json.dumps(payload,ensure_ascii=False)
 
 
+def _media_autoplay_eligible(row):
+    """Autonomous playback respects curation and rejects known utility samples."""
+    if _media_is_hidden(row): return False
+    try:
+        duration=float(row.get("duration") or row.get("duration_seconds") or 0)
+    except (TypeError,ValueError):
+        duration=0
+    return not (0 < duration < 3.0)
+
+
 def _media_tool_play(query,shuffle=False,kind="",artist="",selection="",limit=0,match_mode="fuzzy"):
     query=" ".join(str(query or "").split()).strip()
     kind_filter=str(kind or "").casefold()
@@ -15797,6 +15807,7 @@ def _media_tool_play(query,shuffle=False,kind="",artist="",selection="",limit=0,
         match_kind="selector"
     else:
         return _ToolResult(False,"needs_input","MEDIA NEEDS INPUT · what should I play?")
+    rows=[row for row in rows if _media_autoplay_eligible(row)]
     label=query or (artist if artist else ("any "+kind_filter if kind_filter else "media"))
     if not rows:
         return _ToolResult(False,"not_found",f"MEDIA NOT FOUND · {label}")

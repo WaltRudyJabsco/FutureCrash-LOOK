@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Future Crash + LOOK Unified Node 8.8.3.
+"""Future Crash + LOOK Unified Node 8.8.5.
 
 A small distributed supervisor for trusted personal machines. Immediate events stay
 asynchronous; a one-second fabric pulse reconciles presence, leases and stale work.
@@ -80,7 +80,7 @@ try:
 except ImportError:
     from fabric_vision import capture_provider as vision_capture_provider, capture_screen as vision_capture_screen, list_displays as vision_list_displays, vision_broker_request
 
-VERSION = "8.8.3"
+VERSION = "8.8.5"
 RELEASE_NAME = "FABRIC VISION"
 DEFAULT_HOST = "127.0.0.1"
 DEFAULT_PORT = 7332
@@ -2345,7 +2345,7 @@ def _local_web_search(query, limit=8):
     base=os.environ.get("FCL_SEARXNG_URL","http://127.0.0.1:8888").rstrip("/")
     request=urllib.request.Request(base+"/search?"+params,headers={
         "Accept":"application/json",
-        "User-Agent":"Future-Crash-Fabric/8.8.3",
+        "User-Agent":"Future-Crash-Fabric/8.8.5",
     })
     try:
         with urllib.request.urlopen(request,timeout=8) as response:
