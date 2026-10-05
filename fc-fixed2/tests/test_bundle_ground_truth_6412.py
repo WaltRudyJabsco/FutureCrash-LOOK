@@ -1,0 +1,19 @@
+from pathlib import Path
+
+ROOT=Path(__file__).resolve().parents[1]
+
+def test_bundle_versions_and_installer_identity_guard():
+    assert (ROOT/'VERSION').read_text().strip()=='8.8.5'
+    for rel in ('albert/VERSION',):
+        assert (ROOT/rel).read_text().strip()=='8.8.5'
+    install=(ROOT/'install.sh').read_text()
+    assert 'BUNDLE SOURCE  $ROOT' in install
+    assert 'BUNDLE RELEASE $EXPECTED_RELEASE · FABRIC VISION' in install
+    assert 'core/node.py' in install and 'core/ingress.py' in install and 'core/tailcat.py' in install
+    assert 'expected release 8.8.5' in install
+
+def test_no_stale_fabric_user_agent():
+    lk=(ROOT/'look/lk').read_text()
+    assert 'Future-Crash-Fabric/8.8.5' in lk
+    assert 'Future-Crash-Fabric/6.4.10' not in lk
+    assert 'Future-Crash-Fabric/6.4.11' not in lk
