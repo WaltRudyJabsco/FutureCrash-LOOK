@@ -1,0 +1,64 @@
+#!/usr/bin/env bash
+set -euo pipefail
+
+APP="$HOME/.local/share/future-crash/future_crash.py"
+LOOK_STATE="$HOME/.local/share/look"
+
+if [[ "${FUTURE_CRASH_ACTIVE:-}" == "1" && "${1:-}" != "--nested" ]]; then
+  echo "Already inside Future Crash."
+  echo "Type exit to return to the existing Future Crash session."
+  exit 0
+fi
+
+if [[ "${1:-}" == "--nested" ]]; then
+  shift
+fi
+
+export FUTURE_CRASH_ACTIVE=1
+
+
+[[ -f "$APP" ]] || {
+  echo "Future Crash is not installed: $APP" >&2
+  exit 1
+}
+
+args=("$@")
+has_model=0
+has_ollama=0
+for ((i=0; i<${#args[@]}; i++)); do
+  [[ "${args[$i]}" == "--model" || "${args[$i]}" == --model=* ]] && has_model=1
+  [[ "${args[$i]}" == "--ollama" || "${args[$i]}" == --ollama=* ]] && has_ollama=1
+done
+
+extra=()
+
+if (( ! has_model )); then
+  model="qwen3:4b"
+  [[ -s "$LOOK_STATE/ollama_model" ]] && model="$(<"$LOOK_STATE/ollama_model")"
+  extra+=(--model "$model")
+fi
+
+if (( ! has_ollama )); then
+  host="$(
+    python3 - "$LOOK_STATE/ollama_hosts.json" <<'PY'
+import json, sys
+from pathlib import Path
+
+local="http://127.0.0.1:11434"
+p=Path(sys.argv[1])
+try:
+    data=json.loads(p.read_text())
+    default=str(data.get("default") or "local")
+    hosts=data.get("hosts") or {}
+    if default=="local":
+        print(local)
+    else:
+        print((hosts.get(default) or {}).get("url") or local)
+except Exception:
+    print(local)
+PY
+  )"
+  extra+=(--ollama "$host")
+fi
+
+exec python3 "$APP" "${extra[@]}" "$@"

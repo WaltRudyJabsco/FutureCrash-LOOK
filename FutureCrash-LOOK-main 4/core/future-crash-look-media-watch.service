@@ -1,0 +1,12 @@
+[Unit]
+Description=Future Crash + LOOK Removable Media Watch
+After=default.target
+
+[Service]
+Type=simple
+ExecStart=%h/.local/share/look/media_watch.py
+Restart=on-failure
+RestartSec=3
+
+[Install]
+WantedBy=default.target
