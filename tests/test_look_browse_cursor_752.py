@@ -78,9 +78,23 @@ def test_initial_select_is_filter_focus_not_a_third_state(monkeypatch,tmp_path):
 
 
 def test_escape_from_filter_restores_browse_grid(monkeypatch,tmp_path):
-    _items,activated,screen=_pager_fixture(monkeypatch,tmp_path,['\x1b[B','\x1b','q'])
+    _items,activated,screen=_pager_fixture(monkeypatch,tmp_path,['\x1b[B','\x1b','Q'])
     assert activated==[]
     assert screen.rfind('GRID a.txt') > screen.rfind('LIST ')
+
+
+def test_lowercase_q_is_filter_text_not_quit(monkeypatch,tmp_path):
+    # q is consumed as ordinary FILTER text. Backspace removes it, then Enter
+    # activates the original first result. If q were still a quit command,
+    # activation could never occur.
+    items,activated,_screen=_pager_fixture(monkeypatch,tmp_path,['\x1b[B','q','\x7f','\r'])
+    assert activated==[items[0]]
+
+
+def test_uppercase_q_quits_from_filter(monkeypatch,tmp_path):
+    _items,activated,screen=_pager_fixture(monkeypatch,tmp_path,['\x1b[B','Q'])
+    assert activated==[]
+    assert 'FILTER' in screen
 
 
 def test_renderer_has_only_browse_and_filter_interaction_states():

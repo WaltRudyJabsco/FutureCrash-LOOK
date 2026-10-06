@@ -1528,7 +1528,7 @@ def pager(rows:list[str],height:int,width:int,rebuild=None,browse_rebuild=None,f
                 back_hint='Esc back' if on_back else 'Esc exit'
                 status=f'  {FAINT}{last}/{len(current)}{RESET}'
                 action_parts=['⇧F sort','Enter/→ filter','Space/PgDn next','b/PgUp back',
-                              'g ends','G go','⇧↑/↓ page','⇧←/→ ends','←/< parent',back_hint,'q quit']
+                              'g ends','G go','⇧↑/↓ page','⇧←/→ ends','←/< parent',back_hint,'Q quit']
             if notice:
                 status=f'{status}  {YELLOW}{notice}{RESET}'
                 notice=''
@@ -1540,7 +1540,9 @@ def pager(rows:list[str],height:int,width:int,rebuild=None,browse_rebuild=None,f
                 key=read_key(wakeup_fd=native_preview.wakeup_fd,on_wakeup=native_preview.paint_ready)
 
             if filtering:
-                if key in {'q','Q','\x03'}: break
+                # FILTER owns printable characters. Lowercase q is search text;
+                # only explicit uppercase Q (or Ctrl-C) quits LOOK.
+                if key in {'Q','\x03'}: break
                 if key=='F' and on_sort:
                     picked=selected_path(); notice=on_sort()
                     current=rebuild(query,picked,None,marked) if rebuild else current
@@ -1678,7 +1680,7 @@ def pager(rows:list[str],height:int,width:int,rebuild=None,browse_rebuild=None,f
                     refresh_filter()
                 continue
 
-            if key in {'q','Q','\x03'}: break
+            if key in {'Q','\x03'}: break
             if key=='F' and on_sort:
                 notice=on_sort()
                 current=browse_rebuild(None,marked) if browse_rebuild else current

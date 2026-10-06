@@ -19123,7 +19123,7 @@ def _file_find_selector(rows,query,source):
                 if snippet and n==idx:
                     print("    "+_c(snippet[:max(20,width-6)],'2'))
             if not visible: print('  no matches')
-            footer=f"{_c('FILTER','1;36')} {filter_text}█  {_c('type refine · ↑↓ choose · Enter accept · Y copy path · Esc clear/back · q quit','2')}"
+            footer=f"{_c('FILTER','1;36')} {filter_text}█  {_c('type refine · ↑↓ choose · Enter accept · Y copy path · Esc clear/back · Q quit','2')}"
             if notice: footer+='  '+_c(notice,'33'); notice=''
             print('\n'+footer,end='',flush=True)
             key=_read_tty_key(fd)
@@ -19350,7 +19350,7 @@ def commands_screen():
             for n,(template,category,description) in enumerate(visible[top:top+usable],start=top):
                 mark=_c("›","1;36") if n==idx else " "
                 print(f"{mark} {template:<34} {_c(category,'2'):<18} {description}")
-            print(f"\n{_c('FILTER','1;36')} {query}█  {_c('type search · ↑↓ choose · Enter/→ send to shell · Esc clear/back · q quit','2')}",end="",flush=True)
+            print(f"\n{_c('FILTER','1;36')} {query}█  {_c('type search · ↑↓ choose · Enter/→ send to shell · Esc clear/back · Q quit','2')}",end="",flush=True)
             key=_read_tty_key(fd)
             if key in {"q","Q","\x03"}: break
             if key=="esc":
