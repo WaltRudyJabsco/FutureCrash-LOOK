@@ -16384,6 +16384,17 @@ def _media_pin_playable_entry(entry, timeout=3.0):
 def _media_pin_playable_rows(rows):
     """Pin a logical result set concurrently so a dead copy cannot poison a queue."""
     rows=list(rows or [])
+    if os.environ.get("LOOK_MEDIA_DEBUG_PIN"):
+        print("MEDIA PIN INPUT:", file=sys.stderr)
+        for index,row in enumerate(rows):
+            print(
+                json.dumps(
+                    {"index":index,"row":row},
+                    ensure_ascii=False,
+                    default=str,
+                ),
+                file=sys.stderr,
+            )
     if not rows: return [],[]
     from concurrent.futures import ThreadPoolExecutor, as_completed
     pinned=[None]*len(rows); failures=[]
@@ -16394,7 +16405,17 @@ def _media_pin_playable_rows(rows):
             idx=future_map[future]
             try: pinned[idx]=future.result()
             except Exception as exc: failures.append((_media_entry_label(rows[idx]),str(exc)))
-    return [row for row in pinned if row is not None],failures
+    result=[row for row in pinned if row is not None]
+    if os.environ.get("LOOK_MEDIA_DEBUG_PIN"):
+        print(
+            json.dumps(
+                {"pinned":result,"failures":failures},
+                ensure_ascii=False,
+                default=str,
+            ),
+            file=sys.stderr,
+        )
+    return result,failures
 
 
 def _media_wait_for_local_queue(queue, attempts=4):
