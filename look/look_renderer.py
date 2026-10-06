@@ -1417,7 +1417,7 @@ def pager(rows:list[str],height:int,width:int,rebuild=None,browse_rebuild=None,f
                 except OSError: pass
             notice=f'rename failed · {exc}'; return
         marked.clear()
-        notice=f'renamed {len(paths)} item{'s' if len(paths)!=1 else ''}'
+        notice=f"renamed {len(paths)} item" + ("s" if len(paths) != 1 else "")
 
     try:
         sys.stdout.write(HIDE)
