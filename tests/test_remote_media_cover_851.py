@@ -19,7 +19,7 @@ def test_remote_cover_is_bounded_cached_and_renderer_fallback():
     end=LK.index('def _media_cover_path',start)
     block=LK[start:end]
     assert "2*1024*1024+1" in block
-    assert 'timeout=2.0' in block
+    assert 'timeout=10.0' in block
     assert "media-art'/'remote'" in block
     assert '_REMOTE_MEDIA_ART_MISS' in block
     cover=LK[LK.index('def _media_cover_lines'):LK.index('def _media_player_art_lines')]

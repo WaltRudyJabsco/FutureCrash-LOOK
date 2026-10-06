@@ -17203,7 +17203,7 @@ def _media_fetch_remote_preview(row,width,height):
         "node":ident["node"],"id":ident["id"],"path":ident["path"],"width":int(width),"height":int(height)})
     try:
         req=urllib.request.Request(url,headers={"User-Agent":"LOOK-terminal-preview"})
-        with urllib.request.urlopen(req,timeout=4.0) as response:
+        with urllib.request.urlopen(req,timeout=10.0) as response:
             payload=json.loads(response.read(256*1024).decode("utf-8"))
         lines=payload.get("lines") if isinstance(payload,dict) else None
         if not isinstance(lines,list) or not lines:
@@ -17322,7 +17322,7 @@ def _media_remote_cover_path(row):
         tmp=cache/f'.{token}.{os.getpid()}.jpg'
         try:
             req=urllib.request.Request(url,headers={"User-Agent":"LOOK-media-cover"})
-            with urllib.request.urlopen(req,timeout=2.0) as response:
+            with urllib.request.urlopen(req,timeout=10.0) as response:
                 data=response.read(2*1024*1024+1)
             if not data or len(data)>2*1024*1024:
                 raise ValueError("invalid media cover size")
@@ -17374,15 +17374,16 @@ def _media_cover_lines(row,width,height=11,background_remote=False):
     return []
 
 def _media_player_art_lines(row,width,height=11):
-    """Render player art as strict ASCII; Media Find keeps the richer Chafa path."""
+    """Render strict ASCII locally or on the Fabric node that owns the bytes."""
     direct=str(row.get("path") or "") if isinstance(row,dict) else ""
     if direct:
         lines=media_art.ascii_lines(direct,width,height)
         if lines: return lines
     source=_media_art_source(row)
     if source and source!=direct:
-        return media_art.ascii_lines(source,width,height)
-    return []
+        lines=media_art.ascii_lines(source,width,height)
+        if lines: return lines
+    return _media_remote_preview_lines(row,width,height)
 
 def _media_detail_lines(row, width=110):
     """Human-readable provenance for one catalog location."""
