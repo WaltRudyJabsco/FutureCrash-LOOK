@@ -1,0 +1,9 @@
+.DS_Store
+__pycache__/
+*.py[cod]
+
+# Local Future Crash build/debug worktrees
+/FutureCrash-LOOK-main */
+/fc-fixed*/
+/fc-fuxed*
+/future-crash-look-*.zip

@@ -1,0 +1,578 @@
+{
+  "broad_exception_files": {
+    "albert/server.py": 18,
+    "core/cognition.py": 4,
+    "core/decision.py": 5,
+    "core/endpoint_auth.py": 1,
+    "core/fabric_client.py": 2,
+    "core/fabric_identity.py": 4,
+    "core/fabric_packet.py": 5,
+    "core/fabric_vision.py": 4,
+    "core/fcl-openjev-worker": 1,
+    "core/ingress.py": 4,
+    "core/memory_store.py": 1,
+    "core/node.py": 119,
+    "core/rendezvous.py": 5,
+    "core/tailcat.py": 3,
+    "core/tailscale_serve.py": 1,
+    "future-crash/future_crash.py": 33,
+    "local-labs-host/console.py": 2,
+    "local-labs-host/server.py": 2,
+    "look/comfy_bootstrap.py": 3,
+    "look/file_catalog.py": 1,
+    "look/games.py": 3,
+    "look/lk": 184,
+    "look/lo_engine.py": 1,
+    "look/look_ai.py": 19,
+    "look/look_renderer.py": 1,
+    "signal-window/server.py": 36
+  },
+  "broad_exception_handlers": 462,
+  "classes": 59,
+  "duplicate_definitions": [],
+  "functions": 1941,
+  "largest_files": [
+    {
+      "classes": 7,
+      "code_lines": 18212,
+      "functions": 826,
+      "lines": 20654,
+      "path": "look/lk"
+    },
+    {
+      "classes": 7,
+      "code_lines": 5472,
+      "functions": 237,
+      "lines": 6119,
+      "path": "core/node.py"
+    },
+    {
+      "classes": 12,
+      "code_lines": 3604,
+      "functions": 166,
+      "lines": 4064,
+      "path": "future-crash/future_crash.py"
+    },
+    {
+      "classes": 2,
+      "code_lines": 1710,
+      "functions": 65,
+      "lines": 1938,
+      "path": "look/look_renderer.py"
+    },
+    {
+      "classes": 1,
+      "code_lines": 1381,
+      "functions": 45,
+      "lines": 1642,
+      "path": "local-labs-host/server.py"
+    },
+    {
+      "classes": 1,
+      "code_lines": 1299,
+      "functions": 67,
+      "lines": 1447,
+      "path": "signal-window/server.py"
+    },
+    {
+      "classes": 1,
+      "code_lines": 820,
+      "functions": 61,
+      "lines": 964,
+      "path": "look/games.py"
+    },
+    {
+      "classes": 1,
+      "code_lines": 584,
+      "functions": 40,
+      "lines": 650,
+      "path": "albert/server.py"
+    },
+    {
+      "classes": 2,
+      "code_lines": 495,
+      "functions": 39,
+      "lines": 564,
+      "path": "core/fabric_packet.py"
+    },
+    {
+      "classes": 0,
+      "code_lines": 446,
+      "functions": 28,
+      "lines": 525,
+      "path": "look/media_core.py"
+    },
+    {
+      "classes": 0,
+      "code_lines": 399,
+      "functions": 13,
+      "lines": 461,
+      "path": "core/fabric_vision.py"
+    },
+    {
+      "classes": 2,
+      "code_lines": 380,
+      "functions": 29,
+      "lines": 448,
+      "path": "core/rendezvous.py"
+    },
+    {
+      "classes": 0,
+      "code_lines": 381,
+      "functions": 17,
+      "lines": 444,
+      "path": "core/fabric_client.py"
+    },
+    {
+      "classes": 0,
+      "code_lines": 363,
+      "functions": 22,
+      "lines": 431,
+      "path": "look/look_ai.py"
+    },
+    {
+      "classes": 0,
+      "code_lines": 347,
+      "functions": 14,
+      "lines": 406,
+      "path": "look/comfy_bootstrap.py"
+    }
+  ],
+  "largest_functions": [
+    {
+      "complexity": 501,
+      "line": 10852,
+      "lines": 1515,
+      "path": "look/lk",
+      "qualname": "ollama_chat"
+    },
+    {
+      "complexity": 377,
+      "line": 5541,
+      "lines": 575,
+      "path": "core/node.py",
+      "qualname": "main"
+    },
+    {
+      "complexity": 177,
+      "line": 1189,
+      "lines": 510,
+      "path": "look/look_renderer.py",
+      "qualname": "pager"
+    },
+    {
+      "complexity": 1,
+      "line": 1527,
+      "lines": 346,
+      "path": "look/lk",
+      "qualname": "help_screen"
+    },
+    {
+      "complexity": 221,
+      "line": 20323,
+      "lines": 329,
+      "path": "look/lk",
+      "qualname": "main"
+    },
+    {
+      "complexity": 202,
+      "line": 3980,
+      "lines": 282,
+      "path": "core/node.py",
+      "qualname": "API.do_POST"
+    },
+    {
+      "complexity": 134,
+      "line": 1169,
+      "lines": 250,
+      "path": "signal-window/server.py",
+      "qualname": "App.do_POST"
+    },
+    {
+      "complexity": 91,
+      "line": 3044,
+      "lines": 219,
+      "path": "future-crash/future_crash.py",
+      "qualname": "FutureCrash.handle_key"
+    },
+    {
+      "complexity": 128,
+      "line": 3762,
+      "lines": 217,
+      "path": "core/node.py",
+      "qualname": "API.do_GET"
+    },
+    {
+      "complexity": 72,
+      "line": 2749,
+      "lines": 203,
+      "path": "future-crash/future_crash.py",
+      "qualname": "FutureCrash.poll"
+    },
+    {
+      "complexity": 113,
+      "line": 17475,
+      "lines": 203,
+      "path": "look/lk",
+      "qualname": "_media_selector"
+    },
+    {
+      "complexity": 83,
+      "line": 3111,
+      "lines": 189,
+      "path": "look/lk",
+      "qualname": "_memory_command"
+    },
+    {
+      "complexity": 48,
+      "line": 3375,
+      "lines": 179,
+      "path": "future-crash/future_crash.py",
+      "qualname": "FutureCrash.render_ambient"
+    },
+    {
+      "complexity": 77,
+      "line": 1550,
+      "lines": 178,
+      "path": "future-crash/future_crash.py",
+      "qualname": "HostTools.execute"
+    },
+    {
+      "complexity": 90,
+      "line": 18346,
+      "lines": 173,
+      "path": "look/lk",
+      "qualname": "media_mp"
+    },
+    {
+      "complexity": 42,
+      "line": 291,
+      "lines": 154,
+      "path": "core/fabric_client.py",
+      "qualname": "stream_infer"
+    },
+    {
+      "complexity": 48,
+      "line": 14941,
+      "lines": 154,
+      "path": "look/lk",
+      "qualname": "uninstall"
+    },
+    {
+      "complexity": 53,
+      "line": 1682,
+      "lines": 153,
+      "path": "core/node.py",
+      "qualname": "_stream_model_infer"
+    },
+    {
+      "complexity": 93,
+      "line": 332,
+      "lines": 150,
+      "path": "albert/server.py",
+      "qualname": "action"
+    },
+    {
+      "complexity": 52,
+      "line": 2120,
+      "lines": 141,
+      "path": "future-crash/future_crash.py",
+      "qualname": "Oracle.run"
+    }
+  ],
+  "legacy_pager_states": [],
+  "most_complex_functions": [
+    {
+      "complexity": 501,
+      "line": 10852,
+      "lines": 1515,
+      "path": "look/lk",
+      "qualname": "ollama_chat"
+    },
+    {
+      "complexity": 377,
+      "line": 5541,
+      "lines": 575,
+      "path": "core/node.py",
+      "qualname": "main"
+    },
+    {
+      "complexity": 221,
+      "line": 20323,
+      "lines": 329,
+      "path": "look/lk",
+      "qualname": "main"
+    },
+    {
+      "complexity": 202,
+      "line": 3980,
+      "lines": 282,
+      "path": "core/node.py",
+      "qualname": "API.do_POST"
+    },
+    {
+      "complexity": 177,
+      "line": 1189,
+      "lines": 510,
+      "path": "look/look_renderer.py",
+      "qualname": "pager"
+    },
+    {
+      "complexity": 134,
+      "line": 1169,
+      "lines": 250,
+      "path": "signal-window/server.py",
+      "qualname": "App.do_POST"
+    },
+    {
+      "complexity": 128,
+      "line": 3762,
+      "lines": 217,
+      "path": "core/node.py",
+      "qualname": "API.do_GET"
+    },
+    {
+      "complexity": 113,
+      "line": 17475,
+      "lines": 203,
+      "path": "look/lk",
+      "qualname": "_media_selector"
+    },
+    {
+      "complexity": 96,
+      "line": 4948,
+      "lines": 137,
+      "path": "core/node.py",
+      "qualname": "_dash_render_full"
+    },
+    {
+      "complexity": 93,
+      "line": 332,
+      "lines": 150,
+      "path": "albert/server.py",
+      "qualname": "action"
+    },
+    {
+      "complexity": 91,
+      "line": 3044,
+      "lines": 219,
+      "path": "future-crash/future_crash.py",
+      "qualname": "FutureCrash.handle_key"
+    },
+    {
+      "complexity": 90,
+      "line": 18346,
+      "lines": 173,
+      "path": "look/lk",
+      "qualname": "media_mp"
+    },
+    {
+      "complexity": 83,
+      "line": 3111,
+      "lines": 189,
+      "path": "look/lk",
+      "qualname": "_memory_command"
+    },
+    {
+      "complexity": 77,
+      "line": 1550,
+      "lines": 178,
+      "path": "future-crash/future_crash.py",
+      "qualname": "HostTools.execute"
+    },
+    {
+      "complexity": 73,
+      "line": 17806,
+      "lines": 119,
+      "path": "look/lk",
+      "qualname": "_media_resolve_targets"
+    },
+    {
+      "complexity": 72,
+      "line": 2749,
+      "lines": 203,
+      "path": "future-crash/future_crash.py",
+      "qualname": "FutureCrash.poll"
+    },
+    {
+      "complexity": 72,
+      "line": 19961,
+      "lines": 106,
+      "path": "look/lk",
+      "qualname": "_fabric_doctor"
+    },
+    {
+      "complexity": 70,
+      "line": 13064,
+      "lines": 112,
+      "path": "look/lk",
+      "qualname": "_vision_screen_command"
+    },
+    {
+      "complexity": 65,
+      "line": 18565,
+      "lines": 112,
+      "path": "look/lk",
+      "qualname": "media"
+    },
+    {
+      "complexity": 59,
+      "line": 2358,
+      "lines": 113,
+      "path": "look/lk",
+      "qualname": "_load_memory"
+    }
+  ],
+  "parse_errors": [],
+  "production_code_lines": 39866,
+  "production_files": 40,
+  "production_lines": 45464,
+  "source_contract_test_files": [
+    "tests/test_accountless_search_580.py",
+    "tests/test_albert_630.py",
+    "tests/test_albert_clean_paper_642.py",
+    "tests/test_albert_front_door_6410.py",
+    "tests/test_albert_media_edge_756.py",
+    "tests/test_albert_media_lifecycle_635.py",
+    "tests/test_albert_native_audio_7718.py",
+    "tests/test_albert_paper_brain_641.py",
+    "tests/test_albert_remote_640.py",
+    "tests/test_albert_searchlight_643.py",
+    "tests/test_albert_sources_751.py",
+    "tests/test_albert_trust_750.py",
+    "tests/test_albert_vision_756.py",
+    "tests/test_authority_701.py",
+    "tests/test_browser_effect_runtime_650.py",
+    "tests/test_browser_endpoint_dispatch_6411.py",
+    "tests/test_browser_endpoint_voice_649.py",
+    "tests/test_browser_media_ticket_7714.py",
+    "tests/test_bundle_ground_truth_6412.py",
+    "tests/test_bundle_hygiene_840.py",
+    "tests/test_capability_curator_720.py",
+    "tests/test_classic_arts_636.py",
+    "tests/test_clean_handoff_777.py",
+    "tests/test_clean_start_774.py",
+    "tests/test_cognitive_fabric_690.py",
+    "tests/test_consolidation_800.py",
+    "tests/test_context_held_757.py",
+    "tests/test_dash_activity.py",
+    "tests/test_decision_interaction_source.py",
+    "tests/test_decision_plane.py",
+    "tests/test_edge_repair_611.py",
+    "tests/test_endpoint_local_media_6111.py",
+    "tests/test_endpoint_media_origin_6115.py",
+    "tests/test_endpoint_route_repair_612.py",
+    "tests/test_execution_hotfix_881.py",
+    "tests/test_execution_hotfix_882.py",
+    "tests/test_fabric_audio_647.py",
+    "tests/test_fabric_audio_648.py",
+    "tests/test_fabric_doctor_video_835.py",
+    "tests/test_fabric_edge_613.py",
+    "tests/test_fabric_object_identity_6119.py",
+    "tests/test_fabric_route_cli_681.py",
+    "tests/test_fabric_vision_870.py",
+    "tests/test_fabric_vision_872.py",
+    "tests/test_file_find_572.py",
+    "tests/test_future_crash_channels.py",
+    "tests/test_gtd_836.py",
+    "tests/test_harden_media_watch_820.py",
+    "tests/test_install_integrity_audit.py",
+    "tests/test_install_manifest_8319.py",
+    "tests/test_installed_node_truth_755.py",
+    "tests/test_installer_safe_harbor_617.py",
+    "tests/test_island_surface.py",
+    "tests/test_jev_fabric_710.py",
+    "tests/test_jev_installed_layout_704.py",
+    "tests/test_live_state_730.py",
+    "tests/test_living_fabric_830.py",
+    "tests/test_living_mind_661.py",
+    "tests/test_lo_terminal_input_662.py",
+    "tests/test_look_browse_cursor_752.py",
+    "tests/test_look_context_header_756.py",
+    "tests/test_look_fast_navigation_693.py",
+    "tests/test_look_filter_minus_771.py",
+    "tests/test_look_games_644.py",
+    "tests/test_look_games_646.py",
+    "tests/test_look_interactive_rows_691.py",
+    "tests/test_look_personalization_753.py",
+    "tests/test_look_simple_preview_764.py",
+    "tests/test_media_art_restore_841.py",
+    "tests/test_media_catalog_surface.py",
+    "tests/test_media_cli_language_source_624.py",
+    "tests/test_media_edge_repair_614.py",
+    "tests/test_media_fabric_discovery_834.py",
+    "tests/test_media_fabric_source.py",
+    "tests/test_media_finish_855.py",
+    "tests/test_media_handoff_550.py",
+    "tests/test_media_identity_778.py",
+    "tests/test_media_item_route_7712.py",
+    "tests/test_media_launch_truth_664.py",
+    "tests/test_media_lo_surface.py",
+    "tests/test_media_mount_race_6110.py",
+    "tests/test_media_mp_860.py",
+    "tests/test_media_mpv_video_665.py",
+    "tests/test_media_native_freeze_7714.py",
+    "tests/test_media_output_ownership_625.py",
+    "tests/test_media_output_routing_source.py",
+    "tests/test_media_owner_regression.py",
+    "tests/test_media_player_probe_618.py",
+    "tests/test_media_polish_854.py",
+    "tests/test_media_root_repair_619.py",
+    "tests/test_media_session_776.py",
+    "tests/test_media_signal_617.py",
+    "tests/test_media_stream_edge_615.py",
+    "tests/test_media_video_transition_637.py",
+    "tests/test_media_visibility_games_video_831.py",
+    "tests/test_model_benchmark_source.py",
+    "tests/test_native_preview_772.py",
+    "tests/test_native_preview_773.py",
+    "tests/test_observation_plane_740.py",
+    "tests/test_one_brain_660.py",
+    "tests/test_persistent_brain_672.py",
+    "tests/test_persona_fabric.py",
+    "tests/test_player_ascii_843.py",
+    "tests/test_preview_view_770.py",
+    "tests/test_release_7715_ingress_albert.py",
+    "tests/test_release_7716_edge_ownership.py",
+    "tests/test_release_7717_albert_media_path.py",
+    "tests/test_release_821.py",
+    "tests/test_release_8311.py",
+    "tests/test_release_8312.py",
+    "tests/test_release_8313.py",
+    "tests/test_release_8314.py",
+    "tests/test_release_8315.py",
+    "tests/test_release_8316.py",
+    "tests/test_release_8317.py",
+    "tests/test_release_8320.py",
+    "tests/test_release_8321.py",
+    "tests/test_release_833.py",
+    "tests/test_release_837.py",
+    "tests/test_release_838.py",
+    "tests/test_release_850_lockdown.py",
+    "tests/test_release_name_version_contract.py",
+    "tests/test_release_runtime.py",
+    "tests/test_release_surfaces_692.py",
+    "tests/test_remote_media_cover_851.py",
+    "tests/test_remote_media_cover_852.py",
+    "tests/test_rendezvous_670.py",
+    "tests/test_resolve_first_880.py",
+    "tests/test_restore_channels_885.py",
+    "tests/test_selector_filter_letters_631.py",
+    "tests/test_shared_router_645.py",
+    "tests/test_signal_camera_source.py",
+    "tests/test_signal_fabric_auth_616.py",
+    "tests/test_signal_playability_623.py",
+    "tests/test_signal_session.py",
+    "tests/test_terminal_preview_853.py",
+    "tests/test_true_frame_775.py",
+    "tests/test_unified_installer_entrypoint_6114.py",
+    "tests/test_view_810.py",
+    "tests/test_vision_arm_media_choice_883.py",
+    "tests/test_voice_preview_754.py",
+    "tests/test_weather_edge.py",
+    "tests/test_weather_transport_675.py",
+    "tests/test_world_state_700.py"
+  ],
+  "source_contract_tests": 144,
+  "tests": 180
+}
