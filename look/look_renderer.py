@@ -1863,9 +1863,13 @@ def pager(rows:list[str],height:int,width:int,rebuild=None,browse_rebuild=None,f
                 top=min(max(0,len(current)-usable),top+usable)
             elif key in {'b','\x1b[5~','\x1b[1;2A'}: top=max(0,top-usable)
             elif key in {'j','\x1b[B'} and candidates:
-                matches=candidates(''); selected=0; cursoring=bool(matches)
+                # Arrow/Vim navigation enters the same interactive FILTER state as
+                # Enter/right-arrow.  There is no second browse-cursor/SELECT mode.
+                filtering=True; query=''; refresh_filter()
+                selected=0
             elif key in {'k','\x1b[A'} and candidates:
-                matches=candidates(''); selected=max(0,len(matches)-1); cursoring=bool(matches)
+                filtering=True; query=''; refresh_filter()
+                selected=max(0,len(matches)-1)
             elif key=='\x1b[1;2D': top=0
             elif key=='\x1b[1;2C': top=max(0,len(current)-usable)
             elif key=='g': top=max(0,len(current)-usable) if top==0 else 0
