@@ -55,6 +55,17 @@ echo "[2/5] Python syntax"
   look core albert future-crash local-labs-host signal-window tools
 "$PYTHON" -m py_compile look/lk
 
+# The development venv can be newer than endpoint Python. Parse `lk` using the
+# oldest grammar we support so a new nested-f-string feature cannot break Macs
+# while passing verification on the Linux development machine.
+"$PYTHON" - <<'PYGRAMMAR'
+import ast
+from pathlib import Path
+
+source=Path("look/lk").read_text()
+ast.parse(source,filename="look/lk",feature_version=(3,10))
+PYGRAMMAR
+
 echo "[3/5] shell syntax"
 for script in \
   install.sh \

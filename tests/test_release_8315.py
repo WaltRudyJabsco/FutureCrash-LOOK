@@ -10,7 +10,10 @@ def test_tailscale_backend_is_woken_before_serve_reconcile():
 
 def test_media_catalog_refreshes_discovery_and_tries_all_peer_routes():
     assert 'try: PEERS.refresh()' in NODE
-    assert 'remote = _peer_json(peer, "/v1/media/catalog", timeout=12.0)' in NODE
+    assert 'MEDIA_CATALOG_PEER_TIMEOUT = 3.0' in NODE
+    assert 'ThreadPoolExecutor' in NODE
+    assert 'as_completed' in NODE
+    assert '"/v1/media/catalog"' in NODE
     assert 'for base in _peer_bases(peer)' in NODE
 
 def test_transport_hostname_does_not_replace_fabric_label():

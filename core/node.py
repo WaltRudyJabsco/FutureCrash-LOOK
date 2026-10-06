@@ -2594,29 +2594,93 @@ def _fabric_media_catalog(force=False):
               "identified": local.get("identified", 0), "online": True}]
     errors = []
     snapshot = {"self": node_info(), "peers": PEERS.public()}
+
+    # A slow peer must never hold the local catalog hostage. Remote catalogs are
+    # optional enrichment: fetch them concurrently under a short bounded timeout
+    # and return the healthy subset of the Fabric.
+    import concurrent.futures
+
+    MEDIA_CATALOG_PEER_TIMEOUT = 3.0
+    MEDIA_CATALOG_MAX_WORKERS = 4
+
+    candidates = []
     for peer in snapshot.get("peers") or []:
         ad = peer.get("node") or {}
         name = (peer.get("name") or (ad.get("identity") or {}).get("name"))
         if not name:
             continue
         if not ad:
-            errors.append({"node": name, "error": str(peer.get("node_error") or "peer discovered/trusted but advertisement unavailable")})
+            errors.append({
+                "node": name,
+                "error": str(peer.get("node_error") or
+                             "peer discovered/trusted but advertisement unavailable"),
+            })
             continue
         if not (peer.get("url") or peer.get("tailcat_endpoints") or peer.get("dns")):
             errors.append({"node": name, "error": "peer has no usable transport endpoint"})
             continue
+        candidates.append((name, peer))
+
+    def fetch_peer_media_catalog(item):
+        name, peer = item
         try:
-            remote = _peer_json(peer, "/v1/media/catalog", timeout=12.0)
-            remote_rows = [dict(row) for row in (remote.get("entries") or []) if isinstance(row, dict)]
-            # Catalog ownership follows stable Fabric peer identity, never a mutable
-            # Tailscale hostname returned by the remote machine.
+            remote = _peer_json(
+                peer,
+                "/v1/media/catalog",
+                timeout=MEDIA_CATALOG_PEER_TIMEOUT,
+            )
+            remote_rows = [
+                dict(row)
+                for row in (remote.get("entries") or [])
+                if isinstance(row, dict)
+            ]
+
+            # Catalog ownership follows stable Fabric peer identity, never a
+            # mutable Tailscale hostname returned by the remote machine.
             for row in remote_rows:
                 row["node"] = name
-            entries.extend(remote_rows)
-            nodes.append({"node": name, "count": len(remote_rows),
-                          "identified": sum(1 for row in remote_rows if row.get("digest")), "online": True})
+
+            return {
+                "name": name,
+                "rows": remote_rows,
+                "error": None,
+            }
         except Exception as exc:
-            errors.append({"node": name, "error": str(exc)})
+            return {
+                "name": name,
+                "rows": [],
+                "error": str(exc),
+            }
+
+    if candidates:
+        worker_count = min(MEDIA_CATALOG_MAX_WORKERS, len(candidates))
+        with concurrent.futures.ThreadPoolExecutor(
+            max_workers=worker_count,
+            thread_name_prefix="fabric-media",
+        ) as pool:
+            futures = [
+                pool.submit(fetch_peer_media_catalog, item)
+                for item in candidates
+            ]
+
+            for future in concurrent.futures.as_completed(futures):
+                result = future.result()
+                name = result["name"]
+
+                if result["error"]:
+                    errors.append({"node": name, "error": result["error"]})
+                    continue
+
+                remote_rows = result["rows"]
+                entries.extend(remote_rows)
+                nodes.append({
+                    "node": name,
+                    "count": len(remote_rows),
+                    "identified": sum(
+                        1 for row in remote_rows if row.get("digest")
+                    ),
+                    "online": True,
+                })
 
     result = {
         "schema": "fabric-media-catalog-v1",

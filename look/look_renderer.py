@@ -1442,7 +1442,7 @@ def pager(rows:list[str],height:int,width:int,rebuild=None,browse_rebuild=None,f
             preview_h=0
             list_view_h=list_usable
             if filtering and picked and not preview_view and width<96:
-                preview_h=max(4,min(8,list_usable//3))
+                preview_h=max(4,min(14,list_usable//3))
                 list_view_h=max(3,list_usable-preview_h-1)
 
             # Headers and bottom previews both shrink the real list viewport.
@@ -1476,7 +1476,10 @@ def pager(rows:list[str],height:int,width:int,rebuild=None,browse_rebuild=None,f
                         rendered.append(l+' '*pad+FAINT+' │ '+RESET+r)
                     sys.stdout.write('\n'.join(rendered[:list_usable]))
                 else:
+                    # Keep the bottom preview anchored instead of letting it jump
+                    # upward when a narrow filter has fewer rows than the viewport.
                     rendered=[fit(r,width) for r in page]
+                    rendered.extend("" for _ in range(max(0,list_view_h-len(rendered))))
                     rendered.append(FAINT+('─'*width)+RESET)
                     rendered.extend(preview_rows(picked,width,preview_h))
                     sys.stdout.write('\n'.join(rendered[:list_usable]))
@@ -1493,6 +1496,12 @@ def pager(rows:list[str],height:int,width:int,rebuild=None,browse_rebuild=None,f
                 left_w=max(44,width-right_w-3)
                 native_rows=max(2,min(18,list_usable-2))
                 native_preview.request(picked,len(context_rows)+3,left_w+4,native_rows,right_w)
+            elif filtering and picked and width<96:
+                # Narrow mode owns a real bottom preview pane too. Preserve its two
+                # text metadata rows and progressively replace only the ASCII artwork.
+                native_rows=max(2,preview_h-2)
+                native_row=len(context_rows)+list_view_h+4
+                native_preview.request(picked,native_row,1,native_rows,width)
             else:
                 native_preview.invalidate()
             last=min(len(current),top+usable)

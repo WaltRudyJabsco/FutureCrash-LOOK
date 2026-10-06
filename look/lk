@@ -14009,7 +14009,11 @@ def ollama_curate(args):
         print(f"  {'MODEL':<27} {'SIZE':>6} {'FIT':>10} {'RSN':>5} {'TOOLS':>6} {'AGENT':>6} {'TTFT':>7} {'TOK/S':>7}")
         for row in models:
             r=row.get("roles") or {}
-            print(f"  {str(row.get('name') or ''):<27.27} {_format_gib(row.get('size')):>6} {str(r.get('fit') or '—'):>10} {str(r.get('reasoning') if r.get('reasoning') is not None else '—'):>5} {str(r.get('tools') if r.get('tools') is not None else '—'):>6} {('yes' if r.get('agent') else 'no'):>6} {((f"{r.get('ttft'):.2f}s") if isinstance(r.get('ttft'),(int,float)) else '—'):>7} {((f"{r.get('rate'):.1f}") if isinstance(r.get('rate'),(int,float)) else '—'):>7}")
+            ttft=r.get("ttft")
+            rate=r.get("rate")
+            ttft_text=("%.2fs" % ttft) if isinstance(ttft,(int,float)) else "—"
+            rate_text=("%.1f" % rate) if isinstance(rate,(int,float)) else "—"
+            print(f"  {str(row.get('name') or ''):<27.27} {_format_gib(row.get('size')):>6} {str(r.get('fit') or '—'):>10} {str(r.get('reasoning') if r.get('reasoning') is not None else '—'):>5} {str(r.get('tools') if r.get('tools') is not None else '—'):>6} {('yes' if r.get('agent') else 'no'):>6} {ttft_text:>7} {rate_text:>7}")
     return 0 if data.get("ok",True) else 1
 
 
@@ -16246,6 +16250,25 @@ def _media_status_snapshot():
 def _media_local_node_names():
     """Names that unambiguously refer to this machine for media routing."""
     names={"local","localhost","127.0.0.1",platform.node(),socket.gethostname()}
+
+    # Catalog ownership uses the Unified Node's advertised Fabric name, which
+    # need not equal the operating-system hostname. Ask the local node for its
+    # canonical identity so this endpoint never mistakes its own media for a
+    # remote Fabric location.
+    try:
+        request=urllib.request.Request(
+            "http://127.0.0.1:7332/v1/node",
+            headers={"Accept":"application/json"},
+        )
+        with urllib.request.urlopen(request,timeout=1.0) as response:
+            node=json.loads(response.read().decode("utf-8"))
+        advertised=(node or {}).get("name")
+        if advertised:
+            names.add(str(advertised))
+    except Exception:
+        # Local hostname aliases remain a valid fallback while the node starts.
+        pass
+
     return {str(name).strip().casefold() for name in names if str(name).strip()}
 
 
@@ -17935,6 +17958,11 @@ def _media_prepare_command(args):
     except (RuntimeError,ValueError,FileNotFoundError,OSError) as exc:
         print(json.dumps({"ok":False,"error":str(exc)},ensure_ascii=False,separators=(",",":")))
         return 1
+    # Removable/local media may need a fraction of a second to automount.
+    # Give the resolved queue one bounded wake-up opportunity before reachability
+    # pinning; doing this later in M3U generation is too late because pinning may
+    # already have discarded temporarily unavailable local files.
+    _media_wait_for_local_queue(rows)
     rows,failures=_media_pin_playable_rows(rows)
     if not rows:
         detail="; ".join(f"{label}: {error}" for label,error in failures[:3])
@@ -17954,6 +17982,11 @@ def _media_play_command(args):
     except (RuntimeError,ValueError,FileNotFoundError,OSError) as exc:
         print(f"LOOK media · {exc}")
         return 1
+    # Removable/local media may need a fraction of a second to automount.
+    # Give the resolved queue one bounded wake-up opportunity before reachability
+    # pinning; doing this later in M3U generation is too late because pinning may
+    # already have discarded temporarily unavailable local files.
+    _media_wait_for_local_queue(rows)
     rows,failures=_media_pin_playable_rows(rows)
     if failures:
         print(f"LOOK media · {len(failures)} unreachable item(s) skipped")
@@ -20425,7 +20458,12 @@ def main():
     if cmd in {"think-display","thinkdisplay"}: return lo_think_display(rest)
     if cmd in {"media","music"}: return media(rest)
     # Natural shorthand: `lk play TARGET` is the obvious media entry point.
-    if cmd=="play": return media(["play",*rest]) if rest else media(["play"])
+    # Named canned stations/intents already belong to media(); route them there
+    # before generic library search can reinterpret words such as "classical".
+    if cmd=="play":
+        if rest and rest[0].casefold() in {"classical","classics","arts"}:
+            return media(rest)
+        return media(["play",*rest]) if rest else media(["play"])
     if cmd=="player": return media_player()
     if cmd=="mp": return media_mp(" ".join(rest))
     if cmd=="albert":
