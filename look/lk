@@ -17448,7 +17448,7 @@ def _media_choose_hide_directory(row, rows, fd):
             if len(label)>max(20,width-32): label="…"+label[-max(19,width-33):]
             root=" · MEDIA ROOT" if item["media_root"] else ""
             tone="33" if item["media_root"] else "2"
-            print(f"{focus} {label}  {_c(f'{item['count']:,} items{root}',tone)}")
+            print(f"{focus} {label}  {_c(f"{item['count']:,} items{root}",tone)}")
         print("\n"+_c("↑↓ choose · Enter hide · Esc cancel","2"),end="",flush=True)
         key=_read_tty_key(fd)
         if key=="esc": return None
