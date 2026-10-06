@@ -17410,7 +17410,14 @@ def _media_collapse(rows, show_all=False, show_hidden=False):
     for bucket in groups.values():
         # Catalog collapse must be pure metadata work. Playback resolves reachability.
         bucket.sort(key=lambda r:(bool(r.get("hidden")), str(r.get("path") or "").casefold()))
-        row=dict(bucket[0]); row["sources"]=bucket; row["source_count"]=len(bucket); out.append(row)
+        row=dict(bucket[0])
+        # A logical media row carries every physical copy in the canonical
+        # locations envelope. `sources` remains the selector/UI representation,
+        # but playback must see the same alternatives when pinning reachability.
+        row["sources"]=bucket
+        row["locations"]=bucket
+        row["source_count"]=len(bucket)
+        out.append(row)
     return out
 
 
