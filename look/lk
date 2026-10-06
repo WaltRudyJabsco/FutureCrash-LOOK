@@ -16323,7 +16323,7 @@ def _media_entry_source(entry):
     raise FileNotFoundError(primary_path or "media queue entry has no path, catalog id, or digest")
 
 
-def _media_pin_playable_entry(entry, timeout=3.0):
+def _media_pin_playable_entry(entry, timeout=10.0):
     """Return the same logical media row pinned to one reachable physical copy.
 
     Catalog merge deliberately keeps all copies. Execution must choose a concrete
