@@ -919,16 +919,6 @@ class ModelRegistry:
         except Exception:
             return {}
 
-    def snapshot(self):
-        """Return the last completed model snapshot without doing Ollama I/O.
-
-        Interactive request paths must never synchronously walk /api/show across
-        every installed model. The pulse thread owns discovery; request handlers
-        consume its last known-good result.
-        """
-        with self.lock:
-            return list(self.cached)
-
     def discover(self, force=False):
         with self.lock:
             if not force and now() - self.cached_at < MODEL_REFRESH_SECONDS:
@@ -2409,6 +2399,16 @@ def _write_media_library(data):
         MEDIA_CATALOG_CACHE["local_mtime_ns"] = -1
 
 
+def _media_catalog_id(path):
+    """Derive the same stable path identity as LOOK media_core for legacy rows.
+
+    Old catalogs may predate the explicit ``id`` field.  Publishing a derived ID
+    keeps those rows remotely playable without widening the path-security boundary.
+    """
+    target=Path(str(path or "")).expanduser().resolve()
+    return hashlib.sha1(str(target).encode("utf-8","surrogatepass")).hexdigest()[:16]
+
+
 def _local_media_catalog():
     """Publish discovered media as catalog rows; bytes remain owned by their source node."""
     library = _read_media_library()
@@ -2418,6 +2418,7 @@ def _local_media_catalog():
         if not isinstance(raw, dict) or not raw.get("path"):
             continue
         row = dict(raw)
+        row["id"] = str(row.get("id") or _media_catalog_id(row["path"]))
         row["node"] = node
         row["identified"] = bool(str(row.get("digest") or "").startswith("sha256:"))
         rows.append(row)
@@ -2442,11 +2443,15 @@ def _local_media_entry(entry_id, path_hint=""):
     if not entry_id:
         raise ValueError("media entry id required")
     for row in (_read_media_library().get("entries") or []):
-        if isinstance(row,dict) and str(row.get("id") or "") == entry_id:
+        if not isinstance(row,dict) or not row.get("path"):
+            continue
+        row_id=str(row.get("id") or _media_catalog_id(row["path"]))
+        if row_id == entry_id:
             path=Path(str(row.get("path") or "")).expanduser()
             if not path.is_file():
                 raise FileNotFoundError(str(path))
-            return dict(row),path
+            resolved=dict(row); resolved["id"]=row_id
+            return resolved,path
     hint=str(path_hint or "").strip()
     if hint:
         for row in (_read_media_library().get("entries") or []):
@@ -2454,7 +2459,8 @@ def _local_media_entry(entry_id, path_hint=""):
                 path=Path(hint).expanduser()
                 if not path.is_file():
                     raise FileNotFoundError(str(path))
-                return dict(row),path
+                resolved=dict(row); resolved["id"]=str(row.get("id") or _media_catalog_id(hint))
+                return resolved,path
     raise FileNotFoundError(entry_id)
 
 

@@ -1187,11 +1187,11 @@ def resolve_action_destination(dest:str,current_dir:Path|None)->Path:
 
 
 def pager(rows:list[str],height:int,width:int,rebuild=None,browse_rebuild=None,filter_context=None,candidates=None,on_browse=None,on_back=None,on_parent=None,on_go=None,on_activate=None,on_sort=None,header_rows=None,force_interactive=False,initial_select:Path|None=None,initial_query:str='',marked_set:set[Path]|None=None,current_dir:Path|None=None,clipboard_state:dict|None=None)->None:
-    # Interactive state machine: browse -> filter -> select.
+    # Interactive state machine: browse <-> filter. Focus belongs to filter state.
     usable=max(3,height-5)
     if (len(rows)<=height-1 and not force_interactive) or not (sys.stdin.isatty() and sys.stdout.isatty()):
         print('\n'.join(rows)); return
-    top=0; query=initial_query or ''; filtering=bool(query); selecting=False; cursoring=False; preview_view=False; selected=0
+    top=0; query=initial_query or ''; filtering=bool(query); preview_view=False; selected=0
     current=browse_rebuild(None,marked_set or set()) if browse_rebuild else rows
     rows=current
     matches:list[Path]=[]
@@ -1208,7 +1208,6 @@ def pager(rows:list[str],height:int,width:int,rebuild=None,browse_rebuild=None,f
             if path.resolve()==wanted:
                 selected=index
                 filtering=True
-                selecting=True
                 break
 
     def refresh_filter()->None:
@@ -1424,16 +1423,6 @@ def pager(rows:list[str],height:int,width:int,rebuild=None,browse_rebuild=None,f
         sys.stdout.write(HIDE)
         while True:
             picked=selected_path()
-            if cursoring and browse_rebuild:
-                render_width=max(48,width-min(34,max(26,width//4))-3) if picked and width>=96 else width
-                current=browse_rebuild(picked, marked, render_width)
-                # Keep the highlighted grid row visible without converting the
-                # ordinary browse surface into the one-row filter surface.
-                if picked and matches:
-                    cols=max(1, max(1,width)//max(1,min(38,max((len(p.name)+6 for p in matches),default=1))))
-                    cursor_row=selected//cols
-                    if cursor_row < top: top=cursor_row
-                    elif cursor_row >= top+usable: top=max(0,cursor_row-usable+1)
             if filtering and rebuild:
                 # Side previews consume terminal width. Reflow the grid to the
                 # visible list pane so highlighted matches cannot live beneath
@@ -1449,11 +1438,7 @@ def pager(rows:list[str],height:int,width:int,rebuild=None,browse_rebuild=None,f
                 list_usable=max(1,usable-len(context_rows))
             # Sticky headers shrink the real list viewport. Follow the focus inside it.
             if matches:
-                if cursoring:
-                    cols=max(1,max(1,width)//max(1,min(38,max((len(p.name)+6 for p in matches),default=1))))
-                    focus_row=selected//cols
-                else:
-                    focus_row=selected
+                focus_row=selected
                 if focus_row < top: top=focus_row
                 elif focus_row >= top+list_usable: top=max(0,focus_row-list_usable+1)
                 top=max(0,min(top,max(0,len(current)-list_usable)))
@@ -1466,7 +1451,7 @@ def pager(rows:list[str],height:int,width:int,rebuild=None,browse_rebuild=None,f
                 # Preview View is only another presentation of the current filtered
                 # set. The pager, query, current item, and marked set stay authoritative.
                 sys.stdout.write('\n'.join(preview_rows(picked,width,list_usable)[:list_usable]))
-            elif (cursoring or selecting or filtering) and picked:
+            elif filtering and picked:
                 if width>=96:
                     right_w=min(60,max(40,(width*2)//5))
                     left_w=max(44,width-right_w-3)
@@ -1493,7 +1478,7 @@ def pager(rows:list[str],height:int,width:int,rebuild=None,browse_rebuild=None,f
                 # Rows 1-2 remain the instant text title/metadata; native pixels may
                 # progressively replace only the ASCII art beneath them.
                 native_preview.request(picked,len(context_rows)+3,1,max(2,list_usable-2),width)
-            elif (cursoring or filtering or selecting) and picked and width>=96:
+            elif filtering and picked and width>=96:
                 # List view uses the same proven graphics plane. The text frame and
                 # ASCII side preview are already complete before native pixels arrive.
                 right_w=min(60,max(40,(width*2)//5))
@@ -1522,31 +1507,6 @@ def pager(rows:list[str],height:int,width:int,rebuild=None,browse_rebuild=None,f
                     action_parts=['J/K move','Tab mark','A all','V Preview','Enter/→ open','B clipboard',
                                   'B Copy','T Cut','P Paste','C Copy To','M Move To','⇧R rename','⇧D delete',
                                   'L LO context','X clear set','E edit','O open with','Y path','G go','← parent','Esc clear']
-            elif selecting:
-                name=picked.name if picked else '(no matches)'
-                kind='folder' if picked and picked.is_dir() else 'file'
-                sel=selection_status()
-                status=(f'  {CYAN}{BOLD}SELECT{RESET} {WHITE}{name}{RESET} {GRAY}· {kind}{RESET}'
-                        + (f'  · {sel}' if sel else ''))
-                action_parts=['j/k move','Tab mark','Enter/→ open','B clipboard',
-                              'B Copy','T Cut','P Paste','C Copy To','M Move To','⇧R rename','⇧D delete',
-                              'L LO context','X clear set','E edit','O open with','Y path','G go','← parent','Esc filter','q quit']
-            elif cursoring:
-                # A cursor is a real object selection. Keep the footer in the same
-                # object-action grammar as SELECT so preview and available actions
-                # can never disagree about whether something is selected.
-                name=picked.name if picked else '(empty)'
-                kind='folder' if picked and picked.is_dir() else 'file'
-                sel=selection_status()
-                status=(f'  {CYAN}{BOLD}SELECT{RESET} {WHITE}{name}{RESET} {GRAY}· {kind} · {selected+1 if matches else 0}/{len(matches)}{RESET}'
-                        + (f'  · {sel}' if sel else ''))
-                action_parts=['↑/↓ move','Tab mark','Enter/→ open','B clipboard',
-                              'B Copy','T Cut','P Paste','C Copy To','M Move To','⇧R rename','⇧D delete',
-                              'L LO context','X clear set','E edit','O open with','Y path','G go','← parent','Esc clear','q quit']
-            elif query:
-                status=(f'  {CYAN}{BOLD}FILTER{RESET} {WHITE}{query}{RESET}'
-                        f'  {GRAY}{last}/{len(current)}{RESET}')
-                action_parts=['Enter select','Esc clear','q quit']
             else:
                 back_hint='Esc back' if on_back else 'Esc exit'
                 status=f'  {FAINT}{last}/{len(current)}{RESET}'
@@ -1614,7 +1574,10 @@ def pager(rows:list[str],height:int,width:int,rebuild=None,browse_rebuild=None,f
                     if preview_view:
                         preview_view=False
                     else:
-                        query=''; filtering=False; selecting=False; refresh_filter()
+                        # Leaving FILTER restores the real browse surface; do not
+                        # keep a one-row filter rebuild behind a browse footer.
+                        query=''; filtering=False; matches=[]; selected=0; top=0
+                        current=browse_rebuild(None,marked) if browse_rebuild else rows
                 elif key=='\x1b[D' and on_parent:
                     on_parent(); return
                 elif key.startswith('\x1b[') and key!='\x1b[Z':
@@ -1698,150 +1661,6 @@ def pager(rows:list[str],height:int,width:int,rebuild=None,browse_rebuild=None,f
                     refresh_filter()
                 continue
 
-            if cursoring:
-                if key in {'q','Q','\x03'}: break
-                if key=='F' and on_sort:
-                    picked=selected_path(); notice=on_sort()
-                    matches=candidates('') if candidates else []
-                    if picked and matches:
-                        wanted=picked.resolve()
-                        selected=next((i for i,p in enumerate(matches) if p.resolve()==wanted),min(selected,len(matches)-1))
-                    current=browse_rebuild(picked,marked) if browse_rebuild else current
-                    top=0; continue
-                if key=='\x1b':
-                    cursoring=False; matches=[]; selected=0
-                    current=browse_rebuild(None,marked) if browse_rebuild else rows
-                    continue
-                if key in {'\x1b[B','j'} and matches:
-                    selected=min(len(matches)-1,selected+1); continue
-                if key in {'\x1b[A','k'} and matches:
-                    selected=max(0,selected-1); continue
-                if key in {'\x1b[6~','\x1b[1;2B'} and matches:
-                    selected=min(len(matches)-1,selected+usable); continue
-                if key in {'\x1b[5~','\x1b[1;2A'} and matches:
-                    selected=max(0,selected-usable); continue
-                if key=='\x1b[1;2D' and matches: selected=0; continue
-                if key=='\x1b[1;2C' and matches: selected=len(matches)-1; continue
-                if key=='g' and matches:
-                    selected=(len(matches)-1 if selected==0 else 0); continue
-                if key=='G' and on_go and current_dir is not None:
-                    on_go(current_dir); return
-                if key in {'<','\x1b[D'} and on_parent:
-                    on_parent(); return
-                if key in {'\r','\n','\x1b[C'}:
-                    picked=selected_path()
-                    if picked:
-                        if on_activate: on_activate(picked); return
-                        if picked.is_dir() and on_browse: on_browse(picked); return
-                        opened,message=open_default(picked)
-                        if opened: break
-                        notice=message
-                    continue
-                if key in {'\t','\x1b[Z'} and matches:
-                    rp=selected_path().resolve()
-                    if rp in marked: marked.remove(rp)
-                    else: marked.add(rp)
-                    continue
-                if key in {'C','M','D'} and matches:
-                    run_action({'C':'copy','M':'move','D':'remove'}[key])
-                    matches=candidates('') if candidates else []
-                    selected=min(selected,max(0,len(matches)-1))
-                    current=browse_rebuild(selected_path(),marked) if browse_rebuild else current
-                    continue
-                if key=='R' and matches:
-                    run_rename()
-                    matches=candidates('') if candidates else []
-                    selected=min(selected,max(0,len(matches)-1))
-                    current=browse_rebuild(selected_path(),marked) if browse_rebuild else current
-                    continue
-                if key=='B': stage_clipboard('copy'); continue
-                if key=='T': stage_clipboard('move'); continue
-                if key=='P': paste_clipboard(); continue
-                if key=='Y' and matches:
-                    value='\n'.join(str(x) for x in action_paths())
-                    notice='copied paths' if value and copy_text(value) else 'clipboard unavailable'
-                    continue
-                if key=='L': run_lo_context(); continue
-                if key=='X': marked.clear(); notice='selection cleared'; continue
-                # Typing or explicit filter enters the existing one-row filter
-                # contract, starting from a clean query rather than the grid.
-                if key=='/':
-                    cursoring=False; filtering=True; query=''; refresh_filter(); continue
-                if len(key)==1 and key.isprintable() and key not in {' ','b'}:
-                    cursoring=False; filtering=True; query=key; refresh_filter(); continue
-                if key in {' ','\x1b[6~'}:
-                    selected=min(len(matches)-1,selected+usable); continue
-                if key in {'b','\x1b[5~'}:
-                    selected=max(0,selected-usable); continue
-                continue
-
-            if selecting:
-                if key in {'q','Q','\x03'}: break
-                if key=='\x1b': selecting=False; filtering=True; continue
-                if key in {'j','J','\x1b[B'} and matches: selected=(selected+1)%len(matches); continue
-                if key in {'k','K','\x1b[A'} and matches: selected=(selected-1)%len(matches); continue
-                if key in {'\x1b[6~','\x1b[1;2B'} and matches: selected=min(len(matches)-1,selected+usable); continue
-                if key in {'\x1b[5~','\x1b[1;2A'} and matches: selected=max(0,selected-usable); continue
-                if key=='\x1b[1;2D' and matches: selected=0; continue
-                if key=='\x1b[1;2C' and matches: selected=len(matches)-1; continue
-                if key=='\x1b[D' and on_parent:
-                    on_parent(); return
-                picked=selected_path()
-                if key.startswith('\x1b[') and key not in {'\x1b[C','\x1b[Z'}: continue
-                if not picked: continue
-                if key in {'\r','\n','\x1b[C'}:
-                    if on_activate:
-                        on_activate(picked); return
-                    if picked.is_dir() and on_browse:
-                        on_browse(picked); return
-                    opened,message=open_default(picked)
-                    if opened:
-                        break
-                    notice=message
-                    continue
-                if key in {'\t','\x1b[Z'}:
-                    rp=picked.resolve()
-                    if rp in marked: marked.remove(rp)
-                    else: marked.add(rp)
-                    continue
-                if key in {'C','M','D'}:
-                    run_action({'C':'copy','M':'move','D':'remove'}[key])
-                    refresh_filter(); continue
-                if key=='R':
-                    run_rename(); refresh_filter(); continue
-                if key=='B':
-                    stage_clipboard('copy'); continue
-                if key=='T':
-                    stage_clipboard('move'); continue
-                if key=='P':
-                    paste_clipboard(); refresh_filter(); continue
-                if key in {'y','Y'}:
-                    paths=action_paths()
-                    value='\n'.join(str(x) for x in paths)
-                    notice='copied paths' if value and copy_text(value) else 'clipboard unavailable'
-                    continue
-                if key in {'g','G'} and on_go:
-                    on_go(picked if picked.is_dir() else picked.parent); return
-                if key=='L':
-                    run_lo_context()
-                    refresh_filter(); continue
-                if key=='X':
-                    marked.clear()
-                    notice='selection cleared'
-                    refresh_filter(); continue
-                if key in {'e','E'}:
-                    if picked.is_dir(): notice='folders are browsed with Enter'; continue
-                    sys.stdout.write(SHOW+RESET+'\n'); sys.stdout.flush(); edit_path(picked); return
-                if key in {'o','O'}:
-                    sys.stdout.write(SHOW+RESET+'\n'); sys.stdout.flush()
-                    opened,message=open_with(picked)
-                    sys.stdout.write(HIDE); sys.stdout.flush()
-                    if not opened and message!='open-with cancelled': notice=message
-                    continue
-                if key=='p':
-                    sys.stdout.write(SHOW+RESET+'\n'+str(picked.resolve())+'\n'); sys.stdout.flush(); return
-                continue
-
             if key in {'q','Q','\x03'}: break
             if key=='F' and on_sort:
                 notice=on_sort()
@@ -1851,13 +1670,10 @@ def pager(rows:list[str],height:int,width:int,rebuild=None,browse_rebuild=None,f
                 filtering=True
                 refresh_filter()
             elif key=='\x1b':
-                if query:
-                    query=''; selecting=False; refresh_filter()
-                elif on_back:
+                if on_back:
                     on_back()
                     return
-                else:
-                    break
+                break
             elif key in {' ','\x1b[6~','\x1b[1;2B'}:
                 if last>=len(current): break
                 top=min(max(0,len(current)-usable),top+usable)

@@ -8,8 +8,9 @@ def test_release_version():
     assert (ROOT/'VERSION').read_text().strip()=='8.8.5'
 
 def test_selected_browse_item_uses_inspection_pane():
-    assert 'elif (cursoring or selecting or filtering) and picked:' in SRC
-    assert 'elif (cursoring or filtering or selecting) and picked and width>=96:' in SRC
+    assert 'elif filtering and picked:' in SRC
+    assert 'elif filtering and picked and width>=96:' in SRC
+    assert 'cursoring' not in SRC and 'selecting' not in SRC
 
 def test_destination_picker_returns_to_editable_line():
     assert 'def _destination_picker(start_dir:Path)' in SRC

@@ -9,11 +9,11 @@ SIGNAL=(ROOT/'signal-window/app.js').read_text()
 
 
 def test_navigation_contract_is_preserved_while_personalization_grows():
-    assert "if key in {'\\x1b[B','j'} and matches:" in RENDERER
-    assert 'if cursoring:' in RENDERER
+    assert "elif key in {'j','\\x1b[B'} and candidates:" in RENDERER
+    assert 'cursoring' not in RENDERER
+    assert 'selecting' not in RENDERER
     assert "Space/PgDn next" in RENDERER
     assert "Enter/→ filter" in RENDERER
-
 
 def test_renderer_preferences_are_bounded_and_nerd_is_default():
     assert "data={'icons':'nerd','preview':'ascii'}" in RENDERER

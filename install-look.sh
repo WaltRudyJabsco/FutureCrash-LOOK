@@ -62,6 +62,17 @@ done
 
 have(){ command -v "$1" >/dev/null 2>&1; }
 run(){ if ((DRY)); then printf '  →'; printf ' %q' "$@"; printf '\n'; else "$@"; fi; }
+
+install_file() {
+  # Copy and verify as one operation. A successful installer must never leave a
+  # stale runtime module behind just because a later verification list drifted.
+  local src="$1" dst="$2"
+  run cp "$src" "$dst"
+  if ((!DRY)) && ! cmp -s "$src" "$dst"; then
+    echo "INSTALL ERROR: deployed file does not match source: $dst" >&2
+    exit 5
+  fi
+}
 ask() {
   local prompt="$1" default="$2" answer
   if ((NO_OPTIONAL)); then return 1; fi
@@ -295,19 +306,19 @@ if ((!DRY)); then
   fi
 fi
 
-run cp "$ROOT/look/lk" "$HOME/.local/share/look/lk"
-run cp "$ROOT/look/look_renderer.py" "$HOME/.local/share/look/look_renderer.py"
-run cp "$ROOT/look/look_ai.py" "$HOME/.local/share/look/look_ai.py"
-run cp "$ROOT/look/lo_engine.py" "$HOME/.local/share/look/lo_engine.py"
-run cp "$ROOT/look/media_core.py" "$HOME/.local/share/look/media_core.py"
-run cp "$ROOT/look/media_art.py" "$HOME/.local/share/look/media_art.py"
-run cp "$ROOT/look/media_watch.py" "$HOME/.local/share/look/media_watch.py"
-run cp "$ROOT/look/file_catalog.py" "$HOME/.local/share/look/file_catalog.py"
-run cp "$ROOT/look/games.py" "$HOME/.local/share/look/games.py"
-run cp "$ROOT/look/comfy_bootstrap.py" "$HOME/.local/share/look/comfy_bootstrap.py"
+install_file "$ROOT/look/lk" "$HOME/.local/share/look/lk"
+install_file "$ROOT/look/look_renderer.py" "$HOME/.local/share/look/look_renderer.py"
+install_file "$ROOT/look/look_ai.py" "$HOME/.local/share/look/look_ai.py"
+install_file "$ROOT/look/lo_engine.py" "$HOME/.local/share/look/lo_engine.py"
+install_file "$ROOT/look/media_core.py" "$HOME/.local/share/look/media_core.py"
+install_file "$ROOT/look/media_art.py" "$HOME/.local/share/look/media_art.py"
+install_file "$ROOT/look/media_watch.py" "$HOME/.local/share/look/media_watch.py"
+install_file "$ROOT/look/file_catalog.py" "$HOME/.local/share/look/file_catalog.py"
+install_file "$ROOT/look/games.py" "$HOME/.local/share/look/games.py"
+install_file "$ROOT/look/comfy_bootstrap.py" "$HOME/.local/share/look/comfy_bootstrap.py"
 run chmod +x "$HOME/.local/share/look/look_ai.py" "$HOME/.local/share/look/comfy_bootstrap.py" "$HOME/.local/share/look/media_watch.py"
 run mkdir -p "$HOME/.local/share/look/workflows"
-run cp "$ROOT/look/workflows/sdxl-api.json" "$HOME/.local/share/look/workflows/sdxl-api.json"
+install_file "$ROOT/look/workflows/sdxl-api.json" "$HOME/.local/share/look/workflows/sdxl-api.json"
 run chmod +x "$HOME/.local/share/look/lk"
 if ((!DRY)); then
   ln -sfn "$HOME/.local/share/look/lk" "$HOME/.local/bin/lk"
@@ -336,11 +347,11 @@ if [[ -f "$HOME/.zshrc" ]]; then
 fi
 
 # LOOK owns this fragment; the user's ~/.zshrc remains theirs.
-run cp "$ROOT/look/zshrc" "$LOOK_ZSH_FILE"
+install_file "$ROOT/look/zshrc" "$LOOK_ZSH_FILE"
 run mkdir -p "$LOOK_ZSH_DIR/completions"
-run cp "$ROOT/look/completions/_lk" "$LOOK_ZSH_DIR/completions/_lk"
-run cp "$ROOT/look/completions/_lo" "$LOOK_ZSH_DIR/completions/_lo"
-run cp "$ROOT/look/completions/_lmk" "$LOOK_ZSH_DIR/completions/_lmk"
+install_file "$ROOT/look/completions/_lk" "$LOOK_ZSH_DIR/completions/_lk"
+install_file "$ROOT/look/completions/_lo" "$LOOK_ZSH_DIR/completions/_lo"
+install_file "$ROOT/look/completions/_lmk" "$LOOK_ZSH_DIR/completions/_lmk"
 
 if ((!DRY)); then
   touch "$HOME/.zshrc"

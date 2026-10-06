@@ -19,7 +19,7 @@ Use `lk version` for installed LOOK/bundle identity, `lk help` for the live glos
 
 ## Current high-value workflows
 
-- `l` / `lk PATH`: interactive LOOK browser. Arrow selection enters inspect mode; Tab marks; Shift-arrow navigation keeps fast top/page/bottom movement.
+- `l` / `lk PATH`: interactive LOOK browser. Arrow navigation enters the filter/focus view; Tab marks; Shift-arrow navigation keeps fast top/page/bottom movement.
 - `C` / `M`: Copy To / Move To with editable destination plus directory picker.
 - `Shift-D`: remove selected/marked objects with confirmation and journaled undo where supported.
 - `Shift-R`: rename one or many objects; `#`, `##`, `###` provide numbered batch patterns.
@@ -398,9 +398,11 @@ server help
 
 See `docs/COMMAND-GRAMMAR.md`, `look/docs/COMMANDS.md`, and `docs/RELEASE-HISTORY.md` for the deeper command/release record.
 
-## Release
+For repository health, run `./tools/verify.sh`; `docs/CODE_HEALTH.md` documents the structural checks and current complexity baseline.
 
-Current release: **6.1.10 — Media Mount Race Repair**.
+## Historical release note: 6.1.10
+
+The following section describes **6.1.10 — Media Mount Race Repair** and is preserved for release-history context. The current bundle is **8.8.5 — RESTORE CHANNELS**.
 
 Browser endpoint management is now Fabric-wide: `lk fabric endpoints`, `allow`, and `revoke-endpoint` work from any reachable trusted node rather than only the Signal host. Tailcat adds direct certificate-pinned TLS transport between paired nodes on reachable LAN/IP paths and is preferred automatically; Tailscale remains a fallback for reachability and bootstrap rather than the definition of Fabric networking. Existing 6.0 pairings learn Tailcat metadata from authenticated peer identity and do not require another re-pair.
 

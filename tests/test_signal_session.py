@@ -76,7 +76,8 @@ class SignalMediaSurfaceTests(unittest.TestCase):
 
     def test_media_state_normalizes_available_flag(self):
         fake=type('CP',(),{'returncode':0,'stdout':'{"active":true,"state":"playing","queue":[],"entry":{}}','stderr':''})()
-        with unittest.mock.patch.object(server,'_lk_path',return_value='/tmp/lk'), \
+        with unittest.mock.patch.object(server,'_node_get',return_value=None), \
+             unittest.mock.patch.object(server,'_lk_path',return_value='/tmp/lk'), \
              unittest.mock.patch.object(server.subprocess,'run',return_value=fake):
             state=server._media_state()
         self.assertTrue(state['available'])

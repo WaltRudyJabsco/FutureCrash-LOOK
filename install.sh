@@ -517,27 +517,28 @@ if (( ! INGRESS_READY )); then
   exit 5
 fi
 
-# Verify exact installed bytes. This catches stale LOOK/new-node split installs.
-if ! cmp -s "$ROOT/look/lo_engine.py" "$HOME/.local/share/look/lo_engine.py"; then
-  echo "INSTALL ERROR: installed native LO engine does not match this checkout" >&2
-  exit 5
-fi
-if ! cmp -s "$ROOT/look/lk" "$HOME/.local/share/look/lk"; then
-  echo "INSTALL ERROR: installed LOOK does not match this checkout" >&2
-  exit 5
-fi
-if ! cmp -s "$ROOT/look/file_catalog.py" "$HOME/.local/share/look/file_catalog.py"; then
-  echo "INSTALL ERROR: installed file catalog core does not match this checkout" >&2
-  exit 5
-fi
-if ! cmp -s "$ROOT/look/media_watch.py" "$HOME/.local/share/look/media_watch.py"; then
-  echo "INSTALL ERROR: installed removable media watcher does not match this checkout" >&2
-  exit 5
-fi
-if ! cmp -s "$ROOT/look/media_core.py" "$HOME/.local/share/look/media_core.py"; then
-  echo "INSTALL ERROR: installed media core does not match this checkout" >&2
-  exit 5
-fi
+# Verify exact installed bytes. install-look.sh verifies each copy immediately;
+# this second pass guards the unified release boundary after all services restart.
+verify_same() {
+  local src="$1" dst="$2" label="$3" code="${4:-5}"
+  if ! cmp -s "$src" "$dst"; then
+    echo "INSTALL ERROR: installed $label does not match this checkout" >&2
+    exit "$code"
+  fi
+}
+
+verify_same "$ROOT/look/lk" "$HOME/.local/share/look/lk" "LOOK"
+verify_same "$ROOT/look/look_renderer.py" "$HOME/.local/share/look/look_renderer.py" "LOOK renderer"
+verify_same "$ROOT/look/look_ai.py" "$HOME/.local/share/look/look_ai.py" "LOOK AI broker"
+verify_same "$ROOT/look/lo_engine.py" "$HOME/.local/share/look/lo_engine.py" "native LO engine"
+verify_same "$ROOT/look/file_catalog.py" "$HOME/.local/share/look/file_catalog.py" "file catalog core"
+verify_same "$ROOT/look/media_watch.py" "$HOME/.local/share/look/media_watch.py" "removable media watcher"
+verify_same "$ROOT/look/media_core.py" "$HOME/.local/share/look/media_core.py" "media core"
+verify_same "$ROOT/look/media_art.py" "$HOME/.local/share/look/media_art.py" "media art core"
+verify_same "$ROOT/look/games.py" "$HOME/.local/share/look/games.py" "games core"
+verify_same "$ROOT/look/comfy_bootstrap.py" "$HOME/.local/share/look/comfy_bootstrap.py" "ComfyUI bootstrap"
+verify_same "$ROOT/look/workflows/sdxl-api.json" "$HOME/.local/share/look/workflows/sdxl-api.json" "SDXL workflow"
+
 if ! cmp -s "$ROOT/core/node.py" "$HOME/.local/share/future-crash-look/core/node.py"; then
   echo "INSTALL ERROR: installed node does not match this checkout" >&2
   exit 5

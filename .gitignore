@@ -7,3 +7,4 @@ __pycache__/
 /fc-fixed*/
 /fc-fuxed*
 /future-crash-look-*.zip
+.venv/

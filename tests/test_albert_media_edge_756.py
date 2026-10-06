@@ -27,8 +27,8 @@ def test_albert_prepared_library_media_becomes_browser_player(monkeypatch):
     result=a.action('play some clash')
     assert result['type']=='audio'
     assert result['title']=='London Calling'
-    assert result['src'].startswith('/v1/media/item?')
-    assert 'song-1' in result['src']
+    assert result['media']=={'node':'3090','id':'song-1','index':0}
+    assert 'src' not in result  # playback-time ticketing owns the ephemeral URL
     assert result['pipeline']['effect']=='browser playback'
 
 
@@ -36,7 +36,7 @@ def test_albert_media_proxy_preserves_range_support_contract():
     text=(ROOT/'albert'/'server.py').read_text()
     assert 'def _proxy_media_item' in text
     assert 'handler.headers.get("Range")' in text
-    assert "if path=='/v1/media/item':" in text
+    assert "if path in {'/api/media/audio','/api/media/browser','/v1/media/item'}:" in text
 
 
 def test_shared_media_edge_repairs_some_only_after_full_query():

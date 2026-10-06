@@ -20,9 +20,10 @@ def test_preview_view_marks_existing_marked_set():
 
 
 def test_escape_leaves_preview_before_clearing_filter():
-    needle=r"elif key=='\x1b':" + "\n                    if preview_view:\n                        preview_view=False\n                    else:\n                        query=''; filtering=False; selecting=False; refresh_filter()"
-    assert needle in SRC
-
+    assert "if preview_view:" in SRC
+    assert "preview_view=False" in SRC
+    assert "query=''; filtering=False; matches=[]; selected=0; top=0" in SRC
+    assert "current=browse_rebuild(None,marked) if browse_rebuild else rows" in SRC
 
 def test_simple_preview_architecture_stays_canonical():
     assert "data={'icons':'nerd','preview':'ascii'}" in SRC

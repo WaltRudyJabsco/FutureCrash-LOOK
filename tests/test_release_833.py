@@ -15,7 +15,8 @@ def test_media_find_modern_navigation_and_hot_loop_cache():
     assert '.exists()' not in collapse
 
 def test_sticky_header_focus_follows_real_viewport():
-    assert 'focus_row=selected//cols' in RENDER
+    assert 'focus_row=selected' in RENDER
+    assert 'cursoring' not in RENDER
     assert 'elif focus_row >= top+list_usable:' in RENDER
 
 def test_fabric_browser_video_representation_is_cached_and_source_safe():
