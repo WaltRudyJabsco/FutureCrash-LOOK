@@ -17,7 +17,8 @@ def test_media_find_modern_navigation_and_hot_loop_cache():
 def test_sticky_header_focus_follows_real_viewport():
     assert 'focus_row=selected' in RENDER
     assert 'cursoring' not in RENDER
-    assert 'elif focus_row >= top+list_usable:' in RENDER
+    assert 'elif focus_row >= top+list_view_h:' in RENDER
+    assert 'list_view_h=max(3,list_usable-preview_h-1)' in RENDER
 
 def test_fabric_browser_video_representation_is_cached_and_source_safe():
     assert 'def _browser_media_source(self, entry_id, path_hint=""):' in NODE

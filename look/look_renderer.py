@@ -1436,13 +1436,23 @@ def pager(rows:list[str],height:int,width:int,rebuild=None,browse_rebuild=None,f
             if filtering and filter_context:
                 context_rows=list(filter_context(query,width) or [])[:2]
                 list_usable=max(1,usable-len(context_rows))
-            # Sticky headers shrink the real list viewport. Follow the focus inside it.
+
+            # The narrow preview occupies part of the terminal's vertical budget.
+            # Navigation follows only the list rows that remain visible above it.
+            preview_h=0
+            list_view_h=list_usable
+            if filtering and picked and not preview_view and width<96:
+                preview_h=max(4,min(8,list_usable//3))
+                list_view_h=max(3,list_usable-preview_h-1)
+
+            # Headers and bottom previews both shrink the real list viewport.
             if matches:
                 focus_row=selected
                 if focus_row < top: top=focus_row
-                elif focus_row >= top+list_usable: top=max(0,focus_row-list_usable+1)
-                top=max(0,min(top,max(0,len(current)-list_usable)))
-            page=current[top:top+list_usable]
+                elif focus_row >= top+list_view_h:
+                    top=max(0,focus_row-list_view_h+1)
+                top=max(0,min(top,max(0,len(current)-list_view_h)))
+            page=current[top:top+list_view_h]
             native_preview.frame_cleared()
             sys.stdout.write(CLEAR)
             if context_rows:
@@ -1466,9 +1476,7 @@ def pager(rows:list[str],height:int,width:int,rebuild=None,browse_rebuild=None,f
                         rendered.append(l+' '*pad+FAINT+' │ '+RESET+r)
                     sys.stdout.write('\n'.join(rendered[:list_usable]))
                 else:
-                    preview_h=max(4,min(8,list_usable//3))
-                    list_h=max(3,list_usable-preview_h-1)
-                    rendered=[fit(r,width) for r in page[:list_h]]
+                    rendered=[fit(r,width) for r in page]
                     rendered.append(FAINT+('─'*width)+RESET)
                     rendered.extend(preview_rows(picked,width,preview_h))
                     sys.stdout.write('\n'.join(rendered[:list_usable]))
@@ -1561,15 +1569,15 @@ def pager(rows:list[str],height:int,width:int,rebuild=None,browse_rebuild=None,f
                     selected=max(0,selected-1)
                     top=max(0,top-1)
                 elif key in {'\x1b[6~','\x1b[1;2B'} and matches:
-                    selected=min(len(matches)-1,selected+list_usable)
-                    top=min(max(0,len(current)-list_usable),top+list_usable)
+                    selected=min(len(matches)-1,selected+list_view_h)
+                    top=min(max(0,len(current)-list_view_h),top+list_view_h)
                 elif key in {'\x1b[5~','\x1b[1;2A'} and matches:
-                    selected=max(0,selected-list_usable)
-                    top=max(0,top-list_usable)
+                    selected=max(0,selected-list_view_h)
+                    top=max(0,top-list_view_h)
                 elif key=='\x1b[1;2D' and matches:
                     selected=0; top=0
                 elif key=='\x1b[1;2C' and matches:
-                    selected=len(matches)-1; top=max(0,len(current)-list_usable)
+                    selected=len(matches)-1; top=max(0,len(current)-list_view_h)
                 elif key=='\x1b':
                     if preview_view:
                         preview_view=False
