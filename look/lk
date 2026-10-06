@@ -15681,13 +15681,55 @@ def _media_register(path):
 
 
 def _media_fabric_catalog():
-    """One online Fabric catalog, with a local-library fallback when the node is down."""
+    """Return a recent Fabric catalog without making every UI action pay discovery cost.
+
+    LOOK processes are intentionally short-lived, so cache on disk rather than in
+    memory. A fresh cache makes repeated Signal/LO/LK requests immediate. When the
+    node is slow or unavailable, a stale Fabric catalog is still more useful than
+    throwing away knowledge of remote/offline media.
+    """
+    cache_path=HOME/".cache/look/fabric-media-catalog.json"
+    ttl=max(5.0,float(os.environ.get("LOOK_MEDIA_CATALOG_TTL","45")))
+    now=time.time()
+
+    cached=None
     try:
-        payload=_media_fabric_cli(["media-catalog"])
+        if cache_path.is_file():
+            cached=json.loads(cache_path.read_text(encoding="utf-8"))
+            cached_at=float(cached.get("_look_cached_at") or cache_path.stat().st_mtime)
+            if now-cached_at <= ttl:
+                cached.pop("_look_cached_at",None)
+                return cached
+    except (OSError,ValueError,TypeError):
+        cached=None
+
+    # Talk directly to the already-running local Unified Node. Spawning fcl-node
+    # just to turn around and call localhost adds process startup and JSON churn.
+    try:
+        request=urllib.request.Request(
+            "http://127.0.0.1:7332/v1/media/fabric",
+            headers={"Accept":"application/json"},
+        )
+        with urllib.request.urlopen(request,timeout=8.0) as response:
+            payload=json.loads(response.read().decode("utf-8"))
         if isinstance(payload,dict):
+            try:
+                cache_path.parent.mkdir(parents=True,exist_ok=True)
+                stored=dict(payload)
+                stored["_look_cached_at"]=now
+                _atomic_json(cache_path,stored)
+            except (OSError,ValueError,TypeError):
+                pass
             return payload
-    except RuntimeError:
+    except Exception:
         pass
+
+    # Stale-while-unavailable: catalog knowledge survives a sleepy peer/node.
+    if isinstance(cached,dict):
+        cached.pop("_look_cached_at",None)
+        cached["stale"]=True
+        return cached
+
     local=_media_library()
     node=platform.node() or "local"
     rows=[]
@@ -16323,7 +16365,7 @@ def _media_entry_source(entry):
     raise FileNotFoundError(primary_path or "media queue entry has no path, catalog id, or digest")
 
 
-def _media_pin_playable_entry(entry, timeout=10.0):
+def _media_pin_playable_entry(entry, timeout=1.5):
     """Return the same logical media row pinned to one reachable physical copy.
 
     Catalog merge deliberately keeps all copies. Execution must choose a concrete
@@ -16370,6 +16412,28 @@ def _media_pin_playable_entry(entry, timeout=10.0):
                         pinned=dict(row); pinned.update({"node":node,"id":entry_id})
                         if path: pinned["path"]=path
                         return pinned
+            except urllib.error.HTTPError as exc:
+                # A concrete HTTP failure is evidence that this physical copy is
+                # unavailable; keep looking for another location.
+                errors.append(f"{node}: HTTP {exc.code}")
+                continue
+            except (TimeoutError, socket.timeout) as exc:
+                # Sleeping disks and cross-Fabric startup routinely exceed a tiny
+                # HEAD budget. A timeout is not proof that the media is absent:
+                # hand the canonical URL to the real player and let GET/open wake it.
+                pinned=dict(row); pinned.update({"node":node,"id":entry_id})
+                if path: pinned["path"]=path
+                pinned["reachability"]="optimistic"
+                return pinned
+            except urllib.error.URLError as exc:
+                # urllib wraps socket timeouts on some Python/platform versions.
+                reason=getattr(exc,"reason",None)
+                if isinstance(reason,(TimeoutError,socket.timeout)):
+                    pinned=dict(row); pinned.update({"node":node,"id":entry_id})
+                    if path: pinned["path"]=path
+                    pinned["reachability"]="optimistic"
+                    return pinned
+                errors.append(f"{node}: {exc}")
             except Exception as exc:
                 errors.append(f"{node}: {exc}")
 
