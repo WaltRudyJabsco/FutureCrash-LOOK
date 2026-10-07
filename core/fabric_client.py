@@ -5,7 +5,7 @@ Apps request capabilities; this module handles node choice, packet submission an
 result waiting. It deliberately contains no application semantics.
 """
 from __future__ import annotations
-import base64, json, time, urllib.request, urllib.error, uuid
+import base64, json, ssl, time, urllib.request, urllib.error, urllib.parse, uuid
 
 from conductor import classify as _classify_work, last_user_text as _last_user_text
 try:
@@ -288,6 +288,21 @@ def _stage_image_artifacts(payload, endpoint):
         messages.append(copy)
     return messages,staged
 
+def _transport_failure(exc, *, target, endpoint, stage):
+    """Identify a failed hop without printing URL credentials or request pixels."""
+    parsed=urllib.parse.urlsplit(endpoint)
+    host=parsed.hostname or "unknown"
+    if ":" in host: host=f"[{host}]"
+    if parsed.port: host+=f":{parsed.port}"
+    address=f"{parsed.scheme}://{host}{parsed.path}"
+    reason=getattr(exc,"reason",exc)
+    if isinstance(reason,ssl.SSLCertVerificationError):
+        detail="TLS certificate verification failed; check this peer's paired certificate or the local CA trust"
+    else:
+        detail=str(reason)
+    return RuntimeError(f"Fabric {stage} failed on {target} ({address}): {detail}")
+
+
 def stream_infer(payload, *, requires=None, priority="interactive", timeout=180,
                  base=DEFAULT_NODE, owner="lo", route=None, work_class=None):
     """Route a mature Ollama chat payload to Fabric and yield its JSONL stream.
@@ -366,7 +381,7 @@ def stream_infer(payload, *, requires=None, priority="interactive", timeout=180,
         except RuntimeError as exc:
             # All currently eligible workers may be in the exclusion set. During
             # the interactive BUSY grace window, clear it and ask a fresh snapshot.
-            last_error=exc
+            last_error=last_error or exc
             if busy_grace_deadline and time.monotonic() < busy_grace_deadline:
                 tried.clear(); attempt_no=0
                 time.sleep(busy_retry_seconds)
@@ -379,29 +394,32 @@ def stream_infer(payload, *, requires=None, priority="interactive", timeout=180,
         # making the first model frame look like a ten-second routing decision.
         yield {"_fabric_meta":"route", "_fabric_node":target, "_fabric_model":chosen}
         endpoint_base=_endpoint_base(snap,target,dns,base)
-        staged_messages,_staged=_stage_image_artifacts(payload, endpoint_base) if any(
-            bool(m.get("images")) for m in payload.get("messages",[]) if isinstance(m,dict)
-        ) else (payload.get("messages") or [],[])
-        inp={"model":chosen,"messages":staged_messages,"timeout":timeout,
-             "keep_alive":payload.get("keep_alive",-1),"options":payload.get("options") or {}}
-        if "think" in payload: inp["think"]=payload.get("think")
-        if isinstance(payload.get("tools"),list): inp["tools"]=payload["tools"]
-        packet={
-          "fabric":"fwp/1","kind":"task","origin":owner,"relationships":{},
-          "work":{"operation":"model.infer","objective":"stream conversational inference","input":inp},
-          "capabilities":{"requires":list(reqs),"prefers":{"latency":"low" if tier=="reflex" else "normal","work_class":tier}},
-          "context":{},"execution":{"priority":priority,"cancellable":True,
-            "budget":{"wall_ms":int(timeout*1000)+5000,"child_jobs":0,"depth":0}},
-          "authority":{"principal":"user","grants":["model.infer"],"confirmed_operations":[]},
-          "delivery":{"target":target},"provenance":{},"extensions":{"futurecrash":{"owner":owner,"work_class":tier}},
-        }
-        endpoint=endpoint_base+"/v1/infer/stream"
-        headers={"Content-Type":"application/json"}
-        headers.update(FABRIC_IDENTITY.auth_headers_for_url(endpoint))
-        req=urllib.request.Request(endpoint,data=json.dumps({"packet":packet}).encode(),
-                                   headers=headers,method="POST")
         emitted=False
+        stage="image upload"
+        endpoint=endpoint_base+"/v1/artifacts"
         try:
+            staged_messages,_staged=_stage_image_artifacts(payload, endpoint_base) if any(
+                bool(m.get("images")) for m in payload.get("messages",[]) if isinstance(m,dict)
+            ) else (payload.get("messages") or [],[])
+            inp={"model":chosen,"messages":staged_messages,"timeout":timeout,
+                 "keep_alive":payload.get("keep_alive",-1),"options":payload.get("options") or {}}
+            if "think" in payload: inp["think"]=payload.get("think")
+            if isinstance(payload.get("tools"),list): inp["tools"]=payload["tools"]
+            packet={
+              "fabric":"fwp/1","kind":"task","origin":owner,"relationships":{},
+              "work":{"operation":"model.infer","objective":"stream conversational inference","input":inp},
+              "capabilities":{"requires":list(reqs),"prefers":{"latency":"low" if tier=="reflex" else "normal","work_class":tier}},
+              "context":{},"execution":{"priority":priority,"cancellable":True,
+                "budget":{"wall_ms":int(timeout*1000)+5000,"child_jobs":0,"depth":0}},
+              "authority":{"principal":"user","grants":["model.infer"],"confirmed_operations":[]},
+              "delivery":{"target":target},"provenance":{},"extensions":{"futurecrash":{"owner":owner,"work_class":tier}},
+            }
+            stage="inference stream"
+            endpoint=endpoint_base+"/v1/infer/stream"
+            headers={"Content-Type":"application/json"}
+            headers.update(FABRIC_IDENTITY.auth_headers_for_url(endpoint))
+            req=urllib.request.Request(endpoint,data=json.dumps({"packet":packet}).encode(),
+                                       headers=headers,method="POST")
             with _open(req,url=endpoint,timeout=timeout) as response:
                 node=response.headers.get("X-Fabric-Node") or target
                 for raw in response:
@@ -422,7 +440,7 @@ def stream_infer(payload, *, requires=None, priority="interactive", timeout=180,
             detail=exc.read().decode("utf-8","replace")
             try: detail=json.loads(detail).get("error") or detail
             except Exception: pass
-            last_error=RuntimeError(f"Fabric inference HTTP {exc.code}: {detail}")
+            last_error=RuntimeError(f"Fabric {stage} HTTP {exc.code} on {target}: {detail}")
             # 409 before streaming is temporary placement pressure. Try distinct
             # workers first, then briefly wait/re-route instead of telling the user
             # the Fabric is unavailable merely because every lane was busy now.
@@ -430,10 +448,10 @@ def stream_infer(payload, *, requires=None, priority="interactive", timeout=180,
                 raise last_error from None
             if busy_grace_seconds and busy_grace_deadline is None:
                 busy_grace_deadline=time.monotonic()+busy_grace_seconds
-        except (urllib.error.URLError, TimeoutError, socket.timeout) as exc:
-            last_error=exc
+        except (urllib.error.URLError, TimeoutError, socket.timeout, ssl.SSLError) as exc:
+            last_error=_transport_failure(exc,target=target,endpoint=endpoint,stage=stage)
             if emitted:
-                raise
+                raise last_error from exc
         tried.add(target)
         attempt_no += 1
         if isinstance(route,dict):
