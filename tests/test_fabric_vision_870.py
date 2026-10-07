@@ -59,9 +59,12 @@ def test_unchanged_frame_omits_image_payload(tmp_path, monkeypatch):
         returncode=0
         stderr=b''
     def run(*args,**kwargs):
-        # capture_screen owns a private temp path; create its expected output.
         command=args[0]
-        Path(command[-1]).write_bytes(data)
+        # Only the mocked capture command writes an image. Display-discovery
+        # subprocesses such as `xrandr --query` must not treat their final
+        # argument as an output filename.
+        if command and command[0]=='fake':
+            Path(command[-1]).write_bytes(data)
         return Result()
     monkeypatch.setattr(mod.subprocess,'run',run)
     def compress(source,dest,max_width,quality):

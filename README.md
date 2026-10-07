@@ -1,7 +1,7 @@
-# Future Crash + LOOK 8.8.5 — RESTORE CHANNELS
+# Future Crash + LOOK 8.9.0 — FABRIC MEDIA
 
 
-8.8.5 keeps Resolve First and playable queues intact while adding explicit foreground authorization for remote macOS Fabric Vision and deterministic canonical choice for typed video playback.
+8.9.0 stabilizes the Phase-2 refactor and hardens Fabric media across nodes: faster catalog discovery, reliable remote playback, browser handoff by media ownership, remote artwork and previews, removable-media wake-up, and cleaner LOOK filter interaction.
 
 **One local-first personal computer made from the machines you already own.**
 
@@ -11,7 +11,7 @@ Remote and local media covers now use the same explicit full-RGB Chafa symbol co
 
 | Layer | Version |
 | --- | ---: |
-| Future Crash + LOOK bundle | **8.8.5** |
+| Future Crash + LOOK bundle | **8.9.0** |
 | LOOK component | **4.56.5** |
 | Future Crash component | **1.2.2** |
 
@@ -402,7 +402,7 @@ For repository health, run `./tools/verify.sh`; `docs/CODE_HEALTH.md` documents 
 
 ## Historical release note: 6.1.10
 
-The following section describes **6.1.10 — Media Mount Race Repair** and is preserved for release-history context. The current bundle is **8.8.5 — RESTORE CHANNELS**.
+The following section describes **6.1.10 — Media Mount Race Repair** and is preserved for release-history context. The current bundle is **8.9.0 — FABRIC MEDIA**.
 
 Browser endpoint management is now Fabric-wide: `lk fabric endpoints`, `allow`, and `revoke-endpoint` work from any reachable trusted node rather than only the Signal host. Tailcat adds direct certificate-pinned TLS transport between paired nodes on reachable LAN/IP paths and is preferred automatically; Tailscale remains a fallback for reachability and bootstrap rather than the definition of Fabric networking. Existing 6.0 pairings learn Tailcat metadata from authenticated peer identity and do not require another re-pair.
 

@@ -1,3 +1,14 @@
+# 8.9.0 — FABRIC MEDIA
+
+- Stabilized the Phase-2 architecture refactor.
+- Made Fabric media catalog discovery concurrent and bounded.
+- Repaired remote media reachability and removable-media wake-up behavior.
+- Fixed cross-node Signal browser playback by separating media ownership from output-session ownership.
+- Restored remote terminal previews and player artwork.
+- Repaired classical/classics/arts routing and typed video playback.
+- Hardened LOOK preview layout and older-Python compatibility.
+- Reserved uppercase Q for quit while preserving printable letters for FILTER and destination alpha-search.
+
 # 8.8.5 — RESTORE CHANNELS
 
 - Fix LOOK executable syntax error in purpose-evidence TTFT/rate formatting.
