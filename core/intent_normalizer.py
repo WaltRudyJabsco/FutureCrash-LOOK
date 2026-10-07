@@ -10,6 +10,12 @@ import re
 from typing import Any
 
 SCHEMA = "fabric-intent-v2"
+MAX_MEDIA_SELECTION = 100
+_MEDIA_QUANTITIES = {
+    "a couple": 2, "a couple of": 2, "a few": 3, "some": 8,
+    "one": 1, "two": 2, "three": 3, "four": 4, "five": 5, "six": 6,
+    "seven": 7, "eight": 8, "nine": 9, "ten": 10, "eleven": 11, "twelve": 12,
+}
 
 _MEDIA_KIND = {
     "movie": "video", "movies": "video", "video": "video", "videos": "video",
@@ -79,15 +85,23 @@ def normalize(prompt: str) -> dict[str, Any] | None:
     if m:
         return _intent("media.play", kind=_MEDIA_KIND[m.group(1)], selection="random", limit=1, match_mode="selector")
 
-    # Conversational artist selectors should resolve structurally instead of
-    # becoming fuzzy title strings. "some Stones" means a small random artist
-    # selection; the catalog resolver can expand unique shorthand such as
-    # "Stones" -> "The Rolling Stones" without involving a model.
-    m = re.fullmatch(r"(?:please\s+)?(?:play|put\s+on)\s+(?:me\s+)?some\s+(.+)", text, re.I)
+    # Quantity belongs to selection policy, never fuzzy catalog text. The same
+    # bounded artist request can replace playback or append to its queue.
+    quantity_pattern = "|".join(re.escape(q) for q in sorted(_MEDIA_QUANTITIES, key=len, reverse=True))
+    m = re.fullmatch(
+        rf"(?:please\s+)?(play|put\s+on|shuffle|queue|add)\s+(?:(?:me|us)\s+)?"
+        rf"(\d+|{quantity_pattern})\s+(?:more\s+)?(.+)", text, re.I,
+    )
     if m:
-        artist = _clean(m.group(1).strip(" .!?"))
-        if artist and artist.casefold() not in _MEDIA_KIND:
-            return _intent("media.play", kind="audio", artist=artist, selection="random", limit=8)
+        quantity = m.group(2).casefold()
+        count = int(quantity) if quantity.isdigit() else _MEDIA_QUANTITIES[quantity]
+        artist = re.sub(r"^(?:(?:songs?|tracks?|music)\s+)?(?:by|from|of)\s+", "", m.group(3), flags=re.I)
+        artist = _clean(re.sub(r"\s+(?:songs?|tracks?|music)$", "", artist.strip(" .!?"), flags=re.I))
+        counted = quantity in {"a few", "a couple", "a couple of", "some"} or bool(re.search(r"\b(?:songs?|tracks?|music|by|from)\b", m.group(3), re.I))
+        if artist and counted and artist.casefold() not in _MEDIA_KIND:
+            action = "media.queue" if m.group(1).casefold() in {"queue", "add"} else "media.play"
+            return _intent(action, kind="audio", artist=artist, selection="random",
+                           limit=max(1, min(MAX_MEDIA_SELECTION, count)))
 
     # Media type can appear before or after the human query. Preserve the type
     # as structured data so "Catalina video" searches video metadata for
@@ -155,7 +169,8 @@ def media_tool(intent: dict[str, Any] | None) -> dict[str, Any] | None:
     if action == "media.control":
         return {"tool": "media_control", "args": {"action": intent.get("control") or "status"}}
     if action == "media.queue":
-        return {"tool": "media_queue", "args": {"query": intent.get("query") or ""}}
+        args = {k: intent.get(k) for k in ("query", "kind", "artist", "selection", "limit", "match_mode") if intent.get(k) not in (None, "")}
+        return {"tool": "media_queue", "args": args}
     if action == "media.play":
         args = {k: intent.get(k) for k in ("query", "kind", "artist", "selection", "limit", "shuffle") if intent.get(k) not in (None, "")}
         mode=intent.get("match_mode")

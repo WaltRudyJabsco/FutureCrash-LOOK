@@ -6926,6 +6926,14 @@ def _lo_media_intent_profile(prompt,profile="workspace"):
         resolution={"status":"no_match"}
         normalized=None
     if normalized:
+        artist=str((normalized.get("args") or {}).get("artist") or "")
+        if re.fullmatch(r"(?:(?:this|that|the|same|current) artist|him|her|them|more)",artist,re.I):
+            session=_media_session() or {}
+            queue=session.get("queue") or []
+            index=int(session.get("current_index") or 0)
+            current=queue[index] if 0<=index<len(queue) else {}
+            if not current.get("artist"): return None
+            normalized["args"]["artist"]=current["artist"]
         return normalized
     if resolution.get("status")=="clarify":
         return None
@@ -8305,8 +8313,13 @@ def _capability_tools():
             "name":"media_queue",
             "description":"Add a local/Fabric media artist, album, title, or query to LOOK's canonical media queue without replacing the current queue.",
             "parameters":{"type":"object","properties":{
-                "query":{"type":"string"}
-            },"required":["query"]}
+                "query":{"type":"string"},
+                "kind":{"type":"string","enum":["audio","video"]},
+                "artist":{"type":"string"},
+                "selection":{"type":"string","enum":["all","random"]},
+                "limit":{"type":"integer","minimum":1,"maximum":100},
+                "match_mode":{"type":"string","enum":["fuzzy","literal"]}
+            }}
         }},
         {"type":"function","function":{
             "name":"media_control",
@@ -8383,7 +8396,7 @@ def _run_capability_tool(name,args,workspace,profile):
                                 selection=args.get("selection",""),limit=args.get("limit",0),
                                 match_mode=args.get("match_mode","fuzzy"))
     if name=="media_queue":
-        return _media_tool_queue(args.get("query",""))
+        return _media_tool_queue(**{k:args[k] for k in ("query","kind","artist","selection","limit","match_mode") if k in args})
     if name=="media_control":
         return _media_tool_control(args.get("action","status"))
     return f"Unknown capability tool: {name}"
@@ -15816,6 +15829,23 @@ def _media_autoplay_eligible(row):
     return not (0 < duration < 3.0)
 
 
+def _media_selection_catalog(catalog):
+    """Apply visibility and collapse copies before a limit counts actual songs."""
+    # SHA catalog rows may already contain several locations. Expand those cheap
+    # metadata envelopes so a second collapse cannot discard alternate copies.
+    physical=[]; seen=set()
+    for row in catalog:
+        for location in [row]+list(row.get("locations") or []):
+            if not isinstance(location,dict): continue
+            entry=dict(row); entry.update(location)
+            key=(str(entry.get("node") or ""),str(entry.get("id") or ""),str(entry.get("path") or ""))
+            if key in seen: continue
+            seen.add(key)
+            entry.pop("locations",None); entry.pop("sources",None)
+            physical.append(entry)
+    return [row for row in _media_collapse(physical) if _media_autoplay_eligible(row)]
+
+
 def _media_tool_play(query,shuffle=False,kind="",artist="",selection="",limit=0,match_mode="fuzzy"):
     query=" ".join(str(query or "").split()).strip()
     kind_filter=str(kind or "").casefold()
@@ -15830,7 +15860,7 @@ def _media_tool_play(query,shuffle=False,kind="",artist="",selection="",limit=0,
         catalog,_=_media_catalog_entries()
         try: wanted_limit=max(0,min(100,int(limit or 0)))
         except (TypeError,ValueError): wanted_limit=0
-        rows=media_core.select_entries({"entries":catalog},kind=kind_filter,artist=artist,selection=selection or "all",limit=wanted_limit)
+        rows=media_core.select_entries({"entries":_media_selection_catalog(catalog)},kind=kind_filter,artist=artist,selection=selection or "all",limit=wanted_limit)
         match_kind="selector"
     else:
         return _ToolResult(False,"needs_input","MEDIA NEEDS INPUT · what should I play?")
@@ -15857,18 +15887,33 @@ def _media_tool_play(query,shuffle=False,kind="",artist="",selection="",limit=0,
     return _ToolResult(True,"ok",f"MEDIA PLAY OK · {match_kind} · {label} · {len(rows)} item{'s' if len(rows)!=1 else ''}" + (" · shuffle" if shuffle else ""))
 
 
-def _media_tool_queue(query):
+def _media_tool_queue(query="",kind="",artist="",selection="",limit=0,match_mode="fuzzy"):
     query=" ".join(str(query or "").split()).strip()
-    if not query:
+    if query:
+        match_kind,rows=_media_query_matches(query,match_mode=match_mode)
+    elif kind or artist or selection:
+        catalog,_=_media_catalog_entries()
+        catalog=_media_selection_catalog(catalog)
+        # "More" should draw fresh songs, not repeat the current random batch.
+        existing={_media_logical_key(row) for row in ((_media_session() or {}).get("queue") or [])}
+        catalog=[row for row in catalog if _media_logical_key(row) not in existing]
+        try: wanted_limit=max(0,min(100,int(limit or 0)))
+        except (TypeError,ValueError): wanted_limit=0
+        rows=media_core.select_entries({"entries":catalog},kind=kind,artist=artist,selection=selection or "all",limit=wanted_limit)
+        match_kind="selector"
+    else:
         return _ToolResult(False,"needs_input","MEDIA NEEDS INPUT · what should I queue?")
-    kind,rows=_media_query_matches(query)
+    label=query or artist or kind or "media"
     if not rows:
-        return _ToolResult(False,"not_found",f"MEDIA NOT FOUND · {query}")
-    if kind=="ambiguous":
+        return _ToolResult(False,"not_found",f"MEDIA NOT FOUND · {label}")
+    if match_kind=="ambiguous":
         preview="; ".join(_media_row_label(row) for row in rows[:8])
-        return _ToolResult(False,"ambiguous",f"MEDIA AMBIGUOUS · {query} · {len(rows)} matches · {preview}")
+        return _ToolResult(False,"ambiguous",f"MEDIA AMBIGUOUS · {label} · {len(rows)} matches · {preview}")
     count=_media_queue_append(rows)
-    return _ToolResult(True,"ok",f"MEDIA QUEUE OK · {kind} · {query} · {count} item{'s' if count!=1 else ''}")
+    warning=str((_media_session() or {}).get("runtime_queue_error") or "")
+    if warning:
+        return _ToolResult(False,"failed",f"MEDIA QUEUE SAVED · {count} item(s) · PLAYER APPEND FAILED · {warning}")
+    return _ToolResult(True,"ok",f"MEDIA QUEUE OK · {match_kind} · {label} · {count} item{'s' if count!=1 else ''}")
 
 
 def _media_snapshot_payload():
@@ -17407,15 +17452,62 @@ def _media_detail_lines(row, width=110):
     return lines
 
 
+def _media_append_runtime(session, start):
+    """Extend mpv's playlist without replacing, seeking, or restarting its track."""
+    if not _media_mpv_alive(): return session
+    mapping=list(session.get("runtime_queue_indices") or range(start))
+    count=_media_mpv_property("playlist-count")
+    if not isinstance(count,int) or count!=len(mapping):
+        session["runtime_queue_error"]="player playlist differs from the saved queue; reload the queue to repair it"
+        return session
+    sources=[]; indices=[]; missing=[]
+    for index,entry in enumerate(session["queue"][start:],start):
+        try:
+            sources.append(_media_entry_source(entry)); indices.append(index)
+        except (RuntimeError,FileNotFoundError,ValueError,OSError) as exc:
+            missing.append(str(exc))
+    if sources:
+        # mpv reads this playlist before acknowledging loadlist. A temporary list
+        # keeps the active launch playlist and current transport untouched.
+        STATE_DIR.mkdir(parents=True,exist_ok=True)
+        with tempfile.NamedTemporaryFile("w",suffix=".m3u8",dir=STATE_DIR,delete=False,encoding="utf-8") as output:
+            output.write("#EXTM3U\n"+"\n".join(sources)+"\n")
+            path=Path(output.name)
+        try:
+            result=_media_mpv_request(["loadlist",str(path),"append"])
+        finally:
+            path.unlink(missing_ok=True)
+        if not result or result.get("error")!="success":
+            session["runtime_queue_error"]="mpv did not accept the appended playlist"
+            return session
+        session["runtime_queue_indices"]=mapping+indices
+        # If the old last track ended during source resolution, continue with
+        # the appended batch. An already idle or paused session stays that way.
+        if session.get("state")=="playing" and _media_mpv_property("idle-active"):
+            _media_mpv_request(["set_property","playlist-pos",len(mapping)])
+            _media_mpv_request(["set_property","pause",False])
+    if missing:
+        session["runtime_queue_error"]="; ".join(missing[:3])
+    return session
+
+
+def _media_queue_notice(count):
+    warning=str((_media_session() or {}).get("runtime_queue_error") or "")
+    return f"queued {count}"+(f" · player append failed: {warning}" if warning else "")
+
+
 def _media_queue_append(rows):
     rows=[media_core.queue_entry(row) for row in rows if isinstance(row,dict)]
     if not rows:
         return 0
     session=_media_sync_session() or media_core.new_session([])
     session=media_core.normalize_session(session)
+    start=len(session["queue"])
     session["queue"].extend(rows)
-    # Queue mutation must be instant and side-effect free for interactive selectors.
-    # Do not resolve remote streams or synchronize mpv here; playback reconciles lazily.
+    session.pop("runtime_queue_error",None)
+    # Persistence alone cannot advance playback. Mirror only the newly added
+    # tail at this execution edge; never reload the active track to append.
+    session=_media_append_runtime(session,start)
     _media_save_session(session)
     return len(rows)
 
@@ -17502,7 +17594,7 @@ def _media_tree_candidates(row, rows):
     path=str(row.get("path") or "")
     if not path: return []
     parent=Path(path).parent
-    root_text=str(row.get("root") or "").rstrip(os.sep)
+    root_text=str(row.get("root") or "")
     root=Path(root_text) if root_text else None
     out=[]; seen=set(); current=parent
     while str(current) not in seen:
@@ -17532,7 +17624,7 @@ def _media_choose_hide_directory(row, rows, fd):
             root=" · MEDIA ROOT" if item["media_root"] else ""
             tone="33" if item["media_root"] else "2"
             item_count = f"{item['count']:,} items{root}"
-        print(f"{focus} {label}  {_c(item_count,tone)}")
+            print(f"{focus} {label}  {_c(item_count,tone)}")
         print("\n"+_c("↑↓ choose · Enter hide · Esc cancel","2"),end="",flush=True)
         key=_read_tty_key(fd)
         if key=="esc": return None
@@ -17740,7 +17832,7 @@ def _media_selector(rows,title="FABRIC MEDIA",initial_query="",catalog_meta=None
                 action=("play",chosen); break
             if key=="Q" and chosen:
                 count=_media_queue_append(chosen)
-                notice=f"queued {count}"
+                notice=_media_queue_notice(count)
                 continue
             if key=="A" and visible:
                 visible_ids={row_id(row) for row in visible}
@@ -17930,7 +18022,7 @@ def _media_resolve_targets(args):
         clean.append(arg); i+=1
     if not clean and (kind or selection or artist):
         catalog,_=_media_catalog_entries()
-        rows=media_core.select_entries({"entries":catalog},kind=kind,artist=artist,selection=selection or "all",limit=limit)
+        rows=media_core.select_entries({"entries":_media_selection_catalog(catalog)},kind=kind,artist=artist,selection=selection or "all",limit=limit)
         if not rows:
             label=artist or ("any "+kind if kind else "media")
             raise ValueError(f"no Fabric media match for {label!r}; run lk media find or lk media scan")
@@ -17978,7 +18070,7 @@ def _media_resolve_targets(args):
         if isinstance(intent,dict) and intent.get("action")=="media.play":
             if not intent.get("query"):
                 rows=media_core.select_entries(
-                    {"entries":catalog}, kind=str(intent.get("kind") or ""),
+                    {"entries":_media_selection_catalog(catalog)}, kind=str(intent.get("kind") or ""),
                     artist=str(intent.get("artist") or ""), selection=str(intent.get("selection") or "all"),
                     limit=int(intent.get("limit") or 0),
                 )
@@ -18681,7 +18773,7 @@ def media_mp(initial_query=""):
             if key in {"\r","\n"} and picked:
                 _media_launch_session(media_core.new_session(picked)); notice=f"playing {len(picked)} item(s)"; continue
             if key=="A" and picked:
-                notice=f"queued {_media_queue_append(picked)}"; view_key=None if mode=="queue" else view_key; continue
+                notice=_media_queue_notice(_media_queue_append(picked)); view_key=None if mode=="queue" else view_key; continue
             if key==" ": _media_control_session("toggle"); continue
             if key=="n": _media_control_session("next"); continue
             if key=="p": _media_control_session("prev"); continue
