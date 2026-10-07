@@ -984,9 +984,9 @@ def _destination_picker(start_dir:Path)->Path|None:
             sys.stdout.write(f'\n{CYAN}{BOLD}FILTER{RESET} {WHITE}{query}█{RESET}')
             sys.stdout.flush()
             key=read_key()
-            if key in {'\x03','q','Q','\x1b'}: return None
-            if key in {'\x1b[B','j'} and visible: selected=min(len(visible)-1,selected+1); continue
-            if key in {'\x1b[A','k'} and visible: selected=max(0,selected-1); continue
+            if key in {'\x03','Q','\x1b'}: return None
+            if key=='\x1b[B' and visible: selected=min(len(visible)-1,selected+1); continue
+            if key=='\x1b[A' and visible: selected=max(0,selected-1); continue
             if key in {'\x1b[6~','\x1b[1;2B'} and visible: selected=min(len(visible)-1,selected+usable); continue
             if key in {'\x1b[5~','\x1b[1;2A'} and visible: selected=max(0,selected-usable); continue
             if key=='\x1b[1;2D' and visible: selected=0; continue
