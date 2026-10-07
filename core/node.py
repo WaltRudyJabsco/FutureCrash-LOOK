@@ -385,7 +385,7 @@ class Supervisor:
 
     def cancelled(self, rid):
         with self.lock:
-            return bool(self.active and self.active.id == rid and self.active.cancel_requested)
+            return not self.active or self.active.id != rid or self.active.cancel_requested
 
     def reconcile(self):
         """Pulse backstop: mark stale work; never kill healthy work on elapsed time alone."""
@@ -838,25 +838,52 @@ def _ollama_residency_action(model, keep):
     return http_json("http://127.0.0.1:11434/api/generate",payload,timeout=180 if keep else 30)
 
 
-def curator_apply(profile="balanced", reason="manual"):
-    """Converge local Ollama residency on the requested canonical set."""
-    if SUP.status()["active"] is not None:
-        return {"ok":False,"skipped":"supervisor busy","plan":curator_plan(profile)}
-    plan=curator_plan(profile)
-    if not plan.get("ok"): return plan
+def curator_apply(profile="balanced", reason="manual", *, lease_id=None, target_model=None, allow_load=True):
+    """Change residency only while owning the worker; never speculate in idle cycles."""
+    with CURATOR_LOCK:
+        plan=curator_plan(profile)
+        if not plan.get("ok"): return plan
+        if target_model:
+            if target_model not in (plan.get("eligible") or []):
+                return {"ok":False,"skipped":"requested model unavailable","plan":plan}
+            # Routing has already selected the model for this request. A profile
+            # recommendation must not replace it with a different large model.
+            plan=dict(plan,target=[target_model])
+        if not allow_load and set(plan.get("target") or [])-set(plan.get("current") or []):
+            return {"ok":True,"deferred":"background never cold-loads models","plan":plan}
+        owns_lease=lease_id is None
+        if owns_lease:
+            lease,busy=SUP.acquire("model-curator", "background" if reason=="background policy" else "interactive",
+                                   "curation", reason, worker=identity().get("name","local"))
+            if not lease: return {"ok":False,"skipped":"supervisor busy","plan":plan}
+            lease_id=lease["id"]
+        elif SUP.cancelled(lease_id):
+            return {"ok":False,"skipped":"inference lease lost","plan":plan}
+        try:
+            return _curator_converge(plan,profile,reason,lease_id,load_models=not target_model)
+        finally:
+            if owns_lease: SUP.release(lease_id,"ok","curation finished")
+
+
+def _curator_converge(plan,profile,reason,lease_id,load_models=True):
     target=list(plan.get("target") or []); current=list(plan.get("current") or [])
     unloaded=[]; loaded=[]; errors=[]
     # Reclaim first. Large-model requests must not inherit VRAM pressure from the
     # balanced resident set.
     for name in current:
+        if SUP.cancelled(lease_id): return {"ok":False,"skipped":"curation yielded"}
         if name not in target:
             try: _ollama_residency_action(name,False); unloaded.append(name)
             except Exception as exc: errors.append(f"unload {name}: {exc}")
-    for name in target:
+    # A request loads its own selected model through /api/chat with the actual
+    # context size. Prewarming at CURATOR_CONTEXT would load it twice.
+    for name in (target if load_models else []):
+        if SUP.cancelled(lease_id): return {"ok":False,"skipped":"curation yielded"}
         if name not in current:
             try: _ollama_residency_action(name,True); loaded.append(name)
             except Exception as exc: errors.append(f"load {name}: {exc}")
-    MODELS.discover(force=True); refresh_advertisement()
+    if unloaded or loaded:
+        MODELS.discover(force=True); refresh_advertisement()
     state=load_curator_state(); state.update(last_action=now(),last_reason=reason,profile=profile)
     save_curator_state(state)
     result={"ok":not errors,"profile":profile,"target":target,"loaded":loaded,"unloaded":unloaded,"errors":errors,
@@ -906,7 +933,7 @@ def background_curator():
         try:
             plan=curator_plan(profile)
             if plan.get("ok") and set(plan.get("target") or [])!=set(plan.get("current") or []):
-                curator_apply(profile,reason="background policy")
+                curator_apply(profile,reason="background policy",allow_load=False)
         except Exception:
             pass
 
@@ -1607,6 +1634,13 @@ def execute_packet(packet, job_id, attempt, worker, lease_id):
     return data
 
 
+def _queued_stream_request(packet):
+    # Historical stream clients used this objective before stream ownership was
+    # explicit. Those queued attempts must not replay after an upgrade/restart.
+    work=packet.get("work") or {}
+    return work.get("operation")=="model.infer" and work.get("objective")=="stream conversational inference"
+
+
 def job_worker_loop():
     """Small deterministic worker. Ledger faults degrade/retry; the thread stays alive."""
     worker = identity()["name"]
@@ -1636,6 +1670,14 @@ def job_worker_loop():
                 if not lease:
                     break
                 lease_id = lease["id"]
+                current=FABRIC_STORE.get_job(job["id"])
+                if not current or current.get("status")!="queued":
+                    SUP.release(lease_id,"skipped","queued snapshot already handled")
+                    continue
+                if _queued_stream_request(packet):
+                    FABRIC_STORE.finish(job["id"],"cancelled",error="orphaned stream request; client must retry",node=worker)
+                    SUP.release(lease_id,"cancelled","orphaned stream request")
+                    continue
                 attempt = FABRIC_STORE.start(job["id"], worker)
                 SUP.progress(lease_id, "working", str(operation))
                 FABRIC_STORE.event(job["id"], "progress", "working", str(operation), node=worker)
@@ -1670,8 +1712,8 @@ def job_worker_loop():
             time.sleep(1.0)
 
 
-def _curator_prepare_packet(packet):
-    """For auto mode, make room for genuinely deep work before taking the lease."""
+def _curator_prepare_packet(packet, lease_id):
+    """Prepare the selected deep model after this request owns the worker."""
     state=load_curator_state()
     if state.get("mode")!="auto": return None
     prefs=(packet.get("capabilities") or {}).get("prefers") or {}
@@ -1681,7 +1723,9 @@ def _curator_prepare_packet(packet):
     state["profile"]="deep"
     save_curator_state(state)
     with CURATOR_LOCK:
-        return curator_apply("deep",reason="deep interactive work")
+        model=str(((packet.get("work") or {}).get("input") or {}).get("model") or "")
+        if not model: return None
+        return curator_apply("deep",reason="deep interactive work",lease_id=lease_id,target_model=model)
 
 
 def _stream_model_infer(handler, raw):
@@ -1706,15 +1750,15 @@ def _stream_model_infer(handler, raw):
     req_ok, missing = _requirements_ok(packet)
     if not req_ok:
         raise ValueError("missing capabilities: " + ", ".join(missing))
-    job, created = FABRIC_STORE.submit(packet, node=worker)
-    if not created:
-        raise ValueError("stream packet id already exists")
     priority = (packet.get("execution") or {}).get("priority", "interactive")
+    # Reserve before ledger submission. Rejected HTTP attempts must never become
+    # queued work that the asynchronous executor later runs without their client.
+    if not CURATOR_LOCK.acquire(blocking=False):
+        raise RuntimeError("worker busy: model curation in progress")
     try:
-        _curator_prepare_packet(packet)
-    except Exception:
-        pass
-    lease, busy = SUP.acquire(f"job:{job['id']}", priority, "inference", "streaming model inference", worker=worker)
+        lease, busy = SUP.acquire(f"job:{packet['id']}", priority, "inference", "streaming model inference", worker=worker)
+    finally:
+        CURATOR_LOCK.release()
     if not lease:
         raise RuntimeError("worker busy")
     lease_id = lease["id"]
@@ -1727,7 +1771,16 @@ def _stream_model_infer(handler, raw):
         lease_done = True
         return SUP.release(lease_id, status, detail)
 
+    job=None
     try:
+        job, created = FABRIC_STORE.submit(packet, node=worker)
+        if not created:
+            job=None
+            raise ValueError("stream packet id already exists")
+        try:
+            _curator_prepare_packet(packet,lease_id)
+        except Exception:
+            pass
         attempt = FABRIC_STORE.start(job["id"], worker)
         inp = (packet.get("work") or {}).get("input") or {}
         model = str(inp.get("model") or "")
@@ -1836,6 +1889,8 @@ def _stream_model_infer(handler, raw):
         # release the lane too (artifact hydration/model discovery included).
         # Otherwise a one-off vision error can leave a permanent ghost BUSY worker.
         if not lease_done:
+            if job is not None:
+                FABRIC_STORE.finish(job["id"],"failed",error="stream aborted before completion",node=worker)
             _release("failed", "stream aborted before completion")
 
 
