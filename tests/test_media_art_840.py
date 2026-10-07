@@ -23,6 +23,7 @@ def test_embedded_cover_extracts_and_player_ascii_needs_no_chafa(monkeypatch):
         real=media_art.shutil.which
         monkeypatch.setattr(media_art.shutil,'which',lambda name: None if name=='chafa' else real(name))
         lines=media_art.ascii_lines(song,16,6)
+        assert media_art.symbol_lines(song,16,6) == lines
         assert len(lines)>=3
         assert all(set(line) <= set(' .:-=+*#%@') for line in lines)
 
