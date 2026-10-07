@@ -17238,6 +17238,9 @@ def _media_remote_preview_worker_loop():
         _REMOTE_MEDIA_PREVIEW_LOADING.add(key)
         try:
             _media_fetch_remote_preview(row,width,height)
+            # Warm the tiny cover cache off-thread as well. MP can then promote
+            # ASCII to native pixels on its next frame without blocking input.
+            _media_remote_cover_path(row)
         finally:
             _REMOTE_MEDIA_PREVIEW_LOADING.discard(key)
 
@@ -17282,8 +17285,12 @@ def _media_remote_preview_state(row,width,height):
 def _media_remote_preview_pending(row,width,height):
     return _media_remote_preview_state(row,width,height)[0]=="loading"
 
-def _media_remote_cover_path(row):
-    """Fetch/cache a remote owner's tiny cover asset, never the whole media file."""
+def _media_remote_cover_path(row, fetch=True):
+    """Return/fetch a remote owner's tiny cover asset, never the whole media file.
+
+    ``fetch=False`` is the interactive fast path: return cached art only and never
+    block cursor movement on Fabric/network I/O.
+    """
     if not isinstance(row,dict): return None
     candidates=[]
     # Queue entries retain this compact identity even after playback has been
@@ -17316,6 +17323,8 @@ def _media_remote_cover_path(row):
         try:
             if out.is_file() and out.stat().st_size>0: return out
         except OSError: pass
+        if not fetch:
+            continue
         miss_key=f"{node}|{entry_id}|{path}"
         if now-float(_REMOTE_MEDIA_ART_MISS.get(miss_key) or 0)<20.0: continue
         url='http://127.0.0.1:7332/v1/media/cover?'+urllib.parse.urlencode({"node":node,"id":entry_id,"path":path})
@@ -18445,12 +18454,16 @@ def media_player():
 
 
 def _media_mp_rows(mode, library_rows, query):
-    """Return the current MP list without manufacturing a second media model."""
+    """Return MP rows through the same logical visibility model as Media Find."""
     if mode == "queue":
         session=_media_sync_session() or _media_session() or {}
         rows=list(session.get("queue") or [])
     else:
-        rows=list(library_rows)
+        rows=_media_collapse(
+            library_rows,
+            show_all=False,
+            show_hidden=False,
+        )
     return _media_filter_rows(rows,query) if query else rows
 
 
@@ -18503,6 +18516,16 @@ def media_mp(initial_query=""):
     # frame reads this flag before any key event has had a chance to create it.
     search_mode=False
     search_before=query
+    # MP owns its own graphics plane. ASCII/Fabric text art is immediate;
+    # supported terminals may progressively replace only the art rectangle.
+    native_preview=NativePreviewController()
+
+    # Full terminal redraws erase native graphics. Repaint only when MP state
+    # actually changes; idle polling may paint a completed native image without
+    # immediately replacing it with the ASCII fallback again.
+    dirty=True
+    pending=False
+    last_terminal_size=None
 
     def row_id(row):
         return str(row.get("digest") or f"{row.get('node','')}:{row.get('id','')}:{row.get('path','')}")
@@ -18511,88 +18534,128 @@ def media_mp(initial_query=""):
         tty.setcbreak(fd)
         sys.stdout.write("\033[2J\033[H")
         while True:
-            next_key=(mode,query)
-            if next_key != view_key:
-                visible=_media_mp_rows(mode,library_rows,query)
-                view_key=next_key
-                idx=max(0,min(idx,max(0,len(visible)-1)))
-            terminal=shutil.get_terminal_size((120,34))
-            width=max(72,terminal.columns)
-            height=max(20,terminal.lines)
-            right_w=min(40,max(28,width//3)) if width>=96 else 0
-            left_w=width-right_w-3 if right_w else width
-            list_rows=max(6,height-10)
-            top=max(0,min(max(0,len(visible)-list_rows),idx-list_rows+1))
-            page=visible[top:top+list_rows]
-            chosen=visible[idx] if visible else None
-            selected=[row for row in visible if row_id(row) in selected_ids]
+            terminal_now=shutil.get_terminal_size((120,34))
+            terminal_size=(terminal_now.columns,terminal_now.lines)
+            if terminal_size != last_terminal_size:
+                last_terminal_size=terminal_size
+                dirty=True
 
-            info_h=list_rows
-            art=[]; art_status=""
-            if chosen and right_w:
-                art_h=min(11,max(6,info_h//2))
-                art=_media_cover_lines(chosen,right_w,art_h,background_remote=True)
-                state,owner=_media_remote_preview_state(chosen,right_w,art_h)
-                if not art and state in {"loading","idle"}:
-                    art_status=f"ART… requesting {owner}" if owner else "ART… loading"
-                elif not art and state=="unavailable":
-                    art_status="ART unavailable"
-                details=_media_detail_lines(chosen,right_w)[:max(0,info_h-art_h-1)]
-            else:
-                details=[]
+            if dirty:
+                next_key=(mode,query)
+                if next_key != view_key:
+                    visible=_media_mp_rows(mode,library_rows,query)
+                    view_key=next_key
+                    idx=max(0,min(idx,max(0,len(visible)-1)))
+                terminal=shutil.get_terminal_size((120,34))
+                width=max(72,terminal.columns)
+                height=max(20,terminal.lines)
+                right_w=min(40,max(28,width//3)) if width>=96 else 0
+                left_w=width-right_w-3 if right_w else width
+                list_rows=max(6,height-10)
+                top=max(0,min(max(0,len(visible)-list_rows),idx-list_rows+1))
+                page=visible[top:top+list_rows]
+                chosen=visible[idx] if visible else None
+                selected=[row for row in visible if row_id(row) in selected_ids]
 
-            out=io.StringIO()
-            with redirect_stdout(out):
-                tab="LIBRARY" if mode=="library" else "QUEUE"
-                node_count=len((catalog_meta or {}).get("nodes") or [])
-                _title("LOOK MP",f"{tab} · {len(visible):,} shown · {node_count} node(s) · {len(selected_ids)} marked")
-                print(_c("FABRIC VISION", "1;36")+"  "+_c("Fabric library + queue + transport", "2"))
-                print("─"*min(width,140))
-                for line_no in range(list_rows):
-                    if line_no < len(page):
-                        n=top+line_no; row=page[line_no]
-                        rid=row_id(row)
-                        focus=_c("›","1;36") if n==idx else " "
-                        mark=_c("✓","32") if rid in selected_ids else " "
-                        label=_media_row_label(row)
-                        node=str(row.get("node") or "local")
-                        suffix=f" · {node}"
-                        max_label=max(12,left_w-len(suffix)-5)
-                        left=f"{focus}{mark} "+(label[:max_label-1]+"…" if len(label)>max_label else label.ljust(max_label))+_c(suffix,"2")
+                info_h=list_rows
+                art=[]; art_status=""; native_art=None
+                if chosen and right_w:
+                    art_h=min(11,max(6,info_h//2))
+                    art=_media_cover_lines(chosen,right_w,art_h,background_remote=True)
+
+                    # NativePreviewController requires a real local image. Resolve
+                    # local media artwork immediately; for remote rows use only an
+                    # already-cached cover here so cursor movement never waits on
+                    # Fabric/network I/O.
+                    local_source=_media_art_source(chosen)
+                    if local_source:
+                        candidate=media_art.artwork_for(local_source)
+                        if candidate:
+                            native_art=Path(candidate)
                     else:
-                        left=""
-                    if right_w:
-                        right=""
-                        if line_no < len(art):
-                            right=_ansi_clip(art[line_no],right_w)
-                        elif line_no==0 and art_status:
-                            right=_c(art_status,"2" if "requesting" in art_status or "loading" in art_status else "33")
-                        else:
-                            di=line_no-max(len(art),1 if art_status else 0)
-                            if 0 <= di < len(details): right=details[di]
-                        print(_ansi_clip(left,left_w)+" "*max(0,left_w-len(_strip_ansi(_ansi_clip(left,left_w))))+" │ "+_ansi_clip(right,right_w))
-                    else:
-                        print(_ansi_clip(left,width))
-                print("─"*min(width,140))
-                print(_c(_media_mp_now_playing(width),"1"))
-                if search_mode:
-                    filter_text=f"SEARCH /{query}█"
+                        candidate=_media_remote_cover_path(chosen,fetch=False)
+                        if candidate:
+                            native_art=Path(candidate)
+                    state,owner=_media_remote_preview_state(chosen,right_w,art_h)
+                    if not art and state in {"loading","idle"}:
+                        art_status=f"ART… requesting {owner}" if owner else "ART… loading"
+                    elif not art and state=="unavailable":
+                        art_status="ART unavailable"
+                    details=_media_detail_lines(chosen,right_w)[:max(0,info_h-art_h-1)]
                 else:
-                    filter_text=f"FILTER {query or 'all media'} · / search"
-                print(_c(filter_text,"1;36"))
-                controls="↑↓ select · ⇧ arrows page/top/bottom · Tab mark · Enter play · A add queue · L library · Q queue"
-                print(_c(controls,"2"))
-                print(_c("space pause · ←/→ seek · p/n prev/next · s shuffle · r repeat · x stop · Esc clear/exit","2"),end="")
-                if notice:
-                    print("  "+_c(notice,"33"),end="")
-                    notice=""
-            sys.stdout.write(_terminal_frame_payload(out.getvalue()))
-            sys.stdout.flush()
+                    details=[]
 
-            pending=bool(chosen and right_w and not art and art_status.startswith("ART…"))
+                out=io.StringIO()
+                with redirect_stdout(out):
+                    tab="LIBRARY" if mode=="library" else "QUEUE"
+                    node_count=len((catalog_meta or {}).get("nodes") or [])
+                    _title("LOOK MP",f"{tab} · {len(visible):,} shown · {node_count} node(s) · {len(selected_ids)} marked")
+                    print(_c("FABRIC VISION", "1;36")+"  "+_c("Fabric library + queue + transport", "2"))
+                    print("─"*min(width,140))
+                    for line_no in range(list_rows):
+                        if line_no < len(page):
+                            n=top+line_no; row=page[line_no]
+                            rid=row_id(row)
+                            focus=_c("›","1;36") if n==idx else " "
+                            mark=_c("✓","32") if rid in selected_ids else " "
+                            label=_media_row_label(row)
+                            node=str(row.get("node") or "local")
+                            suffix=f" · {node}"
+                            max_label=max(12,left_w-len(suffix)-5)
+                            left=f"{focus}{mark} "+(label[:max_label-1]+"…" if len(label)>max_label else label.ljust(max_label))+_c(suffix,"2")
+                        else:
+                            left=""
+                        if right_w:
+                            right=""
+                            if line_no < len(art):
+                                right=_ansi_clip(art[line_no],right_w)
+                            elif line_no==0 and art_status:
+                                right=_c(art_status,"2" if "requesting" in art_status or "loading" in art_status else "33")
+                            else:
+                                di=line_no-max(len(art),1 if art_status else 0)
+                                if 0 <= di < len(details): right=details[di]
+                            print(_ansi_clip(left,left_w)+" "*max(0,left_w-len(_strip_ansi(_ansi_clip(left,left_w))))+" │ "+_ansi_clip(right,right_w))
+                        else:
+                            print(_ansi_clip(left,width))
+                    print("─"*min(width,140))
+                    print(_c(_media_mp_now_playing(width),"1"))
+                    if search_mode:
+                        filter_text=f"SEARCH /{query}█"
+                    else:
+                        filter_text=f"FILTER {query or 'all media'} · / search"
+                    print(_c(filter_text,"1;36"))
+                    controls="↑↓ select · ⇧ arrows page/top/bottom · Tab mark · Enter play · A add queue · D hide dir · L library · Q queue"
+                    print(_c(controls,"2"))
+                    print(_c("space pause · ←/→ seek · p/n prev/next · s shuffle · r repeat · x stop · Esc clear/exit","2"),end="")
+                    if notice:
+                        print("  "+_c(notice,"33"),end="")
+                        notice=""
+                native_preview.frame_cleared()
+                sys.stdout.write(_terminal_frame_payload(out.getvalue()))
+                sys.stdout.flush()
+
+                # Header occupies three terminal rows; the list/art pane begins on
+                # row 4. The right pane begins immediately after " │ ".
+                if native_art and right_w:
+                    native_preview.request(native_art,4,left_w+4,art_h,right_w)
+                else:
+                    native_preview.invalidate()
+
+                pending=bool(chosen and right_w and not art and art_status.startswith("ART…"))
+                dirty=False
+
             key=_read_tty_key(fd,.10 if pending else .25)
+            native_preview.paint_ready()
             if not key:
+                # Remote artwork may become available while idle. Keep checking
+                # only while that asynchronous request is genuinely pending.
+                if pending:
+                    dirty=True
                 continue
+
+            # Every real input event may alter selection, mode, query, queue,
+            # transport status, notice text, or visibility.
+            dirty=True
             if search_mode:
                 if key=="esc":
                     query=search_before; search_mode=False; idx=0; view_key=None; continue
@@ -18616,6 +18679,16 @@ def media_mp(initial_query=""):
             if key in {"pagedown","shiftdown"} and visible: idx=min(len(visible)-1,idx+list_rows); continue
             if key in {"home","shiftleft"} and visible: idx=0; continue
             if key in {"end","shiftright"} and visible: idx=len(visible)-1; continue
+            if key=="D" and chosen:
+                picked=_media_choose_hide_directory(chosen,library_rows,fd)
+                if picked and _media_hide_tree_path(picked["path"]):
+                    notice=f"hidden directory · {picked['count']:,} item(s)"
+                    selected_ids.clear()
+                    idx=0
+                    view_key=None
+                else:
+                    notice="hide directory cancelled"
+                continue
             if key=="L": mode="library"; query=""; idx=0; selected_ids.clear(); view_key=None; continue
             if key=="Q": mode="queue"; query=""; idx=0; selected_ids.clear(); view_key=None; continue
             if key=="\t" and chosen:
@@ -18639,6 +18712,7 @@ def media_mp(initial_query=""):
     except KeyboardInterrupt:
         return 0
     finally:
+        native_preview.invalidate()
         try: termios.tcsetattr(fd,termios.TCSADRAIN,old)
         except Exception: pass
         sys.stdout.write("\n")

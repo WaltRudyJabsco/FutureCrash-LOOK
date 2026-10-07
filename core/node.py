@@ -431,7 +431,12 @@ def refresh_identity():
     """Refresh transport hints while keeping Fabric identity transport-independent."""
     ts = tailscale_self()
     hostname = socket.gethostname()
-    name = ((ts.get("dns") or "").split(".", 1)[0] or ts.get("hostname") or hostname)
+
+    # Fabric naming and transport naming are separate concerns. A configured
+    # node name is stable; Tailscale DNS/HostName remains mutable transport
+    # metadata and must never silently rename the Fabric node.
+    configured_name = os.environ.get("FCL_NODE_NAME", "").strip()
+    name = configured_name or ((ts.get("dns") or "").split(".", 1)[0] or ts.get("hostname") or hostname)
     value = {"name": name, "hostname": hostname, "tailscale": ts}
     try:
         value.update(FABRIC_IDENTITY.public(name=name, hostname=hostname))
