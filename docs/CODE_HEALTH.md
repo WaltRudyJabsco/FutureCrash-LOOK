@@ -52,3 +52,12 @@ has a name and one job. Current highest-value future boundaries are:
 
 The goal is not fashionable architecture. The goal is to make any behavior have one
 obvious home and one obvious test.
+
+## First LO extraction
+
+The post-8.9.0 [response-stream audit](AUDIT_LO_STREAM.md) extracts normalized
+stream assembly to `look/lo_stream.py`. Fabric and direct Ollama share that
+boundary; terminal cleanup and action/receipt policy remain in the conversation
+loop. `ollama_chat()` is now 1,495 lines with structural complexity 483, down
+from 1,515 / 501. The next audit should trace final-response truth through saved
+conversation and memory before extracting more policy.

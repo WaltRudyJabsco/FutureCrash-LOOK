@@ -12,6 +12,7 @@ if str(_LOOK_MODULE_DIR) not in sys.path:
     sys.path.insert(0,str(_LOOK_MODULE_DIR))
 import media_core
 import media_art
+import lo_stream
 import file_catalog
 import games as look_games
 from look_renderer import NativePreviewController
@@ -11885,40 +11886,20 @@ def ollama_chat(force_search=False, initial_prompt=None, allow_start=True, host_
                 if events: events.emit("tools_scoped",family=turn_intent,tools=[t.get("function",{}).get("name","") for t in tools])
 
             try:
-                aggregate={"role":"assistant","content":"","thinking":"","tool_calls":[]}
                 roller=_RollingThinking(_load_think_display())
                 waiting=_ActivityHandle("waiting for model").start()
-                first_event=True
-                final_event={}
                 task_rounds+=1
                 if events: events.emit("inference_start", round=task_rounds)
-                progress_tokens=0
                 try:
                     if fabric_mode:
                         stream_iter=_fabric_stream_chat(payload_obj,events=events,route=turn_fabric_route)
                     else:
                         stream_iter=_ollama_stream_chat(base,payload_obj,events=events)
-                    for event in stream_iter:
-                        fragment=event.get("message",{}) or {}
-                        thought=str(fragment.get("thinking") or "")
-                        content=str(fragment.get("content") or "")
-                        calls=fragment.get("tool_calls") or []
-                        if first_event and (thought or content or calls):
-                            waiting.finish(); first_event=False
-                            if events: events.emit("first_token", round=task_rounds)
-                        if events and (thought or content):
-                            progress_tokens += 1
-                            if progress_tokens % 16 == 0:
-                                events.emit("token_progress", chunks=progress_tokens, round=task_rounds)
-                        if thought:
-                            aggregate["thinking"]+=thought
-                            roller.feed(thought)
-                        if content:
-                            aggregate["content"]+=content
-                        if calls:
-                            aggregate["tool_calls"].extend(calls)
-                        if event.get("done"):
-                            final_event=event
+                    aggregate,final_event=lo_stream.collect_response(
+                        stream_iter,round_number=task_rounds,
+                        on_first_token=waiting.finish,on_thinking=roller.feed,
+                        events=events,
+                    )
                 finally:
                     waiting.finish()
                 roller.finish()

@@ -11,13 +11,14 @@ def test_look_installer_verifies_each_runtime_copy_immediately():
     assert 'cmp -s "$src" "$dst"' in helper
     assert 'exit 5' in helper
     assert 'install_file "$ROOT/look/look_renderer.py" "$HOME/.local/share/look/look_renderer.py"' in source
-    for name in ('lk','look_ai.py','lo_engine.py','media_core.py','media_art.py','media_watch.py','file_catalog.py','games.py','comfy_bootstrap.py'):
+    for name in ('lk','look_ai.py','lo_engine.py','lo_stream.py','media_core.py','media_art.py','media_watch.py','file_catalog.py','games.py','comfy_bootstrap.py'):
         assert f'install_file "$ROOT/look/{name}"' in source
 
 
 def test_unified_installer_rechecks_renderer_at_release_boundary():
     source=(ROOT/'install.sh').read_text()
     assert 'verify_same "$ROOT/look/look_renderer.py" "$HOME/.local/share/look/look_renderer.py" "LOOK renderer"' in source
+    assert 'verify_same "$ROOT/look/lo_stream.py" "$HOME/.local/share/look/lo_stream.py" "LO stream assembler"' in source
 
 
 def test_code_health_invariants_are_machine_checkable():
