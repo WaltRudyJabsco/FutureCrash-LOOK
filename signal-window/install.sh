@@ -3,7 +3,7 @@ set -euo pipefail
 SOURCE_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 INSTALL_DIR="$HOME/.local/share/signal-window"
 mkdir -p "$INSTALL_DIR"
-install -m 0644 "$SOURCE_DIR/index.html" "$SOURCE_DIR/style.css" "$SOURCE_DIR/app.js" "$INSTALL_DIR/"
+install -m 0644 "$SOURCE_DIR/index.html" "$SOURCE_DIR/style.css" "$SOURCE_DIR/app.js" "$SOURCE_DIR/media-session.js" "$INSTALL_DIR/"
 install -m 0755 "$SOURCE_DIR/server.py" "$INSTALL_DIR/server.py"
 OS="$(uname -s)"
 if [[ "$OS" == "Linux" ]] && command -v systemctl >/dev/null 2>&1; then

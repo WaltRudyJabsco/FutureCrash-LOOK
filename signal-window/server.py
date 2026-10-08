@@ -1164,7 +1164,7 @@ class App(BaseHTTPRequestHandler):
                 "lo_timeout":self.lo_timeout,"gallery":str(self.gallery_dir) if self.gallery_enabled else None,
                 **(probe_ollama(self.backend) if self.mode=="ollama" else {"ok":lo_ok})})
         path="index.html" if self.path in ("/","") else self.path.lstrip("/")
-        if path not in ("index.html","app.js","style.css"): return self.json(404,{"error":"not found"})
+        if path not in ("index.html","app.js","media-session.js","style.css"): return self.json(404,{"error":"not found"})
         p=ROOT/path; self.send_bytes(200,p.read_bytes(),mimetypes.guess_type(p.name)[0] or "application/octet-stream")
     def do_POST(self):
         if self.path.startswith("/api/"):

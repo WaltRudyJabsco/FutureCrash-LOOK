@@ -80,6 +80,11 @@ try:
 except ImportError:
     from fabric_vision import capture_provider as vision_capture_provider, capture_screen as vision_capture_screen, list_displays as vision_list_displays, vision_broker_request
 
+try:
+    from . import maintenance
+except ImportError:
+    import maintenance
+
 VERSION = "8.9.0"
 RELEASE_NAME = "FABRIC VISION"
 DEFAULT_HOST = "127.0.0.1"
@@ -925,7 +930,7 @@ def background_curator():
     while True:
         time.sleep(CURATOR_INTERVAL_SECONDS)
         state=load_curator_state()
-        if benchmark_guard_active(): continue
+        if benchmark_guard_active() or maintenance.draining(): continue
         if state.get("mode")!="auto": continue
         if SUP.status()["active"] is not None: continue
         if now()-SUP.last_human_activity < CURATOR_IDLE_SECONDS: continue
@@ -1198,6 +1203,7 @@ def _build_advertisement():
         },
         "supervisor": SUP.status(),
         "curation": load_curator_state(),
+        "maintenance": _maintenance_advertisement(),
     }
 
 def refresh_advertisement():
@@ -1329,7 +1335,7 @@ def background_qualifier():
         time.sleep(5)
         if SUP.status()["active"] is not None:
             continue
-        if benchmark_guard_active():
+        if benchmark_guard_active() or maintenance.draining():
             continue
         if now() - SUP.last_human_activity < QUALIFY_IDLE_SECONDS:
             continue
@@ -1402,6 +1408,31 @@ def service_status(name: str):
     return {"ok": True, "service": name, "managed": False, "state": "unmanaged"}
 
 
+def _maintenance_advertisement():
+    try:
+        manifest=json.loads(maintenance.registry().read_text())
+        return {"protocol":maintenance.PROTOCOL,"release":manifest.get("release"),"commit":manifest.get("commit"),
+                "state":maintenance.status().get("state","idle")}
+    except (OSError,ValueError): return {"protocol":maintenance.PROTOCOL,"registered":False}
+
+
+def _maintenance_update(data):
+    if data.get("confirm") is not True: raise PermissionError("update requires explicit confirmation")
+    source=str(data.get("source") or "")
+    expected=str(data.get("digest") or "")
+    if len(expected)!=64 or any(c not in "0123456789abcdef" for c in expected): raise ValueError("approved release digest required")
+    if maintenance.release_info().get("digest")==expected: return {"ok":True,"state":"healthy","unchanged":True}
+    snap={"self":{**advertisement(),"name":identity()["name"]},"peers":PEERS.snapshot()}
+    url=_remote_url(snap,source,"/v1/maintenance/bundle")
+    req=urllib.request.Request(url,headers=FABRIC_IDENTITY.auth_headers_for_url(url))
+    context=FABRIC_IDENTITY.ssl_context_for_url(url) if url.startswith("https://") else None
+    kwargs={"timeout":30}
+    if context is not None: kwargs["context"]=context
+    with urllib.request.urlopen(req,**kwargs) as response:
+        bundle=response.read(maintenance.MAX_BUNDLE+1)
+    return {"ok":True,**maintenance.schedule("update",data=bundle,expected=expected)}
+
+
 def service_action(name: str, action: str, confirmed=False):
     if action not in {"start", "stop", "restart"}:
         return {"ok": False, "error": "unsupported service action"}
@@ -1412,7 +1443,10 @@ def service_action(name: str, action: str, confirmed=False):
     if not st.get("ok") or not st.get("managed"):
         return {**st, "ok": False, "error": st.get("error") or "service is not Fabric-managed on this platform"}
     system = platform.system().lower(); unit = st["unit"]
-    if name == "node" and action in {"stop", "restart"}:
+    if name == "node" and action == "restart":
+        try: return {"ok":True,"service":name,"action":action,**maintenance.schedule("restart")}
+        except (OSError,ValueError) as exc: return {"ok":False,"service":name,"error":str(exc)}
+    if name == "node" and action == "stop":
         return {"ok": False, "error": "self stop/restart is intentionally deferred; use the platform service manager locally"}
     if system == "linux":
         argv = ["systemctl", "--user", action, unit]
@@ -1650,7 +1684,7 @@ def job_worker_loop():
             WORKER_HEALTH["last_loop"] = now()
             JOB_WAKE.wait(timeout=.5)
             JOB_WAKE.clear()
-            if benchmark_guard_active():
+            if benchmark_guard_active() or maintenance.draining():
                 continue
             queued = [j for j in reversed(FABRIC_STORE.jobs(128)) if j.get("status") == "queued"]
             WORKER_HEALTH.update(alive=True, last_loop=now(), last_error=None)
@@ -1735,6 +1769,7 @@ def _stream_model_infer(handler, raw):
     closing the upstream Ollama response stops this attempt instead of leaving an
     orphan generation behind.
     """
+    if maintenance.draining(): raise RuntimeError("worker busy: runtime maintenance")
     worker = identity()["name"]
     packet = normalize_packet(raw.get("packet") if isinstance(raw, dict) and isinstance(raw.get("packet"), dict) else raw,
                               origin=worker)
@@ -3898,6 +3933,22 @@ class API(BaseHTTPRequestHandler):
                                "last_error": WORKER_HEALTH.get("last_error"),
                                "errors": WORKER_HEALTH.get("errors", 0)},
             })
+        if path == "/v1/maintenance/release":
+            return self.sendj(200,maintenance.release_info())
+        if path == "/v1/maintenance/status":
+            try:
+                job=(parse_qs(urlparse(self.path).query).get("job") or [None])[0]
+                return self.sendj(200,maintenance.receipt(job) if job else maintenance.status())
+            except (OSError,ValueError): return self.sendj(404,{"error":"maintenance job not found"})
+        if path == "/v1/maintenance/bundle":
+            try: _,payload=maintenance.bundle()
+            except (OSError,ValueError) as exc: return self.sendj(409,{"error":str(exc)})
+            self.send_response(200)
+            self.send_header("Content-Type","application/zip")
+            self.send_header("Content-Length",str(len(payload)))
+            self.end_headers()
+            self.wfile.write(payload)
+            return
         if path == "/v1/http":
             ingress_guard = {"ok": False, "error": "ingress guard unavailable"}
             try:
@@ -4314,6 +4365,10 @@ class API(BaseHTTPRequestHandler):
                 result["state"]=load_curator_state()
                 return self.sendj(200 if result.get("ok") else 409,result)
             return self.sendj(200,{"ok":True,"state":state,"plan":curator_plan(profile)})
+        if path == "/v1/maintenance/update":
+            try: return self.sendj(202,_maintenance_update(d))
+            except PermissionError as exc: return self.sendj(403,{"ok":False,"error":str(exc)})
+            except (ValueError,OSError) as exc: return self.sendj(409,{"ok":False,"error":str(exc)})
         if path == "/v1/services/action":
             name = str(d.get("service") or "")
             action = str(d.get("action") or "")
@@ -5665,7 +5720,7 @@ def _print_jobs(data, target="local"):
 def main():
     ap=argparse.ArgumentParser(description="Future Crash + LOOK unified node")
     ap.add_argument("command",nargs="?",default="serve",
-        choices=["serve","status","nodes","activity","pulse","fabric","watch","dashboard","models","route","qualify","services","service",
+        choices=["serve","status","nodes","activity","pulse","fabric","watch","dashboard","models","route","qualify","services","service","release","maintenance","update",
                  "jobs","job","submit","packet","cancel","events","http","beacon","lights","artifact-add","artifact","artifacts","file-catalog","file-find","media-catalog","media-identify",
                  "decisions","decision","answer","ask","decision-shadow","decision-provider","identity","trust","untrust","pair-code","pair","transport","rendezvous","endpoints","endpoint-code","allow","revoke-endpoint","media-outputs","media-state","media-play","media-control","speak","alert"])
     ap.add_argument("args",nargs="*")
@@ -6199,6 +6254,32 @@ def main():
             if a.command=="qualify":
                 if not a.args: ap.error("qualify requires MODEL")
                 print(json.dumps(_target_post(a.host,a.port,a.node,"/v1/models/qualify",{"model":a.args[0]},timeout=45),indent=2)); return 0
+            if a.command in {"release","maintenance"}:
+                path="/v1/maintenance/release" if a.command=="release" else "/v1/maintenance/status"
+                if a.args and a.command=="maintenance": path+="?job="+urllib.parse.quote(a.args[0])
+                print(json.dumps(_target_get(a.host,a.port,a.node,path),indent=2)); return 0
+            if a.command=="update":
+                if len(a.args)<2: ap.error("update requires SOURCE TARGET [TARGET ...]")
+                source=a.args[0]; targets=a.args[1:]
+                snapshot=_daemon_get(a.host,a.port,"/v1/nodes")
+                local=(snapshot.get("self") or {}).get("name")
+                if source=="local": source=local
+                release=_target_get(a.host,a.port,source,"/v1/maintenance/release")
+                if not release.get("available"): raise RuntimeError(release.get("error") or "source has no registered release")
+                if targets==["all"]:
+                    targets=[str((p.get("node") or {}).get("identity",{}).get("name") or p.get("name")) for p in snapshot.get("peers") or [] if p.get("node")]
+                    if local!=source: targets.append(local)
+                targets=list(dict.fromkeys(t for t in targets if t!=source))
+                if not targets: raise RuntimeError("no update targets")
+                print(f"FABRIC UPDATE · {source} → {', '.join(targets)} · commit {release.get('commit') or 'unversioned'} · {release['digest']}")
+                if not a.yes and input("Install this runtime on these nodes? [y/N] ").strip().lower() not in {"y","yes"}: return 1
+                results=[]
+                for target in targets:
+                    try:
+                        result=_target_post(a.host,a.port,target,"/v1/maintenance/update",{"source":source,"digest":release["digest"],"confirm":True},timeout=40)
+                        results.append({"node":target,**result})
+                    except Exception as exc: results.append({"node":target,"ok":False,"error":str(exc)})
+                print(json.dumps(results,indent=2)); return 0 if all(r.get("ok") for r in results) else 1
             if a.command=="service":
                 if len(a.args)<2: ap.error("service requires SERVICE ACTION")
                 service,action=a.args[:2]

@@ -143,6 +143,7 @@ retire_stale_macos_node_listener
 mkdir -p "$HOME/.local/share/future-crash-look/core" "$HOME/.local/bin"
 install -m 0755 "$ROOT/core/node.py" "$HOME/.local/share/future-crash-look/core/node.py"
 install -m 0644 "$ROOT/core/fabric_packet.py" "$HOME/.local/share/future-crash-look/core/fabric_packet.py"
+install -m 0644 "$ROOT/core/maintenance.py" "$HOME/.local/share/future-crash-look/core/maintenance.py"
 install -m 0644 "$ROOT/core/fabric_client.py" "$HOME/.local/share/future-crash-look/core/fabric_client.py"
 install -m 0644 "$ROOT/core/fabric_vision.py" "$HOME/.local/share/future-crash-look/core/fabric_vision.py"
 install -m 0644 "$ROOT/core/fabric_identity.py" "$HOME/.local/share/future-crash-look/core/fabric_identity.py"
@@ -653,6 +654,9 @@ echo "  fcl-node activity   # supervisor truth"
 echo "  fcl-node http       # local + guarded-ingress HTTP pressure"
 echo "  fcl-node nodes      # peers + node advertisements"
 echo "  fcl-node jobs       # durable Fabric work ledger"
+
+# Register only verified runtime bytes for explicit paired-node distribution.
+python3 "$HOME/.local/share/future-crash-look/core/maintenance.py" --register "$ROOT"
 
 # All verification completed; failure recovery is no longer needed.
 INSTALL_COMPLETE=1

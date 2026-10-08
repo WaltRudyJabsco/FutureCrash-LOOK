@@ -1,5 +1,10 @@
 # 8.9.0 — FABRIC MEDIA
 
+- Added Signal browser Media Session transport controls and Now Playing metadata, scoped to playback on that browser.
+- Added persistent device-local LO prompt recall through the terminal line editor.
+- Added explicitly approved paired-node runtime distribution, staged validation, detached update/restart helpers, health receipts, and rollback.
+- Unified installer now registers verified code for distribution; remote runtime updates preserve user state, dependencies, service definitions, and shell configuration.
+
 - Stabilized the Phase-2 architecture refactor.
 - Made Fabric media catalog discovery concurrent and bounded.
 - Repaired remote media reachability and removable-media wake-up behavior.

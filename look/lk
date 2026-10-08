@@ -13,6 +13,7 @@ if str(_LOOK_MODULE_DIR) not in sys.path:
 import media_core
 import media_art
 import lo_stream
+import lo_history
 import file_catalog
 import games as look_games
 from look_renderer import NativePreviewController
@@ -10381,7 +10382,9 @@ def _lo_readline_prompt(text):
 def _lo_read_input():
     """Read one LO chat line without making readline own the multi-line label."""
     print("\n"+_lo_label("you","36"))
-    return input(_lo_readline_prompt(_c("› ","36")))
+    prompt=input(_lo_readline_prompt(_c("› ","36")))
+    lo_history.remember(prompt)
+    return prompt
 
 
 def _receipt_log_path():
@@ -10863,6 +10866,7 @@ def _lo_action_from_tool(name,args,result):
     path=str(args.get("path") or args.get("url") or "").strip()
     return {"tool":name,"args":dict(args),"path":path} if path else None
 
+@lo_history.session
 def ollama_chat(force_search=False, initial_prompt=None, allow_start=True, host_override=None, host_name=None, access_profile=None, selected_paths=None, workspace_override=None, one_shot=False, confirm_unsafe_override=False, events=None, conversation_history=None, interface_context=None):
     """Minimal local chat; optional first prompt and web-search mode."""
     import json
@@ -20350,7 +20354,7 @@ def _fabric_command(args):
     sub=aliases.get(sub,sub)
     if sub=="dash": sub="dashboard"
     if sub in {"doctor","diagnose","debug"}: return _fabric_doctor()
-    if sub not in {"fabric","doctor","watch","dashboard","dash","beacon","lights","nodes","activity","pulse","models","status","qualify","services","service","jobs","job","submit","packet","cancel","events","http","decisions","decision","answer","ask","decision-shadow","decision-provider","identity","trust","untrust","pair-code","pair","transport","rendezvous","endpoints","endpoint-code","allow","revoke-endpoint","speak","alert","route"}:
+    if sub not in {"fabric","doctor","watch","dashboard","dash","beacon","lights","nodes","activity","pulse","models","status","qualify","services","service","jobs","job","submit","packet","cancel","events","http","decisions","decision","answer","ask","decision-shadow","decision-provider","identity","trust","untrust","pair-code","pair","transport","rendezvous","endpoints","endpoint-code","allow","revoke-endpoint","speak","alert","route","release","maintenance","update"}:
         print("usage: lk fabric [doctor|identity|trust|pair-code [URL]|pair NODE CODE|untrust NODE_ID|transport|rendezvous [status|set URL|off|sync]|endpoints|endpoint-code URL [once|trust]|allow CODE [once|trust]|revoke-endpoint ENDPOINT_ID|watch|dashboard|decisions [NODE]|decision [NODE] ID|answer [NODE] ID CHOICE|ask [NODE] QUESTION [CHOICE ...]|decision-shadow [NODE] STATE QUESTION CANDIDATE...|decision-provider [NODE]|beacon|lights|nodes|status|activity|pulse|models|route reflex|balanced|deep|jobs|events|submit|packet|cancel|qualify|services|service|speak [NODE] TEXT|alert [@TARGET] MESSAGE]")
         return 2
     argv=[exe,sub]
@@ -20368,7 +20372,7 @@ def _fabric_command(args):
         if rest[0].startswith("@"):
             argv += ["--node",rest.pop(0)[1:]]
         argv += rest
-    elif sub in {"status","activity","pulse","models","services","jobs","events","http","decisions","decision-provider"}:
+    elif sub in {"status","activity","pulse","models","services","jobs","events","http","decisions","decision-provider","release","maintenance"}:
         if rest and not rest[0].startswith("-"):
             argv += ["--node",rest.pop(0)]
         argv += rest

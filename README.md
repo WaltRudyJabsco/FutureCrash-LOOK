@@ -164,6 +164,54 @@ future-crash
 
 The installer is intentionally additive. Optional capabilities degrade cleanly when their dependencies are absent.
 
+## Playback controls, prompt recall, and remote maintenance
+
+Signal registers browser Media Session controls while playing on **This Device**:
+play/pause, previous/next, seeking, and Now Playing metadata. Moving playback to
+another node releases the browser's media session. Hardware delivery, especially
+CarPlay steering-wheel controls, should be checked on the actual device.
+
+LO uses the terminal line editor's Up/Down history, Left/Right editing, and Ctrl-R
+search. Submitted prompts persist on that device in `~/.local/share/look/lo_history.json`.
+Recall uses the current resource context and never runs a recalled command until
+Enter. Responses, pixels, and attachment payloads are not stored in prompt history.
+
+Install this update normally **once on each participating node** to bootstrap the
+maintenance protocol. Afterward a node with a freshly installed runtime can serve
+its registered code to paired peers:
+
+```sh
+lk fabric release m3max-pro
+lk fabric update m3max-pro 3090 m4-air
+lk fabric maintenance 3090
+lk fabric service 3090 node restart
+```
+
+`update SOURCE TARGET...` displays the exact source commit and bundle digest for
+approval; `--yes` provides explicit unattended approval. `TARGET=all` selects the
+advertising peers plus the local node, excluding the source. Offline or older
+nodes report an error; they are not silently assumed updated. The request returns
+a job ID; `maintenance NODE [JOB_ID]` reports staged, draining, installing,
+restarting, verifying, healthy, rolled_back, or failed. A healthy receipt confirms
+the installed bundle digest and local node health, not merely file transfer.
+
+Updates validate paths, file hashes, size limits, and Python syntax before any
+replacement. They wait up to five minutes for inference/native playback and
+active media streams, preserve the old runtime, stop affected services, replace
+code, and restart. Failed health verification restores the old files. Node
+restart is explicit and immediate, so it can recover a stuck inference lease.
+The helper runs separately from the node and keeps receipts and backups under
+`~/.local/share/future-crash-look/maintenance`.
+
+This is an explicit **runtime code update**, using authenticated paired-peer
+transport and an operator-approved digest. It does not install dependencies,
+change service definitions or shell configuration, update models, reboot hosts,
+or automatically trust whichever node advertises newer code. Changes requiring
+those installation steps still use the unified installer. Distribution uses
+installed runtime files; it does not advance a target's Git checkout. An open LO
+process keeps its imported code until you reopen it; reload Signal after an update.
+
+
 ## Files: discovery first, understanding second
 
 LOOK maintains a cheap local SQLite catalog. A normal scan records filesystem metadata and incrementally extracts bounded text from formats where extraction is deterministic and inexpensive.
