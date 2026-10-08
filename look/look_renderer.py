@@ -788,7 +788,11 @@ def open_default(path:Path)->tuple[bool,str]:
     """Ask the OS to open a file, returning a short user-facing failure."""
     try:
         if sys.platform=='darwin':
-            proc=subprocess.run(['open',str(path)],capture_output=True,text=True)
+            media=media_open.command(path)
+            if media and media[0]!='open':
+                subprocess.Popen(media,stdin=subprocess.DEVNULL,stdout=subprocess.DEVNULL,stderr=subprocess.DEVNULL)
+                return True,''
+            proc=subprocess.run(media or ['open',str(path)],capture_output=True,text=True)
             if proc.returncode:
                 ext=path.suffix or 'this file type'
                 return False, f'no application is registered to open {ext}'

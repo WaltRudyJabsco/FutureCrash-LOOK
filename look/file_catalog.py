@@ -101,7 +101,13 @@ def _extract_text(path,ext):
     except Exception as exc:
         return None,str(exc)[:160]
 
-def _index_content(db,path,ext,size,mtime,stamp):
+def _index_content(db,path,ext,size,mtime,stamp,sidecar=False):
+    if sidecar:
+        try: from . import media_sidecar
+        except ImportError: import media_sidecar
+        data=media_sidecar.load(path)
+        existing=db.execute('SELECT provenance FROM file_facts WHERE path=?',(str(path),)).fetchone()
+        if data and (not existing or existing[0]!='user'): put_facts(db,path,**media_sidecar.facts(data))
     if ext not in CONTENT_EXTS or size>CONTENT_MAX_FILE_BYTES: return False
     old=db.execute('SELECT mtime,bytes FROM content_state WHERE path=?',(str(path),)).fetchone()
     if old and float(old[0])==float(mtime) and int(old[1])==int(size) and db.execute("SELECT 1 FROM file_facts WHERE path=?",(str(path),)).fetchone(): return False
@@ -152,6 +158,7 @@ def _scan_locked(db_path,base,default_home=False):
     db=connect(db_path); started=time.monotonic(); stamp=time.time(); count=0; skipped=0; content_indexed=0
     batch=[]
     for dirpath,dirnames,filenames in os.walk(base,followlinks=False):
+        filenames=set(filenames)
         here=Path(dirpath)
         kept=[]
         for d in dirnames:
@@ -167,7 +174,7 @@ def _scan_locked(db_path,base,default_home=False):
             except (OSError,PermissionError): skipped+=1; continue
             ext=p.suffix.casefold(); size=int(st.st_size); mtime=float(st.st_mtime)
             batch.append((str(p),str(base),name,ext,size,mtime,int(st.st_ino),int(st.st_mode),stamp)); count+=1
-            if _index_content(db,p,ext,size,mtime,stamp): content_indexed+=1
+            if _index_content(db,p,ext,size,mtime,stamp,sidecar=ext in {".mp4",".mkv",".webm",".m4v",".mov",".mp3",".m4a",".opus",".ogg"} and p.with_suffix(".info.json").name in filenames): content_indexed+=1
             if len(batch)>=1000:
                 db.executemany('INSERT OR REPLACE INTO files VALUES(?,?,?,?,?,?,?,?,?)',batch); batch.clear()
     if batch: db.executemany('INSERT OR REPLACE INTO files VALUES(?,?,?,?,?,?,?,?,?)',batch)
@@ -346,7 +353,7 @@ def register(db_path,path,facts=None):
         old=db.execute('SELECT root FROM files WHERE path=?',(str(path),)).fetchone()
         if old: root=old[0]
         db.execute('INSERT OR REPLACE INTO files VALUES(?,?,?,?,?,?,?,?,?)',(str(path),root,path.name,path.suffix.casefold(),stat.st_size,stat.st_mtime,stat.st_ino,stat.st_mode,stamp))
-        _index_content(db,path,path.suffix.casefold(),stat.st_size,stat.st_mtime,stamp)
+        _index_content(db,path,path.suffix.casefold(),stat.st_size,stat.st_mtime,stamp,sidecar=path.with_suffix(".info.json").is_file())
         if facts: put_facts(db,path,**facts)
         count=db.execute('SELECT COUNT(*) FROM files WHERE root=?',(root,)).fetchone()[0]
         db.execute('INSERT OR REPLACE INTO roots VALUES(?,?,?)',(root,stamp,count)); db.commit()

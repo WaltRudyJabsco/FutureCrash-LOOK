@@ -5983,6 +5983,11 @@ def _desktop_launch(target, category="", preview=False):
     preferred=apps.get(category,"system")
     system=platform.system()
     try:
+        import media_open
+        media=media_open.command(target,preferred)
+        if media:
+            subprocess.Popen(media,stdin=subprocess.DEVNULL,stdout=subprocess.DEVNULL,stderr=subprocess.DEVNULL)
+            return f"{'PREVIEW' if preview else 'OPEN'} OK · {target} · {category or 'file'} · {preferred if preferred!='system' else 'mpv'}"
         if preview and system=="Darwin" and shutil.which("qlmanage"):
             subprocess.Popen(["qlmanage","-p",str(target)],stdout=subprocess.DEVNULL,stderr=subprocess.DEVNULL)
             return f"PREVIEW OK · {target} · Quick Look"
@@ -5998,11 +6003,6 @@ def _desktop_launch(target, category="", preview=False):
                 os.startfile(str(target))  # type: ignore[attr-defined]
                 return f"{'PREVIEW' if preview else 'OPEN'} OK · {target} · system"
         else:
-            import media_open
-            media=media_open.command(target,preferred)
-            if media:
-                subprocess.Popen(media,stdin=subprocess.DEVNULL,stdout=subprocess.DEVNULL,stderr=subprocess.DEVNULL)
-                return f"{'PREVIEW' if preview else 'OPEN'} OK · {target} · {category or 'file'} · {preferred if preferred!='system' else 'mpv'}"
             if preferred and preferred!="system":
                 binary=shutil.which(preferred) or (preferred if Path(preferred).exists() else None)
                 if not binary:
@@ -9155,6 +9155,9 @@ def _comfy_generate(prompt,negative="",seed=None,open_result=True):
             if images:
                 output_dir=Path(str(cfg.get("output_dir") or (HOME/"Pictures"/"LOOK"))).expanduser()
                 output_dir.mkdir(parents=True,exist_ok=True)
+                import managed_folders
+                try: managed_folders.register(output_dir)
+                except OSError: pass
                 saved=[]
                 for idx,image in enumerate(images[:8]):
                     filename=image.get("filename")
@@ -9168,6 +9171,8 @@ def _comfy_generate(prompt,negative="",seed=None,open_result=True):
                     with urllib.request.urlopen(host+"/view?"+query,timeout=30) as response:
                         dest.write_bytes(response.read())
                     saved.append(dest)
+                    try: file_catalog.register(FILE_CATALOG_DB,dest)
+                    except (OSError,file_catalog.sqlite3.Error): pass
                 if saved:
                     if open_result and bool(cfg.get("auto_preview",True)):
                         preview_receipt=_preview_host_path(saved[0])
@@ -14798,6 +14803,12 @@ if ((pb.pasteboardItems.count * 1) < 1) throw new Error('clipboard verification 
 def _open_file(path, choose=False):
     try:
         if platform.system()=="Darwin":
+            import media_open
+            media=media_open.command(path)
+            if media:
+                if media[0]=="open": return subprocess.call(media)
+                subprocess.Popen(media,stdin=subprocess.DEVNULL,stdout=subprocess.DEVNULL,stderr=subprocess.DEVNULL)
+                return 0
             if choose:
                 # `open -a` needs an app name; keep LOOK's card simple and use
                 # the default app here. The filesystem browser still provides

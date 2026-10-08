@@ -94,7 +94,7 @@ def _title_and_track(stem: str) -> tuple[str, int | None, int | None]:
     return title, track, disc
 
 
-def entry_from_path(path: str | Path, root: str | Path | None = None) -> dict[str, Any]:
+def entry_from_path(path: str | Path, root: str | Path | None = None, sidecar: bool = False) -> dict[str, Any]:
     """Create a cheap catalog row from filesystem structure, without hashing media bytes."""
     target = Path(path).expanduser().resolve()
     stat = target.stat()
@@ -122,7 +122,7 @@ def entry_from_path(path: str | Path, root: str | Path | None = None) -> dict[st
         if target.parent.parent != target.parent:
             artist = target.parent.parent.name
 
-    return {
+    row = {
         "id": _stable_id(str(target)),
         "path": str(target),
         "root": str(root_path) if root_path else "",
@@ -137,6 +137,14 @@ def entry_from_path(path: str | Path, root: str | Path | None = None) -> dict[st
         "bytes": stat.st_size,
         "mtime": stat.st_mtime,
     }
+    if sidecar:
+        try: from . import media_sidecar
+        except ImportError: import media_sidecar
+        data=media_sidecar.load(target)
+        if data:
+            row.update(title=data.get('title') or row['title'],artist=data.get('channel') or data.get('uploader') or row['artist'],
+                       source_url=data.get('webpage_url') or '',description=data.get('description') or '',keywords=data.get('tags') or [])
+    return row
 
 
 def empty_library() -> dict[str, Any]:
@@ -173,6 +181,7 @@ def scan_root(root: str | Path, existing: Any = None) -> dict[str, Any]:
     keep = [row for row in library["entries"] if str(row.get("root") or "") != base_s]
     found: list[dict[str, Any]] = []
     for dirpath, dirnames, filenames in os.walk(base):
+        filenames=set(filenames)
         dirnames[:] = sorted((d for d in dirnames if not d.startswith(".")), key=str.casefold)
         for name in sorted(filenames, key=str.casefold):
             if name.startswith("."):
@@ -181,7 +190,7 @@ def scan_root(root: str | Path, existing: Any = None) -> dict[str, Any]:
             if path.suffix.casefold() not in MEDIA_EXTENSIONS:
                 continue
             try:
-                row = entry_from_path(path, base)
+                row = entry_from_path(path, base,sidecar=path.with_suffix(".info.json").name in filenames)
                 previous = existing_by_path.get(str(row.get("path") or "")) or {}
                 # A rescan must not throw away expensive content identity. Preserve it
                 # only when the cheap filesystem fingerprint still matches.

@@ -1,4 +1,4 @@
-"""Linux graphical media edge, independent of desktop MIME registration."""
+"""Preferred media apps on Mac and Linux, independent of MIME registration."""
 from __future__ import annotations
 import json, os, shutil, sys
 from pathlib import Path
@@ -20,11 +20,17 @@ def mpv_binary():
 def command(path,preferred=None):
     """Use the configured app or mpv for Linux media; other types use the OS."""
     path=Path(path)
-    if not sys.platform.startswith('linux') or path.suffix.casefold() not in media_core.MEDIA_EXTENSIONS: return None
+    if path.suffix.casefold() not in media_core.MEDIA_EXTENSIONS: return None
     category='video' if path.suffix.casefold() in media_core.VIDEO_EXTENSIONS else 'audio'
     if preferred is None:
         try: preferred=json.loads((Path.home()/'.local/share/look/apps.json').read_text()).get(category,'system')
         except (OSError,ValueError,AttributeError): preferred='system'
+    if sys.platform=='darwin':
+        if str(preferred).casefold()=='mpv':
+            binary=mpv_binary()
+            if binary: return [binary,'--player-operation-mode=pseudo-gui','--',str(path)]
+        return ['open','-a',preferred,str(path)] if preferred and preferred!='system' else None
+    if not sys.platform.startswith('linux'): return None
     if preferred and preferred!='system':
         binary=shutil.which(preferred)
         if binary is None and Path(preferred).is_file() and os.access(preferred,os.X_OK): binary=preferred

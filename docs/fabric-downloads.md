@@ -57,3 +57,11 @@ Destination prompts support Tab completion for node-qualified paths, including s
 On Linux, the installer registers **LOOK mpv** in the desktop and fills missing or stale media associations. Existing working defaults such as VLC remain in place. LOOK opens audio/video directly in the configured player or installed mpv; desktop opening of other file types uses the normal system opener. Mac defaults are unchanged. This repairs application discovery; a particular file can still fail decoding and must be checked on its owning machine.
 
 Normal `~/Downloads/LOOK` downloads remain permanent. Only explicit `--holding` gives a job a 30-day expiry. Keep clears expiry and moves it into permanent storage; moving files yourself also causes the holding cleanup to retain changed manifests for review.
+
+## LOOK-owned folder repair and Mac media preferences
+
+Every node's `~/Downloads/LOOK`, `~/Downloads/LOOK-Holding`, and `~/Pictures/LOOK` is included in the periodic discovery repair, without requiring a manual root scan. Custom download/output folders are registered when LOOK creates content there. Downloads still register immediately on completion; generated images now register immediately too. The watcher checks on startup and every five minutes. Hidden incomplete download staging folders are excluded. Other nodes discover the owning node's published catalog through live Fabric queries; an unavailable node remains unavailable.
+
+Normal media and file rescans import a neighboring `BASENAME.info.json` for supported media. Moving an MP4 and its sidecar together therefore restores its title, channel, source URL, description, and tags in its new location. The video plays without the sidecar, but moving only that video still leaves the descriptive information behind. Original files and existing manually entered catalog descriptions are preserved.
+
+LOOK's Mac browser and file cards now honor the configured video/audio preference, as do explicit open/preview actions. `lk apps video VLC` selects VLC; `lk apps video mpv` can use the Homebrew executable without requiring an mpv app bundle. `system` retains the ordinary Mac default. These changes do not alter Apple media authorization or infer DRM from an `.m4v` extension.

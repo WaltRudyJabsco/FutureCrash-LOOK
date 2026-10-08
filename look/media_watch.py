@@ -11,6 +11,7 @@ from pathlib import Path
 HERE=Path(__file__).resolve().parent
 if str(HERE) not in sys.path: sys.path.insert(0,str(HERE))
 import media_core
+import managed_folders
 
 LIBRARY=Path.home()/'.local/share/look/media_library.json'
 STATUS=Path.home()/'.local/share/look/media_watch.json'
@@ -100,7 +101,8 @@ def refresh_existing(previous):
     by_folder={}
     for path,row in known.items(): by_folder.setdefault((row.get('root'),str(Path(path).parent)),[]).append(path)
     changes={}; removed=set(); current={}
-    for root in library['roots']:
+    owned={str(path) for path in managed_folders.roots() if path.is_dir()}
+    for root in sorted(set(library['roots'])|owned):
         base=Path(root).expanduser().resolve()
         if base==base.parent or not base.is_dir(): continue
         for folder,dirs,names in os.walk(base):
@@ -109,12 +111,13 @@ def refresh_existing(previous):
             except OSError: continue
             key=(str(base),folder); current[key]=stamp
             if previous.get(key)==stamp: continue
+            names=set(names)
             visible={str(Path(folder)/name) for name in names if not name.startswith('.') and Path(name).suffix.casefold() in media_core.MEDIA_EXTENSIONS}
             removed.update(path for path in by_folder.get(key,[]) if path not in visible)
             for path in visible:
                 try:
-                    row=media_core.entry_from_path(path,base); old=known.get(path)
-                    if old and old.get('bytes')==row['bytes'] and old.get('mtime')==row['mtime']: continue
+                    row=media_core.entry_from_path(path,base,sidecar=Path(path).with_suffix('.info.json').name in names); old=known.get(path)
+                    if old and old.get('bytes')==row['bytes'] and old.get('mtime')==row['mtime'] and old.get('source_url')==row.get('source_url') and old.get('description')==row.get('description'): continue
                     changes[path]=row
                     file_catalog.register(Path.home()/'.local/share/look/file_catalog.sqlite3',path)
                 except (OSError,ValueError): continue
@@ -125,9 +128,12 @@ def refresh_existing(previous):
     if changes or removed:
         def merge(current_library):
             entries={item['path']:item for item in current_library['entries'] if item['path'] not in removed}
-            entries.update(changes); current_library['entries']=list(entries.values()); return current_library
+            entries.update(changes); current_library['entries']=list(entries.values())
+            current_library['roots']=list(set(current_library['roots'])|owned)
+            return current_library
         media_core.update_library(LIBRARY,merge)
         for path in removed: file_catalog.forget(Path.home()/'.local/share/look/file_catalog.sqlite3',path)
+    managed_folders.refresh_catalog()
     write_status(refresh_seconds=REFRESH_SECONDS,last_refresh=time.time(),added_or_changed=len(changes),removed=len(removed),
                  refresh_message='existing scoped roots checked; whole-filesystem roots need manual rescan')
     return current

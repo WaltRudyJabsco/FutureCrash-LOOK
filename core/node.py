@@ -2405,6 +2405,8 @@ def _look_catalog_modules():
 
 def _download_index(row):
     catalog, media = _look_catalog_modules()
+    import managed_folders
+    managed_folders.register(row['root'])
     path=Path(row['file']); facts=row.get('metadata') or {}
     catalog.register(LOOK_FILE_CATALOG,path,dict(summary=facts.get('description') or facts.get('title') or path.stem,
         keywords=facts.get('tags') or [],source_url=facts.get('webpage_url') or row['url'],provenance='source'))
@@ -2413,6 +2415,7 @@ def _download_index(row):
                  album='YouTube',source_url=row['url'])
     def merge(library):
         library['entries']=[item for item in library['entries'] if item.get('path')!=str(path)]+[entry]
+        library['roots']=list(set(library['roots'])|{str(Path(row['root']).resolve())})
         return library
     media.update_library(LOOK_MEDIA_LIBRARY,merge)
     with MEDIA_CATALOG_LOCK: MEDIA_CATALOG_CACHE['at']=0.0
