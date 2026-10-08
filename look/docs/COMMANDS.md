@@ -167,3 +167,10 @@ The file catalog incrementally extracts bounded text from common text/source/con
 
 
 For `lk mp`, use `/` to enter Search; `L`/`Q` switch Library/Queue, `Tab` marks, `Enter` plays, `A` appends to queue, and the usual Space/seek/previous/next/shuffle/repeat/stop controls remain live outside Search.
+
+## Fabric downloads and descriptions
+`lk ytd URL --node NODE` · `lk ytd find QUERY --node NODE` · `lk ytd jobs --node NODE`
+`lk ytd status JOB --node NODE --wait` · `lk ytd keep JOB --node NODE` · `lk ytd cancel JOB --node NODE` · `lk ytd index JOB --node NODE`
+`lk describe PATH --text TEXT --keywords a,b`
+
+See [download workflow](../../docs/fabric-downloads.md). Downloads are permanent unless `--holding` explicitly enables 30-day retention.

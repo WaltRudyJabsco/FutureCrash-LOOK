@@ -7367,7 +7367,7 @@ def _lo_weather_location(prompt):
         if not match:
             continue
         place=match.group(1).strip(" \t,.;:?!")
-        place=re.sub(r"\s+(?:today|tonight|tomorrow|this morning|this afternoon|this evening)$","",place,flags=re.I).strip()
+        place=re.sub(r"\s+(?:today|tonight|tomorrow|this morning|this afternoon|this evening|this weekend|the weekend|next week|this week|(?:five|seven|[1-7])[ -]day(?: forecast)?)$","",place,flags=re.I).strip()
         place=_normalize_weather_location(place)
         if 1 <= len(place) <= 96:
             return place
@@ -7429,7 +7429,7 @@ def _lo_weather_followup(prompt, history):
     patterns=(
         r"^(?:how|what) about\b",
         r"\b(?:high|low|highs|lows)\b",
-        r"^(?:today|tonight|tomorrow|this morning|this afternoon|this evening)\b",
+        r"^(?:today|tonight|tomorrow|this morning|this afternoon|this evening|this weekend|next week|five.day|seven.day)\b",
         r"\b(?:accurate|correct|right|verify|verification|check that|double[- ]check)\b",
         r"^(?:and|also)\s+(?:today|tonight|tomorrow)\b",
     )
@@ -7468,6 +7468,9 @@ def _weather_direct_followup(prompt, tool_content):
     row=_weather_payload(tool_content)
     if not row:
         return None
+    from weather_forecast import requested, format_forecast
+    if requested(row.get("requested")):
+        return format_forecast(row,_weather_code_text)
     low=" ".join(str(prompt or "").casefold().split())
     if not (re.search(r"\bhighs?\b",low) and re.search(r"\blows?\b",low)):
         return None
@@ -8436,6 +8439,8 @@ _TOOL_POLICY = {
     "game_action":("all","action"),
     "audio_speak":("all","action"),
     "media_search":("all","observation"),"media_play":("all","action"),"media_queue":("all","action"),"media_control":("all","action"),
+    "video_search":("all","observation"),"video_download_status":("all","observation"),
+    "video_download":("workspace","mutation"),
     "run_command":("power","command"),
 }
 _PROFILE_RANK={"conservative":0,"workspace":1,"power":2,"unsafe":3}
@@ -8446,7 +8451,9 @@ def _filter_tools_for_profile(tools,profile):
     return [t for t in tools if _tool_allowed(t.get("function",{}).get("name",""),profile)]
 
 def _lo_tools(profile):
+    import ytd
     tools=_filesystem_tools()
+    tools.extend(ytd.tools())
     tools.extend(_information_tools())
     tools.extend(_system_inspection_tools())
     tools.extend(_capability_tools())
@@ -8544,7 +8551,7 @@ def _run_system_inspection_tool(name,args):
 
 def _information_tools():
     return [
-        {"type":"function","function":{"name":"weather","description":"Canonical live weather edge. Get current weather and forecast from Open-Meteo. MUST use for current weather rather than model memory.","parameters":{"type":"object","properties":{"location":{"type":"string"}},"required":["location"]}}},
+        {"type":"function","function":{"name":"weather","description":"Canonical live weather edge. Get current weather and forecast from Open-Meteo. MUST use for current weather rather than model memory.","parameters":{"type":"object","properties":{"location":{"type":"string"},"request":{"type":"string","description":"Requested day or range, such as tomorrow, weekend, five-day or seven-day forecast."}},"required":["location"]}}},
         {"type":"function","function":{"name":"place_lookup","description":"Canonical PLACE edge. Resolve a geographic place to coordinates and timezone. Not a business search or directions tool.","parameters":{"type":"object","properties":{"query":{"type":"string"}},"required":["query"]}}},
         {"type":"function","function":{"name":"wikipedia","description":"Canonical WIKI edge. Search English Wikipedia for stable human-readable encyclopedic background.","parameters":{"type":"object","properties":{"query":{"type":"string"}},"required":["query"]}}},
         {"type":"function","function":{"name":"wikidata","description":"Canonical DATA edge. Search Wikidata for structured entities, identifiers, descriptions, and canonical entity URLs.","parameters":{"type":"object","properties":{"query":{"type":"string"}},"required":["query"]}}},
@@ -9729,7 +9736,7 @@ def _place_lookup(query,count=5):
         rows.append({"name":item.get("name"),"region":", ".join(x for x in [item.get("admin1"),item.get("country")] if x),"latitude":item.get("latitude"),"longitude":item.get("longitude"),"timezone":item.get("timezone")})
     return json.dumps(_info_envelope("Open-Meteo geocoding","PLACE",{"query":query,"results":rows},source_url="https://geocoding-api.open-meteo.com/"),ensure_ascii=False)
 
-def _weather_lookup(location):
+def _weather_lookup(location,request=""):
     import json
     from urllib.parse import urlencode
     # Normalize at the edge too. Model-issued tool calls and deterministic
@@ -9738,13 +9745,13 @@ def _weather_lookup(location):
     geo=json.loads(_place_lookup(location,1)); matches=geo.get("results") or []
     if not matches: return f"No weather location match for {location!r}."
     place=matches[0]
-    params={"latitude":place["latitude"],"longitude":place["longitude"],"timezone":"auto","temperature_unit":"fahrenheit","wind_speed_unit":"mph","precipitation_unit":"inch","current":"temperature_2m,apparent_temperature,relative_humidity_2m,precipitation,weather_code,cloud_cover,wind_speed_10m,wind_direction_10m","daily":"weather_code,temperature_2m_max,temperature_2m_min,precipitation_probability_max,precipitation_sum,sunrise,sunset","forecast_days":3}
+    params={"latitude":place["latitude"],"longitude":place["longitude"],"timezone":"auto","temperature_unit":"fahrenheit","wind_speed_unit":"mph","precipitation_unit":"inch","current":"temperature_2m,apparent_temperature,relative_humidity_2m,precipitation,weather_code,cloud_cover,wind_speed_10m,wind_direction_10m","daily":"weather_code,temperature_2m_max,temperature_2m_min,precipitation_probability_max,precipitation_sum,sunrise,sunset","forecast_days":16}
     data=_http_json("https://api.open-meteo.com/v1/forecast?"+urlencode(params)); daily=data.get("daily") or {}; days=[]
-    for i,day in enumerate((daily.get("time") or [])[:3]):
+    for i,day in enumerate((daily.get("time") or [])[:16]):
         def at(k):
             v=daily.get(k) or []; return v[i] if i<len(v) else None
         days.append({"date":day,"weather_code":at("weather_code"),"high_f":at("temperature_2m_max"),"low_f":at("temperature_2m_min"),"precip_probability_pct":at("precipitation_probability_max"),"precipitation_in":at("precipitation_sum"),"sunrise":at("sunrise"),"sunset":at("sunset")})
-    return json.dumps(_info_envelope("Open-Meteo","WEATHER",{"location":place,"observed_at":(data.get("current") or {}).get("time"),"current":data.get("current") or {},"current_units":data.get("current_units") or {},"forecast":days},as_of=(data.get("current") or {}).get("time"),source_url="https://open-meteo.com/"),ensure_ascii=False)
+    return json.dumps(_info_envelope("Open-Meteo","WEATHER",{"location":place,"requested":request,"timezone":data.get("timezone") or place.get("timezone"),"observed_at":(data.get("current") or {}).get("time"),"current":data.get("current") or {},"current_units":data.get("current_units") or {},"forecast":days},as_of=(data.get("current") or {}).get("time"),source_url="https://open-meteo.com/"),ensure_ascii=False)
 
 def _weather_code_text(code):
     try: code=int(code)
@@ -9766,6 +9773,9 @@ def _weather_direct_summary(tool_content):
     row=_weather_payload(tool_content)
     if not row:
         return None
+    from weather_forecast import requested, format_forecast
+    if requested(row.get("requested")):
+        return format_forecast(row,_weather_code_text)
     place=row.get("location") or {}
     name=str(place.get("name") or "the selected location")
     region=str(place.get("admin1") or place.get("region") or "").strip()
@@ -9793,7 +9803,9 @@ def _weather_direct_summary(tool_content):
     if humidity is not None: details.append(f"humidity {float(humidity):.0f}%")
     if wind is not None: details.append(f"wind {float(wind):.1f} mph")
     suffix=("; " + ", ".join(details)) if details else ""
-    return f"{label}: {current}{suffix}."
+    observed=str(row.get("observed_at") or today.get("date") or "").strip()
+    dated=f" · today {observed[:10]}" if observed else ""
+    return f"{label}: {current}{suffix}.{dated}"
 
 def _weather_verify_nws(tool_content):
     """Cross-check current conditions against the nearest NWS observation station.
@@ -11785,7 +11797,7 @@ def ollama_chat(force_search=False, initial_prompt=None, allow_start=True, host_
             for weather_attempt in range(2):
                 try:
                     with _activity("weather" if weather_attempt == 0 else "weather retry"):
-                        weather_content=_weather_lookup(weather_location)
+                        weather_content=_weather_lookup(weather_location,request=prompt)
                     weather_succeeded=not str(weather_content).startswith(("Weather lookup failed:","No weather location match"))
                 except Exception as exc:
                     weather_content=f"Weather lookup failed: {exc}"
@@ -11876,6 +11888,7 @@ def ollama_chat(force_search=False, initial_prompt=None, allow_start=True, host_
         task_load_s=0.0
         task_trace=[]
         repeated_tool_calls={}
+        download_receipts={}
         # Route once per operator turn, then keep every tool continuation on the
         # same worker/model. This preserves locality and avoids cross-node thrash.
         turn_fabric_route={} if fabric_mode else None
@@ -12008,12 +12021,23 @@ def ollama_chat(force_search=False, initial_prompt=None, allow_start=True, host_
                     tool_event_started=time.monotonic()
                     if events: events.emit("tool_start", tool=name)
 
-                    if name == "weather":
+                    if name in {"video_search","video_download","video_download_status"}:
+                        import ytd
+                        try:
+                            if name=='video_download' and not re.search(r'\b(download|save|offline|ytd)\b',prompt,re.I):
+                                raise ValueError('The user has not requested a download')
+                            if name=='video_download' and signature in download_receipts:
+                                tool_content=download_receipts[signature]
+                            else:
+                                tool_content=ytd.tool(name,args)
+                                if name=='video_download': download_receipts[signature]=tool_content
+                        except Exception as exc: tool_content=f"DOWNLOAD FAILED · {exc}"
+                    elif name == "weather":
                         location=args.get("location","")
                         try:
                             print(f"{_ansi_label('weather ›', '36')} {location}")
                             with _activity("weather"):
-                                tool_content=_weather_lookup(location)
+                                tool_content=_weather_lookup(location,request=args.get("request") or prompt)
                             weather_succeeded=not str(tool_content).startswith(("Weather lookup failed:","No weather location match"))
                         except Exception as exc: tool_content=f"Weather lookup failed: {exc}"
                     elif name == "place_lookup":
@@ -16103,7 +16127,13 @@ def _media_library():
 
 
 def _media_save_library(library):
-    _atomic_json(MEDIA_LIBRARY_FILE,media_core.normalize_library(library))
+    def merge(current):
+        entries={row['path']:row for row in current['entries']}
+        entries.update({row['path']:row for row in library.get('entries') or []})
+        current['entries']=list(entries.values())
+        current['roots']=list(set(current['roots'])|set(library.get('roots') or []))
+        return current
+    media_core.update_library(MEDIA_LIBRARY_FILE,merge)
 
 
 def _media_session():
@@ -16991,9 +17021,9 @@ def _media_info_command(args):
     return 0
 
 
-def _media_relocate_root(old_root,new_root):
+def _media_relocate_root(old_root,new_root,library=None):
     """Explicitly replace one indexed root, then scan its new filesystem location."""
-    library=_media_library()
+    library=_media_library() if library is None else library
     old=str(Path(old_root).expanduser())
     old_resolved=str(Path(old).resolve()) if Path(old).exists() else old
     known=list(library.get("roots") or [])
@@ -17018,11 +17048,15 @@ def _media_scan_command(args):
         new_root=" ".join(args[2:])
         started=time.monotonic()
         try:
-            library,old_base,new_base=_media_relocate_root(old_root,new_root)
+            relocation=[]
+            def relocate(current):
+                result=_media_relocate_root(old_root,new_root,current); relocation.append(result)
+                return result[0]
+            library=media_core.update_library(MEDIA_LIBRARY_FILE,relocate)
+            _unused,old_base,new_base=relocation[0]
         except (OSError,ValueError,NotADirectoryError) as exc:
             print(f"LOOK media · {exc}")
             return 1
-        _media_save_library(library)
         count=sum(1 for row in library["entries"] if row.get("root")==new_base)
         print(f"LOOK MEDIA ROOT RELOCATED · {count:,} items · {time.monotonic()-started:.2f}s")
         print(f"  from  {old_base}")
@@ -17050,13 +17084,13 @@ def _media_scan_command(args):
             print("LOOK media · no standard local media folders found")
             print("  use: lk media scan /path/to/media")
             return 1
-        started=time.monotonic(); library=_media_library()
-        for scan_root in roots:
-            try:
-                library=media_core.scan_root(scan_root,library)
-            except (OSError,NotADirectoryError):
-                continue
-        _media_save_library(library)
+        started=time.monotonic()
+        def discover(current):
+            for scan_root in roots:
+                try: current=media_core.scan_root(scan_root,current)
+                except (OSError,NotADirectoryError): continue
+            return current
+        library=media_core.update_library(MEDIA_LIBRARY_FILE,discover)
         print(f"LOOK MEDIA DISCOVERY · {len(library.get('entries') or []):,} local items · {time.monotonic()-started:.2f}s")
         for scan_root in roots:
             count=sum(1 for row in library.get("entries") or [] if row.get("root")==str(scan_root))
@@ -17065,11 +17099,10 @@ def _media_scan_command(args):
     root=Path(" ".join(args)).expanduser()
     started=time.monotonic()
     try:
-        library=media_core.scan_root(root,_media_library())
+        library=media_core.update_library(MEDIA_LIBRARY_FILE,lambda current:media_core.scan_root(root,current))
     except (OSError,NotADirectoryError) as exc:
         print(f"LOOK media · {exc}")
         return 1
-    _media_save_library(library)
     base=str(root.resolve())
     count=sum(1 for row in library["entries"] if row.get("root")==base)
     print(f"LOOK MEDIA LIBRARY · {count:,} items · {time.monotonic()-started:.2f}s")
@@ -19412,6 +19445,7 @@ _COMMANDS = [
     ("lk match", "<TEXT>", "files", "Match/find filesystem content"),
     ("lk scan", "[ROOT]", "files", "Refresh lightweight local file catalog"),
     ("lk find", "<QUERY>", "files", "Search catalog with plain-language metadata terms"),
+    ("lk describe", "<PATH> --text <TEXT> [--keywords a,b]", "files", "Add a searchable catalog description"),
     ("lk catalog", "", "files", "Inspect local file catalog"),
     ("lk open", "<PATH>", "files", "Open in desktop application"),
     ("lk preview", "<PATH>", "files", "Preview outside terminal"),
@@ -19476,6 +19510,13 @@ _COMMANDS = [
     ("lk clean", "", "system", "Conservative maintenance surface"),
     ("lk web", "[...]", "ai", "Web-search key/status"),
     ("lk budget", "[...]", "ai", "LO context/token budget"),
+    ("lk ytd", "<URL> [--node NODE] [--to DIR] [--holding]", "media", "Download a YouTube video on the selected node"),
+    ("lk ytd find", "<QUERY> [--node NODE]", "media", "Find videos and choose one to download"),
+    ("lk ytd status", "<JOB> [--node NODE] [--wait]", "media", "Inspect persistent download progress"),
+    ("lk ytd keep", "<JOB> [--node NODE] [--to DIR]", "media", "Move a held download into permanent storage"),
+    ("lk ytd jobs", "[--node NODE]", "media", "List download jobs"),
+    ("lk ytd cancel", "<JOB> [--node NODE]", "media", "Cancel a download"),
+    ("lk ytd index", "<JOB> [--node NODE]", "media", "Retry catalog registration"),
     ("lk media", "[...]", "media", "Media library, queue, playlists, transport", "lk music"),
     ("lk player", "", "media", "Live LOOK miniplayer"),
     ("lk mp", "[QUERY]", "media", "Integrated Fabric media player"),
@@ -20651,6 +20692,21 @@ def capability_command(args):
 
 def main():
     _safe_cwd(repair=True)
+    if len(sys.argv)>=2 and sys.argv[1]=="ytd":
+        import ytd
+        return ytd.main(sys.argv[2:])
+    if len(sys.argv)>=2 and sys.argv[1]=="describe":
+        import argparse
+        parser=argparse.ArgumentParser(prog="lk describe")
+        parser.add_argument("path")
+        parser.add_argument("--text",required=True)
+        parser.add_argument("--keywords",default="")
+        args=parser.parse_args(sys.argv[2:])
+        try:
+            print(json.dumps(file_catalog.register(FILE_CATALOG_DB,args.path,dict(summary=args.text,keywords=[word.strip() for word in args.keywords.split(",") if word.strip()],provenance="user")),indent=2))
+            return 0
+        except (OSError,ValueError) as exc:
+            print(f"LOOK describe · {exc}"); return 1
     if len(sys.argv)>=3 and sys.argv[1]=="_lo-job":
         return _run_lo_job(sys.argv[2])
     if len(sys.argv)>=2 and sys.argv[1]=="events":

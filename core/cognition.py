@@ -52,6 +52,9 @@ class ActionSpec:
 # reason over the same action vocabulary without duplicating policy.
 ACTION_SPECS = (
     ActionSpec("web_search", "web", "read", "observation", ("web search", "search online", "headlines", "news", "latest")),
+    ActionSpec("video_search", "web", "read", "observation", ("youtube", "find video")),
+    ActionSpec("video_download", "web", "local_effect", "mutation", ("download video", "download youtube", "save video")),
+    ActionSpec("video_download_status", "web", "read", "observation", ("download status",)),
     ActionSpec("weather", "weather", "read", "observation", ("weather", "forecast", "temperature", "rain", "snow", "wind")),
     ActionSpec("place_lookup", "places", "read", "observation", ("place", "location", "geocode", "where is")),
     ActionSpec("wikipedia", "knowledge", "read", "observation", ("wikipedia", "encyclopedia", "background article")),
@@ -214,6 +217,7 @@ def _rule_scores(text: str) -> dict[str, float]:
     patterns=(
         ("games", r"\b(gtnw|chess|checkers|draughts|backgammon|tic tac toe|ttt|play a game|games?)\b", .995),
         ("weather", r"\b(weather|forecast|temperature|temp|rain(?:ing)?|snow(?:ing)?|wind(?:y)?|humidity|precipitation)\b", .995),
+        ("web", r"\b(youtube|yt-dlp|download (?:a |the )?video)\b", .995),
         ("web", r"\b(headlines?|breaking news|latest news|current events?|news today|today'?s news)\b", .995),
         ("media", r"\b(play|queue|shuffle|pause|resume|next track|previous track|now playing|listen to)\b", .82),
         ("speech", r"\b(say|speak|read (?:this|that|it)?\s*aloud|out loud|tell .* aloud)\b", .94),

@@ -83,10 +83,11 @@ except ImportError:
     from fabric_vision import capture_provider as vision_capture_provider, capture_screen as vision_capture_screen, list_displays as vision_list_displays, vision_broker_request
 
 try:
-    from . import maintenance, file_transfer
+    from . import maintenance, file_transfer, downloads
 except ImportError:
     import maintenance
     import file_transfer
+    import downloads
 
 _COPY_TRANSFERS = {}
 _COPY_TRANSFERS_LOCK = threading.Lock()
@@ -2390,6 +2391,52 @@ def _file_search_terms(query):
     return re.findall(r"[\w.+-]+",str(query or "").casefold())
 
 
+
+_DOWNLOAD_MANAGER = None
+_DOWNLOAD_MANAGER_LOCK = threading.Lock()
+
+def _look_catalog_modules():
+    for folder in (Path(__file__).resolve().parent.parent/'look', Path.home()/'.local/share/look'):
+        if (folder/'file_catalog.py').is_file() and str(folder) not in sys.path:
+            sys.path.insert(0,str(folder))
+    import file_catalog, media_core
+    return file_catalog, media_core
+
+
+def _download_index(row):
+    catalog, media = _look_catalog_modules()
+    path=Path(row['file']); facts=row.get('metadata') or {}
+    catalog.register(LOOK_FILE_CATALOG,path,dict(summary=facts.get('description') or facts.get('title') or path.stem,
+        keywords=facts.get('tags') or [],source_url=facts.get('webpage_url') or row['url'],provenance='source'))
+    entry=media.entry_from_path(path,row['root'])
+    entry.update(title=facts.get('title') or path.stem,artist=facts.get('channel') or facts.get('uploader') or '',
+                 album='YouTube',source_url=row['url'])
+    def merge(library):
+        library['entries']=[item for item in library['entries'] if item.get('path')!=str(path)]+[entry]
+        return library
+    media.update_library(LOOK_MEDIA_LIBRARY,merge)
+    with MEDIA_CATALOG_LOCK: MEDIA_CATALOG_CACHE['at']=0.0
+
+
+def _download_forget(paths):
+    catalog, media = _look_catalog_modules()
+    for path in paths: catalog.forget(LOOK_FILE_CATALOG,path)
+    def remove(library):
+        library['entries']=[item for item in library['entries'] if item.get('path') not in paths]
+        return library
+    media.update_library(LOOK_MEDIA_LIBRARY,remove)
+    with MEDIA_CATALOG_LOCK: MEDIA_CATALOG_CACHE['at']=0.0
+
+
+def _downloads():
+    global _DOWNLOAD_MANAGER
+    with _DOWNLOAD_MANAGER_LOCK:
+        if _DOWNLOAD_MANAGER is None:
+            _DOWNLOAD_MANAGER=downloads.Downloads(index=_download_index,forget=_download_forget)
+            threading.Thread(target=_DOWNLOAD_MANAGER.maintenance,daemon=True,name='download-retention').start()
+        return _DOWNLOAD_MANAGER
+
+
 def _local_file_search(query,limit=80):
     """Bounded local metadata + FTS5 search; file contents never cross the network."""
     if not LOOK_FILE_CATALOG.exists(): return {"schema":"fabric-file-search-v2","node":identity()["name"],"entries":[],"count":0}
@@ -2402,6 +2449,9 @@ def _local_file_search(query,limit=80):
     try:
         db=sqlite3.connect(f"file:{LOOK_FILE_CATALOG}?mode=ro",uri=True,timeout=.5); db.execute("PRAGMA busy_timeout=500")
         node=identity()["name"]; merged={}
+        catalog,_media = _look_catalog_modules()
+        for item in catalog.facts_search_connection(db,query,limit):
+            if not ext or item.get("ext")==ext: merged[item["path"]]=dict(item,node=node)
         # Content first. OR gives natural-language recall; BM25 promotes files matching several useful words.
         if words:
             fts=" OR ".join('"'+w.replace('"','')+'"' for w in words[:16])
@@ -2411,7 +2461,7 @@ def _local_file_search(query,limit=80):
                 if ext: sql+=" AND fi.ext=?"; fparams.append(ext)
                 sql+=" ORDER BY bm25(content_fts) LIMIT ?"; fparams.append(int(limit))
                 for row in db.execute(sql,fparams):
-                    item=dict(zip(("path","name","ext","bytes","mtime","root","rank","snippet","digest"),row),node=node,match="content"); merged[item["path"]]=item
+                    item=dict(zip(("path","name","ext","bytes","mtime","root","rank","snippet","digest"),row),node=node,match="content"); merged[item["path"]]={**merged.get(item["path"],{}),**item}
             except sqlite3.OperationalError: pass
         where=[]; params=[]
         if ext: where.append("files.ext=?"); params.append(ext)
@@ -2545,15 +2595,14 @@ def _read_media_library():
 
 
 def _write_media_library(data):
-    LOOK_MEDIA_LIBRARY.parent.mkdir(parents=True, exist_ok=True)
-    with MEDIA_LIBRARY_LOCK:
-        tmp = LOOK_MEDIA_LIBRARY.with_suffix(".json.tmp")
-        tmp.write_text(json.dumps(data, indent=2, sort_keys=True) + "\n", encoding="utf-8")
-        try:
-            os.chmod(tmp, 0o600)
-        except OSError:
-            pass
-        tmp.replace(LOOK_MEDIA_LIBRARY)
+    _catalog,media=_look_catalog_modules()
+    def merge(current):
+        entries={row['path']:row for row in current['entries']}
+        entries.update({row['path']:row for row in data.get('entries') or []})
+        current['entries']=list(entries.values())
+        current['roots']=list(set(current['roots'])|set(data.get('roots') or []))
+        return current
+    with MEDIA_LIBRARY_LOCK: media.update_library(LOOK_MEDIA_LIBRARY,merge)
     with MEDIA_CATALOG_LOCK:
         MEDIA_CATALOG_CACHE["at"] = 0.0
         MEDIA_CATALOG_CACHE["data"] = None
@@ -3486,6 +3535,30 @@ class API(BaseHTTPRequestHandler):
             raise PermissionError("Destination node is not paired and advertising")
         return peer, value
 
+    def _downloads_request(self, payload=None):
+        try:
+            peer,_value=self._file_target()
+            path=urlparse(self.path).path
+            if peer is not None:
+                # Discover a route read-only; submit a mutation exactly once.
+                if payload is None: result=_file_peer_json(peer,path)
+                else: result=http_json(_copy_route(peer)+path,data=payload,timeout=60.0 if payload.get('action')=='find' else 15.0)
+                return self.sendj(200,result)
+            manager=_downloads()
+            if payload is None:
+                result={'jobs':manager.list()} if path=='/v1/downloads' else {'job':manager.get(path.rsplit('/',1)[-1])}
+            else:
+                action=payload.get('action','download')
+                if action=='download': result={'job':manager.create(payload.get('url',''),payload.get('directory'),payload.get('holding',False))}
+                elif action=='find': result={'results':manager.search(payload.get('query',''))}
+                elif action=='keep': result={'job':manager.keep(payload.get('job',''),payload.get('directory'))}
+                elif action=='cancel': result={'job':manager.cancel(payload.get('job',''))}
+                elif action=='index': result={'job':manager.reindex(payload.get('job',''))}
+                else: raise ValueError('Unknown download action')
+            return self.sendj(200,dict(result,ok=True,node=identity()['name']))
+        except Exception as exc:
+            return self.sendj(400,{'ok':False,'error':str(exc)})
+
     def _files_browse(self):
         try:
             peer, value = self._file_target()
@@ -4063,6 +4136,7 @@ class API(BaseHTTPRequestHandler):
     def do_GET(self):
         path = urlparse(self.path).path
         if not self._authorized_ingress(path): return
+        if path == "/v1/downloads" or path.startswith("/v1/downloads/"): return self._downloads_request()
         if path == "/v1/files/browse": return self._files_browse()
         if path == "/v1/files/copy/status": return self._files_copy_status()
         if path in ("/health", "/v1/health"):
@@ -4301,6 +4375,7 @@ class API(BaseHTTPRequestHandler):
         if not self._authorized_ingress(path): return
         if path == "/v1/files/copy": return self._files_copy()
         d = self.body()
+        if path == "/v1/downloads": return self._downloads_request(d)
         if path == "/v1/endpoints/fabric/allow":
             if getattr(self.server,"plane","local") != "local":
                 return self.sendj(403,{"error":"Fabric endpoint management is local-control only"})
@@ -6444,6 +6519,7 @@ def main():
     threading.Thread(target=background_curator,name="model-curator",daemon=True).start()
     threading.Thread(target=job_worker_loop,name="fabric-jobs",daemon=True).start()
     threading.Thread(target=_decision_expiry_loop,name="fabric-decisions",daemon=True).start()
+    _downloads()
     JOB_WAKE.set()
     srv=FabricHTTPServer((a.host,a.port),API,plane="local")
     threading.Thread(target=_local_accept_watchdog,args=(srv,),name="fabric-http-watchdog",daemon=True).start()

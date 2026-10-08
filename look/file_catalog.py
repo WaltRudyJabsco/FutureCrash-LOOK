@@ -4,7 +4,7 @@ import os, sqlite3, time, re, contextlib, subprocess, shutil, zipfile, html.pars
 import fcntl
 from pathlib import Path
 
-SCHEMA_VERSION=3
+SCHEMA_VERSION=4
 CONTENT_MAX_FILE_BYTES=4*1024*1024
 CONTENT_MAX_CHARS=256*1024
 CONTENT_EXTS={'.txt','.md','.markdown','.py','.js','.ts','.tsx','.jsx','.css','.json','.yaml','.yml','.toml','.ini','.cfg','.sh','.zsh','.html','.htm','.docx','.pdf','.epub'}
@@ -42,6 +42,7 @@ def connect(path):
         db.execute("CREATE VIRTUAL TABLE IF NOT EXISTS content_fts USING fts5(path UNINDEXED, body, tokenize='unicode61')")
     except sqlite3.OperationalError:
         pass
+    _facts_schema(db)
     # user_version is a migration marker, not connection setup. Writing it on
     # every open creates needless writer contention with background scans.
     current=int(db.execute('PRAGMA user_version').fetchone()[0])
@@ -103,7 +104,7 @@ def _extract_text(path,ext):
 def _index_content(db,path,ext,size,mtime,stamp):
     if ext not in CONTENT_EXTS or size>CONTENT_MAX_FILE_BYTES: return False
     old=db.execute('SELECT mtime,bytes FROM content_state WHERE path=?',(str(path),)).fetchone()
-    if old and float(old[0])==float(mtime) and int(old[1])==int(size): return False
+    if old and float(old[0])==float(mtime) and int(old[1])==int(size) and db.execute("SELECT 1 FROM file_facts WHERE path=?",(str(path),)).fetchone(): return False
     text,error=_extract_text(path,ext)
     # CONTENT_MAX_FILE_BYTES bounds this read. Exact identity is worth computing
     # here because extraction already paid the filesystem I/O cost.
@@ -115,6 +116,10 @@ def _index_content(db,path,ext,size,mtime,stamp):
     except sqlite3.OperationalError: return False
     if text: db.execute('INSERT INTO content_fts(path,body) VALUES(?,?)',(str(path),text))
     db.execute('INSERT OR REPLACE INTO content_state(path,mtime,bytes,kind,chars,indexed,error,digest) VALUES(?,?,?,?,?,?,?,?)',(str(path),mtime,size,ext,len(text or ''),stamp,error,digest))
+    if text:
+        summary,keywords=describe_text(text)
+        existing=db.execute("SELECT provenance FROM file_facts WHERE path=?",(str(path),)).fetchone()
+        if not existing or existing[0]=="extracted": put_facts(db,path,summary,keywords,provenance="extracted",digest=digest)
     return bool(text)
 
 @contextlib.contextmanager
@@ -172,6 +177,9 @@ def _scan_locked(db_path,base,default_home=False):
         try: db.execute('DELETE FROM content_fts WHERE path=?',(old_path,))
         except sqlite3.OperationalError: pass
         db.execute('DELETE FROM content_state WHERE path=?',(old_path,))
+        db.execute('DELETE FROM file_facts WHERE path=?',(old_path,))
+        try: db.execute('DELETE FROM facts_fts WHERE path=?',(old_path,))
+        except sqlite3.OperationalError: pass
     db.execute('DELETE FROM files WHERE root=? AND scanned<?',(str(base),stamp))
     db.execute('INSERT OR REPLACE INTO roots VALUES(?,?,?)',(str(base),stamp,count)); db.commit(); db.close()
     return {'root':str(base),'count':count,'skipped':skipped,'content_indexed':content_indexed,'seconds':time.monotonic()-started}
@@ -224,8 +232,11 @@ def content_search(db_path,query,limit=80):
     db.close(); return rows
 
 def combined_search(db_path,query,limit=80):
-    meta=search(db_path,query,limit); content=content_search(db_path,query,limit); merged={}
-    for row in content: merged[row['path']]=row
+    meta=search(db_path,query,limit); content=content_search(db_path,query,limit); db=connect(db_path)
+    try: facts=facts_search_connection(db,query,limit)
+    finally: db.close()
+    merged={row["path"]:row for row in facts}
+    for row in content: merged[row['path']]={**merged.get(row['path'],{}),**row}
     for row in meta:
         if row['path'] in merged: merged[row['path']]['match']='name+content'
         else: row=dict(row); row['match']='name'; merged[row['path']]=row
@@ -309,3 +320,73 @@ def search_rows(rows,query,limit=80):
         if all(t in hay for t in remaining): out.append(dict(row))
     key=(lambda r:int(r.get('bytes') or 0)) if any(x in terms for x in ('big','biggest','large','largest')) else (lambda r:float(r.get('mtime') or 0))
     return sorted(out,key=key,reverse=True)[:int(limit)]
+
+
+def _facts_schema(db):
+    db.execute('CREATE TABLE IF NOT EXISTS file_facts(path TEXT PRIMARY KEY,mtime REAL,bytes INTEGER,digest TEXT,summary TEXT,keywords TEXT,source_url TEXT,provenance TEXT,indexed REAL)')
+    try: db.execute("CREATE VIRTUAL TABLE IF NOT EXISTS facts_fts USING fts5(path UNINDEXED,body,tokenize='unicode61')")
+    except sqlite3.OperationalError: pass
+
+
+def put_facts(db,path,summary='',keywords=(),source_url='',provenance='user',digest=''):
+    import json
+    path=Path(path).resolve(); stat=path.stat()
+    summary=str(summary)[:4000]; keywords=[str(word)[:80] for word in keywords][:32]
+    db.execute('INSERT OR REPLACE INTO file_facts VALUES(?,?,?,?,?,?,?,?,?)',
+               (str(path),stat.st_mtime,stat.st_size,digest,summary,json.dumps(keywords),str(source_url)[:2048],provenance,time.time()))
+    try:
+        db.execute('DELETE FROM facts_fts WHERE path=?',(str(path),))
+        db.execute('INSERT INTO facts_fts VALUES(?,?)',(str(path),' '.join([summary,*keywords,str(source_url)])))
+    except sqlite3.OperationalError: pass
+
+
+def register(db_path,path,facts=None):
+    path=Path(path).resolve(); stat=path.stat(); db=connect(db_path); root=str(path.parent); stamp=time.time()
+    try:
+        old=db.execute('SELECT root FROM files WHERE path=?',(str(path),)).fetchone()
+        if old: root=old[0]
+        db.execute('INSERT OR REPLACE INTO files VALUES(?,?,?,?,?,?,?,?,?)',(str(path),root,path.name,path.suffix.casefold(),stat.st_size,stat.st_mtime,stat.st_ino,stat.st_mode,stamp))
+        _index_content(db,path,path.suffix.casefold(),stat.st_size,stat.st_mtime,stamp)
+        if facts: put_facts(db,path,**facts)
+        count=db.execute('SELECT COUNT(*) FROM files WHERE root=?',(root,)).fetchone()[0]
+        db.execute('INSERT OR REPLACE INTO roots VALUES(?,?,?)',(root,stamp,count)); db.commit()
+    finally: db.close()
+    return {'path':str(path),'indexed':True}
+
+
+def forget(db_path,path):
+    db=connect(db_path)
+    try:
+        old=db.execute('SELECT root FROM files WHERE path=?',(str(path),)).fetchone()
+        for table in ('facts_fts','file_facts','content_fts','content_state','files'):
+            try: db.execute(f'DELETE FROM {table} WHERE path=?',(str(path),))
+            except sqlite3.OperationalError: pass
+        if old:
+            db.execute('UPDATE roots SET count=(SELECT COUNT(*) FROM files WHERE root=?) WHERE root=?',(old[0],old[0]))
+        db.commit()
+    finally: db.close()
+
+
+def facts_search_connection(db,query,limit=80):
+    import json
+    words=[word for word in _terms(query) if word not in {'find','file','files','about','the','a','that','video','of','my','me','show'}]
+    if not words: return []
+    expression=' OR '.join('"'+word.replace('"','')+'"' for word in words[:16])
+    try:
+        rows=db.execute('''SELECT f.path,f.name,f.ext,f.bytes,f.mtime,f.root,d.digest,d.summary,d.keywords,d.source_url,d.provenance
+            FROM facts_fts x JOIN file_facts d ON d.path=x.path JOIN files f ON f.path=x.path
+            WHERE facts_fts MATCH ? AND d.bytes=f.bytes AND d.mtime=f.mtime ORDER BY bm25(facts_fts) LIMIT ?''',(expression,int(limit)))
+        results=[]
+        for row in rows:
+            item=dict(zip(('path','name','ext','bytes','mtime','root','digest','summary','keywords','source_url','provenance'),row),match='description',snippet=row[7])
+            item['keywords']=json.loads(item['keywords']); results.append(item)
+        return results
+    except sqlite3.OperationalError: return []
+
+
+def describe_text(text):
+    from collections import Counter
+    stop={'that','this','with','from','have','will','your','they','were','what','when','which','there','their','about','into','then','some','return','true','false','none','self','import'}
+    words=[word for word in re.findall(r'\b[\w-]{4,}\b',text.casefold()) if word not in stop]
+    summary=' '.join(text.split())[:600]
+    return summary,[word for word,_ in Counter(words).most_common(20)]

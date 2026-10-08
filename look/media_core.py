@@ -5,6 +5,7 @@ Nothing here opens devices, starts players, or talks to Fabric.
 """
 from __future__ import annotations
 
+import contextlib
 import hashlib
 import json
 import mimetypes
@@ -523,3 +524,28 @@ def playlist_payload(name: str, session: Any) -> dict[str, Any]:
         "saved": _now(),
         "queue": normalized["queue"],
     }
+
+
+@contextlib.contextmanager
+def library_lock(path):
+    import fcntl
+    path=Path(path); path.parent.mkdir(parents=True,exist_ok=True)
+    with Path(str(path)+'.lock').open('a') as lock:
+        fcntl.flock(lock,fcntl.LOCK_EX)
+        try: yield
+        finally: fcntl.flock(lock,fcntl.LOCK_UN)
+
+
+def update_library(path,transform):
+    import json, os, uuid
+    path=Path(path)
+    with library_lock(path):
+        try: library=normalize_library(json.loads(path.read_text()))
+        except (OSError,ValueError): library=empty_library()
+        result=normalize_library(transform(library))
+        temp=path.with_name(path.name+'.'+uuid.uuid4().hex+'.tmp')
+        try:
+            temp.write_text(json.dumps(result,indent=2)+'\n'); os.chmod(temp,0o600); temp.replace(path)
+        finally:
+            if temp.exists(): temp.unlink()
+        return result

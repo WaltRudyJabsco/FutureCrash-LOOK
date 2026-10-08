@@ -179,6 +179,7 @@ echo
 echo "LOOK WORKSTATION"
 core=(zsh python3 git zoxide fzf fd nvim bat fortune cowsay fastfetch chafa pdftotext ttyd lsof mpv qrencode)
 core+=(sox espeak-ng)
+core+=(yt-dlp ffmpeg)
 # MPRIS is an optional Linux system-player adapter, not a LOOK core dependency.
 # Never feed playerctl through Linuxbrew: use the distribution package manager
 # later, non-fatally, and keep the rest of LOOK installable without it.
@@ -315,6 +316,8 @@ install_file "$ROOT/look/look_ai.py" "$HOME/.local/share/look/look_ai.py"
 install_file "$ROOT/look/lo_engine.py" "$HOME/.local/share/look/lo_engine.py"
 install_file "$ROOT/look/lo_stream.py" "$HOME/.local/share/look/lo_stream.py"
 install_file "$ROOT/look/lo_history.py" "$HOME/.local/share/look/lo_history.py"
+install_file "$ROOT/look/ytd.py" "$HOME/.local/share/look/ytd.py"
+install_file "$ROOT/look/weather_forecast.py" "$HOME/.local/share/look/weather_forecast.py"
 install_file "$ROOT/look/media_core.py" "$HOME/.local/share/look/media_core.py"
 install_file "$ROOT/look/fabric_files.py" "$HOME/.local/share/look/fabric_files.py"
 install_file "$ROOT/look/media_art.py" "$HOME/.local/share/look/media_art.py"

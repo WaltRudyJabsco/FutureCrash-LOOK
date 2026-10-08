@@ -23,10 +23,14 @@ def load():
 
 
 def save(data):
-    LIBRARY.parent.mkdir(parents=True,exist_ok=True)
-    tmp=LIBRARY.with_suffix('.json.tmp')
-    tmp.write_text(json.dumps(media_core.normalize_library(data),indent=2,sort_keys=True)+'\n',encoding='utf-8')
-    os.chmod(tmp,0o600); tmp.replace(LIBRARY)
+    # A mount scan contributes only its roots; retain concurrent download entries.
+    roots=set(data.get('roots') or [])
+    def merge(current):
+        paths={row['path']:row for row in current['entries']}
+        paths.update({row['path']:row for row in data.get('entries') or []})
+        current['entries']=list(paths.values()); current['roots']=list(roots|set(current['roots']))
+        return current
+    media_core.update_library(LIBRARY,merge)
 
 
 def candidates():
@@ -82,12 +86,64 @@ def scan_new(seen:set[str]):
     return seen
 
 
+REFRESH_SECONDS=300.0
+
+
+def refresh_existing(previous):
+    """Inspect directory mtimes, refreshing changed folders without decoding media.
+
+    Files rewritten in place without directory changes still require a manual
+    rescan. Never automatically traverse an explicit whole-filesystem root.
+    """
+    import file_catalog
+    library=load(); known={item['path']:item for item in library['entries']}
+    by_folder={}
+    for path,row in known.items(): by_folder.setdefault((row.get('root'),str(Path(path).parent)),[]).append(path)
+    changes={}; removed=set(); current={}
+    for root in library['roots']:
+        base=Path(root).expanduser().resolve()
+        if base==base.parent or not base.is_dir(): continue
+        for folder,dirs,names in os.walk(base):
+            dirs[:]=[name for name in dirs if not name.startswith('.')]
+            try: stamp=Path(folder).stat().st_mtime_ns
+            except OSError: continue
+            key=(str(base),folder); current[key]=stamp
+            if previous.get(key)==stamp: continue
+            visible={str(Path(folder)/name) for name in names if not name.startswith('.') and Path(name).suffix.casefold() in media_core.MEDIA_EXTENSIONS}
+            removed.update(path for path in by_folder.get(key,[]) if path not in visible)
+            for path in visible:
+                try:
+                    row=media_core.entry_from_path(path,base); old=known.get(path)
+                    if old and old.get('bytes')==row['bytes'] and old.get('mtime')==row['mtime']: continue
+                    changes[path]=row
+                    file_catalog.register(Path.home()/'.local/share/look/file_catalog.sqlite3',path)
+                except (OSError,ValueError): continue
+    # Deleted directories are removed only under a root we could inspect.
+    live_roots={key[0] for key in current}
+    for key in set(previous)-set(current):
+        if key[0] in live_roots and not Path(key[1]).exists(): removed.update(by_folder.get(key,[]))
+    if changes or removed:
+        def merge(current_library):
+            entries={item['path']:item for item in current_library['entries'] if item['path'] not in removed}
+            entries.update(changes); current_library['entries']=list(entries.values()); return current_library
+        media_core.update_library(LIBRARY,merge)
+        for path in removed: file_catalog.forget(Path.home()/'.local/share/look/file_catalog.sqlite3',path)
+    write_status(refresh_seconds=REFRESH_SECONDS,last_refresh=time.time(),added_or_changed=len(changes),removed=len(removed),
+                 refresh_message='existing scoped roots checked; whole-filesystem roots need manual rescan')
+    return current
+
+
 def main():
-    seen=set(); write_status(state='watching',volume='',count=0,message='waiting for removable media')
+    seen=set(); previous={}; refreshed=0.0
+    write_status(state='watching',volume='',count=0,message='waiting for removable media')
     while True:
         live={str(p) for p in candidates()}
         seen.intersection_update(live)
         scan_new(seen)
+        if time.monotonic()-refreshed>=REFRESH_SECONDS:
+            try: previous=refresh_existing(previous)
+            except Exception as exc: write_status(refresh_error=str(exc))
+            refreshed=time.monotonic()
         time.sleep(INTERVAL)
 
 if __name__=='__main__':

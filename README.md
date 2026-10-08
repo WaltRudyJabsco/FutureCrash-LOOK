@@ -17,6 +17,8 @@ Remote and local media covers now use the same explicit full-RGB Chafa symbol co
 
 Use `lk version` for installed LOOK/bundle identity, `lk help` for the live glossary, and `man lk` for the reference manual. Component versions intentionally advance independently.
 
+Download videos directly on a chosen Fabric node with `lk ytd URL --node 3090`. The installer includes yt-dlp and ffmpeg. See [Fabric downloads and descriptions](docs/fabric-downloads.md) for progress, search, optional holding, Keep, catalog freshness, and dated forecasts.
+
 ## Current high-value workflows
 
 - `l` / `lk PATH`: interactive LOOK browser. Arrow navigation enters the filter/focus view; Tab marks; Shift-arrow navigation keeps fast top/page/bottom movement.
