@@ -174,13 +174,15 @@ replacing it. Ordinary installs leave your terminal configuration alone. To appl
 just the profile to an already-installed Kitty, run `python3 tools/configure_kitty.py`.
 Personal overrides live in `~/.config/kitty/kitty-local.conf`, loaded last.
 
-The profile uses an opaque green phosphor theme, MesloLGS NF at 13pt, ordinary ANSI
+The profile uses a transparent green phosphor theme (82% opacity, blur radius 24),
+a moving cursor trail, powerline tabs, MesloLGS NF at 13pt, and ordinary ANSI
 colors for art and diagnostics, and the OS login shell. Both Mac Option keys work
 as Alt. Shift-arrows and Ctrl-R go to LOOK/LO; terminal shortcuts use Control-Shift
 (with conventional Command shortcuts on Mac). Use Control-Shift-PageUp/PageDown
 for terminal scrollback, Control-Tab to cycle tabs, and Control-Shift-T/N for a new
 tab/window in the same directory. Fully restart Kitty after changing Option keys.
-The installer supplies the matching Meslo font on Mac; on Linux install it locally
+Use Control-Shift-A then M/L to increase/decrease opacity, or R to reset.
+Blur depends on the desktop compositor on Linux. The installer supplies the matching Meslo font on Mac; on Linux install it locally
 or set `font_family` in the personal override. Remote runtime updates do not deploy
 terminal preferences or install applications/fonts.
 
