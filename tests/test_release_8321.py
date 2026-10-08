@@ -5,7 +5,7 @@ def test_shift_object_tools_are_wired_in_all_selection_states():
     text=(ROOT/'look/look_renderer.py').read_text()
     assert "key in {'C','M','D'}" in text
     assert "key=='R'" in text
-    assert '⇧R rename' in text and '⇧D delete' in text
+    assert 'R rename' in text and 'D delete' in text
 
 def test_batch_rename_has_hash_sequence_and_collision_guard():
     text=(ROOT/'look/look_renderer.py').read_text()

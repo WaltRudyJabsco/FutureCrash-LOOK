@@ -11,9 +11,11 @@ Normally installed by the repository's ./install.sh.
 from __future__ import annotations
 import json
 try:
-    from . import fabric_files
+    from . import fabric_files, media_open, destination_history
 except ImportError:
     import fabric_files
+    import media_open
+    import destination_history
 
 import argparse
 import base64
@@ -793,6 +795,10 @@ def open_default(path:Path)->tuple[bool,str]:
         elif os.name=='nt':
             os.startfile(str(path))  # type: ignore[attr-defined]
         else:
+            media=media_open.command(path)
+            if media:
+                subprocess.Popen(media,stdin=subprocess.DEVNULL,stdout=subprocess.DEVNULL,stderr=subprocess.DEVNULL)
+                return True,''
             proc=subprocess.run(['xdg-open',str(path)],capture_output=True,text=True)
             if proc.returncode:
                 return False, f'no application could open {path.suffix or "this file type"}'
@@ -918,43 +924,39 @@ def copy_path(path:Path)->bool:
 
 def _complete_path_text(value:str)->str:
     """Shell-like, deterministic path completion for LOOK action prompts."""
+    if value.startswith('@'):
+        try: dest=fabric_files.parse(value)
+        except ValueError:
+            try: matches=[str(node) for node in fabric_files.nodes() if str(node).casefold().startswith(value.casefold())]
+            except (OSError,RuntimeError): return value
+            return matches[0] if len(matches)==1 else os.path.commonprefix(matches) or value
+        history=[row['value'].rstrip('/')+'/' for row in destination_history.recent(dest.node) if row['value'].casefold().startswith(value.casefold())]
+        if len(history)==1: return history[0]
+        parent=dest.path if dest.path.endswith('/') or dest.path=='~' else str(Path(dest.path).parent)
+        prefix='' if dest.path.endswith('/') or dest.path=='~' else Path(dest.path).name
+        try: rows=fabric_files.browse(fabric_files.Destination(dest.node,parent))['directories']
+        except (OSError,RuntimeError): return value
+        matches=[row['name']+'/' for row in rows if row['name'].casefold().startswith(prefix.casefold())]
+        if not matches: return value
+        completed=matches[0] if len(matches)==1 else os.path.commonprefix(matches)
+        if len(completed)<=len(prefix): return value
+        return '@'+dest.node+':'+parent.rstrip('/')+'/'+completed
     if not value:
+        history=destination_history.recent()
+        if history: return history[0]['value'].rstrip('/')+'/'
         value="./"
     expanded=os.path.expanduser(value)
     p=Path(expanded)
-    parent=p.parent if str(p.parent) else Path(".")
-    prefix=p.name
+    parent=p if value.endswith('/') else p.parent
+    prefix='' if value.endswith('/') else p.name
     try:
-        names=sorted(
-            (x.name + ("/" if x.is_dir() else "") for x in parent.iterdir()),
-            key=str.casefold
-        )
-    except OSError:
-        return value
-
-    matches=[n for n in names if n.casefold().startswith(prefix.casefold())]
-    if not matches:
-        return value
-
-    # Extend to a unique/common prefix. A unique directory keeps its trailing slash.
-    if len(matches)==1:
-        completed=matches[0]
-    else:
-        common=os.path.commonprefix(matches)
-        if len(common)<=len(prefix):
-            return value
-        completed=common
-
-    # Preserve the user's spelling style (~, absolute, relative).
-    raw_parent=str(Path(value).parent)
-    if value.startswith("~"):
-        base=value[:value.rfind(prefix)] if prefix else value
-        return base+completed
-    if raw_parent in {"",".","./"}:
-        base="./" if value.startswith("./") else ""
-        return base+completed
-    sep="" if value[:value.rfind(prefix)].endswith(os.sep) else os.sep
-    base=value[:value.rfind(prefix)] if prefix else value
+        names=sorted((x.name+('/' if x.is_dir() else '') for x in parent.iterdir()),key=str.casefold)
+    except OSError: return value
+    matches=[name for name in names if name.casefold().startswith(prefix.casefold())]
+    if not matches: return value
+    completed=matches[0] if len(matches)==1 else os.path.commonprefix(matches)
+    if len(completed)<=len(prefix): return value
+    base=value[:-len(prefix)] if prefix else value
     return base+completed
 
 
@@ -965,20 +967,31 @@ def _destination_picker(start_dir:Path)->Path|None:
     here=start_dir if isinstance(start_dir,fabric_files.Destination) else start_dir.expanduser().resolve()
     if isinstance(here,Path) and not here.is_dir():
         here=here.parent if here.parent.is_dir() else Path.home()
-    query=''; selected=0; error=''; loaded=object(); dirs=[]
+    query=''; selected=0; error=''; loaded=object(); dirs=[]; labels={}; common=True
     try:
         tty.setcbreak(fd)
         while True:
             try:
-                if here != loaded:
-                    loaded=here
+                view=(here,common)
+                if view != loaded:
+                    loaded=view; labels={}
                     error=''
                     if here is None:
                         dirs=[Path('/')]+fabric_files.nodes()
                     elif isinstance(here,fabric_files.Destination):
-                        listing=fabric_files.browse(here)
+                        places=common and here.path=='/'
+                        listing=fabric_files.browse(here,common=True) if places else fabric_files.browse(here)
                         here=fabric_files.Destination(here.node,listing['path'])
-                        dirs=[fabric_files.Destination(here.node,row['path']) for row in listing['directories']]
+                        rows=listing['directories']
+                        dirs=[fabric_files.Destination(here.node,row['path']) for row in rows]
+                        labels={str(path):row.get('name') or path.name for path,row in zip(dirs,rows)}
+                        if places:
+                            history=[fabric_files.parse(row['value']) for row in destination_history.recent(here.node)[:8]]
+                            for path in reversed(history):
+                                if path and path not in dirs:
+                                    dirs.insert(0,path); labels[str(path)]='Recent · '+path.path
+                            labels[str(fabric_files.Destination(here.node,'/'))]='Filesystem / (all directories)'
+                        loaded=(here,common)
                     else:
                         dirs=sorted((x for x in here.iterdir() if x.is_dir()),key=lambda x:x.name.casefold())
             except Exception as exc:
@@ -986,17 +999,19 @@ def _destination_picker(start_dir:Path)->Path|None:
                 error=str(exc)
 
             terms=query.casefold().split()
-            visible=[x for x in dirs if all(t in x.name.casefold() for t in terms)]
+            visible=[x for x in dirs if all(t in (labels.get(str(x),x.name)).casefold() for t in terms)]
             selected=max(0,min(selected,max(0,len(visible)-1)))
             terminal=shutil.get_terminal_size((100,30)); width=max(56,terminal.columns); height=max(12,terminal.lines)
             usable=max(4,height-6); top=max(0,min(max(0,len(visible)-usable),selected-usable+1))
             sys.stdout.write(CLEAR)
-            sys.stdout.write(f'{CYAN}{BOLD}LOOK DESTINATION{RESET}  {WHITE}{here if here is not None else "FABRIC NODES"}{RESET}\n')
-            sys.stdout.write(f'{FAINT}← parent · → descend · Enter choose · arrows move · Shift-arrows page/ends · type filter · Esc cancel{RESET}\n\n')
+            heading=str(here) if here is not None else 'FABRIC NODES'
+            if isinstance(here,fabric_files.Destination) and here.path=='/' and common: heading+=' · COMMON PLACES'
+            sys.stdout.write(f'{CYAN}{BOLD}LOOK DESTINATION{RESET}  {WHITE}{heading}{RESET}\n')
+            sys.stdout.write(f'{FAINT}← parent · → descend · Enter choose · arrows move · Shift-arrows page/ends · type filter · Tab common/all · Esc cancel{RESET}\n\n')
             for n,path in enumerate(visible[top:top+usable],start=top):
                 focus=f'{CYAN}{BOLD}›{RESET}' if n==selected else ' '
                 label=(f'@{path.node}:/ (Fabric)' if here is None and isinstance(path,fabric_files.Destination)
-                       else '/ (this computer)' if here is None else path.name+'/')
+                       else '/ (this computer)' if here is None else labels.get(str(path),path.name+'/'))
                 sys.stdout.write(f'{focus} {label}\n')
             if error: sys.stdout.write(f'  {RED}{error}{RESET}\n')
             if not visible: sys.stdout.write('  (no matching directories)\n')
@@ -1010,13 +1025,22 @@ def _destination_picker(start_dir:Path)->Path|None:
             if key in {'\x1b[5~','\x1b[1;2A'} and visible: selected=max(0,selected-usable); continue
             if key=='\x1b[1;2D' and visible: selected=0; continue
             if key=='\x1b[1;2C' and visible: selected=len(visible)-1; continue
+            if key=='\t' and isinstance(here,fabric_files.Destination):
+                if here.path=='/': common=not common
+                else: here=fabric_files.Destination(here.node,'/'); common=True
+                query=''; selected=0; continue
             if key=='\x1b[D':
                 here=None if here is None or here==Path('/') else here.parent
                 query=''; selected=0; continue
-            if key=='\x1b[C' and visible: here=visible[selected]; query=''; selected=0; continue
+            if key=='\x1b[C' and visible:
+                chosen=visible[selected]
+                common=not (isinstance(here,fabric_files.Destination) and here.path=='/' and isinstance(chosen,fabric_files.Destination) and chosen.path=='/')
+                here=chosen; query=''; selected=0; continue
             if key in {'\r','\n'} and visible:
-                if isinstance(visible[selected],fabric_files.Destination): return visible[selected]
-                return visible[selected].resolve()
+                chosen=visible[selected] if isinstance(visible[selected],fabric_files.Destination) else visible[selected].resolve()
+                try: destination_history.remember(chosen)
+                except OSError: pass
+                return chosen
             if key in {'\x7f','\b'}:
                 if query: query=query[:-1]; selected=0
                 continue
@@ -1194,10 +1218,12 @@ def action_footer(parts:list[str],width:int)->list[str]:
     lines=[]
     current=prefix
     for part in parts:
-        piece=part if current==prefix else ' · '+part
+        key,separator,label=part.partition(' ')
+        styled=f'{RESET}{CYAN}{BOLD}{key}{RESET}{FAINT} {label}' if separator else f'{RESET}{CYAN}{BOLD}{part}{RESET}{FAINT}'
+        piece=styled if current==prefix else ' · '+styled
         if len(strip_ansi(current+piece)) > width and current!=prefix:
             lines.append(f'{FAINT}{current}{RESET}')
-            current=prefix+part
+            current=prefix+styled
         else:
             current+=piece
     if current!=prefix:
@@ -1549,20 +1575,20 @@ def pager(rows:list[str],height:int,width:int,rebuild=None,browse_rebuild=None,f
                     status=(f'  {CYAN}{BOLD}PREVIEW{RESET} {WHITE}{name}{RESET}'
                             f'  {GRAY}{selected+1 if matches else 0}/{len(matches)} · filter {query}{RESET}'
                             + (f'  · {sel}' if sel else ''))
-                    action_parts=['J/K move','Space/Tab mark','V list','Enter/→ open','B Copy','T Cut','P Paste',
-                                  'C Copy To','M Move To','⇧R rename','⇧D delete','L LO context','X clear set','E edit',
+                    action_parts=['J/K move','Space/Tab mark','V list','Enter/→ open','B clipboard','T Cut','P Paste',
+                                  'C Copy To','M Move To','R rename','D delete','L LO context','X clear set','E edit',
                                   'O open with','Y path','G go','Esc list']
                 else:
                     status=(f'  {CYAN}{BOLD}FILTER{RESET} {WHITE}{query}█{RESET}'
                             f'  {GRAY}{len(matches)} {match_word}{RESET}'
                             + (f'  · {sel}' if sel else ''))
-                    action_parts=['J/K move','⇧H hidden','Tab mark','A all','V Preview','Enter/→ open','B clipboard',
-                                  'B Copy','T Cut','P Paste','C Copy To','M Move To','⇧R rename','⇧D delete',
+                    action_parts=['J/K move','H hidden','Tab mark','A all','V Preview','Enter/→ open','B clipboard',
+                                  'T Cut','P Paste','C Copy To','M Move To','R rename','D delete',
                                   'L LO context','X clear set','E edit','O open with','Y path','G go','← parent','Esc clear']
             else:
                 back_hint='Esc back' if on_back else 'Esc exit'
                 status=f'  {FAINT}{last}/{len(current)}{RESET}'
-                action_parts=['⇧H hidden','⇧F sort','Enter/→ filter','Space/PgDn next','b/PgUp back',
+                action_parts=['H hidden','F sort','Enter/→ filter','Space/PgDn next','b/PgUp back',
                               'g ends','G go','⇧↑/↓ page','⇧←/→ ends','←/< parent',back_hint,'Q quit']
             if notice:
                 status=f'{status}  {YELLOW}{notice}{RESET}'

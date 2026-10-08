@@ -5998,10 +5998,15 @@ def _desktop_launch(target, category="", preview=False):
                 os.startfile(str(target))  # type: ignore[attr-defined]
                 return f"{'PREVIEW' if preview else 'OPEN'} OK · {target} · system"
         else:
+            import media_open
+            media=media_open.command(target,preferred)
+            if media:
+                subprocess.Popen(media,stdin=subprocess.DEVNULL,stdout=subprocess.DEVNULL,stderr=subprocess.DEVNULL)
+                return f"{'PREVIEW' if preview else 'OPEN'} OK · {target} · {category or 'file'} · {preferred if preferred!='system' else 'mpv'}"
             if preferred and preferred!="system":
                 binary=shutil.which(preferred) or (preferred if Path(preferred).exists() else None)
                 if not binary:
-                    return f"Open failed: preferred {category or 'app'} is unavailable: {active}"
+                    return f"Open failed: preferred {category or 'app'} is unavailable: {preferred}"
                 cmd=[binary,str(target)]
             else:
                 opener=shutil.which("xdg-open")
@@ -14799,6 +14804,11 @@ def _open_file(path, choose=False):
                 # the richer O/open-with chooser.
                 return subprocess.call(["open",str(path)])
             return subprocess.call(["open",str(path)])
+        import media_open
+        media=media_open.command(path)
+        if media:
+            subprocess.Popen(media,stdin=subprocess.DEVNULL,stdout=subprocess.DEVNULL,stderr=subprocess.DEVNULL)
+            return 0
         if shutil.which("xdg-open"):
             subprocess.Popen(["xdg-open",str(path)],stdout=subprocess.DEVNULL,stderr=subprocess.DEVNULL)
             return 0
@@ -19321,7 +19331,7 @@ def _file_find_lines(rows,query,source):
             n/=1024
         human=f"{n:.0f}{u}" if u in {'B','K'} else f"{n:.1f}{u}"
         node=str(row.get('node') or '')
-        prefix=(node+' · ') if source=='Fabric' and node else ''
+        prefix=(node+' · ') if source.startswith('Fabric') and node else ''
         kind=str(row.get('match') or 'name')
         lines.append(f"  {stamp}  {human:>7}  {prefix}{row['path']}  [{kind}]")
         snippet=str(row.get('snippet') or '').replace('\n',' ').strip()
@@ -19350,7 +19360,7 @@ def _file_find_selector(rows,query,source):
                 node=str(row.get('node') or '')
                 kind=str(row.get('match') or 'name')
                 path=str(row.get('path') or '')
-                label=(f"{node} · " if source=='Fabric' and node else '')+path
+                label=(f"{node} · " if source.startswith('Fabric') and node else '')+path
                 room=max(18,width-len(kind)-7)
                 if len(label)>room: label='…'+label[-(room-1):]
                 print(f"{mark} {label:<{room}}  {_c('['+kind+']','2')}")
@@ -19371,12 +19381,14 @@ def _file_find_selector(rows,query,source):
             if key=='pageup' and visible: idx=max(0,idx-usable); continue
             if key=='pagedown' and visible: idx=min(len(visible)-1,idx+usable); continue
             if key in {'y','Y'} and visible:
-                notice='copied path' if _copy_value(visible[idx]['path']) else 'clipboard unavailable'; continue
+                row=visible[idx]
+                value='@'+str(row.get('node'))+':'+row['path'] if row.get('local') is False else row['path']
+                notice='copied path' if _copy_value(value) else 'clipboard unavailable'; continue
             if key in {'\r','\n','right'} and visible:
                 row=visible[idx]; path=Path(str(row.get('path') or '')).expanduser()
-                if not path.exists():
+                if row.get("local") is False or not path.exists():
                     node=str(row.get('node') or 'remote')
-                    notice=f"remote/unmounted result on {node} · path copied with Y"
+                    notice=f"remote/unmounted result on {node} · Y copies its node-qualified path"
                     continue
                 # Leave raw mode before handing the accepted result to the normal
                 # LOOK file view. That view supplies preview, mark/copy/move/remove,
@@ -19404,6 +19416,15 @@ def _file_find_command(args):
         payload=_media_fabric_cli(["file-find",query])
         rows=payload.get("entries") or []
         source="Fabric"
+        errors=payload.get('errors') or []
+        if errors: source+=' · partial, unavailable: '+', '.join(str(item.get('node') or '?') for item in errors)
+        local=payload.get('local_node')
+        if local:
+            for row in rows:
+                copies=row.get('locations') or [row]
+                local_copy=next((copy for copy in copies if copy.get('node')==local),None)
+                if local_copy: row.update(local_copy)
+                row['local']=bool(local_copy)
     except RuntimeError:
         rows=file_catalog.combined_search(FILE_CATALOG_DB,query)
     if not rows:

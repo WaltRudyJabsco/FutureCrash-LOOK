@@ -3,7 +3,7 @@ ROOT=Path(__file__).resolve().parents[1]
 
 def test_filter_focus_uses_object_action_footer():
     text=(ROOT/'look/look_renderer.py').read_text()
-    for label in ('Tab mark','C Copy To','M Move To','⇧R rename','⇧D delete','E edit','O open with'):
+    for label in ('Tab mark','C Copy To','M Move To','R rename','D delete','E edit','O open with'):
         assert label in text
     assert 'cursoring' not in text and 'selecting' not in text
 

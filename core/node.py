@@ -2531,7 +2531,7 @@ def _fabric_file_search(query,limit=80):
         if primary.get("digest"): primary["object_id"]=primary["digest"]
         logical.append(primary)
     logical=sorted(logical,key=key,reverse=True)[:int(limit)]
-    return {"schema":"fabric-file-search-v3","generated":now(),"query":query,"entries":logical,"count":len(logical),"locations":sum(int(x.get("copies") or 1) for x in logical),"errors":errors}
+    return {"schema":"fabric-file-search-v3","local_node":identity()["name"],"generated":now(),"query":query,"entries":logical,"count":len(logical),"locations":sum(int(x.get("copies") or 1) for x in logical),"errors":errors}
 
 
 
@@ -3562,10 +3562,12 @@ class API(BaseHTTPRequestHandler):
     def _files_browse(self):
         try:
             peer, value = self._file_target()
+            mode=(parse_qs(urlparse(self.path).query).get('mode') or ['all'])[0]
+            if mode not in {'common','all'}: raise ValueError('Unknown browse mode')
             if peer is None:
-                result = file_transfer.browse(value)
+                result = file_transfer.common_places() if mode=='common' else file_transfer.browse(value)
             else:
-                route = "/v1/files/browse?" + urllib.parse.urlencode({"path": value})
+                route = "/v1/files/browse?" + urllib.parse.urlencode({"path": value,"mode":mode})
                 result = _file_peer_json(peer, route)
             return self.sendj(200, result)
         except Exception as exc:

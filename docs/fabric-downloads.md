@@ -45,3 +45,15 @@ lk find 'equipment notes'
 Descriptions live in the SQLite catalog, not inside the original files. Download facts retain source provenance; supported small documents gain an extracted text excerpt and frequent keywords during scanning. Extraction uses no language model. The stored size/mtime fingerprint prevents changed cataloged files from matching stale descriptions after a rescan. Rename/replacement metadata is refreshed by scanning; descriptions are not portable embedded file tags yet.
 
 Weather requests for tomorrow, a weekend, five/seven days, or next week now use location-local daily dates. Each forecast row shows its date, conditions, high/low, and precipitation probability. Next week begins next Monday.
+
+## Destination discovery and Linux opening
+
+LOOK's destination picker starts remote nodes at common places: Home, existing user/shared folders, mounted drives, and indexed media roots. Choose **Filesystem /** to explore everything, or press **Tab** to switch common/full views. Inside a remote directory, Tab returns to that node's common places. Going above the root still shows Fabric nodes.
+
+Destination prompts support Tab completion for node-qualified paths, including spaces and remote `~/`. Previously chosen directories appear as recent places for that node; matching recent destinations complete without a network browse. Local completion also descends into directories after a trailing slash.
+
+`lk find QUERY` searches the indexed local and reachable trusted Fabric nodes. Supported document text, filenames/paths, metadata, descriptions, tags, and download source facts are searchable. It shows partial coverage when nodes are unavailable and prefers a local copy of a logical result when one is cataloged. A remote-only result cannot accidentally open a different local file with the same path; Y copies its node-qualified address. Discovery does not fetch remote bytes or inspect every possible file format.
+
+On Linux, the installer registers **LOOK mpv** in the desktop and fills missing or stale media associations. Existing working defaults such as VLC remain in place. LOOK opens audio/video directly in the configured player or installed mpv; desktop opening of other file types uses the normal system opener. Mac defaults are unchanged. This repairs application discovery; a particular file can still fail decoding and must be checked on its owning machine.
+
+Normal `~/Downloads/LOOK` downloads remain permanent. Only explicit `--holding` gives a job a 30-day expiry. Keep clears expiry and moves it into permanent storage; moving files yourself also causes the holding cleanup to retain changed manifests for review.

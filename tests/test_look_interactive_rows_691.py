@@ -38,4 +38,4 @@ def test_interactive_clipboard_uses_existing_batch_transaction_path():
     assert "shelf.update(kind=kind,paths=" in source
     assert "'_batch',kind,str(dest)" in source
     assert "notice='pasted · lk undo'" in source
-    assert "'B Copy','T Cut','P Paste'" in source
+    assert "'B clipboard','T Cut','P Paste'" in source

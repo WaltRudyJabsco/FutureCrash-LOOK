@@ -16,7 +16,8 @@ def test_destination_picker_returns_to_editable_line():
     assert 'def _destination_picker(start_dir:Path)' in SRC
     assert "down/right opens LOOK Destination" in SRC
     assert 'picker_root=current_dir' in SRC
-    assert "return visible[selected].resolve()" in SRC
+    assert "else visible[selected].resolve()" in SRC
+    assert "return chosen" in SRC
 
 def test_media_info_has_cover_fallback():
     assert 'def _media_cover_path(row):' in LK

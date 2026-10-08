@@ -120,7 +120,7 @@ def test_destination_picker_ascends_above_root_and_selects_remote_drive(monkeypa
     monkeypatch.setattr(renderer.sys, 'stdin', Mock(fileno=lambda: 0))
     monkeypatch.setattr(renderer.sys, 'stdout', io.StringIO())
     monkeypatch.setattr(ff, 'nodes', lambda: [ff.Destination('3090', '/')])
-    monkeypatch.setattr(ff, 'browse', lambda dest: {'path': dest.path, 'directories': [{'name': '2TB Storage', 'path': '/run/media/jreno/2TB Storage'}]})
+    monkeypatch.setattr(ff, 'browse', lambda dest,common=False: {'path': dest.path, 'directories': [{'name': '2TB Storage', 'path': '/run/media/jreno/2TB Storage'}]})
     keys = iter(['\x1b[D', '\x1b[B', '\x1b[C', '\r'])
     monkeypatch.setattr(renderer, 'read_key', lambda: next(keys))
     selected = renderer._destination_picker(Path('/'))

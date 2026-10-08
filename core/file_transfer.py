@@ -35,6 +35,34 @@ def browse(value):
             'directories': sorted(entries, key=lambda row: row['name'].casefold())}
 
 
+def common_places():
+    """Useful existing folders and media drives on this node, plus full root access."""
+    import json, sys
+    home=Path.home(); candidates=[('Home',home)]
+    candidates += [(name,home/name) for name in ('Desktop','Documents','Downloads','Music','Movies','Videos','Public')]
+    if sys.platform=='darwin':
+        candidates.append(('Shared',Path('/Users/Shared'))); mounts=[Path('/Volumes')]
+    else:
+        candidates += [('Shared media',Path('/srv/media')),('Shared',Path('/srv'))]
+        mounts=[Path('/run/media')/home.name,Path('/media')/home.name,Path('/media'),Path('/mnt')]
+    for folder in mounts:
+        try:
+            candidates += [('Drive · '+child.name,child) for child in folder.iterdir() if not child.name.startswith('.') and child.is_dir()]
+        except OSError: pass
+    try:
+        library=json.loads((home/'.local/share/look/media_library.json').read_text())
+        candidates += [('Media · '+Path(value).name,Path(value)) for value in library.get('roots') or [] if str(value)!='/']
+    except (OSError,ValueError,AttributeError): pass
+    seen=set(); directories=[]
+    for label,path in candidates:
+        try:
+            path=path.resolve()
+            if path not in seen and path.is_dir(): directories.append({'name':label,'path':str(path)}); seen.add(path)
+        except OSError: continue
+    directories.append({'name':'Filesystem / (all directories)','path':'/'})
+    return {'ok':True,'path':'/','home':str(home),'mode':'common','directories':directories}
+
+
 def receive(stream, value, before_publish=None):
     """Extract regular files into a private stage; publish only after validation.
 

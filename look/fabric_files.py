@@ -86,8 +86,10 @@ def nodes():
     return [Destination(name, '/') for name in sorted(names, key=str.casefold)]
 
 
-def browse(dest):
-    return request('/v1/files/browse', {'target': dest.node, 'path': dest.path})
+def browse(dest,common=False):
+    params={'target':dest.node,'path':dest.path}
+    if common: params['mode']='common'
+    return request('/v1/files/browse',params)
 
 
 def copy(paths, destination, progress=None):

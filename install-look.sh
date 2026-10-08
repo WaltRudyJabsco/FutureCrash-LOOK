@@ -254,6 +254,11 @@ fi
 
 echo
 echo "LOOK MEDIA"
+if [[ "$OSTYPE" == linux* ]]; then
+  media_args=()
+  ((DRY)) && media_args+=(--dry-run)
+  python3 "$ROOT/tools/configure_media.py" "${media_args[@]}" || echo "  ! mpv desktop registration needs attention"
+fi
 if have mpv; then
   echo "  ✓ mpv · canonical local/Fabric playback edge"
 else
@@ -316,6 +321,8 @@ install_file "$ROOT/look/look_ai.py" "$HOME/.local/share/look/look_ai.py"
 install_file "$ROOT/look/lo_engine.py" "$HOME/.local/share/look/lo_engine.py"
 install_file "$ROOT/look/lo_stream.py" "$HOME/.local/share/look/lo_stream.py"
 install_file "$ROOT/look/lo_history.py" "$HOME/.local/share/look/lo_history.py"
+install_file "$ROOT/look/media_open.py" "$HOME/.local/share/look/media_open.py"
+install_file "$ROOT/look/destination_history.py" "$HOME/.local/share/look/destination_history.py"
 install_file "$ROOT/look/ytd.py" "$HOME/.local/share/look/ytd.py"
 install_file "$ROOT/look/weather_forecast.py" "$HOME/.local/share/look/weather_forecast.py"
 install_file "$ROOT/look/media_core.py" "$HOME/.local/share/look/media_core.py"
