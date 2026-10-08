@@ -1422,7 +1422,7 @@ def _maintenance_update(data):
     expected=str(data.get("digest") or "")
     if len(expected)!=64 or any(c not in "0123456789abcdef" for c in expected): raise ValueError("approved release digest required")
     if maintenance.release_info().get("digest")==expected: return {"ok":True,"state":"healthy","unchanged":True}
-    snap={"self":{**advertisement(),"name":identity()["name"]},"peers":PEERS.snapshot()}
+    snap={"self":{**advertisement(),"name":identity()["name"]},"peers":PEERS.public()}
     url=_remote_url(snap,source,"/v1/maintenance/bundle")
     req=urllib.request.Request(url,headers=FABRIC_IDENTITY.auth_headers_for_url(url))
     context=FABRIC_IDENTITY.ssl_context_for_url(url) if url.startswith("https://") else None
@@ -4368,7 +4368,7 @@ class API(BaseHTTPRequestHandler):
         if path == "/v1/maintenance/update":
             try: return self.sendj(202,_maintenance_update(d))
             except PermissionError as exc: return self.sendj(403,{"ok":False,"error":str(exc)})
-            except (ValueError,OSError) as exc: return self.sendj(409,{"ok":False,"error":str(exc)})
+            except (ValueError,OSError,RuntimeError) as exc: return self.sendj(409,{"ok":False,"error":str(exc)})
         if path == "/v1/services/action":
             name = str(d.get("service") or "")
             action = str(d.get("action") or "")

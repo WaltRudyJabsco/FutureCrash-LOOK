@@ -1,5 +1,6 @@
 # 8.9.0 — FABRIC MEDIA
 
+- Fixed remote update reception to use the real peer registry and return structured source-resolution errors.
 - Added Signal player ASCII album art with persistent Image/Off choices and `/art` commands; original covers also reach browser Now Playing metadata through an authenticated cover-only Fabric gateway.
 - Added Signal browser Media Session transport controls and Now Playing metadata, scoped to playback on that browser.
 - Added persistent device-local LO prompt recall through the terminal line editor.

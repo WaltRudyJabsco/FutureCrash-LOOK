@@ -273,3 +273,26 @@ def test_release_digest_survives_manifest_roundtrip_and_local_file_modes(home):
         m.write_runtime(m.destination(f['path']), payload[f['path']], 0o755)
     m.atomic_json(m.registry(), manifest)
     assert m.release_info()['digest'] == m.digest(original)
+
+
+def test_receiver_resolves_source_with_real_peer_registry_and_stages(home, monkeypatch):
+    installed(home)
+    data, _, _ = package()
+    expected = m.digest(data)
+    # Keep the actual PeerRegistry.public method: inventing a snapshot stub hid
+    # an AttributeError in the receive path before the first real deployment.
+    monkeypatch.setattr(node.PEERS, 'rows', [{'name': '3090', 'node': {'identity': {'name': '3090'}},
+                                           'url': 'https://3090.example:7443'}])
+    monkeypatch.setattr(node, 'advertisement', lambda: {})
+    monkeypatch.setattr(node, 'identity', lambda: {'name': 'm3max-pro'})
+    monkeypatch.setattr(node.maintenance, 'release_info', lambda: {'digest': 'old'})
+    monkeypatch.setattr(node.FABRIC_IDENTITY, 'auth_headers_for_url', lambda url: {'Authorization': 'paired'})
+    monkeypatch.setattr(node.FABRIC_IDENTITY, 'ssl_context_for_url', lambda url: None)
+    opener = Mock(return_value=io.BytesIO(data))
+    monkeypatch.setattr(node.urllib.request, 'urlopen', opener)
+    stage = Mock(return_value={'job': 'a' * 32, 'state': 'staged'})
+    monkeypatch.setattr(node.maintenance, 'schedule', stage)
+    result = node._maintenance_update({'source': '3090', 'digest': expected, 'confirm': True})
+    assert result['ok'] and result['state'] == 'staged'
+    assert opener.call_args.args[0].full_url == 'https://3090.example:7443/v1/maintenance/bundle'
+    stage.assert_called_once_with('update', data=data, expected=expected)
