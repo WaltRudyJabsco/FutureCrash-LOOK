@@ -225,7 +225,8 @@ class Handler(BaseHTTPRequestHandler):
             # control responses buffers an entire song/movie behind the ingress
             # guard and lets the short control timeout turn healthy playback into
             # an opaque 502. Stream them incrementally and preserve Range headers.
-            is_stream = _is_stream_path(path)
+            is_upload = path == "/v1/files/copy" and self.command == "POST"
+            is_stream = _is_stream_path(path) or is_upload
             if is_stream:
                 stream_slot = self.server.stream_slots.acquire(blocking=False)
                 if not stream_slot:
@@ -233,9 +234,9 @@ class Handler(BaseHTTPRequestHandler):
                     return self._send_json(503, {"ok": False, "error": "Fabric ingress stream capacity busy"})
 
             length = int(self.headers.get("Content-Length", "0") or "0")
-            if length < 0 or length > MAX_BODY_BYTES:
+            if length < 0 or (not is_upload and length > MAX_BODY_BYTES):
                 return self._send_json(413, {"error": "request body too large"})
-            body = self.rfile.read(length) if length else None
+            body = self.rfile.read(length) if length and not is_upload else None
 
             headers = {}
             for key, value in self.headers.items():
@@ -244,13 +245,21 @@ class Handler(BaseHTTPRequestHandler):
                     continue
                 headers[key] = value
             headers["Connection"] = "close"
-            if body is not None:
+            if is_upload:
+                headers["Content-Length"] = str(length)
+            elif body is not None:
                 headers["Content-Length"] = str(len(body))
 
             timeout = STREAM_TIMEOUT_SECONDS if is_stream else CONTROL_TIMEOUT_SECONDS
             conn = http.client.HTTPConnection(self.server.backend_host, self.server.backend_port, timeout=timeout)
             target = parsed.path + (("?" + parsed.query) if parsed.query else "")
             conn.request(self.command, target, body=body, headers=headers)
+            if is_upload:
+                remaining = length
+                while remaining:
+                    chunk = self.rfile.read(min(64 * 1024, remaining))
+                    if not chunk: raise ValueError("Copy upload interrupted")
+                    conn.send(chunk); remaining -= len(chunk)
             upstream = conn.getresponse()
 
             self.send_response(upstream.status, upstream.reason)

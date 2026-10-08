@@ -92,6 +92,21 @@ Esc      clear / back
 q        quit
 ```
 
+For **Copy to**, enter a Fabric destination such as
+`@3090:/run/media/jreno/2TB Storage/srv/media/` or `@3090:~/Downloads/`.
+The field treats spaces literally; no shell quoting is required. `~` expands to
+the home directory of the account running the destination node. The destination
+must be an existing directory. Copies use paired Fabric connections rather than
+SSH, keep their local sources, and refuse to overwrite existing remote names;
+remote copies are outside local `lk undo`. Remote moves are refused.
+
+Press **Down** or **Right** in the destination field to open the directory picker.
+Use **Left** to ascend to `/`, then **Left** once more to see this computer and
+paired, advertising Fabric nodes. **Right** enters a node and its directories
+(including `/Volumes` on macOS and `/run/media` on Linux); type fragments to
+filter, and **Enter** chooses the highlighted directory. Both source and
+destination nodes need this update installed.
+
 On macOS, `B` uses native clipboard file objects for documents and folders and image data for a single common image, so the result can be pasted into Finder-, Mail-, chat-, and image-aware applications. `Y` is intentionally different: it copies the pathname as text.
 
 Now find something anywhere under your home directory:

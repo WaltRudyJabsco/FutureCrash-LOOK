@@ -5505,6 +5505,9 @@ def _batch_action(kind, destination, paths):
         print(f"{_c('✗','31')} {kind.upper()} failed · no source paths")
         return 1
 
+    if kind in {"copy", "move"} and str(destination).lstrip().strip('"\'').startswith('@'):
+        return _fabric_file_action(kind, paths, destination)
+
     txid=uuid.uuid4().hex
     results=[]
     failed_source=None
@@ -5626,7 +5629,24 @@ def _batch_action(kind, destination, paths):
         return 1
 
 
+def _fabric_file_action(kind, paths, destination):
+    if kind != "copy":
+        print("MOVE refused · copy to the Fabric first; local sources are retained")
+        return 1
+    try:
+        import fabric_files
+        result = fabric_files.copy(paths, destination)
+        print(f"COPY OK · {len(result['copied'])} items · {destination} · remote copy, no local undo")
+        return 0
+    except Exception as exc:
+        print(f"COPY failed · {exc}")
+        return 1
+
+
 def _interactive_file_action(kind, src, dest, batch_id=None):
+    if str(dest).lstrip().strip('"\'').startswith('@'):
+        code = _fabric_file_action(kind, [src], dest)
+        return "COPY OK · remote copy, no local undo" if code == 0 else "Fabric action failed"
     action=_journal_copy if kind=="copy" else _journal_move
     result=action(src,dest,batch_id=batch_id)
     if result.startswith("CREATE_DIR_REQUIRED · "):

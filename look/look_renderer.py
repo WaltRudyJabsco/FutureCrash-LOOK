@@ -10,6 +10,10 @@ Normally installed by the repository's ./install.sh.
 """
 from __future__ import annotations
 import json
+try:
+    from . import fabric_files
+except ImportError:
+    import fabric_files
 
 import argparse
 import base64
@@ -958,28 +962,43 @@ def _destination_picker(start_dir:Path)->Path|None:
     """Arrow-driven directory chooser. Enter commits; right descends; left ascends."""
     fd=sys.stdin.fileno()
     old=termios.tcgetattr(fd)
-    here=start_dir.expanduser().resolve()
-    if not here.is_dir():
+    here=start_dir if isinstance(start_dir,fabric_files.Destination) else start_dir.expanduser().resolve()
+    if isinstance(here,Path) and not here.is_dir():
         here=here.parent if here.parent.is_dir() else Path.home()
-    query=''; selected=0
+    query=''; selected=0; error=''; loaded=object(); dirs=[]
     try:
         tty.setcbreak(fd)
         while True:
             try:
-                dirs=sorted((x for x in here.iterdir() if x.is_dir()),key=lambda x:x.name.casefold())
-            except OSError:
-                dirs=[]
+                if here != loaded:
+                    loaded=here
+                    error=''
+                    if here is None:
+                        dirs=[Path('/')]+fabric_files.nodes()
+                    elif isinstance(here,fabric_files.Destination):
+                        listing=fabric_files.browse(here)
+                        here=fabric_files.Destination(here.node,listing['path'])
+                        dirs=[fabric_files.Destination(here.node,row['path']) for row in listing['directories']]
+                    else:
+                        dirs=sorted((x for x in here.iterdir() if x.is_dir()),key=lambda x:x.name.casefold())
+            except Exception as exc:
+                dirs=[Path('/')] if here is None else []
+                error=str(exc)
+
             terms=query.casefold().split()
             visible=[x for x in dirs if all(t in x.name.casefold() for t in terms)]
             selected=max(0,min(selected,max(0,len(visible)-1)))
             terminal=shutil.get_terminal_size((100,30)); width=max(56,terminal.columns); height=max(12,terminal.lines)
             usable=max(4,height-6); top=max(0,min(max(0,len(visible)-usable),selected-usable+1))
             sys.stdout.write(CLEAR)
-            sys.stdout.write(f'{CYAN}{BOLD}LOOK DESTINATION{RESET}  {WHITE}{here}{RESET}\n')
+            sys.stdout.write(f'{CYAN}{BOLD}LOOK DESTINATION{RESET}  {WHITE}{here if here is not None else "FABRIC NODES"}{RESET}\n')
             sys.stdout.write(f'{FAINT}← parent · → descend · Enter choose · arrows move · Shift-arrows page/ends · type filter · Esc cancel{RESET}\n\n')
             for n,path in enumerate(visible[top:top+usable],start=top):
                 focus=f'{CYAN}{BOLD}›{RESET}' if n==selected else ' '
-                sys.stdout.write(f'{focus} {path.name}/\n')
+                label=(f'@{path.node}:/ (Fabric)' if here is None and isinstance(path,fabric_files.Destination)
+                       else '/ (this computer)' if here is None else path.name+'/')
+                sys.stdout.write(f'{focus} {label}\n')
+            if error: sys.stdout.write(f'  {RED}{error}{RESET}\n')
             if not visible: sys.stdout.write('  (no matching directories)\n')
             sys.stdout.write(f'\n{CYAN}{BOLD}FILTER{RESET} {WHITE}{query}█{RESET}')
             sys.stdout.flush()
@@ -991,9 +1010,13 @@ def _destination_picker(start_dir:Path)->Path|None:
             if key in {'\x1b[5~','\x1b[1;2A'} and visible: selected=max(0,selected-usable); continue
             if key=='\x1b[1;2D' and visible: selected=0; continue
             if key=='\x1b[1;2C' and visible: selected=len(visible)-1; continue
-            if key=='\x1b[D': here=here.parent; query=''; selected=0; continue
+            if key=='\x1b[D':
+                here=None if here is None or here==Path('/') else here.parent
+                query=''; selected=0; continue
             if key=='\x1b[C' and visible: here=visible[selected]; query=''; selected=0; continue
-            if key in {'\r','\n'} and visible: return visible[selected].resolve()
+            if key in {'\r','\n'} and visible:
+                if isinstance(visible[selected],fabric_files.Destination): return visible[selected]
+                return visible[selected].resolve()
             if key in {'\x7f','\b'}:
                 if query: query=query[:-1]; selected=0
                 continue
@@ -1042,25 +1065,31 @@ def prompt_line(prompt:str, *, initial:str='', picker_root:Path|None=None)->tupl
                     # Destination fields use right-arrow as an explicit visual picker.
                     if picker_root is not None:
                         typed=''.join(chars).strip()
-                        candidate=resolve_action_destination(typed,picker_root) if typed else picker_root.resolve()
-                        start=candidate if candidate.is_dir() else candidate.parent
+                        try:
+                            candidate=resolve_action_destination(typed,picker_root) if typed else picker_root.resolve()
+                        except ValueError:
+                            sys.stdout.write('\a'); sys.stdout.flush(); continue
+                        start=candidate if isinstance(candidate,fabric_files.Destination) or candidate.is_dir() else candidate.parent
                         termios.tcsetattr(fd,termios.TCSADRAIN,old)
                         picked=_destination_picker(start)
                         tty.setcbreak(fd)
                         if picked is not None:
-                            value=str(picked)+os.sep
+                            value=str(picked).rstrip(os.sep)+os.sep
                             chars[:]=list(value); cursor=len(chars)
                         redraw(); continue
                     cursor=min(len(chars),cursor+1); redraw(); continue
                 if key==b'\x1b[B' and picker_root is not None:
                     typed=''.join(chars).strip()
-                    candidate=resolve_action_destination(typed,picker_root) if typed else picker_root.resolve()
-                    start=candidate if candidate.is_dir() else candidate.parent
+                    try:
+                        candidate=resolve_action_destination(typed,picker_root) if typed else picker_root.resolve()
+                    except ValueError:
+                        sys.stdout.write('\a'); sys.stdout.flush(); continue
+                    start=candidate if isinstance(candidate,fabric_files.Destination) or candidate.is_dir() else candidate.parent
                     termios.tcsetattr(fd,termios.TCSADRAIN,old)
                     picked=_destination_picker(start)
                     tty.setcbreak(fd)
                     if picked is not None:
-                        value=str(picked)+os.sep
+                        value=str(picked).rstrip(os.sep)+os.sep
                         chars[:]=list(value); cursor=len(chars)
                     redraw(); continue
                 if key in {b'\x1b[H',b'\x1b[1~',b'\x1b[7~'}:
@@ -1178,7 +1207,9 @@ def action_footer(parts:list[str],width:int)->list[str]:
 
 def resolve_action_destination(dest:str,current_dir:Path|None)->Path:
     """Resolve a filer action destination in LOOK's visible-directory context."""
-    raw=Path(os.path.expanduser(dest))
+    remote=fabric_files.parse(dest)
+    if remote is not None: return remote
+    raw=Path(os.path.expanduser(fabric_files.literal(dest)))
     if raw.is_absolute():
         return raw.resolve()
     if current_dir is not None:
@@ -1312,13 +1343,17 @@ def pager(rows:list[str],height:int,width:int,rebuild=None,browse_rebuild=None,f
             # displaying, not to the shell process CWD.  The two often match on
             # macOS launch paths but need not (notably when LOOK is started from
             # $HOME and then browses elsewhere).
-            expanded=resolve_action_destination(dest,current_dir)
+            try:
+                expanded=resolve_action_destination(dest,current_dir)
+            except ValueError as exc:
+                notice=str(exc); return
             dest=str(expanded)
+            remote=isinstance(expanded,fabric_files.Destination)
 
             # A multi-item destination must be a directory. Resolve this before
             # entering the batch subprocess so a missing path can never hide a
             # creation prompt behind the activity spinner.
-            if len(paths)>1 and not expanded.exists():
+            if not remote and len(paths)>1 and not expanded.exists():
                 sys.stdout.write(SHOW+RESET+'\n'); sys.stdout.flush()
                 try:
                     answer,cancelled=prompt_line(
@@ -1334,7 +1369,7 @@ def pager(rows:list[str],height:int,width:int,rebuild=None,browse_rebuild=None,f
                 except OSError as exc:
                     notice=f'create failed · {exc}'; return
                 dest=str(expanded)
-            elif len(paths)>1 and not expanded.is_dir():
+            elif not remote and len(paths)>1 and not expanded.is_dir():
                 notice='destination is not a directory'; return
             with activity(f"{'copying' if kind=='copy' else 'moving'} {len(paths)} item{'s' if len(paths)!=1 else ''}"):
                 proc=subprocess.run([sys.executable,str(lk),'_batch',kind,dest,*map(str,paths)])
@@ -1352,7 +1387,7 @@ def pager(rows:list[str],height:int,width:int,rebuild=None,browse_rebuild=None,f
             with activity(f"removing {len(paths)} item{'s' if len(paths)!=1 else ''}"):
                 proc=subprocess.run([sys.executable,str(lk),'_batch','remove','--',*map(str,paths)])
         marked.clear()
-        notice='done · lk undo' if proc.returncode==0 else 'action failed'
+        notice=('done · remote copy' if kind in {'copy','move'} and remote else 'done · lk undo') if proc.returncode==0 else 'action failed'
 
     def run_rename()->None:
         """Rename selected/marked objects. # runs are deterministic batch counters."""

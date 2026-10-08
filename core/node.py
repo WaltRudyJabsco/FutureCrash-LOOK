@@ -27,6 +27,7 @@ import socket
 import subprocess
 import threading
 import time
+import tempfile
 import urllib.error
 import urllib.request
 import uuid
@@ -81,9 +82,10 @@ except ImportError:
     from fabric_vision import capture_provider as vision_capture_provider, capture_screen as vision_capture_screen, list_displays as vision_list_displays, vision_broker_request
 
 try:
-    from . import maintenance
+    from . import maintenance, file_transfer
 except ImportError:
     import maintenance
+    import file_transfer
 
 VERSION = "8.9.0"
 RELEASE_NAME = "FABRIC VISION"
@@ -3406,6 +3408,72 @@ class API(BaseHTTPRequestHandler):
         self.sendj(401,{"ok":False,"error":"unpaired or unauthorized Fabric peer","pair":"lk fabric pair-code"})
         return False
 
+    def _file_target(self):
+        params = parse_qs(urlparse(self.path).query)
+        target = (params.get("target") or ["local"])[0]
+        value = (params.get("path") or ["/"])[0]
+        local = str(identity()["name"])
+        if target.casefold() in {"local", local.casefold()}:
+            return None, value
+        if getattr(self.server, "plane", "local") != "local" or self.headers.get("X-Fabric-Node"):
+            raise PermissionError("File routing is local-control only")
+        peer = _peer_for_target({"peers": PEERS.public()}, target)
+        if not peer.get("trusted") or not peer.get("node"):
+            raise PermissionError("Destination node is not paired and advertising")
+        return peer, value
+
+    def _files_browse(self):
+        try:
+            peer, value = self._file_target()
+            if peer is None:
+                result = file_transfer.browse(value)
+            else:
+                route = "/v1/files/browse?" + urllib.parse.urlencode({"path": value})
+                result = _peer_json(peer, route, timeout=5.0)
+            return self.sendj(200, result)
+        except Exception as exc:
+            return self.sendj(400, {"ok": False, "error": str(exc)})
+
+    def _files_copy(self):
+        try:
+            peer, value = self._file_target()
+            length = int(self.headers.get("Content-Length", "0"))
+            if length <= 0: raise ValueError("A sized copy archive is required")
+            # Spool to disk rather than JSON/base64 or an unbounded RAM buffer.
+            with tempfile.TemporaryFile() as stream:
+                remaining = length
+                while remaining:
+                    chunk = self.rfile.read(min(1024 * 1024, remaining))
+                    if not chunk: raise ValueError("Copy upload was interrupted")
+                    stream.write(chunk); remaining -= len(chunk)
+                stream.seek(0)
+                if peer is None:
+                    result = file_transfer.receive(stream, value)
+                else:
+                    # Probe routes before uploading; never retry a write whose
+                    # response may have been lost after committing remotely.
+                    base = None
+                    for candidate in _peer_bases(peer):
+                        try:
+                            http_json(candidate + "/v1/identity", timeout=3.0)
+                            base = candidate; break
+                        except Exception: continue
+                    if base is None: raise RuntimeError("Destination node is unreachable")
+                    url = base + "/v1/files/copy?" + urllib.parse.urlencode({"path": value})
+                    headers = FABRIC_IDENTITY.auth_headers_for_url(url)
+                    headers.update({"Content-Length": str(length), "Content-Type": "application/x-tar"})
+                    request = urllib.request.Request(url, data=stream, headers=headers, method="POST")
+                    context = FABRIC_IDENTITY.ssl_context_for_url(url)
+                    with urllib.request.urlopen(request, timeout=3600, context=context) as response:
+                        result = json.load(response)
+            return self.sendj(200, result)
+        except urllib.error.HTTPError as exc:
+            try: detail = json.load(exc).get("error", str(exc))
+            except Exception: detail = str(exc)
+            return self.sendj(400, {"ok": False, "error": detail})
+        except Exception as exc:
+            return self.sendj(400, {"ok": False, "error": str(exc)})
+
     def _serve_artifact(self, digest, *, head=False):
         try:
             meta, source = ARTIFACTS.path_for(digest)
@@ -3921,6 +3989,7 @@ class API(BaseHTTPRequestHandler):
     def do_GET(self):
         path = urlparse(self.path).path
         if not self._authorized_ingress(path): return
+        if path == "/v1/files/browse": return self._files_browse()
         if path in ("/health", "/v1/health"):
             db = FABRIC_STORE.health()
             worker_age = max(0.0, now() - float(WORKER_HEALTH.get("last_loop") or 0))
@@ -4155,6 +4224,7 @@ class API(BaseHTTPRequestHandler):
     def do_POST(self):
         path = urlparse(self.path).path
         if not self._authorized_ingress(path): return
+        if path == "/v1/files/copy": return self._files_copy()
         d = self.body()
         if path == "/v1/endpoints/fabric/allow":
             if getattr(self.server,"plane","local") != "local":
