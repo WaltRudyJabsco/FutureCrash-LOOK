@@ -42,7 +42,7 @@ class SignalMediaSession {
     if (key !== this.key && this.Metadata) {
       try {
         this.session.metadata = new this.Metadata({title: entry.title || 'Media', artist: entry.artist || '',
-          album: entry.album || '', artwork: /^https?:\/\//i.test(art || '') ? [{src: art}] : []});
+          album: entry.album || '', artwork: (/^(https?:\/\/|\/api\/media\/cover\?)/i.test(art || '')) ? [{src: art}] : []});
         this.key = key;
       } catch {}
     }

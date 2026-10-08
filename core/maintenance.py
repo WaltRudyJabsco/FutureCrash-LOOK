@@ -46,7 +46,7 @@ def allowed(relative):
     if parent == '.local/share/future-crash-look': return p.name == 'RELEASE'
     if parent == '.local/share/look': return p.suffix == '.py' or p.name == 'lk'
     if parent == '.local/share/signal-window':
-        return p.name in {'server.py', 'app.js', 'media-session.js', 'index.html', 'style.css'}
+        return p.name in {'server.py', 'app.js', 'media-session.js', 'media-art.js', 'index.html', 'style.css'}
     if parent == '.local/share/future-crash': return p.name == 'future_crash.py'
     if parent == '.local/bin':
         return p.name in {'fcl-node', 'fcl-ingress', 'fcl-tailcat', 'fcl-rendezvous', 'fcl-openjev-worker', 'future-crash'}
@@ -74,7 +74,7 @@ def register_install(source):
     mappings.append((source / 'look/lk', '.local/share/look/lk'))
     mappings.append((source / 'VERSION', '.local/share/future-crash-look/RELEASE'))
     mappings += [(source / 'signal-window' / n, '.local/share/signal-window/' + n)
-                 for n in ('server.py', 'app.js', 'media-session.js', 'index.html', 'style.css')]
+                 for n in ('server.py', 'app.js', 'media-session.js', 'media-art.js', 'index.html', 'style.css')]
     mappings += [(source / 'future-crash' / n, target) for n, target in
                  [('future_crash.py', '.local/share/future-crash/future_crash.py'), ('future-crash', '.local/bin/future-crash')]]
     files = []

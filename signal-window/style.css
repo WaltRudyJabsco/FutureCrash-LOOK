@@ -107,3 +107,6 @@ main.mode-compact #activity{height:18px;line-height:17px;flex-basis:18px}
 .auth-kicker{font-size:10px;letter-spacing:.18em;color:#5c8867}.auth-title{font-size:20px;color:#d4e5d8;margin:6px 0 14px}.auth-copy,.auth-note{font-size:12px;line-height:1.5;color:#6f9478}.auth-code{font-size:34px;letter-spacing:.16em;color:#8fd6a2;margin:18px 0 10px}.auth-command{font-size:12px;color:#d0dfd4;border:1px solid #1d3825;padding:9px;margin-bottom:12px}.auth-note b{color:#91c79e;font-weight:normal}
 
 .media-video{display:block;width:100%;max-height:min(48vh,420px);margin:7px 0;background:#000;object-fit:contain}
+.media-ascii{font:7px/7px ui-monospace,SFMono-Regular,Menlo,monospace;letter-spacing:0;white-space:pre;color:#9ed2aa;text-align:center;margin:8px auto;overflow:hidden}
+.media-cover{display:block;width:168px;height:168px;max-width:100%;object-fit:contain;margin:8px auto}.media-cover[hidden]{display:none}
+.media-art-modes{display:flex;gap:3px}.media-art-modes [aria-pressed="true"]{border-color:#8fd6a2;color:#d4e5d8}.media-actions{flex-wrap:wrap}

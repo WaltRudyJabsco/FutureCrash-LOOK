@@ -166,6 +166,14 @@ The installer is intentionally additive. Optional capabilities degrade cleanly w
 
 ## Playback controls, prompt recall, and remote maintenance
 
+Signal's player displays ASCII album art by default. Choose **ASCII**, **Image**, or
+**Art off** on the player card, or use `/art ascii`, `/art image` (also
+`/art high-res`), or `/art off`. The browser remembers your choice. Image mode
+shows the original cover supplied by the media owner; it does not upscale it.
+Cover extraction and transport use the existing Fabric cover endpoint, and missing
+art never blocks playback. Browser Now Playing metadata receives the original
+cover independently of the in-page art style.
+
 Signal registers browser Media Session controls while playing on **This Device**:
 play/pause, previous/next, seeking, and Now Playing metadata. Moving playback to
 another node releases the browser's media session. Hardware delivery, especially

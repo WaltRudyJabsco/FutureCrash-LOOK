@@ -910,6 +910,31 @@ def _proxy_artifact(handler,node,digest,*,head=False):
             handler.send_response(502); handler.send_header("Content-Length","0"); handler.end_headers()
         else: handler.json(502,{"error":str(exc)})
 
+def _proxy_media_cover(handler,node,item_id,*,head=False):
+    """Authenticated cover-only gateway; paths remain private to the owning node."""
+    if not item_id:
+        return handler.json(400,{"error":"media entry id required"})
+    query="?"+urllib.parse.urlencode({"target":str(node or ""),"id":str(item_id)})
+    req=urllib.request.Request(NODE_URL+"/v1/media/cover"+query,method="HEAD" if head else "GET")
+    try:
+        with urllib.request.urlopen(req,timeout=12.0) as response:
+            ctype=response.headers.get("Content-Type","").split(";",1)[0]
+            if ctype not in {"image/jpeg","image/png","image/webp","image/gif"}:
+                return handler.json(502,{"error":"unsupported cover image"})
+            data=b"" if head else response.read(8*1024*1024+1)
+            if len(data)>8*1024*1024:
+                return handler.json(502,{"error":"cover image too large"})
+            handler.send_response(200)
+            handler.send_header("Content-Type",ctype)
+            handler.send_header("Content-Length",response.headers.get("Content-Length","0") if head else str(len(data)))
+            handler.send_header("Cache-Control","private, max-age=300")
+            handler.end_headers()
+            if not head: handler.wfile.write(data)
+    except urllib.error.HTTPError as exc:
+        handler.send_response(exc.code); handler.send_header("Content-Length","0"); handler.end_headers()
+    except Exception:
+        handler.json(502,{"error":"cover transport unavailable"})
+
 def _proxy_media_audio(handler,node,index=0,*,item_id="",head=False,browser=False):
     if item_id:
         query="?node="+quote(str(node or ""),safe="")+"&id="+quote(str(item_id),safe="")
@@ -1099,6 +1124,9 @@ class App(BaseHTTPRequestHandler):
     def do_HEAD(self):
         parsed=urlparse(self.path)
         if parsed.path.startswith("/api/") and not self._media_ticket_allows(parsed) and not self._require_endpoint("media.output"): return
+        if parsed.path=="/api/media/cover":
+            q=parse_qs(parsed.query)
+            return _proxy_media_cover(self,(q.get("node") or [""])[0],(q.get("id") or [""])[0],head=True)
         if parsed.path=="/api/artifact":
             q=parse_qs(parsed.query); node=str((q.get("node") or [""])[0]); digest=str((q.get("digest") or [""])[0])
             return _proxy_artifact(self,node,digest,head=True)
@@ -1143,6 +1171,9 @@ class App(BaseHTTPRequestHandler):
         if self.path.startswith("/api/artifact"):
             q=parse_qs(urlparse(self.path).query); node=str((q.get("node") or [""])[0]); digest=str((q.get("digest") or [""])[0])
             return _proxy_artifact(self,node,digest)
+        if path=="/api/media/cover":
+            q=parse_qs(parsed.query)
+            return _proxy_media_cover(self,(q.get("node") or [""])[0],(q.get("id") or [""])[0])
         if self.path.startswith("/api/media/audio") or self.path.startswith("/api/media/browser"):
             parsed=urlparse(self.path); q=parse_qs(parsed.query); node=str((q.get("node") or [""])[0]); item_id=str((q.get("id") or [""])[0])
             try: index=int((q.get("index") or [0])[0] or 0)
@@ -1164,7 +1195,7 @@ class App(BaseHTTPRequestHandler):
                 "lo_timeout":self.lo_timeout,"gallery":str(self.gallery_dir) if self.gallery_enabled else None,
                 **(probe_ollama(self.backend) if self.mode=="ollama" else {"ok":lo_ok})})
         path="index.html" if self.path in ("/","") else self.path.lstrip("/")
-        if path not in ("index.html","app.js","media-session.js","style.css"): return self.json(404,{"error":"not found"})
+        if path not in ("index.html","app.js","media-session.js","media-art.js","style.css"): return self.json(404,{"error":"not found"})
         p=ROOT/path; self.send_bytes(200,p.read_bytes(),mimetypes.guess_type(p.name)[0] or "application/octet-stream")
     def do_POST(self):
         if self.path.startswith("/api/"):
