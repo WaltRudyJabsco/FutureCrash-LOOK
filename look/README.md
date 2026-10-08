@@ -109,6 +109,12 @@ paired, advertising Fabric nodes. **Right** enters a node and its directories
 filter, and **Enter** chooses the highlighted directory. Both source and
 destination nodes need this update installed.
 
+Fabric copies show preparation, connection, upload percentage/bytes, transfer rate,
+elapsed time, and a distinct wait for destination confirmation. Reaching 100%
+uploaded is not a completion receipt. The gateway streams archives through without
+buffering a second copy on disk. File operations discover live routes concurrently,
+and directory navigation reuses a working route for up to 90 seconds.
+
 On macOS, `B` uses native clipboard file objects for documents and folders and image data for a single common image, so the result can be pasted into Finder-, Mail-, chat-, and image-aware applications. `Y` is intentionally different: it copies the pathname as text.
 
 Now find something anywhere under your home directory:

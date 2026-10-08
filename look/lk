@@ -5636,8 +5636,9 @@ def _fabric_file_action(kind, paths, destination):
         return 1
     try:
         import fabric_files
-        result = fabric_files.copy(paths, destination)
-        print(f"COPY OK · {len(result['copied'])} items · {destination} · remote copy, no local undo")
+        with fabric_files.Progress() as progress:
+            result = fabric_files.copy(paths, destination, progress)
+        print(f"COPY OK · {len(result['copied'])} items · {destination} · {result.get('elapsed',0):.1f}s · remote copy, no local undo")
         return 0
     except Exception as exc:
         print(f"COPY failed · {exc}")

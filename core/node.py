@@ -27,6 +27,7 @@ import socket
 import subprocess
 import threading
 import time
+import concurrent.futures
 import tempfile
 import urllib.error
 import urllib.request
@@ -86,6 +87,69 @@ try:
 except ImportError:
     import maintenance
     import file_transfer
+
+_COPY_TRANSFERS = {}
+_COPY_TRANSFERS_LOCK = threading.Lock()
+_FILE_ROUTES = {}
+_FILE_ROUTES_LOCK = threading.Lock()
+
+
+def _copy_progress(transfer, **fields):
+    with _COPY_TRANSFERS_LOCK:
+        stamp=time.monotonic()
+        for key,row in list(_COPY_TRANSFERS.items()):
+            if stamp-row['updated']>600: _COPY_TRANSFERS.pop(key,None)
+        if transfer not in _COPY_TRANSFERS:
+            if len(_COPY_TRANSFERS)>=64:
+                completed=[key for key,row in _COPY_TRANSFERS.items() if row.get('stage') in {'complete','failed'}]
+                if not completed: raise RuntimeError("Too many active copy transfers")
+                _COPY_TRANSFERS.pop(min(completed,key=lambda key:_COPY_TRANSFERS[key]['updated']))
+            _COPY_TRANSFERS[transfer]={'started':stamp,'bytes':0,'total':0}
+        row=_COPY_TRANSFERS[transfer]; row.update(fields,updated=stamp)
+        return dict(row,elapsed=stamp-row['started'])
+
+
+def _file_route_key(peer):
+    return tuple(_peer_bases(peer))
+
+
+def _file_race(peer,path):
+    """Bounded concurrent read-only discovery, caching the first live route."""
+    bases=_peer_bases(peer)
+    if not bases: raise RuntimeError("Destination node has no advertised routes")
+    pool=concurrent.futures.ThreadPoolExecutor(max_workers=min(8,len(bases)))
+    futures={pool.submit(http_json,base+path,timeout=3.0):base for base in bases}
+    try:
+        for future in concurrent.futures.as_completed(futures,timeout=4.0):
+            try: result=future.result()
+            except Exception: continue
+            base=futures[future]
+            with _FILE_ROUTES_LOCK:
+                if len(_FILE_ROUTES)>=128: _FILE_ROUTES.clear()
+                _FILE_ROUTES[_file_route_key(peer)]=(base,time.monotonic())
+            return base,result
+        raise RuntimeError("Destination node is unreachable")
+    except concurrent.futures.TimeoutError as exc:
+        raise RuntimeError("Destination node route probes timed out") from exc
+    finally:
+        for future in futures: future.cancel()
+        pool.shutdown(wait=False,cancel_futures=True)
+
+
+def _copy_route(peer):
+    # Fresh read-only discovery before a write; never retry the upload itself.
+    return _file_race(peer,'/v1/identity')[0]
+
+
+def _file_peer_json(peer,path):
+    key=_file_route_key(peer)
+    with _FILE_ROUTES_LOCK: cached=_FILE_ROUTES.get(key)
+    if cached and time.monotonic()-cached[1]<90:
+        try: return http_json(cached[0]+path,timeout=2.0)
+        except Exception:
+            with _FILE_ROUTES_LOCK: _FILE_ROUTES.pop(key,None)
+    return _file_race(peer,path)[1]
+
 
 VERSION = "8.9.0"
 RELEASE_NAME = "FABRIC VISION"
@@ -3429,50 +3493,60 @@ class API(BaseHTTPRequestHandler):
                 result = file_transfer.browse(value)
             else:
                 route = "/v1/files/browse?" + urllib.parse.urlencode({"path": value})
-                result = _peer_json(peer, route, timeout=5.0)
+                result = _file_peer_json(peer, route)
             return self.sendj(200, result)
         except Exception as exc:
             return self.sendj(400, {"ok": False, "error": str(exc)})
 
+    def _files_copy_status(self):
+        if getattr(self.server,"plane","local") != "local" or self.headers.get("X-Fabric-Node"):
+            return self.sendj(403,{"ok":False,"error":"Copy status is local-control only"})
+        transfer=(parse_qs(urlparse(self.path).query).get("transfer") or [""])[0]
+        with _COPY_TRANSFERS_LOCK:
+            row=_COPY_TRANSFERS.get(transfer)
+            result=dict(row,elapsed=time.monotonic()-row['started']) if row else None
+        return self.sendj(200 if result else 404, {"ok":bool(result),"transfer":result,"error":"Copy has not started" if not result else ""})
+
     def _files_copy(self):
+        transfer=(parse_qs(urlparse(self.path).query).get("transfer") or [uuid.uuid4().hex])[0]
         try:
-            peer, value = self._file_target()
-            length = int(self.headers.get("Content-Length", "0"))
-            if length <= 0: raise ValueError("A sized copy archive is required")
-            # Spool to disk rather than JSON/base64 or an unbounded RAM buffer.
-            with tempfile.TemporaryFile() as stream:
-                remaining = length
-                while remaining:
-                    chunk = self.rfile.read(min(1024 * 1024, remaining))
-                    if not chunk: raise ValueError("Copy upload was interrupted")
-                    stream.write(chunk); remaining -= len(chunk)
-                stream.seek(0)
-                if peer is None:
-                    result = file_transfer.receive(stream, value)
-                else:
-                    # Probe routes before uploading; never retry a write whose
-                    # response may have been lost after committing remotely.
-                    base = None
-                    for candidate in _peer_bases(peer):
-                        try:
-                            http_json(candidate + "/v1/identity", timeout=3.0)
-                            base = candidate; break
-                        except Exception: continue
-                    if base is None: raise RuntimeError("Destination node is unreachable")
-                    url = base + "/v1/files/copy?" + urllib.parse.urlencode({"path": value})
-                    headers = FABRIC_IDENTITY.auth_headers_for_url(url)
-                    headers.update({"Content-Length": str(length), "Content-Type": "application/x-tar"})
-                    request = urllib.request.Request(url, data=stream, headers=headers, method="POST")
-                    context = FABRIC_IDENTITY.ssl_context_for_url(url)
-                    with urllib.request.urlopen(request, timeout=3600, context=context) as response:
-                        result = json.load(response)
-            return self.sendj(200, result)
+            if not re.fullmatch(r'[0-9a-f]{32}',transfer): raise ValueError("Invalid transfer id")
+            peer,value=self._file_target()
+            length=int(self.headers.get("Content-Length","0"))
+            if length<=0: raise ValueError("A sized copy archive is required")
+            _copy_progress(transfer,stage="connecting",total=length)
+            if peer is None:
+                reader=file_transfer.SizedReader(self.rfile,length,lambda count,total:_copy_progress(transfer,stage="receiving",bytes=count,total=total))
+                def finish():
+                    reader.finish(); _copy_progress(transfer,stage="finalizing")
+                result=file_transfer.receive(reader,value,before_publish=finish)
+            else:
+                base=_copy_route(peer)
+                url=base+"/v1/files/copy?"+urllib.parse.urlencode({"path":value})
+                headers=FABRIC_IDENTITY.auth_headers_for_url(url)
+                headers.update({"Content-Length":str(length),"Content-Type":"application/x-tar"})
+                _copy_progress(transfer,stage="uploading",route=base,upload_started=time.monotonic())
+                def advance(count,total):
+                    _copy_progress(transfer,stage="confirming" if count==total else "uploading",bytes=count,total=total)
+                # The gateway relays the request body immediately, without a
+                # second archive on disk. A lost write response is never retried.
+                reader=file_transfer.SizedReader(self.rfile,length,advance,upload=True)
+                request=urllib.request.Request(url,data=reader,headers=headers,method="POST")
+                context=FABRIC_IDENTITY.ssl_context_for_url(url)
+                with urllib.request.urlopen(request,timeout=3600,context=context) as response:
+                    result=json.load(response)
+            if not result.get('ok'): raise RuntimeError(result.get('error') or 'Remote copy failed')
+            receipt=_copy_progress(transfer,stage="complete",bytes=length,total=length)
+            result['transfer']={key:value for key,value in receipt.items() if key not in {'started','updated','upload_started'}}
+            return self.sendj(200,result)
         except urllib.error.HTTPError as exc:
-            try: detail = json.load(exc).get("error", str(exc))
-            except Exception: detail = str(exc)
-            return self.sendj(400, {"ok": False, "error": detail})
+            try: detail=json.load(exc).get("error",str(exc))
+            except Exception: detail=str(exc)
+            if transfer in _COPY_TRANSFERS: _copy_progress(transfer,stage="failed",error=detail)
+            return self.sendj(400,{"ok":False,"error":detail})
         except Exception as exc:
-            return self.sendj(400, {"ok": False, "error": str(exc)})
+            if transfer in _COPY_TRANSFERS: _copy_progress(transfer,stage="failed",error=str(exc))
+            return self.sendj(400,{"ok":False,"error":str(exc)})
 
     def _serve_artifact(self, digest, *, head=False):
         try:
@@ -3990,6 +4064,7 @@ class API(BaseHTTPRequestHandler):
         path = urlparse(self.path).path
         if not self._authorized_ingress(path): return
         if path == "/v1/files/browse": return self._files_browse()
+        if path == "/v1/files/copy/status": return self._files_copy_status()
         if path in ("/health", "/v1/health"):
             db = FABRIC_STORE.health()
             worker_age = max(0.0, now() - float(WORKER_HEALTH.get("last_loop") or 0))

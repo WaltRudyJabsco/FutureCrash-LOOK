@@ -32,7 +32,7 @@ import termios
 import tty
 import tempfile
 import threading
-from contextlib import contextmanager
+from contextlib import contextmanager, nullcontext
 from dataclasses import dataclass
 from datetime import datetime, timedelta
 from pathlib import Path
@@ -1371,7 +1371,7 @@ def pager(rows:list[str],height:int,width:int,rebuild=None,browse_rebuild=None,f
                 dest=str(expanded)
             elif not remote and len(paths)>1 and not expanded.is_dir():
                 notice='destination is not a directory'; return
-            with activity(f"{'copying' if kind=='copy' else 'moving'} {len(paths)} item{'s' if len(paths)!=1 else ''}"):
+            with (nullcontext() if remote else activity(f"{'copying' if kind=='copy' else 'moving'} {len(paths)} item{'s' if len(paths)!=1 else ''}")):
                 proc=subprocess.run([sys.executable,str(lk),'_batch',kind,dest,*map(str,paths)])
         elif kind=='remove':
             sys.stdout.write(SHOW+RESET+'\n'); sys.stdout.flush()

@@ -86,7 +86,15 @@ def test_large_copy_through_gateway_and_ingress_with_nested_spaces(tmp_path, mon
                 listing = ff.browse(ff.Destination('3090', '~/'))
                 assert listing['path'] == str(tmp_path)
                 assert '2TB Storage' in [row['name'] for row in listing['directories']]
-                result = ff.copy([source], '@3090:~/2TB Storage/')
+                progress_updates=[]
+                progress=Mock(update=lambda **fields:progress_updates.append(fields))
+                # Gateway forwarding must not create another archive on disk.
+                monkeypatch.setattr(node,'tempfile',Mock(TemporaryFile=Mock(side_effect=AssertionError('gateway buffered the copy'))))
+                result = ff.copy([source], '@3090:~/2TB Storage/',progress)
+                transfer=next(row['transfer'] for row in progress_updates if row.get('transfer'))
+                status=ff.request('/v1/files/copy/status',{'transfer':transfer})['transfer']
+                assert status['stage']=='complete' and status['bytes']==status['total']
+                assert result['transfer']['stage']=='complete' and result['elapsed']>=0
                 assert result['ok'] and not result['undo_available']
                 assert (target / source.name / 'My Song.mp3').read_bytes() == content
                 assert (source / 'My Song.mp3').read_bytes() == content

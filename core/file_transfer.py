@@ -22,14 +22,20 @@ def browse(value):
     if not path.is_dir():
         raise NotADirectoryError(str(path))
     entries = []
-    for child in path.iterdir():
-        if child.is_dir():
-            entries.append({'name': child.name, 'path': str(child)})
+    # scandir can use the directory's cached entry type instead of issuing a
+    # separate stat for every song/file, particularly costly on network mounts.
+    with os.scandir(path) as children:
+        for child in children:
+            try:
+                if child.is_dir():
+                    entries.append({'name':child.name,'path':str(path/child.name)})
+            except OSError:
+                continue
     return {'ok': True, 'path': str(path), 'home': str(Path.home()),
             'directories': sorted(entries, key=lambda row: row['name'].casefold())}
 
 
-def receive(stream, value):
+def receive(stream, value, before_publish=None):
     """Extract regular files into a private stage; publish only after validation.
 
     Existing destinations are never replaced. Failed batches remove only entries
@@ -38,7 +44,7 @@ def receive(stream, value):
     dest = resolve(value)
     if not dest.is_dir():
         raise NotADirectoryError(f'Choose an existing destination directory: {dest}')
-    with _LOCK, tempfile.TemporaryDirectory(prefix='.look-copy-', dir=dest) as folder:
+    with tempfile.TemporaryDirectory(prefix='.look-copy-', dir=dest) as folder:
         stage = Path(folder)
         seen = set()
         with tarfile.open(fileobj=stream, mode='r|') as archive:
@@ -58,9 +64,11 @@ def receive(stream, value):
                         shutil.copyfileobj(source, output, 1024 * 1024)
                     os.chmod(target, member.mode & 0o777)
                     os.utime(target, (member.mtime, member.mtime))
+        if before_publish: before_publish()
         items = list(stage.iterdir())
         if not items: raise ValueError('Empty copy archive')
         created = []
+        _LOCK.acquire()
         try:
             for item in items:
                 target = dest / item.name
@@ -77,5 +85,29 @@ def receive(stream, value):
                 if target.is_dir(): shutil.rmtree(target)
                 else: target.unlink()
             raise
+        finally:
+            _LOCK.release()
         return {'ok': True, 'path': str(dest), 'copied': [str(p) for p in created],
                 'undo_available': False}
+
+
+class SizedReader:
+    """Read exactly a declared HTTP body, with bounded memory and EOF checks."""
+    def __init__(self, stream, length, progress=None, upload=False):
+        self.stream=stream; self.total=int(length); self.remaining=self.total
+        self.progress=progress; self.upload=upload
+
+    def read(self, size=-1):
+        if not self.remaining: return b''
+        # HTTP clients default to tiny 8 KiB file reads. Use larger relay chunks;
+        # archive readers retain their requested read size.
+        size=256*1024 if self.upload or size<0 else min(size,256*1024)
+        size=min(size,self.remaining)
+        chunk=self.stream.read(size)
+        if len(chunk)!=size: raise ValueError('Copy upload was interrupted')
+        self.remaining-=len(chunk)
+        if self.progress: self.progress(self.total-self.remaining,self.total)
+        return chunk
+
+    def finish(self):
+        while self.remaining: self.read(256*1024)
