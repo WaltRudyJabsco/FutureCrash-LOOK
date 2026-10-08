@@ -166,6 +166,24 @@ The installer is intentionally additive. Optional capabilities degrade cleanly w
 
 ## Playback controls, prompt recall, and remote maintenance
 
+The reference terminal is **Kitty on both macOS and Linux**; **mpv** remains the
+canonical local/Fabric playback engine. VLC is an optional standalone player.
+Activate the bundled terminal profile with `./install.sh --kitty`. This explicitly
+checks/installs Kitty and backs up any existing `~/.config/kitty/kitty.conf` before
+replacing it. Ordinary installs leave your terminal configuration alone. To apply
+just the profile to an already-installed Kitty, run `python3 tools/configure_kitty.py`.
+Personal overrides live in `~/.config/kitty/kitty-local.conf`, loaded last.
+
+The profile uses an opaque green phosphor theme, MesloLGS NF at 13pt, ordinary ANSI
+colors for art and diagnostics, and the OS login shell. Both Mac Option keys work
+as Alt. Shift-arrows and Ctrl-R go to LOOK/LO; terminal shortcuts use Control-Shift
+(with conventional Command shortcuts on Mac). Use Control-Shift-PageUp/PageDown
+for terminal scrollback, Control-Tab to cycle tabs, and Control-Shift-T/N for a new
+tab/window in the same directory. Fully restart Kitty after changing Option keys.
+The installer supplies the matching Meslo font on Mac; on Linux install it locally
+or set `font_family` in the personal override. Remote runtime updates do not deploy
+terminal preferences or install applications/fonts.
+
 Signal's player displays ASCII album art by default. Choose **ASCII**, **Image**, or
 **Art off** on the player card, or use `/art ascii`, `/art image` (also
 `/art high-res`), or `/art off`. The browser remembers your choice. Image mode

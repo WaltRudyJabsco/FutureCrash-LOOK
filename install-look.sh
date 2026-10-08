@@ -18,6 +18,7 @@ FUTURE_CRASH_VERSION="1.2.2"
 DRY=0
 ASSUME_YES=0
 NO_OPTIONAL=0
+KITTY_CONFIG=0
 FORCE_DOWNGRADE=0
 BREW_BOOTSTRAPPED=0
 installed_packages=()
@@ -29,11 +30,12 @@ usage() {
 LOOK + FUTURE CRASH — system installer
 
 Usage:
-  ./install.sh [--dry-run] [--yes] [--no-optional] [--force-downgrade] [--openjev=MODE] [--uninstall]
+  ./install.sh [--dry-run] [--yes] [--no-optional] [--force-downgrade] [--kitty] [--openjev=MODE] [--uninstall]
 
   --dry-run          show what the installer would do
   --yes              accept optional component prompts
   --no-optional      install without optional Remote + AI/media components
+  --kitty            install/check Kitty and activate the shared profile (backs up existing config)
   --force-downgrade  deliberately install over a newer unified release
   --openjev=MODE     unified installer option; LOOK accepts and defers it
   --uninstall        remove Future Crash + LOOK owned files
@@ -45,6 +47,7 @@ while (($#)); do
     --dry-run) DRY=1 ;;
     --yes|-y) ASSUME_YES=1 ;;
     --no-optional) NO_OPTIONAL=1 ;;
+    --kitty) KITTY_CONFIG=1 ;;
     --force-downgrade) FORCE_DOWNGRADE=1 ;;
     --openjev=off|--openjev=auto|--openjev=adopt|--openjev=install) : ;;
     --uninstall)
@@ -463,25 +466,25 @@ PY
   echo
   echo "TERMINAL EXPERIENCE"
   if [[ "$TERMINAL_OS" == "Darwin" ]]; then
-    echo "  Recommended: iTerm2 · Zsh · Powerlevel10k · MesloLGS NF"
+    echo "  Recommended: Kitty · Zsh · Powerlevel10k · MesloLGS NF"
   else
     echo "  Recommended: Kitty · Zsh · Powerlevel10k · MesloLGS NF"
   fi
   echo "  Future Crash + LOOK works without these."
   echo
-  if ask "  Install/check recommended terminal components?" N; then
+  if (( KITTY_CONFIG )) || ask "  Install/check recommended terminal components?" N; then
     if [[ "$TERMINAL_OS" == "Darwin" ]] && command -v brew >/dev/null 2>&1; then
-      [[ -d "/Applications/iTerm.app" || -d "$HOME/Applications/iTerm.app" ]] \
-        && echo "  ✓ iTerm2" \
-        || run brew install --cask iterm2
+      [[ -d "/Applications/kitty.app" || -d "$HOME/Applications/kitty.app" ]] \
+        && echo "  ✓ Kitty" \
+        || run brew install --cask kitty
       if system_profiler SPFontsDataType 2>/dev/null | grep -qi "MesloLGS"; then
         echo "  ✓ MesloLGS NF"
       else
         echo "  Installing MesloLGS NF…"
-        if [[ "${DRY_RUN:-0}" == "1" ]]; then
-          echo "  [dry-run] brew install --cask font-meslo-lg-nerd-font"
+        if [[ "$DRY" == "1" ]]; then
+          echo "  [dry-run] brew install --cask font-meslo-for-powerlevel10k"
         else
-          brew install --cask font-meslo-lg-nerd-font || echo "  Optional font install failed; continuing."
+          brew install --cask font-meslo-for-powerlevel10k || echo "  Optional font install failed; continuing."
         fi
       fi
     elif [[ "$TERMINAL_OS" != "Darwin" ]]; then
@@ -495,13 +498,13 @@ PY
       if (( NEED_KITTY || NEED_IMAGE || NEED_PDF )); then
         if command -v apt-get >/dev/null 2>&1; then
           PKGS=(); (( NEED_KITTY )) && PKGS+=(kitty); (( NEED_IMAGE )) && PKGS+=(imagemagick); (( NEED_PDF )) && PKGS+=(poppler-utils)
-          if [[ "${DRY_RUN:-0}" == "1" ]]; then echo "  [dry-run] sudo apt-get install -y ${PKGS[*]}"; else sudo apt-get install -y "${PKGS[@]}" || echo "  Optional terminal/preview helpers install failed; ASCII remains available."; fi
+          if [[ "$DRY" == "1" ]]; then echo "  [dry-run] sudo apt-get install -y ${PKGS[*]}"; else sudo apt-get install -y "${PKGS[@]}" || echo "  Optional terminal/preview helpers install failed; ASCII remains available."; fi
         elif command -v dnf >/dev/null 2>&1; then
           PKGS=(); (( NEED_KITTY )) && PKGS+=(kitty); (( NEED_IMAGE )) && PKGS+=(ImageMagick); (( NEED_PDF )) && PKGS+=(poppler-utils)
-          if [[ "${DRY_RUN:-0}" == "1" ]]; then echo "  [dry-run] sudo dnf install -y ${PKGS[*]}"; else sudo dnf install -y "${PKGS[@]}" || echo "  Optional terminal/preview helpers install failed; ASCII remains available."; fi
+          if [[ "$DRY" == "1" ]]; then echo "  [dry-run] sudo dnf install -y ${PKGS[*]}"; else sudo dnf install -y "${PKGS[@]}" || echo "  Optional terminal/preview helpers install failed; ASCII remains available."; fi
         elif command -v pacman >/dev/null 2>&1; then
           PKGS=(); (( NEED_KITTY )) && PKGS+=(kitty); (( NEED_IMAGE )) && PKGS+=(imagemagick); (( NEED_PDF )) && PKGS+=(poppler)
-          if [[ "${DRY_RUN:-0}" == "1" ]]; then echo "  [dry-run] sudo pacman -S --noconfirm ${PKGS[*]}"; else sudo pacman -S --noconfirm "${PKGS[@]}" || echo "  Optional terminal/preview helpers install failed; ASCII remains available."; fi
+          if [[ "$DRY" == "1" ]]; then echo "  [dry-run] sudo pacman -S --noconfirm ${PKGS[*]}"; else sudo pacman -S --noconfirm "${PKGS[@]}" || echo "  Optional terminal/preview helpers install failed; ASCII remains available."; fi
         else
           echo "  Optional Kitty/ImageMagick/Poppler components are incomplete; install them with your distribution's package manager."
         fi
@@ -516,11 +519,11 @@ PY
       else
         echo "  playerctl not found · optional Linux system-media adapter"
         if command -v apt-get >/dev/null 2>&1; then
-          [[ "${DRY_RUN:-0}" == "1" ]] && echo "  [dry-run] sudo apt-get install -y playerctl" || sudo apt-get install -y playerctl || echo "  Optional playerctl install failed; LOOK media remains available."
+          [[ "$DRY" == "1" ]] && echo "  [dry-run] sudo apt-get install -y playerctl" || sudo apt-get install -y playerctl || echo "  Optional playerctl install failed; LOOK media remains available."
         elif command -v dnf >/dev/null 2>&1; then
-          [[ "${DRY_RUN:-0}" == "1" ]] && echo "  [dry-run] sudo dnf install -y playerctl" || sudo dnf install -y playerctl || echo "  Optional playerctl install failed; LOOK media remains available."
+          [[ "$DRY" == "1" ]] && echo "  [dry-run] sudo dnf install -y playerctl" || sudo dnf install -y playerctl || echo "  Optional playerctl install failed; LOOK media remains available."
         elif command -v pacman >/dev/null 2>&1; then
-          [[ "${DRY_RUN:-0}" == "1" ]] && echo "  [dry-run] sudo pacman -S --noconfirm playerctl" || sudo pacman -S --noconfirm playerctl || echo "  Optional playerctl install failed; LOOK media remains available."
+          [[ "$DRY" == "1" ]] && echo "  [dry-run] sudo pacman -S --noconfirm playerctl" || sudo pacman -S --noconfirm playerctl || echo "  Optional playerctl install failed; LOOK media remains available."
         else
           echo "  Install playerctl with your distribution package manager to control MPRIS players."
         fi
@@ -538,7 +541,7 @@ PY
     else
       echo "  Powerlevel10k recommended; prompt configuration remains user-owned."
     fi
-    echo "  Terminal/font preferences remain untouched."
+    echo "  Personal font/terminal overrides belong in kitty-local.conf."
   fi
 
   echo
@@ -569,3 +572,14 @@ if [[ -f "$LOOK_MAN_SRC" ]]; then
   run cp "$LOOK_MAN_SRC" "$LOOK_MAN_DIR/lk.1"
 fi
 
+
+# Terminal configuration is explicitly selected and user-owned; runtime pushes
+# never rewrite it. The helper backs up any previous profile before activation.
+if (( KITTY_CONFIG )); then
+  KITTY_ARGS=()
+  if (( DRY )); then
+    KITTY_ARGS+=(--dry-run)
+    echo "[dry-run] would check/install Kitty with Homebrew cask on Mac or the distribution package manager on Linux"
+  fi
+  python3 "$ROOT/tools/configure_kitty.py" "${KITTY_ARGS[@]}"
+fi

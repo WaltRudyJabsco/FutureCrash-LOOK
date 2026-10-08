@@ -1,5 +1,6 @@
 # 8.9.0 — FABRIC MEDIA
 
+- Standardized the optional reference terminal on Kitty for Mac/Linux, with a bundled LOOK keyboard profile and explicit `--kitty` activation that backs up existing configuration. mpv remains the playback engine.
 - Fixed remote update reception to use the real peer registry and return structured source-resolution errors.
 - Added Signal player ASCII album art with persistent Image/Off choices and `/art` commands; original covers also reach browser Now Playing metadata through an authenticated cover-only Fabric gateway.
 - Added Signal browser Media Session transport controls and Now Playing metadata, scoped to playback on that browser.
