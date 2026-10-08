@@ -39,6 +39,6 @@ def test_art_status_is_diagnostic_not_ambiguous():
     selector=block(LK,'def _media_selector(rows,title="FABRIC MEDIA",initial_query="",catalog_meta=None):','def _media_selector_finish')
     assert 'ART… requesting {art_owner}' in selector
     assert 'ART unavailable' in selector
-    player=block(LK,'def _media_player_render():','def media_player():')
+    player=block(LK,'def _media_player_render(','def media_player(')
     assert 'ART… requesting {art_owner}' in player
     assert 'ART unavailable' in player

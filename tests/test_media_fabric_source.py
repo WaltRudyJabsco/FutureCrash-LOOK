@@ -14,7 +14,7 @@ class MediaFabricSourceTests(unittest.TestCase):
         self.assertIn('artifact-add', block)
         self.assertIn('--input-ipc-server=', block)
         self.assertIn('--playlist=', block)
-        self.assertIn('def media_player():', block)
+        self.assertIn('def media_player(', block)
 
     def test_node_advertises_generic_artifact_transport_not_media_server(self):
         source = (ROOT / "core" / "node.py").read_text(encoding="utf-8")

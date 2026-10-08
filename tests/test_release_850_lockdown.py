@@ -12,7 +12,7 @@ def test_850_component_versions_are_explicit():
 
 def test_850_player_shares_media_find_renderer():
     lk=(ROOT/'look/lk').read_text()
-    block=lk[lk.index('def _media_player_render():'):lk.index('def media_player():')]
+    block=lk[lk.index('def _media_player_render('):lk.index('def media_player(')]
     assert '_media_cover_lines(entry,art_w,11,background_remote=True)' in block
     assert '_media_player_art_lines(entry' not in block
     assert '_ansi_clip(art[i] if i<len(art) else "",art_w)' in block

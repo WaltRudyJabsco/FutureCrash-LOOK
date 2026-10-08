@@ -1217,7 +1217,7 @@ def resolve_action_destination(dest:str,current_dir:Path|None)->Path:
     return raw.resolve()
 
 
-def pager(rows:list[str],height:int,width:int,rebuild=None,browse_rebuild=None,filter_context=None,candidates=None,on_browse=None,on_back=None,on_parent=None,on_go=None,on_activate=None,on_sort=None,header_rows=None,force_interactive=False,initial_select:Path|None=None,initial_query:str='',marked_set:set[Path]|None=None,current_dir:Path|None=None,clipboard_state:dict|None=None)->None:
+def pager(rows:list[str],height:int,width:int,rebuild=None,browse_rebuild=None,filter_context=None,candidates=None,on_browse=None,on_back=None,on_parent=None,on_go=None,on_activate=None,on_sort=None,on_hidden=None,header_rows=None,force_interactive=False,initial_select:Path|None=None,initial_query:str='',marked_set:set[Path]|None=None,current_dir:Path|None=None,clipboard_state:dict|None=None)->None:
     # Interactive state machine: browse <-> filter. Focus belongs to filter state.
     usable=max(3,height-5)
     if (len(rows)<=height-1 and not force_interactive) or not (sys.stdin.isatty() and sys.stdout.isatty()):
@@ -1556,13 +1556,13 @@ def pager(rows:list[str],height:int,width:int,rebuild=None,browse_rebuild=None,f
                     status=(f'  {CYAN}{BOLD}FILTER{RESET} {WHITE}{query}█{RESET}'
                             f'  {GRAY}{len(matches)} {match_word}{RESET}'
                             + (f'  · {sel}' if sel else ''))
-                    action_parts=['J/K move','Tab mark','A all','V Preview','Enter/→ open','B clipboard',
+                    action_parts=['J/K move','⇧H hidden','Tab mark','A all','V Preview','Enter/→ open','B clipboard',
                                   'B Copy','T Cut','P Paste','C Copy To','M Move To','⇧R rename','⇧D delete',
                                   'L LO context','X clear set','E edit','O open with','Y path','G go','← parent','Esc clear']
             else:
                 back_hint='Esc back' if on_back else 'Esc exit'
                 status=f'  {FAINT}{last}/{len(current)}{RESET}'
-                action_parts=['⇧F sort','Enter/→ filter','Space/PgDn next','b/PgUp back',
+                action_parts=['⇧H hidden','⇧F sort','Enter/→ filter','Space/PgDn next','b/PgUp back',
                               'g ends','G go','⇧↑/↓ page','⇧←/→ ends','←/< parent',back_hint,'Q quit']
             if notice:
                 status=f'{status}  {YELLOW}{notice}{RESET}'
@@ -1573,6 +1573,16 @@ def pager(rows:list[str],height:int,width:int,rebuild=None,browse_rebuild=None,f
                 key,pending=pending,''
             else:
                 key=read_key(wakeup_fd=native_preview.wakeup_fd,on_wakeup=native_preview.paint_ready)
+
+            if key=='H' and on_hidden:
+                previous=selected_path()
+                notice=on_hidden()
+                if filtering:
+                    refresh_filter()
+                    if previous in matches: selected=matches.index(previous)
+                else:
+                    current=browse_rebuild(None,marked) if browse_rebuild else current
+                top=0; continue
 
             if filtering:
                 # FILTER owns printable characters. Lowercase q is search text;
@@ -1817,14 +1827,18 @@ def _start_global_catalog(root:Path)->tuple[list[Path],threading.Event]:
     ).start()
     return catalog,done
 
-def _catalog_matches(paths:list[Path],query:str)->list[Path]:
-    snapshot=paths[:]
+def _catalog_matches(paths:list[Path],query:str,hidden:bool=True,root:Path|None=None)->list[Path]:
+    def visible(path):
+        try: relative=path.relative_to(root) if root is not None else path
+        except ValueError: relative=path
+        return hidden or not any(part.startswith('.') for part in relative.parts if part not in {'.','..'})
+    snapshot=[p for p in paths[:] if visible(p)]
     if not query:
         return snapshot
     return [p for p in snapshot if query_matches(p.name,query)]
 
-def _catalog_view(paths:list[Path],root:Path,width:int,query:str='',highlight_path:Path|None=None,marked:set[Path]|None=None,scanning:bool=False)->list[str]:
-    matches=_catalog_matches(paths,query)
+def _catalog_view(paths:list[Path],root:Path,width:int,query:str='',highlight_path:Path|None=None,marked:set[Path]|None=None,scanning:bool=False,hidden:bool=True)->list[str]:
+    matches=_catalog_matches(paths,query,hidden,root)
     shown=matches[:800]
     scan_note=' · scanning…' if scanning else ''
     header=(f'{BOLD}{CYAN}LOOK FIND{RESET}  {WHITE}{root}{RESET}'
@@ -1858,7 +1872,9 @@ def main():
     ap.add_argument('path',nargs='?',default='.')
     ap.add_argument('--mode',choices=['smart','detail','dirs','files','tree','recent','size','kind','added'],default='smart')
     ap.add_argument('--depth',type=int,default=2)
-    ap.add_argument('--no-hidden',action='store_true')
+    visibility=ap.add_mutually_exclusive_group()
+    visibility.add_argument('--hidden','--all','-a',action='store_true')
+    visibility.add_argument('--no-hidden',action='store_true')
     ap.add_argument('--interactive',action='store_true')
     ap.add_argument('--select',default=None,help=argparse.SUPPRESS)
     ap.add_argument('--global-find',action='store_true',help=argparse.SUPPRESS)
@@ -1867,7 +1883,12 @@ def main():
     ap.add_argument('-h','--help',action='help')
     args=ap.parse_args()
     target=Path(os.path.expanduser(args.path))
-    hidden=not args.no_hidden
+    hidden=args.hidden and not args.no_hidden
+
+    def toggle_hidden():
+        nonlocal hidden
+        hidden=not hidden
+        return 'hidden shown' if hidden else 'hidden suppressed'
 
     if args.global_find:
         root=target.expanduser().resolve()
@@ -1881,11 +1902,12 @@ def main():
             nonlocal go_result
             go_result=path.resolve()
         pager(
-            _catalog_view(catalog,root,shutil.get_terminal_size((100,30)).columns,scanning=not scan_done.is_set()),
+            _catalog_view(catalog,root,shutil.get_terminal_size((100,30)).columns,scanning=not scan_done.is_set(),hidden=hidden),
             shutil.get_terminal_size((100,30)).lines,
             shutil.get_terminal_size((100,30)).columns,
-            rebuild=lambda q,h=None,w=None,m=None: _catalog_view(catalog,root,w or 100,q,h,m,scanning=not scan_done.is_set()),
-            candidates=lambda q: _catalog_matches(catalog,q),
+            rebuild=lambda q,h=None,w=None,m=None: _catalog_view(catalog,root,w or 100,q,h,m,scanning=not scan_done.is_set(),hidden=hidden),
+            candidates=lambda q: _catalog_matches(catalog,q,hidden,root),
+            on_hidden=toggle_hidden,
             on_browse=choose_global,
             on_go=go_global,
             on_activate=choose_global,
@@ -1907,7 +1929,7 @@ def main():
             parent=selected_result if selected_result.is_dir() else selected_result.parent
             return subprocess.call([
                 sys.executable,str(Path(__file__).resolve()),str(parent),
-                "--mode","smart","--interactive","--select",str(selected_result)
+                "--mode","smart","--interactive",*( ["--hidden"] if hidden else [] ),"--select",str(selected_result)
             ])
         return 0
 
@@ -1955,6 +1977,7 @@ def main():
               filter_context=lambda q,w=None: build_view(target,sort_state['mode'],hidden,w or sz.columns,args.depth,q,None,None,interactive_rows=False)[:2],
               candidates=lambda q: matching_paths(target,sort_state['mode'],hidden,q,args.depth),
               on_sort=cycle_sort,
+              on_hidden=toggle_hidden,
               header_rows=sticky_header,
               on_browse=choose_dir,
               on_back=choose_back if history else None,

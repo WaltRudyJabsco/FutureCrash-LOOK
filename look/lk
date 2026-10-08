@@ -12,6 +12,7 @@ if str(_LOOK_MODULE_DIR) not in sys.path:
     sys.path.insert(0,str(_LOOK_MODULE_DIR))
 import media_core
 import media_art
+import player_visuals
 import lo_stream
 import lo_history
 import file_catalog
@@ -1970,7 +1971,7 @@ def home():
         parts.append(f"{_c('lk','36')} look around")
     parts.append(f"{_c('lo' if 'lo' in active else 'lk o','36')} ask")
     parts.append(f"{_c('lk','36')} inspect")
-    parts.append(f"{_c('lh' if 'lh' in active else 'lk home','36')} home")
+    parts.append(f"{_c('lk home','36')} home")
     if "fc" in active:
         parts.append(f"{_c('fc','36')} Future Crash")
     print("   ".join(parts))
@@ -18451,8 +18452,28 @@ def _media_player_visualizer(entry,state,width):
     return "EQ  "+"".join(bars)
 
 
-def _media_player_render():
+def _media_player_full_visual(snap,mode):
+    terminal=shutil.get_terminal_size((80,24))
+    width=max(1,min(240,terminal.columns-1)); height=max(1,terminal.lines-1)
+    entry=snap['entry']; state=str(snap['state']).lower()
+    queue=snap['session'].get('queue') or []
+    name=player_visuals.NAMES[(mode-1)%len(player_visuals.NAMES)]
+    seed=int(hashlib.sha256(_media_entry_label(entry).encode()).hexdigest()[:4],16)%23
+    header=[f"LOOK PLAYER · {name} · ambient animation",
+            _media_entry_label(entry),
+            f"{state.upper()} · {_media_time(snap.get('position') or 0)} / {_media_time(snap.get('duration') or 0)} · Queue {snap['index']+1}/{len(queue)}"]
+    footer=['v next visual / normal · space pause · p/n previous/next',
+            '←/→ seek · s shuffle · r repeat · x stop · q close']
+    art=player_visuals.frame(mode,width,max(1,height-len(header)-len(footer)),time.monotonic(),state in {'play','playing'},seed)
+    lines=header+art+footer
+    color=("1;32","1;36","1;35","1;34","1;37","1;33")[(mode-1)%len(player_visuals.NAMES)]
+    return "\n".join(_c(_media_player_line(line,width),color) if len(header)<=i<len(header)+len(art) else _media_player_line(line,width) for i,line in enumerate(lines[:height]))
+
+
+def _media_player_render(visualizer=0):
     snap=_media_status_snapshot()
+    if visualizer and snap:
+        return _media_player_full_visual(snap,visualizer)
     width=max(42,min(88,shutil.get_terminal_size((72,24)).columns-2))
     inner=width-2
     if not snap:
@@ -18481,7 +18502,7 @@ def _media_player_render():
             f"{time_text}  {bar}",
             f"{state}  ·  {footer}", "",
             "space play/pause   ←/→ seek 10s   p/n previous/next",
-            "s shuffle   r repeat   x stop   q close player",
+            "s shuffle   r repeat   v visuals   x stop   q close player",
             "", "", "",
         ]
         # Use the exact same proven Chafa renderer as Media Find.  Art rows are
@@ -18514,24 +18535,26 @@ def _media_player_render():
     return "\n".join(out)
 
 
-def media_player():
+def media_player(initial_visualizer=0):
     """Tiny live view over MediaSession; closing it never stops playback."""
     if not (sys.stdin.isatty() and sys.stdout.isatty()):
         print(_media_player_render())
         return 0
+    visualizer=initial_visualizer % (len(player_visuals.NAMES)+1)
     fd=sys.stdin.fileno()
     old=termios.tcgetattr(fd)
     try:
         tty.setcbreak(fd)
         sys.stdout.write("\033[2J")
         while True:
-            sys.stdout.write("\033[H"+_media_player_render()+"\033[J")
+            sys.stdout.write("\033[H"+_media_player_render(visualizer)+"\033[J")
             sys.stdout.flush()
             key=_read_tty_key(fd,.25)
             if not key:
                 continue
             if key in {"q","esc"}: return 0
-            if key==" ": _media_control_session("toggle")
+            if key=="v": visualizer=(visualizer+1) % (len(player_visuals.NAMES)+1)
+            elif key==" ": _media_control_session("toggle")
             elif key=="n": _media_control_session("next")
             elif key=="p": _media_control_session("prev")
             elif key=="left": _media_mpv_request(["seek",-10,"relative"])
@@ -18723,7 +18746,7 @@ def media_mp(initial_query=""):
                     print(_c(filter_text,"1;36"))
                     controls="↑↓ select · ⇧ arrows page/top/bottom · Tab mark · Enter play · A add queue · D hide dir · L library · Q queue"
                     print(_c(controls,"2"))
-                    print(_c("space pause · ←/→ seek · p/n prev/next · s shuffle · r repeat · x stop · Esc clear/exit","2"),end="")
+                    print(_c("space pause · ←/→ seek · p/n prev/next · v visuals · s shuffle · r repeat · x stop · Esc clear/exit","2"),end="")
                     if notice:
                         print("  "+_c(notice,"33"),end="")
                         notice=""
@@ -18768,6 +18791,13 @@ def media_mp(initial_query=""):
                 if query:
                     query=""; idx=0; view_key=None; continue
                 return 0
+            if key=="v":
+                native_preview.invalidate()
+                termios.tcsetattr(fd,termios.TCSADRAIN,old)
+                media_player(initial_visualizer=1)
+                tty.setcbreak(fd)
+                native_preview.frame_cleared()
+                continue
             if key=="/":
                 search_before=query; search_mode=True; continue
             if key in {"up","K"} and visible: idx=max(0,idx-1); continue
@@ -20702,6 +20732,7 @@ def main():
     a=sys.argv[1:]
     if not a: return render(["--interactive"])
     cmd=a[0]; rest=a[1:]
+    if cmd in {"--hidden","--all","-a","--no-hidden"}: return render([*a,"--interactive"])
     if cmd=="_remember-worker": return _memory_worker()
     if cmd=="_skill-feedback-worker": return _skill_feedback_worker()
     if cmd=="memory": return _memory_command(rest)
@@ -20876,6 +20907,7 @@ def main():
         mode=oct(p.stat().st_mode & 0o777)
         print(f"LOOK secrets: {p} exists · permissions {mode} · contents hidden")
         return 0 if mode=="0o600" else 1
+    if cmd=="hidden": return render(["--hidden", "--interactive", *rest])
     if cmd in modes: return render(["--mode", modes[cmd], "--interactive", *rest])
     if cmd in {"run","project"}: return inspect_project(rest[0] if rest else '.')
     if cmd in {"up","ports","services"}: return inspect_up()

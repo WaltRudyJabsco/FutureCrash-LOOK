@@ -102,7 +102,7 @@ commands() {
   print -P '%F{75}  ff [WORD]%f global LOOK search'
 
   _look_shortcut_is_look l  && print -P '%F{75}  l%f        look around'
-  _look_shortcut_is_look lh && print -P '%F{75}  lh%f       LOOK home'
+  _look_shortcut_is_look lh && print -P '%F{75}  lh%f       include hidden files'
   _look_shortcut_is_look lo && print -P '%F{75}  lo%f       ask LO'
   _look_shortcut_is_look f  && print -P '%F{75}  f%f        Future Crash'
   print -P '%F{75}  lk home%f  LOOK home           %F{75}lk o%f     ask LO'
@@ -303,7 +303,11 @@ _look_short_install lf lkf
 _look_short_install lt lkt
 _look_short_install lr lkr
 _look_short_install lz lkz
-_look_short_install lh '_look home'
+# Migrate only LOOK's old home shortcut when an existing shell reloads this file.
+if (( $+functions[lh] )) && [[ "${functions[lh]}" == *'_look home "$@"'* ]]; then
+  unfunction lh
+fi
+_look_short_install lh '_look hidden'
 _look_short_install f fcr
 
 # `fc` is permanently reserved for Zsh's native history builtin.

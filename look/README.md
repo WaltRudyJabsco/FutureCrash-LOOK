@@ -56,7 +56,7 @@ G        take me there
 B        put this file in my clipboard
 Y        give me its path
 lo       talk about this workspace
-lh       come home
+lh       list including hidden files
 Esc      back out
 ```
 
@@ -73,6 +73,8 @@ Look around the current directory:
 ```sh
 l
 ```
+
+`l` and `lk` hide dotfiles by default. `lh` includes them; **Shift-H** toggles them in browse or filter view without clearing your query. `lk --hidden` (or `lk -a`) also includes them. The home dashboard remains available as `lk home`.
 
 Type ordinary fragments to filter. `Tab` marks things; `A` toggles all current matches: mark them all, or clear them all when they are already marked. With no marks, actions apply to the highlighted object. With marks, they apply to the marked set.
 
@@ -510,7 +512,7 @@ Then it never says it again.
 
 ## A little terminal personality
 
-`lh` is LOOK's home screen: current directory, Git state, Ollama state, and a small fortune/cowsay ritual. `rs` remains the reset ritual. `rb` reloads Zsh.
+`lk home` is LOOK's home screen: current directory, Git state, Ollama state, and a small fortune/cowsay ritual. `rs` remains the reset ritual. `rb` reloads Zsh.
 
 LOOK 3 uses terminal-native truecolor when available and falls back to ANSI. The 2.2 interaction grammar is the compatibility constitution:
 
@@ -603,7 +605,7 @@ ld          directories                  lf       files
 lt          tree                         lr       recent
 lz          sizes                        zll WORD jump + look
 cdl WORD    jump + details               f        find anywhere → LOOK
-fznv        fuzzy find → Neovim          lh       LOOK home
+fznv        fuzzy find → Neovim          lh       include hidden files
 lcp         assisted copy                lmv      assisted move
 lscp        assisted scp                 lrm      assisted remove
 lmk PATH    make directory path          mkd DIR  make + enter
@@ -807,3 +809,13 @@ Discovery is intentionally cheap: LOOK does not read, hash, embed, or transfer f
 ## Personalization and speech
 
 `lk settings` controls LOOK file icons, image preview mode, receipt-driven feedback sound, and shared Fabric speech preferences. Nerd icons are the default; Classic remains available. Speech presets are shared by LOOK/LO/Fabric rather than being LOOK-only, and personality-specific voices can be disabled.
+
+## Player visualizers
+
+In `lk player`, press lowercase **v** to cycle normal → Bars → Waves → Orbit →
+Tunnel → Stars → Plasma → normal. The six terminal animations are ambient, not
+measurements of audio amplitude or frequency. Paused/stopped animations remain
+static. Track, time, queue position, and transport controls stay visible.
+
+In `lk mp`, press **v** outside the search field to enter the same visual player;
+**q** returns to the library/queue view. Closing either view leaves playback running.
