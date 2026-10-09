@@ -26,7 +26,12 @@ content while keeping your query; the footer says FILTER or SEARCH. Add
 Shift-F cycles updated, created, title, project, due/reminder, and type sorting.
 Shift-T cycles all records, notes, tasks, and reminders. Each row includes
 creation and latest-edit timestamps; changes to a note retain its creation time.
-Enter opens the focused Markdown document in `$VISUAL`, `$EDITOR`, Neovim, or vi.
+Enter opens a boxed, scrollable Markdown view. E opens a quick body editor;
+Enter saves, Shift-Enter/Ctrl-J inserts a newline, and Escape cancels. The title
+stays stable so named notebooks are easy to reopen. V opens the same document
+in `$VISUAL`, `$EDITOR`, Neovim, or vi. Escape returns to the filtered list.
+If another node changes a note during quick editing, the draft is preserved
+locally under `~/.local/share/look/notebook/drafts/` instead of overwriting it.
 Shift-N opens quick capture: Enter saves; Shift-Enter adds a line break or a
 blank paragraph; Escape cancels. The editor requests modified-key reporting
 while active. If a terminal sends Enter and Shift-Enter identically, use Ctrl-J
@@ -64,7 +69,7 @@ name through the running daemon. Offline, use an explicit name.
 
 Reusable notes need no flags: `lkn To Do`, `lkn Scratch Pad`, or `lkn Notes`
 creates the record on first use and reopens the exact title on later calls.
-On a terminal it opens your editor; piped output prints the document, and
+On a terminal it opens the inline view; piped output prints the document, and
 `--json` prints its record. Names ignore case and repeated spaces. If more than
 one record has that title, choose one in the notebook or use an ID. `lkn new To Do`
 always creates a new record. Capture flags such as `--task`, `--remind`, or

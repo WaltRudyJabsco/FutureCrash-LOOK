@@ -26,6 +26,49 @@ def terminal(monkeypatch):
     monkeypatch.setattr(notebook.tty,'setcbreak',Mock())
 
 
+def test_inline_view_edits_body_and_preserves_record_fields(tmp_path,terminal,monkeypatch,capsys):
+    store=Notebook(tmp_path); store.create('To Do',kind='task',project='Work',remind_at='in 10 minutes')
+    original=store.list()[0]; keys=iter(['E','shiftenter','x','\r','esc'])
+    monkeypatch.setattr(notebook,'nudge_sync',lambda:None)
+    notebook.note_view(store,original,lambda *args:next(keys))
+    row=store.list()[0]
+    assert row['body']=='To Do\nx'
+    for field in ('id','title','kind','project','remind_at','status'): assert row[field]==original[field]
+    assert '┌' in capsys.readouterr().out
+    notebook.termios.tcsetattr.assert_called_with(5,notebook.termios.TCSADRAIN,['old'])
+
+
+def test_quick_edit_cancel_creates_no_revision(tmp_path,terminal,monkeypatch):
+    store=Notebook(tmp_path); store.create('Scratch'); row=store.list()[0]
+    monkeypatch.setattr(notebook,'capture_note',lambda *args:None)
+    assert notebook.quick_edit(store,row,5,None)==''
+    assert store.list()[0]['revision']==row['revision']
+
+
+def test_quick_edit_preserves_draft_when_peer_changes_note(tmp_path,terminal,monkeypatch):
+    store=Notebook(tmp_path); store.create('Scratch'); row=store.list()[0]
+    store.change(row['id'],{'body':'Peer text'})
+    monkeypatch.setattr(notebook,'capture_note',lambda *args:'My draft')
+    assert 'draft preserved' in notebook.quick_edit(store,row,5,None)
+    assert store.list()[0]['body']=='Peer text'
+    assert next((tmp_path/'drafts').glob('*.md')).read_text()=='My draft'
+
+
+def test_inline_view_full_editor_uses_same_note(tmp_path,terminal,monkeypatch):
+    store=Notebook(tmp_path); store.create('Scratch'); row=store.list()[0]
+    editor=Mock(); monkeypatch.setattr(notebook,'edit',editor)
+    keys=iter(['V','esc'])
+    notebook.note_view(store,row,lambda *args:next(keys))
+    editor.assert_called_once_with(store,row)
+
+
+def test_workspace_view_returns_to_filter(tmp_path,terminal,capsys):
+    store=Notebook(tmp_path); store.create('Apple')
+    keys=iter(['a','\r','esc','esc','q'])
+    notebook.workspace(store,None,lambda *args:next(keys),lambda text,width:text[:width])
+    assert capsys.readouterr().out.count('FILTER a█')>=2
+
+
 def test_capture_enter_saves_shift_enter_and_ctrl_j_add_paragraphs(terminal,capsys):
     keys=iter(['a','shiftenter','shiftenter','b','\n','c','\r'])
     assert notebook.capture_note(5,lambda *args:next(keys))=='a\n\nb\nc'

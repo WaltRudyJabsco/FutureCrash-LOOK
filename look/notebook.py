@@ -84,7 +84,10 @@ def named_records(store,text):
 HELP_TEXT='''LOOK NOTEBOOK — notes, tasks and reminders share one record.
 
 Capture: N opens a draft. Enter saves; Shift-Enter/Ctrl-J inserts a newline.
-Escape cancels a draft. Enter on a listed record opens it in your editor.
+Escape cancels a draft. Enter opens a boxed Markdown note view.
+In the view: arrows/Space scroll, E edits the body, V opens your full editor.
+Quick edits keep the title; Enter saves, Shift-Enter/Ctrl-J adds a newline.
+Escape returns to the list. Explicit lkn edit NAME also opens the full editor.
 
 File (P): change the project label; text and stable ID stay the same.
 Done (C): complete the record and stop its reminder. List --all shows it again.
@@ -137,23 +140,27 @@ def show_help(fd,read_key):
         elif key=='end': top=len(rows)
 
 
-def capture_note(fd,read_key):
+def capture_note(fd,read_key,initial_text='',label='NEW NOTE'):
     """Keep Enter fast; request distinct modified keys while the note editor owns input."""
     previous=termios.tcgetattr(fd)
-    text=''; cursor=0
+    text=initial_text; cursor=len(text)
     try:
         tty.setraw(fd)
         sys.stdout.write('\033[>1u')
         while True:
             width,height=shutil.get_terminal_size((100,30))
+            boxed=label!='NEW NOTE'; columns=max(1,min(96,width-4)) if boxed else max(1,width-1)
             before=text[:cursor]; after=text[cursor:]
             rows=(before+'█'+after).split('\n')
-            rows=[part for line in rows for part in (textwrap.wrap(line,max(1,width-1),replace_whitespace=False,drop_whitespace=False) or [''])]
+            rows=[part for line in rows for part in (textwrap.wrap(line,columns,replace_whitespace=False,drop_whitespace=False) or [''])]
             cursor_row=next((index for index,line in enumerate(rows) if '█' in line),0)
-            top=max(0,cursor_row-max(1,height-4)+1)
-            visible=rows[top:top+max(1,height-4)]
-            frame=['NEW NOTE · Enter save · Shift-Enter/Ctrl-J newline · Esc cancel'[:max(1,width-1)],'']
-            frame.extend(visible)
+            page=max(1,height-(6 if boxed else 4))
+            top=max(0,cursor_row-page+1)
+            visible=rows[top:top+page]
+            frame=[(label+' · Enter save · Shift-Enter/Ctrl-J newline · Esc cancel')[:max(1,width-1)],'']
+            if boxed:
+                frame.extend(['┌'+'─'*columns+'┐',*['│'+line.ljust(columns)+'│' for line in visible],'└'+'─'*columns+'┘'])
+            else: frame.extend(visible)
             sys.stdout.write('\033[2J\033[H'+'\r\n'.join(frame)+'\033[J'); sys.stdout.flush()
             key=read_key(fd,None)
             if key in {'esc','\x03'}: return None
@@ -164,6 +171,16 @@ def capture_note(fd,read_key):
                 text=text[:cursor-1]+text[cursor:]; cursor-=1
             elif key=='left': cursor=max(0,cursor-1)
             elif key=='right': cursor=min(len(text),cursor+1)
+            elif key=='delete': text=text[:cursor]+text[cursor+1:]
+            elif key in {'up','down'}:
+                start=text.rfind('\n',0,cursor)+1; column=cursor-start
+                end=text.find('\n',cursor)
+                if key=='up' and start:
+                    prior=text.rfind('\n',0,start-1)+1
+                    cursor=min(prior+column,start-1)
+                elif key=='down' and end>=0:
+                    following=text.find('\n',end+1)
+                    cursor=min(end+1+column,len(text) if following<0 else following)
             elif key=='home': cursor=text.rfind('\n',0,cursor)+1
             elif key=='end':
                 next_line=text.find('\n',cursor); cursor=len(text) if next_line<0 else next_line
@@ -172,6 +189,69 @@ def capture_note(fd,read_key):
     finally:
         sys.stdout.write('\033[<u'); sys.stdout.flush()
         termios.tcsetattr(fd,termios.TCSADRAIN,previous)
+
+
+def quick_edit(store,row,fd,read_key):
+    draft=capture_note(fd,read_key,row['body'],'EDIT · '+row['title'])
+    if draft is None or draft==row['body']: return ''
+    try:
+        store.change(row['id'],{'body':draft},expected=row['revision'])
+    except (ValueError,OSError):
+        # A peer may have edited while this draft was open. Preserve both texts.
+        directory=store.root/'drafts'; directory.mkdir(parents=True,exist_ok=True)
+        path=directory/(row['id']+'-'+str(time.time_ns())+'.md')
+        path.write_text(draft,encoding='utf-8')
+        return 'Note changed or save failed; draft preserved at '+str(path)
+    nudge_sync()
+    return 'saved'
+
+
+def note_view(store,row,read_key):
+    """Own terminal state so the same view works from the list and named CLI entry."""
+    fd=sys.stdin.fileno(); old=termios.tcgetattr(fd); top=0; notice=''
+    try:
+        tty.setcbreak(fd); sys.stdout.write('\033[?25l')
+        while True:
+            width,height=shutil.get_terminal_size((100,30))
+            inner=max(1,min(96,width-4)); page=max(1,height-8)
+            content=[part for line in row['body'].splitlines() for part in
+                     (textwrap.wrap(line,inner,replace_whitespace=False,drop_whitespace=False) or [''])]
+            top=max(0,min(top,max(0,len(content)-page)))
+            border='─'*inner
+            frame=['\033[1;36m'+row['title'][:max(1,width-1)]+'\033[0m',
+                   metadata(row)[:max(1,width-1)],'┌'+border+'┐']
+            for line in content[top:top+page]:
+                padded=line.ljust(inner)
+                if line.lstrip().startswith('#'): padded='\033[1;36m'+padded+'\033[0m'
+                frame.append('│'+padded+'│')
+            frame.extend(['│'+' '*inner+'│']*max(0,page-len(content[top:top+page])))
+            frame.extend(['└'+border+'┘',
+                          '↑↓/Space scroll · E edit · V full editor · H help · Esc back'[:max(1,width-1)],
+                          notice[:max(1,width-1)]])
+            sys.stdout.write('\033[2J\033[H'+'\n'.join(frame)+'\033[J'); sys.stdout.flush()
+            key=read_key(fd,None)
+            if key in {'esc','q','\x03'}: return
+            if key in {'down','j','\r','\n'}: top+=1
+            elif key in {'up','k'}: top-=1
+            elif key in {'pagedown',' '}: top+=page
+            elif key=='pageup': top-=page
+            elif key=='home': top=0
+            elif key=='end': top=len(content)
+            elif key in {'H','?'}: show_help(fd,read_key)
+            elif key in {'E','V'}:
+                if key=='E':
+                    notice='Resolve this conflict in the full editor (V).' if row['conflict'] else quick_edit(store,row,fd,read_key)
+                else:
+                    termios.tcsetattr(fd,termios.TCSADRAIN,old)
+                    sys.stdout.write('\033[?25h'); sys.stdout.flush()
+                    try: edit(store,row)
+                    finally:
+                        tty.setcbreak(fd); sys.stdout.write('\033[?25l')
+                matches=[item for item in store.list(include_done=True) if item['id']==row['id']]
+                row=next((item for item in matches if item['revision']==row['revision']),matches[0] if matches else row)
+    finally:
+        termios.tcsetattr(fd,termios.TCSADRAIN,old)
+        sys.stdout.write('\033[?25h\033[0m'); sys.stdout.flush()
 
 
 def workspace(store,kind,read_key,hints,initial_query=''):
@@ -201,7 +281,7 @@ def workspace(store,kind,read_key,hints,initial_query=''):
                 lines.append(('\033[1;36m›' if number==index else ' ')+marker+' '+display(row)[:max(10,width-5)]+'\033[0m')
                 lines.append('\033[2m   '+metadata(row)[:max(1,width-4)]+'\033[0m')
             while len(lines)<height-4: lines.append('')
-            lines.extend([('FILTER ' if scope=='title' else 'SEARCH ')+query+'█',hints('↑↓ move · Tab mark · Enter edit · N new · P file · C done · R remind · F sort · T type · / full text · H help · Esc clear/exit',width),notice])
+            lines.extend([('FILTER ' if scope=='title' else 'SEARCH ')+query+'█',hints('↑↓ move · Tab mark · Enter view · V full editor · N new · P file · C done · R remind · F sort · T type · / full text · H help · Esc clear/exit',width),notice])
             sys.stdout.write('\033[H'+ '\033[K\n'.join(lines)+'\033[K\033[J'); sys.stdout.flush()
             key=read_key(fd,1)
             if not key: continue
@@ -235,6 +315,11 @@ def workspace(store,kind,read_key,hints,initial_query=''):
                 continue
             try:
                 if key in {'\r','\n'} and rows:
+                    termios.tcsetattr(fd,termios.TCSADRAIN,old)
+                    try: note_view(store,rows[index],read_key)
+                    finally:
+                        tty.setcbreak(fd); sys.stdout.write('\033[?25l')
+                elif key=='V' and rows:
                     termios.tcsetattr(fd,termios.TCSADRAIN,old)
                     try: edit(store,rows[index])
                     finally: tty.setcbreak(fd)
@@ -287,7 +372,7 @@ def main(argv=None,kind=None,read_key=None,hints=None):
             if len(matches)==1 and not matches[0]['conflict']:
                 row=matches[0]
                 if args.json: print(json.dumps(row,ensure_ascii=False,indent=2))
-                elif sys.stdin.isatty() and sys.stdout.isatty(): edit(store,row)
+                elif sys.stdin.isatty() and sys.stdout.isatty() and read_key: note_view(store,row,read_key)
                 else: print(Path(row['path']).read_text())
                 return 0
             if matches:

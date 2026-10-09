@@ -63,12 +63,12 @@ def test_bare_title_reopens_existing_record_and_new_explicitly_duplicates(tmp_pa
     assert len(store.list())==2
 
 
-def test_named_note_opens_editor_on_terminal(tmp_path,monkeypatch):
+def test_named_note_opens_inline_view_on_terminal(tmp_path,monkeypatch):
     store=Notebook(tmp_path); row=store.create('Scratch Pad')
     monkeypatch.setattr(notebook,'Notebook',lambda:store)
     monkeypatch.setattr(notebook.sys,'stdin',Mock(isatty=lambda:True))
     monkeypatch.setattr(notebook.sys,'stdout',Mock(isatty=lambda:True))
-    editor=Mock(); monkeypatch.setattr(notebook,'edit',editor)
-    assert notebook.main(['Scratch','Pad'])==0
+    editor=Mock(); monkeypatch.setattr(notebook,'note_view',editor)
+    assert notebook.main(['Scratch','Pad'],read_key=lambda *args:'esc')==0
     assert editor.call_args.args[1]['id']==row['note']
     assert len(store.list())==1
