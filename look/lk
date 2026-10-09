@@ -17,7 +17,7 @@ import lo_stream
 import lo_history
 import file_catalog
 import games as look_games
-from look_renderer import NativePreviewController
+from look_renderer import NativePreviewController, action_footer
 
 try:
     import readline
@@ -1846,11 +1846,13 @@ LIVE FILTER / SELECTION
   O          open with another application
   B          copy file object(s) to desktop clipboard
   C / M      Copy To / Move To
-  ⇧R / ⇧D    rename / delete
+  R / D      rename / delete
+  H          toggle hidden files (hidden by default)
+  lh         open LOOK with hidden files shown; lk home opens the home screen
   L          hand persistent working set to a new LO session
   X          clear persistent working set
   Y          copy absolute path(s) as text
-  P          print absolute path + exit
+  T / P      cut / paste file objects
   G          exit LOOK and make this the shell's directory
   Esc        clear / back / cancel
   q          quit
@@ -1872,7 +1874,8 @@ HELP PAGER
   g / G                beginning / end
   q / Esc              quit
 """
-    return _page_text(_help_color(body))
+    reference=ROOT/"docs"/"REFERENCE.md"
+    return _page_text(_help_color(reference.read_text() if reference.exists() else body))
 
 
 def _shell_shortcut_state():
@@ -17801,7 +17804,7 @@ def _media_selector(rows,title="FABRIC MEDIA",initial_query="",catalog_meta=None
             height=max(10,terminal.lines)
             width=max(56,terminal.columns)
             info_rows=13 if info_mode else 0
-            usable=max(4,height-7-info_rows-(1 if catalog_meta and (catalog_meta.get("errors") or catalog_meta.get("fallback")) else 0))
+            usable=max(4,height-11-info_rows-(1 if catalog_meta and (catalog_meta.get("errors") or catalog_meta.get("fallback")) else 0))
             top=max(0,min(max(0,len(visible)-usable),idx-usable+1))
             page=visible[top:top+usable]
 
@@ -17810,7 +17813,7 @@ def _media_selector(rows,title="FABRIC MEDIA",initial_query="",catalog_meta=None
             frame_io=io.StringIO()
             with redirect_stdout(frame_io):
                 mode=("ALL SOURCES" if show_all else "LOGICAL")+(" + HIDDEN" if show_hidden else "")
-                suffix=f"{len(visible):,} shown · {len(rows):,} locations · {len(selected_rows)} selected · {mode}"
+                suffix=f"{len(visible):,} shown · {len(rows):,} locations · {len(selected_rows)} selected · {_c(mode,'1;35')}"
                 _title(title,suffix)
                 if catalog_meta:
                     nodes=catalog_meta.get("nodes") or []
@@ -17832,7 +17835,7 @@ def _media_selector(rows,title="FABRIC MEDIA",initial_query="",catalog_meta=None
                     max_label=max(12,width-len(right)-7)
                     if len(label)>max_label:
                         label=label[:max(1,max_label-1)]+"…"
-                    print(f"{focus}{mark} {label:<{max_label}}  {_c(right,'2')}")
+                    print(f"{focus}{mark} {label:<{max_label}}  {_c(right,'32' if row.get('digest') else '2')}")
                 if not visible:
                     print("  no matches")
                 art_pending=False
@@ -17860,8 +17863,8 @@ def _media_selector(rows,title="FABRIC MEDIA",initial_query="",catalog_meta=None
                             print(left)
 
                 filter_text=f"{_c('FILTER','1;36')} {query}█" if query else f"{_c('FILTER','1;36')} █"
-                actions=_c("Tab select · A select all · Enter/P play · Q queue · I info · V sources · H hidden · X hide · D hide by directory · U unhide · ◆ SHA · · scanned · Esc exit","2")
-                footer=f"{filter_text}  {actions}"
+                actions=_media_hints("↑↓/J/K move · Shift-arrows page/ends · Tab select · A select all · Enter/P play · Q queue · C clear selection · S save playlist · I info · V sources · H hidden · X hide · D hide by directory · U unhide · Esc clear/exit",width)
+                footer=f"{filter_text}  "+_c("◆ SHA · · scanned","2")+"\n"+actions
                 if notice:
                     footer+="  "+_c(notice,"33")
                     notice=""
@@ -18482,6 +18485,25 @@ def _media_repeat_command(args):
     return 0
 
 
+def _media_hints(text, width):
+    """Use the filer key palette, preserving plain output for pipes."""
+    lines=action_footer(text.split(" · "),width)
+    if not sys.stdout.isatty():
+        lines=[_strip_ansi(line) for line in lines]
+    return "\n".join(line.lstrip() for line in lines)
+
+
+def _media_player_style(line, index):
+    # Style after padding/clipping, so artwork and box geometry stay intact.
+    if index in {6,7}:
+        return re.sub(r"(?<!\S)(space|←/→|p/n|s|r|v|x|q)(?=\s)",
+                      lambda m:_c(m.group(0),"1;36"),line)
+    if index==4:
+        return re.sub(r"PLAYING|PAUSED|STOPPED|Shuffle (?:on|off)|Repeat \w+",
+                      lambda m:_c(m.group(0),"1;32" if m.group(0)=="PLAYING" else "33" if m.group(0)=="PAUSED" else "35"),line)
+    return _c(line,{0:"1",1:"2",2:"36",3:"36",9:"33"}.get(index,"0"))
+
+
 def _media_player_line(text,width):
     text=str(text)
     if len(text)>width:
@@ -18522,7 +18544,7 @@ def _media_player_full_visual(snap,mode):
     art=player_visuals.frame(mode,width,max(1,height-len(header)-len(footer)),time.monotonic(),state in {'play','playing'},seed)
     lines=header+art+footer
     color=("1;32","1;36","1;35","1;34","1;37","1;33")[(mode-1)%len(player_visuals.NAMES)]
-    return "\n".join(_c(_media_player_line(line,width),color) if len(header)<=i<len(header)+len(art) else _media_player_line(line,width) for i,line in enumerate(lines[:height]))
+    return "\n".join(_c(_media_player_line(line,width),color) if len(header)<=i<len(header)+len(art) else _media_player_style(_media_player_line(line,width),6 if i>=len(header)+len(art) else 0 if i==1 else 4 if i==2 else 1) for i,line in enumerate(lines[:height]))
 
 
 def _media_player_render(visualizer=0):
@@ -18552,12 +18574,12 @@ def _media_player_render(visualizer=0):
                 f"Shuffle {'on' if snap['session'].get('shuffle') else 'off'}  ·  "
                 f"Repeat {snap['session'].get('repeat','off')}")
         eq=_media_player_visualizer(entry,snap["state"],inner)
+        player_controls="space play/pause · ←/→ seek 10s · p/n previous/next · s shuffle · r repeat · v visuals · x stop · q/Esc close player"
         raw_body=[
             f"{artist} — {title}" if artist else title, album, eq or "",
             f"{time_text}  {bar}",
             f"{state}  ·  {footer}", "",
-            "space play/pause   ←/→ seek 10s   p/n previous/next",
-            "s shuffle   r repeat   v visuals   x stop   q close player",
+            "", "",
             "", "", "",
         ]
         # Use the exact same proven Chafa renderer as Media Find.  Art rows are
@@ -18571,7 +18593,7 @@ def _media_player_render(visualizer=0):
             text_w=inner-art_w-2
             body=[]
             for i,line in enumerate(raw_body):
-                left=_media_player_line(line,text_w)
+                left=_media_player_style(_media_player_line(line,text_w),i)
                 right=_ansi_clip(art[i] if i<len(art) else "",art_w)
                 visible=min(art_w,len(_strip_ansi(right)))
                 right_pad=" "*max(0,art_w-visible)
@@ -18581,12 +18603,14 @@ def _media_player_render(visualizer=0):
                 raw_body[9]=f"ART… requesting {art_owner}" if art_owner else "ART… loading remote preview"
             elif art_state=="unavailable":
                 raw_body[9]="ART unavailable"
-            body=[_media_player_line(line,inner) for line in raw_body]
+            body=[_media_player_style(_media_player_line(line,inner),i) for i,line in enumerate(raw_body)]
+        for line in _media_hints(player_controls,inner).splitlines():
+            body.append(line+" "*max(0,inner-len(_strip_ansi(line))))
     top="┌"+"─"*(width-2)+"┐"
     bottom="└"+"─"*(width-2)+"┘"
     title=" LOOK PLAYER "
     top=top[:2]+title+top[2+len(title):]
-    out=[top]+["│"+line+"│" for line in body]+[bottom]
+    out=[_c(top,"36")]+[_c("│","36")+line+_c("│","36") for line in body]+[_c(bottom,"36")]
     return "\n".join(out)
 
 
@@ -18726,7 +18750,7 @@ def media_mp(initial_query=""):
                 height=max(20,terminal.lines)
                 right_w=min(40,max(28,width//3)) if width>=96 else 0
                 left_w=width-right_w-3 if right_w else width
-                list_rows=max(6,height-10)
+                list_rows=max(6,height-13)
                 top=max(0,min(max(0,len(visible)-list_rows),idx-list_rows+1))
                 page=visible[top:top+list_rows]
                 chosen=visible[idx] if visible else None
@@ -18764,7 +18788,7 @@ def media_mp(initial_query=""):
                 with redirect_stdout(out):
                     tab="LIBRARY" if mode=="library" else "QUEUE"
                     node_count=len((catalog_meta or {}).get("nodes") or [])
-                    _title("LOOK MP",f"{tab} · {len(visible):,} shown · {node_count} node(s) · {len(selected_ids)} marked")
+                    _title("LOOK MP",f"{_c(tab,'1;35')} · {len(visible):,} shown · {node_count} node(s) · {len(selected_ids)} marked")
                     print(_c("FABRIC VISION", "1;36")+"  "+_c("Fabric library + queue + transport", "2"))
                     print("─"*min(width,140))
                     for line_no in range(list_rows):
@@ -18793,15 +18817,15 @@ def media_mp(initial_query=""):
                         else:
                             print(_ansi_clip(left,width))
                     print("─"*min(width,140))
-                    print(_c(_media_mp_now_playing(width),"1"))
+                    print(_c(_media_mp_now_playing(width),"32" if (_media_status_snapshot() or {}).get("state")=="playing" else "33"))
                     if search_mode:
                         filter_text=f"SEARCH /{query}█"
                     else:
                         filter_text=f"FILTER {query or 'all media'} · / search"
                     print(_c(filter_text,"1;36"))
-                    controls="↑↓ select · ⇧ arrows page/top/bottom · Tab mark · Enter play · A add queue · D hide dir · L library · Q queue"
-                    print(_c(controls,"2"))
-                    print(_c("space pause · ←/→ seek · p/n prev/next · v visuals · s shuffle · r repeat · x stop · Esc clear/exit","2"),end="")
+                    controls="↑↓ select · Shift-arrows page/ends · Tab mark · Enter play · A add queue · D hide dir · L library · Q queue"
+                    print(_media_hints(controls,width))
+                    print(_media_hints("/ search · space pause · ←/→ seek 10s · p/n prev/next · v visuals · s shuffle · r repeat · x stop · Esc clear/exit",width),end="")
                     if notice:
                         print("  "+_c(notice,"33"),end="")
                         notice=""
@@ -19449,6 +19473,22 @@ def _file_find_command(args):
 # Canonical human-facing command grammar. Aliases are entry points, not separate implementations.
 # Keep internal worker commands out of this registry.
 _COMMANDS = [
+    ('lh', '[PATH]', 'files', 'LOOK with hidden files shown'),
+    ('lk hidden', '[PATH]', 'files', 'LOOK with hidden files shown'),
+    ('lk doc', '', 'meta', 'Full generated command, option and keyboard reference'),
+    ("lk tldr", "", "meta", "Short offline command examples"),
+    ('lk dash', '', 'fabric', 'Live Fabric dashboard'),
+    ('lk fabric', '[...]', 'fabric', 'Fabric nodes, transfers, jobs, repair and update'),
+    ('lk nodes', '', 'fabric', 'Fabric node inventory'),
+    ('lk voice', '[...]', 'ai', 'Speech settings'),
+    ('lk alert', '[...]', 'ai', 'Spoken notification'),
+    ('lk capability', '[...]', 'ai', 'Inspect capabilities'),
+    ('lk state', '[...]', 'ai', 'Inspect live state'),
+    ('lk model current', '[--json]', 'ai', 'Current shared model'),
+    ('lk inference', '[--json]', 'ai', 'Endpoint reachability and residency'),
+    ('lk play', 'TARGET', 'media', 'Play local or Fabric media'),
+    ('lk forget', 'TEXT', 'ai', 'Forget matching memory'),
+    ('lk clear-memory', '', 'ai', 'Clear memory'),
     # Files / navigation
     ("lk", "", "files", "Open interactive LOOK in the current directory"),
     ("l", "[PATH|WORD]", "files", "Smart jump + interactive LOOK"),
@@ -19549,6 +19589,18 @@ _COMMANDS = [
     ("lk ytd jobs", "[--node NODE]", "media", "List download jobs"),
     ("lk ytd cancel", "<JOB> [--node NODE]", "media", "Cancel a download"),
     ("lk ytd index", "<JOB> [--node NODE]", "media", "Retry catalog registration"),
+    ('lk media find', '[QUERY]', 'media', 'Search and select logical Fabric media'),
+    ('lk media browse', '[QUERY]', 'media', 'Browse the Fabric media catalog'),
+    ('lk media play', '<TARGET> [--shuffle] [--exact] [--kind KIND] [--artist ARTIST] [--selection SELECTION] [--limit N]', 'media', 'Create or resume a LOOK queue'),
+    ('lk media queue', '', 'media', 'Inspect queue'),
+    ('lk media doctor', '', 'media', 'Inspect player, queue, source and decode health'),
+    ('lk media scan', '<ROOT>|--relocate <OLD_ROOT> <NEW_ROOT>', 'media', 'Scan or relocate a media root'),
+    ('lk media library', '', 'media', 'Inspect indexed roots'),
+    ('lk media outputs', '', 'media', 'List reachable playback endpoints'),
+    ('lk media on', '<NODE> play <TARGET>', 'media', 'Play on a specified node'),
+    ('lk media identify', '<QUERY|PATH|--all>', 'media', 'Promote discoveries to SHA identity'),
+    ('lk media shuffle', '[on|off]', 'media', 'Toggle or set shuffle'),
+    ('lk media repeat', '[off|all]', 'media', 'Cycle or set repeat'),
     ("lk media", "[...]", "media", "Media library, queue, playlists, transport", "lk music"),
     ("lk player", "", "media", "Live LOOK miniplayer"),
     ("lk mp", "[QUERY]", "media", "Integrated Fabric media player"),
@@ -19587,7 +19639,14 @@ _COMMANDS = [
 
 def _command_rows():
     rows=[]
-    for item in _COMMANDS:
+    forms=_COMMANDS
+    reference=ROOT/"docs"/"command_forms.json"
+    try:
+        loaded=json.loads(reference.read_text())
+        if isinstance(loaded,list) and all(isinstance(row,list) and len(row) in {4,5} and all(isinstance(value,str) for value in row) for row in loaded):
+            forms=loaded
+    except (OSError,ValueError): pass
+    for item in forms:
         command,args,category,description,*alias=item
         template=(command+(" "+args if args else "")).strip()
         extra=(" · "+alias[0]) if alias else ""
@@ -19652,7 +19711,9 @@ def _command_audit():
     templates=[r[0] for r in rows]
     duplicates=sorted({x for x in templates if templates.count(x)>1})
     print(f"LOOK COMMAND AUDIT · {len(rows)} registered forms")
-    print("  registry      canonical _COMMANDS")
+    print("  registry      _COMMANDS + generated dispatch entry points")
+    print("  reference     lk doc · lk help all · man lk · lk tldr")
+    print("  drift check   python3 tools/command_reference.py --check (repository)")
     print("  categories    "+" · ".join(f"{k} {v}" for k,v in sorted(categories.items())))
     print(f"  duplicates    {len(duplicates)}"+(" · "+", ".join(duplicates) if duplicates else ""))
     print("  palette       lk commands · searchable · Enter/→ composes to shell")
@@ -19695,6 +19756,8 @@ DIRECT IS ALWAYS AVAILABLE
 DISCOVER
   lk commands      terse complete command index
   lk help all      complete command + key glossary
+  lk doc           full offline reference
+  lk tldr          short command examples
 
 The five control surfaces are a map over LOOK, not a replacement for its commands.
 """
@@ -20890,6 +20953,12 @@ def main():
     if cmd in ("help","-h","--help"):
         if rest and rest[0]=="all": return help_screen()
         return starter_help()
+    if cmd=="tldr":
+        path=ROOT/"tldr"/"lk.md"
+        return _page_text(path.read_text()) if path.exists() else starter_help()
+    if cmd=="doc":
+        path=ROOT/"docs"/"REFERENCE.md"
+        return _page_text(path.read_text()) if path.exists() else help_screen()
     if cmd=="commands": return commands_screen()
     if cmd=="ai":
         if rest and rest[0] in {"status","stats","start","stop","wake"}: return _ai_command(rest)

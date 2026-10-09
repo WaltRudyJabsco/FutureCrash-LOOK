@@ -15,7 +15,7 @@ Remote and local media covers now use the same explicit full-RGB Chafa symbol co
 | LOOK component | **4.56.5** |
 | Future Crash component | **1.2.2** |
 
-Use `lk version` for installed LOOK/bundle identity, `lk help` for the live glossary, and `man lk` for the reference manual. Component versions intentionally advance independently.
+Use `lk version` for installed LOOK/bundle identity, `lk help` for the starter map, `lk commands` for the searchable index, `lk doc` / `lk help all` / `man lk` for the full reference, and `lk tldr` for short examples. Component versions intentionally advance independently.
 
 Download videos directly on a chosen Fabric node with `lk ytd URL --node 3090`. The installer includes yt-dlp and ffmpeg. See [Fabric downloads and descriptions](docs/fabric-downloads.md) for progress, search, optional holding, Keep, catalog freshness, and dated forecasts.
 

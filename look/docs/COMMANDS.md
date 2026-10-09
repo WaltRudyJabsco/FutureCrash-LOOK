@@ -1,6 +1,6 @@
 # Future Crash + LOOK command reference
 
-`lk help` is canonical. This compact repository reference is synchronized with the live glossary.
+The generated [full reference](REFERENCE.md) is shared by `lk doc`, `lk help all`, and `man lk`; `lk commands` uses the same command forms. `lk help` is the starter map and `lk tldr` gives short examples. This page supplies additional explanations.
 
 ## LOOK
 `lk [THING]` · `lk [PATH]` · `lk detail` · `lk dirs` · `lk files` · `lk tree` · `lk recent` · `lk size` · `lk run`

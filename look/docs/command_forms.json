@@ -1,0 +1,1286 @@
+[
+  [
+    "lh",
+    "[PATH]",
+    "files",
+    "LOOK with hidden files shown"
+  ],
+  [
+    "lk hidden",
+    "[PATH]",
+    "files",
+    "LOOK with hidden files shown"
+  ],
+  [
+    "lk doc",
+    "",
+    "meta",
+    "Full generated command, option and keyboard reference"
+  ],
+  [
+    "lk tldr",
+    "",
+    "meta",
+    "Short offline command examples"
+  ],
+  [
+    "lk dash",
+    "",
+    "fabric",
+    "Live Fabric dashboard"
+  ],
+  [
+    "lk fabric",
+    "[...]",
+    "fabric",
+    "Fabric nodes, transfers, jobs, repair and update"
+  ],
+  [
+    "lk nodes",
+    "",
+    "fabric",
+    "Fabric node inventory"
+  ],
+  [
+    "lk voice",
+    "[...]",
+    "ai",
+    "Speech settings"
+  ],
+  [
+    "lk alert",
+    "[...]",
+    "ai",
+    "Spoken notification"
+  ],
+  [
+    "lk capability",
+    "[...]",
+    "ai",
+    "Inspect capabilities"
+  ],
+  [
+    "lk state",
+    "[...]",
+    "ai",
+    "Inspect live state"
+  ],
+  [
+    "lk model current",
+    "[--json]",
+    "ai",
+    "Current shared model"
+  ],
+  [
+    "lk inference",
+    "[--json]",
+    "ai",
+    "Endpoint reachability and residency"
+  ],
+  [
+    "lk play",
+    "TARGET",
+    "media",
+    "Play local or Fabric media"
+  ],
+  [
+    "lk forget",
+    "TEXT",
+    "ai",
+    "Forget matching memory"
+  ],
+  [
+    "lk clear-memory",
+    "",
+    "ai",
+    "Clear memory"
+  ],
+  [
+    "lk",
+    "",
+    "files",
+    "Open interactive LOOK in the current directory"
+  ],
+  [
+    "l",
+    "[PATH|WORD]",
+    "files",
+    "Smart jump + interactive LOOK"
+  ],
+  [
+    "ll",
+    "[PATH|WORD]",
+    "files",
+    "LOOK detail view",
+    "lk detail"
+  ],
+  [
+    "ld",
+    "[PATH|WORD]",
+    "files",
+    "LOOK directories",
+    "lk dirs"
+  ],
+  [
+    "lf",
+    "[PATH|WORD]",
+    "files",
+    "LOOK files",
+    "lk files"
+  ],
+  [
+    "lt",
+    "[PATH|WORD]",
+    "files",
+    "LOOK tree",
+    "lk tree"
+  ],
+  [
+    "lr",
+    "[PATH|WORD]",
+    "files",
+    "LOOK recent",
+    "lk recent"
+  ],
+  [
+    "lz",
+    "[PATH|WORD]",
+    "files",
+    "LOOK sizes",
+    "lk size"
+  ],
+  [
+    "zll",
+    "<WORD>",
+    "files",
+    "Zoxide jump + LOOK"
+  ],
+  [
+    "cdl",
+    "<WORD>",
+    "files",
+    "Zoxide jump + detail LOOK"
+  ],
+  [
+    "ff",
+    "[WORD]",
+    "files",
+    "Global LOOK search"
+  ],
+  [
+    "fznv",
+    "[WORD]",
+    "files",
+    "Global LOOK search + Neovim"
+  ],
+  [
+    "lk detail",
+    "[PATH]",
+    "files",
+    "Interactive detail view"
+  ],
+  [
+    "lk dirs",
+    "[PATH]",
+    "files",
+    "Interactive directories view"
+  ],
+  [
+    "lk files",
+    "[PATH]",
+    "files",
+    "Interactive files view"
+  ],
+  [
+    "lk tree",
+    "[PATH]",
+    "files",
+    "Interactive tree view"
+  ],
+  [
+    "lk recent",
+    "[PATH]",
+    "files",
+    "Interactive recent view"
+  ],
+  [
+    "lk size",
+    "[PATH]",
+    "files",
+    "Interactive size view"
+  ],
+  [
+    "lmv",
+    "<SRC...> <DEST>",
+    "files",
+    "Move path(s)"
+  ],
+  [
+    "lcp",
+    "<SRC...> <DEST>",
+    "files",
+    "Copy path(s)"
+  ],
+  [
+    "lscp",
+    "<SRC...> <DEST>",
+    "files",
+    "Copy path(s), preserving source"
+  ],
+  [
+    "lmk",
+    "<PATH>",
+    "files",
+    "Smart make file or directory"
+  ],
+  [
+    "mkd",
+    "<PATH>",
+    "files",
+    "Make directory"
+  ],
+  [
+    "lrm",
+    "<PATH...>",
+    "files",
+    "Remove through LOOK"
+  ],
+  [
+    "lk match",
+    "<TEXT>",
+    "files",
+    "Match/find filesystem content"
+  ],
+  [
+    "lk scan",
+    "[ROOT]",
+    "files",
+    "Refresh lightweight local file catalog"
+  ],
+  [
+    "lk find",
+    "<QUERY>",
+    "files",
+    "Search catalog with plain-language metadata terms"
+  ],
+  [
+    "lk describe",
+    "<PATH> --text <TEXT> [--keywords a,b]",
+    "files",
+    "Add a searchable catalog description"
+  ],
+  [
+    "lk catalog",
+    "",
+    "files",
+    "Inspect local file catalog"
+  ],
+  [
+    "lk open",
+    "<PATH>",
+    "files",
+    "Open in desktop application"
+  ],
+  [
+    "lk preview",
+    "<PATH>",
+    "files",
+    "Preview outside terminal"
+  ],
+  [
+    "lk reveal",
+    "<PATH>",
+    "files",
+    "Reveal in Finder/file manager"
+  ],
+  [
+    "lk undo",
+    "",
+    "files",
+    "Undo newest ready filesystem action"
+  ],
+  [
+    "lk undo list",
+    "",
+    "files",
+    "Inspect undo history"
+  ],
+  [
+    "lk undo skip",
+    "",
+    "files",
+    "Abandon newest blocked undo record"
+  ],
+  [
+    "lk receipts",
+    "[N]",
+    "files",
+    "Inspect transaction receipts"
+  ],
+  [
+    "lk system",
+    "",
+    "system",
+    "System control surface"
+  ],
+  [
+    "lk doctor",
+    "",
+    "system",
+    "Run LOOK diagnostics"
+  ],
+  [
+    "lk doctor island",
+    "",
+    "system",
+    "Audit single-node offline autonomy"
+  ],
+  [
+    "lk machine",
+    "",
+    "system",
+    "Machine summary",
+    "lk box"
+  ],
+  [
+    "lk disk",
+    "",
+    "system",
+    "Disk/storage inspection"
+  ],
+  [
+    "lk gpu",
+    "",
+    "system",
+    "GPU inspection"
+  ],
+  [
+    "lk up",
+    "",
+    "system",
+    "Listening services/ports",
+    "lk ports"
+  ],
+  [
+    "lk port",
+    "<NUMBER>",
+    "system",
+    "Inspect a port"
+  ],
+  [
+    "lk processes",
+    "",
+    "system",
+    "Process list",
+    "lk procs"
+  ],
+  [
+    "lk process",
+    "<NAME>",
+    "system",
+    "Inspect process",
+    "lk proc"
+  ],
+  [
+    "lk pid",
+    "<NUMBER>",
+    "system",
+    "Inspect PID"
+  ],
+  [
+    "lk git",
+    "[PATH]",
+    "system",
+    "Git repository inspection"
+  ],
+  [
+    "lk run",
+    "[PATH]",
+    "system",
+    "Inspect runnable project",
+    "lk project"
+  ],
+  [
+    "lk env",
+    "",
+    "system",
+    "Environment inspection"
+  ],
+  [
+    "lk path",
+    "",
+    "system",
+    "PATH inspection"
+  ],
+  [
+    "lk why",
+    "<COMMAND>",
+    "system",
+    "Explain command resolution"
+  ],
+  [
+    "lk net",
+    "",
+    "network",
+    "Network control surface"
+  ],
+  [
+    "lk network",
+    "",
+    "network",
+    "Network inspection"
+  ],
+  [
+    "lk tailscale",
+    "",
+    "network",
+    "Tailscale inspection"
+  ],
+  [
+    "lk share",
+    "[...]",
+    "network",
+    "Sharing controls"
+  ],
+  [
+    "lk services",
+    "",
+    "network",
+    "Service inspection"
+  ],
+  [
+    "lo",
+    "[PROMPT]",
+    "ai",
+    "Talk to LO"
+  ],
+  [
+    "lo",
+    "search [PROMPT]",
+    "ai",
+    "LO with explicit web search"
+  ],
+  [
+    "lk ai",
+    "",
+    "ai",
+    "AI control surface"
+  ],
+  [
+    "lk models",
+    "[MODEL]",
+    "ai",
+    "Model chooser"
+  ],
+  [
+    "lk benchmark",
+    "[--all]",
+    "ai",
+    "Benchmark model(s)"
+  ],
+  [
+    "lk ollama",
+    "",
+    "ai",
+    "Ollama inspection"
+  ],
+  [
+    "lk ollama models",
+    "[MODEL]",
+    "ai",
+    "Ollama model chooser"
+  ],
+  [
+    "lk ollama test",
+    "[--all]",
+    "ai",
+    "Ollama benchmark"
+  ],
+  [
+    "lk ollama host",
+    "[...]",
+    "ai",
+    "Inference hosts"
+  ],
+  [
+    "lk ollama share",
+    "[...]",
+    "ai",
+    "Tailnet Ollama sharing"
+  ],
+  [
+    "lk ollama access",
+    "[...]",
+    "ai",
+    "LO access profile"
+  ],
+  [
+    "lk ollama key",
+    "[...]",
+    "ai",
+    "Web-search key/status"
+  ],
+  [
+    "lk ai-pool",
+    "[...]",
+    "ai",
+    "Inference pool"
+  ],
+  [
+    "lk access",
+    "[...]",
+    "ai",
+    "Filesystem grants/access"
+  ],
+  [
+    "lk personality",
+    "[...]",
+    "ai",
+    "LO personality"
+  ],
+  [
+    "lk thinking",
+    "[...]",
+    "ai",
+    "LO thinking mode"
+  ],
+  [
+    "lk think-display",
+    "[...]",
+    "ai",
+    "Thinking display"
+  ],
+  [
+    "lk memory",
+    "[...]",
+    "ai",
+    "LO memory"
+  ],
+  [
+    "lk brain",
+    "",
+    "ai",
+    "Persistent working goals"
+  ],
+  [
+    "lk world",
+    "",
+    "ai",
+    "Typed goals, receipts, failures, and wake state"
+  ],
+  [
+    "lk skills",
+    "[...]",
+    "ai",
+    "LO learned skills"
+  ],
+  [
+    "lk profile",
+    "[...]",
+    "ai",
+    "Portable LOOK/LO profile"
+  ],
+  [
+    "lk feedback",
+    "[...]",
+    "ai",
+    "LO feedback/expression"
+  ],
+  [
+    "lk sound",
+    "[...]",
+    "ai",
+    "Sound feedback"
+  ],
+  [
+    "lk vision",
+    "<IMAGE> [QUESTION]",
+    "ai",
+    "Inspect image with vision model"
+  ],
+  [
+    "lk generate",
+    "<PROMPT>",
+    "ai",
+    "Generate image through ComfyUI",
+    "lk image"
+  ],
+  [
+    "lk comfy",
+    "[...]",
+    "ai",
+    "ComfyUI discovery/configuration"
+  ],
+  [
+    "lk schedule",
+    "[...]",
+    "ai",
+    "Delayed/recurring LO jobs",
+    "lk scheduler"
+  ],
+  [
+    "lk translate",
+    "[...]",
+    "ai",
+    "Translation helper"
+  ],
+  [
+    "lk clean",
+    "",
+    "system",
+    "Conservative maintenance surface"
+  ],
+  [
+    "lk web",
+    "[...]",
+    "ai",
+    "Web-search key/status"
+  ],
+  [
+    "lk budget",
+    "[...]",
+    "ai",
+    "LO context/token budget"
+  ],
+  [
+    "lk ytd",
+    "<URL> [--node NODE] [--to DIR] [--holding]",
+    "media",
+    "Download a YouTube video on the selected node"
+  ],
+  [
+    "lk ytd find",
+    "<QUERY> [--node NODE]",
+    "media",
+    "Find videos and choose one to download"
+  ],
+  [
+    "lk ytd status",
+    "<JOB> [--node NODE] [--wait]",
+    "media",
+    "Inspect persistent download progress"
+  ],
+  [
+    "lk ytd keep",
+    "<JOB> [--node NODE] [--to DIR]",
+    "media",
+    "Move a held download into permanent storage"
+  ],
+  [
+    "lk ytd jobs",
+    "[--node NODE]",
+    "media",
+    "List download jobs"
+  ],
+  [
+    "lk ytd cancel",
+    "<JOB> [--node NODE]",
+    "media",
+    "Cancel a download"
+  ],
+  [
+    "lk ytd index",
+    "<JOB> [--node NODE]",
+    "media",
+    "Retry catalog registration"
+  ],
+  [
+    "lk media find",
+    "[QUERY]",
+    "media",
+    "Search and select logical Fabric media"
+  ],
+  [
+    "lk media browse",
+    "[QUERY]",
+    "media",
+    "Browse the Fabric media catalog"
+  ],
+  [
+    "lk media play",
+    "<TARGET> [--shuffle] [--exact] [--kind KIND] [--artist ARTIST] [--selection SELECTION] [--limit N]",
+    "media",
+    "Create or resume a LOOK queue"
+  ],
+  [
+    "lk media queue",
+    "",
+    "media",
+    "Inspect queue"
+  ],
+  [
+    "lk media doctor",
+    "",
+    "media",
+    "Inspect player, queue, source and decode health"
+  ],
+  [
+    "lk media scan",
+    "<ROOT>|--relocate <OLD_ROOT> <NEW_ROOT>",
+    "media",
+    "Scan or relocate a media root"
+  ],
+  [
+    "lk media library",
+    "",
+    "media",
+    "Inspect indexed roots"
+  ],
+  [
+    "lk media outputs",
+    "",
+    "media",
+    "List reachable playback endpoints"
+  ],
+  [
+    "lk media on",
+    "<NODE> play <TARGET>",
+    "media",
+    "Play on a specified node"
+  ],
+  [
+    "lk media identify",
+    "<QUERY|PATH|--all>",
+    "media",
+    "Promote discoveries to SHA identity"
+  ],
+  [
+    "lk media shuffle",
+    "[on|off]",
+    "media",
+    "Toggle or set shuffle"
+  ],
+  [
+    "lk media repeat",
+    "[off|all]",
+    "media",
+    "Cycle or set repeat"
+  ],
+  [
+    "lk media",
+    "[...]",
+    "media",
+    "Media library, queue, playlists, transport",
+    "lk music"
+  ],
+  [
+    "lk player",
+    "",
+    "media",
+    "Live LOOK miniplayer"
+  ],
+  [
+    "lk mp",
+    "[QUERY]",
+    "media",
+    "Integrated Fabric media player"
+  ],
+  [
+    "lk albert",
+    "[url|qr|ipad]",
+    "fabric",
+    "Open/share Albert browser surface"
+  ],
+  [
+    "mm",
+    "",
+    "media",
+    "Toggle media playback",
+    "lk media toggle"
+  ],
+  [
+    "mn",
+    "",
+    "media",
+    "Next media item",
+    "lk media next"
+  ],
+  [
+    "mp",
+    "",
+    "media",
+    "Previous media item",
+    "lk media prev"
+  ],
+  [
+    "lk jobs",
+    "",
+    "ai",
+    "Inspect background LO jobs"
+  ],
+  [
+    "lk events",
+    "[...]",
+    "ai",
+    "Inspect LO event stream"
+  ],
+  [
+    "lk games",
+    "[GAME] [0p|1p|2p]",
+    "meta",
+    "WOPR recreation channel"
+  ],
+  [
+    "lk games ttt",
+    "[0p|1p|2p]",
+    "meta",
+    "Tic-Tac-Toe"
+  ],
+  [
+    "lk games checkers",
+    "[0p|1p|2p]",
+    "meta",
+    "Checkers"
+  ],
+  [
+    "lk games chess",
+    "[0p|1p|2p]",
+    "meta",
+    "Chess"
+  ],
+  [
+    "lk games backgammon",
+    "[0p|1p|2p]",
+    "meta",
+    "Backgammon"
+  ],
+  [
+    "lk games gtnw",
+    "",
+    "meta",
+    "Global Thermonuclear War"
+  ],
+  [
+    "lk ttt",
+    "[0p|1p|2p]",
+    "meta",
+    "Tic-Tac-Toe alias"
+  ],
+  [
+    "lk gtnw",
+    "",
+    "meta",
+    "Global Thermonuclear War alias"
+  ],
+  [
+    "lk settings",
+    "[SEARCH]",
+    "config",
+    "Unified settings"
+  ],
+  [
+    "lk config",
+    "",
+    "config",
+    "Configuration surface"
+  ],
+  [
+    "lk config paths",
+    "",
+    "config",
+    "Show configuration paths",
+    "lk config raw"
+  ],
+  [
+    "lk apps",
+    "[...]",
+    "config",
+    "Desktop app preferences"
+  ],
+  [
+    "lk shortcuts",
+    "[...]",
+    "config",
+    "Shell shortcut policy"
+  ],
+  [
+    "lk secrets",
+    "",
+    "config",
+    "Inspect secret-file status"
+  ],
+  [
+    "lk home",
+    "",
+    "config",
+    "LOOK home"
+  ],
+  [
+    "lk help",
+    "",
+    "meta",
+    "Starter help"
+  ],
+  [
+    "lk help all",
+    "",
+    "meta",
+    "Complete glossary"
+  ],
+  [
+    "lk commands",
+    "",
+    "meta",
+    "Interactive command palette"
+  ],
+  [
+    "lk architecture-audit",
+    "",
+    "dev",
+    "Architecture self-audit"
+  ],
+  [
+    "lk tooling-audit",
+    "",
+    "dev",
+    "Tool harness self-audit"
+  ],
+  [
+    "lk command-audit",
+    "",
+    "dev",
+    "Canonical command grammar audit"
+  ],
+  [
+    "lk locator-test",
+    "",
+    "dev",
+    "Locator self-test"
+  ],
+  [
+    "lk version",
+    "",
+    "meta",
+    "Print LOOK version"
+  ],
+  [
+    "lk uninstall",
+    "",
+    "meta",
+    "Uninstall LOOK"
+  ],
+  [
+    "lk aipool",
+    "[ARGS]",
+    "aliases",
+    "Additional routed entry point; see usage details below"
+  ],
+  [
+    "lk box",
+    "[ARGS]",
+    "aliases",
+    "Additional routed entry point; see usage details below"
+  ],
+  [
+    "lk capabilities",
+    "[ARGS]",
+    "aliases",
+    "Additional routed entry point; see usage details below"
+  ],
+  [
+    "lk image",
+    "[ARGS]",
+    "aliases",
+    "Additional routed entry point; see usage details below"
+  ],
+  [
+    "lk live-state",
+    "[ARGS]",
+    "aliases",
+    "Additional routed entry point; see usage details below"
+  ],
+  [
+    "lk livestate",
+    "[ARGS]",
+    "aliases",
+    "Additional routed entry point; see usage details below"
+  ],
+  [
+    "lk music",
+    "[ARGS]",
+    "aliases",
+    "Additional routed entry point; see usage details below"
+  ],
+  [
+    "lk o",
+    "[ARGS]",
+    "aliases",
+    "Additional routed entry point; see usage details below"
+  ],
+  [
+    "lk ports",
+    "[ARGS]",
+    "aliases",
+    "Additional routed entry point; see usage details below"
+  ],
+  [
+    "lk proc",
+    "[ARGS]",
+    "aliases",
+    "Additional routed entry point; see usage details below"
+  ],
+  [
+    "lk procs",
+    "[ARGS]",
+    "aliases",
+    "Additional routed entry point; see usage details below"
+  ],
+  [
+    "lk project",
+    "[ARGS]",
+    "aliases",
+    "Additional routed entry point; see usage details below"
+  ],
+  [
+    "lk receipt",
+    "[ARGS]",
+    "aliases",
+    "Additional routed entry point; see usage details below"
+  ],
+  [
+    "lk scheduler",
+    "[ARGS]",
+    "aliases",
+    "Additional routed entry point; see usage details below"
+  ],
+  [
+    "lk thinkdisplay",
+    "[ARGS]",
+    "aliases",
+    "Additional routed entry point; see usage details below"
+  ],
+  [
+    "lk translation",
+    "[ARGS]",
+    "aliases",
+    "Additional routed entry point; see usage details below"
+  ],
+  [
+    "lk access add",
+    "<PATH> [read|write]",
+    "ai",
+    "See usage details and live glossary below"
+  ],
+  [
+    "lk fabric alert",
+    "[@<TARGET>] <MESSAGE>",
+    "fabric",
+    "See usage details and live glossary below"
+  ],
+  [
+    "lk fabric answer",
+    "[<NODE>] <ID> <CHOICE>",
+    "fabric",
+    "See usage details and live glossary below"
+  ],
+  [
+    "lk fabric packet",
+    "[<NODE>] <FILE>",
+    "fabric",
+    "See usage details and live glossary below"
+  ],
+  [
+    "lk fabric qualify",
+    "[<NODE>] <MODEL>",
+    "fabric",
+    "See usage details and live glossary below"
+  ],
+  [
+    "lk fabric service",
+    "[<NODE>] <SERVICE> start|stop|restart",
+    "fabric",
+    "See usage details and live glossary below"
+  ],
+  [
+    "lk fabric speak",
+    "[<NODE>] <TEXT>",
+    "fabric",
+    "See usage details and live glossary below"
+  ],
+  [
+    "lk fabric submit",
+    "[<NODE>] <OP> [key=value ...]",
+    "fabric",
+    "See usage details and live glossary below"
+  ],
+  [
+    "lk feedback motion",
+    "off|subtle|normal",
+    "ai",
+    "See usage details and live glossary below"
+  ],
+  [
+    "lk feedback sound",
+    "off|subtle|expressive",
+    "ai",
+    "See usage details and live glossary below"
+  ],
+  [
+    "lk media add",
+    "<PATH>",
+    "media",
+    "See usage details and live glossary below"
+  ],
+  [
+    "lk media adopt",
+    "<SESSION>.json|-",
+    "media",
+    "See usage details and live glossary below"
+  ],
+  [
+    "lk media info",
+    "[@<NODE>] sha256:<DIGEST>",
+    "media",
+    "See usage details and live glossary below"
+  ],
+  [
+    "lk media jump",
+    "<INDEX>",
+    "media",
+    "See usage details and live glossary below"
+  ],
+  [
+    "lk media load",
+    "<NAME> [--shuffle]",
+    "media",
+    "See usage details and live glossary below"
+  ],
+  [
+    "lk media playlist",
+    "[list|save <NAME>|load <NAME> [--shuffle]]",
+    "media",
+    "See usage details and live glossary below"
+  ],
+  [
+    "lk media playlist load",
+    "<NAME> [--shuffle]",
+    "media",
+    "See usage details and live glossary below"
+  ],
+  [
+    "lk media playlist save",
+    "<NAME>",
+    "media",
+    "See usage details and live glossary below"
+  ],
+  [
+    "lk media save",
+    "<NAME>",
+    "media",
+    "See usage details and live glossary below"
+  ],
+  [
+    "lk media stream",
+    "<PATH> | lk media stream @<NODE> sha256:<DIGEST>",
+    "media",
+    "See usage details and live glossary below"
+  ],
+  [
+    "lk memory add",
+    "<text> [--importance <N>]",
+    "ai",
+    "See usage details and live glossary below"
+  ],
+  [
+    "lk memory add-persona",
+    "<NAME> <TEXT> [--importance <N>]",
+    "ai",
+    "See usage details and live glossary below"
+  ],
+  [
+    "lk memory forget",
+    "<text>",
+    "ai",
+    "See usage details and live glossary below"
+  ],
+  [
+    "lk ollama curate auto",
+    "on|off",
+    "ai",
+    "See usage details and live glossary below"
+  ],
+  [
+    "lk ollama set",
+    "[list|save <NAME>|show <NAME>|apply <NAME> [<ROLE>]|champion <NAME>|challenger <NAME>|compare <A> <B>|delete <NAME>]",
+    "ai",
+    "See usage details and live glossary below"
+  ],
+  [
+    "lk ollama set apply",
+    "<NAME> [reflex|balanced|deep]",
+    "ai",
+    "See usage details and live glossary below"
+  ],
+  [
+    "lk ollama set compare",
+    "<A> <B>",
+    "ai",
+    "See usage details and live glossary below"
+  ],
+  [
+    "lk ollama set delete",
+    "<NAME>",
+    "ai",
+    "See usage details and live glossary below"
+  ],
+  [
+    "lk ollama set save",
+    "<NAME>",
+    "ai",
+    "See usage details and live glossary below"
+  ],
+  [
+    "lk ollama set show",
+    "<NAME>",
+    "ai",
+    "See usage details and live glossary below"
+  ],
+  [
+    "lk ollama warm",
+    "<MODEL> [<MODEL> ...]",
+    "ai",
+    "See usage details and live glossary below"
+  ],
+  [
+    "lk profile backup",
+    "[<DEST>] [--keep <N>]",
+    "ai",
+    "See usage details and live glossary below"
+  ],
+  [
+    "lk profile restore",
+    "<ZIP|BACKUP_DIR> [--yes]",
+    "ai",
+    "See usage details and live glossary below"
+  ],
+  [
+    "lk skills add",
+    "<general reusable lesson>",
+    "ai",
+    "See usage details and live glossary below"
+  ],
+  [
+    "lk skills forget",
+    "<text>",
+    "ai",
+    "See usage details and live glossary below"
+  ],
+  [
+    "lk translate host",
+    "<URL>",
+    "ai",
+    "See usage details and live glossary below"
+  ],
+  [
+    "lk vision arm",
+    "[10m]",
+    "ai",
+    "See usage details and live glossary below"
+  ],
+  [
+    "lk vision screen",
+    "[@<NODE>] [--display <N>|--displays 1,3|--all] [--ask <QUESTION>] [--save <FILE>] [--watch [30s]] [--every 5s] [--max-width 1600] [--quality 72]",
+    "ai",
+    "See usage details and live glossary below"
+  ]
+]

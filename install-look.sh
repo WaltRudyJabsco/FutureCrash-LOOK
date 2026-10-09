@@ -316,6 +316,12 @@ if ((!DRY)); then
 fi
 
 install_file "$ROOT/look/lk" "$HOME/.local/share/look/lk"
+run mkdir -p "$HOME/.local/share/look/docs"
+install_file "$ROOT/look/docs/REFERENCE.md" "$HOME/.local/share/look/docs/REFERENCE.md"
+install_file "$ROOT/look/docs/command_forms.json" "$HOME/.local/share/look/docs/command_forms.json"
+run mkdir -p "$HOME/.local/share/look/tldr" "${XDG_CACHE_HOME:-$HOME/.cache}/tldr/pages/common"
+install_file "$ROOT/look/tldr/lk.md" "$HOME/.local/share/look/tldr/lk.md"
+install_file "$ROOT/look/tldr/lk.md" "${XDG_CACHE_HOME:-$HOME/.cache}/tldr/pages/common/lk.md"
 install_file "$ROOT/look/look_renderer.py" "$HOME/.local/share/look/look_renderer.py"
 install_file "$ROOT/look/look_ai.py" "$HOME/.local/share/look/look_ai.py"
 install_file "$ROOT/look/lo_engine.py" "$HOME/.local/share/look/lo_engine.py"

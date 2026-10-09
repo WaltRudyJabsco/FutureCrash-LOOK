@@ -23,6 +23,12 @@ _lk() {
 
   local -a top
   top=(
+    'doc:full offline command and keyboard reference'
+    'tldr:short offline command examples'
+    'mp:integrated Fabric media player'
+    'ytd:download videos on a Fabric node'
+    'describe:searchable catalog description'
+    'hidden:LOOK with hidden files shown'
     'detail:detailed filesystem view'
     'dirs:directories only'
     'files:files only'

@@ -1011,7 +1011,14 @@ def _destination_picker(start_dir:Path)->Path|None:
             heading=str(here) if here is not None else 'FABRIC NODES'
             if isinstance(here,fabric_files.Destination) and here.path=='/' and common: heading+=' · COMMON PLACES'
             sys.stdout.write(f'{CYAN}{BOLD}LOOK DESTINATION{RESET}  {WHITE}{heading}{RESET}\n')
-            sys.stdout.write(f'{FAINT}← parent · → descend · Enter choose · arrows move · Shift-arrows page/ends · type filter · Tab common/all · Esc cancel{RESET}\n\n')
+            hints=['← parent','→ descend','Enter choose highlighted','↑↓ move','Shift-↑↓ page','Shift-←→ first/last','Type filter']
+            if isinstance(here,fabric_files.Destination):
+                hints.append('Tab common/all' if here.path=='/' else 'Tab common places')
+            hints.append('Esc/Q cancel')
+            hint_lines=action_footer(hints,width)
+            usable=max(4,height-5-len(hint_lines))
+            top=max(0,min(max(0,len(visible)-usable),selected-usable+1))
+            sys.stdout.write('\n'.join(hint_lines)+'\n\n')
             for n,path in enumerate(visible[top:top+usable],start=top):
                 focus=f'{CYAN}{BOLD}›{RESET}' if n==selected else ' '
                 label=(f'@{path.node}:/ (Fabric)' if here is None and isinstance(path,fabric_files.Destination)
@@ -1247,7 +1254,7 @@ def resolve_action_destination(dest:str,current_dir:Path|None)->Path:
     return raw.resolve()
 
 
-def pager(rows:list[str],height:int,width:int,rebuild=None,browse_rebuild=None,filter_context=None,candidates=None,on_browse=None,on_back=None,on_parent=None,on_go=None,on_activate=None,on_sort=None,on_hidden=None,header_rows=None,force_interactive=False,initial_select:Path|None=None,initial_query:str='',marked_set:set[Path]|None=None,current_dir:Path|None=None,clipboard_state:dict|None=None)->None:
+def pager(rows:list[str],height:int,width:int,rebuild=None,browse_rebuild=None,filter_context=None,candidates=None,on_browse=None,on_back=None,on_parent=None,on_go=None,on_activate=None,on_sort=None,on_hidden=None,header_rows=None,force_interactive=False,initial_select:Path|None=None,initial_query:str='',marked_set:set[Path]|None=None,current_dir:Path|None=None,clipboard_state:dict|None=None,live_revision=None)->None:
     # Interactive state machine: browse <-> filter. Focus belongs to filter state.
     usable=max(3,height-5)
     if (len(rows)<=height-1 and not force_interactive) or not (sys.stdin.isatty() and sys.stdout.isatty()):
@@ -1258,6 +1265,7 @@ def pager(rows:list[str],height:int,width:int,rebuild=None,browse_rebuild=None,f
     matches:list[Path]=[]
     notice=''
     pending=''
+    revision=None
     marked:set[Path]=marked_set if marked_set is not None else set()
     shelf=clipboard_state if clipboard_state is not None else {}
     native_preview=NativePreviewController()
@@ -1487,6 +1495,12 @@ def pager(rows:list[str],height:int,width:int,rebuild=None,browse_rebuild=None,f
     try:
         sys.stdout.write(HIDE)
         while True:
+            if live_revision:
+                next_revision=live_revision()
+                if next_revision!=revision:
+                    revision=next_revision
+                    if filtering: refresh_filter()
+                    elif rebuild: current=rebuild('',None,width,marked)
             picked=selected_path()
             if filtering and rebuild:
                 # Side previews consume terminal width. Reflow the grid to the
@@ -1602,8 +1616,12 @@ def pager(rows:list[str],height:int,width:int,rebuild=None,browse_rebuild=None,f
             if pending:
                 key,pending=pending,''
             else:
-                key=read_key(wakeup_fd=native_preview.wakeup_fd,on_wakeup=native_preview.paint_ready)
+                if live_revision and not revision[1]:
+                    key=read_key(timeout=.25,wakeup_fd=native_preview.wakeup_fd,on_wakeup=native_preview.paint_ready)
+                else:
+                    key=read_key(wakeup_fd=native_preview.wakeup_fd,on_wakeup=native_preview.paint_ready)
 
+            if not key and live_revision: continue
             if key=='H' and on_hidden:
                 previous=selected_path()
                 notice=on_hidden()
@@ -1820,12 +1838,10 @@ def _global_catalog_stream(root:Path, catalog:list[Path], done:threading.Event)-
             )
             if proc.stdout is not None:
                 for line in proc.stdout:
-                    value=line.strip()
+                    value=line.rstrip("\n")
                     if value:
                         add(Path(value))
-                    if len(catalog)>=20000:
-                        proc.terminate()
-                        break
+
             try: proc.wait(timeout=1)
             except subprocess.TimeoutExpired:
                 proc.kill()
@@ -1835,12 +1851,8 @@ def _global_catalog_stream(root:Path, catalog:list[Path], done:threading.Event)-
                 b=Path(base)
                 for d in dirs:
                     add(b/d)
-                    if len(catalog)>=20000: break
-                if len(catalog)>=20000: break
                 for f in files:
                     add(b/f)
-                    if len(catalog)>=20000: break
-                if len(catalog)>=20000: break
     except (OSError,subprocess.SubprocessError):
         pass
     finally:
@@ -1867,14 +1879,24 @@ def _catalog_matches(paths:list[Path],query:str,hidden:bool=True,root:Path|None=
         return snapshot
     return [p for p in snapshot if query_matches(p.name,query)]
 
-def _catalog_view(paths:list[Path],root:Path,width:int,query:str='',highlight_path:Path|None=None,marked:set[Path]|None=None,scanning:bool=False,hidden:bool=True)->list[str]:
-    matches=_catalog_matches(paths,query,hidden,root)
-    shown=matches[:800]
-    scan_note=' · scanning…' if scanning else ''
-    header=(f'{BOLD}{CYAN}LOOK FIND{RESET}  {WHITE}{root}{RESET}'
-            f'  {FAINT}{len(matches)} matches{scan_note}{RESET}')
-    rows=[header,FAINT+('─'*min(width,max(24,len(strip_ansi(header)))))+RESET]
-    for p in shown:
+class _CatalogView:
+    """List-like search rows; stat only the terminal viewport, not the whole home."""
+    def __init__(self,paths,headers,root,width,highlight_path,marked):
+        self.paths=paths; self.headers=headers; self.root=root; self.width=width
+        self.highlight_path=highlight_path; self.marked=marked
+
+    def __len__(self):
+        return len(self.headers)+max(1,len(self.paths))
+
+    def __getitem__(self,index):
+        if isinstance(index,slice):
+            return [self[n] for n in range(*index.indices(len(self)))]
+        if index<0: index+=len(self)
+        if not 0<=index<len(self): raise IndexError(index)
+        if index<len(self.headers): return self.headers[index]
+        if not self.paths: return FAINT+'· no matches'+RESET
+        p=self.paths[index-len(self.headers)]
+        root=self.root; width=self.width; marked=self.marked; highlight_path=self.highlight_path
         try:
             rel=p.relative_to(root)
         except ValueError:
@@ -1891,10 +1913,16 @@ def _catalog_view(paths:list[Path],root:Path,width:int,query:str='',highlight_pa
             except OSError:
                 style=WHITE
         suffix='/' if p.is_dir() else ''
-        rows.append(style+fit(f'{mark}{rel}{suffix}',width)+RESET)
-    if not shown:
-        rows.append(FAINT+'· no matches'+RESET)
-    return rows
+        return style+fit(f'{mark}{rel}{suffix}',width)+RESET
+
+
+def _catalog_view(paths:list[Path],root:Path,width:int,query:str='',highlight_path:Path|None=None,marked:set[Path]|None=None,scanning:bool=False,hidden:bool=True):
+    matches=_catalog_matches(paths,query,hidden,root)
+    scan_note=' · scanning…' if scanning else ''
+    header=(f'{BOLD}{CYAN}LOOK FIND{RESET}  {WHITE}{root}{RESET}'
+            f'  {FAINT}{len(matches)} matches{scan_note}{RESET}')
+    headers=[header,FAINT+('─'*min(width,max(24,len(strip_ansi(header)))))+RESET]
+    return _CatalogView(matches,headers,root,width,highlight_path,marked)
 
 
 def main():
@@ -1943,6 +1971,7 @@ def main():
             on_activate=choose_global,
             force_interactive=True,
             initial_query=args.query,
+            live_revision=lambda:(len(catalog),scan_done.is_set()),
         )
         if go_result is not None:
             target_dir=go_result if go_result.is_dir() else go_result.parent

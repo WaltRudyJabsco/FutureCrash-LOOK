@@ -49,6 +49,7 @@ echo "version: $("$PYTHON" -c 'import sys; print(sys.version.split()[0])')"
 
 echo "[1/5] structural health"
 "$PYTHON" tools/code_health.py --check >/dev/null
+"$PYTHON" tools/command_reference.py --check
 
 echo "[2/5] Python syntax"
 "$PYTHON" -m compileall -q \

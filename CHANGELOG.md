@@ -1,5 +1,9 @@
 # 8.9.0 — FABRIC MEDIA
 
+- Unified key/label colors across Media Find, MP, Player, and the destination picker; wrapped player controls remain visible beside album art.
+- Added generated offline command/flag/key references shared by the command palette, `lk doc`, `lk help all`, man page and tldr examples, with verification for drift.
+- Fixed `ff` discovery truncation and idle result refresh; large catalogs stat only visible rows.
+
 - Standardized the optional reference terminal on Kitty for Mac/Linux, with a bundled LOOK keyboard profile and explicit `--kitty` activation that backs up existing configuration. mpv remains the playback engine.
 - Fixed remote update reception to use the real peer registry and return structured source-resolution errors.
 - Added Signal player ASCII album art with persistent Image/Off choices and `/art` commands; original covers also reach browser Now Playing metadata through an authenticated cover-only Fabric gateway.
