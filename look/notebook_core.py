@@ -59,10 +59,24 @@ def timestamp(value, now=None):
         return result
     text = str(value).strip().lower()
     current = dt.datetime.fromtimestamp(time.time() if now is None else now)
-    relative = re.fullmatch(r'in (\d+) (minute|hour|day)s?', text)
+    quantities={'one':1,'two':2,'three':3,'four':4,'five':5,'six':6,'seven':7,'eight':8,'nine':9,'ten':10,'eleven':11,'twelve':12,'fifteen':15,'twenty':20,'thirty':30,'forty':40,'fifty':50,'sixty':60,'a':1,'an':1}
+    relative = re.fullmatch(r'(?:in )?(\d+|[a-z]+) (second|minute|hour|day|week)s?', text)
     if relative:
-        return current.timestamp() + int(relative[1])*{'minute':60, 'hour':3600, 'day':86400}[relative[2]]
+        count=int(relative[1]) if relative[1].isdigit() else quantities.get(relative[1])
+        if count is None or count<=0: raise ValueError('Use a positive duration, e.g. ten minutes')
+        return timestamp(current.timestamp()+count*{'second':1,'minute':60,'hour':3600,'day':86400,'week':604800}[relative[2]])
     words = text.split()
+    if len(words)==3 and words[1]=='at': words.pop(1)
+    clock_only=re.fullmatch(r'(\d{1,2})(?::(\d{2}))?(am|pm)',text) or re.fullmatch(r'(\d{1,2}):(\d{2})',text)
+    if clock_only:
+        hour=int(clock_only[1]); minute=int(clock_only[2] or 0)
+        period=clock_only[3] if len(clock_only.groups())==3 else None
+        if period:
+            if not 1<=hour<=12: raise ValueError('Invalid clock hour')
+            hour=hour%12+(12 if period=='pm' else 0)
+        target=current.replace(hour=hour,minute=minute,second=0,microsecond=0)
+        if target<=current: target+=dt.timedelta(days=1)
+        return target.timestamp()
     days = ['monday','tuesday','wednesday','thursday','friday','saturday','sunday']
     if words and (words[0] in {'today','tomorrow'} or words[0] in days):
         offset = (0 if words[0]=='today' else 1) if words[0] not in days else (days.index(words[0])-current.weekday()) % 7
@@ -182,9 +196,16 @@ class Notebook:
             rows=self._import_edits(self._read()); self._project(rows)
             return rows
 
-    def list(self,query='',kind=None,include_done=False):
+    def list(self,query='',kind=None,include_done=False,scope='all',sort='updated'):
         result=[]
-        for note,heads in self.heads(self.snapshot()).items():
+        revisions=self.snapshot()
+        created={}
+        for revision in revisions:
+            if not revision['parents']:
+                note=revision['note']; created[note]=min(created.get(note,revision['created']),revision['created'])
+        for revision in revisions:
+            created.setdefault(revision['note'],revision['created'])
+        for note,heads in self.heads(revisions).items():
             conflict=len(heads)>1
             for row in heads:
                 data=row['data']
@@ -192,10 +213,20 @@ class Notebook:
                 if kind=='reminder':
                     if data['kind']!='reminder' and not data['remind_at']: continue
                 elif kind and data['kind']!=kind: continue
-                if not all(word.casefold() in json.dumps(data,ensure_ascii=False).casefold() for word in query.split()): continue
+                searchable=data['title']+' '+data['project']
+                if scope=='all': searchable+=' '+data['body']
+                tokens=query.casefold().split(); folded=searchable.casefold()
+                if not all((word[1:] not in folded if word.startswith('\\') and len(word)>1 else word in folded) for word in tokens): continue
                 name=note+('.'+row['id'] if conflict else '')+'.md'
-                result.append(dict(data,id=note,revision=row['id'],conflict=conflict,path=str(self.notes/name),updated=row['created']))
-        return sorted(result,key=lambda row:row['updated'],reverse=True)
+                result.append(dict(data,id=note,revision=row['id'],conflict=conflict,path=str(self.notes/name),created=created[note],updated=row['created']))
+        keys={'updated':lambda row:(-row['updated'],row['id']),
+              'created':lambda row:(-row['created'],row['id']),
+              'title':lambda row:(row['title'].casefold(),row['id']),
+              'project':lambda row:(row['project'].casefold(),row['title'].casefold(),row['id']),
+              'due':lambda row:(row['remind_at'] or row['due'] or float('inf'),row['title'].casefold(),row['id']),
+              'type':lambda row:(row['kind'],row['title'].casefold(),row['id'])}
+        if sort not in keys: raise ValueError('Unknown notebook sort')
+        return sorted(result,key=keys[sort])
 
     def create(self,text,kind='note',project='Inbox',due=None,remind_at=None,target='all'):
         text=str(text).strip()

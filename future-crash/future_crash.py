@@ -73,7 +73,7 @@ WHITE = CSI + "38;5;255m"
 GRAY = CSI + "38;5;245m"
 DARK = CSI + "38;5;239m"
 
-VERSION = "1.2.4"
+VERSION = "1.2.5"
 GLYPHS = "0123456789ABCDEF"
 SPARKS = "▁▂▃▄▅▆▇█"
 
@@ -382,6 +382,11 @@ def wrap_menu(items, width):
     if current:
         rows.append(current)
     return rows
+
+
+def command_footer(text):
+    """Accent the key tokens while retaining subdued labels and identical layout."""
+    return DIM+re.sub(r'\[([^\]]+)\]',lambda match:'['+RESET+CYAN+BOLD+match[1]+RESET+DIM+']',text)+RESET
 
 # ---------- Telemetry ----------
 
@@ -3574,7 +3579,7 @@ class FutureCrash:
         for fortune_row in fortune_rows:
             rows.append(fit(GREEN2 + "  " + fortune_row + RESET, w))
         for menu_row in menu_rows:
-            rows.append(DIM + menu_row + RESET)
+            rows.append(command_footer(menu_row))
 
         if self.incident:
             phase = int(time.time() * 15) % 8
@@ -3686,7 +3691,7 @@ class FutureCrash:
         lines.append(CYAN + "┌" + "─" * (usable + 2) + "┐" + RESET)
         lines.append(CYAN + "│ " + RESET + shown + CYAN + " │" + RESET)
         lines.append(CYAN + "└" + "─" * (usable + 2) + "┘" + RESET)
-        lines += ["", DIM + "[enter] send   [ctrl-u] clear   [esc] return" + RESET]
+        lines += ["", command_footer("[enter] send   [ctrl-u] clear   [esc] return")]
         pad_top = max(1, (h - len(lines)) // 3)
         frame = [""] * pad_top + ["   " + x for x in lines]
         while len(frame) < h:
@@ -3748,7 +3753,7 @@ class FutureCrash:
 
         while len(frame) < h - 2:
             frame.append("")
-        frame.append(DIM + "[type] another question   [↑/↓] scroll   [A] ask   [Q] quit   [ESC] return" + RESET)
+        frame.append(command_footer("[type] another question   [↑/↓] scroll   [A] ask   [Q] quit   [ESC] return"))
         while len(frame) < h:
             frame.append("")
         return "\n".join(safe_row(row, w) for row in frame[:h])
@@ -3819,7 +3824,7 @@ class FutureCrash:
         if self.deferred_submit:
             frame.append(AMBER + "INTERACTIVE QUEUED // current Oracle call will finish first" + RESET)
         else:
-            frame.append(DIM + "[enter] send   [ctrl-t] threads   [ctrl-u] clear conversation   [ctrl-k] erase memory   [esc] return" + RESET)
+            frame.append(command_footer("[enter] send   [ctrl-t] threads   [ctrl-u] clear conversation   [ctrl-k] erase memory   [esc] return"))
         while len(frame) < h:
             frame.append("")
         return "\n".join(safe_row(row, w) for row in frame[:h])
@@ -3977,7 +3982,7 @@ class FutureCrash:
             frame.append("")
         dream=self.threads.dream_task()
         dream_state="ON" if dream and dream.get("state")=="active" else "OFF"
-        frame.append(DIM + f"[d] dream {dream_state}   [enter] details   [j/k or ↑/↓] select   [p] pause   [r] resume   [x] cancel   [esc] return" + RESET)
+        frame.append(command_footer(f"[d] dream {dream_state}   [enter] details   [j/k or ↑/↓] select   [p] pause   [r] resume   [x] cancel   [esc] return"))
         while len(frame) < h:
             frame.append("")
         return "\n".join(safe_row(row, w) for row in frame[:h])

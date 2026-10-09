@@ -30,3 +30,11 @@ def test_edit_line_long_input_keeps_cursor_visible_and_fixed_width():
 
 def test_edit_line_clamps_cursor():
     assert MOD.render_edit_line("abc", 99, 8).startswith("> abc_")
+
+
+def test_command_footer_accents_keys_without_changing_labels_or_width():
+    text='[A] ask   [ESC] return'
+    colored=MOD.command_footer(text)
+    assert MOD.strip_ansi(colored)==text
+    assert MOD.CYAN+MOD.BOLD+'A' in colored
+    assert MOD.DIM+'] ask' in colored

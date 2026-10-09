@@ -39,7 +39,7 @@ def test_surfaces_advertise_and_execute_browser_speech():
 
 
 def test_release_649_contract():
-    assert (ROOT/'VERSION').read_text().strip()=='8.10.2'
+    assert (ROOT/'VERSION').read_text().strip()=='8.11.0'
     node=(ROOT/'core/node.py').read_text()
-    assert 'VERSION = "8.10.2"' in node
+    assert 'VERSION = "8.11.0"' in node
     assert 'RELEASE_NAME = "FABRIC VISION"' in node

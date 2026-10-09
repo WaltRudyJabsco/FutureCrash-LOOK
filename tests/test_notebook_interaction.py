@@ -63,6 +63,17 @@ def test_notebook_help_returns_without_losing_filter_or_records(tmp_path,termina
     assert len(store.list())==1
 
 
+def test_full_text_toggle_and_sort_keep_focused_record(tmp_path,terminal,capsys):
+    store=Notebook(tmp_path); store.create('Alpha\nHidden zebra'); store.create('Beta')
+    keys=iter(['z','/','F','esc','q'])
+    notebook.workspace(store,None,lambda *args:next(keys),lambda text,width:text[:width])
+    output=capsys.readouterr().out
+    assert 'FILTER z█' in output and 'SEARCH z█' in output
+    assert 'sort created' in output
+    assert 'made ' in output and 'edited ' in output
+    assert len(store.list())==2
+
+
 @pytest.mark.parametrize('encoded,expected',[
     (b'\x1b[13;2u','shiftenter'),(b'\x1b[27;2;13~','shiftenter'),
     (b'\x1b\r','shiftenter'),(b'\r','\r'),('é'.encode(),'é')])

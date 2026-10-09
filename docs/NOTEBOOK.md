@@ -20,6 +20,12 @@ lk reminders list
 
 Bare `lkn` opens the notebook. Arrow keys move; Shift-arrows page or jump to
 ends; Tab marks; Shift-A selects all filtered records. Type to filter or use `/`.
+Typing filters titles and projects. `/` toggles full-text search across note
+content while keeping your query; the footer says FILTER or SEARCH. Add
+`\word` to exclude a term in the active scope, e.g. `LOOK \old`.
+Shift-F cycles updated, created, title, project, due/reminder, and type sorting.
+Shift-T cycles all records, notes, tasks, and reminders. Each row includes
+creation and latest-edit timestamps; changes to a note retain its creation time.
 Enter opens the focused Markdown document in `$VISUAL`, `$EDITOR`, Neovim, or vi.
 Shift-N opens quick capture: Enter saves; Shift-Enter adds a line break or a
 blank paragraph; Escape cancels. The editor requests modified-key reporting
@@ -56,6 +62,14 @@ output. `--target all` is the default; named nodes or a comma-separated group
 limit notification delivery. `--target local` resolves the current Fabric node
 name through the running daemon. Offline, use an explicit name.
 
+Reusable notes need no flags: `lkn To Do`, `lkn Scratch Pad`, or `lkn Notes`
+creates the record on first use and reopens the exact title on later calls.
+On a terminal it opens your editor; piped output prints the document, and
+`--json` prints its record. Names ignore case and repeated spaces. If more than
+one record has that title, choose one in the notebook or use an ID. `lkn new To Do`
+always creates a new record. Capture flags such as `--task`, `--remind`, or
+`--project` continue to request a new structured capture.
+
 Each reminder occurrence has the same ID on all replicas. Each targeted node
 records its local delivery once and pulses the existing beacon. Albert and
 Signal show a reminder card with Done, Snooze 10 minutes, and Open note. Late
@@ -72,7 +86,10 @@ automatic reminders pause for conflicted records. Read both versions and reconci
 with `lkn resolve NOTE_ID "reconciled text"`; deletion markers prevent stale
 replicas from resurrecting deleted records.
 
-Dates accept `today`, `tomorrow`, `Saturday 9am`, `in 10 minutes`, or ISO date/time.
+Dates accept `today`, `tomorrow`, `Saturday 9am`, `Saturday at 9am`, or ISO date/time.
+Durations accept `ten minutes`, `10 minutes`, or `in 10 minutes`, plus numeric
+seconds, hours, days, and weeks. A bare clock such as `9am` or `15:30` means its
+next local occurrence.
 Local dates are interpreted on the capturing device and stored as absolute times.
 Task due dates organize work; add `--remind` when an alert is required. Recurring
 calendar events are outside this initial notebook feature.

@@ -1,18 +1,21 @@
-# Future Crash + LOOK 8.10.2 — FABRIC MEDIA
+# Future Crash + LOOK 8.11.0 — FABRIC MEDIA
 
-8.10.2 isolates Future Crash's shared LO output from the live terminal, protects
+8.11.0 adds reusable notes by title, creation/edit timestamps, sort and type
+cycling, distinct title filtering and full-text search, and friendlier reminder
+durations. Future Crash footer keys now use cyan accents.
+8.11.0 isolates Future Crash's shared LO output from the live terminal, protects
 Escape from late replies, and adds notebook H/? help plus offline per-command
 help. Start with [Finding help](docs/HELP-GUIDE.md).
-8.10.2 fixes notebook screen clearing, adds multiline quick capture with
+8.11.0 fixes notebook screen clearing, adds multiline quick capture with
 Enter to save and Shift-Enter to insert a newline, and gives LO explicit
 notebook list/read tools plus direct handling of simple notebook questions.
-8.10.2 adds the replicated LOOK notebook: `lkn` / `lk notes`, `lk tasks`, and
+8.11.0 adds the replicated LOOK notebook: `lkn` / `lk notes`, `lk tasks`, and
 `lk reminders`. Capture and edit Markdown offline, file records by project,
 and synchronize revisions across paired nodes. Due reminders appear in Albert
 and Signal with Done, Snooze, and Open note controls. Future Crash's workstation
 keeps Escape responsive during host operations. See [Notebook guide](docs/NOTEBOOK.md).
 
-8.10.2 stabilizes the Phase-2 refactor and hardens Fabric media across nodes: faster catalog discovery, reliable remote playback, browser handoff by media ownership, remote artwork and previews, removable-media wake-up, and cleaner LOOK filter interaction.
+8.11.0 stabilizes the Phase-2 refactor and hardens Fabric media across nodes: faster catalog discovery, reliable remote playback, browser handoff by media ownership, remote artwork and previews, removable-media wake-up, and cleaner LOOK filter interaction.
 
 **One local-first personal computer made from the machines you already own.**
 
@@ -22,9 +25,9 @@ Remote and local media covers now use the same explicit full-RGB Chafa symbol co
 
 | Layer | Version |
 | --- | ---: |
-| Future Crash + LOOK bundle | **8.10.2** |
-| LOOK component | **4.57.2** |
-| Future Crash component | **1.2.4** |
+| Future Crash + LOOK bundle | **8.11.0** |
+| LOOK component | **4.58.0** |
+| Future Crash component | **1.2.5** |
 
 Use `lk version` for installed LOOK/bundle identity, `lk help` for the starter map, `lk commands` for the searchable index, `lk doc` / `lk help all` / `man lk` for the full reference, and `lk tldr` for short examples. Component versions intentionally advance independently.
 
@@ -491,7 +494,7 @@ For repository health, run `./tools/verify.sh`; `docs/CODE_HEALTH.md` documents 
 
 ## Historical release note: 6.1.10
 
-The following section describes **6.1.10 — Media Mount Race Repair** and is preserved for release-history context. The current bundle is **8.10.2 — FABRIC MEDIA**.
+The following section describes **6.1.10 — Media Mount Race Repair** and is preserved for release-history context. The current bundle is **8.11.0 — FABRIC MEDIA**.
 
 Browser endpoint management is now Fabric-wide: `lk fabric endpoints`, `allow`, and `revoke-endpoint` work from any reachable trusted node rather than only the Signal host. Tailcat adds direct certificate-pinned TLS transport between paired nodes on reachable LAN/IP paths and is preferred automatically; Tailscale remains a fallback for reachability and bootstrap rather than the definition of Fabric networking. Existing 6.0 pairings learn Tailcat metadata from authenticated peer identity and do not require another re-pair.
 

@@ -60,6 +60,27 @@ def display(row):
     return f"{row['id'][:8]} · {row['kind']} · {row['project']} · {row['title']}"+(' · '+due if due else '')+(' · CONFLICT' if row['conflict'] else '')
 
 
+SORT_MODES=('updated','created','title','project','due','type')
+TYPE_VIEWS=(None,'note','task','reminder')
+
+
+def metadata(row):
+    def stamp(value): return dt.datetime.fromtimestamp(value).strftime('%Y-%m-%d %H:%M')
+    text='made '+stamp(row['created'])+' · edited '+stamp(row['updated'])
+    if row.get('due'): text+=' · due '+stamp(row['due'])
+    if row.get('remind_at'): text+=' · remind '+stamp(row['remind_at'])
+    return text
+
+
+def named_records(store,text):
+    name=' '.join(text.casefold().split())
+    rows=store.list(include_done=True)
+    matches=[row for row in rows if ' '.join(row['title'].casefold().split())==name]
+    if matches: return matches
+    if re.fullmatch(r'[a-f0-9]{8,32}',name): return [row for row in rows if row['id'].startswith(name)]
+    return []
+
+
 HELP_TEXT='''LOOK NOTEBOOK — notes, tasks and reminders share one record.
 
 Capture: N opens a draft. Enter saves; Shift-Enter/Ctrl-J inserts a newline.
@@ -71,10 +92,16 @@ Remind (R): attach a one-time alert to a note or task. Due dates alone are not a
 Delete (D): delete after confirmation; a deletion marker syncs to other nodes.
 
 Arrows move; Shift-arrows page/jump; Tab marks; Shift-A selects all shown.
-Type or / filters. Escape clears the filter, then exits. H or ? opens help.
+Type filters titles/projects. / toggles full-text search, keeping your query.
+Backslash terms subtract matches: project \\old excludes old in the active scope.
+Shift-F cycles sort: updated, created, title, project, due/reminder, type.
+Shift-T cycles all / notes / tasks / reminders. Rows show made and edited times.
+Escape clears the query, then exits. H or ? opens help.
 
 CLI examples:
   lkn Quick thought
+  lkn To Do              # first capture, later reopen that exact title
+  lkn new To Do          # explicitly create another, even if one exists
   lkn --project LOOK --task Test playback
   lkn --remind "in 10 minutes" Check download
   lkn file NOTE_ID --project LOOK
@@ -87,6 +114,7 @@ Every paired node keeps a local copy. Captures work offline; revisions sync
 when peers reconnect. Concurrent edits are preserved as conflicts.
 Targets: --target all (default), a node name, or comma-separated node names.
 LO can list notes or read a note by its position in the newest-updated-first list.
+Reminder durations accept ten minutes, 10 minutes, or in 10 minutes.
 Full command flags: lkn --help. Global reference: lk doc or man lk.
 '''
 
@@ -146,9 +174,9 @@ def capture_note(fd,read_key):
         termios.tcsetattr(fd,termios.TCSADRAIN,previous)
 
 
-def workspace(store,kind,read_key,hints):
+def workspace(store,kind,read_key,hints,initial_query=''):
     fd=sys.stdin.fileno(); old=termios.tcgetattr(fd)
-    query=''; index=0; marked=set(); notice=''
+    query=initial_query; index=0; marked=set(); notice=''; scope='title'; sort='updated'; focused=None
     def prompt(label):
         termios.tcsetattr(fd,termios.TCSADRAIN,old)
         sys.stdout.write('\033[?25h'); sys.stdout.flush()
@@ -160,16 +188,20 @@ def workspace(store,kind,read_key,hints):
         tty.setcbreak(fd)
         sys.stdout.write('\033[2J\033[H\033[?25l'); sys.stdout.flush()
         while True:
-            rows=store.list(query,kind)
+            rows=store.list(query,kind,scope=scope,sort=sort)
+            if focused:
+                index=next((i for i,row in enumerate(rows) if row['revision']==focused),index)
+                focused=None
             index=max(0,min(index,max(0,len(rows)-1)))
-            width,height=shutil.get_terminal_size((100,30)); usable=max(2,height-7)
+            width,height=shutil.get_terminal_size((100,30)); usable=max(1,(height-7)//2)
             top=max(0,index-usable+1)
-            lines=['\033[1;36mLOOK NOTEBOOK\033[0m · '+(kind or 'all')+f' · {len(rows)} shown · {len(marked)} marked','']
+            lines=['\033[1;36mLOOK NOTEBOOK\033[0m · '+(kind or 'all')+f' · sort {sort} · {len(rows)} shown · {len(marked)} marked','']
             for number,row in enumerate(rows[top:top+usable],top):
                 marker='✓' if row['id'] in marked else ' '
                 lines.append(('\033[1;36m›' if number==index else ' ')+marker+' '+display(row)[:max(10,width-5)]+'\033[0m')
+                lines.append('\033[2m   '+metadata(row)[:max(1,width-4)]+'\033[0m')
             while len(lines)<height-4: lines.append('')
-            lines.extend(['FILTER '+query+'█',hints('↑↓ move · Tab mark · A all · Enter edit · N new · P file · C done · R remind · D delete · H/? help · / filter · Esc clear/exit',width),notice])
+            lines.extend([('FILTER ' if scope=='title' else 'SEARCH ')+query+'█',hints('↑↓ move · Tab mark · Enter edit · N new · P file · C done · R remind · F sort · T type · / full text · H help · Esc clear/exit',width),notice])
             sys.stdout.write('\033[H'+ '\033[K\n'.join(lines)+'\033[K\033[J'); sys.stdout.flush()
             key=read_key(fd,1)
             if not key: continue
@@ -180,6 +212,11 @@ def workspace(store,kind,read_key,hints):
                 break
             if key in {'H','?'}:
                 show_help(fd,read_key); continue
+            if key=='F':
+                focused=rows[index]['revision'] if rows else None
+                sort=SORT_MODES[(SORT_MODES.index(sort)+1)%len(SORT_MODES)]; continue
+            if key=='T':
+                kind=TYPE_VIEWS[(TYPE_VIEWS.index(kind)+1)%len(TYPE_VIEWS)]; index=0; continue
             if key in {'up','K'}: index=max(0,index-1); continue
             if key in {'down','J'}: index=min(len(rows)-1,index+1); continue
             if key in {'pageup','shiftup'}: index=max(0,index-usable); continue
@@ -215,7 +252,7 @@ def workspace(store,kind,read_key,hints):
                         store.change(row['id'],changes,expected=row['revision'])
                     marked.clear(); nudge_sync(); notice='saved'
                 elif key in {'\x7f','\b'}: query=query[:-1]; index=0
-                elif key=='/': query=prompt('filter'); index=0
+                elif key=='/': scope='all' if scope=='title' else 'title'; index=0
                 elif len(key)==1 and key.isprintable(): query+=key; index=0
             except (OSError,ValueError,subprocess.CalledProcessError) as exc:
                 notice=str(exc)
@@ -242,7 +279,21 @@ def main(argv=None,kind=None,read_key=None,hints=None):
     try:
         words=args.words
         action=words[0] if words and words[0] in {'list','show','edit','file','done','delete','snooze','resolve','sync','new'} else 'new'
+        explicit=bool(words and words[0] in {'list','show','edit','file','done','delete','snooze','resolve','sync','new'})
         values=words[1:] if words and words[0]==action else words
+        structured=args.task or args.remind or args.due or args.stdin or args.project!='Inbox' or args.target!='all' or kind is not None
+        if words and not explicit and not structured:
+            matches=named_records(store,' '.join(words))
+            if len(matches)==1 and not matches[0]['conflict']:
+                row=matches[0]
+                if args.json: print(json.dumps(row,ensure_ascii=False,indent=2))
+                elif sys.stdin.isatty() and sys.stdout.isatty(): edit(store,row)
+                else: print(Path(row['path']).read_text())
+                return 0
+            if matches:
+                if sys.stdin.isatty() and sys.stdout.isatty() and read_key and hints:
+                    return workspace(store,None,read_key,hints,initial_query=' '.join(words))
+                raise ValueError('Multiple or conflicting notes match that name; use a note ID to choose')
         if not words and not args.stdin:
             if sys.stdin.isatty() and sys.stdout.isatty() and read_key and hints:
                 return workspace(store,kind,read_key,hints)
@@ -250,8 +301,8 @@ def main(argv=None,kind=None,read_key=None,hints=None):
         elif action=='sync': result=daemon('sync',{})
         elif action=='list': result=store.list(' '.join(values),kind,include_done=args.all)
         elif action in {'show','edit'}:
-            if len(values)!=1: raise ValueError(action+' requires one note ID')
-            matches=[row for row in store.list(include_done=True) if row['id'].startswith(values[0])]
+            if not values: raise ValueError(action+' requires a note name or ID')
+            matches=named_records(store,' '.join(values))
             if len(matches)!=1: raise ValueError('Note ID is missing, ambiguous, or conflicted')
             row=matches[0]
             if action=='edit': edit(store,row); result={'ok':True}
@@ -324,7 +375,7 @@ def direct_read(intent):
         store=Notebook()
         rows=store.list() if intent['tool']=='notebook_list' else [read_records(store,intent['args'])]
         if not rows: return 'Your notebook has no open notes, tasks, or reminders.'
-        answer=['LOOK notebook · current list, newest updated first']
+        answer=['LOOK notebook · default list, newest updated first']
         start=int(intent['args'].get('position') or 1)
         if start<0: start=len(store.list())
         for position,row in enumerate(rows,start):
@@ -336,8 +387,8 @@ def direct_read(intent):
 
 def tools():
     definitions=[('notebook_search','Search saved notebook records. Omit query or use an empty string to list all records, including completed records. Results include full note bodies.',{'query':{'type':'string'}},[]),
-        ('notebook_list','List saved notes, tasks and reminders in current LKN order: most recently updated first. No keyword is required. Results include full bodies.',{'include_done':{'type':'boolean'}},[]),
-        ('notebook_read','Read the full text of a saved notebook record by its ID or position in the current LKN list. First note means position 1; positions follow newest updated first.',{'id':{'type':'string'},'position':{'type':'integer','minimum':1},'include_done':{'type':'boolean'}},[]),
+        ('notebook_list','List saved notes, tasks and reminders in default LKN order: most recently updated first. No keyword is required. Results include full bodies.',{'include_done':{'type':'boolean'}},[]),
+        ('notebook_read','Read the full text of a saved notebook record by its ID or position in the default LKN list. First note means position 1; positions follow newest updated first.',{'id':{'type':'string'},'position':{'type':'integer','minimum':1},'include_done':{'type':'boolean'}},[]),
         ('notebook_capture','Save a note, task or reminder only when the user asks to record it.',
          {'text':{'type':'string'},'kind':{'type':'string','enum':['note','task','reminder']},'project':{'type':'string'},
           'due':{'type':'string'},'remind_at':{'type':'string'},'target':{'type':'string'}},['text']),
