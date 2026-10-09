@@ -22,7 +22,7 @@ def test_remote_preview_inherits_working_playback_route():
 
 def test_media_find_swaps_complete_frames_without_blank_clear_cycle():
     block=LK[LK.index('def _media_selector('):LK.index('def _media_selector_finish')]
-    assert 'frame_io=io.StringIO()' in block
+    assert 'frame_io=_TerminalFrameBuffer()' in block
     assert 'with redirect_stdout(frame_io):' in block
     assert 'sys.stdout.write(_terminal_frame_payload(frame))' in block
     # One initial clear is fine; navigation frames must not clear to blank first.

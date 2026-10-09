@@ -12,6 +12,27 @@ The Fabric catalog answers *what media exists and on which node*. A queue answer
 
 Controls: Tab toggles the focused row; Shift-A selects/unselects every currently visible row; Enter or Shift-P plays selected rows (or the focused row); Shift-Q appends selected/focused rows to the queue; Shift-S saves selected/focused rows as a playlist; Shift-C clears selection; Shift-I shows identity/details; Esc clears the filter and then exits.
 
+## Hidden media
+
+In Media Find, Shift-X hides selected items, Shift-D chooses a directory to hide,
+Shift-H shows hidden items, and Shift-U removes a visibility rule. New hide/unhide
+changes are stored on each file's owning node and published with its catalog, so
+other devices honor the same choice after refreshing their catalog (normally
+within the 45-second cache window). A directory rule affects that owner's path;
+it does not hide an unrelated matching path on another node. Hiding a logical
+item applies to every known physical source. Bulk hides use one request per
+owner. If an owner is unavailable, the status reports that the change did not sync.
+
+Older endpoint-local exclusions remain local. Reapply Shift-X or Shift-D to make
+those choices Fabric-wide. Shift-U clears both the local rule and the owning
+node's corresponding rule. Each source node and browsing endpoint must run this
+update. A view already open on another endpoint needs reopening to refresh.
+
+For playback failures, select/play the affected item, then run `lk media doctor`
+on the playback machine. It reports the actual source, decoder probe and recent
+mpv log. A successful probe is evidence of decoding, not proof that rendering
+or sound output works correctly.
+
 ## Albert
 
 A Fabric media result may contain a complete queue. Albert retains that queue, displays the current position, advances automatically at track end, and provides previous/next/clear controls. A later audio play result replaces the earlier Albert audio queue.

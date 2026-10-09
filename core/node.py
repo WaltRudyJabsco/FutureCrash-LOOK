@@ -2622,17 +2622,76 @@ def _media_catalog_id(path):
     return hashlib.sha1(str(target).encode("utf-8","surrogatepass")).hexdigest()[:16]
 
 
+def _media_owner_visibility():
+    path = LOOK_MEDIA_LIBRARY.parent / "media_owner_visibility.json"
+    try:
+        data = json.loads(path.read_text(encoding="utf-8"))
+        if not isinstance(data, dict): return {"paths": [], "trees": []}
+        return {key: [value for value in data.get(key, []) if isinstance(value,str)] for key in ("paths", "trees")}
+    except (OSError, ValueError, TypeError):
+        return {"paths": [], "trees": []}
+
+
+def _media_owner_hidden(path, rules):
+    if path in rules["paths"]:
+        return path
+    matches = [root for root in rules["trees"] if path == root or path.startswith(root.rstrip("/") + "/")]
+    return max(matches, key=len) if matches else ""
+
+
+def _local_media_visibility(payload):
+    """Curation belongs to the owner; publish rules with every catalog row."""
+    paths = payload.get("paths", [payload.get("path")])
+    if not isinstance(paths, list) or not paths or len(paths)>50000:
+        raise ValueError("catalog paths required (maximum 50000)")
+    if any(not isinstance(path,str) or not path.startswith("/") or ".." in path.split("/") for path in paths):
+        raise ValueError("absolute catalog path required")
+    paths = {path.rstrip("/") or "/" for path in paths}
+    tree = bool(payload.get("tree"))
+    hidden = payload.get("hidden")
+    if not isinstance(hidden, bool):
+        raise ValueError("hidden must be a boolean")
+    with MEDIA_LIBRARY_LOCK:
+        catalog_paths = {str(row.get("path") or "") for row in _read_media_library().get("entries") or []}
+        for path in paths:
+            if path not in catalog_paths and not (tree and any(candidate.startswith(path.rstrip("/")+"/") for candidate in catalog_paths)):
+                raise ValueError("path is not in this node's media catalog")
+        rules = _media_owner_visibility()
+        key = "trees" if tree else "paths"
+        values = set(rules[key])
+        if hidden:
+            values.update(paths)
+        else:
+            values.difference_update(paths)
+            if not tree:
+                for path in paths:
+                    cause = _media_owner_hidden(path, rules)
+                    if cause in rules["trees"]: rules["trees"].remove(cause)
+        rules[key] = sorted(values)
+        target = LOOK_MEDIA_LIBRARY.parent / "media_owner_visibility.json"
+        target.parent.mkdir(parents=True, exist_ok=True)
+        temp = target.with_name(target.name + ".tmp")
+        temp.write_text(json.dumps(rules), encoding="utf-8")
+        temp.replace(target)
+    with MEDIA_CATALOG_LOCK:
+        MEDIA_CATALOG_CACHE["data"] = None
+    return {"ok": True, "rules": rules, "node": identity()["name"]}
+
+
 def _local_media_catalog():
     """Publish discovered media as catalog rows; bytes remain owned by their source node."""
     library = _read_media_library()
     node = identity()["name"]
     rows = []
+    visibility = _media_owner_visibility()
+    visibility["paths"] = set(visibility["paths"])
     for raw in library.get("entries") or []:
         if not isinstance(raw, dict) or not raw.get("path"):
             continue
         row = dict(raw)
         row["id"] = str(row.get("id") or _media_catalog_id(row["path"]))
         row["node"] = node
+        row["fabric_hidden_by"] = _media_owner_hidden(str(row["path"]), visibility)
         row["identified"] = bool(str(row.get("digest") or "").startswith("sha256:"))
         rows.append(row)
     return {
@@ -3035,6 +3094,8 @@ def _local_media_output():
 
 def _local_media_route(operation, payload):
     """Execute one bounded media operation on this node only."""
+    if str(operation or "").casefold() == "visibility":
+        return _local_media_visibility(payload)
     lk = _look_command()
     if not lk:
         raise RuntimeError("LOOK command unavailable")

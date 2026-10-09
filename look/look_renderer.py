@@ -1501,6 +1501,25 @@ def pager(rows:list[str],height:int,width:int,rebuild=None,browse_rebuild=None,f
                     revision=next_revision
                     if filtering: refresh_filter()
                     elif rebuild: current=rebuild('',None,width,marked)
+            terminal=shutil.get_terminal_size((width,height))
+            width,height=terminal.columns,terminal.lines
+            if filtering:
+                if preview_view:
+                    action_parts=['J/K move','Space/Tab mark','V list','Enter/→ open','B clipboard','T Cut','P Paste',
+                                  'C Copy To','M Move To','R rename','D delete','L LO context','X clear set','E edit',
+                                  'O open with','Y path','G go','Esc list']
+                else:
+                    action_parts=['J/K move','H hidden','Tab mark','A all','V Preview','Enter/→ open','B clipboard',
+                                  'T Cut','P Paste','C Copy To','M Move To','R rename','D delete',
+                                  'L LO context','X clear set','E edit','O open with','Y path','G go','← parent','Esc clear']
+            else:
+                back_hint='Esc back' if on_back else 'Esc exit'
+                action_parts=['H hidden','F sort','Enter/→ filter','Space/PgDn next','b/PgUp back',
+                              'g ends','G go','⇧↑/↓ page','⇧←/→ ends','←/< parent',back_hint,'Q quit']
+            footer=action_footer(action_parts,width)
+            # A wrapped command bar owns real rows; leave one spare row to avoid
+            # terminal autowrap scrolling the filter prompt out of its frame.
+            usable=max(1,height-len(footer)-2)
             picked=selected_path()
             if filtering and rebuild:
                 # Side previews consume terminal width. Reflow the grid to the
@@ -1584,7 +1603,6 @@ def pager(rows:list[str],height:int,width:int,rebuild=None,browse_rebuild=None,f
             else:
                 native_preview.invalidate()
             last=min(len(current),top+usable)
-            action_parts=[]
             if filtering:
                 match_word='match' if len(matches)==1 else 'matches'
                 sel=selection_status()
@@ -1593,25 +1611,16 @@ def pager(rows:list[str],height:int,width:int,rebuild=None,browse_rebuild=None,f
                     status=(f'  {CYAN}{BOLD}PREVIEW{RESET} {WHITE}{name}{RESET}'
                             f'  {GRAY}{selected+1 if matches else 0}/{len(matches)} · filter {query}{RESET}'
                             + (f'  · {sel}' if sel else ''))
-                    action_parts=['J/K move','Space/Tab mark','V list','Enter/→ open','B clipboard','T Cut','P Paste',
-                                  'C Copy To','M Move To','R rename','D delete','L LO context','X clear set','E edit',
-                                  'O open with','Y path','G go','Esc list']
                 else:
                     status=(f'  {CYAN}{BOLD}FILTER{RESET} {WHITE}{query}█{RESET}'
                             f'  {GRAY}{len(matches)} {match_word}{RESET}'
                             + (f'  · {sel}' if sel else ''))
-                    action_parts=['J/K move','H hidden','Tab mark','A all','V Preview','Enter/→ open','B clipboard',
-                                  'T Cut','P Paste','C Copy To','M Move To','R rename','D delete',
-                                  'L LO context','X clear set','E edit','O open with','Y path','G go','← parent','Esc clear']
             else:
                 back_hint='Esc back' if on_back else 'Esc exit'
                 status=f'  {FAINT}{last}/{len(current)}{RESET}'
-                action_parts=['H hidden','F sort','Enter/→ filter','Space/PgDn next','b/PgUp back',
-                              'g ends','G go','⇧↑/↓ page','⇧←/→ ends','←/< parent',back_hint,'Q quit']
             if notice:
                 status=f'{status}  {YELLOW}{notice}{RESET}'
                 notice=''
-            footer=action_footer(action_parts,width)
             sys.stdout.write('\n'+fit(status,width)+'\n'+'\n'.join(footer)); sys.stdout.flush()
             if pending:
                 key,pending=pending,''
@@ -1916,13 +1925,13 @@ class _CatalogView:
         return style+fit(f'{mark}{rel}{suffix}',width)+RESET
 
 
-def _catalog_view(paths:list[Path],root:Path,width:int,query:str='',highlight_path:Path|None=None,marked:set[Path]|None=None,scanning:bool=False,hidden:bool=True):
-    matches=_catalog_matches(paths,query,hidden,root)
+def _catalog_view(paths:list[Path],root:Path,width:int,query:str='',highlight_path:Path|None=None,marked:set[Path]|None=None,scanning:bool=False,hidden:bool=True,include_headers:bool=True,matched_paths=None):
+    matches=matched_paths if matched_paths is not None else _catalog_matches(paths,query,hidden,root)
     scan_note=' · scanning…' if scanning else ''
     header=(f'{BOLD}{CYAN}LOOK FIND{RESET}  {WHITE}{root}{RESET}'
             f'  {FAINT}{len(matches)} matches{scan_note}{RESET}')
     headers=[header,FAINT+('─'*min(width,max(24,len(strip_ansi(header)))))+RESET]
-    return _CatalogView(matches,headers,root,width,highlight_path,marked)
+    return _CatalogView(matches,headers if include_headers else [],root,width,highlight_path,marked)
 
 
 def main():
@@ -1951,6 +1960,19 @@ def main():
     if args.global_find:
         root=target.expanduser().resolve()
         catalog,scan_done=_start_global_catalog(root)
+        match_cache={}
+        match_revision=None
+        def global_matches(query):
+            nonlocal match_revision
+            current_revision=(len(catalog),hidden)
+            if current_revision!=match_revision:
+                match_cache.clear(); match_revision=current_revision
+            if query not in match_cache:
+                if len(match_cache)>=8: match_cache.clear()
+                match_cache[query]=([path for path in global_matches('') if query_matches(path.name,query)]
+                                    if query else _catalog_matches(catalog,'',hidden,root))
+            return match_cache[query]
+
         selected_result:Path|None=None
         go_result:Path|None=None
         def choose_global(path:Path)->None:
@@ -1960,11 +1982,12 @@ def main():
             nonlocal go_result
             go_result=path.resolve()
         pager(
-            _catalog_view(catalog,root,shutil.get_terminal_size((100,30)).columns,scanning=not scan_done.is_set(),hidden=hidden),
+            _catalog_view(catalog,root,shutil.get_terminal_size((100,30)).columns,scanning=not scan_done.is_set(),hidden=hidden,include_headers=False),
             shutil.get_terminal_size((100,30)).lines,
             shutil.get_terminal_size((100,30)).columns,
-            rebuild=lambda q,h=None,w=None,m=None: _catalog_view(catalog,root,w or 100,q,h,m,scanning=not scan_done.is_set(),hidden=hidden),
-            candidates=lambda q: _catalog_matches(catalog,q,hidden,root),
+            rebuild=lambda q,h=None,w=None,m=None: _catalog_view(catalog,root,w or 100,q,h,m,scanning=not scan_done.is_set(),hidden=hidden,include_headers=False,matched_paths=global_matches(q)),
+            header_rows=lambda w:_catalog_view(catalog,root,w,scanning=not scan_done.is_set(),hidden=hidden,matched_paths=global_matches('')).headers,
+            candidates=global_matches,
             on_hidden=toggle_hidden,
             on_browse=choose_global,
             on_go=go_global,

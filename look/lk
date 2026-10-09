@@ -17192,6 +17192,16 @@ def _strip_ansi(text):
     return re.sub(r"\x1b\[[0-9;?]*[ -/]*[@-~]", "", str(text))
 
 
+class _TerminalFrameBuffer(io.StringIO):
+    """Buffer a repaint without losing the destination terminal's color capability."""
+    def __init__(self):
+        super().__init__()
+        self._terminal = sys.stdout.isatty()
+
+    def isatty(self):
+        return self._terminal
+
+
 def _terminal_frame_payload(frame):
     """Replace a terminal frame without exposing blank/stale cells between frames.
 
@@ -17529,7 +17539,7 @@ def _media_detail_lines(row, width=110):
             lines.append((f"  {src.get('node') or 'local'} · {src.get('path') or '—'}")[:max(20,width-2)])
     if row.get("hidden"):
         rules=_media_visibility(); path=str(row.get("path") or "")
-        cause=next((root for root in sorted(rules.get("hidden_trees") or [],key=len,reverse=True) if path==str(root).rstrip(os.sep) or path.startswith(str(root).rstrip(os.sep)+os.sep)),"")
+        cause=_media_owner_rule(row) or next((root for root in sorted(rules.get("hidden_trees") or [],key=len,reverse=True) if path==str(root).rstrip(os.sep) or path.startswith(str(root).rstrip(os.sep)+os.sep)),"")
         lines.append("Visibility HIDDEN")
         lines.append(("Hidden by  "+(f"directory · {cause}" if cause else "item rule"))[:max(20,width-2)])
     return lines
@@ -17614,9 +17624,8 @@ def _media_visibility_path():
 
 def _media_visibility():
     data=_media_read_json(_media_visibility_path(), {"hidden_paths":[],"hidden_trees":[],"fabric_hidden_paths":[],"fabric_hidden_trees":[]})
-    # Existing endpoint-local curation stays local. Fabric-wide rules are a separate
-    # namespace so a future explicit "hide everywhere" action can synchronize them
-    # without silently globalizing years of local choices.
+    # Preserve legacy local choices. New shared curation is owned by the source
+    # node and arrives in catalog rows, scoped to that node rather than path alone.
     data.setdefault("hidden_paths",[])
     data.setdefault("hidden_trees",[])
     data.setdefault("fabric_hidden_paths",[])
@@ -17628,8 +17637,21 @@ def _media_save_visibility(data):
     _atomic_json(_media_visibility_path(), data)
 
 
+_MEDIA_OWNER_RULES={}
+
+
+def _media_owner_rule(row):
+    owner=_MEDIA_OWNER_RULES.get(str(row.get("node") or ""))
+    if owner is None: return str(row.get("fabric_hidden_by") or "")
+    path=str(row.get("path") or "")
+    if path in owner["paths"]: return path
+    matches=[root for root in owner["trees"] if path==root or path.startswith(root.rstrip("/")+"/")]
+    return max(matches,key=len) if matches else ""
+
+
 def _media_is_hidden(row, rules=None):
     rules=rules or _media_visibility()
+    if _media_owner_rule(row): return True
     path=str(row.get("path") or "")
     if path in set(rules.get("hidden_paths") or []) or path in set(rules.get("fabric_hidden_paths") or []):
         return True
@@ -17682,7 +17704,7 @@ def _media_tree_candidates(row, rows):
     out=[]; seen=set(); current=parent
     while str(current) not in seen:
         seen.add(str(current)); prefix=str(current).rstrip(os.sep)+os.sep
-        count=sum(1 for candidate in rows if (cp:=str(candidate.get("path") or ""))==str(current) or cp.startswith(prefix))
+        count=sum(1 for candidate in rows if candidate.get("node")==row.get("node") and ((cp:=str(candidate.get("path") or ""))==str(current) or cp.startswith(prefix)))
         out.append({"path":str(current),"count":count,"media_root":bool(root and current==root)})
         if root and current==root: break
         nxt=current.parent
@@ -17720,28 +17742,72 @@ def _media_choose_hide_directory(row, rows, fd):
                 if str(_read_tty_key(fd)).casefold()!="y": continue
             return chosen
 
-def _media_hide_tree_path(path):
-    rules=_media_visibility(); values=set(rules.get("hidden_trees") or [])
-    value=str(path or "").rstrip(os.sep)
-    if value: values.add(value)
-    rules["hidden_trees"]=sorted(values,key=str.casefold); _media_save_visibility(rules)
-    return bool(value)
+_MEDIA_VISIBILITY_ERRORS=[]
+
+
+def _media_set_owner_visibility(row, path, hidden, tree=False, paths=None):
+    payload={"node":str(row.get("node") or ""), "operation":"visibility",
+             "path":path, "hidden":hidden, "tree":tree}
+    if paths is not None: payload["paths"]=paths
+    request=urllib.request.Request("http://127.0.0.1:7332/v1/media/route",
+        data=json.dumps(payload).encode(),headers={"Content-Type":"application/json"})
+    try:
+        with urllib.request.urlopen(request,timeout=8.0) as response:
+            result=json.loads(response.read().decode())
+        if not result.get("ok"): raise RuntimeError(result.get("error") or "owner rejected visibility change")
+        rules=result["rules"]
+        _MEDIA_OWNER_RULES[payload["node"]]={"paths":set(rules["paths"]),"trees":rules["trees"]}
+        # Update current physical rows too; the next catalog fetch gets owner truth.
+        for source in [row,*(row.get("sources") or []),*(row.get("locations") or [])]:
+            if str(source.get("node") or "")!=str(row.get("node") or ""): continue
+            source_path=str(source.get("path") or "")
+            causes=[root for root in rules["trees"] if source_path==root or source_path.startswith(root.rstrip("/")+"/")]
+            source["fabric_hidden_by"]=(source_path if source_path in rules["paths"] else max(causes,key=len) if causes else "")
+        try: (HOME/".cache/look/fabric-media-catalog.json").unlink(missing_ok=True)
+        except OSError: pass
+        return True
+    except Exception as exc:
+        _MEDIA_VISIBILITY_ERRORS.append(f"{payload['node'] or 'local'}: {exc}")
+        return False
+
+
+def _media_visibility_status():
+    errors=list(_MEDIA_VISIBILITY_ERRORS); _MEDIA_VISIBILITY_ERRORS.clear()
+    return " · not synced: "+"; ".join(errors) if errors else " · Fabric-wide"
+
+
+def _media_hide_tree_path(path, row=None, rows=None):
+    row=row or {"node":"", "path":path}
+    ok=_media_set_owner_visibility(row,str(path),True,tree=True)
+    if ok:
+        for candidate in rows or []:
+            if candidate.get("node")==row.get("node") and (candidate.get("path")==path or str(candidate.get("path") or "").startswith(str(path).rstrip("/")+"/")):
+                candidate["fabric_hidden_by"]=str(path)
+    return ok
+
 
 def _media_hide(rows, tree=False):
     """Hide exact items or, for tree mode, only each item's immediate parent directory."""
-    rules=_media_visibility(); key="hidden_trees" if tree else "hidden_paths"; values=set(rules.get(key) or [])
-    for row in rows:
-        path=str(row.get("path") or "")
-        value=str(Path(path).parent) if tree and path else path
-        if value: values.add(value)
-    rules[key]=sorted(values,key=str.casefold); _media_save_visibility(rules)
-    return len(rows)
+    count=0; groups={}
+    for logical in rows:
+        for row in logical.get("sources") or [logical]:
+            path=str(row.get("path") or "")
+            value=str(Path(path).parent) if tree and path else path
+            if value: groups.setdefault(str(row.get("node") or ""),[]).append((row,value))
+    for node,items in groups.items():
+        paths=sorted({value for row,value in items})
+        if _media_set_owner_visibility(items[0][0],paths[0],True,tree,paths=paths): count+=len(items)
+    return count
 
 
 def _media_unhide(rows):
     """Remove the exact item rule or nearest directory rule hiding each row."""
     rules=_media_visibility(); paths=set(rules.get("hidden_paths") or []); trees=set(rules.get("hidden_trees") or [])
     removed=0
+    for logical in rows:
+        for source in logical.get("sources") or [logical]:
+            if _media_owner_rule(source) and _media_set_owner_visibility(source,str(source.get("path") or ""),False): removed+=1
+        if logical.get("sources"): logical["fabric_hidden_by"]=logical["sources"][0].get("fabric_hidden_by", "")
     for row in rows:
         path=str(row.get("path") or "")
         if path in paths:
@@ -17810,7 +17876,7 @@ def _media_selector(rows,title="FABRIC MEDIA",initial_query="",catalog_meta=None
 
             # Build the complete next frame away from the terminal, then swap it in
             # with one write.  Never clear to blank between arrow-key frames.
-            frame_io=io.StringIO()
+            frame_io=_TerminalFrameBuffer()
             with redirect_stdout(frame_io):
                 mode=("ALL SOURCES" if show_all else "LOGICAL")+(" + HIDDEN" if show_hidden else "")
                 suffix=f"{len(visible):,} shown · {len(rows):,} locations · {len(selected_rows)} selected · {_c(mode,'1;35')}"
@@ -17937,15 +18003,15 @@ def _media_selector(rows,title="FABRIC MEDIA",initial_query="",catalog_meta=None
             if key=="H":
                 show_hidden=not show_hidden; idx=0; notice="hidden shown" if show_hidden else "hidden suppressed"; continue
             if key=="X" and chosen:
-                notice=f"hidden {_media_hide(chosen)} item(s)"; selected_ids.clear(); view_key=None; continue
+                notice=f"hidden {_media_hide(chosen)} item(s)"+_media_visibility_status(); selected_ids.clear(); view_key=None; continue
             if key=="D" and visible:
                 picked=_media_choose_hide_directory(visible[idx],rows,fd)
-                if picked and _media_hide_tree_path(picked["path"]):
-                    notice=f"hidden directory · {picked['count']:,} item(s)"; selected_ids.clear(); idx=0; view_key=None
-                else: notice="hide directory cancelled"
+                if picked and _media_hide_tree_path(picked["path"],visible[idx],rows):
+                    notice=f"hidden directory · {picked['count']:,} item(s)"+_media_visibility_status(); selected_ids.clear(); idx=0; view_key=None
+                else: notice="hide directory cancelled"+_media_visibility_status()
                 continue
             if key=="U" and chosen:
-                notice=f"removed {_media_unhide(chosen)} visibility rule(s)"; selected_ids.clear(); view_key=None; continue
+                notice=f"removed {_media_unhide(chosen)} visibility rule(s)"+_media_visibility_status(); selected_ids.clear(); view_key=None; continue
 
             # LOOK filter style: ordinary printable characters immediately refine
             # the view. Uppercase letters above are reserved for contextual actions.
@@ -18784,7 +18850,7 @@ def media_mp(initial_query=""):
                 else:
                     details=[]
 
-                out=io.StringIO()
+                out=_TerminalFrameBuffer()
                 with redirect_stdout(out):
                     tab="LIBRARY" if mode=="library" else "QUEUE"
                     node_count=len((catalog_meta or {}).get("nodes") or [])
@@ -18887,13 +18953,13 @@ def media_mp(initial_query=""):
             if key in {"end","shiftright"} and visible: idx=len(visible)-1; continue
             if key=="D" and chosen:
                 picked=_media_choose_hide_directory(chosen,library_rows,fd)
-                if picked and _media_hide_tree_path(picked["path"]):
-                    notice=f"hidden directory · {picked['count']:,} item(s)"
+                if picked and _media_hide_tree_path(picked["path"],chosen,library_rows):
+                    notice=f"hidden directory · {picked['count']:,} item(s)"+_media_visibility_status()
                     selected_ids.clear()
                     idx=0
                     view_key=None
                 else:
-                    notice="hide directory cancelled"
+                    notice="hide directory cancelled"+_media_visibility_status()
                 continue
             if key=="L": mode="library"; query=""; idx=0; selected_ids.clear(); view_key=None; continue
             if key=="Q": mode="queue"; query=""; idx=0; selected_ids.clear(); view_key=None; continue
