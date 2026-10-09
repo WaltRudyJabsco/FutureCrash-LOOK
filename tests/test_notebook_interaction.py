@@ -62,6 +62,22 @@ def test_inline_view_full_editor_uses_same_note(tmp_path,terminal,monkeypatch):
     editor.assert_called_once_with(store,row)
 
 
+def test_preview_hides_marks_but_editor_retains_source(tmp_path,terminal,monkeypatch,capsys):
+    store=Notebook(tmp_path); store.create('# Header\n**Bold**')
+    original=store.list()[0]; keys=iter(['E','esc','esc']); edited=[]
+    def draft(fd,reader,source,label):
+        edited.append(source)
+        assert reader(fd,None)=='esc'
+        return None
+    monkeypatch.setattr(notebook,'capture_note',draft)
+    notebook.note_view(store,original,lambda *args:next(keys))
+    output=capsys.readouterr().out
+    assert '**Bold**' not in output
+    assert '# Header' not in output
+    assert edited==['# Header\n**Bold**']
+    assert store.list()[0]['revision']==original['revision']
+
+
 def test_workspace_view_returns_to_filter(tmp_path,terminal,capsys):
     store=Notebook(tmp_path); store.create('Apple')
     keys=iter(['a','\r','esc','esc','q'])

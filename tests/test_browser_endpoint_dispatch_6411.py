@@ -14,7 +14,7 @@ def test_cli_delegates_browser_speech_resolution_to_resident_daemon():
 
 
 def test_release_6411_contract():
-    assert (ROOT/'VERSION').read_text().strip()=='8.12.2'
+    assert (ROOT/'VERSION').read_text().strip()=='8.13.0'
     node=(ROOT/'core/node.py').read_text()
-    assert 'VERSION = "8.12.2"' in node
+    assert 'VERSION = "8.13.0"' in node
     assert 'RELEASE_NAME = "FABRIC VISION"' in node

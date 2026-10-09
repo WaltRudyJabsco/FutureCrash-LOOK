@@ -4,7 +4,7 @@ ROOT = Path(__file__).resolve().parents[1]
 
 
 def test_release_and_serve_owner_contract():
-    assert (ROOT / "VERSION").read_text().strip() == "8.12.2"
+    assert (ROOT / "VERSION").read_text().strip() == "8.13.0"
     install = (ROOT / "install.sh").read_text()
     assert 'core/tailscale_serve.py' in install
     assert 'tailscale serve --bg --https=7332' not in install
@@ -17,5 +17,5 @@ def test_release_and_serve_owner_contract():
 
 def test_look_product_version_bumped():
     lk = (ROOT / "look/lk").read_text()
-    assert 'VERSION="4.59.2"' in lk
-    assert 'Future-Crash-Fabric/8.12.2' in lk
+    assert 'VERSION="4.60.0"' in lk
+    assert 'Future-Crash-Fabric/8.13.0' in lk

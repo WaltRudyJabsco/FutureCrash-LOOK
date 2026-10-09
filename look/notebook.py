@@ -18,8 +18,10 @@ import urllib.request
 
 try:
     from .notebook_core import Notebook, timestamp
+    from .notebook_markdown import render as render_markdown
 except ImportError:
     from notebook_core import Notebook, timestamp
+    from notebook_markdown import render as render_markdown
 
 
 def daemon(action,payload=None,timeout=10):
@@ -96,6 +98,8 @@ HELP_TEXT='''LOOK NOTEBOOK — notes, tasks and reminders share one record.
 
 Capture: N opens a draft. Enter saves; Shift-Enter/Ctrl-J inserts a newline.
 Escape cancels a draft. Enter opens a boxed Markdown note view.
+The view previews headings, bold/italic, lists, checkboxes, quotes and code.
+E shows the original Markdown marks; saving returns to the rendered preview.
 In the view: arrows/Space scroll, E edits the body, V opens your full editor.
 Quick edits keep the title; Enter saves, Shift-Enter/Ctrl-J adds a newline.
 Editor: Shift-Left/Right jumps to the start/end of the note; Home/End moves
@@ -235,16 +239,15 @@ def note_view(store,row,read_key):
         while True:
             width,height=shutil.get_terminal_size((100,30))
             inner=max(1,min(96,width-4)); page=max(1,height-8)
-            content=[part for line in row['body'].splitlines() for part in
-                     (textwrap.wrap(line,inner,replace_whitespace=False,drop_whitespace=False) or [''])]
+            content=render_markdown(row['body'],inner)
             top=max(0,min(top,max(0,len(content)-page)))
             border='─'*inner
-            frame=[KEY_CYAN+row['title'][:max(1,width-1)]+'\033[0m',
+            title_rows=render_markdown(row['title'],max(1,width-1))
+            title=re.sub(r'\033\[[0-9;]*m','',title_rows[0]).rstrip() if title_rows else ''
+            frame=[KEY_CYAN+title+RESET,
                    '\033[0;2m'+metadata(row)[:max(1,width-1)]+'\033[0m','┌'+border+'┐']
             for line in content[top:top+page]:
-                padded=line.ljust(inner)
-                if line.lstrip().startswith('#'): padded=KEY_CYAN+padded+'\033[0m'
-                frame.append('│'+padded+'│')
+                frame.append('│'+line+'│')
             frame.extend(['│'+' '*inner+'│']*max(0,page-len(content[top:top+page])))
             frame.extend(['└'+border+'┘',
                           command_hints('↑↓/Space scroll · E edit · V full editor · H help · Esc back'[:max(1,width-1)]),

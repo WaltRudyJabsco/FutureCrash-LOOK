@@ -29,7 +29,12 @@ content while keeping your query; the footer says FILTER or SEARCH. Add
 Shift-F cycles updated, created, title, project, due/reminder, and type sorting.
 Shift-T cycles all records, notes, tasks, and reminders. Each row includes
 creation and latest-edit timestamps; changes to a note retain its creation time.
-Enter opens a boxed, scrollable Markdown view. E opens a quick body editor;
+Enter opens a boxed, scrollable Markdown preview. Heading marks disappear
+into cyan headings; **bold**, *italic*, ~~strikethrough~~, bullets, numbered
+lists, task checkboxes, quotes, links and inline/fenced code are rendered.
+Links retain their destination as visible text. Code preserves literal marks.
+This is a lightweight terminal preview; tables and HTML remain plain text.
+E opens a quick body editor with the original Markdown marks;
 Enter saves, Shift-Enter/Ctrl-J inserts a newline, and Escape cancels. The title
 stays stable so named notebooks are easy to reopen. V opens the same document
 in `$VISUAL`, `$EDITOR`, Neovim, or vi. Escape returns to the filtered list.
@@ -104,3 +109,18 @@ next local occurrence.
 Local dates are interpreted on the capturing device and stored as absolute times.
 Task due dates organize work; add `--remind` when an alert is required. Recurring
 calendar events are outside this initial notebook feature.
+
+For example, edit a note to contain:
+
+```markdown
+# To Do
+## Today
+- [ ] Buy **milk**
+- [x] Read the *Notebook guide*
+
+Use `lkn To Do` to reopen it.
+```
+
+The preview shows headings without hashes, readable emphasis and ☐/☑ task
+markers. Enter saves an edit and returns to that preview. Formatting never
+rewrites the saved Markdown or the file opened by V.
