@@ -62,6 +62,17 @@ def display(row):
 
 SORT_MODES=('updated','created','title','project','due','type')
 TYPE_VIEWS=(None,'note','task','reminder')
+KEY_CYAN='\033[0;1;38;5;117m'
+LABEL_DIM='\033[0;2m'
+RESET='\033[0m'
+
+
+def command_hints(text):
+    """Style after wrapping/clipping so ANSI escapes never affect the layout."""
+    plain=re.sub(r'\033\[[0-9;]*m','',text)
+    return '\n'.join(LABEL_DIM+re.sub(r'(^| · )(\S+)',
+        lambda match:match[1]+KEY_CYAN+match[2]+LABEL_DIM,line)+RESET
+        for line in plain.split('\n'))
 
 
 def metadata(row):
@@ -130,7 +141,7 @@ def show_help(fd,read_key):
         width,height=shutil.get_terminal_size((100,30)); page=max(1,height-2)
         rows=[part for line in HELP_TEXT.splitlines() for part in (textwrap.wrap(line,max(1,width-1)) or [''])]
         top=max(0,min(top,max(0,len(rows)-page)))
-        footer='↑↓ scroll · Space page · Esc/H/? return'[:max(1,width-1)]
+        footer=command_hints('↑↓ scroll · Space page · Esc/H/? return'[:max(1,width-1)])
         sys.stdout.write('\033[2J\033[H'+'\n'.join(rows[top:top+page])+ '\n'+footer+'\033[J'); sys.stdout.flush()
         key=read_key(fd,None)
         if key in {'esc','H','?','q','\x03'}: return
@@ -159,8 +170,10 @@ def capture_note(fd,read_key,initial_text='',label='NEW NOTE'):
             page=max(1,height-(6 if boxed else 4))
             top=max(0,cursor_row-page+1)
             visible=rows[top:top+page]
-            frame=[(label+' · Enter save · Shift-Enter/Ctrl-J newline · Esc cancel')[:max(1,width-1)],
-                   'Shift-↑↓ / PgUp/PgDn page · Shift-←→ note start/end · Home/End line'[:max(1,width-1)]]
+            heading=(label+' · ')[:max(1,width-1)]
+            actions='Enter save · Shift-Enter/Ctrl-J newline · Esc cancel'[:max(0,width-1-len(heading))]
+            frame=[KEY_CYAN+heading+'\033[0m'+command_hints(actions),
+                   command_hints('Shift-↑↓/PgUp/PgDn page · Shift-←→ note start/end · Home/End line'[:max(1,width-1)])]
             if boxed:
                 frame.extend(['┌'+'─'*columns+'┐',*['│'+line.ljust(columns)+'│' for line in visible],'└'+'─'*columns+'┘'])
             else: frame.extend(visible)
@@ -226,15 +239,15 @@ def note_view(store,row,read_key):
                      (textwrap.wrap(line,inner,replace_whitespace=False,drop_whitespace=False) or [''])]
             top=max(0,min(top,max(0,len(content)-page)))
             border='─'*inner
-            frame=['\033[1;36m'+row['title'][:max(1,width-1)]+'\033[0m',
-                   metadata(row)[:max(1,width-1)],'┌'+border+'┐']
+            frame=[KEY_CYAN+row['title'][:max(1,width-1)]+'\033[0m',
+                   '\033[0;2m'+metadata(row)[:max(1,width-1)]+'\033[0m','┌'+border+'┐']
             for line in content[top:top+page]:
                 padded=line.ljust(inner)
-                if line.lstrip().startswith('#'): padded='\033[1;36m'+padded+'\033[0m'
+                if line.lstrip().startswith('#'): padded=KEY_CYAN+padded+'\033[0m'
                 frame.append('│'+padded+'│')
             frame.extend(['│'+' '*inner+'│']*max(0,page-len(content[top:top+page])))
             frame.extend(['└'+border+'┘',
-                          '↑↓/Space scroll · E edit · V full editor · H help · Esc back'[:max(1,width-1)],
+                          command_hints('↑↓/Space scroll · E edit · V full editor · H help · Esc back'[:max(1,width-1)]),
                           notice[:max(1,width-1)]])
             sys.stdout.write('\033[2J\033[H'+'\n'.join(frame)+'\033[J'); sys.stdout.flush()
             key=read_key(fd,None)
@@ -283,13 +296,13 @@ def workspace(store,kind,read_key,hints,initial_query=''):
             index=max(0,min(index,max(0,len(rows)-1)))
             width,height=shutil.get_terminal_size((100,30)); usable=max(1,(height-7)//2)
             top=max(0,index-usable+1)
-            lines=['\033[1;36mLOOK NOTEBOOK\033[0m · '+(kind or 'all')+f' · sort {sort} · {len(rows)} shown · {len(marked)} marked','']
+            lines=[KEY_CYAN+'LOOK NOTEBOOK'+RESET+' · '+(kind or 'all')+f' · sort {sort} · {len(rows)} shown · {len(marked)} marked','']
             for number,row in enumerate(rows[top:top+usable],top):
                 marker='✓' if row['id'] in marked else ' '
-                lines.append(('\033[1;36m›' if number==index else ' ')+marker+' '+display(row)[:max(10,width-5)]+'\033[0m')
+                lines.append((KEY_CYAN+'›' if number==index else ' ')+marker+' '+display(row)[:max(10,width-5)]+'\033[0m')
                 lines.append('\033[2m   '+metadata(row)[:max(1,width-4)]+'\033[0m')
             while len(lines)<height-4: lines.append('')
-            lines.extend([('FILTER ' if scope=='title' else 'SEARCH ')+query+'█',hints('↑↓ move · Tab mark · Enter view · V full editor · N new · P file · C done · R remind · F sort · T type · / full text · H help · Esc clear/exit',width),notice])
+            lines.extend([('FILTER ' if scope=='title' else 'SEARCH ')+query+'█',command_hints(hints('↑↓ move · Tab mark · Enter view · V full editor · N new · P file · C done · R remind · F sort · T type · / full text · H help · Esc clear/exit',width)),notice])
             sys.stdout.write('\033[H'+ '\033[K\n'.join(lines)+'\033[K\033[J'); sys.stdout.flush()
             key=read_key(fd,1)
             if not key: continue

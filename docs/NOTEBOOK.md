@@ -18,6 +18,9 @@ lk tasks list
 lk reminders list
 ```
 
+Notebook command keys use bold cyan accents, with subdued action labels and
+metadata. The palette is shared by the list, note view, quick editor and help footer.
+
 Bare `lkn` opens the notebook. Arrow keys move; Shift-arrows page or jump to
 ends; Tab marks; Shift-A selects all filtered records. Type to filter or use `/`.
 Typing filters titles and projects. `/` toggles full-text search across note
