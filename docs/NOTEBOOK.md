@@ -28,6 +28,9 @@ or Alt-Enter for a newline. Cursor keys and Backspace edit the draft.
 Shift-P files under a project, Shift-C completes,
 Shift-R schedules a reminder, and Shift-D deletes after confirmation. Escape
 clears a filter, then exits. Ctrl-C exits immediately.
+Press **H** or **?** for an in-app help page. It explains what File, Done,
+Remind, and Delete change, with command examples. Escape closes help and retains
+your filter and selection. `lkn --help` lists all flags and the same explanations.
 
 LO can list or read records directly: `lo list the notes`, `lo what do our notes say`,
 or `lo what does the first note say`. First/second refers to the current LKN

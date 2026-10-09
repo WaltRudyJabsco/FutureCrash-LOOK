@@ -53,6 +53,16 @@ def test_workspace_clears_old_screen_and_saves_multiline_capture(tmp_path,monkey
     assert store.list()[0]['body']=='a\nb'
 
 
+def test_notebook_help_returns_without_losing_filter_or_records(tmp_path,terminal,capsys):
+    store=Notebook(tmp_path); store.create('Apple note')
+    keys=iter(['a','H','esc','esc','q'])
+    notebook.workspace(store,None,lambda *args:next(keys),lambda text,width:text[:width])
+    output=capsys.readouterr().out
+    assert 'File (P)' in output and 'Remind (R)' in output
+    assert output.count('FILTER a█')>=2
+    assert len(store.list())==1
+
+
 @pytest.mark.parametrize('encoded,expected',[
     (b'\x1b[13;2u','shiftenter'),(b'\x1b[27;2;13~','shiftenter'),
     (b'\x1b\r','shiftenter'),(b'\r','\r'),('é'.encode(),'é')])

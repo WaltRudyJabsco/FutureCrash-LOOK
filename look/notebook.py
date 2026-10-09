@@ -60,6 +60,55 @@ def display(row):
     return f"{row['id'][:8]} · {row['kind']} · {row['project']} · {row['title']}"+(' · '+due if due else '')+(' · CONFLICT' if row['conflict'] else '')
 
 
+HELP_TEXT='''LOOK NOTEBOOK — notes, tasks and reminders share one record.
+
+Capture: N opens a draft. Enter saves; Shift-Enter/Ctrl-J inserts a newline.
+Escape cancels a draft. Enter on a listed record opens it in your editor.
+
+File (P): change the project label; text and stable ID stay the same.
+Done (C): complete the record and stop its reminder. List --all shows it again.
+Remind (R): attach a one-time alert to a note or task. Due dates alone are not alerts.
+Delete (D): delete after confirmation; a deletion marker syncs to other nodes.
+
+Arrows move; Shift-arrows page/jump; Tab marks; Shift-A selects all shown.
+Type or / filters. Escape clears the filter, then exits. H or ? opens help.
+
+CLI examples:
+  lkn Quick thought
+  lkn --project LOOK --task Test playback
+  lkn --remind "in 10 minutes" Check download
+  lkn file NOTE_ID --project LOOK
+  lkn done NOTE_ID
+  lkn snooze NOTE_ID "in 20 minutes"
+  lkn list --all
+  lkn sync
+
+Every paired node keeps a local copy. Captures work offline; revisions sync
+when peers reconnect. Concurrent edits are preserved as conflicts.
+Targets: --target all (default), a node name, or comma-separated node names.
+LO can list notes or read a note by its position in the newest-updated-first list.
+Full command flags: lkn --help. Global reference: lk doc or man lk.
+'''
+
+
+def show_help(fd,read_key):
+    top=0
+    while True:
+        width,height=shutil.get_terminal_size((100,30)); page=max(1,height-2)
+        rows=[part for line in HELP_TEXT.splitlines() for part in (textwrap.wrap(line,max(1,width-1)) or [''])]
+        top=max(0,min(top,max(0,len(rows)-page)))
+        footer='↑↓ scroll · Space page · Esc/H/? return'[:max(1,width-1)]
+        sys.stdout.write('\033[2J\033[H'+'\n'.join(rows[top:top+page])+ '\n'+footer+'\033[J'); sys.stdout.flush()
+        key=read_key(fd,None)
+        if key in {'esc','H','?','q','\x03'}: return
+        if key in {'down','j','\r','\n'}: top+=1
+        elif key in {'up','k'}: top-=1
+        elif key in {'pagedown',' '}: top+=page
+        elif key in {'pageup','b'}: top-=page
+        elif key=='home': top=0
+        elif key=='end': top=len(rows)
+
+
 def capture_note(fd,read_key):
     """Keep Enter fast; request distinct modified keys while the note editor owns input."""
     previous=termios.tcgetattr(fd)
@@ -120,7 +169,7 @@ def workspace(store,kind,read_key,hints):
                 marker='✓' if row['id'] in marked else ' '
                 lines.append(('\033[1;36m›' if number==index else ' ')+marker+' '+display(row)[:max(10,width-5)]+'\033[0m')
             while len(lines)<height-4: lines.append('')
-            lines.extend(['FILTER '+query+'█',hints('↑↓ move · Shift-arrows page/ends · Tab mark · A all · Enter edit · N new · P file · C done · R remind · D delete · / filter · Esc clear/exit',width),notice])
+            lines.extend(['FILTER '+query+'█',hints('↑↓ move · Tab mark · A all · Enter edit · N new · P file · C done · R remind · D delete · H/? help · / filter · Esc clear/exit',width),notice])
             sys.stdout.write('\033[H'+ '\033[K\n'.join(lines)+'\033[K\033[J'); sys.stdout.flush()
             key=read_key(fd,1)
             if not key: continue
@@ -129,6 +178,8 @@ def workspace(store,kind,read_key,hints):
             if key=='esc':
                 if query: query=''; index=0; continue
                 break
+            if key in {'H','?'}:
+                show_help(fd,read_key); continue
             if key in {'up','K'}: index=max(0,index-1); continue
             if key in {'down','J'}: index=min(len(rows)-1,index+1); continue
             if key in {'pageup','shiftup'}: index=max(0,index-usable); continue
@@ -175,16 +226,17 @@ def workspace(store,kind,read_key,hints):
 
 
 def main(argv=None,kind=None,read_key=None,hints=None):
-    parser=argparse.ArgumentParser(prog='lk notes',description='Offline replicated notebook. Text captures to Inbox; no arguments opens the workspace.')
+    parser=argparse.ArgumentParser(prog='lk notes',description='Offline replicated notebook. Text captures to Inbox; no arguments opens the workspace.',epilog=HELP_TEXT,formatter_class=argparse.RawDescriptionHelpFormatter)
     parser.add_argument('words',nargs='*')
-    parser.add_argument('--project',default='Inbox')
-    parser.add_argument('--task',action='store_true')
-    parser.add_argument('--remind',metavar='WHEN')
-    parser.add_argument('--due',metavar='WHEN')
+    parser.add_argument('--project',default='Inbox',help='Project label for capture or file; defaults to Inbox')
+    parser.add_argument('--task',action='store_true',help='Capture a task instead of a note')
+    parser.add_argument('--remind',metavar='WHEN',help='Schedule a one-time reminder, e.g. "Saturday 9am"')
+    parser.add_argument('--due',metavar='WHEN',help='Task due date; does not create an alert')
     parser.add_argument('--target',default='all',help='all or a named node')
     parser.add_argument('--stdin',action='store_true',help='Read multiline note text from standard input')
-    parser.add_argument('--json',action='store_true')
+    parser.add_argument('--json',action='store_true',help='Print structured JSON instead of human output')
     parser.add_argument('--all',action='store_true',help='Include completed records')
+    if argv==['help']: argv=['--help']
     args=parser.parse_intermixed_args(argv)
     store=Notebook()
     try:

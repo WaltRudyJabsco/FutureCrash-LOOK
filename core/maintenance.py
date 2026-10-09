@@ -45,9 +45,10 @@ def allowed(relative):
     if parent == '.local/share/future-crash-look/core': return p.suffix == '.py'
     if parent == '.local/share/future-crash-look': return p.name == 'RELEASE'
     if parent == '.local/share/look': return p.suffix == '.py' or p.name == 'lk'
+    if parent == '.local/share/look/docs': return p.name in {'REFERENCE.md','command_forms.json','command_help.json'}
     if parent == '.local/share/signal-window':
         return p.name in {'server.py', 'app.js', 'media-session.js', 'media-art.js', 'index.html', 'style.css'}
-    if parent == '.local/share/future-crash': return p.name == 'future_crash.py'
+    if parent == '.local/share/future-crash': return p.name in {'future_crash.py','lo_worker.py'}
     if parent == '.local/bin':
         return p.name in {'fcl-node', 'fcl-ingress', 'fcl-tailcat', 'fcl-rendezvous', 'fcl-openjev-worker', 'future-crash'}
     return False
@@ -72,11 +73,13 @@ def register_install(source):
     for p in (source / 'look').glob('*.py'):
         mappings.append((p, '.local/share/look/' + p.name))
     mappings.append((source / 'look/lk', '.local/share/look/lk'))
+    mappings += [(source/'look/docs'/name,'.local/share/look/docs/'+name)
+                 for name in ('REFERENCE.md','command_forms.json','command_help.json')]
     mappings.append((source / 'VERSION', '.local/share/future-crash-look/RELEASE'))
     mappings += [(source / 'signal-window' / n, '.local/share/signal-window/' + n)
                  for n in ('server.py', 'app.js', 'media-session.js', 'media-art.js', 'index.html', 'style.css')]
     mappings += [(source / 'future-crash' / n, target) for n, target in
-                 [('future_crash.py', '.local/share/future-crash/future_crash.py'), ('future-crash', '.local/bin/future-crash')]]
+                 [('future_crash.py', '.local/share/future-crash/future_crash.py'), ('lo_worker.py','.local/share/future-crash/lo_worker.py'), ('future-crash', '.local/bin/future-crash')]]
     files = []
     for src, relative in mappings:
         if not allowed(relative): continue

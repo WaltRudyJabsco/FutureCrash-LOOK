@@ -168,6 +168,10 @@ _look() {
 # Human-facing smart-view implementation. Public short names are installed
 # later through the collision-aware shortcut layer.
 _look_smart() {
+  if (( $# == 1 )) && [[ "$1" == "--help" || "$1" == "-h" ]]; then
+    command lk help
+    return
+  fi
   if (( $# == 1 )) && [[ "$1" == "-" ]]; then
     builtin cd - || return
     _look . --mode smart --interactive
@@ -224,6 +228,10 @@ _look_smart() {
 _look_view() {
   local mode="$1"
   shift
+  if (( $# == 1 )) && [[ "$1" == "--help" || "$1" == "-h" ]]; then
+    command lk "$mode" --help
+    return
+  fi
 
   local target="."
   if (( $# > 0 )); then

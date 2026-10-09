@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 """
 FUTURE CRASH // ZERO
-One process. One model. One terminal. Zero dependencies.
+One terminal. One shared conversational engine. Zero third-party dependencies.
 
 Mac/Linux:
     python3 future_crash.py --model qwen3:4b
@@ -73,7 +73,7 @@ WHITE = CSI + "38;5;255m"
 GRAY = CSI + "38;5;245m"
 DARK = CSI + "38;5;239m"
 
-VERSION = "1.2.3"
+VERSION = "1.2.4"
 GLYPHS = "0123456789ABCDEF"
 SPARKS = "▁▂▃▄▅▆▇█"
 
@@ -297,7 +297,7 @@ def bytes_text(n):
 
 def run(argv, timeout=1.5):
     try:
-        p = subprocess.run(argv, capture_output=True, text=True, timeout=timeout)
+        p = subprocess.run(argv, stdin=subprocess.DEVNULL, capture_output=True, text=True, timeout=timeout)
         return p.stdout.strip()
     except Exception:
         return ""
@@ -361,7 +361,7 @@ class AudioEngine:
             return
         try:
             path = self._wav(name, patterns[name])
-            subprocess.Popen([self.player, str(path)], stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+            subprocess.Popen([self.player, str(path)], stdin=subprocess.DEVNULL, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
         except Exception:
             pass
 
@@ -1695,6 +1695,7 @@ class HostTools:
                     return False, f"CWD NOT FOUND: {cwd}"
                 proc = subprocess.run(
                     argv, cwd=str(cwd) if cwd else None,
+                    stdin=subprocess.DEVNULL,
                     capture_output=True, text=True, timeout=25,
                 )
                 output = ((proc.stdout or "") + (proc.stderr or "")).strip()
@@ -1707,7 +1708,7 @@ class HostTools:
                 if not target:
                     return False, "EMPTY OPEN TARGET"
                 opener = ["open", target] if sys.platform == "darwin" else ["xdg-open", target]
-                proc = subprocess.run(opener, capture_output=True, text=True, timeout=10)
+                proc = subprocess.run(opener, stdin=subprocess.DEVNULL, capture_output=True, text=True, timeout=10)
                 detail = ((proc.stdout or "") + (proc.stderr or "")).strip()
                 return proc.returncode == 0, f"OPEN EXIT {proc.returncode}: {target}" + (f"\n{detail}" if detail else "")
 
@@ -2076,7 +2077,6 @@ def _shared_lo_chat(prompt, history=None, mode="ask"):
     for path in candidates:
         if (path/"lo_engine.py").exists() and str(path) not in sys.path:
             sys.path.insert(0,str(path))
-    import lo_engine
     clean=[]
     local_context=[]
     for row in list(history or [])[-12:]:
@@ -2095,10 +2095,18 @@ def _shared_lo_chat(prompt, history=None, mode="ask"):
     )
     if local_context:
         interface += "\n\nORACLE LOCAL MEMORY (this Future Crash instance only):\n" + "\n\n".join(local_context)[-4500:]
-    return lo_engine.chat_once(
-        str(prompt), profile=_shared_access_profile(), history=clean,
-        interface_context=interface, persona="oracle"
-    )
+    # LO captures human diagnostics using process-wide stdout redirection and
+    # imports readline. Neither may own the live Future Crash terminal.
+    worker=Path(__file__).with_name('lo_worker.py')
+    payload=dict(prompt=str(prompt),profile=_shared_access_profile(),history=clean,
+                 interface_context=interface,persona="oracle")
+    result=subprocess.run([sys.executable,str(worker)],input=json.dumps(payload),
+                          capture_output=True,text=True,timeout=90)
+    if result.returncode:
+        raise RuntimeError(result.stderr.strip() or 'Shared LO worker failed')
+    value=json.loads(result.stdout)
+    if not isinstance(value,dict): raise RuntimeError('Shared LO worker returned invalid data')
+    return value
 
 
 # ---------- Ollama ----------
@@ -2288,26 +2296,34 @@ class Terminal:
         return s.columns, s.lines
 
     def key(self):
-        r, _, _ = select.select([sys.stdin], [], [], 0)
+        # Recover immediate input if a child or terminal integration restored
+        # canonical/echo mode. Future Crash alone owns this terminal while active.
+        flags=termios.tcgetattr(self.fd)[3]
+        if flags & (termios.ICANON | termios.ECHO):
+            tty.setcbreak(self.fd,termios.TCSANOW)
+            sys.stdout.write(CSI+'?25l'); sys.stdout.flush()
+        r, _, _ = select.select([self.fd], [], [], 0)
         if not r:
             return None
         ch = os.read(self.fd, 1).decode("utf-8", "ignore")
+        if not ch: return None
         if ch != ESC:
             return ch
         # Parse a small useful subset of ANSI keys.
         seq = ch
-        time.sleep(.001)
         while True:
-            r, _, _ = select.select([sys.stdin], [], [], 0)
+            r, _, _ = select.select([self.fd], [], [], .035)
             if not r:
                 break
             seq += os.read(self.fd, 1).decode("utf-8", "ignore")
-            if len(seq) >= 6:
+            if seq[-1] in '~ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz' or len(seq)>=16:
                 break
         return {
             "\x1b[A":"UP", "\x1b[B":"DOWN", "\x1b[C":"RIGHT", "\x1b[D":"LEFT",
             "\x1b[3~":"DELETE", "\x1b[H":"HOME", "\x1b[F":"END",
             "\x1b[1~":"HOME", "\x1b[4~":"END",
+            "\x1b[27u":"ESC", "\x1b[27;1u":"ESC",
+            "\x1b[5~":"PAGEUP", "\x1b[6~":"PAGEDOWN",
         }.get(seq, "ESC")
 
 # ---------- UI ----------
@@ -2327,6 +2343,7 @@ class FutureCrash:
         self.host = HostTools()
         self.host_results = queue.Queue()
         self.work_detached = False
+        self.ask_detached = False
         self.notebook_reminders = []
         self.look_path = shutil.which("lk")
         self.threads = ThreadStore()
@@ -2661,6 +2678,10 @@ class FutureCrash:
             self._ask_oracle("thread:" + str(task.get("id")), prompt, priority="background", lease_held=True)
 
     def _queue_tool_request(self, request, origin, visible_text, history=None):
+        if origin=='ask' and self.ask_detached:
+            self.answer=visible_text+'\nTool proposal deferred: Oracle closed.'
+            self.busy=False
+            return
         if origin=='work' and self.work_detached:
             self.work_log.append(('oracle',visible_text+'\nTool proposal deferred: workstation closed.'))
             self.work_pending_user = None
@@ -2717,6 +2738,11 @@ class FutureCrash:
         self.pending_tool_visible_text = ""
         self.pending_tool_history = []
         self.audio.cue("recover" if ok else "incident")
+        if origin=='ask' and self.ask_detached:
+            self.answer=(visible_text+'\n\n' if visible_text else '')+host_receipt
+            self.busy=False
+            self.last_frame=''
+            return
         if origin=='work' and self.work_detached:
             if visible_text: self.work_log.append(('oracle',visible_text))
             self.work_log.append(('host',host_receipt))
@@ -2808,6 +2834,10 @@ class FutureCrash:
                 elif kind == "ask":
                     self.audio.cue("oracle")
                     self.last_provenance = dict(provenance or {})
+                    if self.ask_detached:
+                        self.answer=f'ORACLE LINK FAILED: {err}' if err else text
+                        self.last_frame=''
+                        continue
                     if err:
                         self.answer = f"ORACLE LINK FAILED: {err}"
                         self.set_mode("answer")
@@ -3088,6 +3118,7 @@ class FutureCrash:
             elif key == "ESC":
                 self.drop_to_shell()
             elif key in ("a", "A"):
+                self.ask_detached = False
                 self.audio.cue("ask")
                 self.input = ""
                 self.cursor = 0
@@ -3139,6 +3170,7 @@ class FutureCrash:
                 self.set_mode("threads")
             elif key == "ESC":
                 if self.mode=='work': self.work_detached=True
+                else: self.ask_detached=True
                 self.deferred_submit=None
                 self.input = ""
                 self.cursor = 0
@@ -3178,10 +3210,14 @@ class FutureCrash:
 
         elif self.mode == "answer":
             if key == "ESC":
+                self.ask_detached=True
+                self.deferred_submit=None
+                self.input=''; self.cursor=0
                 self.set_mode("ambient")
             elif key in ("q", "Q"):
                 self.request_quit()
             elif key in ("a", "A"):
+                self.ask_detached=False
                 self.input = ""
                 self.cursor = 0
                 self.set_mode("ask")
@@ -3200,6 +3236,7 @@ class FutureCrash:
                 # Answer view is conversational: typing immediately starts the
                 # next Ask turn. No Ctrl-C or explicit mode hop is required.
                 self.input = key
+                self.ask_detached=False
                 self.cursor = 1
                 self.set_mode("ask")
 

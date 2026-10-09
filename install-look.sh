@@ -12,8 +12,8 @@ if [[ "${FCL_UNIFIED_INSTALL_CHILD:-0}" != "1" && -x "$ROOT/install.sh" ]]; then
 fi
 
 PRODUCT_VERSION="$(tr -d '[:space:]' < "$ROOT/VERSION")"
-LOOK_VERSION="4.57.1"
-FUTURE_CRASH_VERSION="1.2.3"
+LOOK_VERSION="4.57.2"
+FUTURE_CRASH_VERSION="1.2.4"
 
 DRY=0
 ASSUME_YES=0
@@ -333,6 +333,8 @@ install_file "$ROOT/look/media_open.py" "$HOME/.local/share/look/media_open.py"
 install_file "$ROOT/look/destination_history.py" "$HOME/.local/share/look/destination_history.py"
 install_file "$ROOT/look/ytd.py" "$HOME/.local/share/look/ytd.py"
 install_file "$ROOT/look/notebook.py" "$HOME/.local/share/look/notebook.py"
+install_file "$ROOT/look/command_help.py" "$HOME/.local/share/look/command_help.py"
+install_file "$ROOT/look/docs/command_help.json" "$HOME/.local/share/look/docs/command_help.json"
 install_file "$ROOT/look/notebook_core.py" "$HOME/.local/share/look/notebook_core.py"
 install_file "$ROOT/look/weather_forecast.py" "$HOME/.local/share/look/weather_forecast.py"
 install_file "$ROOT/look/media_core.py" "$HOME/.local/share/look/media_core.py"
@@ -436,6 +438,7 @@ if ((!DRY)); then
   FUTURE_DIR="$HOME/.local/share/future-crash"
   run mkdir -p "$FUTURE_DIR"
   run cp "$ROOT/future-crash/future_crash.py" "$FUTURE_DIR/future_crash.py"
+  install_file "$ROOT/future-crash/lo_worker.py" "$FUTURE_DIR/lo_worker.py"
 run cp "$ROOT/future-crash/personality.md" "$FUTURE_DIR/personality.md"
   run cp "$ROOT/future-crash/future-crash" "$HOME/.local/bin/future-crash"
   run chmod +x "$HOME/.local/bin/future-crash"

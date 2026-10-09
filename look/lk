@@ -31,7 +31,7 @@ try:
 except Exception:
     readline = None
 
-VERSION="4.57.1"
+VERSION="4.57.2"
 
 LOOK_WORDMARK = r"""       ██╗      ██╗  ██╗
        ██║      ██║ ██╔╝
@@ -10014,7 +10014,7 @@ def _direct_searxng_search(query, limit=8):
     params=urllib.parse.urlencode({"q":query,"format":"json"})
     request=urllib.request.Request(base+"/search?"+params,headers={
         "Accept":"application/json",
-        "User-Agent":"Future-Crash-Fabric/8.10.1",
+        "User-Agent":"Future-Crash-Fabric/8.10.2",
     })
     with urllib.request.urlopen(request,timeout=12) as response:
         data=json.load(response)
@@ -20931,6 +20931,13 @@ def capability_command(args):
 
 def main():
     _safe_cwd(repair=True)
+    if len(sys.argv)>2 and sys.argv[1]=='help' and sys.argv[2]!='all':
+        import command_help
+        return command_help.show(sys.argv[2:])
+    if len(sys.argv)>2 and any(flag in sys.argv[2:] for flag in ('--help','-h')):
+        if sys.argv[1] not in {'notes','tasks','reminders','ytd','describe'}:
+            import command_help
+            return command_help.show([word for word in sys.argv[1:] if word not in {'--help','-h'}])
     if len(sys.argv)>=2 and sys.argv[1] in {"notes","tasks","reminders"}:
         import notebook
         kind={"notes":None,"tasks":"task","reminders":"reminder"}[sys.argv[1]]

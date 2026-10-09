@@ -203,7 +203,67 @@ def outputs(root=ROOT):
 
 `lk doc`
 '''
-    return {root/'look/docs/REFERENCE.md':reference,root/'docs/COMMAND-GRAMMAR.md':grammar,root/'look/lk.1':roff,root/'look/docs/command_forms.json':json.dumps(forms,ensure_ascii=False,indent=2)+'\n',root/'look/tldr/lk.md':tldr}
+    command_help=command_help_pages(root,forms,usages)
+    return {root/'look/docs/REFERENCE.md':reference,root/'docs/COMMAND-GRAMMAR.md':grammar,root/'look/lk.1':roff,root/'look/docs/command_forms.json':json.dumps(forms,ensure_ascii=False,indent=2)+'\n',root/'look/docs/command_help.json':json.dumps(command_help,ensure_ascii=False,indent=2)+'\n',root/'look/tldr/lk.md':tldr}
+
+
+def command_help_pages(root,forms,usages):
+    tree=ast.parse((root/'look/lk').read_text())
+    functions={node.name:node for node in tree.body if isinstance(node,ast.FunctionDef)}
+    handlers={}
+    for block in ast.walk(functions['main']):
+        if not isinstance(block,ast.If): continue
+        commands=set()
+        for comparison in ast.walk(block.test):
+            if isinstance(comparison,ast.Compare) and isinstance(comparison.left,ast.Name) and comparison.left.id=='cmd':
+                commands.update(node.value for node in ast.walk(comparison) if isinstance(node,ast.Constant) and isinstance(node.value,str))
+        targets={node.value.func.id for statement in block.body for node in ast.walk(statement)
+                 if isinstance(node,ast.Return) and isinstance(node.value,ast.Call) and isinstance(node.value.func,ast.Name)}
+        for command in commands: handlers.setdefault(command,set()).update(targets)
+    grouped={}
+    for command,args,area,description,*alias in forms:
+        words=command.split(); name=words[1] if words[0]=='lk' and len(words)>1 else words[0]
+        grouped.setdefault(name,[]).append(command+(' '+args if args else '')+'\n  '+description)
+    pages={}
+    for name,entries in grouped.items():
+        parts=['LOOK HELP · '+name,'','COMMAND FORMS',*entries]
+        usage=[line for lines in usages.values() for line in lines
+               if line.startswith('usage: lk '+name+' ') or line.startswith('usage: '+name+' ')]
+        if usage: parts.extend(['','USAGE',*sorted(set(usage))])
+        seen=set(); pending=list(handlers.get(name,set())); flags=set()
+        for _depth in range(3):
+            next_level=[]
+            for target in pending:
+                if target in seen or target not in functions: continue
+                seen.add(target)
+                for node in ast.walk(functions[target]):
+                    if isinstance(node,ast.Compare):
+                        flags.update(token.value for token in ast.walk(node) if isinstance(token,ast.Constant) and isinstance(token.value,str) and token.value.startswith('--') and ' ' not in token.value)
+                    if isinstance(node,ast.Call) and isinstance(node.func,ast.Name) and node.func.id in functions:
+                        next_level.append(node.func.id)
+            pending=next_level
+        if flags and name!='settings': parts.extend(['','RECOGNIZED FLAGS',', '.join(sorted(flags))])
+        surface_help={
+            'settings':'Settings opens a searchable picker. Supply a word to start filtered, e.g. lk settings voice. Arrows choose; Enter opens the setting.',
+            'models':'Models opens the local model chooser. Supply an installed model name to select it. Use lk ollama models for model management and lk fabric models for Fabric inventory.',
+            'mp':'LK MP: / search; arrows choose; Tab marks; A marks all shown; Enter plays; B adds to queue; L library; Q queue; Space pause; Esc clears filter, then exits.',
+            'media':'Media Find: type or / filters; arrows move; Tab marks; A marks all shown; Enter plays; Q adds to queue; Esc ends search, clears filter, then exits.',
+            'lo':'LO flags: --conservative, --workspace, --power, --unsafe select access; --no-start avoids starting inference; --events-json emits machine events. @NODE selects a host. search PROMPT requests web search; bg PROMPT queues background work.',
+        }
+        if name in surface_help: parts.extend(['','INTERFACE',surface_help[name]])
+        if name=='fabric':
+            backend=root/'core/node.py'
+            if backend.is_file():
+                node_flags=[]
+                for node in ast.walk(ast.parse(backend.read_text())):
+                    if isinstance(node,ast.Call) and isinstance(node.func,ast.Attribute) and node.func.attr=='add_argument':
+                        names=[arg.value for arg in node.args if isinstance(arg,ast.Constant) and isinstance(arg.value,str) and arg.value.startswith('-')]
+                        help_value=next((string(key.value,'') for key in node.keywords if key.arg=='help'),'')
+                        if names: node_flags.append(' / '.join(names)+(' — '+help_value if help_value else ''))
+                parts.extend(['','FABRIC NODE FLAGS',*sorted(set(node_flags))])
+        parts.extend(['','More: lk help all · lk doc · man lk','For command-specific help: lk COMMAND --help or lk help COMMAND'])
+        pages[name]='\n'.join(parts)
+    return pages
 
 
 def main():
