@@ -31,7 +31,7 @@ try:
 except Exception:
     readline = None
 
-VERSION="4.56.5"
+VERSION="4.57.0"
 
 LOOK_WORDMARK = r"""       ██╗      ██╗  ██╗
        ██║      ██║ ██╔╝
@@ -8449,6 +8449,8 @@ _TOOL_POLICY = {
     "media_search":("all","observation"),"media_play":("all","action"),"media_queue":("all","action"),"media_control":("all","action"),
     "video_search":("all","observation"),"video_download_status":("all","observation"),
     "video_download":("workspace","mutation"),
+    "notebook_search":("all","observation"),
+    "notebook_capture":("workspace","mutation"),"notebook_complete":("workspace","mutation"),
     "run_command":("power","command"),
 }
 _PROFILE_RANK={"conservative":0,"workspace":1,"power":2,"unsafe":3}
@@ -8460,8 +8462,10 @@ def _filter_tools_for_profile(tools,profile):
 
 def _lo_tools(profile):
     import ytd
+    import notebook
     tools=_filesystem_tools()
     tools.extend(ytd.tools())
+    tools.extend(notebook.tools())
     tools.extend(_information_tools())
     tools.extend(_system_inspection_tools())
     tools.extend(_capability_tools())
@@ -10009,7 +10013,7 @@ def _direct_searxng_search(query, limit=8):
     params=urllib.parse.urlencode({"q":query,"format":"json"})
     request=urllib.request.Request(base+"/search?"+params,headers={
         "Accept":"application/json",
-        "User-Agent":"Future-Crash-Fabric/8.9.0",
+        "User-Agent":"Future-Crash-Fabric/8.10.0",
     })
     with urllib.request.urlopen(request,timeout=12) as response:
         data=json.load(response)
@@ -12034,7 +12038,14 @@ def ollama_chat(force_search=False, initial_prompt=None, allow_start=True, host_
                     tool_event_started=time.monotonic()
                     if events: events.emit("tool_start", tool=name)
 
-                    if name in {"video_search","video_download","video_download_status"}:
+                    if name in {"notebook_search","notebook_capture","notebook_complete"}:
+                        import notebook
+                        try:
+                            if name!='notebook_search' and not re.search(r'\b(note|notes|save|record|remember|remind|task|todo|to.do|complete|done|finish)\b',prompt,re.I):
+                                raise ValueError('The user has not requested a notebook change')
+                            tool_content=notebook.tool(name,args)
+                        except Exception as exc: tool_content=f"NOTEBOOK FAILED · {exc}"
+                    elif name in {"video_search","video_download","video_download_status"}:
                         import ytd
                         try:
                             if name=='video_download' and not re.search(r'\b(download|save|offline|ytd)\b',prompt,re.I):
@@ -19582,6 +19593,10 @@ _COMMANDS = [
     ('lk forget', 'TEXT', 'ai', 'Forget matching memory'),
     ('lk clear-memory', '', 'ai', 'Clear memory'),
     # Files / navigation
+    ("lkn", "[TEXT|ACTION] [OPTIONS]", "files", "Offline notebook, tasks and reminders", "lk notes"),
+    ("lk notes", "[TEXT|ACTION] [OPTIONS]", "files", "Capture, search, edit and file notes"),
+    ("lk tasks", "[TEXT|ACTION] [OPTIONS]", "files", "Notebook task view"),
+    ("lk reminders", "[TEXT|ACTION] [OPTIONS]", "files", "Notebook reminder view"),
     ("lk", "", "files", "Open interactive LOOK in the current directory"),
     ("l", "[PATH|WORD]", "files", "Smart jump + interactive LOOK"),
     ("ll", "[PATH|WORD]", "files", "LOOK detail view", "lk detail"),
@@ -20886,6 +20901,10 @@ def capability_command(args):
 
 def main():
     _safe_cwd(repair=True)
+    if len(sys.argv)>=2 and sys.argv[1] in {"notes","tasks","reminders"}:
+        import notebook
+        kind={"notes":None,"tasks":"task","reminders":"reminder"}[sys.argv[1]]
+        return notebook.main(sys.argv[2:],kind=kind,read_key=_read_tty_key,hints=_media_hints)
     if len(sys.argv)>=2 and sys.argv[1]=="ytd":
         import ytd
         return ytd.main(sys.argv[2:])

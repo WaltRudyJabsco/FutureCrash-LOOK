@@ -85,6 +85,9 @@ ACTION_SPECS = (
     ActionSpec("generate_image", "image", "local_effect", "action", ("generate image", "draw", "render image", "make a picture")),
     ActionSpec("schedule_prompt", "schedule", "external_effect", "action", ("schedule", "remind", "every day", "later")),
     ActionSpec("schedule_list", "schedule", "read", "observation", ("scheduled jobs", "reminders")),
+    ActionSpec("notebook_search", "memory", "read", "observation", ("notes", "tasks", "notebook", "to-do")),
+    ActionSpec("notebook_capture", "memory", "local_effect", "mutation", ("save a note", "record", "task")),
+    ActionSpec("notebook_complete", "memory", "local_effect", "mutation", ("complete task", "done")),
     ActionSpec("list_processes", "system", "read", "observation", ("processes", "what is running", "pid")),
     ActionSpec("listening_ports", "system", "read", "observation", ("port", "listening", "what uses port")),
     ActionSpec("system_snapshot", "system", "read", "observation", ("system status", "machine status", "host status")),
@@ -118,6 +121,7 @@ def public_registry() -> list[dict[str,Any]]:
 FAMILY_TOOLS: dict[str, set[str]] = {}
 for _spec in ACTION_SPECS:
     FAMILY_TOOLS.setdefault(_spec.family, set()).add(_spec.name)
+FAMILY_TOOLS.setdefault('schedule',set()).update({'notebook_search','notebook_capture','notebook_complete'})
 
 # Families may need adjacent capabilities to complete a natural request.  These
 # are still narrow enough to stop the model wandering into unrelated toolsets.
@@ -224,6 +228,7 @@ def _rule_scores(text: str) -> dict[str, float]:
         ("files", r"\b(file|folder|directory|workspace|codebase|project files?|this folder|search files?|filename)\b", .94),
         ("image", r"\b(generate|draw|render|make)\b.*\b(image|picture|illustration|artwork|photo)\b", .96),
         ("schedule", r"\b(remind|schedule|every day|every morning|every evening|later today|tomorrow at)\b", .94),
+        ("memory", r"\b(notes?|notebook|tasks?|todo|to.do)\b", .94),
         ("system", r"\b(process(?:es)?|pid|port\s*\d*|system status|machine status|what is running)\b", .90),
         ("browser", r"\b(open|visit|launch)\b.*\b(browser|website|site|url|web page)\b", .90),
         ("research", r"\b(doi|research paper|journal article|papers|primary source|archive)\b", .88),

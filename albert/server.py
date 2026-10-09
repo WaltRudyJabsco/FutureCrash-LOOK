@@ -594,6 +594,14 @@ class Handler(BaseHTTPRequestHandler):
         data=target.read_bytes(); self.send_response(200); self.send_header('Content-Type',mimetypes.guess_type(target.name)[0] or 'application/octet-stream'); self.send_header('Cache-Control','no-cache'); self.send_header('Content-Length',str(len(data))); self.end_headers(); self.wfile.write(data)
     def do_POST(self):
         path=urlparse(self.path).path
+        if path=='/api/notebook/answer':
+            if not self._require_endpoint('lo.use'): return
+            try:
+                n=int(self.headers.get('Content-Length') or 0)
+                if not 0<n<=65536: raise ValueError('Invalid reminder request size')
+                d=json.loads(self.rfile.read(n))
+                return self.send_json(200,node_json('/v1/notebook/answer',d,timeout=3))
+            except Exception as exc: return self.send_json(400,{'ok':False,'error':str(exc)})
         if path=='/api/saved':
             if not self._require_endpoint('lo.use'): return
             try:

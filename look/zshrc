@@ -251,6 +251,7 @@ lkf() { _look_view files "$@"; }
 lkt() { _look_view tree "$@"; }
 lkr() { _look_view recent "$@"; }
 lkz() { _look_view size "$@"; }
+lkn() { command lk notes "$@"; }
 
 # Ultra-short muscle-memory layer. LOOK is deliberately a guest in the user's
 # shell: by default a pre-existing alias/function/builtin/executable wins.
@@ -784,4 +785,3 @@ _look_export_shortcut_state() {
   export LOOK_SHORTCUT_POLICY="$_LOOK_SHORTCUT_POLICY"
 }
 _look_export_shortcut_state
-

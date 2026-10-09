@@ -99,6 +99,8 @@ def test_common_places_include_existing_media_roots_and_full_filesystem(tmp_path
 
 
 def test_linux_media_open_bypasses_missing_association_and_quotes_no_shell(monkeypatch,tmp_path):
+    # This test must not inherit the developer's real preferred media application.
+    monkeypatch.setattr(Path,'home',classmethod(lambda cls:tmp_path))
     monkeypatch.setattr(media_open.sys,'platform','linux')
     monkeypatch.setattr(media_open,'mpv_binary',lambda:'/home/linuxbrew/.linuxbrew/bin/mpv')
     path=tmp_path/'My video.mp4'

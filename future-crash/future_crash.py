@@ -73,7 +73,7 @@ WHITE = CSI + "38;5;255m"
 GRAY = CSI + "38;5;245m"
 DARK = CSI + "38;5;239m"
 
-VERSION = "1.2.2"
+VERSION = "1.2.3"
 GLYPHS = "0123456789ABCDEF"
 SPARKS = "▁▂▃▄▅▆▇█"
 
@@ -2325,6 +2325,9 @@ class FutureCrash:
         self.memory = MemoryStore()
         self.signal = SignalCanvas()
         self.host = HostTools()
+        self.host_results = queue.Queue()
+        self.work_detached = False
+        self.notebook_reminders = []
         self.look_path = shutil.which("lk")
         self.threads = ThreadStore()
         self.thread_selected = 0
@@ -2658,6 +2661,11 @@ class FutureCrash:
             self._ask_oracle("thread:" + str(task.get("id")), prompt, priority="background", lease_held=True)
 
     def _queue_tool_request(self, request, origin, visible_text, history=None):
+        if origin=='work' and self.work_detached:
+            self.work_log.append(('oracle',visible_text+'\nTool proposal deferred: workstation closed.'))
+            self.work_pending_user = None
+            self.busy = False
+            return
         self.pending_tool = request
         self.pending_tool_origin = origin
         self.pending_tool_visible_text = visible_text or ""
@@ -2685,17 +2693,38 @@ class FutureCrash:
         if str(request.get("name", "")).startswith("thread_"):
             ok, receipt = self._execute_internal_thread_request(request)
         else:
-            ok, receipt = self.host.execute(request)
+            # Host/network operations can block for seconds. Keep keyboard input
+            # on the UI thread; only the result is applied there when ready.
+            self.pending_tool = None
+            self.busy = True
+            self.set_mode(self.tool_return_mode)
+            def run_host():
+                try: result=self.host.execute(request)
+                except Exception as exc: result=(False,str(exc))
+                self.host_results.put((request,origin,visible_text,history,*result))
+            threading.Thread(target=run_host,name='workstation-host',daemon=True).start()
+            return
+        self._finish_host_tool(request,origin,visible_text,history,ok,receipt)
+
+    def _finish_host_tool(self,request,origin,visible_text,history,ok,receipt):
         capability = self.host.capability(request)
         stamp = "SUCCESS" if ok else "FAILED"
         host_receipt = f"HOST RECEIPT [{stamp}] [{capability}]\\n{receipt}"
-        self.host_notice = host_receipt.splitlines()[0] + " // " + receipt.splitlines()[0]
+        self.host_notice = host_receipt.splitlines()[0] + " // " + (receipt.splitlines() or ["No details"])[0]
         self.host_notice_until = time.time() + 5.0
         self.pending_tool = None
         self.pending_tool_origin = None
         self.pending_tool_visible_text = ""
         self.pending_tool_history = []
         self.audio.cue("recover" if ok else "incident")
+        if origin=='work' and self.work_detached:
+            if visible_text: self.work_log.append(('oracle',visible_text))
+            self.work_log.append(('host',host_receipt))
+            self.work_history.append({'role':'system','content':host_receipt})
+            self.work_pending_user=None
+            self.busy=False
+            self.last_frame=''
+            return
 
         # Feed the verified result back to the model. It may request one next step.
         continuation = (
@@ -2751,6 +2780,12 @@ class FutureCrash:
         while key is not None:
             self.handle_key(key)
             key = self.term.key()
+
+        try:
+            while True:
+                self._finish_host_tool(*self.host_results.get_nowait())
+        except queue.Empty:
+            pass
 
         try:
             while True:
@@ -3040,6 +3075,11 @@ class FutureCrash:
 
     def _health_probe(self):
         self.online = self.oracle.online()
+        try:
+            with urllib.request.urlopen('http://127.0.0.1:7332/v1/notebook/reminders',timeout=1) as response:
+                self.notebook_reminders = json.load(response).get('reminders',[])
+        except (OSError,ValueError):
+            pass
 
     def handle_key(self, key):
         if self.mode == "ambient":
@@ -3053,6 +3093,7 @@ class FutureCrash:
                 self.cursor = 0
                 self.set_mode("ask")
             elif key in ("x", "X"):
+                self.work_detached = False
                 self.input = ""
                 self.cursor = 0
                 self.set_mode("work")
@@ -3097,6 +3138,8 @@ class FutureCrash:
                 self.thread_selected = 0
                 self.set_mode("threads")
             elif key == "ESC":
+                if self.mode=='work': self.work_detached=True
+                self.deferred_submit=None
                 self.input = ""
                 self.cursor = 0
                 self.set_mode("ambient")
@@ -3240,7 +3283,12 @@ class FutureCrash:
                         self.work_log.append(("oracle", visible))
                     self.work_log.append(("host", denial))
                     self.work_pending_user = None
-                    self.set_mode("work")
+                    if key == "ESC":
+                        self.work_detached = True
+                        self.deferred_submit = None
+                        self.set_mode("ambient")
+                    else:
+                        self.set_mode("work")
 
         elif self.mode == "memory_clear":
             if key in ("y", "Y"):
@@ -3435,6 +3483,8 @@ class FutureCrash:
             f"THREADS    {CYAN}{self.threads.active_count()} ACTIVE{RESET}",
             f"AUDIO      {CYAN}{self.audio.status}{RESET}",
         ]
+        if self.notebook_reminders:
+            left_lines.append(AMBER + 'REMINDER · ' + self.notebook_reminders[0]['title'][:max(8,left_w-12)] + RESET)
 
         signal_title = "SIGNAL FIELD"
         if self.signal.active():
@@ -3680,6 +3730,8 @@ class FutureCrash:
         ]
         if self.work_notice and time.time() < self.work_notice_until:
             frame.append(GREEN2 + self.work_notice + RESET)
+        elif self.notebook_reminders:
+            frame.append(AMBER + 'REMINDER // ' + self.notebook_reminders[0]['title'][:max(20,w-16)] + RESET)
         elif self.thread_notifications:
             frame.append(AMBER + "THREAD // " + self.thread_notifications[-1][:max(20, w-12)] + RESET)
         elif self.host_notice and time.time() < self.host_notice_until:

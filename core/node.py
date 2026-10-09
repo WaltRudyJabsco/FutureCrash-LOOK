@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Future Crash + LOOK Unified Node 8.9.0.
+"""Future Crash + LOOK Unified Node 8.10.0.
 
 A small distributed supervisor for trusted personal machines. Immediate events stay
 asynchronous; a one-second fabric pulse reconciles presence, leases and stale work.
@@ -152,7 +152,7 @@ def _file_peer_json(peer,path):
     return _file_race(peer,path)[1]
 
 
-VERSION = "8.9.0"
+VERSION = "8.10.0"
 RELEASE_NAME = "FABRIC VISION"
 DEFAULT_HOST = "127.0.0.1"
 DEFAULT_PORT = 7332
@@ -2373,6 +2373,77 @@ def _memory_sync() -> dict:
 
 
 
+NOTEBOOK_WAKE = threading.Event()
+NOTEBOOK_SYNC_LOCK = threading.Lock()
+NOTEBOOK_SYNC_SECONDS = 15.0
+
+
+def _notebook_store():
+    _look_catalog_modules()
+    from notebook_core import Notebook
+    return Notebook(origin=identity()['name'])
+
+
+def _notebook_sync():
+    if not NOTEBOOK_SYNC_LOCK.acquire(blocking=False):
+        return {'ok':True,'state':'sync already running'}
+    try:
+        store=_notebook_store(); deliveries=[]
+        snapshot={'self':node_info(),'peers':PEERS.public()}
+        for peer in snapshot['peers'] or []:
+            if not peer.get('trusted') or not peer.get('node'): continue
+            name=str(peer.get('name') or '')
+            if not name: continue
+            try:
+                remote=_peer_json(peer,'/v1/notebook',timeout=1.5)
+                rows=store.snapshot(); remote_ids=set(remote.get('ids') or [])
+                from notebook_core import sync_batch
+                incoming=http_json(_remote_url(snapshot,name,'/v1/notebook/exchange'),
+                    {'revisions':sync_batch(row for row in rows if row['id'] not in remote_ids),
+                     'have':[row['id'] for row in rows]},timeout=2.0)
+                store.exchange(incoming.get('revisions') or [],[row['id'] for row in rows])
+                deliveries.append({'node':name,'ok':True})
+            except Exception as exc:
+                deliveries.append({'node':name,'ok':False,'error':str(exc)})
+        result={'ok':all(row['ok'] for row in deliveries),'updated':now(),'peers':deliveries,
+                'revisions':len(store.snapshot())}
+        from notebook_core import atomic
+        atomic(store.root/'sync-status.json',json.dumps(result,indent=2)+'\n')
+        return result
+    finally:
+        NOTEBOOK_SYNC_LOCK.release()
+
+
+def _notebook_reminders():
+    return _notebook_store().pending(identity()['name'])
+
+
+def _notebook_tick():
+    store=_notebook_store()
+    for reminder in store.pending(identity()['name']):
+        event_id=reminder['event_id']
+        if store.delivered(event_id): continue
+        # One deterministic occurrence ID across all replicas; each node presents
+        # it once locally. A network partition cannot require a central scheduler.
+        _beacon_record({'id':event_id,'pattern':'rgb','origin':'reminder',
+                        'start_pulse':pulse_number()+1})
+        FABRIC_STORE.event(None,'reminder','due',reminder['title'],node=identity()['name'],
+                           data={'id':reminder['id'],'event_id':event_id,'due':reminder['remind_at']})
+        store.mark_delivered(event_id)
+
+
+def _notebook_loop():
+    last_sync=0.0
+    while True:
+        try:
+            if NOTEBOOK_WAKE.is_set() or time.monotonic()-last_sync>=NOTEBOOK_SYNC_SECONDS:
+                NOTEBOOK_WAKE.clear(); _notebook_sync(); last_sync=time.monotonic()
+            _notebook_tick()
+        except Exception as exc:
+            print(f'Notebook background: {exc}',file=sys.stderr)
+        NOTEBOOK_WAKE.wait(1.0)
+
+
 def _local_file_catalog():
     """Publish catalog coverage, never the whole path database over the network."""
     node=identity()["name"]
@@ -2549,7 +2620,7 @@ def _local_web_search(query, limit=8):
     base=os.environ.get("FCL_SEARXNG_URL","http://127.0.0.1:8888").rstrip("/")
     request=urllib.request.Request(base+"/search?"+params,headers={
         "Accept":"application/json",
-        "User-Agent":"Future-Crash-Fabric/8.9.0",
+        "User-Agent":"Future-Crash-Fabric/8.10.0",
     })
     try:
         with urllib.request.urlopen(request,timeout=8) as response:
@@ -4317,9 +4388,14 @@ class API(BaseHTTPRequestHandler):
             return self.sendj(200, job)
         if path == "/v1/memory":
             return self.sendj(200, FABRIC_MEMORY.public(include_local=True))
+        if path == "/v1/notebook":
+            return self.sendj(200, {'ok':True,'ids':[row['id'] for row in _notebook_store().snapshot()]})
+        if path == "/v1/notebook/reminders":
+            return self.sendj(200, {'ok':True,'reminders':_notebook_reminders()})
         if path == "/v1/lights":
             events = FABRIC_STORE.recent_events(limit=96)
-            return self.sendj(200, {"pulse": pulse_number(), "light": _active_beacon(events)})
+            return self.sendj(200, {"pulse": pulse_number(), "light": _active_beacon(events),
+                                    "reminders":_notebook_reminders()})
         if path == "/v1/events":
             q = parse_qs(urlparse(self.path).query)
             if "since" not in q:
@@ -4441,6 +4517,25 @@ class API(BaseHTTPRequestHandler):
         if not self._authorized_ingress(path): return
         if path == "/v1/files/copy": return self._files_copy()
         d = self.body()
+        if path.startswith('/v1/notebook/'):
+            try:
+                if not isinstance(d,dict): raise ValueError('Notebook request must be an object')
+                action=path.rsplit('/',1)[-1]; store=_notebook_store()
+                if action=='exchange': result=store.exchange(d.get('revisions',[]),d.get('have',[]))
+                elif action=='sync': result=_notebook_sync()
+                elif action=='wake': NOTEBOOK_WAKE.set(); result={'ok':True}
+                elif action=='answer':
+                    if not d.get('revision'): raise ValueError('Reminder revision required; reload before answering')
+                    choice=d.get('choice')
+                    if choice not in {'done','snooze'}: raise ValueError('Use done or snooze')
+                    from notebook_core import timestamp
+                    changes={'status':'done','remind_at':None} if choice=='done' else {'remind_at':timestamp('in 10 minutes')}
+                    result={'ok':True,'revision':store.change(str(d.get('id') or ''),changes,expected=d.get('revision'))}
+                    NOTEBOOK_WAKE.set()
+                else: return self.sendj(404,{'ok':False,'error':'Unknown notebook action'})
+                return self.sendj(200,result)
+            except (ValueError,TypeError,OSError) as exc:
+                return self.sendj(400,{'ok':False,'error':str(exc)})
         if path == "/v1/downloads": return self._downloads_request(d)
         if path == "/v1/endpoints/fabric/allow":
             if getattr(self.server,"plane","local") != "local":
@@ -6586,6 +6681,7 @@ def main():
     threading.Thread(target=job_worker_loop,name="fabric-jobs",daemon=True).start()
     threading.Thread(target=_decision_expiry_loop,name="fabric-decisions",daemon=True).start()
     _downloads()
+    threading.Thread(target=_notebook_loop,name='fabric-notebook',daemon=True).start()
     JOB_WAKE.set()
     srv=FabricHTTPServer((a.host,a.port),API,plane="local")
     threading.Thread(target=_local_accept_watchdog,args=(srv,),name="fabric-http-watchdog",daemon=True).start()

@@ -335,8 +335,50 @@ setTheme(localStorage.getItem('albert5.theme')||'paper');
 toolgrid.innerHTML=capabilities.map(([n,d,r])=>`<div class="tool"><div class="tool-name">${esc(n)}</div><div class="tool-do">${esc(d)}<br>${esc(r)}</div></div>`).join('');
 document.querySelectorAll('.nav [data-filter]').forEach(btn=>btn.onclick=()=>{document.querySelectorAll('.nav [data-filter]').forEach(b=>b.classList.remove('active'));btn.classList.add('active');const filter=btn.dataset.filter;document.querySelectorAll('#stream .fold').forEach(el=>el.hidden=filter!=='all'&&el.dataset.kind!==filter)});
 // Albert is a Fabric surface, so synchronized beacon/light shows include it too.
+
+// Reminder content is text, so saved notes never become executable browser markup.
+let notebookReminderKey='';
+const notebookReminderPanel=document.createElement('section');
+notebookReminderPanel.setAttribute('aria-label','Due reminders');
+notebookReminderPanel.style.cssText='position:fixed;bottom:16px;right:16px;max-width:420px;max-height:50vh;overflow:auto;z-index:10000;background:Canvas;color:CanvasText;border:1px solid currentColor;border-radius:8px;padding:12px;box-shadow:0 4px 24px #0003';
+notebookReminderPanel.hidden=true;
+document.body.appendChild(notebookReminderPanel);
+function renderNotebookReminders(rows){
+ const key=rows.map(row=>row.event_id+':'+row.revision).join('|');
+ if(key===notebookReminderKey)return;
+ notebookReminderKey=key;
+ notebookReminderPanel.replaceChildren();
+ notebookReminderPanel.hidden=!rows.length;
+ for(const row of rows){
+  const card=document.createElement('article'),heading=document.createElement('strong');
+  const overdue=Date.now()/1000-row.remind_at>60;
+  heading.textContent=(overdue?'Overdue · ':'Reminder · ')+row.title;
+  card.appendChild(heading);
+  const details=document.createElement('details'),summary=document.createElement('summary'),body=document.createElement('pre');
+  summary.textContent='Open note';body.textContent=row.body;
+  body.style.cssText='white-space:pre-wrap;overflow-wrap:anywhere;font:inherit';
+  details.append(summary,body);card.appendChild(details);
+  for(const choice of ['done','snooze']){
+   const button=document.createElement('button');
+   button.textContent=choice==='done'?'Done':'Snooze 10 minutes';
+   button.style.margin='6px';
+   button.onclick=async()=>{
+    button.disabled=true;
+    try{
+     const response=await fetch('/api/notebook/answer',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({id:row.id,revision:row.revision,choice})});
+     const result=await response.json();
+     if(!response.ok||result.ok===false||result.error)throw Error(result.error||'Could not update reminder');
+     card.remove();if(!notebookReminderPanel.children.length)notebookReminderPanel.hidden=true;
+     notebookReminderKey='';
+    }catch(error){button.disabled=false;button.title=error.message;button.textContent='Retry · '+error.message}
+   };
+   card.appendChild(button);
+  }
+  notebookReminderPanel.appendChild(card);
+ }
+}
 let lastBeacon='';
-async function pollLights(){try{const r=await fetch('/v1/lights',{cache:'no-store'});if(!r.ok)return;const d=await r.json(),c=d.light?.color||'';if(c===lastBeacon)return;lastBeacon=c;const colors={red:'#ff3b30',green:'#34c759',blue:'#0a84ff',white:'#ffffff'};beaconLayer.style.background=colors[c]||'transparent';beaconLayer.style.opacity=c&&c!=='off'?'.48':'0'}catch{}}
+async function pollLights(){try{const r=await fetch('/v1/lights',{cache:'no-store'});if(!r.ok)return;const d=await r.json(),c=d.light?.color||'';renderNotebookReminders(d.reminders||[]);if(c===lastBeacon)return;lastBeacon=c;const colors={red:'#ff3b30',green:'#34c759',blue:'#0a84ff',white:'#ffffff'};beaconLayer.style.background=colors[c]||'transparent';beaconLayer.style.opacity=c&&c!=='off'?'.48':'0'}catch{}}
 setInterval(pollLights,350);pollLights();
 // Opening paper: one compact introduction, not a dashboard.
 async function restoreThread(){try{const r=await fetch('/api/thread?session='+encodeURIComponent(ALBERT_SESSION),{cache:'no-store'});if(!r.ok)return;const d=await r.json();if(!d.turns?.length)return;addFold({type:'answer',title:'Albert',meta:'continued thread',badge:'restored',kind:'thing',turns:d.turns.map(t=>({role:t.role,text:t.content}))},{front:true})}catch{}}

@@ -96,6 +96,31 @@
     "Clear memory"
   ],
   [
+    "lkn",
+    "[TEXT|ACTION] [OPTIONS]",
+    "files",
+    "Offline notebook, tasks and reminders",
+    "lk notes"
+  ],
+  [
+    "lk notes",
+    "[TEXT|ACTION] [OPTIONS]",
+    "files",
+    "Capture, search, edit and file notes"
+  ],
+  [
+    "lk tasks",
+    "[TEXT|ACTION] [OPTIONS]",
+    "files",
+    "Notebook task view"
+  ],
+  [
+    "lk reminders",
+    "[TEXT|ACTION] [OPTIONS]",
+    "files",
+    "Notebook reminder view"
+  ],
+  [
     "lk",
     "",
     "files",

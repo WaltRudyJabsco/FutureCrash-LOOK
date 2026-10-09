@@ -485,6 +485,7 @@ class ArtifactStore:
         hexdigest = digest_hash.hexdigest()
         digest = f"sha256:{hexdigest}"
         guessed = mimetypes.guess_type(source.name)[0] or "application/octet-stream"
+        if guessed == 'audio/x-flac': guessed = 'audio/flac'
         meta = self.root / f"{hexdigest}.json"
         managed_blob = self.root / hexdigest
         if managed_blob.is_file() and meta.is_file():

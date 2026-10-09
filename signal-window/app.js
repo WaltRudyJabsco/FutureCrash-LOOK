@@ -286,8 +286,50 @@ async function pollDecisions(){
 setInterval(pollDecisions,750);pollDecisions();
 
 let lastFabricLight='';
+
+// Reminder content is text, so saved notes never become executable browser markup.
+let notebookReminderKey='';
+const notebookReminderPanel=document.createElement('section');
+notebookReminderPanel.setAttribute('aria-label','Due reminders');
+notebookReminderPanel.style.cssText='position:fixed;bottom:16px;right:16px;max-width:420px;max-height:50vh;overflow:auto;z-index:10000;background:Canvas;color:CanvasText;border:1px solid currentColor;border-radius:8px;padding:12px;box-shadow:0 4px 24px #0003';
+notebookReminderPanel.hidden=true;
+document.body.appendChild(notebookReminderPanel);
+function renderNotebookReminders(rows){
+ const key=rows.map(row=>row.event_id+':'+row.revision).join('|');
+ if(key===notebookReminderKey)return;
+ notebookReminderKey=key;
+ notebookReminderPanel.replaceChildren();
+ notebookReminderPanel.hidden=!rows.length;
+ for(const row of rows){
+  const card=document.createElement('article'),heading=document.createElement('strong');
+  const overdue=Date.now()/1000-row.remind_at>60;
+  heading.textContent=(overdue?'Overdue · ':'Reminder · ')+row.title;
+  card.appendChild(heading);
+  const details=document.createElement('details'),summary=document.createElement('summary'),body=document.createElement('pre');
+  summary.textContent='Open note';body.textContent=row.body;
+  body.style.cssText='white-space:pre-wrap;overflow-wrap:anywhere;font:inherit';
+  details.append(summary,body);card.appendChild(details);
+  for(const choice of ['done','snooze']){
+   const button=document.createElement('button');
+   button.textContent=choice==='done'?'Done':'Snooze 10 minutes';
+   button.style.margin='6px';
+   button.onclick=async()=>{
+    button.disabled=true;
+    try{
+     const response=await fetch('/api/notebook/answer',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({id:row.id,revision:row.revision,choice})});
+     const result=await response.json();
+     if(!response.ok||result.ok===false||result.error)throw Error(result.error||'Could not update reminder');
+     card.remove();if(!notebookReminderPanel.children.length)notebookReminderPanel.hidden=true;
+     notebookReminderKey='';
+    }catch(error){button.disabled=false;button.title=error.message;button.textContent='Retry · '+error.message}
+   };
+   card.appendChild(button);
+  }
+  notebookReminderPanel.appendChild(card);
+ }
+}
 async function pollFabricLight(){
- try{const r=await fetch('/api/fabric/lights',{cache:'no-store'});if(!r.ok)return;const d=await r.json();const light=d.light||null;const color=String(light?.color||'off');const key=(light?.show_id||light?.id||'')+':'+color;
+ try{const r=await fetch('/api/fabric/lights',{cache:'no-store'});if(!r.ok)return;const d=await r.json();renderNotebookReminders(d.reminders||[]);const light=d.light||null;const color=String(light?.color||'off');const key=(light?.show_id||light?.id||'')+':'+color;
   const css={red:'#7b1717',green:'#176b35',blue:'#173d7b',white:'#d8e4dc',off:'transparent'}[color]||'transparent';
   fabricLight.style.background=css;fabricLight.style.opacity=color==='off'?'0':'0.82';
   if(light&&key!==lastFabricLight){event(`FABRIC ${String(light.pattern||'LIGHT').toUpperCase()} · ${color.toUpperCase()}`);lastFabricLight=key}

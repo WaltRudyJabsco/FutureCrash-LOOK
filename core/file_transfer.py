@@ -57,7 +57,7 @@ def common_places():
     for label,path in candidates:
         try:
             path=path.resolve()
-            if path not in seen and path.is_dir(): directories.append({'name':label,'path':str(path)}); seen.add(path)
+            if path != Path('/') and path not in seen and path.is_dir(): directories.append({'name':label,'path':str(path)}); seen.add(path)
         except OSError: continue
     directories.append({'name':'Filesystem / (all directories)','path':'/'})
     return {'ok':True,'path':'/','home':str(home),'mode':'common','directories':directories}

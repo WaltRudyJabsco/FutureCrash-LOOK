@@ -12,8 +12,8 @@ if [[ "${FCL_UNIFIED_INSTALL_CHILD:-0}" != "1" && -x "$ROOT/install.sh" ]]; then
 fi
 
 PRODUCT_VERSION="$(tr -d '[:space:]' < "$ROOT/VERSION")"
-LOOK_VERSION="4.56.5"
-FUTURE_CRASH_VERSION="1.2.2"
+LOOK_VERSION="4.57.0"
+FUTURE_CRASH_VERSION="1.2.3"
 
 DRY=0
 ASSUME_YES=0
@@ -332,6 +332,8 @@ install_file "$ROOT/look/media_sidecar.py" "$HOME/.local/share/look/media_sideca
 install_file "$ROOT/look/media_open.py" "$HOME/.local/share/look/media_open.py"
 install_file "$ROOT/look/destination_history.py" "$HOME/.local/share/look/destination_history.py"
 install_file "$ROOT/look/ytd.py" "$HOME/.local/share/look/ytd.py"
+install_file "$ROOT/look/notebook.py" "$HOME/.local/share/look/notebook.py"
+install_file "$ROOT/look/notebook_core.py" "$HOME/.local/share/look/notebook_core.py"
 install_file "$ROOT/look/weather_forecast.py" "$HOME/.local/share/look/weather_forecast.py"
 install_file "$ROOT/look/media_core.py" "$HOME/.local/share/look/media_core.py"
 install_file "$ROOT/look/fabric_files.py" "$HOME/.local/share/look/fabric_files.py"

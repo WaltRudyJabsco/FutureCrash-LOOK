@@ -1201,6 +1201,7 @@ class App(BaseHTTPRequestHandler):
         if self.path.startswith("/api/"):
             if self.path.startswith("/api/media"): scope="media.output"
             elif self.path=="/api/fabric/decisions/answer": scope="decisions.answer"
+            elif self.path=="/api/notebook/answer": scope="lo.use"
             elif self.path=="/api/chat": scope="lo.use"
             else: scope="signal.view"
             if not self._require_endpoint(scope): return
@@ -1215,6 +1216,13 @@ class App(BaseHTTPRequestHandler):
                 return self.json(200,value)
             except Exception as exc:
                 return self.json(502,{"ok":False,"error":str(exc),"actions":[]})
+        if self.path=="/api/notebook/answer":
+            try:
+                n=int(self.headers.get('Content-Length') or 0)
+                if not 0<n<=65536: raise ValueError('Invalid reminder request size')
+                d=json.loads(self.rfile.read(n))
+                return self.json(200,_node_call('/v1/notebook/answer',d,timeout=3))
+            except Exception as exc: return self.json(400,{'ok':False,'error':str(exc)})
         if self.path=="/api/endpoint/receipt":
             try:
                 n=int(self.headers.get("Content-Length","0")); d=json.loads(self.rfile.read(n) or b"{}")
