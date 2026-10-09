@@ -21,9 +21,19 @@ lk reminders list
 Bare `lkn` opens the notebook. Arrow keys move; Shift-arrows page or jump to
 ends; Tab marks; Shift-A selects all filtered records. Type to filter or use `/`.
 Enter opens the focused Markdown document in `$VISUAL`, `$EDITOR`, Neovim, or vi.
-Shift-N captures a note, Shift-P files under a project, Shift-C completes,
+Shift-N opens quick capture: Enter saves; Shift-Enter adds a line break or a
+blank paragraph; Escape cancels. The editor requests modified-key reporting
+while active. If a terminal sends Enter and Shift-Enter identically, use Ctrl-J
+or Alt-Enter for a newline. Cursor keys and Backspace edit the draft.
+Shift-P files under a project, Shift-C completes,
 Shift-R schedules a reminder, and Shift-D deletes after confirmation. Escape
 clears a filter, then exits. Ctrl-C exits immediately.
+
+LO can list or read records directly: `lo list the notes`, `lo what do our notes say`,
+or `lo what does the first note say`. First/second refers to the current LKN
+listing, ordered by most recent update. `notebook_list` needs no keyword;
+`notebook_read` retrieves full text by ID or list position. Empty
+`notebook_search` also lists records.
 
 Use the eight-character ID printed after capture for these actions:
 

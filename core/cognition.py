@@ -86,6 +86,8 @@ ACTION_SPECS = (
     ActionSpec("schedule_prompt", "schedule", "external_effect", "action", ("schedule", "remind", "every day", "later")),
     ActionSpec("schedule_list", "schedule", "read", "observation", ("scheduled jobs", "reminders")),
     ActionSpec("notebook_search", "memory", "read", "observation", ("notes", "tasks", "notebook", "to-do")),
+    ActionSpec("notebook_list", "memory", "read", "observation", ("list notes", "show notes", "our notes")),
+    ActionSpec("notebook_read", "memory", "read", "observation", ("first note", "read note", "what does the note say")),
     ActionSpec("notebook_capture", "memory", "local_effect", "mutation", ("save a note", "record", "task")),
     ActionSpec("notebook_complete", "memory", "local_effect", "mutation", ("complete task", "done")),
     ActionSpec("list_processes", "system", "read", "observation", ("processes", "what is running", "pid")),

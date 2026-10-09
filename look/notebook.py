@@ -4,12 +4,14 @@ import argparse
 import datetime as dt
 import json
 import os
+import re
 from pathlib import Path
 import shlex
 import shutil
 import subprocess
 import sys
 import termios
+import textwrap
 import time
 import tty
 import urllib.request
@@ -58,15 +60,56 @@ def display(row):
     return f"{row['id'][:8]} · {row['kind']} · {row['project']} · {row['title']}"+(' · '+due if due else '')+(' · CONFLICT' if row['conflict'] else '')
 
 
+def capture_note(fd,read_key):
+    """Keep Enter fast; request distinct modified keys while the note editor owns input."""
+    previous=termios.tcgetattr(fd)
+    text=''; cursor=0
+    try:
+        tty.setraw(fd)
+        sys.stdout.write('\033[>1u')
+        while True:
+            width,height=shutil.get_terminal_size((100,30))
+            before=text[:cursor]; after=text[cursor:]
+            rows=(before+'█'+after).split('\n')
+            rows=[part for line in rows for part in (textwrap.wrap(line,max(1,width-1),replace_whitespace=False,drop_whitespace=False) or [''])]
+            cursor_row=next((index for index,line in enumerate(rows) if '█' in line),0)
+            top=max(0,cursor_row-max(1,height-4)+1)
+            visible=rows[top:top+max(1,height-4)]
+            frame=['NEW NOTE · Enter save · Shift-Enter/Ctrl-J newline · Esc cancel'[:max(1,width-1)],'']
+            frame.extend(visible)
+            sys.stdout.write('\033[2J\033[H'+'\r\n'.join(frame)+'\033[J'); sys.stdout.flush()
+            key=read_key(fd,None)
+            if key in {'esc','\x03'}: return None
+            if key in {'\r','enter'}: return text
+            if key in {'shiftenter','\n'}:
+                text=text[:cursor]+'\n'+text[cursor:]; cursor+=1
+            elif key in {'\x7f','\b'} and cursor:
+                text=text[:cursor-1]+text[cursor:]; cursor-=1
+            elif key=='left': cursor=max(0,cursor-1)
+            elif key=='right': cursor=min(len(text),cursor+1)
+            elif key=='home': cursor=text.rfind('\n',0,cursor)+1
+            elif key=='end':
+                next_line=text.find('\n',cursor); cursor=len(text) if next_line<0 else next_line
+            elif len(key)==1 and key.isprintable():
+                text=text[:cursor]+key+text[cursor:]; cursor+=1
+    finally:
+        sys.stdout.write('\033[<u'); sys.stdout.flush()
+        termios.tcsetattr(fd,termios.TCSADRAIN,previous)
+
+
 def workspace(store,kind,read_key,hints):
     fd=sys.stdin.fileno(); old=termios.tcgetattr(fd)
     query=''; index=0; marked=set(); notice=''
     def prompt(label):
         termios.tcsetattr(fd,termios.TCSADRAIN,old)
+        sys.stdout.write('\033[?25h'); sys.stdout.flush()
         try: return input('\n'+label+' › ')
-        finally: tty.setcbreak(fd)
+        finally:
+            tty.setcbreak(fd)
+            sys.stdout.write('\033[?25l'); sys.stdout.flush()
     try:
         tty.setcbreak(fd)
+        sys.stdout.write('\033[2J\033[H\033[?25l'); sys.stdout.flush()
         while True:
             rows=store.list(query,kind)
             index=max(0,min(index,max(0,len(rows)-1)))
@@ -78,7 +121,7 @@ def workspace(store,kind,read_key,hints):
                 lines.append(('\033[1;36m›' if number==index else ' ')+marker+' '+display(row)[:max(10,width-5)]+'\033[0m')
             while len(lines)<height-4: lines.append('')
             lines.extend(['FILTER '+query+'█',hints('↑↓ move · Shift-arrows page/ends · Tab mark · A all · Enter edit · N new · P file · C done · R remind · D delete · / filter · Esc clear/exit',width),notice])
-            sys.stdout.write('\033[H'+ '\n'.join(lines)+'\033[J'); sys.stdout.flush()
+            sys.stdout.write('\033[H'+ '\033[K\n'.join(lines)+'\033[K\033[J'); sys.stdout.flush()
             key=read_key(fd,1)
             if not key: continue
             notice=''; chosen=[row for row in rows if row['id'] in marked] or rows[index:index+1]
@@ -108,8 +151,8 @@ def workspace(store,kind,read_key,hints):
                     try: edit(store,rows[index])
                     finally: tty.setcbreak(fd)
                 elif key=='N':
-                    text=prompt('new '+(kind or 'note'))
-                    if text.strip():
+                    text=capture_note(fd,read_key)
+                    if text and text.strip():
                         remind=timestamp(prompt('remind when')) if kind=='reminder' else None
                         store.create(text,kind=kind or 'note',remind_at=remind); nudge_sync()
                 elif key in {'C','D','R','P'} and chosen:
@@ -127,7 +170,7 @@ def workspace(store,kind,read_key,hints):
                 notice=str(exc)
     finally:
         termios.tcsetattr(fd,termios.TCSADRAIN,old)
-        sys.stdout.write('\n'); sys.stdout.flush()
+        sys.stdout.write('\033[?25h\033[0m\n'); sys.stdout.flush()
     return 0
 
 
@@ -193,8 +236,56 @@ def main(argv=None,kind=None,read_key=None,hints=None):
 MAX_CAPTURE_BYTES=256_001
 
 
+def read_intent(prompt):
+    """Resolve bounded notebook observations; no model is needed to list local records."""
+    text=' '.join(str(prompt).casefold().strip(' .!?').split())
+    if re.fullmatch(r'(?:list|show|read)(?: me)? (?:(?:all|the|our|my|saved) )*(?:notes|notebook|lkn)',text):
+        return {'tool':'notebook_list','args':{}}
+    if re.fullmatch(r'what (?:do|does) (?:(?:the|our|my|saved) )*(?:notes|notebook|lkn) (?:say|contain|have)',text):
+        return {'tool':'notebook_list','args':{}}
+    match=re.fullmatch(r'(?:(?:what does|read|show)(?: me)? )?(?:(?:the|our|my) )*(first|second|third|fourth|fifth|last|oldest|newest|\d+)(?:st|nd|rd|th)? note(?: say| contain)?',text)
+    if match:
+        word=match[1]
+        position={'first':1,'second':2,'third':3,'fourth':4,'fifth':5,'newest':1,'last':-1,'oldest':-1}.get(word)
+        position=int(word) if position is None else position
+        return {'tool':'notebook_read','args':{'position':position}}
+    return None
+
+
+def read_records(store,args):
+    identifier=str(args.get('id') or '')
+    rows=store.list(include_done=bool(args.get('include_done',False)) or bool(identifier))
+    if identifier:
+        matches=[row for row in rows if row['id'].startswith(identifier)]
+        if len(matches)!=1: raise ValueError('Note ID is missing, ambiguous, or conflicted')
+        return matches[0]
+    position=args.get('position',1)
+    if not isinstance(position,int) or isinstance(position,bool) or position==0:
+        raise ValueError('Use a note position starting at 1')
+    index=position-1 if position>0 else len(rows)-1
+    if not 0<=index<len(rows): raise ValueError('That note position is outside the current notebook list')
+    return rows[index]
+
+
+def direct_read(intent):
+    try:
+        store=Notebook()
+        rows=store.list() if intent['tool']=='notebook_list' else [read_records(store,intent['args'])]
+        if not rows: return 'Your notebook has no open notes, tasks, or reminders.'
+        answer=['LOOK notebook · current list, newest updated first']
+        start=int(intent['args'].get('position') or 1)
+        if start<0: start=len(store.list())
+        for position,row in enumerate(rows,start):
+            answer.extend(['',f"{position}. {row['title']} · {row['project']} · {row['id'][:8]}",row['body']])
+        return '\n'.join(answer)
+    except (ValueError,OSError) as exc:
+        return 'LOOK notebook · '+str(exc)
+
+
 def tools():
-    definitions=[('notebook_search','Search saved notes and tasks; authoritative user records.',{'query':{'type':'string'}},[]),
+    definitions=[('notebook_search','Search saved notebook records. Omit query or use an empty string to list all records, including completed records. Results include full note bodies.',{'query':{'type':'string'}},[]),
+        ('notebook_list','List saved notes, tasks and reminders in current LKN order: most recently updated first. No keyword is required. Results include full bodies.',{'include_done':{'type':'boolean'}},[]),
+        ('notebook_read','Read the full text of a saved notebook record by its ID or position in the current LKN list. First note means position 1; positions follow newest updated first.',{'id':{'type':'string'},'position':{'type':'integer','minimum':1},'include_done':{'type':'boolean'}},[]),
         ('notebook_capture','Save a note, task or reminder only when the user asks to record it.',
          {'text':{'type':'string'},'kind':{'type':'string','enum':['note','task','reminder']},'project':{'type':'string'},
           'due':{'type':'string'},'remind_at':{'type':'string'},'target':{'type':'string'}},['text']),
@@ -206,6 +297,8 @@ def tools():
 def tool(name,args):
     store=Notebook()
     if name=='notebook_search': result=store.list(str(args.get('query') or ''),include_done=True)
+    elif name=='notebook_list': result=store.list(include_done=bool(args.get('include_done',False)))
+    elif name=='notebook_read': result=read_records(store,args)
     elif name=='notebook_capture':
         if args.get('kind')=='reminder' and not args.get('remind_at'): raise ValueError('Reminder needs an explicit date/time')
         options={key:args[key] for key in ('kind','project','due','remind_at') if key in args}

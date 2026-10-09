@@ -31,7 +31,7 @@ try:
 except Exception:
     readline = None
 
-VERSION="4.57.0"
+VERSION="4.57.1"
 
 LOOK_WORDMARK = r"""       ██╗      ██╗  ██╗
        ██║      ██║ ██╔╝
@@ -8450,6 +8450,7 @@ _TOOL_POLICY = {
     "video_search":("all","observation"),"video_download_status":("all","observation"),
     "video_download":("workspace","mutation"),
     "notebook_search":("all","observation"),
+    "notebook_list":("all","observation"),"notebook_read":("all","observation"),
     "notebook_capture":("workspace","mutation"),"notebook_complete":("workspace","mutation"),
     "run_command":("power","command"),
 }
@@ -10013,7 +10014,7 @@ def _direct_searxng_search(query, limit=8):
     params=urllib.parse.urlencode({"q":query,"format":"json"})
     request=urllib.request.Request(base+"/search?"+params,headers={
         "Accept":"application/json",
-        "User-Agent":"Future-Crash-Fabric/8.10.0",
+        "User-Agent":"Future-Crash-Fabric/8.10.1",
     })
     with urllib.request.urlopen(request,timeout=12) as response:
         data=json.load(response)
@@ -11090,6 +11091,11 @@ def ollama_chat(force_search=False, initial_prompt=None, allow_start=True, host_
     }
     capability_message_index=len(messages)
     messages.append({"role":"system","content":capability_notes[profile]})
+    messages.append({'role':'system','content':
+        'LOOK NOTEBOOK: explicit user records are separate from model memory. Use notebook_list to list notes without a keyword; '
+        'notebook_search with an empty query also lists records. Use notebook_read for full text by ID or position. '
+        'First/second note refers to positions in the current LKN listing, newest updated first. '
+        'When asked what notes say, retrieve their bodies; do not ask for keywords merely to list them.'})
     thinking_mode=_load_thinking()
     thinking_notes={
         "light":"THINKING DEPTH: LIGHT. Give fast, direct answers.",
@@ -11303,6 +11309,21 @@ def ollama_chat(force_search=False, initial_prompt=None, allow_start=True, host_
             continue
 
         # Fast host actions are real turns but intentionally skip deliberative cognition.
+        import notebook
+        notebook_intent=notebook.read_intent(prompt)
+        if notebook_intent:
+            notebook_answer=notebook.direct_read(notebook_intent)
+            print("\n"+_lo_label("lo","35")+"\n"+_ollama_markup(notebook_answer)+"\n")
+            _save_recent_exchange(prompt,notebook_answer)
+            messages.append({'role':'user','content':prompt})
+            messages.append({'role':'assistant','content':notebook_answer})
+            if events:
+                events.emit('intent_routed',family='memory',families=['memory'],confidence=1.0,margin=1.0,source='rules',forced_search=False)
+                events.emit('response',text=notebook_answer)
+                events.emit('request_done',status='ok',rounds=0,tool_calls=1,prompt_tokens=0,output_tokens=0,load_ms=0)
+            if one_shot: return 0
+            continue
+
         turn_id += 1
 
         # Present-tense state queries are observations, not model questions.
@@ -12038,10 +12059,10 @@ def ollama_chat(force_search=False, initial_prompt=None, allow_start=True, host_
                     tool_event_started=time.monotonic()
                     if events: events.emit("tool_start", tool=name)
 
-                    if name in {"notebook_search","notebook_capture","notebook_complete"}:
+                    if name in {"notebook_search","notebook_list","notebook_read","notebook_capture","notebook_complete"}:
                         import notebook
                         try:
-                            if name!='notebook_search' and not re.search(r'\b(note|notes|save|record|remember|remind|task|todo|to.do|complete|done|finish)\b',prompt,re.I):
+                            if name in {'notebook_capture','notebook_complete'} and not re.search(r'\b(note|notes|save|record|remember|remind|task|todo|to.do|complete|done|finish)\b',prompt,re.I):
                                 raise ValueError('The user has not requested a notebook change')
                             tool_content=notebook.tool(name,args)
                         except Exception as exc: tool_content=f"NOTEBOOK FAILED · {exc}"
@@ -12618,16 +12639,25 @@ def _read_tty_key(fd, timeout=None):
             return ""
     ch=os.read(fd,1)
     if ch != b"\x1b":
+        if ch and ch[0]>=0xC2:
+            count=2 if ch[0]<0xE0 else 3 if ch[0]<0xF0 else 4
+            while len(ch)<count:
+                ready,_,_=select.select([fd],[],[],0.035)
+                if not ready: break
+                ch+=os.read(fd,1)
         return ch.decode("utf-8","ignore")
     seq=bytearray(ch)
-    while len(seq)<8:
+    while len(seq)<16:
         ready,_,_=select.select([fd],[],[],0.035)
         if not ready:
             break
         seq.extend(os.read(fd,1))
-        if seq[-1:] in b"~ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz":
+        if seq[-1:] in b"~ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz\r\n":
             break
     return {
+        b"\x1b[13;2u":"shiftenter", b"\x1b[27;2;13~":"shiftenter",
+        b"\x1b\r":"shiftenter", b"\x1b\n":"shiftenter",
+        b"\x1b[13u":"enter", b"\x1b[13;1u":"enter",
         b"\x1b[A":"up",
         b"\x1b[B":"down",
         b"\x1b[C":"right",
