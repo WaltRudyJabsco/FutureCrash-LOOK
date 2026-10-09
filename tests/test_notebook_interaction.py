@@ -84,6 +84,29 @@ def test_capture_escape_does_not_save_a_draft(terminal,capsys):
     assert capsys.readouterr().out.endswith('\033[<u')
 
 
+@pytest.mark.parametrize('key',['shiftup','pageup'])
+def test_editor_pages_up_preserving_column(key,terminal,monkeypatch):
+    monkeypatch.setattr(notebook.shutil,'get_terminal_size',lambda *args:(80,10))
+    lines=['abcdef']*12
+    keys=iter([key,'X','\r'])
+    result=notebook.capture_note(5,lambda *args:next(keys),'\n'.join(lines),'EDIT')
+    lines[7]+='X'  # Four editable lines fit; move from line 11 to line 7.
+    assert result=='\n'.join(lines)
+
+
+@pytest.mark.parametrize('key',['shiftdown','pagedown'])
+def test_editor_pages_down_and_clamps_at_last_line(key,terminal,monkeypatch):
+    monkeypatch.setattr(notebook.shutil,'get_terminal_size',lambda *args:(80,10))
+    keys=iter(['shiftleft',key,'X',key,key,'Y','\r'])
+    result=notebook.capture_note(5,lambda *args:next(keys),'\n'.join(['abc']*6),'EDIT')
+    assert result=='abc\nabc\nabc\nabc\nXabc\naYbc'
+
+
+def test_editor_note_jumps_and_line_home_end(terminal):
+    keys=iter(['shiftleft','X','down','home','Y','end','Z','shiftright','!','\r'])
+    assert notebook.capture_note(5,lambda *args:next(keys),'abc\ndef','EDIT')=='Xabc\nYdefZ!'
+
+
 def test_workspace_clears_old_screen_and_saves_multiline_capture(tmp_path,monkeypatch,terminal,capsys):
     keys=iter(['N','a','shiftenter','b','\r','q'])
     monkeypatch.setattr(notebook,'nudge_sync',lambda:None)

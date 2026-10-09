@@ -8,7 +8,7 @@ def test_service_binary_discovery_includes_linuxbrew():
     assert 'Path.home()/".linuxbrew/bin"/name' in src
 
 def test_sound_check_release_contract():
-    assert (ROOT/'VERSION').read_text().strip() == '8.12.0'
+    assert (ROOT/'VERSION').read_text().strip() == '8.12.1'
     node=(ROOT/'core/node.py').read_text()
-    assert 'VERSION = "8.12.0"' in node
+    assert 'VERSION = "8.12.1"' in node
     assert 'RELEASE_NAME = "FABRIC VISION"' in node

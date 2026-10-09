@@ -87,6 +87,8 @@ Capture: N opens a draft. Enter saves; Shift-Enter/Ctrl-J inserts a newline.
 Escape cancels a draft. Enter opens a boxed Markdown note view.
 In the view: arrows/Space scroll, E edits the body, V opens your full editor.
 Quick edits keep the title; Enter saves, Shift-Enter/Ctrl-J adds a newline.
+Editor: Shift-Left/Right jumps to the start/end of the note; Home/End moves
+within the line. Shift-Up/Down or Page Up/Down moves a page of lines.
 Escape returns to the list. Explicit lkn edit NAME also opens the full editor.
 
 File (P): change the project label; text and stable ID stay the same.
@@ -157,7 +159,8 @@ def capture_note(fd,read_key,initial_text='',label='NEW NOTE'):
             page=max(1,height-(6 if boxed else 4))
             top=max(0,cursor_row-page+1)
             visible=rows[top:top+page]
-            frame=[(label+' · Enter save · Shift-Enter/Ctrl-J newline · Esc cancel')[:max(1,width-1)],'']
+            frame=[(label+' · Enter save · Shift-Enter/Ctrl-J newline · Esc cancel')[:max(1,width-1)],
+                   'Shift-↑↓ / PgUp/PgDn page · Shift-←→ note start/end · Home/End line'[:max(1,width-1)]]
             if boxed:
                 frame.extend(['┌'+'─'*columns+'┐',*['│'+line.ljust(columns)+'│' for line in visible],'└'+'─'*columns+'┘'])
             else: frame.extend(visible)
@@ -172,15 +175,20 @@ def capture_note(fd,read_key,initial_text='',label='NEW NOTE'):
             elif key=='left': cursor=max(0,cursor-1)
             elif key=='right': cursor=min(len(text),cursor+1)
             elif key=='delete': text=text[:cursor]+text[cursor+1:]
-            elif key in {'up','down'}:
+            elif key=='shiftleft': cursor=0
+            elif key=='shiftright': cursor=len(text)
+            elif key in {'up','down','pageup','pagedown','shiftup','shiftdown'}:
                 start=text.rfind('\n',0,cursor)+1; column=cursor-start
-                end=text.find('\n',cursor)
-                if key=='up' and start:
-                    prior=text.rfind('\n',0,start-1)+1
-                    cursor=min(prior+column,start-1)
-                elif key=='down' and end>=0:
-                    following=text.find('\n',end+1)
-                    cursor=min(end+1+column,len(text) if following<0 else following)
+                count=1 if key in {'up','down'} else page
+                for _ in range(count):
+                    start=text.rfind('\n',0,cursor)+1; end=text.find('\n',cursor)
+                    if key in {'up','pageup','shiftup'} and start:
+                        prior=text.rfind('\n',0,start-1)+1
+                        cursor=min(prior+column,start-1)
+                    elif key in {'down','pagedown','shiftdown'} and end>=0:
+                        following=text.find('\n',end+1)
+                        cursor=min(end+1+column,len(text) if following<0 else following)
+                    else: break
             elif key=='home': cursor=text.rfind('\n',0,cursor)+1
             elif key=='end':
                 next_line=text.find('\n',cursor); cursor=len(text) if next_line<0 else next_line
@@ -233,10 +241,10 @@ def note_view(store,row,read_key):
             if key in {'esc','q','\x03'}: return
             if key in {'down','j','\r','\n'}: top+=1
             elif key in {'up','k'}: top-=1
-            elif key in {'pagedown',' '}: top+=page
-            elif key=='pageup': top-=page
-            elif key=='home': top=0
-            elif key=='end': top=len(content)
+            elif key in {'pagedown','shiftdown',' '}: top+=page
+            elif key in {'pageup','shiftup'}: top-=page
+            elif key in {'home','shiftleft'}: top=0
+            elif key in {'end','shiftright'}: top=len(content)
             elif key in {'H','?'}: show_help(fd,read_key)
             elif key in {'E','V'}:
                 if key=='E':

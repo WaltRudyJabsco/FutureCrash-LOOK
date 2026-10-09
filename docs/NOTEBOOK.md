@@ -36,6 +36,9 @@ Shift-N opens quick capture: Enter saves; Shift-Enter adds a line break or a
 blank paragraph; Escape cancels. The editor requests modified-key reporting
 while active. If a terminal sends Enter and Shift-Enter identically, use Ctrl-J
 or Alt-Enter for a newline. Cursor keys and Backspace edit the draft.
+Shift-Left/Right jumps to the start/end of the note; Home/End moves within
+the current line. Shift-Up/Down and Page Up/Down move a page of lines.
+The read-only view also accepts Shift-arrows to page or jump to its ends.
 Shift-P files under a project, Shift-C completes,
 Shift-R schedules a reminder, and Shift-D deletes after confirmation. Escape
 clears a filter, then exits. Ctrl-C exits immediately.
