@@ -2,6 +2,8 @@ import importlib.util
 import io
 import json
 import os
+import threading
+from concurrent.futures import ThreadPoolExecutor
 from importlib.machinery import SourceFileLoader
 from pathlib import Path
 from types import SimpleNamespace
@@ -22,6 +24,47 @@ def load_lk():
 class Tty(io.StringIO):
     def isatty(self):
         return True
+
+
+def test_concurrent_media_session_writes_use_separate_staging_files(tmp_path,monkeypatch):
+    lk=load_lk()
+    destination=tmp_path/'media_session.json'
+    monkeypatch.setattr(lk,'MEDIA_SESSION_FILE',destination)
+    barrier=threading.Barrier(2)
+    replace=os.replace
+    staged=[]
+
+    def simultaneous_replace(source,target):
+        staged.append(Path(source))
+        # Reproduce Player and MP both finishing their writes before publishing.
+        barrier.wait(timeout=5)
+        return replace(source,target)
+
+    monkeypatch.setattr(os,'replace',simultaneous_replace)
+    with ThreadPoolExecutor(max_workers=2) as pool:
+        futures=[pool.submit(lk._media_save_session,{'state':state})
+                 for state in ['playing','paused']]
+        for future in futures:
+            future.result(timeout=10)
+    assert len(set(staged))==2
+    assert json.loads(destination.read_text())['state'] in {'playing','paused'}
+    assert destination.stat().st_mode & 0o777 == 0o600
+    assert list(tmp_path.glob('*.tmp'))==[]
+
+
+def test_atomic_json_failure_preserves_previous_file_and_cleans_staging(tmp_path,monkeypatch):
+    lk=load_lk()
+    destination=tmp_path/'session.json'
+    lk._atomic_json(destination,{'state':'playing'})
+
+    def fail_replace(*args):
+        raise OSError('simulated publication failure')
+
+    monkeypatch.setattr(os,'replace',fail_replace)
+    with pytest.raises(OSError,match='publication failure'):
+        lk._atomic_json(destination,{'state':'paused'})
+    assert json.loads(destination.read_text())=={'state':'playing'}
+    assert list(tmp_path.glob('*.tmp'))==[]
 
 
 def test_buffered_media_frames_keep_colors_and_pipes_stay_plain(monkeypatch):

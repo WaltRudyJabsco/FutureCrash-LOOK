@@ -20176,11 +20176,18 @@ def _lo_context_handoff(paths):
 def _atomic_json(path, data):
     path=Path(path)
     path.parent.mkdir(parents=True,exist_ok=True)
-    tmp=path.with_suffix(path.suffix+".tmp")
-    tmp.write_text(json.dumps(data,ensure_ascii=False,indent=2)+"\n",encoding="utf-8")
-    try: os.chmod(tmp,0o600)
-    except OSError: pass
-    tmp.replace(path)
+    # Player and MP can write together; each writer needs its own staging file.
+    # Keep it beside the destination so replacement stays atomic.
+    tmp=None
+    try:
+        with tempfile.NamedTemporaryFile("w",prefix=path.name+".",suffix=".tmp",
+                dir=path.parent,delete=False,encoding="utf-8") as output:
+            tmp=Path(output.name)
+            output.write(json.dumps(data,ensure_ascii=False,indent=2)+"\n")
+        tmp.replace(path)
+    finally:
+        if tmp is not None:
+            tmp.unlink(missing_ok=True)
 
 def _emit_event(kind, text, job_id=None):
     LO_EVENTS_DIR.mkdir(parents=True,exist_ok=True)
