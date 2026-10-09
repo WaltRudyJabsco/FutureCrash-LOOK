@@ -12,6 +12,14 @@ The Fabric catalog answers *what media exists and on which node*. A queue answer
 
 Controls: Tab toggles the focused row; Shift-A selects/unselects every currently visible row; Enter or Shift-P plays selected rows (or the focused row); Shift-Q appends selected/focused rows to the queue; Shift-S saves selected/focused rows as a playlist; Shift-C clears selection; Shift-I shows identity/details; Esc clears the filter and then exits.
 
+`/` starts search editing. Enter or Esc finishes editing while keeping the filter.
+Arrows, Tab, and selection actions work directly on the filtered results, including
+while editing. A subsequent Esc clears the filter; another exits.
+
+In `lk mp`, Shift-A likewise selects/unselects all visible results and Shift-C clears
+marks. Shift-B adds marked results (or the focused row) to the queue; Shift-Q shows
+the queue. Enter plays marked results or the focused row after search editing ends.
+
 ## Hidden media
 
 In Media Find, Shift-X hides selected items, Shift-D chooses a directory to hide,

@@ -21,7 +21,7 @@ def test_lk_mp_is_reachable_both_ways():
 
 
 def test_lk_mp_controls_are_documented_in_surface():
-    for text in ('A add queue','L library','Q queue','s shuffle','r repeat','/ search'):
+    for text in ('A select all','B add queue','L library','Q queue','s shuffle','r repeat','/ search'):
         assert text in LK
 
 

@@ -17865,7 +17865,7 @@ def _media_selector(rows,title="FABRIC MEDIA",initial_query="",catalog_meta=None
                 visible=_media_collapse(base_rows,show_all=show_all,show_hidden=show_hidden)
                 view_key=next_view_key
             idx=max(0,min(idx,max(0,len(visible)-1)))
-            selected_rows=[row for row in rows if row_id(row) in selected_ids]
+            selected_rows=[row for row in visible if row_id(row) in selected_ids]
             terminal=shutil.get_terminal_size((110,32))
             height=max(10,terminal.lines)
             width=max(56,terminal.columns)
@@ -17929,7 +17929,7 @@ def _media_selector(rows,title="FABRIC MEDIA",initial_query="",catalog_meta=None
                             print(left)
 
                 filter_text=f"{_c('FILTER','1;36')} {query}█" if query else f"{_c('FILTER','1;36')} █"
-                actions=_media_hints("↑↓/J/K move · Shift-arrows page/ends · Tab select · A select all · Enter/P play · Q queue · C clear selection · S save playlist · I info · V sources · H hidden · X hide · D hide by directory · U unhide · Esc clear/exit",width)
+                actions=_media_hints("/ search · ↑↓/J/K move · Shift-arrows page/ends · Tab select · A select all · Enter/P play · Q queue · C clear selection · S save playlist · I info · V sources · H hidden · X hide · D hide by directory · U unhide · Esc finish/clear/exit",width)
                 footer=f"{filter_text}  "+_c("◆ SHA · · scanned","2")+"\n"+actions
                 if notice:
                     footer+="  "+_c(notice,"33")
@@ -17944,6 +17944,19 @@ def _media_selector(rows,title="FABRIC MEDIA",initial_query="",catalog_meta=None
             key=_read_tty_key(fd,.08 if art_pending else None)
             if not key and art_pending:
                 continue
+            if key=="\x03":
+                break
+            if search_mode:
+                if key in {"esc","\r","\n"}:
+                    search_mode=False; continue
+                if key in {"\x7f","\b"}:
+                    query=query[:-1]; idx=0; continue
+                if len(key)==1 and key.isprintable() and key not in "APQCSIVHXDUJK":
+                    query+=key; idx=0; continue
+                # Navigation and selection act on the filtered results immediately.
+                search_mode=False
+            if key=="/":
+                search_mode=True; continue
             if key in {"\x03","q"} and not query:
                 break
             if key=="esc":
@@ -18889,9 +18902,9 @@ def media_mp(initial_query=""):
                     else:
                         filter_text=f"FILTER {query or 'all media'} · / search"
                     print(_c(filter_text,"1;36"))
-                    controls="↑↓ select · Shift-arrows page/ends · Tab mark · Enter play · A add queue · D hide dir · L library · Q queue"
+                    controls="↑↓ select · Shift-arrows page/ends · Tab mark · A select all · C clear selection · Enter play · B add queue · D hide dir · L library · Q queue"
                     print(_media_hints(controls,width))
-                    print(_media_hints("/ search · space pause · ←/→ seek 10s · p/n prev/next · v visuals · s shuffle · r repeat · x stop · Esc clear/exit",width),end="")
+                    print(_media_hints("/ search · space pause · ←/→ seek 10s · p/n prev/next · v visuals · s shuffle · r repeat · x stop · Esc finish/clear/exit",width),end="")
                     if notice:
                         print("  "+_c(notice,"33"),end="")
                         notice=""
@@ -18921,17 +18934,21 @@ def media_mp(initial_query=""):
             # Every real input event may alter selection, mode, query, queue,
             # transport status, notice text, or visibility.
             dirty=True
+            if key=="\x03":
+                return 0
             if search_mode:
                 if key=="esc":
-                    query=search_before; search_mode=False; idx=0; view_key=None; continue
+                    search_mode=False; continue
                 if key in {"\r","\n"}:
-                    search_mode=False; idx=0; view_key=None; continue
+                    search_mode=False; continue
                 if key in {"\x7f","\b"}:
                     if query: query=query[:-1]; idx=0; view_key=None
                     continue
-                if len(key)==1 and key.isprintable():
+                if len(key)==1 and key.isprintable() and key not in "ABCDLQJK":
                     query+=key; idx=0; view_key=None
-                continue
+                    continue
+                # Arrow/Tab/action keys leave editing and operate on this view.
+                search_mode=False
             if key=="esc":
                 if query:
                     query=""; idx=0; view_key=None; continue
@@ -18968,10 +18985,19 @@ def media_mp(initial_query=""):
                 if rid in selected_ids: selected_ids.remove(rid); notice="unmarked"
                 else: selected_ids.add(rid); notice="marked"
                 continue
+            if key=="A" and visible:
+                visible_ids={row_id(row) for row in visible}
+                if visible_ids.issubset(selected_ids):
+                    selected_ids.difference_update(visible_ids); notice=f"unmarked {len(visible_ids)} visible"
+                else:
+                    selected_ids.update(visible_ids); notice=f"marked {len(visible_ids)} visible"
+                continue
+            if key=="C":
+                selected_ids.clear(); notice="selection cleared"; continue
             picked=selected or ([chosen] if chosen else [])
             if key in {"\r","\n"} and picked:
                 _media_launch_session(media_core.new_session(picked)); notice=f"playing {len(picked)} item(s)"; continue
-            if key=="A" and picked:
+            if key=="B" and picked:
                 notice=_media_queue_notice(_media_queue_append(picked)); view_key=None if mode=="queue" else view_key; continue
             if key==" ": _media_control_session("toggle"); continue
             if key=="n": _media_control_session("next"); continue

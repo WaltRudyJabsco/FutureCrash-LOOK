@@ -444,18 +444,20 @@ LOOK files: H hidden, F sort, R rename, D delete, B desktop clipboard,
 C Copy To, M Move To, T cut, P paste, L LO context, X clear working set,
 Y path, G exit to directory. Hidden files default off; lh shows them.
 
-Media Find: type filters; ↑↓ or J/K move; Shift-↑↓ page; Shift-←→ ends;
+Media Find: type filters or / enters search; ↑↓ or J/K move; Shift-↑↓ page; Shift-←→ ends;
 Tab mark; A mark/unmark all visible; C clear selection; Enter/P play;
 Q append queue; S save playlist; I info; V logical/all physical sources;
 H hidden; X hide selected; D choose a containing directory to hide;
-U remove matching hide rules; Esc clear query then exit.
+U remove matching hide rules; Esc finishes search, then clears query, then exits.
 ◆ is SHA identity and · is scanned identity; these are indicators, not keys.
 
-LK MP: / enters search; Enter accepts search, Esc cancels search;
+LK MP: / enters search; Enter/Esc finish editing and retain the filter;
 ↑↓ or J/K select; Shift-↑↓ page; Shift-←→ ends; Tab mark;
-Enter plays marks/current; A appends queue; D hides a directory;
+A marks/unmarks all visible; C clears marks; Enter plays marks/current;
+B appends marks/current to queue; D hides a directory;
 L library; Q queue; space play/pause; ←/→ seek 10s; p/n previous/next;
 s shuffle; r repeat; v opens visuals; x stop; Esc clears query then exits.
+Both media screens allow arrows, Tab and selection actions during search.
 
 LK Player: space play/pause; ←/→ seek 10s; p/n previous/next;
 s shuffle; r repeat; v cycles six ambient visualizers and normal view;

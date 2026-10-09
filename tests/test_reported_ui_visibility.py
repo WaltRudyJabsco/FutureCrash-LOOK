@@ -67,6 +67,43 @@ def test_atomic_json_failure_preserves_previous_file_and_cleans_staging(tmp_path
     assert list(tmp_path.glob('*.tmp'))==[]
 
 
+@pytest.mark.parametrize('surface',['find','mp'])
+@pytest.mark.parametrize('finish_search',[False,True])
+def test_filtered_media_navigation_marking_and_select_all(tmp_path,monkeypatch,surface,finish_search):
+    lk=load_lk()
+    output=Tty()
+    rows=[{'path':str(tmp_path/f'track{i:02d}.mp3'),'title':f'Track {i:02d}',
+           'artist':'pharc','node':'m3','id':str(i)} for i in range(16)]
+    rows.append({'path':str(tmp_path/'other.mp3'),'title':'Other','artist':'other','node':'m3','id':'other'})
+    monkeypatch.setattr(lk.sys,'stdout',output)
+    monkeypatch.setattr(lk.sys,'stdin',SimpleNamespace(isatty=lambda:True,fileno=lambda:0))
+    monkeypatch.setattr(lk.termios,'tcgetattr',lambda fd:[])
+    monkeypatch.setattr(lk.termios,'tcsetattr',lambda *args:None)
+    monkeypatch.setattr(lk.tty,'setcbreak',lambda fd:None)
+    monkeypatch.setattr(lk.shutil,'get_terminal_size',lambda fallback:os.terminal_size((80,32)))
+    monkeypatch.setattr(lk,'_media_catalog_entries',lambda:(rows,{}))
+    monkeypatch.setattr(lk,'_media_collapse',lambda rows,**kwargs:rows)
+    monkeypatch.setattr(lk,'_media_mp_rows',lambda mode,rows,query:lk._media_filter_rows(rows,query))
+    monkeypatch.setattr(lk,'_media_mp_now_playing',lambda width:'STOPPED')
+    monkeypatch.setattr(lk,'_media_status_snapshot',lambda:None)
+    monkeypatch.setattr(lk,'NativePreviewController',lambda:SimpleNamespace(
+        frame_cleared=lambda:None,invalidate=lambda:None,paint_ready=lambda:None))
+    queued=[]
+    monkeypatch.setattr(lk,'_media_queue_append',lambda picked:queued.extend(picked) or len(picked))
+    keys=['/',*'pharc']+(['esc'] if finish_search else [])+['down','\t','A',
+            'Q' if surface=='find' else 'B','\x03']
+    events=iter(keys)
+    monkeypatch.setattr(lk,'_read_tty_key',lambda *args:next(events))
+    if surface=='find':
+        lk._media_selector(rows)
+    else:
+        lk.media_mp()
+    assert [row['id'] for row in queued]==[str(i) for i in range(16)]
+    # Tab must mark the row reached by Down, rather than the first search result.
+    frames=lk._strip_ansi(output.getvalue())
+    assert '✓ pharc — Track 01' in frames
+
+
 def test_buffered_media_frames_keep_colors_and_pipes_stay_plain(monkeypatch):
     lk=load_lk()
     for terminal in [True,False]:
