@@ -25,11 +25,11 @@ THEMES={
     'paper':{
         # MercuryWriter's page and ink, with darker ANSI accents for light paper.
         'background':'#f6f1e7','foreground':'#201e1a','cursor':'#201e1a','cursor_text_color':'#f6f1e7',
-        'selection_background':'#193a5a','selection_foreground':'#f6f1e7','url_color':'#193a5a',
+        'selection_background':'#f3d76a','selection_foreground':'#201e1a','url_color':'#193a5a',
         'active_tab_foreground':'#f6f1e7','active_tab_background':'#201e1a',
         'inactive_tab_foreground':'#716c62','inactive_tab_background':'#e8e1d4',
         'background_opacity':'1.0','background_blur':'0','cursor_trail':'0',
-        'colors':('#201e1a','#7d302c','#254f38','#6b4a19','#193a5a','#593c64','#1e4f56','#35332f',
+        'colors':('#201e1a','#7d302c','#b8d3af','#e4c67d','#193a5a','#593c64','#1e4f56','#ded8cd',
                   '#59554e','#87372f','#28583b','#705015','#213f65','#624060','#22545a','#171714'),
         'accents':{75:'#193a5a',81:'#1e4f56',114:'#254f38',117:'#193a5a',150:'#254f38',
                    176:'#593c64',180:'#6b4a19',183:'#593c64',203:'#7d302c',221:'#6b4a19',
@@ -58,12 +58,12 @@ def directory():
 
 
 CUSTOM_DEFAULTS={'background':'#f6f1e7','foreground':'#201e1a','accent':'#193a5a',
-                 'muted':'#59554e','green':'#254f38','red':'#7d302c','tabs':'#201e1a'}
+                 'muted':'#59554e','green':'#254f38','red':'#7d302c','tabs':'#201e1a','selection':'#f3d76a'}
 INKS=(('Black ink','#201e1a'),('Navy ink','#193a5a'),('Blue ink','#213f65'),
       ('Red ink','#7d302c'),('Green ink','#254f38'),('Violet ink','#593c64'),
       ('Brown ink','#6b4a19'),('Slate ink','#59554e'),('Amber','#a65c1a'))
 LIGHT_INKS=(('White','#fafafa'),('Warm white','#f6f1e7'),('Sky','#9fc5e8'),
-            ('Mint','#a5d6b3'),('Rose','#e1a4a0'),('Gold','#d6b36a'))
+            ('Mint','#a5d6b3'),('Rose','#e1a4a0'),('Gold','#d6b36a'),('Yellow highlighter','#f3d76a'))
 PAPERS=(('Mercury paper','#f6f1e7'),('Albert paper','#f3efe3'),('White','#fafafa'),
         ('Cool white','#eef1f4'),('Charcoal','#11110f'))
 
@@ -102,16 +102,19 @@ def settings(name,folder=None):
     if name=='custom':
         roles=custom_roles(folder if folder is not None else directory())
         result=settings('paper' if luminance(roles['background'])>.4 else 'slate')
+        result.setdefault('color221',result['color3'])
+        result.setdefault('color176',result['color5'])
         result.update({key:roles[key] for key in ('background','foreground')})
         result.update(cursor=roles['foreground'],cursor_text_color=roles['background'],
-                      url_color=roles['accent'],selection_background=roles['accent'],
-                      selection_foreground=readable_text(roles['accent']),
+                      url_color=roles['accent'],selection_background=roles['selection'],
+                      selection_foreground=readable_text(roles['selection']),
                       active_tab_background=roles['tabs'],active_tab_foreground=readable_text(roles['tabs']),
                       inactive_tab_background=roles['background'],inactive_tab_foreground=roles['muted'])
         for index in (4,6,12,14,75,81,110,117):result['color'+str(index)]=roles['accent']
-        for index in (0,7,15,252):result['color'+str(index)]=roles['foreground']
+        # Keep ANSI panel backgrounds distinct from LOOK text inks.
+        result['color252']=roles['foreground']
         for index in (8,244,245):result['color'+str(index)]=roles['muted']
-        for index in (2,10,114,150):result['color'+str(index)]=roles['green']
+        for index in (10,114,150):result['color'+str(index)]=roles['green']
         for index in (1,9,203,211):result['color'+str(index)]=roles['red']
         return result
     theme=THEMES[name]
@@ -132,8 +135,8 @@ def application_colors():
     if name not in {'paper','custom'}: return {}
     try:palette=settings(name)
     except (OSError,ValueError):palette=settings('paper')
-    roles={'BLUE':'color4','CYAN':'color6','GREEN':'color2','YELLOW':'color3',
-           'MAGENTA':'color5','RED':'color1','WHITE':'foreground','GRAY':'color8','FAINT':'color8',
+    roles={'BLUE':'color75','CYAN':'color81','GREEN':'color114','YELLOW':'color221',
+           'MAGENTA':'color176','RED':'color203','WHITE':'foreground','GRAY':'color8','FAINT':'color8',
            'ACTIVE_BG':'selection_background','ACTIVE_FG':'selection_foreground'}
     return {role:tuple(int(palette[key][index:index+2],16) for index in (1,3,5))
             for role,key in roles.items()}
@@ -192,13 +195,22 @@ def kitty_executable():
     raise ValueError('Kitty is not installed')
 
 
-def customize(read_key,folder):
+def preset_roles(name,folder):
+    palette=settings(name,folder)
+    mapping={'background':'background','foreground':'foreground','accent':'url_color',
+             'muted':'color8','green':'color114' if 'color114' in palette else 'color2',
+             'red':'color203' if 'color203' in palette else 'color1',
+             'tabs':'active_tab_background','selection':'selection_background'}
+    return {role:palette[key] for role,key in mapping.items()}
+
+
+def customize(read_key,folder,base=None):
     if read_key is None or not (sys.stdin.isatty() and sys.stdout.isatty()):
         raise ValueError('Open the selector in a terminal with lk terminal customize')
     if not (folder/'kitty.conf').is_file(): raise ValueError('No Kitty config here; run ./install.sh --kitty first')
-    values=custom_roles(folder);roles=list(values);selected=0;choice=0;choosing=False;notice=''
+    values=preset_roles(base,folder) if base else custom_roles(folder);roles=list(values);selected=0;choice=0;choosing=False;notice=''
     labels={'background':'Paper / background','foreground':'Text ink','accent':'Blue / accent ink',
-            'muted':'Muted text','green':'Green ink','red':'Red ink','tabs':'Active tab'}
+            'muted':'Muted text','green':'Green pen ink','red':'Red pen ink','tabs':'Active tab','selection':'Selection / highlighter'}
     fd=sys.stdin.fileno();old=termios.tcgetattr(fd)
     try:
         from .look_renderer import fit
@@ -207,9 +219,9 @@ def customize(read_key,folder):
     try:
         tty.setcbreak(fd);sys.stdout.write('\033[?25l')
         while True:
-            width,height=shutil.get_terminal_size((100,30));page=max(1,height-7)
+            width,height=shutil.get_terminal_size((100,30));page=max(1,height-9)
             role=roles[selected];options=PAPERS if role=='background' else INKS+LIGHT_INKS
-            lines=['LOOK CUSTOM STYLE · one editable style']
+            lines=['LOOK CUSTOM STYLE · '+(base+' → custom' if base else 'one editable style')]
             if choosing:
                 lines.append(labels[role]+' · choose a color')
                 top=max(0,choice-page+1)
@@ -225,6 +237,12 @@ def customize(read_key,folder):
             ir,ig,ib=(int(values['foreground'][pos:pos+2],16) for pos in (1,3,5))
             lines+=[f'\033[48;2;{br};{bg};{bb}m\033[38;2;{ir};{ig};{ib}m  LOOK  ~/Project  · notes.md  \033[0m',
                     '↑↓ move · Enter choose · S save/apply · Esc back/cancel',notice]
+            def sample(color,text,background=values['background']):
+                r,g,b=(int(color[pos:pos+2],16) for pos in (1,3,5))
+                br,bg,bb=(int(background[pos:pos+2],16) for pos in (1,3,5))
+                return f'\033[48;2;{br};{bg};{bb}m\033[38;2;{r};{g};{b}m{text}\033[0m'
+            lines[-2:-2]=[sample(values['red'],' Red pen ')+sample(values['green'],' Green pen '),
+                           sample(readable_text(values['selection']),' Selected notes.md ',values['selection'])]
             sys.stdout.write('\033[2J\033[H'+'\n'.join(fit(line,max(1,width-1)) for line in lines)+'\033[J');sys.stdout.flush()
             key=read_key(fd,None);notice=''
             if key in {'esc','q','\x03'}:
@@ -255,6 +273,29 @@ def customize(read_key,folder):
         sys.stdout.write('\033[?25h\033[0m');sys.stdout.flush()
 
 
+def choose_theme(read_key):
+    """Return a palette and whether to edit it; leave persistence to the caller."""
+    selected=0;names=(*NAMES,'reset');fd=sys.stdin.fileno();old=termios.tcgetattr(fd)
+    try:
+        tty.setcbreak(fd);sys.stdout.write('\033[?25l')
+        while True:
+            lines=['LOOK TERMINAL · choose a style']
+            for index,name in enumerate(names):
+                label=DESCRIPTIONS.get(name,'Restore your underlying Kitty appearance')
+                lines.append(('› ' if index==selected else '  ')+name+' · '+label)
+            lines.append('↑↓ move · Enter apply · E fine-tune into Custom · Esc cancel')
+            sys.stdout.write('\033[2J\033[H'+'\n'.join(lines)+'\033[J');sys.stdout.flush()
+            key=read_key(fd,None)
+            if key=='down':selected=min(len(names)-1,selected+1)
+            elif key=='up':selected=max(0,selected-1)
+            elif key in {'esc','q','\x03'}:return None
+            elif key in {'\r','\n','enter'}:return names[selected],False
+            elif key in {'e','E'} and names[selected]!='reset':return names[selected],True
+    finally:
+        termios.tcsetattr(fd,termios.TCSADRAIN,old)
+        sys.stdout.write('\033[?25h\033[0m');sys.stdout.flush()
+
+
 def main(argv=None,read_key=None):
     parser=argparse.ArgumentParser(prog='lk terminal',description='Local Kitty palettes; existing fonts, keys, and shell remain yours.')
     commands=parser.add_subparsers(dest='action')
@@ -262,7 +303,8 @@ def main(argv=None,read_key=None):
     theme.add_argument('name',choices=(*NAMES,'reset'))
     launch=commands.add_parser('launch',help='Launch a separate Kitty window with a palette, without changing config')
     launch.add_argument('name',choices=NAMES)
-    commands.add_parser('customize',help='Edit the one custom style with a small color selector')
+    custom=commands.add_parser('customize',help='Edit custom or start from a preset; saves as custom')
+    custom.add_argument('base',nargs='?',choices=tuple(THEMES),help='Preset to fine-tune into custom')
     args=parser.parse_args(argv)
     try:
         if args.action=='theme':
@@ -277,7 +319,18 @@ def main(argv=None,read_key=None):
             subprocess.Popen(command,stdin=subprocess.DEVNULL,stdout=subprocess.DEVNULL,stderr=subprocess.DEVNULL)
             print('Opened Kitty · '+args.name)
         elif args.action=='customize':
-            print('Custom style saved. Reload/reopen LOOK to refresh its text colors.' if customize(read_key,directory()) else 'Custom style unchanged.')
+            print('Custom style saved. Reload/reopen LOOK to refresh its text colors.' if customize(read_key,directory(),args.base) else 'Custom style unchanged.')
+        elif read_key and sys.stdin.isatty() and sys.stdout.isatty():
+            picked=choose_theme(read_key)
+            if picked:
+                name,edit=picked
+                if edit:
+                    saved=customize(read_key,directory(),None if name=='custom' else name)
+                    print('Custom style saved. Reopen LOOK to refresh its text colors.' if saved else 'Custom style unchanged.')
+                else:
+                    select_theme(name,directory())
+                    print('Kitty palette: '+name)
+                    print('Applied to current Kitty.' if reload_kitty() else 'Reload Kitty with Ctrl-Shift-F5, or reopen it.')
         else:
             current=directory()/'look-theme.conf'
             print('LOOK TERMINAL · Kitty')

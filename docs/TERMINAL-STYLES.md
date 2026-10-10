@@ -13,13 +13,21 @@ The optional appearance command provides one local entry point on each node:
     lk terminal theme neon
     lk terminal theme slate
     lk terminal customize
+    lk terminal customize paper
     lk terminal theme custom
     lk terminal theme reset
+
+In an interactive terminal, lk terminal opens the palette picker: arrows move,
+Enter applies, E fine-tunes the highlighted preset into Custom, and Escape cancels.
+In a pipe or script it still prints the palette list.
 
 The palettes are Neon (the existing green LOOK colors), Paper (MercuryWriter's
 warm white #f6f1e7 and dark ink #201e1a), and Slate (quiet charcoal).
 Paper uses saturated navy, red, green, and violet inks, including LOOK’s
-explicit RGB directory headings and Markdown file labels.
+explicit RGB directory headings and Markdown file labels. Selection uses a yellow
+highlighter with dark text. Prompt panels for OS/time and Git use lighter neutral,
+green, and gold backgrounds so dark prompt text stays readable. LOOK ink accents
+use their own indexed colors rather than borrowing those prompt backgrounds.
 
 Launch opens a separate Kitty window with palette overrides. It does not change
 saved preferences or recolor other windows. Theme saves an appearance-only
@@ -45,11 +53,13 @@ No Powerlevel10k configuration wizard is needed.
 Custom is one editable style, saved locally in look-custom.json beside kitty.conf.
 Run lk terminal customize: arrows select a role, Enter opens the color choices,
 and Enter confirms a choice. S saves and applies; Escape returns from choices or
-cancels without changing the active theme. The sample shows a directory heading
-and Markdown file label. You can choose the paper/background, text ink, accent,
-muted text, green, red, and active-tab color. Low-contrast text colors must be
+cancels without changing the active theme. The samples show a directory heading, Markdown file label, red/green ink,
+and a selected file. You can choose the paper/background, text ink, accent,
+muted text, green/red pen inks, active-tab color, and selection/highlighter color. Low-contrast text colors must be
 changed before saving; tab and selection text automatically use black or white.
-For a dark background, choose lighter text inks. Previous saved files are backed
+Run lk terminal customize paper (or neon/slate) to start from that preset; saving
+creates your one Custom style and leaves the built-in preset unchanged. For a
+dark background, choose lighter text inks. Previous saved files are backed
 up. Use lk terminal theme custom to return to this style after another palette,
 or lk terminal launch custom to open it in a separate window.
 
