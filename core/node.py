@@ -200,6 +200,9 @@ BEACON_LOCK = threading.RLock()
 MEDIA_LIBRARY_LOCK = threading.RLock()
 MEDIA_CATALOG_LOCK = threading.RLock()
 MEDIA_CATALOG_CACHE = {"at": 0.0, "data": None, "local_mtime_ns": -1}
+LOCAL_MEDIA_CATALOG_LOCK = threading.RLock()
+LOCAL_MEDIA_CATALOG_CACHE = {"at": 0.0, "data": None, "stamp": None}
+LOCAL_MEDIA_CATALOG_TTL_SECONDS = 3.0
 CURATOR_LOCK = threading.RLock()
 BENCHMARK_GUARD = {"until": 0.0, "reason": ""}
 BENCHMARK_GUARD_LOCK = threading.RLock()
@@ -2765,6 +2768,22 @@ def _local_media_visibility(payload):
 
 
 def _local_media_catalog():
+    """Concurrent readers share one recent publication; catalog edits invalidate it."""
+    with LOCAL_MEDIA_CATALOG_LOCK:
+        stamp=[identity()['name']]
+        for path in (LOOK_MEDIA_LIBRARY, LOOK_MEDIA_LIBRARY.parent/'media_owner_visibility.json'):
+            try:
+                stat=path.stat();stamp.append((str(path),stat.st_mtime_ns,stat.st_size))
+            except OSError:stamp.append((str(path),None))
+        cached=LOCAL_MEDIA_CATALOG_CACHE
+        if cached['data'] is not None and cached['stamp']==stamp and now()-cached['at']<LOCAL_MEDIA_CATALOG_TTL_SECONDS:
+            return cached['data']
+        result=_build_local_media_catalog()
+        cached.update(at=now(),data=result,stamp=stamp)
+        return result
+
+
+def _build_local_media_catalog():
     """Publish discovered media as catalog rows; bytes remain owned by their source node."""
     _catalog,media=_look_catalog_modules()
     library = media.normalize_library(_read_media_library())

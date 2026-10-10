@@ -97,6 +97,19 @@ def test_ts_source_is_not_media_but_transport_packets_are(tmp_path):
     assert [Path(row['path']).name for row in scanned['entries']]==['concert.ts']
 
 
+def test_transport_sync_handles_m2ts_offsets_and_rejects_short_or_text_input(tmp_path):
+    stream=tmp_path/'video.ts'
+    for packet,offset in ((188,187),(192,4)):
+        data=bytearray(offset+3*packet)
+        for index in range(3):data[offset+index*packet]=0x47
+        stream.write_bytes(data)
+        assert media_core.is_media_path(stream)
+        stream.write_bytes(data[:offset+2*packet])
+        assert not media_core.is_media_path(stream)
+    stream.write_text('export const G = "G G G";\n'*50)
+    assert not media_core.is_media_path(stream)
+
+
 def test_broad_rescan_updates_changed_file_without_reassigning_specific_root(tmp_path):
     root=tmp_path/'music';album=root/'Artist'/'Album';album.mkdir(parents=True)
     track=album/'01 Song.mp3';track.write_bytes(b'first')
