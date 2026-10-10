@@ -28,7 +28,7 @@ def terminal(monkeypatch):
 
 def test_inline_view_edits_body_and_preserves_record_fields(tmp_path,terminal,monkeypatch,capsys):
     store=Notebook(tmp_path); store.create('To Do',kind='task',project='Work',remind_at='in 10 minutes')
-    original=store.list()[0]; keys=iter(['E','shiftenter','x','\r','esc'])
+    original=store.list()[0]; keys=iter(['E','\r','x','shiftenter','esc'])
     monkeypatch.setattr(notebook,'nudge_sync',lambda:None)
     notebook.note_view(store,original,lambda *args:next(keys))
     row=store.list()[0]
@@ -85,8 +85,8 @@ def test_workspace_view_returns_to_filter(tmp_path,terminal,capsys):
     assert capsys.readouterr().out.count('FILTER a█')>=2
 
 
-def test_capture_enter_saves_shift_enter_and_ctrl_j_add_paragraphs(terminal,capsys):
-    keys=iter(['a','shiftenter','shiftenter','b','\n','c','\r'])
+def test_capture_enter_and_ctrl_j_add_paragraphs_shift_enter_saves(terminal,capsys):
+    keys=iter(['a','\r','enter','b','\n','c','shiftenter'])
     assert notebook.capture_note(5,lambda *args:next(keys))=='a\n\nb\nc'
     output=capsys.readouterr().out
     assert '\033[>1u' in output
@@ -104,7 +104,7 @@ def test_capture_escape_does_not_save_a_draft(terminal,capsys):
 def test_editor_pages_up_preserving_column(key,terminal,monkeypatch):
     monkeypatch.setattr(notebook.shutil,'get_terminal_size',lambda *args:(80,10))
     lines=['abcdef']*12
-    keys=iter([key,'X','\r'])
+    keys=iter([key,'X','shiftenter'])
     result=notebook.capture_note(5,lambda *args:next(keys),'\n'.join(lines),'EDIT')
     lines[7]+='X'  # Four editable lines fit; move from line 11 to line 7.
     assert result=='\n'.join(lines)
@@ -113,18 +113,18 @@ def test_editor_pages_up_preserving_column(key,terminal,monkeypatch):
 @pytest.mark.parametrize('key',['shiftdown','pagedown'])
 def test_editor_pages_down_and_clamps_at_last_line(key,terminal,monkeypatch):
     monkeypatch.setattr(notebook.shutil,'get_terminal_size',lambda *args:(80,10))
-    keys=iter(['shiftleft',key,'X',key,key,'Y','\r'])
+    keys=iter(['shiftleft',key,'X',key,key,'Y','shiftenter'])
     result=notebook.capture_note(5,lambda *args:next(keys),'\n'.join(['abc']*6),'EDIT')
     assert result=='abc\nabc\nabc\nabc\nXabc\naYbc'
 
 
 def test_editor_note_jumps_and_line_home_end(terminal):
-    keys=iter(['shiftleft','X','down','home','Y','end','Z','shiftright','!','\r'])
+    keys=iter(['shiftleft','X','down','home','Y','end','Z','shiftright','!','shiftenter'])
     assert notebook.capture_note(5,lambda *args:next(keys),'abc\ndef','EDIT')=='Xabc\nYdefZ!'
 
 
 def test_workspace_clears_old_screen_and_saves_multiline_capture(tmp_path,monkeypatch,terminal,capsys):
-    keys=iter(['N','a','shiftenter','b','\r','q'])
+    keys=iter(['N','a','\r','b','shiftenter','q'])
     monkeypatch.setattr(notebook,'nudge_sync',lambda:None)
     store=Notebook(tmp_path)
     notebook.workspace(store,None,lambda *args:next(keys),lambda text,width:text[:width])

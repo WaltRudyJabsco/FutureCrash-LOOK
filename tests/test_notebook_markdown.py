@@ -30,7 +30,7 @@ def test_nested_formatting_and_unmatched_marks():
 
 def test_tasks_bullets_numbered_lists_quotes_and_links():
     assert plain(render('- [ ] Milk\n- [x] Done\n* Item\n2. Next\n> **Quote**\n[Site](https://example.com)',80))==[
-        '☐ Milk','☑ Done','• Item','2. Next','│ Quote','Site (https://example.com)']
+        '☐ Milk','☑ Done','• Item','2. Next','│ Quote','Site']
 
 
 def test_fenced_code_retains_marks_and_hides_fences():

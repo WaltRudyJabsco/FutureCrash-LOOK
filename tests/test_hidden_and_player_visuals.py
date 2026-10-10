@@ -159,3 +159,18 @@ def test_large_album_art_missing_cover_has_clear_fallback(lk,monkeypatch):
     lines=lk._media_player_large_art({},60,12)
     assert any('Album art unavailable' in line for line in lines)
     assert len(lines)==12
+
+
+def test_album_colors_change_on_each_transition_including_hash_collision(lk,monkeypatch):
+    visuals=lk.player_visuals
+    monkeypatch.setattr(visuals,'_album_track',None)
+    snap={'entry':{'album':'Same','title':'First','path':'/first'},'index':0}
+    first=visuals.album_color(snap)
+    assert first==visuals.album_color(dict(snap,state='paused',position=40))
+    # Every distinct identity must change color, even when hashes collide.
+    for index in range(100):
+        snap={'entry':{'album':'Same','title':str(index),'path':'/'+str(index)},'index':index}
+        current=visuals.album_color(snap)
+        assert current!=first
+        assert current==visuals.album_color(snap)
+        first=current

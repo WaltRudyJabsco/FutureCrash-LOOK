@@ -1,3 +1,11 @@
+# 2026-10-10 — Notebook links and track colors
+
+- Enter inserts a quick-editor newline; Shift-Enter/Ctrl-S saves. Bracketed paste is atomic, Unicode stays intact, and terminal controls render as inert escapes.
+- Markdown previews show numbered link labels. Keep direct 1–9 opening; L selects any link and B finds related notes by stable ID.
+- Local links enter LOOK with the target selected. Fabric paths reuse paired-node browsing, now including remote file locations alongside directories.
+- Album Art uses deterministic muted foreground colors and avoids repeating the previous track color, including tracks sharing a cover.
+- Details and compatibility limits: look/docs/NOTEBOOK_LINKS.md.
+
 # 4.56.5 — RESTORE CHANNELS
 
 - Fix nested f-string quoting that prevented `lk` from parsing.

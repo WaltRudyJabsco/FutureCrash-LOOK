@@ -15,14 +15,13 @@ import textwrap
 import time
 import tty
 import urllib.request
-import webbrowser
 
 try:
     from .notebook_core import Notebook, timestamp
-    from .notebook_markdown import render as render_markdown
+    from .notebook_markdown import render as render_markdown, safe_text, extract_links
 except ImportError:
     from notebook_core import Notebook, timestamp
-    from notebook_markdown import render as render_markdown
+    from notebook_markdown import render as render_markdown, safe_text, extract_links
 
 
 def daemon(action,payload=None,timeout=10):
@@ -97,12 +96,15 @@ def named_records(store,text):
 
 HELP_TEXT='''LOOK NOTEBOOK — notes, tasks and reminders share one record.
 
-Capture: N opens a draft. Enter inserts newline; Shift-Enter saves.
+Capture: N opens a draft. Enter/Ctrl-J inserts a newline; Shift-Enter/Ctrl-S saves.
 Escape cancels a draft. Enter opens a boxed Markdown note view.
 The view previews headings, bold/italic, lists, checkboxes, quotes and code.
+L selects numbered Markdown links; B shows notes linking back to this ID.
+Use [label](note:FULL_ID), [label](<file path>), [label](https://example.com),
+or [label](<@3090:/path with spaces>). Relative paths start beside the note.
 E shows the original Markdown marks; saving returns to the rendered preview.
 In the view: arrows/Space scroll, E edits the body, V opens your full editor.
-Quick edits keep the title; Enter inserts newline; Shift-Enter saves.
+Quick edits keep the title; Enter adds a newline; Shift-Enter/Ctrl-S saves.
 Editor: Shift-Left/Right jumps to the start/end of the note; Home/End moves
 within the line. Shift-Up/Down or Page Up/Down moves a page of lines.
 Escape returns to the list. Explicit lkn edit NAME also opens the full editor.
@@ -159,12 +161,12 @@ def show_help(fd,read_key):
 
 
 def capture_note(fd,read_key,initial_text='',label='NEW NOTE'):
-    """Multiline editing must never mistake pasted line breaks for Save."""
+    """Paste and ordinary Enter never submit a draft."""
     previous=termios.tcgetattr(fd)
-    text=initial_text; cursor=len(text)
+    text=safe_text(initial_text); cursor=len(text)
     try:
         tty.setraw(fd)
-        sys.stdout.write('\033[>1u')
+        sys.stdout.write('\033[>1u\033[?2004h')
         while True:
             width,height=shutil.get_terminal_size((100,30))
             boxed=label!='NEW NOTE'; columns=max(1,min(96,width-4)) if boxed else max(1,width-1)
@@ -176,7 +178,7 @@ def capture_note(fd,read_key,initial_text='',label='NEW NOTE'):
             top=max(0,cursor_row-page+1)
             visible=rows[top:top+page]
             heading=(label+' · ')[:max(1,width-1)]
-            actions='Enter newline · Shift-Enter save · Esc cancel'[:max(0,width-1-len(heading))]
+            actions='Enter newline · Shift-Enter/Ctrl-S save · Esc cancel'[:max(0,width-1-len(heading))]
             frame=[KEY_CYAN+heading+'\033[0m'+command_hints(actions),
                    command_hints('Shift-↑↓/PgUp/PgDn page · Shift-←→ note start/end · Home/End line'[:max(1,width-1)])]
             if boxed:
@@ -185,7 +187,10 @@ def capture_note(fd,read_key,initial_text='',label='NEW NOTE'):
             sys.stdout.write('\033[2J\033[H'+'\r\n'.join(frame)+'\033[J'); sys.stdout.flush()
             key=read_key(fd,None)
             if key in {'esc','\x03'}: return None
-            if key=='shiftenter': return text
+            if key in {'shiftenter','\x13'}: return text
+            if key.startswith('paste:'):
+                pasted=safe_text(key[6:]); text=text[:cursor]+pasted+text[cursor:]; cursor+=len(pasted)
+                continue
             if key in {'\r','enter','\n'}:
                 text=text[:cursor]+'\n'+text[cursor:]; cursor+=1
             elif key in {'\x7f','\b'} and cursor:
@@ -210,20 +215,15 @@ def capture_note(fd,read_key,initial_text='',label='NEW NOTE'):
             elif key=='home': cursor=text.rfind('\n',0,cursor)+1
             elif key=='end':
                 next_line=text.find('\n',cursor); cursor=len(text) if next_line<0 else next_line
-            elif key.startswith('paste:'):
-                # A bracketed paste is one insertion, never an editor command.
-                pasted=key[6:].replace('\r\n','\n').replace('\r','\n')
-                pasted=''.join(ch for ch in pasted if ch in '\n\t' or ch.isprintable())
-                text=text[:cursor]+pasted+text[cursor:]; cursor+=len(pasted)
             elif len(key)==1 and key.isprintable():
                 text=text[:cursor]+key+text[cursor:]; cursor+=1
     finally:
-        sys.stdout.write('\033[<u'); sys.stdout.flush()
+        sys.stdout.write('\033[?2004l\033[<u'); sys.stdout.flush()
         termios.tcsetattr(fd,termios.TCSADRAIN,previous)
 
 
 def quick_edit(store,row,fd,read_key):
-    draft=capture_note(fd,read_key,row['body'],'EDIT · '+row['title'])
+    draft=capture_note(fd,read_key,row['body'],'EDIT · '+safe_text(row['title']))
     if draft is None or draft==row['body']: return ''
     try:
         store.change(row['id'],{'body':draft},expected=row['revision'])
@@ -238,47 +238,84 @@ def quick_edit(store,row,fd,read_key):
 
 
 
-
-LINK_PATTERN=re.compile(r'(?<!\\\\)\\[([^\\]\\n]+)\\]\\(([^\\s)]+)\\)')
-
-
-def note_links(body):
-    """Derive navigable targets from Markdown; no separate link database."""
-    return [(match.group(1),match.group(2)) for match in LINK_PATTERN.finditer(body)]
-
-
-def open_note_link(store,target,read_key):
-    if target.startswith(('https://','http://')):
-        webbrowser.open(target)
-        return 'Opened URL'
-    if target.startswith('note:'):
-        matches=named_records(store,target[5:])
-        if len(matches)!=1:
-            return 'Linked note is missing or ambiguous'
-        note_view(store,matches[0],read_key)
-        return ''
-    if target.startswith('file://'):
-        from urllib.parse import unquote,urlsplit
-        parts=urlsplit(target)
-        if parts.netloc not in ('','localhost'):
-            return 'Nonlocal file URL: use a Fabric @node:/path link'
-        target=unquote(parts.path)
-    if target.startswith('@'):
-        # Keep the existing Fabric path syntax intact; LOOK owns resolution.
-        if not re.match(r'^@[^:/\\s]+:.+',target):
-            return 'Invalid Fabric destination'
-    else:
-        path=Path(target).expanduser()
-        if not path.is_absolute():
-            return 'Use an absolute path or @node:/path'
-        if not path.exists():
-            return 'Linked path is unavailable: '+str(path)
-        target=str(path)
+def resolve_link(store,row,target):
+    """Validate at the edge; never send note text through a shell."""
+    from urllib.parse import urlsplit, unquote
     try:
-        subprocess.run(['lk','files',target],check=True)
-        return ''
-    except (OSError,subprocess.CalledProcessError):
-        return 'Could not open path in LOOK: '+target
+        from . import fabric_files
+    except ImportError:
+        import fabric_files
+    if any(ord(char)<32 or ord(char)==127 for char in target) or '\\x1b' in target:
+        raise ValueError('Link contains terminal controls')
+    if target.startswith('note:'):
+        identity=target[5:]
+        if not re.fullmatch(r'[a-f0-9]{32}',identity): raise ValueError('Note links need the full stable ID')
+        matches=[item for item in store.list(include_done=True) if item['id']==identity]
+        if not matches: raise ValueError('Linked note is missing or deleted')
+        if len(matches)!=1: raise ValueError('Linked note has a conflict; resolve it from the list')
+        return 'note',matches[0]
+    if target.startswith('@'):
+        return 'fabric',fabric_files.parse(target)
+    parsed=urlsplit(target)
+    if parsed.scheme in {'http','https'}:
+        if not parsed.hostname: raise ValueError('URL needs a hostname')
+        return 'url',target
+    if parsed.scheme=='file':
+        if parsed.netloc not in {'','localhost'}: raise ValueError('Use @node:/path for remote files')
+        target=unquote(parsed.path)
+    elif parsed.scheme:
+        raise ValueError('Supported links: http(s), file, note:ID, and @node:/path')
+    path=Path(target).expanduser()
+    if not path.is_absolute(): path=Path(row['path']).parent/path
+    path=path.resolve()
+    if not path.exists(): raise ValueError('Linked path does not exist')
+    return 'path',path
+
+
+def related_notes(store,row):
+    target='note:'+row['id']
+    return [(item['title'],'note:'+item['id'])
+            for item in store.list(include_done=True)
+            if item['id']!=row['id'] and any(link==target for _,link in extract_links(item['body']))]
+
+
+def choose_link(fd,read_key,links,label='NOTE LINKS'):
+    selected=0; digits=''
+    while links:
+        width,height=shutil.get_terminal_size((100,30)); page=max(1,height-4)
+        top=max(0,selected-page+1)
+        lines=[label]
+        lines.extend(('› ' if i==selected else '  ')+str(i+1)+'. '+safe_text(name)+' · '+safe_text(target)
+                     for i,(name,target) in enumerate(links[top:top+page],top))
+        lines.append('↑↓/Tab select · number then Enter open · Esc back '+digits)
+        sys.stdout.write('\033[2J\033[H'+'\n'.join(line[:max(1,width-1)] for line in lines)+'\033[J'); sys.stdout.flush()
+        key=read_key(fd,None)
+        if key in {'esc','q','\x03'}: return None
+        if key in {'down','\t'}: selected=(selected+1)%len(links); digits=''
+        elif key=='up': selected=(selected-1)%len(links); digits=''
+        elif key in {'\r','\n','enter'}:
+            index=int(digits)-1 if digits else selected
+            if 0<=index<len(links): return links[index][1]
+            digits=''
+        elif key in '0123456789' and len(key)==1: digits=(digits+key)[-6:]
+        elif key in {'\b','\x7f'}: digits=digits[:-1]
+    return None
+
+
+def open_link(kind,target):
+    if kind=='fabric':
+        try:
+            from .look_renderer import browse_fabric
+        except ImportError:
+            from look_renderer import browse_fabric
+        browse_fabric(target)
+        return
+    if kind=='path':
+        args=[sys.executable,str(Path(__file__).with_name('look_renderer.py')),
+              str(target if target.is_dir() else target.parent),'--interactive','--select',str(target)]
+    else:
+        args=['open' if sys.platform=='darwin' else 'xdg-open',str(target)]
+    subprocess.run(args,check=True)
 
 def note_view(store,row,read_key):
     """Own terminal state so the same view works from the list and named CLI entry."""
@@ -288,8 +325,8 @@ def note_view(store,row,read_key):
         while True:
             width,height=shutil.get_terminal_size((100,30))
             inner=max(1,min(96,width-4)); page=max(1,height-8)
-            content=render_markdown(row['body'],inner)
-            links=note_links(row['body'])
+            links=[]
+            content=render_markdown(row['body'],inner,links)
             top=max(0,min(top,max(0,len(content)-page)))
             border='─'*inner
             title_rows=render_markdown(row['title'],max(1,width-1))
@@ -300,24 +337,37 @@ def note_view(store,row,read_key):
                 frame.append('│'+line+'│')
             frame.extend(['│'+' '*inner+'│']*max(0,page-len(content[top:top+page])))
             frame.extend(['└'+border+'┘',
-                          command_hints('↑↓/Space scroll · E edit · V full editor · H help · Esc back'[:max(1,width-1)]),
+                          command_hints('↑↓/Space scroll · L links · B related · E edit · V editor · H help · Esc back'[:max(1,width-1)]),
                           notice[:max(1,width-1)]])
             sys.stdout.write('\033[2J\033[H'+'\n'.join(frame)+'\033[J'); sys.stdout.flush()
             key=read_key(fd,None)
             if key in {'esc','q','\x03'}: return
-            if len(key)==1 and key in '123456789' and links and int(key)<=len(links):
-                termios.tcsetattr(fd,termios.TCSADRAIN,old)
-                sys.stdout.write('\x1b[?25h'); sys.stdout.flush()
-                try: notice=open_note_link(store,links[int(key)-1][1],read_key)
-                finally:
-                    tty.setcbreak(fd); sys.stdout.write('\x1b[?25l'); sys.stdout.flush()
-            elif key in {'down','j','\r','\n'}: top+=1
+            if key in {'down','j','\r','\n'}: top+=1
             elif key in {'up','k'}: top-=1
             elif key in {'pagedown','shiftdown',' '}: top+=page
             elif key in {'pageup','shiftup'}: top-=page
             elif key in {'home','shiftleft'}: top=0
             elif key in {'end','shiftright'}: top=len(content)
             elif key in {'H','?'}: show_help(fd,read_key)
+            elif key in {'L','B'} or (len(key)==1 and key in '123456789' and int(key)<=len(links)):
+                options=links if key!='B' else related_notes(store,row)
+                target=links[int(key)-1][1] if key in '123456789' else choose_link(fd,read_key,options,'NOTE LINKS' if key=='L' else 'RELATED NOTES')
+                if target is None:
+                    notice='' if options else 'No links' if key=='L' else 'No related notes'
+                    continue
+                try:
+                    kind,value=resolve_link(store,row,target)
+                    if kind=='note':
+                        row=value; top=0; notice=''
+                    else:
+                        termios.tcsetattr(fd,termios.TCSADRAIN,old)
+                        sys.stdout.write('\033[?25h'); sys.stdout.flush()
+                        try: open_link(kind,value)
+                        finally:
+                            tty.setcbreak(fd); sys.stdout.write('\033[?25l')
+                        notice='Opened '+safe_text(target)
+                except (ValueError,OSError,RuntimeError,subprocess.SubprocessError) as exc:
+                    notice=safe_text(str(exc))
             elif key in {'E','V'}:
                 if key=='E':
                     notice='Resolve this conflict in the full editor (V).' if row['conflict'] else quick_edit(store,row,fd,read_key)

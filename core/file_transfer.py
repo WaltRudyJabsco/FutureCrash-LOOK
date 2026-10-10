@@ -21,7 +21,7 @@ def browse(value):
     path = resolve(value)
     if not path.is_dir():
         raise NotADirectoryError(str(path))
-    entries = []
+    entries = []; files = []
     # scandir can use the directory's cached entry type instead of issuing a
     # separate stat for every song/file, particularly costly on network mounts.
     with os.scandir(path) as children:
@@ -29,10 +29,13 @@ def browse(value):
             try:
                 if child.is_dir():
                     entries.append({'name':child.name,'path':str(path/child.name)})
+                elif child.is_file():
+                    files.append({'name':child.name,'path':str(path/child.name)})
             except OSError:
                 continue
     return {'ok': True, 'path': str(path), 'home': str(Path.home()),
-            'directories': sorted(entries, key=lambda row: row['name'].casefold())}
+            'directories': sorted(entries, key=lambda row: row['name'].casefold()),
+            'files': sorted(files, key=lambda row: row['name'].casefold())}
 
 
 def common_places():
