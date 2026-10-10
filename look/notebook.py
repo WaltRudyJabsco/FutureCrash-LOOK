@@ -15,6 +15,7 @@ import textwrap
 import time
 import tty
 import urllib.request
+import webbrowser
 
 try:
     from .notebook_core import Notebook, timestamp
@@ -236,6 +237,49 @@ def quick_edit(store,row,fd,read_key):
     return 'saved'
 
 
+
+
+LINK_PATTERN=re.compile(r'(?<!\\\\)\\[([^\\]\\n]+)\\]\\(([^\\s)]+)\\)')
+
+
+def note_links(body):
+    """Derive navigable targets from Markdown; no separate link database."""
+    return [(match.group(1),match.group(2)) for match in LINK_PATTERN.finditer(body)]
+
+
+def open_note_link(store,target,read_key):
+    if target.startswith(('https://','http://')):
+        webbrowser.open(target)
+        return 'Opened URL'
+    if target.startswith('note:'):
+        matches=named_records(store,target[5:])
+        if len(matches)!=1:
+            return 'Linked note is missing or ambiguous'
+        note_view(store,matches[0],read_key)
+        return ''
+    if target.startswith('file://'):
+        from urllib.parse import unquote,urlsplit
+        parts=urlsplit(target)
+        if parts.netloc not in ('','localhost'):
+            return 'Nonlocal file URL: use a Fabric @node:/path link'
+        target=unquote(parts.path)
+    if target.startswith('@'):
+        # Keep the existing Fabric path syntax intact; LOOK owns resolution.
+        if not re.match(r'^@[^:/\\s]+:.+',target):
+            return 'Invalid Fabric destination'
+    else:
+        path=Path(target).expanduser()
+        if not path.is_absolute():
+            return 'Use an absolute path or @node:/path'
+        if not path.exists():
+            return 'Linked path is unavailable: '+str(path)
+        target=str(path)
+    try:
+        subprocess.run(['lk','files',target],check=True)
+        return ''
+    except (OSError,subprocess.CalledProcessError):
+        return 'Could not open path in LOOK: '+target
+
 def note_view(store,row,read_key):
     """Own terminal state so the same view works from the list and named CLI entry."""
     fd=sys.stdin.fileno(); old=termios.tcgetattr(fd); top=0; notice=''
@@ -245,6 +289,7 @@ def note_view(store,row,read_key):
             width,height=shutil.get_terminal_size((100,30))
             inner=max(1,min(96,width-4)); page=max(1,height-8)
             content=render_markdown(row['body'],inner)
+            links=note_links(row['body'])
             top=max(0,min(top,max(0,len(content)-page)))
             border='─'*inner
             title_rows=render_markdown(row['title'],max(1,width-1))
@@ -260,7 +305,9 @@ def note_view(store,row,read_key):
             sys.stdout.write('\033[2J\033[H'+'\n'.join(frame)+'\033[J'); sys.stdout.flush()
             key=read_key(fd,None)
             if key in {'esc','q','\x03'}: return
-            if key in {'down','j','\r','\n'}: top+=1
+            if key in '123456789' and links and int(key)<=len(links):
+                notice=open_note_link(store,links[int(key)-1][1],read_key)
+            elif key in {'down','j','\r','\n'}: top+=1
             elif key in {'up','k'}: top-=1
             elif key in {'pagedown','shiftdown',' '}: top+=page
             elif key in {'pageup','shiftup'}: top-=page
