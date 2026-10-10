@@ -40,7 +40,7 @@ def test_inline_view_edits_body_and_preserves_record_fields(tmp_path,terminal,mo
 
 def test_quick_edit_cancel_creates_no_revision(tmp_path,terminal,monkeypatch):
     store=Notebook(tmp_path); store.create('Scratch'); row=store.list()[0]
-    monkeypatch.setattr(notebook,'capture_note',lambda *args:None)
+    monkeypatch.setattr(notebook,'capture_note',lambda *args,**kwargs:None)
     assert notebook.quick_edit(store,row,5,None)==''
     assert store.list()[0]['revision']==row['revision']
 
@@ -48,7 +48,7 @@ def test_quick_edit_cancel_creates_no_revision(tmp_path,terminal,monkeypatch):
 def test_quick_edit_preserves_draft_when_peer_changes_note(tmp_path,terminal,monkeypatch):
     store=Notebook(tmp_path); store.create('Scratch'); row=store.list()[0]
     store.change(row['id'],{'body':'Peer text'})
-    monkeypatch.setattr(notebook,'capture_note',lambda *args:'My draft')
+    monkeypatch.setattr(notebook,'capture_note',lambda *args,**kwargs:'My draft')
     assert 'draft preserved' in notebook.quick_edit(store,row,5,None)
     assert store.list()[0]['body']=='Peer text'
     assert next((tmp_path/'drafts').glob('*.md')).read_text()=='My draft'
@@ -65,7 +65,7 @@ def test_inline_view_full_editor_uses_same_note(tmp_path,terminal,monkeypatch):
 def test_preview_hides_marks_but_editor_retains_source(tmp_path,terminal,monkeypatch,capsys):
     store=Notebook(tmp_path); store.create('# Header\n**Bold**')
     original=store.list()[0]; keys=iter(['E','esc','esc']); edited=[]
-    def draft(fd,reader,source,label):
+    def draft(fd,reader,source,label,store=None):
         edited.append(source)
         assert reader(fd,None)=='esc'
         return None
@@ -158,7 +158,9 @@ def test_full_text_toggle_and_sort_keep_focused_record(tmp_path,terminal,capsys)
 
 @pytest.mark.parametrize('encoded,expected',[
     (b'\x1b[13;2u','shiftenter'),(b'\x1b[27;2;13~','shiftenter'),
-    (b'\x1b\r','shiftenter'),(b'\r','\r'),('é'.encode(),'é')])
+    (b'\x1b\r','shiftenter'),(b'\r','\r'),('é'.encode(),'é'),
+    (b'\x1b[107;5u','\x0b'),(b'\x1b[110;5u','\x0e'),
+    (b'\x1b[115;5u','\x13'),(b'\x1b[106;5u','\n'),(b'\x1b[99;5u','\x03')])
 def test_terminal_decoder_handles_modified_enter_and_utf8(encoded,expected):
     read_fd,write_fd=os.pipe()
     try:

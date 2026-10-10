@@ -18,10 +18,10 @@ import urllib.request
 
 try:
     from .notebook_core import Notebook, timestamp
-    from .notebook_markdown import render as render_markdown, safe_text, extract_links
+    from .notebook_markdown import render as render_markdown, safe_text, extract_links, markdown_link, inline, cell_width
 except ImportError:
     from notebook_core import Notebook, timestamp
-    from notebook_markdown import render as render_markdown, safe_text, extract_links
+    from notebook_markdown import render as render_markdown, safe_text, extract_links, markdown_link, inline, cell_width
 
 
 def daemon(action,payload=None,timeout=10):
@@ -100,6 +100,9 @@ Capture: N opens a draft. Enter/Ctrl-J inserts a newline; Shift-Enter/Ctrl-S sav
 Escape cancels a draft. Enter opens a boxed Markdown note view.
 The view previews headings, bold/italic, lists, checkboxes, quotes and code.
 L selects numbered Markdown links; B shows notes linking back to this ID.
+Y copies this note's complete Markdown link from the list or preview.
+Editor Ctrl-K inserts a clipboard path/URL/link and lets you name it.
+Ctrl-N inside that dialog finds notes by title/project and inserts their ID.
 Use [label](note:FULL_ID), [label](<file path>), [label](https://example.com),
 or [label](<@3090:/path with spaces>). Relative paths start beside the note.
 E shows the original Markdown marks; saving returns to the rendered preview.
@@ -160,7 +163,158 @@ def show_help(fd,read_key):
         elif key=='end': top=len(rows)
 
 
-def capture_note(fd,read_key,initial_text='',label='NEW NOTE'):
+def copy_note_link(row):
+    try:
+        from .look_renderer import copy_text
+    except ImportError:
+        from look_renderer import copy_text
+    return copy_text(make_link(row['title'],'note:'+row['id']))
+
+
+def link_target(text):
+    """Use existing address forms; creation can bookmark offline paths."""
+    from urllib.parse import urlsplit
+    text=text.strip()
+    if len(text)>1 and text[0]==text[-1] and text[0] in {'"',"'"}: text=text[1:-1]
+    if not text or safe_text(text)!=text or any(char in '\n\t<>' for char in text):
+        raise ValueError('Use one path, URL, or note link without controls or angle brackets')
+    if text.startswith('note:'):
+        if not re.fullmatch(r'note:[a-f0-9]{32}',text): raise ValueError('Choose a note with Ctrl-N, or paste its copied link')
+    elif text.startswith('@'):
+        try:
+            from .fabric_files import parse
+        except ImportError:
+            from fabric_files import parse
+        parse(text)
+    else:
+        parts=urlsplit(text)
+        if parts.scheme in {'http','https'}:
+            if not parts.hostname: raise ValueError('URL needs a hostname')
+        elif parts.scheme=='file':
+            if parts.netloc not in {'','localhost'}: raise ValueError('Use @node:/path for a remote file')
+        elif parts.scheme: raise ValueError('Use a path, https:// URL, @node:/path, or note link')
+    return text
+
+
+def make_link(label,target):
+    target=link_target(target)
+    label=' '.join(safe_text(label).split()) or 'Link'
+    # A title is a literal label even when it contains Markdown punctuation.
+    label=''.join('\\'+char if char in '\\[]*_~'+chr(96) else char for char in label)
+    return '['+label+'](<'+target+'>)'
+
+
+def link_fields(text):
+    from urllib.parse import urlsplit,unquote
+    text=text.strip(); parsed=markdown_link(text)
+    if parsed and parsed[2]==len(text):
+        label=''.join(part for part,_ in inline(parsed[0]))
+        return link_target(parsed[1]),label
+    target=link_target(text)
+    parts=urlsplit(target) if not target.startswith('@') else None
+    name=(parts.path if parts and parts.scheme in {'http','https','file'} else target).rstrip('/').rsplit('/',1)[-1]
+    if parts and parts.scheme in {'http','https'} and not parts.path.strip('/'): name=parts.hostname
+    if target.startswith('note:'): name='Note'
+    return target,unquote(name) or target
+
+
+def dialog_line(text,width):
+    """Clip untrusted field text in visible terminal cells."""
+    output=[]; used=0
+    for char in safe_text(text).replace('\n',' ').replace('\t',' '):
+        size=cell_width(char)
+        if used+size>width: break
+        output.append(char); used+=size
+    return ''.join(output)
+
+
+def choose_note(store,fd,read_key):
+    rows=store.list(include_done=True); query=''; selected=0
+    while True:
+        terms=query.casefold().split()
+        matches=[row for row in rows if not row['conflict'] and
+                 all(term in (row['title']+' '+row['project']).casefold() for term in terms)]
+        selected=max(0,min(selected,max(0,len(matches)-1)))
+        width,height=shutil.get_terminal_size((100,30)); page=max(1,height-4)
+        top=max(0,selected-page+1)
+        lines=['LINK TO NOTE · type to search','FILTER '+query+'█']
+        lines.extend(('› ' if index==selected else '  ')+row['title']+' · '+row['project']
+                     for index,row in enumerate(matches[top:top+page],top))
+        if not matches: lines.append('No matching notes')
+        lines.append('↑↓ select · Enter choose · Esc return')
+        sys.stdout.write('\033[2J\033[H'+'\r\n'.join(dialog_line(line,max(1,width-1)) for line in lines)+'\033[J');sys.stdout.flush()
+        key=read_key(fd,None)
+        if key in {'esc','\x03'}: return None
+        if key in {'\r','\n','enter'} and matches: return matches[selected]
+        if key=='down': selected+=1
+        elif key=='up': selected-=1
+        elif key in {'\b','\x7f'}: query=query[:-1];selected=0
+        elif key.startswith('paste:'): query+=' '.join(safe_text(key[6:]).split());selected=0
+        elif len(key)==1 and key.isprintable(): query+=key;selected=0
+
+
+def insert_link(store,fd,read_key):
+    try:
+        from .look_renderer import clipboard_text
+    except ImportError:
+        from look_renderer import clipboard_text
+    values=['','']; notice=''; active=0
+    try:
+        values[:]=link_fields(clipboard_text()); active=1
+    except ValueError: pass
+    cursors=[len(value) for value in values]; replace=[bool(value) for value in values]
+    while True:
+        width,_=shutil.get_terminal_size((100,30)); rows=['INSERT LINK']
+        for index,(name,value) in enumerate(zip(('Target','Label'),values)):
+            cursor=cursors[index]
+            shown=value[:cursor]+'█'+value[cursor:] if active==index else value
+            rows.append(('› ' if active==index else '  ')+name+': '+shown)
+        rows+=['Type replaces suggestion · arrows edit · Enter confirms',
+               'Tab target/label · Ctrl-N find note · Esc cancel',notice]
+        sys.stdout.write('\033[2J\033[H'+'\r\n'.join(dialog_line(line,max(1,width-1)) for line in rows)+'\033[J');sys.stdout.flush()
+        key=read_key(fd,None);notice=''
+        if key in {'esc','\x03'}: return None
+        if key=='\x0e':
+            try:
+                row=choose_note(store if store is not None else Notebook(),fd,read_key)
+            except (OSError,ValueError) as exc:
+                notice=safe_text(str(exc));continue
+            if row:
+                values=['note:'+row['id'],row['title']];cursors=[len(value) for value in values];replace=[True,True];active=1
+            continue
+        if key=='\t': active=1-active;continue
+        if key in {'\r','\n','enter'}:
+            try:
+                if active==0:
+                    target,label=link_fields(values[0]);values[0]=target
+                    if not values[1] or replace[1]: values[1]=label;replace[1]=True
+                    cursors=[len(value) for value in values];active=1
+                else: return make_link(values[1],values[0])
+            except ValueError as exc: notice=str(exc);active=0
+            continue
+        if key in {'left','right','home','end'}:
+            replace[active]=False
+            if key=='left': cursors[active]=max(0,cursors[active]-1)
+            elif key=='right': cursors[active]=min(len(values[active]),cursors[active]+1)
+            elif key=='home': cursors[active]=0
+            else: cursors[active]=len(values[active])
+            continue
+        if key in {'\b','\x7f','delete'}:
+            value=values[active];cursor=cursors[active]
+            if replace[active]: value='';cursor=0
+            elif key=='delete': value=value[:cursor]+value[cursor+1:]
+            elif cursor: value=value[:cursor-1]+value[cursor:];cursor-=1
+            values[active]=value;cursors[active]=cursor;replace[active]=False;continue
+        text=key[6:] if key.startswith('paste:') else key if len(key)==1 and key.isprintable() else ''
+        if text:
+            # Paste is field data, never dialog keys.
+            if any(ord(char)<32 or ord(char)==127 for char in text):
+                notice='Paste a single target or label';continue
+            if replace[active]: values[active]='';cursors[active]=0;replace[active]=False
+            cursor=cursors[active];values[active]=values[active][:cursor]+text+values[active][cursor:];cursors[active]+=len(text)
+
+
+def capture_note(fd,read_key,initial_text='',label='NEW NOTE',store=None):
     """Paste and ordinary Enter never submit a draft."""
     previous=termios.tcgetattr(fd)
     text=safe_text(initial_text); cursor=len(text)
@@ -180,7 +334,7 @@ def capture_note(fd,read_key,initial_text='',label='NEW NOTE'):
             heading=(label+' · ')[:max(1,width-1)]
             actions='Enter newline · Shift-Enter/Ctrl-S save · Esc cancel'[:max(0,width-1-len(heading))]
             frame=[KEY_CYAN+heading+'\033[0m'+command_hints(actions),
-                   command_hints('Shift-↑↓/PgUp/PgDn page · Shift-←→ note start/end · Home/End line'[:max(1,width-1)])]
+                   command_hints('Ctrl-K insert link · Shift-↑↓ page · Shift-←→ note start/end · Home/End line'[:max(1,width-1)])]
             if boxed:
                 frame.extend(['┌'+'─'*columns+'┐',*['│'+line.ljust(columns)+'│' for line in visible],'└'+'─'*columns+'┘'])
             else: frame.extend(visible)
@@ -188,6 +342,10 @@ def capture_note(fd,read_key,initial_text='',label='NEW NOTE'):
             key=read_key(fd,None)
             if key in {'esc','\x03'}: return None
             if key in {'shiftenter','\x13'}: return text
+            if key=='\x0b':
+                linked=insert_link(store,fd,read_key)
+                if linked: text=text[:cursor]+linked+text[cursor:];cursor+=len(linked)
+                continue
             if key.startswith('paste:'):
                 pasted=safe_text(key[6:]); text=text[:cursor]+pasted+text[cursor:]; cursor+=len(pasted)
                 continue
@@ -223,7 +381,7 @@ def capture_note(fd,read_key,initial_text='',label='NEW NOTE'):
 
 
 def quick_edit(store,row,fd,read_key):
-    draft=capture_note(fd,read_key,row['body'],'EDIT · '+safe_text(row['title']))
+    draft=capture_note(fd,read_key,row['body'],'EDIT · '+safe_text(row['title']),store=store)
     if draft is None or draft==row['body']: return ''
     try:
         store.change(row['id'],{'body':draft},expected=row['revision'])
@@ -337,7 +495,7 @@ def note_view(store,row,read_key):
                 frame.append('│'+line+'│')
             frame.extend(['│'+' '*inner+'│']*max(0,page-len(content[top:top+page])))
             frame.extend(['└'+border+'┘',
-                          command_hints('↑↓/Space scroll · L links · B related · E edit · V editor · H help · Esc back'[:max(1,width-1)]),
+                          command_hints('↑↓/Space scroll · L links · Y copy link · B related · E edit · V editor · H help · Esc back'[:max(1,width-1)]),
                           notice[:max(1,width-1)]])
             sys.stdout.write('\033[2J\033[H'+'\n'.join(frame)+'\033[J'); sys.stdout.flush()
             key=read_key(fd,None)
@@ -349,6 +507,8 @@ def note_view(store,row,read_key):
             elif key in {'home','shiftleft'}: top=0
             elif key in {'end','shiftright'}: top=len(content)
             elif key in {'H','?'}: show_help(fd,read_key)
+            elif key=='Y':
+                notice='Copied note link · paste into another note' if copy_note_link(row) else 'Clipboard unavailable'
             elif key in {'L','B'} or (len(key)==1 and key in '123456789' and int(key)<=len(links)):
                 options=links if key!='B' else related_notes(store,row)
                 target=links[int(key)-1][1] if key in '123456789' else choose_link(fd,read_key,options,'NOTE LINKS' if key=='L' else 'RELATED NOTES')
@@ -411,7 +571,7 @@ def workspace(store,kind,read_key,hints,initial_query=''):
                 lines.append((KEY_CYAN+'›' if number==index else ' ')+marker+' '+display(row)[:max(10,width-5)]+'\033[0m')
                 lines.append('\033[2m   '+metadata(row)[:max(1,width-4)]+'\033[0m')
             while len(lines)<height-4: lines.append('')
-            lines.extend([('FILTER ' if scope=='title' else 'SEARCH ')+query+'█',command_hints(hints('↑↓ move · Tab mark · Enter view · V full editor · N new · P file · C done · R remind · F sort · T type · / full text · H help · Esc clear/exit',width)),notice])
+            lines.extend([('FILTER ' if scope=='title' else 'SEARCH ')+query+'█',command_hints(hints('↑↓ move · Tab mark · Enter view · V full editor · Y copy link · N new · P file · C done · R remind · F sort · T type · / full text · H help · Esc clear/exit',width)),notice])
             sys.stdout.write('\033[H'+ '\033[K\n'.join(lines)+'\033[K\033[J'); sys.stdout.flush()
             key=read_key(fd,1)
             if not key: continue
@@ -449,12 +609,14 @@ def workspace(store,kind,read_key,hints,initial_query=''):
                     try: note_view(store,rows[index],read_key)
                     finally:
                         tty.setcbreak(fd); sys.stdout.write('\033[?25l')
+                elif key=='Y' and rows:
+                    notice='Copied note link · paste into another note' if copy_note_link(rows[index]) else 'Clipboard unavailable'
                 elif key=='V' and rows:
                     termios.tcsetattr(fd,termios.TCSADRAIN,old)
                     try: edit(store,rows[index])
                     finally: tty.setcbreak(fd)
                 elif key=='N':
-                    text=capture_note(fd,read_key)
+                    text=capture_note(fd,read_key,store=store)
                     if text and text.strip():
                         remind=timestamp(prompt('remind when')) if kind=='reminder' else None
                         store.create(text,kind=kind or 'note',remind_at=remind); nudge_sync()

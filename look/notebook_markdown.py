@@ -18,20 +18,27 @@ def safe_text(text):
 
 
 def markdown_link(text):
-    match=re.match(r'\[([^\]\n]+)\]\(',text)
-    if not match: return None
-    start=match.end(); end=start; nesting=1; angled=text[start:start+1]=='<'
+    if not text.startswith('['): return None
+    end=1
+    while end<len(text):
+        if text[end]=='\\': end+=2; continue
+        if text[end]=='\n': return None
+        if text[end]==']': break
+        end+=1
+    if end<=1 or text[end:end+2]!='](': return None
+    label=text[1:end]
+    start=end+2; end=start; nesting=1; angled=text[start:start+1]=='<'
     if angled:
         close=text.find('>',start+1)
         if close<0 or text[close+1:close+2]!=')': return None
-        return match[1],text[start+1:close],close+2
+        return label,text[start+1:close],close+2
     while end<len(text):
         char=text[end]
         if char=='\n': return None
         if char=='(': nesting+=1
         elif char==')':
             nesting-=1
-            if not nesting: return match[1],text[start:end],end+1
+            if not nesting: return label,text[start:end],end+1
         end+=1
     return None
 
@@ -55,9 +62,10 @@ def inline(text,style=(),depth=0,links=None):
         link=markdown_link(rest)
         if link and depth<8:
             label,target,length=link
-            spans.extend(inline(label,style+('4',)+CYAN,depth+1))
+            label_spans=inline(label,style+('4',)+CYAN,depth+1)
+            spans.extend(label_spans)
             if links is not None:
-                links.append((label,target))
+                links.append((''.join(text for text,_ in label_spans),target))
                 spans.append((' ['+str(len(links))+']',style+CYAN))
             cursor+=length; continue
         matched=False

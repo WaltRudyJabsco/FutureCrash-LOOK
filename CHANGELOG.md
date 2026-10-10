@@ -1,3 +1,10 @@
+# 2026-10-10 — Easier notebook links
+
+- Y copies a ready-made Markdown link from the Notes list or preview.
+- Editor Ctrl-K inserts clipboard paths, URLs, Fabric addresses, or copied note links, with an editable label.
+- Ctrl-N in Insert Link searches notes by title/project and inserts their stable ID automatically.
+- Link labels now support literal brackets and Markdown punctuation; existing opening, paste, and save controls remain available.
+
 # 2026-10-10 — Notebook links and track colors
 
 - Enter inserts a quick-editor newline; Shift-Enter/Ctrl-S saves. Bracketed paste is atomic, Unicode stays intact, and terminal controls render as inert escapes.

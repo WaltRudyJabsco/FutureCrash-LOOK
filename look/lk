@@ -12680,6 +12680,10 @@ def _read_tty_key(fd, timeout=None):
                 return "paste:"
         return "paste:"+bytes(payload[:-len(end)] if payload.endswith(end) else payload).decode("utf-8","replace")
     return {
+        # Enhanced keyboards distinguish Ctrl-letter keys from their legacy bytes.
+        b"\x1b[107;5u":"\x0b", b"\x1b[110;5u":"\x0e",
+        b"\x1b[115;5u":"\x13", b"\x1b[106;5u":"\n",
+        b"\x1b[99;5u":"\x03",
         b"\x1b[13;2u":"shiftenter", b"\x1b[27;2;13~":"shiftenter",
         b"\x1b\r":"shiftenter", b"\x1b\n":"shiftenter",
         b"\x1b[13u":"enter", b"\x1b[13;1u":"enter",
