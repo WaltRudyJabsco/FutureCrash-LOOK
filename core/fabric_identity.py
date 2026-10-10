@@ -8,6 +8,7 @@ from __future__ import annotations
 
 import base64
 import hashlib
+import ipaddress
 import json
 import os
 import secrets
@@ -115,6 +116,12 @@ def _https_authority(value: str) -> tuple[str, int] | None:
     except ValueError:
         pass
     return None
+
+
+def _dns_label(host: str) -> str:
+    try:ipaddress.ip_address(host)
+    except ValueError:return host.split('.',1)[0]
+    return ''
 
 
 def _tailcat_advertisement() -> dict:
@@ -288,15 +295,20 @@ class FabricIdentity:
     def _matching_trust_row(self, url: str) -> dict | None:
         target=_host(url)
         if not target: return None
+        short_name=_dns_label(target)
+        alias=None
         for row in (self.trusted().get("nodes") or {}).values():
             if not isinstance(row,dict): continue
             candidates={_host(str(row.get("endpoint") or "")), str(row.get("hostname") or "").casefold(), str(row.get("name") or "").casefold()}
             for ep in self._active_tailcat_endpoints(row):
                 candidates.add(_host(str(ep)))
             candidates.discard("")
-            if target in candidates or any(target.split(".",1)[0] == c.split(".",1)[0] for c in candidates):
-                return row
-        return None
+            if target in candidates:return row
+            # IP prefixes are networks, never host aliases. Exact endpoint matches
+            # also take precedence over another peer's shortened DNS label.
+            if alias is None and short_name and any(short_name==_dns_label(c) for c in candidates):
+                alias=row
+        return alias
 
     def ssl_context_for_url(self, url: str):
         row=self._matching_trust_row(url)

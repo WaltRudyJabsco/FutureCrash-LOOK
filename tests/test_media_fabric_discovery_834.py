@@ -57,6 +57,17 @@ def test_catalog_fallback_routes_share_a_total_budget(monkeypatch):
     assert calls==[('https://old/v1/media/catalog',8),('https://healthy/v1/media/catalog',4)]
 
 
+def test_catalog_gateway_error_preserves_backend_diagnostic(monkeypatch):
+    import io,urllib.error,pytest
+    from core import node
+    monkeypatch.setattr(node,'_peer_bases',lambda peer:['https://peer'])
+    def request(url,timeout):
+        raise urllib.error.HTTPError(url,502,'Bad Gateway',{},io.BytesIO(b'{"error":"backend connection refused"}'))
+    monkeypatch.setattr(node,'http_json',request)
+    with pytest.raises(RuntimeError,match='backend connection refused'):
+        node._peer_json({},'/v1/media/catalog')
+
+
 def test_unpaired_tailscale_devices_are_not_missing_catalog_owners(monkeypatch):
     from core import node
     monkeypatch.setattr(node,'_refresh_media_peers_background',lambda:None)

@@ -85,16 +85,47 @@ def lk():
 def test_player_cycles_all_views_without_losing_transport_controls(lk,monkeypatch):
     terminal(monkeypatch,lk)
     modes=[]; calls=[]
-    monkeypatch.setattr(lk,'_media_player_render',lambda mode=0:modes.append(mode) or 'frame')
-    keys=iter(['v']*8+[' ','n','p','left','right','s','r','x','q'])
+    monkeypatch.setattr(lk,'_media_player_render',lambda mode=0,visual_elapsed=0:modes.append(mode) or 'frame')
+    keys=iter(['v']*9+[' ','n','p','left','right','s','r','x','q'])
     monkeypatch.setattr(lk,'_read_tty_key',lambda *args:next(keys))
     monkeypatch.setattr(lk,'_media_control_session',lambda action:calls.append(action))
     monkeypatch.setattr(lk,'_media_mpv_request',lambda args:calls.append(args))
     monkeypatch.setattr(lk,'_media_shuffle_command',lambda:calls.append('shuffle'))
     monkeypatch.setattr(lk,'_media_repeat_command',lambda args:calls.append('repeat'))
     assert lk.media_player()==0
-    assert modes[:9]==list(range(8))+[0]
+    assert modes[:10]==list(range(9))+[0]
     assert calls==['toggle','next','prev',['seek',-10,'relative'],['seek',10,'relative'],'shuffle','repeat','stop']
+
+
+def test_cycle_holds_each_visual_ten_seconds_and_includes_album_art():
+    mode=player_visuals.CYCLE_MODE
+    assert [player_visuals.active_mode(mode,seconds) for seconds in (0,9.99,10,60,69.99,70)]==[1,1,2,7,7,1]
+    assert all(player_visuals.active_mode(mode,second)!=0 for second in range(200))
+    for fixed in range(mode):assert player_visuals.active_mode(fixed,120)==fixed
+
+
+def test_cycle_uses_album_renderer_and_keeps_transport_footer(lk,monkeypatch):
+    snap={'entry':{'artist':'Artist','title':'Song'},'state':'playing','position':30,'duration':60,
+          'index':0,'session':{'queue':[{}]}}
+    monkeypatch.setattr(lk.shutil,'get_terminal_size',lambda fallback:os.terminal_size((100,30)))
+    monkeypatch.setattr(lk,'_media_player_large_art',lambda entry,w,h:['@'*w]*h)
+    rendered=lk._media_player_full_visual(snap,player_visuals.CYCLE_MODE,60)
+    assert 'Cycle · Album Art' in rendered and '@' in rendered
+    assert 'space pause' in rendered and 'p/n previous/next' in rendered
+
+
+def test_selecting_cycle_starts_its_own_timer(lk,monkeypatch):
+    terminal(monkeypatch,lk)
+    clock=[100.0];frames=[]
+    monkeypatch.setattr(lk.time,'monotonic',lambda:clock[0])
+    monkeypatch.setattr(lk,'_media_player_render',lambda mode=0,visual_elapsed=0:frames.append((mode,visual_elapsed)) or 'frame')
+    keys=iter([('v',1000.0),('',1009.0),('',1010.0),('q',1010.0)])
+    def key(*args):
+        value,clock[0]=next(keys)
+        return value
+    monkeypatch.setattr(lk,'_read_tty_key',key)
+    assert lk.media_player(initial_visualizer=7)==0
+    assert frames[1:]==[(8,0.0),(8,9.0),(8,10.0)]
 
 
 def test_full_visual_keeps_metadata_within_terminal(lk,monkeypatch):
