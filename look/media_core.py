@@ -162,9 +162,15 @@ def is_media_path(path: Path) -> bool:
     try:
         with path.open('rb') as stream:data=stream.read(4*192)
     except OSError:return False
-    return any(offset+2*packet<len(data) and
-               all(data[offset+index*packet]==0x47 for index in range(3))
-               for packet in (188,192) for offset in range(packet))
+    # Most old broad scans contain TypeScript. Search the bounded buffer for
+    # actual sync candidates in C instead of testing every offset in Python.
+    for packet in (188,192):
+        offset=data.find(b'\x47',0,packet)
+        while offset!=-1:
+            if offset+2*packet<len(data) and data[offset+packet]==0x47 and data[offset+2*packet]==0x47:
+                return True
+            offset=data.find(b'\x47',offset+1,packet)
+    return False
 
 def normalize_library(data: Any) -> dict[str, Any]:
     if not isinstance(data, dict):

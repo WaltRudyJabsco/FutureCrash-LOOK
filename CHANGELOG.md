@@ -3,6 +3,7 @@
 - Fixed LOOK's missing gzip import, which turned successful compressed catalogs into local fallback. Fallbacks now report the actual request/decode error.
 - Scoped the paired Tailcat certificate to its advertised HTTPS host and port so the separate Tailscale HTTPS endpoint uses normal certificate validation.
 - Preserved short-lived discovered IP routes during refreshes of the same paired certificate.
+- Concurrent catalog readers share one recent local publication, invalidated by catalog and visibility edits. Faster MPEG sync checks avoid repeatedly testing every offset in old TypeScript-heavy scans.
 
 # 2026-10-10 — Editor movement and terminal palettes
 

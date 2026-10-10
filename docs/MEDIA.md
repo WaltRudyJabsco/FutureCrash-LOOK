@@ -42,6 +42,12 @@ Tailscale HTTPS fallback keeps normal certificate and hostname verification.
 Short-lived discovered IP routes survive advertisement refreshes while the
 paired Tailcat certificate remains unchanged.
 
+Simultaneous catalog readers share a local publication for up to three seconds;
+changes to the catalog or owner visibility file invalidate it immediately. Old
+TypeScript-heavy broad scans use a bounded byte search for MPEG sync candidates
+instead of checking every candidate offset in Python. This keeps publishing a
+large library from repeating expensive work for each peer browsing it.
+
 Large peer catalogs have an eight-second per-route read timeout and an eighteen-
 second route budget; LOOK allows 45 seconds for the complete local-node response.
 A sleeping peer must not make LOOK discard a healthy owner's catalog merely
