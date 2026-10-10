@@ -305,8 +305,12 @@ def note_view(store,row,read_key):
             sys.stdout.write('\033[2J\033[H'+'\n'.join(frame)+'\033[J'); sys.stdout.flush()
             key=read_key(fd,None)
             if key in {'esc','q','\x03'}: return
-            if key in '123456789' and links and int(key)<=len(links):
-                notice=open_note_link(store,links[int(key)-1][1],read_key)
+            if len(key)==1 and key in '123456789' and links and int(key)<=len(links):
+                termios.tcsetattr(fd,termios.TCSADRAIN,old)
+                sys.stdout.write('\x1b[?25h'); sys.stdout.flush()
+                try: notice=open_note_link(store,links[int(key)-1][1],read_key)
+                finally:
+                    tty.setcbreak(fd); sys.stdout.write('\x1b[?25l'); sys.stdout.flush()
             elif key in {'down','j','\r','\n'}: top+=1
             elif key in {'up','k'}: top-=1
             elif key in {'pagedown','shiftdown',' '}: top+=page
