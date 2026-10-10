@@ -1,6 +1,8 @@
 """Six bounded terminal ambient animations; these do not measure audio PCM."""
 from __future__ import annotations
 import math
+import hashlib
+import json
 
 NAMES = ('Bars', 'Waves', 'Orbit', 'Tunnel', 'Stars', 'Plasma', 'Album Art')
 
@@ -49,3 +51,23 @@ def frame(mode, width, height, phase, playing=True, seed=0):
                 value=(math.sin(x*.10+t)+math.sin(y*.25-t*.8)+math.sin(math.hypot(x-width/2,(y-height/2)*2)*.12-t))/6+.5
                 point(x,y,ramp[max(0,min(len(ramp)-1,int(value*len(ramp))))])
     return [''.join(row) for row in canvas]
+
+
+# Muted foreground accents; no background changes or animation.
+ALBUM_COLORS=('38;5;117','38;5;180','38;5;150','38;5;183','38;5;110','38;5;211')
+_album_track=None
+_album_color=0
+
+
+def album_color(snapshot):
+    """Deterministic transition choices, stable across pause/seek/redraw."""
+    global _album_track,_album_color
+    entry=snapshot['entry']
+    identity=(snapshot.get('index'),tuple(str(entry.get(key) or '') for key in
+              ('node','id','digest','path','artist','title','track')))
+    if identity!=_album_track:
+        choice=int.from_bytes(hashlib.sha256(json.dumps(identity).encode()).digest()[:4],'big')%len(ALBUM_COLORS)
+        if _album_track is not None and choice==_album_color:
+            choice=(choice+1)%len(ALBUM_COLORS)
+        _album_track=identity; _album_color=choice
+    return ALBUM_COLORS[_album_color]

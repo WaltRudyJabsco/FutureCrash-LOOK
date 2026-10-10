@@ -964,6 +964,58 @@ def _complete_path_text(value:str)->str:
     return base+completed
 
 
+
+def browse_fabric(target):
+    """Browse existing paired-node listings; remote files stay on their node."""
+    from posixpath import dirname
+    fd=sys.stdin.fileno(); old=termios.tcgetattr(fd)
+    selected=0; notice=''; focus=target.path
+    try:
+        # File links enter the containing directory with that file selected.
+        try: listing=fabric_files.browse(target)
+        except RuntimeError:
+            target=fabric_files.Destination(target.node,dirname(target.path))
+            listing=fabric_files.browse(target)
+            if not any(row['path']==focus for row in listing.get('files',[])):
+                raise ValueError('Remote file is missing or this node needs the updated file listing')
+        tty.setcbreak(fd)
+        while True:
+            target=fabric_files.Destination(target.node,listing['path'])
+            rows=[(True,row) for row in listing['directories']]+[(False,row) for row in listing.get('files',[])]
+            if focus:
+                selected=next((i for i,(_,row) in enumerate(rows) if row['path']==focus),0); focus=None
+            selected=max(0,min(selected,max(0,len(rows)-1)))
+            width,height=shutil.get_terminal_size((100,30)); page=max(1,height-4)
+            top=max(0,selected-page+1)
+            lines=['LOOK FABRIC · '+str(target)]
+            lines.extend(('› ' if i==selected else '  ')+row['name']+('/' if directory else '')
+                         for i,(directory,row) in enumerate(rows[top:top+page],top))
+            lines+=['↑↓ move · Enter/→ directory or file location · ← parent · Y copy path · Esc back',notice]
+            # Filenames are untrusted data, unlike our own ANSI frame.
+            try:
+                from .notebook_markdown import safe_text
+            except ImportError:
+                from notebook_markdown import safe_text
+            sys.stdout.write(CLEAR+'\n'.join(safe_text(line)[:max(1,width-1)] for line in lines)); sys.stdout.flush()
+            key=read_key()
+            if key in {'\x1b','q','Q','\x03'}: return
+            if key=='\x1b[B': selected+=1
+            elif key=='\x1b[A': selected-=1
+            elif key=='\x1b[D':
+                if target.parent:
+                    listing=fabric_files.browse(target.parent); selected=0
+            elif key in {'\r','\n','\x1b[C'} and rows:
+                directory,row=rows[selected]
+                if directory:
+                    listing=fabric_files.browse(fabric_files.Destination(target.node,row['path'])); selected=0; notice=''
+                else:
+                    notice='File on '+str(fabric_files.Destination(target.node,row['path']))+' · Y copies its address'
+            elif key in {'y','Y'} and rows:
+                value=str(fabric_files.Destination(target.node,rows[selected][1]['path']))
+                notice='Copied '+value if copy_text(value) else 'Clipboard unavailable'
+    finally:
+        termios.tcsetattr(fd,termios.TCSADRAIN,old)
+
 def _destination_picker(start_dir:Path)->Path|None:
     """Arrow-driven directory chooser. Enter commits; right descends; left ascends."""
     fd=sys.stdin.fileno()

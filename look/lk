@@ -12634,6 +12634,9 @@ def _copy_value(value):
     return False
 
 
+NOTEBOOK_PASTE_LIMIT=256_000  # Bound clipboard memory to the notebook body budget.
+
+
 def _read_tty_key(fd, timeout=None):
     if timeout is not None:
         ready,_,_=select.select([fd],[],[],timeout)
@@ -12657,15 +12660,25 @@ def _read_tty_key(fd, timeout=None):
         if seq[-1:] in b"~ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz\r\n":
             break
     if bytes(seq)==b"\x1b[200~":
-        # Bracketed paste is one payload, not a stream of editor commands.
-        payload=bytearray()
-        end=b"\x1b[201~"
-        while len(payload)<256_000:
-            ready,_,_=select.select([fd],[],[],1)
-            if not ready: break
-            payload.extend(os.read(fd,min(4096,256_000-len(payload))))
-            if end in payload: break
-        return "paste:"+bytes(payload).split(end,1)[0].decode("utf-8","replace")
+        # Consume paste as one inert payload; embedded Enter/Esc are never keys.
+        payload=bytearray(); end=b"\x1b[201~"; max_paste=NOTEBOOK_PASTE_LIMIT
+        while not payload.endswith(end):
+            ready,_,_=select.select([fd],[],[],2)
+            if not ready: return "paste:"  # An interrupted paste must not freeze the editor.
+            chunk=os.read(fd,1)
+            if not chunk: break
+            payload.extend(chunk)
+            if len(payload)>max_paste+len(end):
+                # Drain oversized pastes so remaining bytes cannot become commands.
+                tail=bytes(payload[-len(end):])
+                while tail!=end:
+                    ready,_,_=select.select([fd],[],[],2)
+                    if not ready: break
+                    chunk=os.read(fd,1)
+                    if not chunk: break
+                    tail=(tail+chunk)[-len(end):]
+                return "paste:"
+        return "paste:"+bytes(payload[:-len(end)] if payload.endswith(end) else payload).decode("utf-8","replace")
     return {
         b"\x1b[13;2u":"shiftenter", b"\x1b[27;2;13~":"shiftenter",
         b"\x1b\r":"shiftenter", b"\x1b\n":"shiftenter",
@@ -18837,16 +18850,13 @@ def _media_player_full_visual(snap,mode):
     art_height=max(1,height-len(header)-len(footer))
     art=_media_player_large_art(entry,width,art_height) if album_art else player_visuals.frame(mode,width,art_height,time.monotonic(),state in {'play','playing'},seed)
     lines=header+art+footer
-    color=("1;32","1;36","1;35","1;34","1;37","1;33","1;36")[(mode-1)%len(player_visuals.NAMES)]
-    if album_art:
-        # Give each successive queue position a new tint, including tracks sharing a cover.
-        palette=("1;36","1;33","1;32","1;35","1;34","1;91","1;96","1;93")
-        color=palette[snap['index']%len(palette)]
+    color=player_visuals.album_color(snap) if album_art else ("1;32","1;36","1;35","1;34","1;37","1;33")[(mode-1)%6]
     return "\n".join(_c(_media_player_line(line,width),color) if len(header)<=i<len(header)+len(art) else _media_player_style(_media_player_line(line,width),6 if i>=len(header)+len(art) else 0 if i==1 else 4 if i==2 else 1) for i,line in enumerate(lines[:height]))
 
 
 def _media_player_render(visualizer=0):
     snap=_media_status_snapshot()
+    if snap: player_visuals.album_color(snap)
     if visualizer and snap:
         return _media_player_full_visual(snap,visualizer)
     width=max(42,min(88,shutil.get_terminal_size((72,24)).columns-2))

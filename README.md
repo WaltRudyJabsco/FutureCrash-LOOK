@@ -33,7 +33,7 @@ durations. Future Crash footer keys now use cyan accents.
 Escape from late replies, and adds notebook H/? help plus offline per-command
 help. Start with [Finding help](docs/HELP-GUIDE.md).
 8.10.1 fixes notebook screen clearing, adds multiline quick capture with
-Enter to save and Shift-Enter to insert a newline, and gives LO explicit
+Enter for newlines and Shift-Enter/Ctrl-S to save, and gives LO explicit
 notebook list/read tools plus direct handling of simple notebook questions.
 8.10.0 adds the replicated LOOK notebook: `lkn` / `lk notes`, `lk tasks`, and
 `lk reminders`. Capture and edit Markdown offline, file records by project,
