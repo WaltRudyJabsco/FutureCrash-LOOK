@@ -74,3 +74,20 @@ def test_script_entrypoint_preserves_failed_exit_status():
     entry=tree.body[-1].body[0].value
     assert isinstance(entry,ast.Call) and isinstance(entry.func,ast.Attribute)
     assert isinstance(entry.func.value,ast.Name) and entry.func.value.id=='sys' and entry.func.attr=='exit'
+
+
+def test_storage_cli_routes_settings_to_owner(monkeypatch,capsys):
+    routed=Mock(return_value={'ok':True,'root':'/media/library'});monkeypatch.setattr(node,'_target_post',routed)
+    monkeypatch.setattr(sys,'argv',['fcl-node','media-store','settings','{"root":"/media/library"}','--node','3090','--json'])
+    assert node.main()==0
+    assert routed.call_args.args[2:]==('3090','/v1/media/storage',{'action':'settings','payload':{'root':'/media/library'}})
+
+
+def test_storage_endpoint_checks_shape_and_pairing_before_effect(monkeypatch):
+    from look import media_storage
+    monkeypatch.setitem(sys.modules,'media_storage',media_storage)
+    called=Mock();monkeypatch.setattr(media_storage,'owner_request',called)
+    value=api(monkeypatch,{'action':'settings','payload':'invalid'});value.path='/v1/media/storage'
+    value.do_POST();assert value.sendj.call_args.args[0]==400
+    value=api(monkeypatch,{'action':'settings','payload':{}});value.path='/v1/media/storage';value._authorized_ingress=lambda path:False
+    value.do_POST();called.assert_not_called()

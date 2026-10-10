@@ -139,7 +139,7 @@ def lookup(toc):
     if not toc:return []
     from urllib.parse import urlencode
     url='https://musicbrainz.org/ws/2/discid/'+toc['disc_id']+'?'+urlencode({'toc':toc['toc'],'inc':'artists+recordings','fmt':'json'})
-    request=urllib.request.Request(url,headers={'User-Agent':'FutureCrash-LOOK/8.15.0 (personal disc importer)'})
+    request=urllib.request.Request(url,headers={'User-Agent':'FutureCrash-LOOK/8.16.0 (personal disc importer)'})
     try:
         with urllib.request.urlopen(request,timeout=5) as response:data=json.load(response)
     except (OSError,ValueError):return []
@@ -223,6 +223,11 @@ def job_path(identifier):
 
 def read_job(identifier):
     row=json.loads(job_path(identifier).read_text())
+    try:
+        from . import media_storage
+    except ImportError:import media_storage
+    delivery=media_storage.receipt(identifier)
+    if delivery:row['delivery']=delivery
     row['elapsed_seconds']=round((row.get('finished') or time.time())-row['created'],1)
     percent=row.get('percent')
     if isinstance(percent,(int,float)) and 0<percent<100:
@@ -257,7 +262,17 @@ def start(payload):
     if not isinstance(tracks,list) or len(tracks)>99 or any(not isinstance(value,str) or len(value)>300 for value in tracks):raise ValueError('Invalid track metadata')
     if 'disc' in metadata and (not isinstance(metadata['disc'],int) or not 1<=metadata['disc']<=99):raise ValueError('Invalid disc number')
     title=str(payload.get('title') or metadata.get('title') or drive.get('disc') or ('Audio CD' if kind=='cd' else 'Movie'))[:200]
-    destination=Path(payload.get('destination') or Path.home()/('Music' if kind=='cd' else 'Movies')/'Fabric Imports').expanduser().resolve()
+    remote_destination=''
+    requested=payload.get('destination') or ''
+    if not isinstance(requested,str):raise ValueError('Destination must be a path or @node:library-root')
+    if requested.startswith('@'):
+        try:from . import fabric_files
+        except ImportError:import fabric_files
+        target=fabric_files.parse(requested)
+        local=fabric_files.request('/v1/identity').get('name') or ''
+        if target.node.casefold() in {'local',str(local).casefold()}:requested=str(Path(target.path)/('music' if kind=='cd' else 'movies'))
+        else:remote_destination=requested;requested=''
+    destination=Path(requested or Path.home()/('Music' if kind=='cd' else 'Movies')/'Fabric Imports').expanduser().resolve()
     if destination==Path(destination.anchor) or destination==Path.home():raise ValueError('Choose a dedicated import directory')
     destination.mkdir(parents=True,exist_ok=True)
     if shutil.disk_usage(destination).free<MIN_FREE_BYTES:raise ValueError('Less than 1 GiB free at destination')
@@ -267,7 +282,7 @@ def start(payload):
         if any(row['drive']['id']==drive['id'] and row['state'] not in TERMINAL for row in list_jobs()):raise ValueError('This drive already has an import job')
         identifier=uuid.uuid4().hex
         row={'id':identifier,'kind':kind,'drive':drive,'title':title,'metadata':metadata,'title_index':str(payload.get('title_index','')),
-             'destination':str(destination),'state':'queued','created':time.time(),'percent':None,'stage':'queued','cancel_requested':False}
+             'destination':str(destination),'library_destination':remote_destination,'state':'queued','created':time.time(),'percent':None,'stage':'queued','cancel_requested':False}
         atomic(job_path(identifier),row)
         log=ROOT/'jobs'/(identifier+'.log')
         with log.open('ab') as output:
@@ -282,6 +297,10 @@ def start(payload):
 def cancel(identifier):
     with (ROOT/'submit.lock').open('a') as lock:
         fcntl.flock(lock,fcntl.LOCK_EX);row=read_job(identifier)
+        if row.get('delivery',{}).get('state') in {'queued','running'}:
+            try:from . import media_storage
+            except ImportError:import media_storage
+            media_storage.cancel(identifier)
         if row['state'] not in TERMINAL:row['cancel_requested']=True;atomic(job_path(identifier),row)
     return {'ok':True,'job':row}
 
@@ -383,12 +402,24 @@ def worker(identifier):
         except ImportError:import managed_folders
         managed_folders.register(final)
         save(state='complete',stage='complete',percent=100,finished=time.time(),output=str(final),partial_path=None)
+        if row.get('library_destination'):
+            try:
+                try:from . import media_storage
+                except ImportError:import media_storage
+                media_storage.start(identifier,final,row['library_destination'],row['kind'])
+            except Exception as exc:save(delivery_error=str(exc)[:1000])
     except Exception as exc:
         save(state='cancelled' if isinstance(exc,InterruptedError) else 'failed',error=str(exc)[:1000],finished=time.time())
 
 
 def request(action,payload=None):
     payload=payload or {}
+    if action=='deliver':
+        job=read_job(payload.get('id'))
+        if job['state']!='complete':raise ValueError('Finish the local import before delivering it')
+        try:from . import media_storage
+        except ImportError:import media_storage
+        return {'ok':True,'delivery':media_storage.start(job['id'],job['output'],payload['destination'],job['kind'])}
     if action=='drives':return drives()
     if action=='scan':return inspect(payload.get('drive'),payload.get('kind','cd'))
     if action=='start':return start(payload)

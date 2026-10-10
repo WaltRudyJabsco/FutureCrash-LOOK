@@ -92,12 +92,13 @@ def browse(dest,common=False):
     return request('/v1/files/browse',params)
 
 
-def copy(paths, destination, progress=None):
+def copy(paths, destination, progress=None, *, root_name=None):
     dest = parse(destination)
     if dest is None: raise ValueError('Fabric destination required')
     paths = [Path(p).absolute() for p in paths]
     if len({p.name for p in paths}) != len(paths):
         raise ValueError('Selected sources have duplicate destination names')
+    if root_name is not None and (len(paths)!=1 or not root_name or '/' in root_name or '\\' in root_name or root_name in {'.','..'}):raise ValueError('Invalid copy root name')
     # A disk-backed archive bounds RAM and includes spaces verbatim, with no shell.
     started=time.monotonic()
     transfer=uuid.uuid4().hex
@@ -114,7 +115,7 @@ def copy(paths, destination, progress=None):
                     raise ValueError(f'Fabric copy does not follow links or copy special files: {info.name}')
                 return info
             for path in paths:
-                archive.add(path, arcname=path.name, filter=regular_only)
+                archive.add(path, arcname=root_name or path.name, filter=regular_only)
         length = stream.tell(); stream.seek(0)
         if progress: progress.update(stage='connecting',bytes=0,total=length,transfer=transfer)
         result=request('/v1/files/copy', {'target': dest.node, 'path': dest.path, 'transfer': transfer}, stream, length)

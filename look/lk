@@ -31,7 +31,7 @@ try:
 except Exception:
     readline = None
 
-VERSION="4.62.0"
+VERSION="4.63.0"
 
 LOOK_WORDMARK = r"""       ██╗      ██╗  ██╗
        ██║      ██║ ██╔╝
@@ -10014,7 +10014,7 @@ def _direct_searxng_search(query, limit=8):
     params=urllib.parse.urlencode({"q":query,"format":"json"})
     request=urllib.request.Request(base+"/search?"+params,headers={
         "Accept":"application/json",
-        "User-Agent":"Future-Crash-Fabric/8.15.0",
+        "User-Agent":"Future-Crash-Fabric/8.16.0",
     })
     with urllib.request.urlopen(request,timeout=12) as response:
         data=json.load(response)
@@ -17917,6 +17917,27 @@ def _media_edit_prompt(rows,fd,old):
     finally:tty.setcbreak(fd)
 
 
+def _media_storage_command(args):
+    import argparse,media_storage
+    parser=argparse.ArgumentParser(prog='lk media storage',description='Remember a preferred library node and map its canonical media root. Each node has music, movies, tv, books and an inbox; extra scan roots are separate.')
+    parser.add_argument('--node',help='Preferred library node; local keeps new imports here')
+    parser.add_argument('--root',help='Library root on that node (absolute or ~/); existing folders are retained')
+    parser.add_argument('--json',action='store_true')
+    args=parser.parse_args(args)
+    try:
+        current=media_storage.settings();owner=args.node or current['node']
+        payload={'root':args.root} if args.root else {}
+        if owner.casefold() in _media_local_node_names():result=media_storage.owner_request('settings',payload)
+        else:result=_media_fabric_cli(['media-store','settings',json.dumps(payload),'--node',owner])
+        if args.node or args.root:media_storage.settings({'node':owner,'root':result['root']})
+        if args.json:print(json.dumps(result,ensure_ascii=False,indent=2))
+        else:
+            print('MEDIA LIBRARY · '+owner+' · '+result['root'])
+            for name,path in result['directories'].items():print('  '+name+' · '+path)
+        return 0
+    except (OSError,ValueError,RuntimeError) as exc:print('MEDIA LIBRARY · '+str(exc),file=sys.stderr);return 1
+
+
 def _media_edit_command(args):
     import argparse
     parser=argparse.ArgumentParser(prog='lk media edit',description='Correct catalog metadata for one track or a chosen batch. Audio/video bytes are unchanged; corrections live in .info.json files.')
@@ -19259,6 +19280,7 @@ def media(args):
     if raw=="browse": return _media_browse_command(args[1:])
     if raw=="identify": return _media_identify_command(args[1:])
     if raw=="complete": return _media_complete_command(args[1:])
+    if raw=="storage": return _media_storage_command(args[1:])
     if raw=="edit": return _media_edit_command(args[1:])
     if raw=="artists": return _media_group_command("artist",args[1:])
     if raw=="albums": return _media_group_command("album",args[1:])
@@ -19873,6 +19895,7 @@ _COMMANDS = [
     ('lk media identify', '<QUERY|PATH|--all>', 'media', 'Promote discoveries to SHA identity'),
     ('lk media shuffle', '[on|off]', 'media', 'Toggle or set shuffle'),
     ('lk media repeat', '[off|all]', 'media', 'Cycle or set repeat'),
+    ("lk media storage", "[--node NODE] [--root PATH] [--json]", "media", "Remember a library node and map its canonical media root"),
     ("lk media edit", "<QUERY> --artist NAME [--album NAME] [--album-artist NAME] [--title NAME] [--track N] [--disc N] [--all] [--json]", "media", "Correct metadata for one track or matching batch"),
     ("lk media", "[...]", "media", "Media library, queue, playlists, transport", "lk music"),
     ("lk player", "", "media", "Live LOOK miniplayer"),
@@ -21071,7 +21094,7 @@ def main():
         import command_help
         return command_help.show(sys.argv[2:])
     if len(sys.argv)>2 and any(flag in sys.argv[2:] for flag in ('--help','-h')):
-        if sys.argv[1] not in {'notes','tasks','reminders','ytd','describe','notifications'} and not (sys.argv[1] in {'media','music'} and sys.argv[2] in {'import','disc','rip','edit'}):
+        if sys.argv[1] not in {'notes','tasks','reminders','ytd','describe','notifications'} and not (sys.argv[1] in {'media','music'} and sys.argv[2] in {'import','disc','rip','edit','storage'}):
             import command_help
             return command_help.show([word for word in sys.argv[1:] if word not in {'--help','-h'}])
     if len(sys.argv)>=2 and sys.argv[1] in {"notes","tasks","reminders"}:

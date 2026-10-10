@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Future Crash + LOOK Unified Node 8.15.0.
+"""Future Crash + LOOK Unified Node 8.16.0.
 
 A small distributed supervisor for trusted personal machines. Immediate events stay
 asynchronous; a one-second fabric pulse reconciles presence, leases and stale work.
@@ -152,7 +152,7 @@ def _file_peer_json(peer,path):
     return _file_race(peer,path)[1]
 
 
-VERSION = "8.15.0"
+VERSION = "8.16.0"
 RELEASE_NAME = "FABRIC VISION"
 DEFAULT_HOST = "127.0.0.1"
 DEFAULT_PORT = 7332
@@ -2632,7 +2632,7 @@ def _local_web_search(query, limit=8):
     base=os.environ.get("FCL_SEARXNG_URL","http://127.0.0.1:8888").rstrip("/")
     request=urllib.request.Request(base+"/search?"+params,headers={
         "Accept":"application/json",
-        "User-Agent":"Future-Crash-Fabric/8.15.0",
+        "User-Agent":"Future-Crash-Fabric/8.16.0",
     })
     try:
         with urllib.request.urlopen(request,timeout=8) as response:
@@ -4542,6 +4542,14 @@ class API(BaseHTTPRequestHandler):
         if not self._authorized_ingress(path): return
         if path == "/v1/files/copy": return self._files_copy()
         d = self.body()
+        if path == '/v1/media/storage':
+            try:
+                if not isinstance(d,dict) or not isinstance(d.get('payload',{}),dict):raise ValueError('Storage request must be an object')
+                _look_catalog_modules();import media_storage
+                result=media_storage.owner_request(d.get('action'),d.get('payload',{}))
+                with MEDIA_CATALOG_LOCK:MEDIA_CATALOG_CACHE['data']=None
+                return self.sendj(200,dict(result,node=identity()['name']))
+            except (OSError,ValueError,TypeError) as exc:return self.sendj(400,{'ok':False,'error':str(exc)})
         if path == '/v1/media/metadata':
             try:
                 _look_catalog_modules();import media_metadata
@@ -6153,7 +6161,7 @@ def main():
     ap.add_argument("command",nargs="?",default="serve",
         choices=["serve","status","nodes","activity","pulse","fabric","watch","dashboard","models","route","qualify","services","service","release","maintenance","update",
                  "jobs","job","submit","packet","cancel","events","http","beacon","lights","artifact-add","artifact","artifacts","file-catalog","file-find","media-catalog","media-identify",
-                 "decisions","decision","answer","ask","decision-shadow","decision-provider","identity","trust","untrust","pair-code","pair","transport","rendezvous","endpoints","endpoint-code","allow","revoke-endpoint","media-outputs","media-state","media-play","media-control","speak","alert","disc-import","media-edit","notifications"])
+                 "decisions","decision","answer","ask","decision-shadow","decision-provider","identity","trust","untrust","pair-code","pair","transport","rendezvous","endpoints","endpoint-code","allow","revoke-endpoint","media-outputs","media-state","media-play","media-control","speak","alert","disc-import","media-edit","media-store","notifications"])
     ap.add_argument("args",nargs="*")
     ap.add_argument("--node",dest="node",default=None,help="target Fabric node name")
     ap.add_argument("--voice-profile",dest="voice_profile",default="default",choices=["default","albert","warm","crisp","deep","max","philosopher","pirate","wopr"],help="speech voice profile")
@@ -6497,6 +6505,10 @@ def main():
                     print(f"FABRIC FILES · {int(payload.get('locations',payload.get('count',0))):,} cataloged locations")
                     for row in payload.get("nodes") or []: print(f"  {str(row.get('node') or '?'):<20} {int(row.get('count') or 0):>9,} files")
                 return 0
+            if a.command=="media-store":
+                if not a.args:ap.error('media-store requires ACTION [JSON]')
+                result=_target_post(a.host,a.port,a.node,'/v1/media/storage',{'action':a.args[0],'payload':json.loads(a.args[1]) if len(a.args)>1 else {}},timeout=600.0)
+                print(json.dumps(result,indent=2));return 0
             if a.command=="media-edit":
                 if not a.args:ap.error('media-edit requires a JSON payload')
                 result=_target_post(a.host,a.port,a.node,'/v1/media/metadata',json.loads(a.args[0]),timeout=30.0)

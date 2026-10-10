@@ -65,7 +65,10 @@ be verified with the actual connected hardware; no firmware is altered.
 ## Storage and recovery
 
 Defaults: `~/Music/Fabric Imports` for CDs and `~/Movies/Fabric Imports` for
-video. `--destination PATH` always refers to the owner's filesystem. Each job
+video. `--destination PATH` selects an owner-local folder. `--destination @node:ROOT`
+selects a destination node’s canonical library root and uses background inbox delivery.
+Without that override, the initiating node’s remembered `lk media storage` preference
+chooses the destination. Each job
 uses a hidden staging directory beside its destination, then validates media
 streams/duration and publishes the directory atomically. Existing files are
 never overwritten. A unique suffix distinguishes repeated imports. The final
@@ -100,3 +103,31 @@ Sources: [CDDA Paranoia](https://xiph.org/paranoia/manual.html),
 Hardware status: the SuperDrive is not connected yet. Controlled import tests
 verify orchestration and real FLAC encoding; real CD/DVD/Blu-ray acquisition
 requires a compatible drive and disc for the final hardware check.
+
+## Node libraries and inboxes
+
+`lk media storage` shows the remembered library node and its mapped root.
+`lk media storage --node 3090 --root "/run/media/jreno/2TB Storage/srv/media"`
+maps an existing library and remembers it for future imports on this initiating
+computer. Generic defaults use ~/Media; root/music, root/movies, root/tv,
+root/books and root/inbox have stable meanings on every node. Existing files and
+extra manually added scan roots remain independent.
+
+A CD goes to music; DVD/Blu-ray goes to movies. Remote deliveries copy all audio,
+sidecars and provenance into a hidden job folder inside the recipient’s inbox.
+SHA-256 checksums are verified before promotion and cataloging. Delivery runs as
+a detached job with a durable receipt; status/watch show it and cancel can stop
+its owned worker. The ripping node’s original copy is always retained. Offline,
+corrupt, interrupted or colliding deliveries report failure and retain source
+copies; retries are explicit and checksum-matching destinations are reused.
+
+Choose another library per import with --destination @node:ROOT, or use an
+owner-local absolute/~/ folder to keep that import local. The workbench displays
+the current default in its destination prompt; Return accepts it. Preferences
+live in ~/.config/look/media_storage.json on the initiating node; each recipient
+maps its own root in ~/.config/look/media_library.json.
+
+To deliver an older completed import without rereading its disc:
+`lk media import deliver FULL_JOB_ID --destination @3090:ROOT`.
+Background delivery is separate from successful local encoding; its failure
+never changes the local import into missing or deleted media.
