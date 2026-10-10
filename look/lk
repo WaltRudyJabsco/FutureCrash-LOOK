@@ -15862,10 +15862,12 @@ def _media_fabric_catalog():
     try:
         request=urllib.request.Request(
             "http://127.0.0.1:7332/v1/media/fabric",
-            headers={"Accept":"application/json"},
+            headers={"Accept":"application/json","Accept-Encoding":"gzip"},
         )
         with urllib.request.urlopen(request,timeout=45.0) as response:
-            payload=json.loads(response.read().decode("utf-8"))
+            body=response.read()
+            if getattr(response,'headers',{}).get('Content-Encoding','').casefold()=='gzip':body=gzip.decompress(body)
+            payload=json.loads(body.decode("utf-8"))
         if isinstance(payload,dict):
             # A sleepy owner does not erase the last known shared library.
             failed={str(error.get('node') or '') for error in payload.get('errors') or []}
@@ -19385,6 +19387,16 @@ def media(args):
         ok=isinstance(result,str) and result.startswith("URL OPEN OK")
         print("LOOK media · Classic Arts Showcase · default browser" if ok else f"LOOK media · {result}")
         return 0 if ok else 1
+    if raw=='artwork':
+        import media_cover_lookup
+        action=args[1] if len(args)>1 else 'status'
+        if action not in {'on','off','status'}:
+            print('usage: lk media artwork [on|off|status]');return 2
+        if action!='status':media_cover_lookup.configure(action=='on')
+        print('LOOK ALBUM LOOKUP · '+('on' if media_cover_lookup.enabled() else 'off'))
+        print('Artist and album names go to MusicBrainz; covers come from Cover Art Archive.')
+        print('Existing artwork, audio files and tags are preserved. Setting belongs to this node.')
+        return 0
     if raw in {"import","disc","rip"}:
         import disc_ui
         def factory(node):
@@ -20024,6 +20036,7 @@ _COMMANDS = [
     ('lk media doctor', '', 'media', 'Inspect player, queue, source and decode health'),
     ('lk media scan', '<ROOT>|--relocate <OLD_ROOT> <NEW_ROOT>', 'media', 'Scan or relocate a media root'),
     ('lk media library', '', 'media', 'Inspect indexed roots'),
+    ('lk media artwork', '[on|off|status]', 'media', 'Optional background album covers from MusicBrainz and Cover Art Archive'),
     ('lk media outputs', '', 'media', 'List reachable playback endpoints'),
     ('lk media on', '<NODE> play <TARGET>', 'media', 'Play on a specified node'),
     ('lk media identify', '<QUERY|PATH|--all>', 'media', 'Promote discoveries to SHA identity'),

@@ -1,7 +1,8 @@
 """Shared, bounded media artwork discovery for LOOK surfaces.
 
 Artwork is presentation, never control flow: local embedded/external art is cached and
-all failures simply return None. No network access is performed here.
+all failures simply return None. Missing album covers are requested by a separate
+background lookup worker; rendering never waits for its network calls.
 """
 from __future__ import annotations
 import hashlib, os, shutil, subprocess, time
@@ -102,12 +103,17 @@ def _album_art(path:Path)->Path|None:
     except OSError: return None
 
 
-def artwork_for(pathlike:str|Path)->Path|None:
+def artwork_for(pathlike:str|Path,lookup:bool=True)->Path|None:
     """Prefer track art, then sidecars, then a bounded same-directory album cover."""
     path=Path(pathlike).expanduser()
     if not path.exists(): return None
     if path.is_file() and path.suffix.casefold() in IMAGE_SUFFIXES: return path
-    return _embedded(path) or _external(path) or _album_art(path)
+    existing=_embedded(path) or _external(path) or _album_art(path)
+    if existing:return existing
+    if not lookup:return None
+    try:from . import media_cover_lookup
+    except ImportError:import media_cover_lookup
+    return media_cover_lookup.request(path)
 
 
 def symbol_lines(pathlike:str|Path,width:int,height:int)->list[str]:

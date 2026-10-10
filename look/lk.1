@@ -270,6 +270,8 @@ lk media scan <ROOT>|--relocate <OLD_ROOT> <NEW_ROOT>
   [media] Scan or relocate a media root
 lk media library
   [media] Inspect indexed roots
+lk media artwork [on|off|status]
+  [media] Optional background album covers from MusicBrainz and Cover Art Archive
 lk media outputs
   [media] List reachable playback endpoints
 lk media on <NODE> play <TARGET>
@@ -901,6 +903,7 @@ usage: lk match PATTERN [v|t|n] [--all]
 usage: lk media [browse|find QUERY|fabric|outputs|on NODE play TARGET|identify QUERY|--all|play [TARGET] [--shuffle] [--exact]|pause|toggle|next|prev|stop|queue|doctor|clear|state|jump INDEX]
 usage: lk media add PATH
 usage: lk media adopt SESSION.json|-
+usage: lk media artwork [on|off|status]
 usage: lk media identify QUERY|PATH|--all
 usage: lk media info [@NODE] sha256:DIGEST
 usage: lk media jump INDEX

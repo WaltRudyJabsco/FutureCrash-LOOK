@@ -55,10 +55,31 @@ other specific roots remain. Choose the root on its owning computer; this comman
 does not silently curate another node's library. Existing broad scans are not
 automatically removed by installing an update.
 
-Artwork browsing currently uses embedded covers, image sidecars, or sibling-track
-art from the same directory. Online Cover Art Archive downloads are performed by
-matched CD imports; existing ordinary library albums are not automatically
-searched online. Missing remote art can also reflect unavailable owner routes.
+Artwork browsing prefers embedded covers, image sidecars, and sibling-track art.
+With online lookup enabled, when all are absent a background worker searches MusicBrainz by album artist and
+album title, requires an exact normalized match with a unique release group and a
+high search score, then downloads its Cover Art Archive 500-pixel front cover.
+Ambiguous albums are skipped. Lookups are rate-limited, deduplicated by album,
+and cached under ~/.cache/look/album-covers on the owner. The online fallback
+never changes audio bytes, embedded tags, or user cover files. Only artist/album
+metadata is sent to the public provider. The owner serves the downloaded image
+and terminal preview through the existing Fabric artwork routes.
+
+A first miss may remain visible until the background job finishes and the preview
+retries (up to twenty seconds). Temporary provider failures retry after five
+minutes; absent/ambiguous matches after six hours. JSON cache records include the
+state, reason, provider URL and matched release-group ID. Set
+Use lk media artwork on on each owning node to enable lookup, and lk media artwork
+off to disable it. The default is off; lk media artwork status reports the setting.
+The setting applies to LOOK and its node daemon and persists across runtime updates.
+LOOK_MEDIA_ARTWORK_LOOKUP=1 or 0 overrides it for a process. Cached and existing
+art remains available when disabled. Matched CD imports
+continue to save their original cover sidecars.
+
+Catalog responses now stream in chunks through Tailcat/ingress with a catalog
+transfer timeout, rather than being buffered behind the ordinary control/header
+deadlines. Updated nodes negotiate gzip JSON; older peers can still consume plain
+JSON. This prevents a healthy large catalog from being truncated mid-transfer.
 
 ## Hidden media
 
