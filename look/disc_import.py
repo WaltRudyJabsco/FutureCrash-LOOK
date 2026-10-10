@@ -269,7 +269,9 @@ def read_job(identifier):
 
 
 def list_jobs():
-    return sorted([read_job(path.stem) for path in (ROOT/'jobs').glob('*.json')],key=lambda row:row['created'],reverse=True)
+    # Delivery receipts share this directory but are read through their parent job.
+    return sorted([read_job(path.stem) for path in (ROOT/'jobs').glob('*.json')
+                   if re.fullmatch('[0-9a-f]{32}',path.stem)],key=lambda row:row['created'],reverse=True)
 
 
 def safe_name(value):return re.sub(r'[^\w .()-]+','_',str(value)).strip(' .')[:120] or 'Untitled'

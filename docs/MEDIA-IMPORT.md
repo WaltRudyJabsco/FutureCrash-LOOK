@@ -10,12 +10,12 @@ lk media import drives --node 3090
 lk media import scan --kind cd --node 3090
 lk media import start --kind cd --title "My Album" --node 3090
 lk media import jobs --node 3090
-lk media import watch FULL_JOB_ID --node 3090
+lk media import watch --node 3090
 lk media import cancel FULL_JOB_ID --node 3090
 ```
 
 The workbench has N import, D rediscover, arrows select a job, Enter progress,
-C cancel, and Escape return. Jobs continue when a window closes. Receipts show
+L deliver/retry, C cancel, and Escape return. Jobs continue when a window closes. Receipts show
 stage, elapsed time, progress when the adapter supplies it, and estimated time
 remaining when a meaningful percentage is available. Returning from a progress
 view keeps the job running; cancellation terminates its own tool process group.
@@ -131,3 +131,30 @@ To deliver an older completed import without rereading its disc:
 `lk media import deliver FULL_JOB_ID --destination @3090:ROOT`.
 Background delivery is separate from successful local encoding; its failure
 never changes the local import into missing or deleted media.
+
+## Deliver and watch without job IDs
+
+On the computer that imported the disc:
+
+```bash
+lk media import deliver
+lk media import watch
+```
+
+`deliver` uses the remembered library destination. A single undelivered completed
+import starts immediately; several offer an album picker. You can also use
+`lk media import deliver Grappelli` or an album title (multiple words are accepted).
+Ambiguous names require a choice. `latest` and short job IDs remain available.
+Successful deliveries are omitted from the default picker; naming one explicitly
+allows delivery again to another destination. Existing destination files are
+verified and never overwritten with conflicting content.
+
+`watch` follows all active imports and deliveries on the selected owner. With no
+active work, it shows the latest result. Add an album name to follow one import.
+In a non-interactive shell it prints a snapshot; `--json` includes machine-readable
+job IDs. `--node` selects another import owner.
+
+In the disc workbench, select an album and press **L** to deliver or retry using the
+saved destination; **Enter** shows progress. Failed transfers retain the original
+album and an error receipt. Retry with **L** or `deliver ALBUM` when the recipient is
+available. New imports already deliver automatically when a remote library is saved.

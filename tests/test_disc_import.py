@@ -216,3 +216,13 @@ def test_cover_outage_and_unknown_release_are_optional(tmp_path,monkeypatch):
     response.assert_not_called()
     assert discs.download_cover(tmp_path,'9a5496e4-f879-4805-af51-d3ecdab83911')['state']=='unavailable'
     assert not list(tmp_path.iterdir())
+
+
+def test_job_discovery_includes_delivery_without_treating_receipt_as_import(isolated,monkeypatch):
+    from look import media_storage
+    monkeypatch.setattr(media_storage,'receipt_path',lambda identifier:discs.ROOT/'jobs'/(identifier+'.delivery.json'))
+    identifier=seed(isolated)
+    discs.atomic(discs.ROOT/'jobs'/(identifier+'.delivery.json'),{'id':identifier,'state':'complete','created':time.time()})
+    jobs=discs.list_jobs()
+    assert len(jobs)==1 and jobs[0]['id']==identifier
+    assert jobs[0]['delivery']['state']=='complete'

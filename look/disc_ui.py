@@ -15,7 +15,57 @@ def summary(job):
     eta=job.get('estimated_remaining_seconds');remaining=f' · ETA ~{eta//60}:{eta%60:02d}' if isinstance(eta,int) else ''
     delivery=job.get('delivery') or {}
     library=' · library '+str(delivery.get('state'))+' / '+str(delivery.get('stage')) if delivery else (' · library failed: '+str(job['delivery_error']) if job.get('delivery_error') else '')
-    return f"{job['id'][:8]} · {job['title']} · {job['state']} · {job['stage']} · {progress} · {elapsed//60}:{elapsed%60:02d}"+remaining+library
+    return f"{job['title']} · {job['state']} · {job['stage']} · {progress} · {elapsed//60}:{elapsed%60:02d}"+remaining+library
+
+
+def active(job):
+    return job.get('state') not in {'complete','failed','cancelled'} or (job.get('delivery') or {}).get('state') in {'queued','running'}
+
+
+def resolve_job(request,selector,action):
+    """Resolve human names without guessing which album a mutation should affect."""
+    import re
+    if re.fullmatch('[0-9a-f]{32}',selector):return selector
+    jobs=request('jobs',{})['jobs']
+    eligible=[job for job in jobs if action!='deliver' or job.get('state')=='complete']
+    if selector.casefold()=='latest':eligible=eligible[:1]
+    elif selector:
+        exact=[job for job in eligible if str(job.get('title','')).casefold()==selector.casefold()]
+        eligible=exact or [job for job in eligible if selector.casefold() in
+                          (str(job.get('title',''))+' '+str((job.get('metadata') or {}).get('artist',''))).casefold()
+                          or job['id'].startswith(selector)]
+    elif action=='deliver':
+        eligible=[job for job in eligible if (job.get('delivery') or {}).get('state')!='complete']
+    if not eligible:raise ValueError('No matching '+('undelivered completed imports' if action=='deliver' and not selector else 'imports'))
+    if len(eligible)==1:return eligible[0]['id']
+    labels=[str(job['title'])+' · '+str((job.get('metadata') or {}).get('artist') or 'artist unknown') for job in eligible]
+    if not sys.stdin.isatty() or not sys.stdout.isatty():
+        raise ValueError('More than one import matches; choose an album name: '+', '.join(labels))
+    for number,label in enumerate(labels,1):print(f'  {number}. {label}')
+    choice=input('Choose album number (blank cancels) › ').strip()
+    if not choice:raise ValueError('Delivery cancelled' if action=='deliver' else 'Selection cancelled')
+    if not choice.isdigit() or not 1<=int(choice)<=len(eligible):raise ValueError('Album choice out of range')
+    return eligible[int(choice)-1]['id']
+
+
+def watch_all(request,read_key,hints):
+    """Follow active imports and deliveries, or show the most recent result."""
+    fd=sys.stdin.fileno();old=termios.tcgetattr(fd)
+    try:
+        tty.setcbreak(fd)
+        while True:
+            jobs=request('jobs',{})['jobs'];current=[job for job in jobs if active(job)]
+            shown=current or jobs[:1];width,height=shutil.get_terminal_size((100,30))
+            frame=['\033[1;38;5;117mFABRIC IMPORT PROGRESS\033[0m']
+            frame.extend(summary(job) for job in shown[:max(1,height-4)])
+            if not shown:frame.append('No imports yet')
+            if not current and shown:
+                frame.append(shown[0].get('error') or (shown[0].get('delivery') or {}).get('error') or shown[0].get('output') or '')
+            frame.append(hints('Esc return · Jobs continue in background',width))
+            sys.stdout.write('\033[2J\033[H'+'\n'.join(line[:width-1] if '\033' not in line else line for line in frame)+'\033[J');sys.stdout.flush()
+            if not current:return 0 if not shown or (shown[0]['state']=='complete' and (shown[0].get('delivery') or {}).get('state') not in {'failed','cancelled'}) else 1
+            if read_key(fd,1) in {'esc','q','\x03'}:return 0
+    finally:termios.tcsetattr(fd,termios.TCSADRAIN,old);sys.stdout.write('\033[0m\n');sys.stdout.flush()
 
 
 def capture(request,drive,kind,title='',destination='',title_index='',release=None,metadata=True):
@@ -60,7 +110,7 @@ def workspace(request,read_key,hints):
             frame.append('TOOLS '+', '.join(name for name,path in inventory['tools'].items() if path))
             usable=max(1,height-len(frame)-4);top=max(0,index-usable+1)
             for n,job in enumerate(jobs[top:top+usable],top):frame.append(('› ' if n==index else '  ')+summary(job))
-            frame.extend(['',hints('N import · D discover · ↑↓ jobs · Enter progress · C cancel · Esc exit',width),notice])
+            frame.extend(['',hints('N import · D discover · ↑↓ jobs · Enter progress · L deliver/retry · C cancel · Esc exit',width),notice])
             sys.stdout.write('\033[2J\033[H'+'\n'.join(line[:width-1] if '\033' not in line else line for line in frame)+'\033[J');sys.stdout.flush()
             key=read_key(fd,1)
             if key in {'esc','q','\x03'}:return 0
@@ -70,6 +120,13 @@ def workspace(request,read_key,hints):
                 elif key=='down':index+=1
                 elif key in {'\r','\n'} and jobs:
                     watch(jobs[index]['id'],request,read_key,hints)
+                elif key=='L' and jobs:
+                    try:from . import media_storage
+                    except ImportError:import media_storage
+                    destination=media_storage.destination(jobs[index]['kind'])
+                    if not destination.startswith('@'):raise ValueError('Choose a library node first with lk media storage --node NODE --root PATH')
+                    request('deliver',{'id':jobs[index]['id'],'destination':destination})
+                    notice='Delivery started; originals kept. Enter shows progress.'
                 elif key=='C' and jobs:
                     if prompt('Cancel selected import? Type yes')=='yes':request('cancel',{'id':jobs[index]['id']});notice='Cancellation requested; partial files retained'
                 elif key=='N':
@@ -108,7 +165,7 @@ def workspace(request,read_key,hints):
 def main(argv,request_factory,read_key,hints):
     parser=argparse.ArgumentParser(prog='lk media import',description='CD/DVD/Blu-ray import on the node owning the drive. No arguments opens the workbench.')
     parser.add_argument('action',nargs='?',choices=['drives','scan','start','jobs','status','watch','cancel','deliver'])
-    parser.add_argument('id',nargs='?',help='Full job ID for status/watch/cancel')
+    parser.add_argument('id',nargs='*',help='Album name, latest, short ID, or full ID; watch defaults to all active work, deliver offers completed imports')
     parser.add_argument('--node',help='Paired drive-owner node; defaults to local')
     parser.add_argument('--drive',help='Drive ID shown by drives')
     parser.add_argument('--kind',choices=['cd','dvd','bluray'],default='cd')
@@ -118,19 +175,37 @@ def main(argv,request_factory,read_key,hints):
     parser.add_argument('--release',type=int,help='MusicBrainz release number from scan (starting at 1)')
     parser.add_argument('--no-metadata',action='store_true',help='Skip the MusicBrainz lookup for CD capture')
     parser.add_argument('--json',action='store_true')
-    args=parser.parse_args(argv);request=request_factory(args.node)
+    args=parser.parse_args(argv);request=request_factory(args.node);selector=' '.join(args.id)
     try:
         if not args.action and sys.stdin.isatty() and sys.stdout.isatty():return workspace(request,read_key,hints)
         action=args.action or 'drives'
         if action=='watch':
-            if not args.id:raise ValueError('watch requires a full job ID')
-            if sys.stdin.isatty() and sys.stdout.isatty():return watch(args.id,request,read_key,hints)
+            if not selector:
+                if sys.stdin.isatty() and sys.stdout.isatty():return watch_all(request,read_key,hints)
+                jobs=request('jobs',{})['jobs'];shown=[job for job in jobs if active(job)] or jobs[:1]
+                if args.json:print(json.dumps({'ok':True,'jobs':shown},ensure_ascii=False,indent=2))
+                else:print('\n'.join(summary(job) for job in shown) or 'No imports yet')
+                return 0
+            selector=resolve_job(request,selector,action)
+            if sys.stdin.isatty() and sys.stdout.isatty():return watch(selector,request,read_key,hints)
             action='status'
         if action=='start':
             import media_storage
             result=capture(request,args.drive,args.kind,args.title,args.destination or media_storage.destination(args.kind),args.title_index,args.release,not args.no_metadata)
         else:
-            if action in {'status','cancel','deliver'} and not args.id:raise ValueError(action+' requires a full job ID')
-            result=request(action,{'drive':args.drive,'kind':args.kind,'id':args.id,'destination':args.destination})
+            if action in {'status','cancel','deliver'}:
+                if action=='cancel' and not selector:raise ValueError('cancel requires an album name or job ID')
+                if not selector and action!='deliver':selector='latest'
+                selector=resolve_job(request,selector,action)
+            destination=args.destination
+            if action=='deliver' and not destination:
+                try:from . import media_storage
+                except ImportError:import media_storage
+                destination=media_storage.destination(args.kind)
+                if not destination.startswith('@'):raise ValueError('Choose a library node first with lk media storage --node NODE --root PATH')
+            result=request(action,{'drive':args.drive,'kind':args.kind,'id':selector,'destination':destination})
+            if action=='deliver' and not args.json:
+                print('Delivery started to '+destination.split(':',1)[0].lstrip('@')+'. Originals kept.\nRun lk media import watch for progress.')
+                return 0
         print(json.dumps(result,ensure_ascii=False,indent=2));return 0
     except (OSError,ValueError,RuntimeError) as exc:print('LOOK IMPORT · '+str(exc),file=sys.stderr);return 1

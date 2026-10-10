@@ -13,3 +13,5 @@ and rejection before service shutdown when isolation fails. Real 3090 rollout
 requires a local install to replace the older updater.
 
 Follow-up fixes: lowercase `q` filters Media Find and grouped album/artist browsing. Matched CD imports fetch optional album artwork beside the tracks for local and Fabric previews.
+
+Import workflow: watch discovers active jobs automatically; deliver resolves album names and uses the saved destination, with a picker for ambiguous selections. Workbench L delivers/retries the selected album. Job discovery excludes delivery receipt files.
