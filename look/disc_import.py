@@ -85,9 +85,9 @@ def drives():
     elif sys.platform=='darwin' and tool('drutil'):
         try:
             listing=query([tool('drutil'),'list'])
-            status=query([tool('drutil'),'status'])
-            device=re.search(r'(?:Name|Device):\s*(/dev/(?:r)?disk\d+)',status)
-            for match in re.finditer(r'^\s*(\d+)\s*[.:]\s*(.+)$',listing,re.M):
+            for match in re.finditer(r'^\s*(\d+)\s*[.:]?\s+(.+)$',listing,re.M):
+                status=query([tool('drutil'),'-drive',match[1],'status'],5)
+                device=re.search(r'(?:Name|Device):\s*(/dev/(?:r)?disk\d+)',status)
                 row={'id':'drive:'+match[1],'device':device[1] if device else '', 'label':match[2].strip(),'mount':'','disc':''}
                 if row['device'] and tool('diskutil'):
                     try:
@@ -99,11 +99,11 @@ def drives():
     if tool('makemkvcon'):
         try:
             text=query([tool('makemkvcon'),'-r','--noscan','--cache=1','info','disc:9999'],15)
-            for fields in robot_records(text,'DRV'):
-                if len(fields)<6 or fields[1]!='1' or fields[2]!='1':continue
+            visible=[fields for fields in robot_records(text,'DRV') if len(fields)>=6 and fields[1]=='1' and fields[2]=='1']
+            for fields in visible:
                 device=fields[6] if len(fields)>6 else ''
                 matches=[row for row in rows if device and row['device']==device]
-                if not matches and len(rows)==1:matches=rows
+                if not matches and len(rows)==1 and len(visible)==1:matches=rows
                 if matches:
                     matches[0]['makemkv_source']='disc:'+fields[0]
                 else:rows.append({'id':'disc:'+fields[0],'device':device,'label':fields[4],'disc':fields[5],'mount':'','makemkv_source':'disc:'+fields[0]})

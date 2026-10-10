@@ -74,7 +74,13 @@ def workspace(request,read_key,hints):
                     kind=prompt('Disc kind: cd / dvd / bluray','cd')
                     scan=request('scan',{'drive':drive,'kind':kind})
                     termios.tcsetattr(fd,termios.TCSADRAIN,old)
-                    print('\n'+json.dumps(scan,ensure_ascii=False,indent=2));tty.setcbreak(fd)
+                    print('\nDISC · '+kind.upper()+' · '+str(scan.get('engine') or ''))
+                    for number,release in enumerate(scan.get('releases') or [],1):
+                        print(f"  {number}. {release['title']} · {release['artist']} · {len(release.get('tracks') or [])} tracks")
+                    for title in scan.get('titles') or []:
+                        print('  Title '+str(title['index'])+' · '+str(title.get('name') or 'Movie title')+' · '+str(title.get('duration') or 'duration unavailable'))
+                    if kind=='cd' and not scan.get('releases'):print('  No matching release · use your own album and track labels')
+                    tty.setcbreak(fd)
                     metadata={};title_index=''
                     if kind=='cd':
                         releases=scan.get('releases') or []

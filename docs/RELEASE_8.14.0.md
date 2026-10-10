@@ -21,7 +21,7 @@ Bundle/Albert 8.14.0; LOOK 4.61.0; Future Crash 1.3.0.
 The user's SuperDrive is not connected. Physical CD/DVD/Blu-ray checks remain
 a hardware test; software tests use controlled readers and real codecs.
 
-Validation: 1,016 tests pass. Controlled CD-reader tests run real ffmpeg FLAC
+Validation: 1,017 tests pass. Controlled CD-reader tests run real ffmpeg FLAC
 encoding and ffprobe verification, exercise failure/cancellation and catalog
 publication, and verify owner routing and browser/native alert behavior.
 Generated command help, code-health, shell syntax and Python 3.10 parsing pass.

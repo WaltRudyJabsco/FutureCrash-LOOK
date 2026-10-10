@@ -53,6 +53,20 @@ def test_drive_selection_and_job_ids_do_not_accept_arbitrary_paths(monkeypatch):
     with pytest.raises(ValueError):discs.job_path('../../outside')
 
 
+def test_mac_discovery_handles_plain_indices_and_each_drive_separately(monkeypatch):
+    import plistlib
+    monkeypatch.setattr(discs.sys,'platform','darwin')
+    monkeypatch.setattr(discs,'tool',lambda name:name if name in {'drutil','diskutil'} else None)
+    def query(command,timeout=30):
+        if command==['drutil','list']:return '1 Vendor DVD 1.0\n2. Vendor Blu-ray 2.0\n'
+        return 'Name: /dev/disk'+command[2]
+    monkeypatch.setattr(discs,'query',query)
+    monkeypatch.setattr(discs.subprocess,'run',lambda command,**kwargs:Mock(stdout=plistlib.dumps({'MountPoint':'/Volumes/'+command[-1].split('/')[-1]})))
+    rows=discs.drives()['drives']
+    assert [(row['id'],row['device'],row['mount']) for row in rows]==[
+        ('drive:1','/dev/disk1','/Volumes/disk1'),('drive:2','/dev/disk2','/Volumes/disk2')]
+
+
 def test_start_rejects_missing_title_and_busy_drive(isolated,monkeypatch):
     drive={'id':'test-drive','device':'/dev/fixture','mount':'','makemkv_source':'disc:0'}
     monkeypatch.setattr(discs,'selected_drive',lambda identifier:drive)
