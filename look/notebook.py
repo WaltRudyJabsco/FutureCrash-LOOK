@@ -96,12 +96,12 @@ def named_records(store,text):
 
 HELP_TEXT='''LOOK NOTEBOOK — notes, tasks and reminders share one record.
 
-Capture: N opens a draft. Enter saves; Shift-Enter/Ctrl-J inserts a newline.
+Capture: N opens a draft. Enter inserts newline; Shift-Enter saves.
 Escape cancels a draft. Enter opens a boxed Markdown note view.
 The view previews headings, bold/italic, lists, checkboxes, quotes and code.
 E shows the original Markdown marks; saving returns to the rendered preview.
 In the view: arrows/Space scroll, E edits the body, V opens your full editor.
-Quick edits keep the title; Enter saves, Shift-Enter/Ctrl-J adds a newline.
+Quick edits keep the title; Enter inserts newline; Shift-Enter saves.
 Editor: Shift-Left/Right jumps to the start/end of the note; Home/End moves
 within the line. Shift-Up/Down or Page Up/Down moves a page of lines.
 Escape returns to the list. Explicit lkn edit NAME also opens the full editor.
@@ -158,7 +158,7 @@ def show_help(fd,read_key):
 
 
 def capture_note(fd,read_key,initial_text='',label='NEW NOTE'):
-    """Keep Enter fast; request distinct modified keys while the note editor owns input."""
+    """Multiline editing must never mistake pasted line breaks for Save."""
     previous=termios.tcgetattr(fd)
     text=initial_text; cursor=len(text)
     try:
@@ -175,7 +175,7 @@ def capture_note(fd,read_key,initial_text='',label='NEW NOTE'):
             top=max(0,cursor_row-page+1)
             visible=rows[top:top+page]
             heading=(label+' · ')[:max(1,width-1)]
-            actions='Enter save · Shift-Enter/Ctrl-J newline · Esc cancel'[:max(0,width-1-len(heading))]
+            actions='Enter newline · Shift-Enter save · Esc cancel'[:max(0,width-1-len(heading))]
             frame=[KEY_CYAN+heading+'\033[0m'+command_hints(actions),
                    command_hints('Shift-↑↓/PgUp/PgDn page · Shift-←→ note start/end · Home/End line'[:max(1,width-1)])]
             if boxed:
@@ -184,8 +184,8 @@ def capture_note(fd,read_key,initial_text='',label='NEW NOTE'):
             sys.stdout.write('\033[2J\033[H'+'\r\n'.join(frame)+'\033[J'); sys.stdout.flush()
             key=read_key(fd,None)
             if key in {'esc','\x03'}: return None
-            if key in {'\r','enter'}: return text
-            if key in {'shiftenter','\n'}:
+            if key=='shiftenter': return text
+            if key in {'\r','enter','\n'}:
                 text=text[:cursor]+'\n'+text[cursor:]; cursor+=1
             elif key in {'\x7f','\b'} and cursor:
                 text=text[:cursor-1]+text[cursor:]; cursor-=1
@@ -209,6 +209,11 @@ def capture_note(fd,read_key,initial_text='',label='NEW NOTE'):
             elif key=='home': cursor=text.rfind('\n',0,cursor)+1
             elif key=='end':
                 next_line=text.find('\n',cursor); cursor=len(text) if next_line<0 else next_line
+            elif key.startswith('paste:'):
+                # A bracketed paste is one insertion, never an editor command.
+                pasted=key[6:].replace('\r\n','\n').replace('\r','\n')
+                pasted=''.join(ch for ch in pasted if ch in '\n\t' or ch.isprintable())
+                text=text[:cursor]+pasted+text[cursor:]; cursor+=len(pasted)
             elif len(key)==1 and key.isprintable():
                 text=text[:cursor]+key+text[cursor:]; cursor+=1
     finally:
