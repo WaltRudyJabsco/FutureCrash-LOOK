@@ -12,7 +12,7 @@ if [[ "${FCL_UNIFIED_INSTALL_CHILD:-0}" != "1" && -x "$ROOT/install.sh" ]]; then
 fi
 
 PRODUCT_VERSION="$(tr -d '[:space:]' < "$ROOT/VERSION")"
-LOOK_VERSION="4.61.0"
+LOOK_VERSION="4.61.1"
 FUTURE_CRASH_VERSION="1.3.0"
 
 DRY=0

@@ -24,7 +24,15 @@ view keeps the job running; cancellation terminates its own tool process group.
 
 Linux uses cd-paranoia/cdparanoia for verified extraction, then ffmpeg encodes
 lossless FLAC with title, artist, album and track tags. macOS can also encode the
-mounted audio-CD AIFF files directly. MusicBrainz lookup uses the CD table of
+mounted audio-CD AIFF files directly.
+
+On a Mac, local requests run from the foreground terminal so removable-volume
+permission applies to the actual reader; remote requests still use the owner's
+node service and require that service to have volume access. Finder track numbers
+are preserved in numeric order. macOS's `drutil` SupportLevel describes its own
+drive support; it does not decide whether mounted audio tracks can be imported.
+
+MusicBrainz lookup uses the CD table of
 contents when a reader provides it. One matching release may be used directly;
 multiple releases are displayed for review rather than guessed. Choose a release
 with the workbench or `--release NUMBER`; supply your own title to override it.

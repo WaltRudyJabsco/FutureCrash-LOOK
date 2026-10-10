@@ -4,9 +4,9 @@ import re
 ROOT = Path(__file__).resolve().parents[1]
 
 def test_release_versions_are_lockstep():
-    assert (ROOT / "VERSION").read_text().strip() == "8.14.0"
+    assert (ROOT / "VERSION").read_text().strip() == "8.14.1"
     for rel in ("albert/VERSION",):
-        assert (ROOT / rel).read_text().strip() == "8.14.0"
+        assert (ROOT / rel).read_text().strip() == "8.14.1"
     for rel in ("core/node.py", "core/ingress.py", "core/tailcat.py", "core/rendezvous.py"):
         text = (ROOT / rel).read_text()
         release=(ROOT/'VERSION').read_text().strip()
@@ -17,7 +17,7 @@ def test_look_version_matches_installer_and_reports_product_release():
     installer = (ROOT / "install-look.sh").read_text()
     lk_version = re.search(r'^VERSION="([^"]+)"$', lk, re.M).group(1)
     declared = re.search(r'^LOOK_VERSION="([^"]+)"$', installer, re.M).group(1)
-    assert lk_version == declared == "4.61.0"
+    assert lk_version == declared == "4.61.1"
     assert 'Future Crash + LOOK {product_release}' in lk
 
 def test_unified_installer_verifies_live_and_cli_versions():

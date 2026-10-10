@@ -88,12 +88,14 @@ def drives():
             for match in re.finditer(r'^\s*(\d+)\s*[.:]?\s+(.+)$',listing,re.M):
                 status=query([tool('drutil'),'-drive',match[1],'status'],5)
                 device=re.search(r'(?:Name|Device):\s*(/dev/(?:r)?disk\d+)',status)
-                row={'id':'drive:'+match[1],'device':device[1] if device else '', 'label':match[2].strip(),'mount':'','disc':''}
+                columns=re.split(r'\s{2,}',match[2].strip())
+                label=' '.join(columns[:2]) if len(columns)>=4 else match[2].strip()
+                row={'id':'drive:'+match[1],'device':device[1] if device else '', 'label':label,'mount':'','disc':''}
                 if row['device'] and tool('diskutil'):
                     try:
-                        result=subprocess.run([tool('diskutil'),'info','-plist',row['device']],capture_output=True,timeout=5)
+                        result=subprocess.run([tool('diskutil'),'info','-plist',row['device']],capture_output=True,timeout=30)
                         info=plistlib.loads(result.stdout);row.update(mount=info.get('MountPoint') or '',disc=info.get('VolumeName') or '')
-                    except (OSError,ValueError,subprocess.SubprocessError):pass
+                    except (OSError,ValueError,subprocess.SubprocessError) as exc:warnings.append('Volume discovery: '+str(exc)[:200])
                 rows.append(row)
         except (OSError,ValueError,subprocess.SubprocessError) as exc:warnings.append(str(exc)[:200])
     if tool('makemkvcon'):
@@ -137,7 +139,7 @@ def lookup(toc):
     if not toc:return []
     from urllib.parse import urlencode
     url='https://musicbrainz.org/ws/2/discid/'+toc['disc_id']+'?'+urlencode({'toc':toc['toc'],'inc':'artists+recordings','fmt':'json'})
-    request=urllib.request.Request(url,headers={'User-Agent':'FutureCrash-LOOK/8.14.0 (personal disc importer)'})
+    request=urllib.request.Request(url,headers={'User-Agent':'FutureCrash-LOOK/8.14.1 (personal disc importer)'})
     try:
         with urllib.request.urlopen(request,timeout=5) as response:data=json.load(response)
     except (OSError,ValueError):return []
@@ -153,13 +155,26 @@ def lookup(toc):
     return releases
 
 
+def audio_tracks(mount):
+    if not mount:return []
+    try:
+        tracks=[path for path in Path(mount).iterdir() if path.suffix.lower() in {'.aiff','.aif','.aifc'} and path.is_file()]
+    except PermissionError as exc:
+        raise ValueError('Audio CD access denied by macOS; run lk media import in the terminal on the Mac owning the drive and allow removable-volume access') from exc
+    # Finder names start with unpadded track numbers; lexical sorting moves 10 before 2.
+    def order(path):
+        number=re.match(r'\d+',path.name)
+        return (int(number[0]) if number else 1000,path.name.casefold())
+    return sorted(tracks,key=order)
+
+
 def inspect(identifier,kind='cd'):
     if kind not in {'cd','dvd','bluray'}:raise ValueError('Use cd, dvd or bluray')
     drive=selected_drive(identifier)
     if kind=='cd':
         ripper=tool('cd-paranoia') or tool('cdparanoia');toc=None
         if ripper and drive['device']:toc=toc_from_query(query([ripper,'-d',drive['device'],'-Q']))
-        native=list(Path(drive['mount']).glob('*.aiff')) if drive['mount'] else []
+        native=audio_tracks(drive['mount'])
         if not toc and not native:raise ValueError('Audio CD not readable; insert a CD and check drive permissions / cd-paranoia')
         return {'ok':True,'drive':drive,'engine':'cd-paranoia' if toc else 'macOS audio volume','toc':toc,'releases':lookup(toc),'tracks':len(native) if not toc else toc['count']}
     if drive.get('makemkv_source'):
@@ -298,7 +313,7 @@ def worker(identifier):
                 run([ripper,'-d',drive['device'],'-B'],'reading audio CD')
                 inputs=sorted(stage.glob('*.wav'))
             else:
-                inputs=sorted(Path(drive['mount']).glob('*.aiff')) if drive['mount'] else []
+                inputs=audio_tracks(drive['mount'])
             if not inputs:raise ValueError('No audio tracks read; insert an audio CD and check access to the drive')
             expected=metadata.get('tracks') or []
             for number,path in enumerate(inputs,1):

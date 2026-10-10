@@ -139,3 +139,15 @@ def test_ambiguous_metadata_is_not_chosen_silently():
     assert 'metadata' not in request.call_args.args[1]
     request=Mock(side_effect=[scan,{'ok':True}]);disc_ui.capture(request,'drive','cd',release=2)
     assert request.call_args.args[1]['metadata']['title']=='Edition B'
+
+
+def test_native_audio_tracks_use_numeric_order_and_supported_extensions(tmp_path):
+    for name in ['10 Ten.aiff','2 Two.aif','1 One.AIFF','3 Three.aifc','cover.jpg']:
+        (tmp_path/name).touch()
+    assert [p.name for p in discs.audio_tracks(tmp_path)]==['1 One.AIFF','2 Two.aif','3 Three.aifc','10 Ten.aiff']
+
+
+def test_native_audio_volume_permission_failure_is_actionable(monkeypatch,tmp_path):
+    def denied(path):raise PermissionError('Operation not permitted')
+    monkeypatch.setattr(Path,'iterdir',denied)
+    with pytest.raises(ValueError,match='removable-volume access'):discs.audio_tracks(tmp_path)

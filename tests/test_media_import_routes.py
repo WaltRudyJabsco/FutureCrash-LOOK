@@ -54,3 +54,23 @@ def test_mutation_rejects_wrong_identity_before_effect(monkeypatch):
     sent=Mock();monkeypatch.setattr(node,'http_json',sent)
     with pytest.raises(PermissionError):node._target_post('127.0.0.1',7332,'3090','/v1/media/import',{})
     sent.assert_not_called()
+
+
+def test_cli_reports_server_error_and_returns_failure(monkeypatch,capsys):
+    import io,urllib.error
+    def failed(*args,**kwargs):
+        raise urllib.error.HTTPError('http://local',400,'Bad Request',{},io.BytesIO(b'{"ok":false,"error":"Audio CD access denied"}'))
+    monkeypatch.setattr(node,'_target_post',failed)
+    monkeypatch.setattr(sys,'argv',['fcl-node','disc-import','scan','{}','--json'])
+    assert node.main()==1
+    captured=capsys.readouterr()
+    assert not captured.out and 'Audio CD access denied' in captured.err
+
+
+def test_script_entrypoint_preserves_failed_exit_status():
+    import ast
+    from pathlib import Path
+    tree=ast.parse(Path(node.__file__).read_text())
+    entry=tree.body[-1].body[0].value
+    assert isinstance(entry,ast.Call) and isinstance(entry.func,ast.Attribute)
+    assert isinstance(entry.func.value,ast.Name) and entry.func.value.id=='sys' and entry.func.attr=='exit'

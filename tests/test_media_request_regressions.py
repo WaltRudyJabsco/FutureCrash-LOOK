@@ -206,3 +206,23 @@ def test_lo_structured_quantity_reaches_player_as_exact_unique_queue(lk,monkeypa
     assert result.ok
     assert len(sessions)==1 and len(sessions[0]['queue'])==count
     assert len({row['title'] for row in sessions[0]['queue']})==count
+
+
+def test_mac_local_disc_requests_run_in_foreground(lk,monkeypatch):
+    from look import disc_ui,disc_import
+    from unittest.mock import Mock
+    monkeypatch.setitem(sys.modules,'disc_ui',disc_ui)
+    monkeypatch.setitem(sys.modules,'disc_import',disc_import)
+    monkeypatch.setattr(sys,'platform','darwin')
+    monkeypatch.setattr(lk,'_media_local_node_names',lambda:{'local','m3max-pro'})
+    routed=Mock(return_value={'ok':True});direct=Mock(return_value={'ok':True})
+    monkeypatch.setattr(lk,'_media_fabric_cli',routed)
+    monkeypatch.setattr(disc_import,'request',direct)
+    def run(argv,factory,*args):
+        factory('m3max-pro')('scan',{'kind':'cd'})
+        factory('3090')('scan',{'kind':'cd'})
+        return 0
+    monkeypatch.setattr(disc_ui,'main',run)
+    assert lk.media(['import'])==0
+    direct.assert_called_once_with('scan',{'kind':'cd'})
+    assert routed.call_count==1 and '--node' in routed.call_args.args[0] and '3090' in routed.call_args.args[0]

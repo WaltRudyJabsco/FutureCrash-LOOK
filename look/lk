@@ -31,7 +31,7 @@ try:
 except Exception:
     readline = None
 
-VERSION="4.61.0"
+VERSION="4.61.1"
 
 LOOK_WORDMARK = r"""       ██╗      ██╗  ██╗
        ██║      ██║ ██╔╝
@@ -10014,7 +10014,7 @@ def _direct_searxng_search(query, limit=8):
     params=urllib.parse.urlencode({"q":query,"format":"json"})
     request=urllib.request.Request(base+"/search?"+params,headers={
         "Accept":"application/json",
-        "User-Agent":"Future-Crash-Fabric/8.14.0",
+        "User-Agent":"Future-Crash-Fabric/8.14.1",
     })
     with urllib.request.urlopen(request,timeout=12) as response:
         data=json.load(response)
@@ -19123,6 +19123,11 @@ def media(args):
     if raw in {"import","disc","rip"}:
         import disc_ui
         def factory(node):
+            if sys.platform=='darwin' and (node is None or node.casefold() in _media_local_node_names()):
+                # macOS grants removable-volume access to the foreground terminal.
+                # The launch agent can discover a disc but cannot necessarily read it.
+                import disc_import
+                return disc_import.request
             def request(action,payload):
                 suffix=["--node",node] if node else []
                 result=_media_fabric_cli(["disc-import",action,json.dumps(payload),*suffix])

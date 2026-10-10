@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Future Crash + LOOK Unified Node 8.14.0.
+"""Future Crash + LOOK Unified Node 8.14.1.
 
 A small distributed supervisor for trusted personal machines. Immediate events stay
 asynchronous; a one-second fabric pulse reconciles presence, leases and stale work.
@@ -152,7 +152,7 @@ def _file_peer_json(peer,path):
     return _file_race(peer,path)[1]
 
 
-VERSION = "8.14.0"
+VERSION = "8.14.1"
 RELEASE_NAME = "FABRIC VISION"
 DEFAULT_HOST = "127.0.0.1"
 DEFAULT_PORT = 7332
@@ -2632,7 +2632,7 @@ def _local_web_search(query, limit=8):
     base=os.environ.get("FCL_SEARXNG_URL","http://127.0.0.1:8888").rstrip("/")
     request=urllib.request.Request(base+"/search?"+params,headers={
         "Accept":"application/json",
-        "User-Agent":"Future-Crash-Fabric/8.14.0",
+        "User-Agent":"Future-Crash-Fabric/8.14.1",
     })
     try:
         with urllib.request.urlopen(request,timeout=8) as response:
@@ -5781,7 +5781,7 @@ def _dash_render_wide(data, width=120, height=28, ansi=False):
     for left,right in ops:
         lines.append(f"{left[:left_w]:<{left_w}}{gap}{right[:right_w]}")
 
-    lines += ["", _dash_media_line()+"   "+_dash_signal(data,min(28,width//3))]
+    lines += ["", (_dash_media_line()+"   "+_dash_signal(data,min(28,width//3)))[:width]]
     lines += ["", "RECENT · OBSERVED BY THIS NODE", rule]
     # Fill the rectangle instead of using a fixed six-row ceiling.  RECENT is the
     # most useful spare-space consumer because every extra row carries real state.
@@ -5836,7 +5836,7 @@ def _dash_render_condensed(data, width=92, height=30, ansi=False):
         spare-=1
 
     if spare>0:
-        lines.append(_dash_media_line()+"   "+_dash_signal(data,min(24,width//3)))
+        lines.append((_dash_media_line()+"   "+_dash_signal(data,min(24,width//3)))[:width])
         spare-=1
 
     lines += ["","RECENT · OBSERVED BY THIS NODE",rule]
@@ -6722,7 +6722,12 @@ def main():
                     answer=input(f"{action} {service} on {target}? [y/N] ").strip().lower()
                     if answer not in {"y","yes"}: print("cancelled"); return 1
                 print(json.dumps(_target_post(a.host,a.port,a.node,"/v1/services/action",{"service":service,"action":action,"confirm":True}),indent=2)); return 0
-        except (RuntimeError, urllib.error.URLError, urllib.error.HTTPError) as exc:
+        except urllib.error.HTTPError as exc:
+            try:
+                detail=json.loads(exc.read()).get('error') or str(exc)
+            except (ValueError,AttributeError):detail=str(exc)
+            print(f"FCL NODE · {detail}",file=sys.stderr); return 1
+        except (RuntimeError, urllib.error.URLError) as exc:
             print(f"FCL NODE · {exc}",file=sys.stderr); return 1
     faulthandler.enable(all_threads=True)
     if hasattr(signal, "SIGUSR1"):
@@ -6757,4 +6762,4 @@ def main():
 
 
 if __name__ == "__main__":
-    main()
+    sys.exit(main())
