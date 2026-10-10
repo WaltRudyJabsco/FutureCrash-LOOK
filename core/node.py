@@ -2763,13 +2763,16 @@ def _local_media_visibility(payload):
 
 def _local_media_catalog():
     """Publish discovered media as catalog rows; bytes remain owned by their source node."""
-    library = _read_media_library()
+    _catalog,media=_look_catalog_modules()
+    library = media.normalize_library(_read_media_library())
     node = identity()["name"]
     rows = []
     visibility = _media_owner_visibility()
     visibility["paths"] = set(visibility["paths"])
     for raw in library.get("entries") or []:
         if not isinstance(raw, dict) or not raw.get("path"):
+            continue
+        if Path(str(raw['path'])).suffix.casefold()=='.ts' and not media.is_media_path(Path(raw['path'])):
             continue
         row = dict(raw)
         row["id"] = str(row.get("id") or _media_catalog_id(row["path"]))
@@ -2971,11 +2974,13 @@ def _fabric_media_catalog(force=False):
     # and return the healthy subset of the Fabric.
     import concurrent.futures
 
-    MEDIA_CATALOG_PEER_TIMEOUT = 3.0
+    MEDIA_CATALOG_PEER_TIMEOUT = 8.0
+    MEDIA_CATALOG_ROUTE_BUDGET = 18.0
     MEDIA_CATALOG_MAX_WORKERS = 4
 
     candidates = []
     for peer in snapshot.get("peers") or []:
+        if not peer.get('trusted'):continue
         ad = peer.get("node") or {}
         name = (peer.get("name") or (ad.get("identity") or {}).get("name"))
         if not name:
@@ -2999,6 +3004,7 @@ def _fabric_media_catalog(force=False):
                 peer,
                 "/v1/media/catalog",
                 timeout=MEDIA_CATALOG_PEER_TIMEOUT,
+                total_timeout=MEDIA_CATALOG_ROUTE_BUDGET,
             )
             remote_rows = [
                 dict(row)
@@ -4984,12 +4990,15 @@ def _peer_bases(peer):
     return out
 
 
-def _peer_json(peer, path, timeout=12.0):
+def _peer_json(peer, path, timeout=12.0, total_timeout=None):
     """Try every authenticated route for a peer; one stale preferred URL must not hide a catalog."""
     last=None
+    deadline=time.monotonic()+total_timeout if total_timeout is not None else None
     for base in _peer_bases(peer):
+        remaining=deadline-time.monotonic() if deadline is not None else timeout
+        if remaining<=0:break
         try:
-            return http_json(base+path, timeout=timeout)
+            return http_json(base+path, timeout=min(timeout,remaining))
         except Exception as exc:
             last=exc
     raise RuntimeError(str(last or "peer has no reachable endpoint"))

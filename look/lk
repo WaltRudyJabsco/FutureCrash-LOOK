@@ -15849,7 +15849,8 @@ def _media_fabric_catalog():
         if cache_path.is_file():
             cached=json.loads(cache_path.read_text(encoding="utf-8"))
             cached_at=float(cached.get("_look_cached_at") or cache_path.stat().st_mtime)
-            if now-cached_at <= ttl and cached.get('_look_local_mtime_ns')==local_stamp:
+            effective_ttl=min(ttl,3.0) if cached.get('errors') or cached.get('fallback') or cached.get('stale') else ttl
+            if now-cached_at <= effective_ttl and cached.get('_look_local_mtime_ns')==local_stamp:
                 cached.pop("_look_cached_at",None)
                 cached.pop('_look_local_mtime_ns',None)
                 return cached
@@ -15863,9 +15864,19 @@ def _media_fabric_catalog():
             "http://127.0.0.1:7332/v1/media/fabric",
             headers={"Accept":"application/json"},
         )
-        with urllib.request.urlopen(request,timeout=8.0) as response:
+        with urllib.request.urlopen(request,timeout=45.0) as response:
             payload=json.loads(response.read().decode("utf-8"))
         if isinstance(payload,dict):
+            # A sleepy owner does not erase the last known shared library.
+            failed={str(error.get('node') or '') for error in payload.get('errors') or []}
+            live={str(node.get('node') or '') for node in payload.get('nodes') or []}
+            if cached and failed:
+                retained=[dict(row,offline=True) for row in cached.get('entries') or []
+                          if str(row.get('node') or '') in failed-live]
+                payload['entries']=list(payload.get('entries') or [])+retained
+                for owner in sorted({str(row.get('node') or '') for row in retained}):
+                    payload.setdefault('nodes',[]).append({'node':owner,'count':sum(row.get('node')==owner for row in retained),'online':False,'cached':True})
+                payload['locations']=len(payload['entries'])
             try:
                 cache_path.parent.mkdir(parents=True,exist_ok=True)
                 stored=dict(payload)
@@ -17159,6 +17170,21 @@ def _media_relocate_root(old_root,new_root,library=None):
 
 
 def _media_scan_command(args):
+    if args and args[0]=='--forget':
+        if len(args)<2:
+            print('usage: lk media scan --forget ROOT');return 2
+        try:
+            backup=MEDIA_LIBRARY_FILE.with_name('media_library.before-forget-'+str(time.time_ns())+'.json')
+            def forget(current):
+                result=media_core.forget_root(current,' '.join(args[1:]))
+                _atomic_json(backup,current)
+                return result
+            library=media_core.update_library(MEDIA_LIBRARY_FILE,forget)
+            (HOME/'.cache/look/fabric-media-catalog.json').unlink(missing_ok=True)
+        except (OSError,ValueError) as exc:
+            print('LOOK media · '+str(exc));return 1
+        print(f'LOOK MEDIA · forgot catalog root · {len(library["entries"]):,} items remain')
+        print('  backup '+str(backup));return 0
     if args and args[0] in {"--relocate","--move-root"}:
         if len(args)<3:
             print("usage: lk media scan --relocate OLD_ROOT NEW_ROOT")
@@ -17244,6 +17270,9 @@ def _media_library_command():
         for root in library["roots"]:
             n=sum(1 for row in entries if row.get("root")==root)
             print(f"  {n:>6,}  {root}")
+    if '/' in library.get('roots',[]):
+        print('  WARNING · root / includes system sounds, samples, and application assets')
+        print('  remove only that catalog scan with: lk media scan --forget /')
     watch=Path.home()/".local/share/look/media_watch.json"
     try:
         state=json.loads(watch.read_text(encoding="utf-8"))
@@ -17767,7 +17796,18 @@ def _media_logical_key(row):
 
 def _media_collapse(rows, show_all=False, show_hidden=False):
     rules=_media_visibility(); groups={}
+    sources=[]
     for row in rows:
+        locations=row.get('locations') or []
+        if locations:
+            base={key:value for key,value in row.items() if key not in {'locations','sources','copies'}}
+            sources.extend(dict(base,**location) for location in locations if isinstance(location,dict))
+        else:sources.append(row)
+    seen=set()
+    for row in sources:
+        locator=(str(row.get('node') or ''),str(row.get('path') or row.get('id') or ''))
+        if locator in seen:continue
+        seen.add(locator)
         r=dict(row); r["hidden"]=_media_is_hidden(r,rules)
         if r["hidden"] and not show_hidden: continue
         if show_all:
@@ -17915,16 +17955,20 @@ def _media_unhide(rows):
     _media_save_visibility(rules)
     return removed
 
-def _media_refresh_rows(rows,discover=True):
+def _media_refresh_rows(rows,discover=True,catalog_meta=None):
     (HOME/'.cache/look/fabric-media-catalog.json').unlink(missing_ok=True)
-    fresh,_=_media_catalog_entries()
-    by_id={(str(row.get('node') or ''),row.get('id')):row for row in fresh}
-    for row in rows:
-        update=by_id.get((str(row.get('node') or ''),row.get('id')))
-        if update:row.update(update)
-    if discover:
-        known={(str(row.get('node') or ''),row.get('id')) for row in rows}
-        rows.extend(row for row in fresh if (str(row.get('node') or ''),row.get('id')) not in known)
+    fresh,meta=_media_catalog_entries()
+    def key(row):
+        return ('sha',row['digest']) if row.get('digest') else ('loc',str(row.get('node') or ''),row.get('id') or row.get('path'))
+    by_id={key(row):row for row in rows}
+    refreshed=[]
+    for update in fresh:
+        old=by_id.get(key(update))
+        if old is not None:
+            old.clear();old.update(update);refreshed.append(old)
+        elif discover:refreshed.append(update)
+    rows[:]=refreshed
+    if catalog_meta is not None:catalog_meta.clear();catalog_meta.update(meta)
     return rows
 
 
@@ -18072,7 +18116,7 @@ def _media_selector(rows,title="FABRIC MEDIA",initial_query="",catalog_meta=None
             height=max(10,terminal.lines)
             width=max(56,terminal.columns)
             info_rows=13 if info_mode else 0
-            usable=max(4,height-11-info_rows-(1 if catalog_meta and (catalog_meta.get("errors") or catalog_meta.get("fallback")) else 0))
+            usable=max(4,height-11-info_rows-(1 if catalog_meta else 0)-(1 if catalog_meta and (catalog_meta.get("errors") or catalog_meta.get("fallback")) else 0)-(1 if catalog_meta and catalog_meta.get('stale') else 0))
             top=max(0,min(max(0,len(visible)-usable),idx-usable+1))
             page=visible[top:top+usable]
 
@@ -18081,11 +18125,16 @@ def _media_selector(rows,title="FABRIC MEDIA",initial_query="",catalog_meta=None
             frame_io=_TerminalFrameBuffer()
             with redirect_stdout(frame_io):
                 mode=("ALL SOURCES" if show_all else "LOGICAL")+(" + HIDDEN" if show_hidden else "")
-                suffix=f"{len(visible):,} shown · {len(rows):,} locations · {len(selected_rows)} selected · {_c(mode,'1;35')}"
+                location_count=sum(int(row.get('copies') or 1) for row in rows)
+                suffix=f"{len(visible):,} shown · {location_count:,} Fabric locations · {len(selected_rows)} selected · {_c(mode,'1;35')}"
                 _title(title,suffix)
                 if catalog_meta:
                     nodes=catalog_meta.get("nodes") or []
                     errors=catalog_meta.get("errors") or []
+                    counts=' · '.join(str(node.get('node') or '?')+': '+format(int(node.get('count') or 0),',')+(' cached' if node.get('cached') else '') for node in nodes)
+                    print(_c(('CATALOG OWNERS · '+counts)[:width-1],'2'))
+                    if catalog_meta.get('stale'):
+                        print(_c('FABRIC STALE · cached remote catalog; local node unavailable','1;33'))
                     if errors:
                         failed=", ".join(str(e.get("node") or "?") for e in errors)
                         print(_c(f"FABRIC PARTIAL · {len(nodes)} node(s) available · unavailable: {failed}","1;33"))
@@ -18191,7 +18240,7 @@ def _media_selector(rows,title="FABRIC MEDIA",initial_query="",catalog_meta=None
 
             chosen=selected_rows or ([visible[idx]] if visible else [])
             if key=="R":
-                try:_media_refresh_rows(rows,discover=discover);notice="catalog refreshed";view_key=None
+                try:_media_refresh_rows(rows,discover=discover,catalog_meta=catalog_meta);notice="catalog refreshed";view_key=None
                 except (OSError,RuntimeError) as exc:notice=str(exc)
                 continue
             if key=="E" and chosen:
@@ -19241,7 +19290,7 @@ def media_mp(initial_query=""):
                 selected_ids.clear(); notice="selection cleared"; continue
             picked=selected or ([chosen] if chosen else [])
             if key=="R":
-                _media_refresh_rows(library_rows);notice="catalog refreshed";view_key=None;continue
+                _media_refresh_rows(library_rows,catalog_meta=catalog_meta);notice="catalog refreshed";view_key=None;continue
             if key=="E" and picked:
                 result=_media_edit_prompt(picked,fd,old)
                 updates={(row.get('node'),row.get('id')):row for row in result['entries']}

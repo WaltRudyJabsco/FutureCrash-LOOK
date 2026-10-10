@@ -22,6 +22,44 @@ In `lk mp`, Shift-A likewise selects/unselects all visible results and Shift-C c
 marks. Shift-B adds marked results (or the focused row) to the queue; Shift-Q shows
 the queue. Enter plays marked results or the focused row after search editing ends.
 
+## Catalog health and scan roots
+
+Media Find shows **CATALOG OWNERS** with each node's physical location count.
+The shown count is the filtered logical list, not a count of files on the current
+computer. Offline owners retained from the last known catalog are labeled cached;
+FABRIC PARTIAL lists unreachable owners and FABRIC STALE identifies a local-node
+fallback. Partial snapshots are retried after three seconds rather than occupying
+the normal 45-second cache window. R refreshes owner health as well as entries,
+and removes locations that disappeared from the current snapshot.
+
+Large peer catalogs have an eight-second per-route read timeout and an eighteen-
+second route budget; LOOK allows 45 seconds for the complete local-node response.
+A sleeping peer must not make LOOK discard a healthy owner's catalog merely
+because the earlier eight-second overall request expired.
+
+`lk media library` lists indexed local roots. A scan of `/` includes application
+sounds, sample packs, and system assets; those are real files but usually not your
+music library. Overlapping scans now count a physical path once and prefer its
+more specific scan root. TypeScript `.ts` source files are excluded; genuine MPEG
+transport streams retain support based on packet sync bytes.
+
+To remove an unwanted scan from the catalog:
+
+```sh
+lk media scan --forget /
+```
+
+This writes a dated catalog backup and forgets entries owned by that scan root.
+It does not delete, move, or modify media files, and separately indexed Music or
+other specific roots remain. Choose the root on its owning computer; this command
+does not silently curate another node's library. Existing broad scans are not
+automatically removed by installing an update.
+
+Artwork browsing currently uses embedded covers, image sidecars, or sibling-track
+art from the same directory. Online Cover Art Archive downloads are performed by
+matched CD imports; existing ordinary library albums are not automatically
+searched online. Missing remote art can also reflect unavailable owner routes.
+
 ## Hidden media
 
 In Media Find, Shift-X hides selected items, Shift-D chooses a directory to hide,
