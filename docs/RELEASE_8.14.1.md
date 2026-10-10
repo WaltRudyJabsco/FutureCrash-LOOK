@@ -14,3 +14,8 @@ Bundle/Albert 8.14.1; LOOK 4.61.1; Future Crash 1.3.0.
 
 Validation: 1,022 automated tests; real SuperDrive discovery of 14 tracks;
 one-second detached FLAC encode and ffprobe verification from the mounted CD.
+
+Installer follow-up: copy tailscale_serve.py and the core package initializer
+before registering the runtime, so older peer installs pass checkout verification.
+The installer inventory regression executes the actual copy commands in an
+isolated home and verifies every registered core Python module.
