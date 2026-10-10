@@ -15802,14 +15802,17 @@ def _media_fabric_catalog():
     cache_path=HOME/".cache/look/fabric-media-catalog.json"
     ttl=max(5.0,float(os.environ.get("LOOK_MEDIA_CATALOG_TTL","45")))
     now=time.time()
+    try:local_stamp=(HOME/'.local/share/look/media_library.json').stat().st_mtime_ns
+    except OSError:local_stamp=-1
 
     cached=None
     try:
         if cache_path.is_file():
             cached=json.loads(cache_path.read_text(encoding="utf-8"))
             cached_at=float(cached.get("_look_cached_at") or cache_path.stat().st_mtime)
-            if now-cached_at <= ttl:
+            if now-cached_at <= ttl and cached.get('_look_local_mtime_ns')==local_stamp:
                 cached.pop("_look_cached_at",None)
+                cached.pop('_look_local_mtime_ns',None)
                 return cached
     except (OSError,ValueError,TypeError):
         cached=None
@@ -15828,6 +15831,7 @@ def _media_fabric_catalog():
                 cache_path.parent.mkdir(parents=True,exist_ok=True)
                 stored=dict(payload)
                 stored["_look_cached_at"]=now
+                stored['_look_local_mtime_ns']=local_stamp
                 _atomic_json(cache_path,stored)
             except (OSError,ValueError,TypeError):
                 pass
@@ -15838,6 +15842,15 @@ def _media_fabric_catalog():
     # Stale-while-unavailable: catalog knowledge survives a sleepy peer/node.
     if isinstance(cached,dict):
         cached.pop("_look_cached_at",None)
+        cached.pop('_look_local_mtime_ns',None)
+        # An unavailable fabric must not hide a just-imported local album.
+        nodes=cached.get('nodes') or []
+        local_node=str((nodes[0] or {}).get('node') or platform.node() or 'local') if nodes else (platform.node() or 'local')
+        local=_media_library()
+        fresh=[dict(row,node=local_node,identified=bool(row.get('digest'))) for row in local.get('entries') or []]
+        cached['entries']=[row for row in cached.get('entries') or [] if row.get('node')!=local_node]+fresh
+        cached['locations']=len(cached['entries'])
+        if nodes:nodes[0]=dict(nodes[0],count=len(fresh))
         cached["stale"]=True
         return cached
 
@@ -17863,13 +17876,16 @@ def _media_unhide(rows):
     _media_save_visibility(rules)
     return removed
 
-def _media_refresh_rows(rows):
+def _media_refresh_rows(rows,discover=True):
     (HOME/'.cache/look/fabric-media-catalog.json').unlink(missing_ok=True)
     fresh,_=_media_catalog_entries()
     by_id={(str(row.get('node') or ''),row.get('id')):row for row in fresh}
     for row in rows:
         update=by_id.get((str(row.get('node') or ''),row.get('id')))
         if update:row.update(update)
+    if discover:
+        known={(str(row.get('node') or ''),row.get('id')) for row in rows}
+        rows.extend(row for row in fresh if (str(row.get('node') or ''),row.get('id')) not in known)
     return rows
 
 
@@ -17967,7 +17983,7 @@ def _media_edit_command(args):
     except (OSError,ValueError,RuntimeError) as exc:print('LOOK MEDIA · '+str(exc),file=sys.stderr);return 1
 
 
-def _media_selector(rows,title="FABRIC MEDIA",initial_query="",catalog_meta=None):
+def _media_selector(rows,title="FABRIC MEDIA",initial_query="",catalog_meta=None,discover=True):
     """LOOK filter semantics over Fabric media rows, with media-specific actions.
 
     Navigation/filtering/selection belong to LOOK. Media contributes only actions.
@@ -18136,7 +18152,7 @@ def _media_selector(rows,title="FABRIC MEDIA",initial_query="",catalog_meta=None
 
             chosen=selected_rows or ([visible[idx]] if visible else [])
             if key=="R":
-                try:_media_refresh_rows(rows);notice="catalog refreshed";view_key=None
+                try:_media_refresh_rows(rows,discover=discover);notice="catalog refreshed";view_key=None
                 except (OSError,RuntimeError) as exc:notice=str(exc)
                 continue
             if key=="E" and chosen:
@@ -18251,7 +18267,7 @@ def _media_group_command(field,args):
     rows,catalog_meta=_media_catalog_entries()
     if sys.stdin.isatty() and sys.stdout.isatty() and not any(x in args for x in {"--json","--list"}):
         def tracks(entries,label):
-            action,payload=_media_selector(entries,label,"",catalog_meta)
+            action,payload=_media_selector(entries,label,"",catalog_meta,discover=False)
             return _media_selector_finish(action,payload)
         return media_library_ui.browse(rows,field,query,_read_tty_key,_media_hints,tracks) or 0
     items=media_library_ui.groups(rows,field)

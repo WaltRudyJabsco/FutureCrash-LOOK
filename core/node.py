@@ -2926,6 +2926,22 @@ def _identify_media_entry(entry_id):
     return {"ok": True, "entry": row, "artifact": _artifact_public_metadata(meta)}
 
 
+MEDIA_PEER_REFRESH_LOCK = threading.Lock()
+
+
+def _refresh_media_peers_background():
+    """Discovery may probe sleeping devices; never hold an album search behind it."""
+    if not MEDIA_PEER_REFRESH_LOCK.acquire(blocking=False):return
+    def refresh():
+        try:PEERS.refresh()
+        except Exception:pass
+        finally:MEDIA_PEER_REFRESH_LOCK.release()
+    try:threading.Thread(target=refresh,name='media-peer-discovery',daemon=True).start()
+    except Exception:
+        MEDIA_PEER_REFRESH_LOCK.release()
+        raise
+
+
 def _fabric_media_catalog(force=False):
     """Union media discoveries from currently reachable trusted Fabric nodes."""
     try:
@@ -2941,7 +2957,7 @@ def _fabric_media_catalog(force=False):
 
     # A catalog request is an explicit user action: refresh discovery now instead
     # of serving a topology snapshot that may predate Tailscale waking up.
-    try: PEERS.refresh()
+    try: _refresh_media_peers_background()
     except Exception: pass
     local = _local_media_catalog()
     entries = list(local.get("entries") or [])

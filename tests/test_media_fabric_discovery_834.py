@@ -18,3 +18,26 @@ def test_scan_without_root_discovers_standard_media():
     assert 'candidates=[home/"Music", home/"Movies"]' in LK
     assert 'Media.localized' in LK
     assert 'LOOK MEDIA DISCOVERY' in LK
+
+
+def test_album_catalog_does_not_wait_for_sleeping_peer_discovery(monkeypatch):
+    import threading
+    from core import node
+    entered=threading.Event();release=threading.Event();finished=threading.Event()
+    def slow_refresh():
+        entered.set()
+        release.wait(3)
+        finished.set()
+    monkeypatch.setattr(node.PEERS,'refresh',slow_refresh)
+    monkeypatch.setattr(node.PEERS,'public',lambda:[])
+    monkeypatch.setattr(node,'node_info',lambda:{})
+    monkeypatch.setattr(node,'_local_media_catalog',lambda:{'node':'local','count':1,'entries':[{'id':'new-album'}]})
+    monkeypatch.setattr(node,'MEDIA_CATALOG_CACHE',{'data':None})
+    try:
+        result=node._fabric_media_catalog(force=True)
+        assert entered.wait(1)
+        assert not finished.is_set()
+        assert result['entries']==[{'id':'new-album'}]
+    finally:
+        release.set()
+        assert finished.wait(1)

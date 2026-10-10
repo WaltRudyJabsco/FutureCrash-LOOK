@@ -15,3 +15,5 @@ requires a local install to replace the older updater.
 Follow-up fixes: lowercase `q` filters Media Find and grouped album/artist browsing. Matched CD imports fetch optional album artwork beside the tracks for local and Fabric previews.
 
 Import workflow: watch discovers active jobs automatically; deliver resolves album names and uses the saved destination, with a picker for ambiguous selections. Workbench L delivers/retries the selected album. Job discovery excludes delivery receipt files.
+
+Catalog freshness: Media Find/player refresh includes new tracks; local index changes invalidate the LOOK cache, and unavailable Fabric responses retain fresh local albums alongside cached remote music. Sleeping peer discovery runs in the background rather than blocking album searches.

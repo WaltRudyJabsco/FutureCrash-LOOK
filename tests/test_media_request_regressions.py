@@ -324,3 +324,34 @@ def test_album_and_artist_browser_lowercase_q_is_filter_text(lk,monkeypatch):
     selected=media_library_ui.choose([{'label':'Queen','entries':[{}]},{'label':'Other','entries':[{}]}],
         'ARTISTS',lambda *args:next(keys),lambda text,width:text)
     assert selected['label']=='Queen'
+
+
+def test_refresh_discovers_new_album_without_losing_existing_row_objects(lk,monkeypatch,tmp_path):
+    monkeypatch.setattr(lk,'HOME',tmp_path)
+    old={'node':'local','id':'old','title':'Old title'}
+    added={'node':'local','id':'new','artist':'Oscar Peterson','album':'Live From Chicago'}
+    monkeypatch.setattr(lk,'_media_catalog_entries',lambda:([dict(old,title='Corrected title'),added],{}))
+    rows=[old]
+    lk._media_refresh_rows(rows)
+    assert rows[0] is old and old['title']=='Corrected title'
+    assert rows[1]==added
+    lk._media_refresh_rows(rows)
+    assert len(rows)==2
+    scoped=[old];lk._media_refresh_rows(scoped,discover=False)
+    assert scoped==[old]
+
+
+def test_unavailable_fabric_merges_fresh_local_album_with_cached_remote_music(lk,monkeypatch,tmp_path):
+    import json,time
+    monkeypatch.setattr(lk,'HOME',tmp_path)
+    cache=tmp_path/'.cache/look/fabric-media-catalog.json';cache.parent.mkdir(parents=True)
+    cache.write_text(json.dumps({'_look_cached_at':time.time(),'nodes':[{'node':'m3'},{'node':'3090'}],
+                                'entries':[{'node':'m3','id':'old'},{'node':'3090','id':'remote'}]}))
+    fresh={'id':'new','artist':'The Oscar Peterson Trio'}
+    monkeypatch.setattr(lk,'_media_library',lambda:{'entries':[fresh]})
+    def offline(*a,**k):raise OSError('fabric unavailable')
+    monkeypatch.setattr(lk.urllib.request,'urlopen',offline)
+    result=lk._media_fabric_catalog()
+    assert result['stale'] and result['locations']==2
+    assert {row['id'] for row in result['entries']}=={'new','remote'}
+    assert next(row for row in result['entries'] if row['id']=='new')['node']=='m3'
