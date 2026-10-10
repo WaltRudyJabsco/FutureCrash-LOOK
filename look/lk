@@ -2,6 +2,7 @@
 import os, platform, re, select, shutil, subprocess, sys, termios, tty, threading, time, hashlib, json, uuid, signal, tempfile, wave, math, struct, zipfile, socket, shlex, io, base64
 from datetime import datetime
 import http.client
+import gzip
 import urllib.request, urllib.parse, urllib.error
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from contextlib import contextmanager, redirect_stdout
@@ -15859,6 +15860,7 @@ def _media_fabric_catalog():
 
     # Talk directly to the already-running local Unified Node. Spawning fcl-node
     # just to turn around and call localhost adds process startup and JSON churn.
+    catalog_error='Invalid catalog response'
     try:
         request=urllib.request.Request(
             "http://127.0.0.1:7332/v1/media/fabric",
@@ -15888,8 +15890,8 @@ def _media_fabric_catalog():
             except (OSError,ValueError,TypeError):
                 pass
             return payload
-    except Exception:
-        pass
+    except Exception as exc:
+        catalog_error=''.join(c if c.isprintable() else ' ' for c in str(exc))[:300]
 
     # Stale-while-unavailable: catalog knowledge survives a sleepy peer/node.
     if isinstance(cached,dict):
@@ -15904,6 +15906,7 @@ def _media_fabric_catalog():
         cached['locations']=len(cached['entries'])
         if nodes:nodes[0]=dict(nodes[0],count=len(fresh))
         cached["stale"]=True
+        cached['catalog_error']=catalog_error
         return cached
 
     local=_media_library()
@@ -15921,6 +15924,7 @@ def _media_fabric_catalog():
         "locations":len(rows),
         "identified_locations":sum(1 for row in rows if row.get("digest")),
         "fallback":True,
+        "catalog_error":catalog_error,
     }
 
 
@@ -17299,6 +17303,8 @@ def _media_fabric_command():
         print(f"  {len(payload['errors'])} node catalog error(s)")
     if payload.get("fallback"):
         print("  local fallback · Unified Node catalog unavailable")
+    if payload.get('catalog_error'):
+        print(f"  catalog error · {payload['catalog_error']}")
     return 0
 
 
@@ -18136,12 +18142,14 @@ def _media_selector(rows,title="FABRIC MEDIA",initial_query="",catalog_meta=None
                     counts=' · '.join(str(node.get('node') or '?')+': '+format(int(node.get('count') or 0),',')+(' cached' if node.get('cached') else '') for node in nodes)
                     print(_c(('CATALOG OWNERS · '+counts)[:width-1],'2'))
                     if catalog_meta.get('stale'):
-                        print(_c('FABRIC STALE · cached remote catalog; local node unavailable','1;33'))
+                        detail=catalog_meta.get('catalog_error') or 'local node unavailable'
+                        print(_c(('FABRIC STALE · cached remote catalog · '+detail)[:width-1],'1;33'))
                     if errors:
                         failed=", ".join(str(e.get("node") or "?") for e in errors)
                         print(_c(f"FABRIC PARTIAL · {len(nodes)} node(s) available · unavailable: {failed}","1;33"))
                     elif catalog_meta.get("fallback"):
-                        print(_c("FABRIC LOCAL FALLBACK · Unified Node catalog unavailable","1;33"))
+                        detail=catalog_meta.get('catalog_error') or 'Unified Node catalog unavailable'
+                        print(_c(('FABRIC LOCAL FALLBACK · '+detail)[:width-1],"1;33"))
                 for n,row in enumerate(page,start=top):
                     rid=row_id(row)
                     focus=_c("›","1;36") if n==idx else " "

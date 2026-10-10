@@ -73,3 +73,35 @@ def test_transport_refresh_preserves_existing_authorization(tmp_path):
     stored=local.trusted()['nodes'][original['node_id']]
     assert stored['auth_token']==token
     assert stored['transports']['tailcat']['endpoints']==['https://peer.local:7443']
+
+
+def test_tailcat_pin_does_not_replace_other_service_certificate(tmp_path, monkeypatch):
+    from core import fabric_identity
+    local=FabricIdentity(tmp_path/'local'); peer=FabricIdentity(tmp_path/'peer')
+    remote=peer.ensure()
+    remote['transports']={'tailcat':{'endpoints':['https://peer.tail.example:7443'], 'cert_pem':'PINNED'}}
+    local.trust(remote,auth_token='x'*48,endpoint='https://peer.tail.example:7332')
+    context=type('Context', (), {'check_hostname':True})()
+    monkeypatch.setattr(fabric_identity.ssl,'create_default_context',lambda **kw: context)
+    assert local.ssl_context_for_url('https://peer.tail.example:7443/v1/identity') is context
+    assert local.ssl_context_for_url('https://peer.tail.example:7332/v1/identity') is None
+    assert local.ssl_context_for_url('https://peer.tail.example/v1/identity') is None
+
+
+def test_transport_refresh_keeps_discovered_routes_only_for_same_pin(tmp_path):
+    import time
+    local=FabricIdentity(tmp_path/'local'); peer=FabricIdentity(tmp_path/'peer')
+    remote=peer.ensure()
+    remote['transports']={'tailcat':{'endpoints':['https://peer.local:7443'], 'cert_pem':'PINNED'}}
+    local.trust(remote,auth_token='x'*48)
+    discovered='https://100.64.0.7:7443'
+    expires=time.time()+60
+    local.learn_discovered_endpoints(remote['node_id'],[discovered],expires_at=expires)
+    local.trust(remote,source='transport-refresh')
+    stored=local.trusted()['nodes'][remote['node_id']]
+    assert discovered in local._active_tailcat_endpoints(stored)
+    assert discovered not in local._active_tailcat_endpoints(stored,now_value=expires+1)
+    changed=dict(remote,transports={'tailcat':{'endpoints':['https://peer.local:7443'], 'cert_pem':'NEW PIN'}})
+    local.trust(changed,source='pairing')
+    stored=local.trusted()['nodes'][remote['node_id']]
+    assert discovered not in local._active_tailcat_endpoints(stored)
