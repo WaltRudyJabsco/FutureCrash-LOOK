@@ -33,7 +33,9 @@ are preserved in numeric order. macOS's `drutil` SupportLevel describes its own
 drive support; it does not decide whether mounted audio tracks can be imported.
 
 MusicBrainz lookup uses the CD table of
-contents when a reader provides it. One matching release may be used directly;
+contents from cd-paranoia or the mounted macOS .TOC.plist. Finder names are
+kept as fallback track titles. A single matching release preloads artist, album
+and tracks; Return keeps those defaults. Without a match, artist is optional. One matching release may be used directly;
 multiple releases are displayed for review rather than guessed. Choose a release
 with the workbench or `--release NUMBER`; supply your own title to override it.
 `--no-metadata` captures with your own labels offline. Unknown tracks keep

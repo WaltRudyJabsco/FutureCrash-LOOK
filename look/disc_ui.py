@@ -20,6 +20,7 @@ def capture(request,drive,kind,title='',destination='',title_index='',release=No
     payload={'drive':drive,'kind':kind,'title':title,'destination':destination,'title_index':title_index}
     if kind=='cd' and metadata:
         scan=request('scan',{'drive':drive,'kind':kind});releases=scan.get('releases') or []
+        if scan.get('metadata'):payload['metadata']=scan['metadata']
         if release is not None:
             if not 1<=release<=len(releases):raise ValueError('Release choice is out of range; scan first')
             payload['metadata']=releases[release-1]
@@ -79,16 +80,19 @@ def workspace(request,read_key,hints):
                         print(f"  {number}. {release['title']} · {release['artist']} · {len(release.get('tracks') or [])} tracks")
                     for title in scan.get('titles') or []:
                         print('  Title '+str(title['index'])+' · '+str(title.get('name') or 'Movie title')+' · '+str(title.get('duration') or 'duration unavailable'))
-                    if kind=='cd' and not scan.get('releases'):print('  No matching release · use your own album and track labels')
+                    if kind=='cd' and not scan.get('releases'):print('  No matching release · keeping detected album and track names')
                     tty.setcbreak(fd)
-                    metadata={};title_index=''
+                    metadata=dict(scan.get('metadata') or {});title_index=''
                     if kind=='cd':
                         releases=scan.get('releases') or []
-                        choice=prompt('Release number (blank uses your own labels)','1' if len(releases)==1 else '')
+                        choice='1' if len(releases)==1 else prompt('Release number (blank keeps detected labels)') if releases else ''
                         if choice:
                             number=int(choice)
                             if not 1<=number<=len(releases):raise ValueError('Release choice out of range')
                             metadata=releases[number-1]
+                        if not metadata.get('artist'):
+                            artist=prompt('Artist (optional; Return keeps Unknown artist)')
+                            if artist:metadata['artist']=artist
                     else:title_index=prompt('Title index from scan (or all with MakeMKV)')
                     title=prompt('Album / movie title',metadata.get('title') or '')
                     destination=prompt('Destination directory (blank uses Music/Movies Fabric Imports)')

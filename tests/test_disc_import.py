@@ -151,3 +151,38 @@ def test_native_audio_volume_permission_failure_is_actionable(monkeypatch,tmp_pa
     def denied(path):raise PermissionError('Operation not permitted')
     monkeypatch.setattr(Path,'iterdir',denied)
     with pytest.raises(ValueError,match='removable-volume access'):discs.audio_tracks(tmp_path)
+
+
+def test_mac_toc_uses_absolute_offsets_without_second_leadin(tmp_path):
+    import plistlib
+    toc={'Sessions':[{'First Track':1,'Last Track':2,'Leadout Block':450,'Track Array':[
+        {'Point':1,'Start Block':150,'Data':False},{'Point':2,'Start Block':250,'Data':False}]}]}
+    (tmp_path/'.TOC.plist').write_bytes(plistlib.dumps(toc))
+    native=discs.toc_from_mount(tmp_path)
+    reader=discs.toc_from_query(' 1. 100 [00:01.25] 0 [00:00.00]\n 2. 200 [00:02.50] 100 [00:01.25]')
+    assert native==reader
+    toc['Sessions'][0]['Track Array'][1]['Data']=True
+    (tmp_path/'.TOC.plist').write_bytes(plistlib.dumps(toc))
+    assert discs.toc_from_mount(tmp_path) is None
+
+
+def test_mac_scan_looks_up_toc_and_keeps_detected_labels(monkeypatch,tmp_path):
+    import plistlib
+    (tmp_path/'1 First.aiff').touch();(tmp_path/'2 Second.aiff').touch()
+    (tmp_path/'.TOC.plist').write_bytes(plistlib.dumps({'Sessions':[{'First Track':1,'Last Track':2,'Leadout Block':450,'Track Array':[
+        {'Point':1,'Start Block':150,'Data':False},{'Point':2,'Start Block':250,'Data':False}]}]}))
+    monkeypatch.setattr(discs,'tool',lambda name:None)
+    monkeypatch.setattr(discs,'selected_drive',lambda identifier:{'mount':str(tmp_path),'disc':'Album'})
+    lookup=Mock(return_value=[{'title':'Album','artist':'Artist','tracks':['First','Second']}])
+    monkeypatch.setattr(discs,'lookup',lookup)
+    scan=discs.inspect(None)
+    assert scan['engine']=='macOS audio volume'
+    assert scan['metadata']=={'title':'Album','tracks':['First','Second']}
+    assert lookup.call_args.args[0]['toc']=='1 2 450 150 250'
+    assert scan['releases'][0]['artist']=='Artist'
+
+
+def test_cd_capture_keeps_native_labels_without_release_match():
+    request=Mock(side_effect=[{'metadata':{'title':'Album','tracks':['First']},'releases':[]},{'ok':True}])
+    disc_ui.capture(request,'drive:1','cd')
+    assert request.call_args.args[1]['metadata']=={'title':'Album','tracks':['First']}

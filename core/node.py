@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Future Crash + LOOK Unified Node 8.14.1.
+"""Future Crash + LOOK Unified Node 8.14.2.
 
 A small distributed supervisor for trusted personal machines. Immediate events stay
 asynchronous; a one-second fabric pulse reconciles presence, leases and stale work.
@@ -152,7 +152,7 @@ def _file_peer_json(peer,path):
     return _file_race(peer,path)[1]
 
 
-VERSION = "8.14.1"
+VERSION = "8.14.2"
 RELEASE_NAME = "FABRIC VISION"
 DEFAULT_HOST = "127.0.0.1"
 DEFAULT_PORT = 7332
@@ -2632,7 +2632,7 @@ def _local_web_search(query, limit=8):
     base=os.environ.get("FCL_SEARXNG_URL","http://127.0.0.1:8888").rstrip("/")
     request=urllib.request.Request(base+"/search?"+params,headers={
         "Accept":"application/json",
-        "User-Agent":"Future-Crash-Fabric/8.14.1",
+        "User-Agent":"Future-Crash-Fabric/8.14.2",
     })
     try:
         with urllib.request.urlopen(request,timeout=8) as response:

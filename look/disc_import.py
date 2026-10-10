@@ -139,7 +139,7 @@ def lookup(toc):
     if not toc:return []
     from urllib.parse import urlencode
     url='https://musicbrainz.org/ws/2/discid/'+toc['disc_id']+'?'+urlencode({'toc':toc['toc'],'inc':'artists+recordings','fmt':'json'})
-    request=urllib.request.Request(url,headers={'User-Agent':'FutureCrash-LOOK/8.14.1 (personal disc importer)'})
+    request=urllib.request.Request(url,headers={'User-Agent':'FutureCrash-LOOK/8.14.2 (personal disc importer)'})
     try:
         with urllib.request.urlopen(request,timeout=5) as response:data=json.load(response)
     except (OSError,ValueError):return []
@@ -153,6 +153,27 @@ def lookup(toc):
                              'tracks':[str(track.get('title') or (track.get('recording') or {}).get('title') or '')[:200] for track in tracks],
                              'release_id':release.get('id'),'disc':int(medium.get('position') or 1)})
     return releases
+
+
+def toc_from_mount(mount):
+    if not mount:return None
+    try:
+        data=plistlib.loads((Path(mount)/'.TOC.plist').read_bytes())
+        sessions=data.get('Sessions') or []
+        if len(sessions)!=1:return None
+        session=sessions[0];tracks=session['Track Array']
+        if any(track.get('Data') for track in tracks):return None
+        first=session['First Track'];last=session['Last Track'];leadout=session['Leadout Block']
+        tracks=sorted(tracks,key=lambda row:row['Point'])
+        offsets=[track['Start Block'] for track in tracks]
+        if first!=1 or not 1<=last<=99 or [track['Point'] for track in tracks]!=list(range(1,last+1)):return None
+        if any(not isinstance(value,int) or value<150 for value in [leadout,*offsets]):return None
+        if offsets!=sorted(set(offsets)) or leadout<=offsets[-1]:return None
+        # macOS stores absolute CD frame offsets, including the lead-in already.
+        packed=f'{first:02X}{last:02X}{leadout:08X}'+''.join(f'{value:08X}' for value in offsets+[0]*(99-last))
+        disc_id=base64.b64encode(hashlib.sha1(packed.encode('ascii')).digest()).decode().translate(str.maketrans('+/=','._-'))
+        return {'disc_id':disc_id,'toc':' '.join(map(str,[first,last,leadout,*offsets])),'count':last}
+    except (OSError,ValueError,KeyError,TypeError,OverflowError):return None
 
 
 def audio_tracks(mount):
@@ -175,8 +196,10 @@ def inspect(identifier,kind='cd'):
         ripper=tool('cd-paranoia') or tool('cdparanoia');toc=None
         if ripper and drive['device']:toc=toc_from_query(query([ripper,'-d',drive['device'],'-Q']))
         native=audio_tracks(drive['mount'])
+        if native and not toc:toc=toc_from_mount(drive['mount'])
         if not toc and not native:raise ValueError('Audio CD not readable; insert a CD and check drive permissions / cd-paranoia')
-        return {'ok':True,'drive':drive,'engine':'cd-paranoia' if toc else 'macOS audio volume','toc':toc,'releases':lookup(toc),'tracks':len(native) if not toc else toc['count']}
+        metadata={'title':drive.get('disc') or '', 'tracks':[re.sub(r'^\d+\s*[-.]?\s*','',path.stem) for path in native]}
+        return {'ok':True,'drive':drive,'engine':'cd-paranoia' if ripper and drive['device'] else 'macOS audio volume','toc':toc,'releases':lookup(toc),'metadata':metadata,'tracks':len(native) if not toc else toc['count']}
     if drive.get('makemkv_source'):
         text=query([tool('makemkvcon'),'-r','--cache=128','info',drive['makemkv_source']],90)
         titles={}
