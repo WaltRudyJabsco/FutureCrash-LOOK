@@ -105,3 +105,25 @@ def test_transport_refresh_keeps_discovered_routes_only_for_same_pin(tmp_path):
     local.trust(changed,source='pairing')
     stored=local.trusted()['nodes'][remote['node_id']]
     assert discovered not in local._active_tailcat_endpoints(stored)
+
+
+def test_ip_routes_match_exact_peer_before_dns_aliases(tmp_path,monkeypatch):
+    from core import fabric_identity
+    local=FabricIdentity(tmp_path/'local')
+    peers=[]
+    for index in (1,2):
+        remote=FabricIdentity(tmp_path/str(index)).ensure()
+        remote.update(name='peer'+str(index),hostname='peer'+str(index)+'.local')
+        remote['transports']={'tailcat':{'endpoints':[f'https://100.64.0.{index}:7443',f'https://192.168.1.{index}:7443'], 'cert_pem':'PIN'+str(index)}}
+        local.trust(remote,auth_token=str(index)*48)
+        peers.append(remote)
+    contexts={value:type('Context',(),{'check_hostname':True})() for value in ('PIN1','PIN2')}
+    monkeypatch.setattr(fabric_identity.ssl,'create_default_context',lambda **kw:contexts[kw['cadata']])
+    for index,peer in enumerate(peers,1):
+        for address in (f'100.64.0.{index}',f'192.168.1.{index}'):
+            url=f'https://{address}:7443/v1/identity'
+            assert local._matching_trust_row(url)['node_id']==peer['node_id']
+            assert local.auth_headers_for_url(url)['Authorization']=='Bearer '+str(index)*48
+            assert local.ssl_context_for_url(url) is contexts['PIN'+str(index)]
+    assert local._matching_trust_row('https://100.64.0.99:7443') is None
+    assert local._matching_trust_row('https://peer2.tail.example:7332')['node_id']==peers[1]['node_id']

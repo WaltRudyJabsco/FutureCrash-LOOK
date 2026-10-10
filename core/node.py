@@ -5041,6 +5041,13 @@ def _peer_json(peer, path, timeout=12.0, total_timeout=None):
         if remaining<=0:break
         try:
             return http_json(base+path, timeout=min(timeout,remaining))
+        except urllib.error.HTTPError as exc:
+            last=exc
+            try:
+                detail=json.loads(exc.read(4096))
+                if isinstance(detail,dict) and isinstance(detail.get('error'),str):
+                    last=RuntimeError(f'{exc}: {detail["error"][:300]}')
+            except (OSError,ValueError,TypeError):pass
         except Exception as exc:
             last=exc
     raise RuntimeError(str(last or "peer has no reachable endpoint"))

@@ -1,3 +1,9 @@
+# 2026-10-10 — Timed player cycle and FabBack discovery
+
+- Added an eighth Cycle visual mode to Player/MP: rotate all seven visuals, including Album Art, every ten seconds without leaving visual mode or losing transport controls.
+- Fixed peer credential/certificate selection for IP routes sharing an address prefix; exact endpoints take precedence over DNS aliases. Gateway catalog failures retain their bounded backend diagnostic.
+- Added a read-only Linux probe for the existing FabBack drive's label, filesystem UUID, mount, free space, permissions, and backup tools. It does not initialize backups or modify drive contents.
+
 # 2026-10-10 — Fabric catalog decoding and certificate routes
 
 - Fixed LOOK's missing gzip import, which turned successful compressed catalogs into local fallback. Fallbacks now report the actual request/decode error.

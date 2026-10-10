@@ -169,4 +169,13 @@ Matched audio CDs download a 500-pixel front cover from the Cover Art Archive in
 
 ## Player visuals
 
-In `lk player`, press lowercase `v` to cycle Bars, Waves, Orbit, Tunnel, Stars, Plasma, then **Album Art**, followed by the normal player view. In `lk mp`, `v` opens the same player visuals. Album Art fills the available canvas with a centered ASCII cover while keeping track information and transport controls visible. Covers preserve their proportions for terminal cells, and remote covers load in the background. Missing artwork displays an availability message.
+In `lk player`, press lowercase `v` to cycle Bars, Waves, Orbit, Tunnel, Stars,
+Plasma, **Album Art**, then **Cycle**, followed by the normal player view. In
+`lk mp`, `v` opens the same player visuals. Cycle rotates through the seven
+visualizers every ten seconds while its view is open, including Album Art, and
+never switches automatically to the normal player view. Selecting Cycle starts
+at Bars; pressing `v` again returns to the normal view. Transport controls remain
+available throughout. Album Art fills the available canvas with a centered ASCII
+cover while keeping track information and transport controls visible. Covers
+preserve their proportions for terminal cells, and remote covers load in the
+background. Missing artwork displays an availability message.

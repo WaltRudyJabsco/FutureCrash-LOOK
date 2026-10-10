@@ -4,7 +4,16 @@ import math
 import hashlib
 import json
 
-NAMES = ('Bars', 'Waves', 'Orbit', 'Tunnel', 'Stars', 'Plasma', 'Album Art')
+NAMES = ('Bars', 'Waves', 'Orbit', 'Tunnel', 'Stars', 'Plasma', 'Album Art', 'Cycle')
+CYCLE_MODE = len(NAMES)
+CYCLE_INTERVAL_SECONDS = 10.0
+
+
+def active_mode(mode, elapsed):
+    """Cycle only through visuals; normal player view is never a timed step."""
+    if mode==CYCLE_MODE:
+        return 1+int(max(0.0,elapsed)//CYCLE_INTERVAL_SECONDS)%(CYCLE_MODE-1)
+    return mode
 
 
 def frame(mode, width, height, phase, playing=True, seed=0):

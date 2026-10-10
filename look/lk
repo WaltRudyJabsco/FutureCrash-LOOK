@@ -18909,15 +18909,17 @@ def _media_player_large_art(entry,width,height):
     return [line[:width].ljust(width) for line in (lines+['']*height)[:height]]
 
 
-def _media_player_full_visual(snap,mode):
+def _media_player_full_visual(snap,mode,visual_elapsed=0):
     terminal=shutil.get_terminal_size((80,24))
     width=max(1,min(240,terminal.columns-1)); height=max(1,terminal.lines-1)
     entry=snap['entry']; state=str(snap['state']).lower()
     queue=snap['session'].get('queue') or []
+    cycling=mode==player_visuals.CYCLE_MODE
+    mode=player_visuals.active_mode(mode,visual_elapsed)
     name=player_visuals.NAMES[(mode-1)%len(player_visuals.NAMES)]
     seed=int(hashlib.sha256(_media_entry_label(entry).encode()).hexdigest()[:4],16)%23
     album_art=name=='Album Art'
-    header=[f"LOOK PLAYER · {name}"+('' if album_art else ' · ambient animation'),
+    header=[f"LOOK PLAYER · "+('Cycle · ' if cycling else '')+name+('' if album_art else ' · ambient animation'),
             _media_entry_label(entry),
             f"{state.upper()} · {_media_time(snap.get('position') or 0)} / {_media_time(snap.get('duration') or 0)} · Queue {snap['index']+1}/{len(queue)}"]
     footer=['v next visual / normal · space pause · p/n previous/next',
@@ -18929,11 +18931,11 @@ def _media_player_full_visual(snap,mode):
     return "\n".join(_c(_media_player_line(line,width),color) if len(header)<=i<len(header)+len(art) else _media_player_style(_media_player_line(line,width),6 if i>=len(header)+len(art) else 0 if i==1 else 4 if i==2 else 1) for i,line in enumerate(lines[:height]))
 
 
-def _media_player_render(visualizer=0):
+def _media_player_render(visualizer=0,visual_elapsed=0):
     snap=_media_status_snapshot()
     if snap: player_visuals.album_color(snap)
     if visualizer and snap:
-        return _media_player_full_visual(snap,visualizer)
+        return _media_player_full_visual(snap,visualizer,visual_elapsed)
     width=max(42,min(88,shutil.get_terminal_size((72,24)).columns-2))
     inner=width-2
     if not snap:
@@ -19003,19 +19005,22 @@ def media_player(initial_visualizer=0):
         print(_media_player_render())
         return 0
     visualizer=initial_visualizer % (len(player_visuals.NAMES)+1)
+    visual_started=time.monotonic()
     fd=sys.stdin.fileno()
     old=termios.tcgetattr(fd)
     try:
         tty.setcbreak(fd)
         sys.stdout.write("\033[2J")
         while True:
-            sys.stdout.write("\033[H"+_media_player_render(visualizer)+"\033[J")
+            sys.stdout.write("\033[H"+_media_player_render(visualizer,time.monotonic()-visual_started)+"\033[J")
             sys.stdout.flush()
             key=_read_tty_key(fd,.25)
             if not key:
                 continue
             if key in {"q","esc"}: return 0
-            if key=="v": visualizer=(visualizer+1) % (len(player_visuals.NAMES)+1)
+            if key=="v":
+                visualizer=(visualizer+1) % (len(player_visuals.NAMES)+1)
+                visual_started=time.monotonic()
             elif key==" ": _media_control_session("toggle")
             elif key=="n": _media_control_session("next")
             elif key=="p": _media_control_session("prev")
