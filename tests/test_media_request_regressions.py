@@ -355,3 +355,53 @@ def test_unavailable_fabric_merges_fresh_local_album_with_cached_remote_music(lk
     assert result['stale'] and result['locations']==2
     assert {row['id'] for row in result['entries']}=={'new','remote'}
     assert next(row for row in result['entries'] if row['id']=='new')['node']=='m3'
+
+
+def test_refresh_removes_old_locations_and_refreshes_owner_health(lk,monkeypatch,tmp_path):
+    monkeypatch.setattr(lk,'HOME',tmp_path)
+    fresh={'node':'3090','id':'real','path':'/music/real.mp3','title':'New title'}
+    monkeypatch.setattr(lk,'_media_catalog_entries',lambda:([fresh],{'nodes':[{'node':'3090','count':1}]}))
+    old=dict(fresh,title='Old title');rows=[old,{'node':'3090','id':'deleted'}];meta={'fallback':True}
+    lk._media_refresh_rows(rows,catalog_meta=meta)
+    assert rows==[fresh] and rows[0] is old
+    assert not meta.get('fallback') and meta['nodes'][0]['count']==1
+
+
+def test_collapsed_sha_keeps_owner_hidden_rules_for_each_copy(lk,monkeypatch):
+    monkeypatch.setattr(lk,'_media_visibility',lambda:{})
+    rows=[{'node':'3090','id':'hidden','path':'/hidden/song.mp3','digest':'sha256:x',
+           'fabric_hidden_by':'/hidden','locations':[
+               {'node':'3090','id':'hidden','path':'/hidden/song.mp3','fabric_hidden_by':'/hidden'},
+               {'node':'m3','id':'visible','path':'/Music/song.mp3','fabric_hidden_by':''}]}]
+    visible=lk._media_collapse(rows)
+    assert len(visible)==1 and visible[0]['node']=='m3'
+    assert visible[0]['source_count']==1
+    assert len(lk._media_collapse(rows,show_all=True,show_hidden=True))==2
+
+
+def test_partial_fabric_keeps_cached_remote_knowledge_and_marks_owner_offline(lk,monkeypatch,tmp_path):
+    import io,json,time
+    monkeypatch.setattr(lk,'HOME',tmp_path)
+    cache=tmp_path/'.cache/look/fabric-media-catalog.json';cache.parent.mkdir(parents=True)
+    cache.write_text(json.dumps({'_look_cached_at':time.time()-60,'entries':[{'node':'3090','id':'remote'}]}))
+    payload={'entries':[{'node':'m3','id':'local'}],'nodes':[{'node':'m3','count':1}],
+             'errors':[{'node':'3090','error':'sleeping'}]}
+    monkeypatch.setattr(lk.urllib.request,'urlopen',lambda *a,**kw:io.BytesIO(json.dumps(payload).encode()))
+    result=lk._media_fabric_catalog()
+    assert {row['id'] for row in result['entries']}=={'local','remote'}
+    assert next(row for row in result['entries'] if row['node']=='3090')['offline']
+    owner=next(node for node in result['nodes'] if node['node']=='3090')
+    assert owner['cached'] and not owner['online'] and owner['count']==1
+
+
+def test_forget_root_backs_up_only_catalog_and_keeps_files(lk,monkeypatch,tmp_path):
+    import json
+    monkeypatch.setattr(lk,'HOME',tmp_path)
+    root=tmp_path/'samples';root.mkdir();file=root/'sound.wav';file.write_bytes(b'keep me')
+    library=tmp_path/'media_library.json';library.write_text(json.dumps({'roots':[str(root)],'entries':[{'path':str(file),'root':str(root)}]}))
+    monkeypatch.setattr(lk,'MEDIA_LIBRARY_FILE',library)
+    assert lk._media_scan_command(['--forget',str(root)])==0
+    assert file.read_bytes()==b'keep me'
+    assert json.loads(library.read_text())['entries']==[]
+    backup=next(tmp_path.glob('media_library.before-forget-*'))
+    assert len(json.loads(backup.read_text())['entries'])==1

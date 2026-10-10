@@ -153,17 +153,48 @@ def empty_library() -> dict[str, Any]:
     return {"schema": SCHEMA_LIBRARY, "updated": 0.0, "roots": [], "entries": []}
 
 
+
+def is_media_path(path: Path) -> bool:
+    if path.suffix.casefold() not in MEDIA_EXTENSIONS:return False
+    if path.suffix.casefold()!='.ts':return True
+    # .ts is both TypeScript and MPEG transport stream. Check packet sync bytes,
+    # never invoke a decoder or read the whole file while discovering media.
+    try:
+        with path.open('rb') as stream:data=stream.read(4*192)
+    except OSError:return False
+    return any(offset+2*packet<len(data) and
+               all(data[offset+index*packet]==0x47 for index in range(3))
+               for packet in (188,192) for offset in range(packet))
+
 def normalize_library(data: Any) -> dict[str, Any]:
     if not isinstance(data, dict):
         return empty_library()
     roots = [str(x) for x in (data.get("roots") or []) if str(x).strip()]
     entries = [dict(x) for x in (data.get("entries") or []) if isinstance(x, dict) and x.get("path")]
+    # Overlapping scans describe one physical file, not additional copies.
+    unique={}
+    for row in entries:
+        path=str(row['path']);previous=unique.get(path)
+        if previous is None:unique[path]=row
+        elif len(str(row.get('root') or ''))>len(str(previous.get('root') or '')):
+            unique[path]=dict(previous,**row)
+        else:
+            unique[path]=dict(row,**previous)
     return {
         "schema": SCHEMA_LIBRARY,
         "updated": float(data.get("updated") or 0.0),
         "roots": sorted(set(roots), key=str.casefold),
-        "entries": entries,
+        "entries": list(unique.values()),
     }
+
+
+def forget_root(library: Any, root: str | Path) -> dict[str, Any]:
+    result=normalize_library(library);base=str(Path(root).expanduser().resolve())
+    if base not in result['roots']:raise ValueError('Root is not indexed: '+base)
+    result['roots']=[value for value in result['roots'] if value!=base]
+    result['entries']=[row for row in result['entries'] if str(row.get('root') or '')!=base]
+    result['updated']=_now()
+    return result
 
 
 def scan_root(root: str | Path, existing: Any = None) -> dict[str, Any]:
@@ -178,8 +209,7 @@ def scan_root(root: str | Path, existing: Any = None) -> dict[str, Any]:
     library = normalize_library(existing)
     base_s = str(base)
 
-    current_rows = [row for row in library["entries"] if str(row.get("root") or "") == base_s]
-    existing_by_path = {str(row.get("path") or ""): row for row in current_rows}
+    existing_by_path = {str(row.get("path") or ""): row for row in library["entries"]}
     keep = [row for row in library["entries"] if str(row.get("root") or "") != base_s]
     found: list[dict[str, Any]] = []
     for dirpath, dirnames, filenames in os.walk(base):
@@ -189,7 +219,7 @@ def scan_root(root: str | Path, existing: Any = None) -> dict[str, Any]:
             if name.startswith("."):
                 continue
             path = Path(dirpath) / name
-            if path.suffix.casefold() not in MEDIA_EXTENSIONS:
+            if not is_media_path(path):
                 continue
             try:
                 row = entry_from_path(path, base,sidecar=path.with_suffix(".info.json").name in filenames)
@@ -202,11 +232,16 @@ def scan_root(root: str | Path, existing: Any = None) -> dict[str, Any]:
                     row["digest"] = previous["digest"]
                     if previous.get("identified_at"):
                         row["identified_at"] = previous["identified_at"]
+                if len(str(previous.get('root') or ''))>len(base_s):
+                    row['root']=previous['root']
+                for key in ('artist','album'):
+                    if not row.get(key) and previous.get(key):row[key]=previous[key]
                 found.append(row)
             except (FileNotFoundError, PermissionError, OSError):
                 continue
 
-    library["entries"] = sorted(keep + found, key=entry_sort_key)
+    found_paths={row['path'] for row in found}
+    library["entries"] = sorted([row for row in keep if row['path'] not in found_paths]+found,key=entry_sort_key)
     roots = [r for r in library["roots"] if r != base_s]
     roots.append(base_s)
     library["roots"] = sorted(set(roots), key=str.casefold)
@@ -442,7 +477,7 @@ def merge_catalog_entries(rows: Iterable[dict[str, Any]], *, local_node: str = "
         primary = dict(copies[0])
         locations = []
         for row in copies:
-            locations.append({k: row.get(k) for k in ("node", "path", "id", "digest") if row.get(k) not in (None, "")})
+            locations.append({k: row.get(k) for k in ("node", "path", "id", "digest", "root", "fabric_hidden_by") if row.get(k) is not None})
         primary["locations"] = locations
         primary["copies"] = len(locations)
         merged.append(primary)

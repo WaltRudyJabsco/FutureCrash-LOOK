@@ -74,3 +74,37 @@ class MediaCatalogTests(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main()
+
+
+def test_overlapping_roots_are_one_physical_file_and_forget_preserves_specific_scan(tmp_path):
+    root=tmp_path/'music';album=root/'Artist'/'Album';album.mkdir(parents=True)
+    track=album/'01 Song.mp3';track.write_bytes(b'audio')
+    broad=media_core.scan_root(root)
+    merged=media_core.scan_root(album,broad)
+    assert len(merged['entries'])==1
+    assert merged['entries'][0]['root']==str(album)
+    forgotten=media_core.forget_root(merged,root)
+    assert len(forgotten['entries'])==1 and forgotten['roots']==[str(album)]
+    assert track.read_bytes()==b'audio'
+
+
+def test_ts_source_is_not_media_but_transport_packets_are(tmp_path):
+    root=tmp_path/'music';root.mkdir()
+    (root/'component.ts').write_text('export const Song = "not a movie";')
+    packets=b''.join(b'G'+bytes(187) for _ in range(4))
+    (root/'concert.ts').write_bytes(packets)
+    scanned=media_core.scan_root(root)
+    assert [Path(row['path']).name for row in scanned['entries']]==['concert.ts']
+
+
+def test_broad_rescan_updates_changed_file_without_reassigning_specific_root(tmp_path):
+    root=tmp_path/'music';album=root/'Artist'/'Album';album.mkdir(parents=True)
+    track=album/'01 Song.mp3';track.write_bytes(b'first')
+    library=media_core.scan_root(album)
+    library['entries'][0]['digest']='sha256:old'
+    track.write_bytes(b'changed content')
+    rescanned=media_core.scan_root(root,library)
+    assert len(rescanned['entries'])==1
+    row=rescanned['entries'][0]
+    assert row['root']==str(album) and row['bytes']==len(b'changed content')
+    assert 'digest' not in row

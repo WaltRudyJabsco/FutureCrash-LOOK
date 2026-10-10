@@ -912,6 +912,7 @@ usage: lk media playlist load NAME [--shuffle]
 usage: lk media playlist save NAME
 usage: lk media repeat [off|all]
 usage: lk media save NAME
+usage: lk media scan --forget ROOT
 usage: lk media scan --relocate OLD_ROOT NEW_ROOT
 usage: lk media stream PATH | lk media stream @NODE sha256:DIGEST
 usage: lk memory add <text> [--importance N]
@@ -973,7 +974,7 @@ _media_group_command: --json, --list
 _media_identify_command: --all
 _media_playlist_command: --shuffle
 _media_resolve_targets: --artist, --exact, --kind, --limit, --literal, --selection, --shuffle
-_media_scan_command: --move-root, --relocate
+_media_scan_command: --forget, --move-root, --relocate
 _memory_command: --importance
 _ollama_proxy_service_state: --user
 _profile_backup: --keep
