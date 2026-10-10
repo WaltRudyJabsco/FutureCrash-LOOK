@@ -4348,6 +4348,9 @@ class API(BaseHTTPRequestHandler):
                                "last_error": WORKER_HEALTH.get("last_error"),
                                "errors": WORKER_HEALTH.get("errors", 0)},
             })
+        if path == '/v1/media/artwork/settings':
+            _look_catalog_modules();import media_cover_lookup
+            return self.sendj(200,{'enabled':media_cover_lookup.enabled(),'node':identity()['name']})
         if path == "/v1/maintenance/release":
             return self.sendj(200,maintenance.release_info())
         if path == "/v1/maintenance/status":
@@ -4577,6 +4580,13 @@ class API(BaseHTTPRequestHandler):
         if not self._authorized_ingress(path): return
         if path == "/v1/files/copy": return self._files_copy()
         d = self.body()
+        if path == '/v1/media/artwork/settings':
+            try:
+                if not isinstance(d,dict) or not isinstance(d.get('enabled'),bool):raise ValueError('enabled must be a boolean')
+                _look_catalog_modules();import media_cover_lookup
+                media_cover_lookup.configure(d['enabled'])
+                return self.sendj(200,{'enabled':media_cover_lookup.enabled(),'node':identity()['name']})
+            except (OSError,ValueError) as exc:return self.sendj(400,{'error':str(exc)})
         if path == '/v1/media/storage':
             try:
                 if not isinstance(d,dict) or not isinstance(d.get('payload',{}),dict):raise ValueError('Storage request must be an object')
