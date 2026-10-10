@@ -73,6 +73,17 @@ else:
     WHITE='\x1b[38;5;252m'; GRAY='\x1b[38;5;244m'; FAINT=DIM
     ACTIVE=REVERSE+BOLD
 
+# Paper must override explicit RGB whites too, not only Kitty's ANSI table.
+try:
+    from .terminal_style import application_colors
+except ImportError:
+    from terminal_style import application_colors
+_APP_COLORS=application_colors()
+for _role,_color in _APP_COLORS.items():
+    if _TRUECOLOR and not _role.startswith('ACTIVE_'):globals()[_role]=_rgb(*_color)
+if _TRUECOLOR and _APP_COLORS:
+    ACTIVE=_bg(*_APP_COLORS['ACTIVE_BG'])+_rgb(*_APP_COLORS['ACTIVE_FG'])+BOLD
+
 CLEAR='\x1b[2J\x1b[H'; HIDE='\x1b[?25l'; SHOW='\x1b[?25h'
 
 _RENDERER_CONFIG=Path.home()/'.config'/'look'/'renderer.json'
