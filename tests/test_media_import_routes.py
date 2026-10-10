@@ -35,3 +35,22 @@ def test_cli_routes_to_named_owner_with_structured_payload(monkeypatch,capsys):
     assert node.main()==0
     assert routed.call_args.args[2:]==('3090','/v1/media/import',{'action':'drives','payload':{}})
     assert json.loads(capsys.readouterr().out)['node']=='3090'
+
+
+def test_mutation_discovers_live_route_and_sends_only_once(monkeypatch):
+    peer={'name':'3090','trusted':True,'node_id':'paired-id','url':'https://stale'}
+    monkeypatch.setattr(node,'_daemon_get',lambda *args:{'self':{'name':'Mac'},'peers':[peer]})
+    monkeypatch.setattr(node,'_file_race',lambda *args:('https://live',{'node_id':'paired-id'}))
+    sent=Mock(return_value={'ok':True});monkeypatch.setattr(node,'http_json',sent)
+    node._target_post('127.0.0.1',7332,'3090','/v1/media/import',{'action':'start'})
+    assert sent.call_count==1 and sent.call_args.args[0]=='https://live/v1/media/import'
+
+
+def test_mutation_rejects_wrong_identity_before_effect(monkeypatch):
+    import pytest
+    peer={'name':'3090','trusted':True,'node_id':'paired-id'}
+    monkeypatch.setattr(node,'_daemon_get',lambda *args:{'self':{'name':'Mac'},'peers':[peer]})
+    monkeypatch.setattr(node,'_file_race',lambda *args:('https://wrong',{'node_id':'other-id'}))
+    sent=Mock();monkeypatch.setattr(node,'http_json',sent)
+    with pytest.raises(PermissionError):node._target_post('127.0.0.1',7332,'3090','/v1/media/import',{})
+    sent.assert_not_called()

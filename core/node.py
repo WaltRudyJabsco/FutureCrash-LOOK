@@ -5044,8 +5044,7 @@ def _target_get(host, port, target, path):
     local=(snap.get("self") or {}).get("name")
     if target == local:
         return _daemon_get(host,port,path)
-    url=_remote_url(snap,target,path)
-    return http_json(url,timeout=4.0)
+    return _peer_json(_peer_for_target(snap,target),path,timeout=4.0)
 
 
 def _target_post(host, port, target, path, payload, timeout=45.0):
@@ -5055,8 +5054,14 @@ def _target_post(host, port, target, path, payload, timeout=45.0):
     local=(snap.get("self") or {}).get("name")
     if target == local:
         return http_json(_daemon_url(host,port,path),payload,timeout=timeout)
-    url=_remote_url(snap,target,path)
-    return http_json(url,payload,timeout=timeout)
+    peer=_peer_for_target(snap,target)
+    if not peer.get('trusted'):raise PermissionError('Destination node is not paired')
+    # Discover a live authenticated route before the mutation; never retry a write.
+    base,identity_result=_file_race(peer,'/v1/identity')
+    found=(identity_result.get('identity') or identity_result).get('node_id')
+    expected=peer.get('node_id') or (peer.get('node') or {}).get('identity',{}).get('node_id')
+    if not expected or found!=expected:raise PermissionError('Destination identity does not match the paired node')
+    return http_json(base+path,payload,timeout=timeout)
 
 
 def _print_models(data, target="local"):
