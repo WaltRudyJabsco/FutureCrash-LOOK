@@ -2,7 +2,7 @@
 from __future__ import annotations
 import math
 
-NAMES = ('Bars', 'Waves', 'Orbit', 'Tunnel', 'Stars', 'Plasma')
+NAMES = ('Bars', 'Waves', 'Orbit', 'Tunnel', 'Stars', 'Plasma', 'Album Art')
 
 
 def frame(mode, width, height, phase, playing=True, seed=0):

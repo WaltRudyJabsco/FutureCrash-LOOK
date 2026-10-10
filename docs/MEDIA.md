@@ -91,3 +91,7 @@ saving fails. Multiple-owner edits report each failure and the successful count.
 ## Imported album artwork
 
 Matched audio CDs download a 500-pixel front cover from the Cover Art Archive into `cover.jpg` beside the tracks. Existing artwork is preserved. Missing art or an unavailable service does not fail the import; the job records its artwork result. Covers travel with inbox delivery and the owning node serves them to remote media browsers.
+
+## Player visuals
+
+In `lk player`, press lowercase `v` to cycle Bars, Waves, Orbit, Tunnel, Stars, Plasma, then **Album Art**, followed by the normal player view. In `lk mp`, `v` opens the same player visuals. Album Art fills the available canvas with a centered ASCII cover while keeping track information and transport controls visible. Covers preserve their proportions for terminal cells, and remote covers load in the background. Missing artwork displays an availability message.

@@ -17,3 +17,5 @@ Follow-up fixes: lowercase `q` filters Media Find and grouped album/artist brows
 Import workflow: watch discovers active jobs automatically; deliver resolves album names and uses the saved destination, with a picker for ambiguous selections. Workbench L delivers/retries the selected album. Job discovery excludes delivery receipt files.
 
 Catalog freshness: Media Find/player refresh includes new tracks; local index changes invalidate the LOOK cache, and unavailable Fabric responses retain fresh local albums alongside cached remote music. Sleeping peer discovery runs in the background rather than blocking album searches.
+
+Player visuals: a seventh mode displays large ASCII album artwork in the shared player/LKMP visual cycle. Cover decoding is cached by image and terminal dimensions, and remote artwork fetches remain in the background.

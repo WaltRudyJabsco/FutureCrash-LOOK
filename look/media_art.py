@@ -132,7 +132,7 @@ def _ascii_via_ffmpeg(art:Path,width:int,height:int)->list[str]:
     sample_h=max(2,height)
     try:
         proc=subprocess.run([ffmpeg,'-nostdin','-loglevel','error','-i',str(art),
-                             '-vf',f'scale={width}:{sample_h}:force_original_aspect_ratio=decrease',
+                             '-vf',f'scale={width}:{sample_h*2}:force_original_aspect_ratio=decrease,pad={width}:{sample_h*2}:(ow-iw)/2:(oh-ih)/2,scale={width}:{sample_h}',
                              '-f','rawvideo','-pix_fmt','gray','-'],
                             capture_output=True,timeout=1.0)
         if proc.returncode!=0 or not proc.stdout: return []
@@ -159,4 +159,3 @@ def ascii_lines(pathlike:str|Path,width:int,height:int)->list[str]:
     # Prefer our deterministic renderer. Chafa remains available to Media Find's
     # richer symbol path, but the player should render on every machine with ffmpeg.
     return _ascii_via_ffmpeg(art,width,height)
-

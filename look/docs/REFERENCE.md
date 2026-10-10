@@ -480,7 +480,7 @@ s shuffle; r repeat; v opens visuals; x stop; Esc clears query then exits.
 Both media screens allow arrows, Tab and selection actions during search.
 
 LK Player: space play/pause; ←/→ seek 10s; p/n previous/next;
-s shuffle; r repeat; v cycles six ambient visualizers and normal view;
+s shuffle; r repeat; v cycles six ambient visualizers, large ASCII album art, and normal view;
 x stop; q/Esc closes the view while playback continues.
 Visualizers are ambient animations, not measurements of decoded audio.
 

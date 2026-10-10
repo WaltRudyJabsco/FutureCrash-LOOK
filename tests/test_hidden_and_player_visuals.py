@@ -86,14 +86,14 @@ def test_player_cycles_all_views_without_losing_transport_controls(lk,monkeypatc
     terminal(monkeypatch,lk)
     modes=[]; calls=[]
     monkeypatch.setattr(lk,'_media_player_render',lambda mode=0:modes.append(mode) or 'frame')
-    keys=iter(['v']*7+[' ','n','p','left','right','s','r','x','q'])
+    keys=iter(['v']*8+[' ','n','p','left','right','s','r','x','q'])
     monkeypatch.setattr(lk,'_read_tty_key',lambda *args:next(keys))
     monkeypatch.setattr(lk,'_media_control_session',lambda action:calls.append(action))
     monkeypatch.setattr(lk,'_media_mpv_request',lambda args:calls.append(args))
     monkeypatch.setattr(lk,'_media_shuffle_command',lambda:calls.append('shuffle'))
     monkeypatch.setattr(lk,'_media_repeat_command',lambda args:calls.append('repeat'))
     assert lk.media_player()==0
-    assert modes[:8]==list(range(7))+[0]
+    assert modes[:9]==list(range(8))+[0]
     assert calls==['toggle','next','prev',['seek',-10,'relative'],['seek',10,'relative'],'shuffle','repeat','stop']
 
 
@@ -124,3 +124,38 @@ def test_lh_migrates_owned_home_shortcut_but_preserves_user_function():
     for old,expected in [('lh() { _look home "$@"; }','hidden /tmp'),('lh() { print custom; }','custom')]:
         output=subprocess.check_output([zsh,'-f','-c',setup+old+'\n'+source[start:end]+'\nlh /tmp'],text=True).strip()
         assert output==expected
+
+
+def test_large_album_art_uses_available_canvas_and_caches_decode(lk,monkeypatch,tmp_path):
+    cover=tmp_path/'cover.jpg';cover.write_bytes(b'cover')
+    calls=[]
+    monkeypatch.setattr(lk.media_art,'artwork_for',lambda source:cover)
+    monkeypatch.setattr(lk.media_art,'ascii_lines',lambda source,w,h:calls.append((w,h)) or ['@'*w]*h)
+    monkeypatch.setattr(lk.shutil,'get_terminal_size',lambda fallback:os.terminal_size((100,30)))
+    snap={'entry':{'path':str(cover),'artist':'Artist','title':'Song'},'state':'paused','position':30,'duration':60,
+          'index':0,'session':{'queue':[{}]}}
+    first=lk._media_player_full_visual(snap,7)
+    assert 'Album Art' in first and 'PAUSED' in first and 'Queue 1/1' in first
+    assert calls==[(99,24)]
+    assert first==lk._media_player_full_visual(snap,7) and len(calls)==1
+    assert len(first.splitlines())==29
+
+
+def test_large_remote_album_art_queues_fetch_without_blocking(lk,monkeypatch):
+    calls=[]
+    monkeypatch.setattr(lk,'_media_remote_cover_path',lambda row,fetch=False:None)
+    monkeypatch.setattr(lk,'_media_remote_preview_identity',lambda row:{'node':'remote','id':'track','path':'/music/song.flac','mtime':1})
+    monkeypatch.setattr(lk,'_media_queue_remote_preview',lambda row,w,h:calls.append((w,h)))
+    lines=lk._media_player_large_art({'node':'remote'},100,30)
+    assert calls==[(80,24)] and len(lines)==30
+    assert all(len(line)==100 for line in lines)
+    assert any('Loading album art' in line for line in lines)
+
+
+def test_large_album_art_missing_cover_has_clear_fallback(lk,monkeypatch):
+    monkeypatch.setattr(lk,'_media_remote_cover_path',lambda row,fetch=False:None)
+    monkeypatch.setattr(lk,'_media_remote_preview_identity',lambda row:None)
+    monkeypatch.setattr(lk,'_media_queue_remote_preview',lambda *args:False)
+    lines=lk._media_player_large_art({},60,12)
+    assert any('Album art unavailable' in line for line in lines)
+    assert len(lines)==12

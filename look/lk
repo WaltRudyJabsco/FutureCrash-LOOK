@@ -18783,6 +18783,34 @@ def _media_player_visualizer(entry,state,width):
     return "EQ  "+"".join(bars)
 
 
+_MEDIA_LARGE_ART_CACHE={}
+
+
+def _media_player_large_art(entry,width,height):
+    """Render once per cover/size; remote cover retrieval stays off the input loop."""
+    source=str(entry.get('path') or '')
+    art=media_art.artwork_for(source) if source and Path(source).exists() else None
+    if art is None:
+        art=_media_remote_cover_path(entry,fetch=False)
+        if art is None:_media_queue_remote_preview(entry,min(80,width),min(24,height))
+    lines=[]
+    if art:
+        try:
+            key=(str(art),art.stat().st_mtime_ns,width,height)
+            lines=_MEDIA_LARGE_ART_CACHE.get(key)
+            if lines is None:
+                lines=media_art.ascii_lines(art,width,height)
+                if lines:
+                    if len(_MEDIA_LARGE_ART_CACHE)>=16:_MEDIA_LARGE_ART_CACHE.clear()
+                    _MEDIA_LARGE_ART_CACHE[key]=lines
+        except OSError:lines=[]
+    if not lines:
+        remote_key,remote_identity=_media_remote_preview_key(entry,min(80,width),min(24,height))
+        message='Loading album art…' if remote_identity and remote_key not in _REMOTE_MEDIA_PREVIEW_MISS else 'Album art unavailable'
+        lines=['']*(height//2)+[message.center(width)]
+    return [line[:width].ljust(width) for line in (lines+['']*height)[:height]]
+
+
 def _media_player_full_visual(snap,mode):
     terminal=shutil.get_terminal_size((80,24))
     width=max(1,min(240,terminal.columns-1)); height=max(1,terminal.lines-1)
@@ -18790,14 +18818,16 @@ def _media_player_full_visual(snap,mode):
     queue=snap['session'].get('queue') or []
     name=player_visuals.NAMES[(mode-1)%len(player_visuals.NAMES)]
     seed=int(hashlib.sha256(_media_entry_label(entry).encode()).hexdigest()[:4],16)%23
-    header=[f"LOOK PLAYER · {name} · ambient animation",
+    album_art=name=='Album Art'
+    header=[f"LOOK PLAYER · {name}"+('' if album_art else ' · ambient animation'),
             _media_entry_label(entry),
             f"{state.upper()} · {_media_time(snap.get('position') or 0)} / {_media_time(snap.get('duration') or 0)} · Queue {snap['index']+1}/{len(queue)}"]
     footer=['v next visual / normal · space pause · p/n previous/next',
             '←/→ seek · s shuffle · r repeat · x stop · q close']
-    art=player_visuals.frame(mode,width,max(1,height-len(header)-len(footer)),time.monotonic(),state in {'play','playing'},seed)
+    art_height=max(1,height-len(header)-len(footer))
+    art=_media_player_large_art(entry,width,art_height) if album_art else player_visuals.frame(mode,width,art_height,time.monotonic(),state in {'play','playing'},seed)
     lines=header+art+footer
-    color=("1;32","1;36","1;35","1;34","1;37","1;33")[(mode-1)%len(player_visuals.NAMES)]
+    color=("1;32","1;36","1;35","1;34","1;37","1;33","1;36")[(mode-1)%len(player_visuals.NAMES)]
     return "\n".join(_c(_media_player_line(line,width),color) if len(header)<=i<len(header)+len(art) else _media_player_style(_media_player_line(line,width),6 if i>=len(header)+len(art) else 0 if i==1 else 4 if i==2 else 1) for i,line in enumerate(lines[:height]))
 
 
