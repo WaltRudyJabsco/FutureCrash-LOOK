@@ -31,7 +31,7 @@ def test_reference_surfaces_are_synchronized_and_cover_dispatch():
 
 def test_generator_detects_new_dispatch_and_printed_usage(tmp_path):
     (tmp_path/'look').mkdir()
-    for name in ['lk','look_renderer.py','ytd.py','games.py','notebook.py','disc_ui.py']:
+    for name in ['lk','look_renderer.py','ytd.py','games.py','notebook.py','disc_ui.py','terminal_style.py']:
         (tmp_path/'look'/name).write_text((ROOT/'look'/name).read_text())
     script=tmp_path/'look/lk'
     script.write_text(script.read_text().replace('    if cmd=="doc":','    if cmd=="future-example":\n        print("usage: lk future-example --special VALUE")\n        return 0\n    if cmd=="doc":'))

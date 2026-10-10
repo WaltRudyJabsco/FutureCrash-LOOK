@@ -15,6 +15,8 @@ lk hidden [PATH]
   [files] LOOK with hidden files shown
 lk doc
   [meta] Full generated command, option and keyboard reference
+lk terminal [theme NAME|launch NAME]
+  [meta] Kitty palettes: neon, paper, slate; reset restores existing appearance
 lk tldr
   [meta] Short offline command examples
 lk dash
@@ -1039,3 +1041,8 @@ Parser arguments and recognized option tokens (grouped by handler):
 --title-index — Video title index from scan, or all for MakeMKV
 action
 id — Album name, latest, short ID, or full ID; watch defaults to all active work, deliver offers completed imports
+
+look/terminal_style.py
+
+Parser arguments and recognized option tokens (grouped by handler):
+name

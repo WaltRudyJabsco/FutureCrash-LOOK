@@ -41,7 +41,7 @@ def collect(root=ROOT):
         forms.append((f'lk {command}','[ARGS]','aliases','Additional routed entry point; see usage details below'))
     usages={}
     options={}
-    for relative in ['look/lk','look/look_renderer.py','look/ytd.py','look/games.py','look/notebook.py','look/disc_ui.py']:
+    for relative in ['look/lk','look/look_renderer.py','look/ytd.py','look/games.py','look/notebook.py','look/disc_ui.py','look/terminal_style.py']:
         parsed=ast.parse((root/relative).read_text())
         lines=set(); flags=set()
         for n in ast.walk(parsed):

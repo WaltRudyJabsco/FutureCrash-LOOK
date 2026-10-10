@@ -18,6 +18,12 @@
     "Full generated command, option and keyboard reference"
   ],
   [
+    "lk terminal",
+    "[theme NAME|launch NAME]",
+    "meta",
+    "Kitty palettes: neon, paper, slate; reset restores existing appearance"
+  ],
+  [
     "lk tldr",
     "",
     "meta",

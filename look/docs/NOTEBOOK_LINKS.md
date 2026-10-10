@@ -88,3 +88,11 @@ the note picker. Path/URL type is inferred from the target, retaining the
 existing @node:/path and note:ID conventions. Bookmark creation does not require
 the path or remote node to be online. L continues to open existing links;
 it does not create them.
+
+## Faster movement
+
+Option/Alt-Left/Right jumps by words; Ctrl-Left/Right is also accepted.
+Option/Alt-Up/Down jumps between blank-line-separated paragraphs.
+Shift-Up/Down remains page movement, along with Page Up/Down.
+The link insertion form also supports word jumps in its fields.
+See docs/TERMINAL-STYLES.md for Kitty palette and keyboard configuration.

@@ -1,3 +1,9 @@
+# 2026-10-10 — Editor movement and terminal palettes
+
+- Notes supports Option/Alt or Ctrl word jumps, and Option/Alt paragraph jumps; Shift-arrow paging remains intact.
+- Added local Kitty Neon/Paper/Slate appearance controls and separate palette-window launches. Paper uses MercuryWriter page/ink colors.
+- Palette changes back up existing config and preserve fonts, keys, local overrides, and the original appearance via reset.
+
 # 2026-10-10 — Easier notebook links
 
 - Y copies a ready-made Markdown link from the Notes list or preview.

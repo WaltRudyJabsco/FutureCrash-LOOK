@@ -575,3 +575,5 @@ The WOPR profile uses the same offline `espeak-ng` + SoX chain on macOS and Linu
 - `docs/MEDIA.md` — catalog/queue/playlist model and current media controls.
 - `docs/ARCHITECTURE.md` — deeper architecture notes.
 - `docs/RELEASE-HISTORY.md` — historical record.
+
+Terminal palettes and editor movement: [Terminal styles](docs/TERMINAL-STYLES.md). Use lk terminal to list Neon, Paper, and Slate; palette selection is local to each computer.
