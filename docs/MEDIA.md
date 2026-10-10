@@ -10,6 +10,8 @@ The Fabric catalog answers *what media exists and on which node*. A queue answer
 
 `lk media find QUERY` is both a catalog search and a lightweight playlist builder. Filtering follows LOOK's include/exclude grammar. `clash london` requires both terms; `clash \\live \\remix` requires `clash` while excluding rows containing `live` or `remix`.
 
+Lowercase `q` is filter text, including in artist/album browsing. Escape exits; uppercase `Q` keeps its queue action.
+
 Controls: Tab toggles the focused row; Shift-A selects/unselects every currently visible row; Enter or Shift-P plays selected rows (or the focused row); Shift-Q appends selected/focused rows to the queue; Shift-S saves selected/focused rows as a playlist; Shift-C clears selection; Shift-I shows identity/details; Esc clears the filter and then exits.
 
 `/` starts search editing. Enter or Esc finishes editing while keeping the filter.
@@ -85,3 +87,7 @@ an artist also updates album artist when it previously matched or was empty;
 explicit compilation album artists remain intact. Each owner validates the
 entire batch before writing, checks for stale metadata, and restores sidecars if
 saving fails. Multiple-owner edits report each failure and the successful count.
+
+## Imported album artwork
+
+Matched audio CDs download a 500-pixel front cover from the Cover Art Archive into `cover.jpg` beside the tracks. Existing artwork is preserved. Missing art or an unavailable service does not fail the import; the job records its artwork result. Covers travel with inbox delivery and the owning node serves them to remote media browsers.

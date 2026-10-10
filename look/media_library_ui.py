@@ -37,7 +37,7 @@ def choose(items,title,read_key,hints):
             frame.extend(['FILTER '+query+'█',hints('↑↓ move · Enter open · Shift-arrows page/ends · Esc clear/back',width)])
             sys.stdout.write('\033[2J\033[H'+'\n'.join(frame)+'\033[J');sys.stdout.flush()
             key=read_key(fd,None)
-            if key in {'esc','q','\x03'}:
+            if key in {'esc','\x03'}:
                 if key=='esc' and query: query=''; index=0;continue
                 return None
             if key in {'\r','\n','enter'} and visible: return visible[index]

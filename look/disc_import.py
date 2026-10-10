@@ -24,6 +24,34 @@ ROOT=Path.home()/'.local/share/look/imports'
 LIBRARY=Path.home()/'.local/share/look/media_library.json'
 TERMINAL={'complete','failed','cancelled'}
 MIN_FREE_BYTES=1024**3
+COVER_MAX_BYTES=2*1024*1024
+
+
+def download_cover(folder,release_id):
+    """Fetch the matched release's front cover; art failure never fails a rip."""
+    folder=Path(folder)
+    # Respect existing user artwork, including a different supported extension.
+    if any(path.is_file() and path.stem.casefold() in {'cover','folder','front','album'}
+           and path.suffix.casefold() in {'.jpg','.jpeg','.png','.webp'} for path in folder.iterdir()):
+        return {'state':'existing'}
+    if not release_id:return {'state':'unavailable','reason':'No matched MusicBrainz release'}
+    try:
+        release_id=str(uuid.UUID(str(release_id)))
+        url='https://coverartarchive.org/release/'+release_id+'/front-500'
+        request=urllib.request.Request(url,headers={'User-Agent':'FutureCrash-LOOK (personal disc importer)'})
+        with urllib.request.urlopen(request,timeout=10) as response:data=response.read(COVER_MAX_BYTES+1)
+        if not data or len(data)>COVER_MAX_BYTES or not data.startswith(b'\xff\xd8\xff'):
+            raise ValueError('Cover is not a bounded JPEG thumbnail')
+        # A hard link publishes atomically without replacing a concurrently added cover.
+        fd,temp=tempfile.mkstemp(dir=folder,prefix='.cover-')
+        try:
+            with os.fdopen(fd,'wb') as stream:stream.write(data);stream.flush();os.fsync(stream.fileno())
+            try:os.link(temp,folder/'cover.jpg')
+            except FileExistsError:return {'state':'existing'}
+        finally:Path(temp).unlink(missing_ok=True)
+        return {'state':'downloaded','file':'cover.jpg','release_id':release_id,'source':url}
+    except (OSError,ValueError) as exc:
+        return {'state':'unavailable','reason':str(exc)[:300]}
 
 
 def tool(name):
@@ -388,6 +416,8 @@ def worker(identifier):
         # Publish the whole verified directory at once; unfinished output stays hidden.
         if row['kind']=='cd':
             for path in stage.glob('*.wav'):path.unlink()
+            save(stage='fetching album cover')
+            save(artwork=download_cover(stage,metadata.get('release_id')))
         final=Path(row['destination'])/(safe_name(row['title'])+' - '+identifier[:8])
         atomic(stage/'import.json',{'job':identifier,'kind':row['kind'],'drive':drive,'metadata':metadata,
                                   'title_index':row['title_index'],'files':[path.name for path in outputs],'created':row['created']})

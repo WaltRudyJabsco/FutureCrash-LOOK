@@ -11,3 +11,5 @@ Bundle/Albert 8.16.1; LOOK 4.63.1; Future Crash 1.3.0.
 Validation: 1,058 tests passed, including independent Linux runner dispatch
 and rejection before service shutdown when isolation fails. Real 3090 rollout
 requires a local install to replace the older updater.
+
+Follow-up fixes: lowercase `q` filters Media Find and grouped album/artist browsing. Matched CD imports fetch optional album artwork beside the tracks for local and Fabric previews.

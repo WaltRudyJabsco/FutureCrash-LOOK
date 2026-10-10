@@ -18104,8 +18104,6 @@ def _media_selector(rows,title="FABRIC MEDIA",initial_query="",catalog_meta=None
                 search_mode=False
             if key=="/":
                 search_mode=True; continue
-            if key in {"\x03","q"} and not query:
-                break
             if key=="esc":
                 if query:
                     query=""; idx=0; continue

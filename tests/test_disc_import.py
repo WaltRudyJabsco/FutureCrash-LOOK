@@ -186,3 +186,33 @@ def test_cd_capture_keeps_native_labels_without_release_match():
     request=Mock(side_effect=[{'metadata':{'title':'Album','tracks':['First']},'releases':[]},{'ok':True}])
     disc_ui.capture(request,'drive:1','cd')
     assert request.call_args.args[1]['metadata']=={'title':'Album','tracks':['First']}
+
+
+def test_cover_download_is_bounded_and_preserves_existing_art(tmp_path,monkeypatch):
+    import io
+    response=Mock(side_effect=lambda *a,**k:io.BytesIO(b'\xff\xd8\xfffixture'))
+    monkeypatch.setattr(discs.urllib.request,'urlopen',response)
+    release='9a5496e4-f879-4805-af51-d3ecdab83911'
+    result=discs.download_cover(tmp_path,release)
+    assert result['state']=='downloaded'
+    assert (tmp_path/'cover.jpg').read_bytes()==b'\xff\xd8\xfffixture'
+    assert discs.download_cover(tmp_path,release)['state']=='existing'
+    assert response.call_count==1
+    assert not list(tmp_path.glob('.cover-*'))
+
+
+@pytest.mark.parametrize('data',[b'<html>error</html>',b'\xff\xd8\xff'+b'x'*discs.COVER_MAX_BYTES])
+def test_bad_cover_does_not_publish(tmp_path,monkeypatch,data):
+    import io
+    monkeypatch.setattr(discs.urllib.request,'urlopen',lambda *a,**k:io.BytesIO(data))
+    assert discs.download_cover(tmp_path,'9a5496e4-f879-4805-af51-d3ecdab83911')['state']=='unavailable'
+    assert not (tmp_path/'cover.jpg').exists()
+
+
+def test_cover_outage_and_unknown_release_are_optional(tmp_path,monkeypatch):
+    response=Mock(side_effect=OSError('offline'))
+    monkeypatch.setattr(discs.urllib.request,'urlopen',response)
+    assert discs.download_cover(tmp_path,None)['state']=='unavailable'
+    response.assert_not_called()
+    assert discs.download_cover(tmp_path,'9a5496e4-f879-4805-af51-d3ecdab83911')['state']=='unavailable'
+    assert not list(tmp_path.iterdir())

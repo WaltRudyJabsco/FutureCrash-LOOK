@@ -291,3 +291,36 @@ def test_selector_edits_all_marked_rows_and_updates_open_view(lk,monkeypatch):
     assert lk._media_selector(rows)==('none',None)
     assert len(edited.call_args.args[0])==2
     assert all(row['artist']=='New' for row in rows)
+
+
+@pytest.mark.parametrize('keys,artist',[(['q','\r'],'Queen'),(['b','q','\r'],'BQ Band')])
+def test_media_find_lowercase_q_filters_instead_of_quitting(lk,monkeypatch,keys,artist):
+    import io
+    class Terminal(io.StringIO):
+        def isatty(self):return True
+        def fileno(self):return 0
+    monkeypatch.setattr(sys,'stdin',Terminal());monkeypatch.setattr(sys,'stdout',Terminal())
+    monkeypatch.setattr(lk.termios,'tcgetattr',lambda fd:[])
+    monkeypatch.setattr(lk.termios,'tcsetattr',lambda *args:None)
+    monkeypatch.setattr(lk.tty,'setcbreak',lambda *args:None)
+    sequence=iter(keys);monkeypatch.setattr(lk,'_read_tty_key',lambda *args:next(sequence))
+    rows=[{'id':'one','path':'/music/song.flac','node':'local','artist':artist,'title':'Song'},
+          {'id':'two','path':'/music/other.flac','node':'local','artist':'Other','title':'Song'}]
+    action,selected=lk._media_selector(rows)
+    assert action=='play' and len(selected)==1 and selected[0]['artist']==artist
+
+
+def test_album_and_artist_browser_lowercase_q_is_filter_text(lk,monkeypatch):
+    import io
+    from look import media_library_ui
+    class Terminal(io.StringIO):
+        def isatty(self):return True
+        def fileno(self):return 0
+    monkeypatch.setattr(sys,'stdin',Terminal());monkeypatch.setattr(sys,'stdout',Terminal())
+    monkeypatch.setattr(lk.termios,'tcgetattr',lambda fd:[])
+    monkeypatch.setattr(lk.termios,'tcsetattr',lambda *args:None)
+    monkeypatch.setattr(lk.tty,'setcbreak',lambda *args:None)
+    keys=iter(['q','\r'])
+    selected=media_library_ui.choose([{'label':'Queen','entries':[{}]},{'label':'Other','entries':[{}]}],
+        'ARTISTS',lambda *args:next(keys),lambda text,width:text)
+    assert selected['label']=='Queen'
