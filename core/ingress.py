@@ -33,6 +33,7 @@ DEFAULT_BACKEND_HOST = "127.0.0.1"
 DEFAULT_BACKEND_PORT = 7332
 HEADER_TIMEOUT_SECONDS = 4.0
 CONTROL_TIMEOUT_SECONDS = 12.0
+CATALOG_TIMEOUT_SECONDS = 45.0
 STREAM_TIMEOUT_SECONDS = 240.0
 MAX_ACTIVE_REQUESTS = 12
 MAX_STREAM_REQUESTS = 4
@@ -47,7 +48,7 @@ HOP_HEADERS = {
 def _is_stream_path(path: str) -> bool:
     """Routes whose response bytes must never be buffered by the guard."""
     return (
-        path in {"/v1/infer/stream", "/v1/media/audio", "/v1/media/item", "/v1/media/browser", "/v1/media/cover", "/v1/media/artifact"}
+        path in {"/v1/infer/stream", "/v1/media/audio", "/v1/media/item", "/v1/media/browser", "/v1/media/cover", "/v1/media/artifact", "/v1/media/catalog", "/v1/media/fabric", "/v1/maintenance/bundle"}
         or path.startswith("/v1/artifacts/")
     )
 
@@ -250,7 +251,11 @@ class Handler(BaseHTTPRequestHandler):
             elif body is not None:
                 headers["Content-Length"] = str(len(body))
 
-            timeout = STREAM_TIMEOUT_SECONDS if is_stream else CONTROL_TIMEOUT_SECONDS
+            timeout = CATALOG_TIMEOUT_SECONDS if path in {'/v1/media/catalog','/v1/media/fabric'} else STREAM_TIMEOUT_SECONDS if is_stream else CONTROL_TIMEOUT_SECONDS
+            # Header protection ends once a complete authenticated request exists.
+            # Large catalog responses need a normal transfer deadline, not the
+            # four-second header deadline inherited by the client socket.
+            self.connection.settimeout(timeout)
             conn = http.client.HTTPConnection(self.server.backend_host, self.server.backend_port, timeout=timeout)
             target = parsed.path + (("?" + parsed.query) if parsed.query else "")
             conn.request(self.command, target, body=body, headers=headers)

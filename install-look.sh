@@ -372,6 +372,7 @@ install_file "$ROOT/look/disc_import.py" "$HOME/.local/share/look/disc_import.py
 install_file "$ROOT/look/disc_ui.py" "$HOME/.local/share/look/disc_ui.py"
 install_file "$ROOT/look/fabric_files.py" "$HOME/.local/share/look/fabric_files.py"
 install_file "$ROOT/look/media_art.py" "$HOME/.local/share/look/media_art.py"
+install_file "$ROOT/look/media_cover_lookup.py" "$HOME/.local/share/look/media_cover_lookup.py"
 install_file "$ROOT/look/player_visuals.py" "$HOME/.local/share/look/player_visuals.py"
 install_file "$ROOT/look/terminal_style.py" "$HOME/.local/share/look/terminal_style.py"
 install_file "$ROOT/look/media_watch.py" "$HOME/.local/share/look/media_watch.py"

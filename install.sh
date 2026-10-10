@@ -542,6 +542,7 @@ verify_same "$ROOT/look/file_catalog.py" "$HOME/.local/share/look/file_catalog.p
 verify_same "$ROOT/look/media_watch.py" "$HOME/.local/share/look/media_watch.py" "removable media watcher"
 verify_same "$ROOT/look/media_core.py" "$HOME/.local/share/look/media_core.py" "media core"
 verify_same "$ROOT/look/media_art.py" "$HOME/.local/share/look/media_art.py" "media art core"
+verify_same "$ROOT/look/media_cover_lookup.py" "$HOME/.local/share/look/media_cover_lookup.py" "album cover lookup"
 verify_same "$ROOT/look/games.py" "$HOME/.local/share/look/games.py" "games core"
 verify_same "$ROOT/look/comfy_bootstrap.py" "$HOME/.local/share/look/comfy_bootstrap.py" "ComfyUI bootstrap"
 verify_same "$ROOT/look/workflows/sdxl-api.json" "$HOME/.local/share/look/workflows/sdxl-api.json" "SDXL workflow"

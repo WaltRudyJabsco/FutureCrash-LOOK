@@ -782,6 +782,12 @@
     "Inspect indexed roots"
   ],
   [
+    "lk media artwork",
+    "[on|off|status]",
+    "media",
+    "Optional background album covers from MusicBrainz and Cover Art Archive"
+  ],
+  [
     "lk media outputs",
     "",
     "media",

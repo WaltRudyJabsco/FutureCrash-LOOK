@@ -10,6 +10,7 @@ import argparse
 import base64
 import errno
 import hashlib
+import gzip
 import sys
 import faulthandler
 import signal
@@ -361,7 +362,7 @@ def binary(name: str) -> str | None:
 
 def http_json(url: str, data=None, timeout: float = 2.0):
     body = None if data is None else json.dumps(data).encode()
-    headers={"Connection":"close","User-Agent":f"FCLNode/{VERSION}"}
+    headers={"Connection":"close","User-Agent":f"FCLNode/{VERSION}","Accept-Encoding":"gzip"}
     if body: headers["Content-Type"]="application/json"
     # Local calls stay local. Remote Fabric calls carry the credential minted at pairing.
     host=(urllib.parse.urlparse(url).hostname or "").casefold()
@@ -372,7 +373,9 @@ def http_json(url: str, data=None, timeout: float = 2.0):
     kwargs={"timeout":timeout}
     if context is not None: kwargs["context"]=context
     with urllib.request.urlopen(req, **kwargs) as r:
-        return json.loads(r.read() or b"{}")
+        body=r.read()
+        if r.headers.get('Content-Encoding','').casefold()=='gzip':body=gzip.decompress(body)
+        return json.loads(body or b"{}")
 
 
 @dataclass
@@ -2875,6 +2878,12 @@ def _local_media_cover(entry_id, path_hint=""):
     for art in by_name.values():
         if art.suffix.casefold() in {".jpg",".jpeg",".png",".webp"} and any(k in art.stem.casefold() for k in ("cover","folder","front","album")):
             return art,mimetypes.guess_type(str(art))[0] or "image/jpeg"
+    _look_catalog_modules()
+    import media_cover_lookup,media_art
+    sibling=media_art._album_art(source)
+    if sibling:return sibling,mimetypes.guess_type(str(sibling))[0] or 'image/jpeg'
+    downloaded=media_cover_lookup.request(source,row)
+    if downloaded:return downloaded,mimetypes.guess_type(str(downloaded))[0] or 'image/jpeg'
     raise FileNotFoundError(f"no artwork for {source}")
 
 
@@ -3662,8 +3671,12 @@ class API(BaseHTTPRequestHandler):
 
     def sendj(self, code, obj):
         b = json.dumps(obj, separators=(",", ":"), ensure_ascii=False).encode()
+        compressed=len(b)>=64*1024 and 'gzip' in getattr(self,'headers',{}).get('Accept-Encoding','').casefold().replace(' ','').split(',')
+        if compressed:b=gzip.compress(b,compresslevel=1)
         self.send_response(code)
         self.send_header("Content-Type", "application/json")
+        if compressed:self.send_header('Content-Encoding','gzip')
+        self.send_header('Vary','Accept-Encoding')
         self.send_header("Content-Length", str(len(b)))
         self.send_header("Connection", "close")
         self.end_headers()
