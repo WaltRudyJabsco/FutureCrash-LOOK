@@ -19,9 +19,9 @@
   ],
   [
     "lk terminal",
-    "[theme NAME|launch NAME]",
+    "[theme NAME|launch NAME|customize]",
     "meta",
-    "Kitty palettes: neon, paper, slate; reset restores existing appearance"
+    "Kitty palettes and one editable custom style; reset removes the appearance overlay"
   ],
   [
     "lk tldr",
