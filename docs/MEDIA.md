@@ -32,6 +32,16 @@ fallback. Partial snapshots are retried after three seconds rather than occupyin
 the normal 45-second cache window. R refreshes owner health as well as entries,
 and removes locations that disappeared from the current snapshot.
 
+LOOK decodes both compressed and ordinary catalog responses. If the local request
+fails, the fallback or stale-catalog line includes its actual error; `lk media
+fabric` also prints the diagnostic. Re-pairing is not required for a local decode
+failure. Fabric doctor probes alternative routes independently: one failed route
+does not make a peer unavailable when another authenticated route works. Tailcat's
+pinned certificate applies only to its advertised HTTPS host and port; the
+Tailscale HTTPS fallback keeps normal certificate and hostname verification.
+Short-lived discovered IP routes survive advertisement refreshes while the
+paired Tailcat certificate remains unchanged.
+
 Large peer catalogs have an eight-second per-route read timeout and an eighteen-
 second route budget; LOOK allows 45 seconds for the complete local-node response.
 A sleeping peer must not make LOOK discard a healthy owner's catalog merely
@@ -68,9 +78,9 @@ and terminal preview through the existing Fabric artwork routes.
 A first miss may remain visible until the background job finishes and the preview
 retries (up to twenty seconds). Temporary provider failures retry after five
 minutes; absent/ambiguous matches after six hours. JSON cache records include the
-state, reason, provider URL and matched release-group ID. Set
-Use lk media artwork on on each owning node to enable lookup, and lk media artwork
-off to disable it. The default is off; lk media artwork status reports the setting.
+state, reason, provider URL and matched release-group ID.
+Use `lk media artwork on` on each owning node to enable lookup, and `lk media artwork
+off` to disable it. The default is off; `lk media artwork status` reports the setting.
 The setting applies to LOOK and its node daemon and persists across runtime updates.
 LOOK_MEDIA_ARTWORK_LOOKUP=1 or 0 overrides it for a process. Cached and existing
 art remains available when disabled. Matched CD imports

@@ -355,6 +355,36 @@ def test_unavailable_fabric_merges_fresh_local_album_with_cached_remote_music(lk
     assert result['stale'] and result['locations']==2
     assert {row['id'] for row in result['entries']}=={'new','remote'}
     assert next(row for row in result['entries'] if row['id']=='new')['node']=='m3'
+    assert result['catalog_error']=='fabric unavailable'
+
+
+@pytest.mark.parametrize('compressed', [False, True])
+def test_lk_reads_and_caches_live_catalog_response(lk, monkeypatch, tmp_path, compressed):
+    import gzip, io, json
+    monkeypatch.setattr(lk, 'HOME', tmp_path)
+    payload={'nodes':[{'node':'m3'},{'node':'3090'}],
+             'entries':[{'node':'m3','id':'local'},{'node':'3090','id':'remote'}]}
+    raw=json.dumps(payload).encode()
+    response=io.BytesIO(gzip.compress(raw) if compressed else raw)
+    response.headers={'Content-Encoding':'gzip'} if compressed else {}
+    def fetch(request, timeout):
+        assert request.get_header('Accept-encoding')=='gzip'
+        return response
+    monkeypatch.setattr(lk.urllib.request, 'urlopen', fetch)
+    monkeypatch.setattr(lk, '_media_library', lambda: {'entries':[]})
+    result=lk._media_fabric_catalog()
+    assert result==payload
+    cached=json.loads((tmp_path/'.cache/look/fabric-media-catalog.json').read_text())
+    assert cached['entries']==payload['entries']
+
+
+def test_invalid_catalog_falls_back_with_diagnostic(lk, monkeypatch, tmp_path):
+    import io
+    monkeypatch.setattr(lk, 'HOME', tmp_path)
+    monkeypatch.setattr(lk.urllib.request, 'urlopen', lambda *a, **kw: io.BytesIO(b'[]'))
+    monkeypatch.setattr(lk, '_media_library', lambda: {'entries':[]})
+    result=lk._media_fabric_catalog()
+    assert result['fallback'] and result['catalog_error']=='Invalid catalog response'
 
 
 def test_refresh_removes_old_locations_and_refreshes_owner_health(lk,monkeypatch,tmp_path):

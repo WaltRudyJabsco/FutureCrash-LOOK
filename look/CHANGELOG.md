@@ -1,3 +1,9 @@
+# 2026-10-10 — Fabric catalog decoding and certificate routes
+
+- Fixed LOOK's missing gzip import, which turned successful compressed catalogs into local fallback. Fallbacks now report the actual request/decode error.
+- Scoped the paired Tailcat certificate to its advertised HTTPS host and port so the separate Tailscale HTTPS endpoint uses normal certificate validation.
+- Preserved short-lived discovered IP routes during refreshes of the same paired certificate.
+
 # 2026-10-10 — Editor movement and terminal palettes
 
 - Notes supports Option/Alt or Ctrl word jumps, and Option/Alt paragraph jumps; Shift-arrow paging remains intact.
@@ -1422,4 +1428,3 @@ No filesystem/browser grammar changed.
 - The first LOOK-initiated Neovim edit teaches `Esc`, `:q`, `Enter` once.
 - README is rewritten around LOOK's present-day mental model rather than release archaeology.
 - Documentation stays deliberately small: `README.md`, `CHANGELOG.md`, and the built-in `lk help`.
-

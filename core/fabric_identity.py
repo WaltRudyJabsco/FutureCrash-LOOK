@@ -107,6 +107,16 @@ def _host(value: str) -> str:
         return ""
 
 
+def _https_authority(value: str) -> tuple[str, int] | None:
+    try:
+        parsed=urllib.parse.urlparse(value)
+        if parsed.scheme=='https' and parsed.hostname:
+            return parsed.hostname.casefold(), parsed.port or 443
+    except ValueError:
+        pass
+    return None
+
+
 def _tailcat_advertisement() -> dict:
     path = Path.home() / ".config/future-crash-look/tailcat/advertisement.json"
     try:
@@ -198,6 +208,15 @@ class FabricIdentity:
         record.update({"trusted_at": prior.get("trusted_at") or _now(), "updated_at": _now(), "source": str(source or "pairing")})
         transports = peer.get("transports") if isinstance(peer.get("transports"),dict) else prior.get("transports")
         if isinstance(transports,dict) and transports:
+            transports=dict(transports)
+            tc=dict(transports.get('tailcat') or {})
+            old_tc=(prior.get('transports') or {}).get('tailcat') or {}
+            # A refreshed advertisement must not erase short-lived routes already
+            # bound to this same certificate by local discovery.
+            if tc.get('cert_pem') and tc.get('cert_pem')==old_tc.get('cert_pem'):
+                for key in ('discovered_endpoints','discovered_expires','discovered_source'):
+                    if key in old_tc:tc[key]=old_tc[key]
+            if tc:transports['tailcat']=tc
             record["transports"] = transports
         token = str(auth_token or prior.get("auth_token") or "")
         if token:
@@ -285,8 +304,10 @@ class FabricIdentity:
         tc=((row.get("transports") or {}).get("tailcat") or {}) if isinstance(row.get("transports"),dict) else {}
         cert=str(tc.get("cert_pem") or "")
         endpoints=self._active_tailcat_endpoints(row)
-        target=_host(url)
-        if not cert or target not in {_host(x) for x in endpoints}:
+        target=_https_authority(url)
+        # Tailcat and Tailscale HTTPS can share a hostname but present different
+        # certificates on different ports. Pin only the advertised service.
+        if not cert or target is None or target not in {_https_authority(x) for x in endpoints}:
             return None
         ctx=ssl.create_default_context(cadata=cert)
         # Exact pinned certificate learned during authenticated pairing is the
