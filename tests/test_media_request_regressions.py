@@ -226,3 +226,68 @@ def test_mac_local_disc_requests_run_in_foreground(lk,monkeypatch):
     assert lk.media(['import'])==0
     direct.assert_called_once_with('scan',{'kind':'cd'})
     assert routed.call_count==1 and '--node' in routed.call_args.args[0] and '3090' in routed.call_args.args[0]
+
+
+def test_metadata_editor_routes_each_owner_and_reports_partial_failures(lk,monkeypatch,tmp_path):
+    from look import media_metadata
+    from unittest.mock import Mock
+    monkeypatch.setitem(sys.modules,'media_metadata',media_metadata)
+    monkeypatch.setattr(lk,'HOME',tmp_path)
+    monkeypatch.setattr(lk,'_media_local_node_names',lambda:{'local'})
+    rows=[{'id':'one','node':'local','artist':'Old'},{'id':'two','node':'peer','artist':'Old'}]
+    direct=Mock(return_value={'ok':True,'entries':[{'id':'one','artist':'New'}]})
+    monkeypatch.setattr(media_metadata,'edit',direct)
+    remote=Mock(side_effect=RuntimeError('Peer offline'));monkeypatch.setattr(lk,'_media_fabric_cli',remote)
+    result=lk._media_edit_rows(rows,{'artist':'New'})
+    assert not result['ok'] and result['count']==1 and result['errors']==['peer: Peer offline']
+    assert rows[0]['artist']=='New' and rows[1]['artist']=='Old'
+    assert direct.call_args.args[1]['entries'][0]['expected']['artist']=='Old'
+    assert remote.call_count==1 and remote.call_args.args[0][-1]=='peer'
+
+
+def test_cli_bulk_edit_requires_explicit_all_and_preserves_individual_titles(lk,monkeypatch,capsys):
+    from unittest.mock import Mock
+    rows=[{'id':str(n),'path':f'/music/{n}.flac','artist':'Old','title':str(n)} for n in (1,2)]
+    monkeypatch.setattr(lk,'_media_catalog_entries',lambda:(rows,{}))
+    edited=Mock(return_value={'ok':True,'count':2,'errors':[]});monkeypatch.setattr(lk,'_media_edit_rows',edited)
+    assert lk._media_edit_command(['Old','--artist','New'])==1
+    edited.assert_not_called()
+    assert lk._media_edit_command(['Old','--all','--title','Same'])==1
+    edited.assert_not_called()
+    assert lk._media_edit_command(['Old','--all','--artist','New'])==0
+    assert edited.call_args.args[1]=={'artist':'New'}
+
+
+def test_metadata_prompt_blank_fields_preserve_each_title(lk,monkeypatch):
+    from look import media_metadata
+    from unittest.mock import Mock
+    monkeypatch.setitem(sys.modules,'media_metadata',media_metadata)
+    monkeypatch.setattr(lk.termios,'tcsetattr',lambda *args:None)
+    monkeypatch.setattr(lk.tty,'setcbreak',lambda *args:None)
+    answers=iter(['New Artist','','','','yes'])
+    monkeypatch.setattr('builtins.input',lambda label:next(answers))
+    edited=Mock(return_value={'ok':True,'count':2,'entries':[],'errors':[]});monkeypatch.setattr(lk,'_media_edit_rows',edited)
+    rows=[{'title':'First','artist':'Old'},{'title':'Second','artist':'Old'}]
+    assert lk._media_edit_prompt(rows,0,None)['count']==2
+    assert edited.call_args.args[1]=={'artist':'New Artist'}
+
+
+def test_selector_edits_all_marked_rows_and_updates_open_view(lk,monkeypatch):
+    import io
+    from unittest.mock import Mock
+    class Terminal(io.StringIO):
+        def isatty(self):return True
+        def fileno(self):return 0
+    monkeypatch.setattr(sys,'stdin',Terminal())
+    monkeypatch.setattr(sys,'stdout',Terminal())
+    monkeypatch.setattr(lk.termios,'tcgetattr',lambda fd:[])
+    monkeypatch.setattr(lk.termios,'tcsetattr',lambda *args:None)
+    monkeypatch.setattr(lk.tty,'setcbreak',lambda *args:None)
+    keys=iter(['A','E','esc']);monkeypatch.setattr(lk,'_read_tty_key',lambda *args:next(keys))
+    rows=[{'id':str(n),'path':f'/music/{n}.flac','node':'local','artist':'Old','title':str(n)} for n in (1,2)]
+    def edit(chosen,*args):
+        return {'count':len(chosen),'entries':[dict(row,artist='New') for row in chosen],'errors':[]}
+    edited=Mock(side_effect=edit);monkeypatch.setattr(lk,'_media_edit_prompt',edited)
+    assert lk._media_selector(rows)==('none',None)
+    assert len(edited.call_args.args[0])==2
+    assert all(row['artist']=='New' for row in rows)

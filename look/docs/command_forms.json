@@ -806,6 +806,12 @@
     "Cycle or set repeat"
   ],
   [
+    "lk media edit",
+    "<QUERY> --artist NAME [--album NAME] [--album-artist NAME] [--title NAME] [--track N] [--disc N] [--all] [--json]",
+    "media",
+    "Correct metadata for one track or matching batch"
+  ],
+  [
     "lk media",
     "[...]",
     "media",

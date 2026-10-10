@@ -3,12 +3,12 @@ import re
 ROOT=Path(__file__).resolve().parents[1]
 
 def test_850_component_versions_are_explicit():
-    assert (ROOT/'VERSION').read_text().strip()=='8.14.2'
-    assert (ROOT/'look/VERSION').read_text().strip()=='4.61.2'
+    assert (ROOT/'VERSION').read_text().strip()=='8.15.0'
+    assert (ROOT/'look/VERSION').read_text().strip()=='4.62.0'
     assert (ROOT/'future-crash/VERSION').read_text().strip()=='1.3.0'
-    assert (ROOT/'albert/VERSION').read_text().strip()=='8.14.2'
-    assert 'VERSION="4.61.2"' in (ROOT/'look/lk').read_text()
-    assert 'LOOK_VERSION="4.61.2"' in (ROOT/'install-look.sh').read_text()
+    assert (ROOT/'albert/VERSION').read_text().strip()=='8.15.0'
+    assert 'VERSION="4.62.0"' in (ROOT/'look/lk').read_text()
+    assert 'LOOK_VERSION="4.62.0"' in (ROOT/'install-look.sh').read_text()
 
 def test_850_player_shares_media_find_renderer():
     lk=(ROOT/'look/lk').read_text()
@@ -18,7 +18,7 @@ def test_850_player_shares_media_find_renderer():
     assert '_ansi_clip(art[i] if i<len(art) else "",art_w)' in block
 
 def test_850_docs_name_current_release():
-    assert (ROOT/'README.md').read_text().startswith('# Future Crash + LOOK 8.14.2 — FABRIC MEDIA')
+    assert (ROOT/'README.md').read_text().startswith('# Future Crash + LOOK 8.15.0 — FABRIC MEDIA')
     man=(ROOT/'look/lk.1').read_text()
-    assert 'LOOK 4.61.2 / Future Crash + LOOK 8.14.2' in man
+    assert 'LOOK 4.62.0 / Future Crash + LOOK 8.15.0' in man
     assert 'Shift-R' in man and 'Shift-D' in man

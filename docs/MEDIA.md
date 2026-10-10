@@ -61,3 +61,27 @@ control order. `--list` retains a printed listing; `--json` returns group data.
 `lk media import` opens a disc workbench. `--node 3090` selects a paired owner.
 See [Disc import](MEDIA-IMPORT.md) for drive discovery, supported adapters,
 metadata review, title selection and background-job progress.
+
+## Correct artist, album and track information
+
+In Media Find, album tracks or LKMP, mark tracks with Tab (A selects all shown),
+then press E. Shared fields include artist, album artist, album and disc. One
+selected track also offers title and track number. Return keeps each current
+value; the final review shows the count and changes before saving. R refreshes
+the view after an import or a correction elsewhere.
+
+For a whole album, open `lk media albums`, open the album, then A and E.
+For an explicit command-line batch:
+
+```sh
+lk media edit "Just One of Those Things" --artist "Stéphane Grappelli" --all
+lk media edit --help
+```
+
+Corrections live beside the media in .info.json and update the owning catalog.
+They survive rescans and appear across the fabric; embedded audio/video tags
+and media bytes remain unchanged. Keep each sidecar when moving files. Editing
+an artist also updates album artist when it previously matched or was empty;
+explicit compilation album artists remain intact. Each owner validates the
+entire batch before writing, checks for stale metadata, and restores sidecars if
+saving fails. Multiple-owner edits report each failure and the successful count.

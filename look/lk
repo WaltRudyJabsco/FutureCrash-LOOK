@@ -31,7 +31,7 @@ try:
 except Exception:
     readline = None
 
-VERSION="4.61.2"
+VERSION="4.62.0"
 
 LOOK_WORDMARK = r"""       ██╗      ██╗  ██╗
        ██║      ██║ ██╔╝
@@ -10014,7 +10014,7 @@ def _direct_searxng_search(query, limit=8):
     params=urllib.parse.urlencode({"q":query,"format":"json"})
     request=urllib.request.Request(base+"/search?"+params,headers={
         "Accept":"application/json",
-        "User-Agent":"Future-Crash-Fabric/8.14.2",
+        "User-Agent":"Future-Crash-Fabric/8.15.0",
     })
     with urllib.request.urlopen(request,timeout=12) as response:
         data=json.load(response)
@@ -17863,6 +17863,89 @@ def _media_unhide(rows):
     _media_save_visibility(rules)
     return removed
 
+def _media_refresh_rows(rows):
+    (HOME/'.cache/look/fabric-media-catalog.json').unlink(missing_ok=True)
+    fresh,_=_media_catalog_entries()
+    by_id={(str(row.get('node') or ''),row.get('id')):row for row in fresh}
+    for row in rows:
+        update=by_id.get((str(row.get('node') or ''),row.get('id')))
+        if update:row.update(update)
+    return rows
+
+
+def _media_edit_rows(rows,values):
+    import media_metadata
+    values=media_metadata.changes(values)
+    owners={};results=[];errors=[];local_names=_media_local_node_names()
+    for row in rows:
+        owner=str(row.get('node') or 'local')
+        owners.setdefault(owner,{})[row['id']]=row
+    for owner,selected in owners.items():
+        payload={'changes':values,'entries':[{'id':row['id'],'expected':{key:row.get(key) for key in media_metadata.EXPECTED}} for row in selected.values()]}
+        try:
+            if owner.casefold() in local_names:result=media_metadata.edit(MEDIA_LIBRARY_FILE,payload)
+            else:result=_media_fabric_cli(['media-edit',json.dumps(payload),'--node',owner])
+            if result.get('ok') is False:raise ValueError(result.get('error') or 'Metadata edit failed')
+            for update in result['entries']:
+                original=selected[update['id']];original.update(update);original['node']=owner
+                results.append(original)
+        except (OSError,ValueError,RuntimeError) as exc:errors.append(owner+': '+str(exc))
+    (HOME/'.cache/look/fabric-media-catalog.json').unlink(missing_ok=True)
+    return {'ok':not errors,'count':len(results),'entries':results,'errors':errors}
+
+
+def _media_edit_prompt(rows,fd,old):
+    import media_metadata
+    termios.tcsetattr(fd,termios.TCSADRAIN,old)
+    try:
+        print('\n'+_c('EDIT MEDIA METADATA','1;36')+f' · {len(rows)} selected track(s)')
+        print('Return keeps each current value · corrections are saved beside the media files')
+        values={}
+        fields=['artist','album_artist','album','disc']+(['title','track'] if len(rows)==1 else [])
+        for field in fields:
+            existing={str(row.get(field) or '') for row in rows}
+            display=next(iter(existing)) if len(existing)==1 else 'mixed'
+            value=input(field.replace('_',' ').title()+f' [{display}] › ').strip()
+            if value:values[field]=int(value) if field in {'track','disc'} else value
+        if not values:return {'ok':True,'count':0,'entries':[],'errors':[]}
+        values=media_metadata.changes(values)
+        print('Apply to '+str(len(rows))+' track(s): '+', '.join(key+' = '+str(value) for key,value in values.items()))
+        if input('Save changes? [y/N] › ').strip().lower() not in {'y','yes'}:return {'ok':True,'count':0,'entries':[],'errors':[]}
+        return _media_edit_rows(rows,values)
+    except (EOFError,KeyboardInterrupt):return {'ok':True,'count':0,'entries':[],'errors':[]}
+    except (OSError,ValueError,RuntimeError) as exc:return {'ok':False,'count':0,'entries':[],'errors':[str(exc)]}
+    finally:tty.setcbreak(fd)
+
+
+def _media_edit_command(args):
+    import argparse
+    parser=argparse.ArgumentParser(prog='lk media edit',description='Correct catalog metadata for one track or a chosen batch. Audio/video bytes are unchanged; corrections live in .info.json files.')
+    parser.add_argument('query',nargs='*')
+    parser.add_argument('--all',action='store_true',help='Apply shared fields to every matching track')
+    parser.add_argument('--artist',help='Shared performer name')
+    parser.add_argument('--album-artist',help='Shared album artist; keep compilations together')
+    parser.add_argument('--album',help='Shared album title')
+    parser.add_argument('--title',help='Song title for a single track')
+    parser.add_argument('--track',type=int,help='Track number for a single track')
+    parser.add_argument('--disc',type=int,help='Shared disc number')
+    parser.add_argument('--json',action='store_true')
+    selected=parser.parse_args(args)
+    values={key:getattr(selected,key) for key in ('artist','album_artist','album','title','track','disc') if getattr(selected,key) is not None}
+    try:
+        if not selected.query:raise ValueError('Give a track/album query or use E in the browser')
+        rows,_=_media_catalog_entries();rows=media_core.search_entries({'entries':rows},' '.join(selected.query))
+        if not rows:raise ValueError('No matching tracks')
+        if len(rows)>1 and not selected.all:raise ValueError(f'{len(rows)} matches; use --all for a batch or E on selected tracks')
+        if len(rows)>1 and any(key in values for key in ('title','track')):raise ValueError('Edit title/track on one track; batch edits share artist, album, album artist or disc')
+        result=_media_edit_rows(rows,values)
+        if selected.json:print(json.dumps(result,ensure_ascii=False,indent=2))
+        else:
+            print(f"LOOK MEDIA · updated {result['count']} track(s)")
+            for error in result['errors']:print(error,file=sys.stderr)
+        return 0 if result['ok'] else 1
+    except (OSError,ValueError,RuntimeError) as exc:print('LOOK MEDIA · '+str(exc),file=sys.stderr);return 1
+
+
 def _media_selector(rows,title="FABRIC MEDIA",initial_query="",catalog_meta=None):
     """LOOK filter semantics over Fabric media rows, with media-specific actions.
 
@@ -17972,7 +18055,7 @@ def _media_selector(rows,title="FABRIC MEDIA",initial_query="",catalog_meta=None
                             print(left)
 
                 filter_text=f"{_c('FILTER','1;36')} {query}█" if query else f"{_c('FILTER','1;36')} █"
-                actions=_media_hints("/ search · ↑↓/J/K move · Shift-arrows page/ends · Tab select · A select all · Enter/P play · Q queue · C clear selection · S save playlist · I info · V sources · H hidden · X hide · D hide by directory · U unhide · Esc finish/clear/exit",width)
+                actions=_media_hints("/ search · ↑↓/J/K move · Shift-arrows page/ends · Tab select · A select all · E edit metadata · R refresh · Enter/P play · Q queue · C clear selection · S save playlist · I info · V sources · H hidden · X hide · D hide by directory · U unhide · Esc finish/clear/exit",width)
                 footer=f"{filter_text}  "+_c("◆ SHA · · scanned","2")+"\n"+actions
                 if notice:
                     footer+="  "+_c(notice,"33")
@@ -17994,7 +18077,7 @@ def _media_selector(rows,title="FABRIC MEDIA",initial_query="",catalog_meta=None
                     search_mode=False; continue
                 if key in {"\x7f","\b"}:
                     query=query[:-1]; idx=0; continue
-                if len(key)==1 and key.isprintable() and key not in "APQCSIVHXDUJK":
+                if len(key)==1 and key.isprintable() and key not in "APQCSIVHXDUJKER":
                     query+=key; idx=0; continue
                 # Navigation and selection act on the filtered results immediately.
                 search_mode=False
@@ -18033,6 +18116,18 @@ def _media_selector(rows,title="FABRIC MEDIA",initial_query="",catalog_meta=None
                 continue
 
             chosen=selected_rows or ([visible[idx]] if visible else [])
+            if key=="R":
+                try:_media_refresh_rows(rows);notice="catalog refreshed";view_key=None
+                except (OSError,RuntimeError) as exc:notice=str(exc)
+                continue
+            if key=="E" and chosen:
+                result=_media_edit_prompt(chosen,fd,old)
+                updates={(row.get('node'),row.get('id')):row for row in result['entries']}
+                for row in rows:
+                    update=updates.get((row.get('node'),row.get('id')))
+                    if update:row.update(update)
+                notice=f"updated {result['count']} track(s)"+(' · '+' · '.join(result['errors']) if result['errors'] else '')
+                view_key=None;selected_ids.clear();continue
             if key in {"\r","\n","P"} and chosen:
                 action=("play",chosen); break
             if key=="Q" and chosen:
@@ -18947,7 +19042,7 @@ def media_mp(initial_query=""):
                     else:
                         filter_text=f"FILTER {query or 'all media'} · / search"
                     print(_c(filter_text,"1;36"))
-                    controls="↑↓ select · Shift-arrows page/ends · Tab mark · A select all · C clear selection · Enter play · B add queue · D hide dir · L library · Q queue"
+                    controls="↑↓ select · Shift-arrows page/ends · Tab mark · A select all · E edit metadata · R refresh · C clear selection · Enter play · B add queue · D hide dir · L library · Q queue"
                     print(_media_hints(controls,width))
                     print(_media_hints("/ search · space pause · ←/→ seek 10s · p/n prev/next · v visuals · s shuffle · r repeat · x stop · Esc finish/clear/exit",width),end="")
                     if notice:
@@ -18989,7 +19084,7 @@ def media_mp(initial_query=""):
                 if key in {"\x7f","\b"}:
                     if query: query=query[:-1]; idx=0; view_key=None
                     continue
-                if len(key)==1 and key.isprintable() and key not in "ABCDLQJK":
+                if len(key)==1 and key.isprintable() and key not in "ABCDLQJKER":
                     query+=key; idx=0; view_key=None
                     continue
                 # Arrow/Tab/action keys leave editing and operate on this view.
@@ -19040,6 +19135,22 @@ def media_mp(initial_query=""):
             if key=="C":
                 selected_ids.clear(); notice="selection cleared"; continue
             picked=selected or ([chosen] if chosen else [])
+            if key=="R":
+                _media_refresh_rows(library_rows);notice="catalog refreshed";view_key=None;continue
+            if key=="E" and picked:
+                result=_media_edit_prompt(picked,fd,old)
+                updates={(row.get('node'),row.get('id')):row for row in result['entries']}
+                for row in library_rows:
+                    update=updates.get((row.get('node'),row.get('id')))
+                    if update:row.update(update)
+                session=_media_session()
+                if session:
+                    for row in session.get('queue') or []:
+                        update=updates.get((row.get('node'),row.get('id')))
+                        if update:row.update({key:update.get(key) for key in ('artist','album_artist','album','title','track','disc')})
+                    _media_save_session(session)
+                notice=f"updated {result['count']} track(s)"+(' · '+' · '.join(result['errors']) if result['errors'] else '')
+                view_key=None;selected_ids.clear();continue
             if key in {"\r","\n"} and picked:
                 _media_launch_session(media_core.new_session(picked)); notice=f"playing {len(picked)} item(s)"; continue
             if key=="B" and picked:
@@ -19148,6 +19259,7 @@ def media(args):
     if raw=="browse": return _media_browse_command(args[1:])
     if raw=="identify": return _media_identify_command(args[1:])
     if raw=="complete": return _media_complete_command(args[1:])
+    if raw=="edit": return _media_edit_command(args[1:])
     if raw=="artists": return _media_group_command("artist",args[1:])
     if raw=="albums": return _media_group_command("album",args[1:])
     if raw=="queue": return _media_queue_command()
@@ -19761,6 +19873,7 @@ _COMMANDS = [
     ('lk media identify', '<QUERY|PATH|--all>', 'media', 'Promote discoveries to SHA identity'),
     ('lk media shuffle', '[on|off]', 'media', 'Toggle or set shuffle'),
     ('lk media repeat', '[off|all]', 'media', 'Cycle or set repeat'),
+    ("lk media edit", "<QUERY> --artist NAME [--album NAME] [--album-artist NAME] [--title NAME] [--track N] [--disc N] [--all] [--json]", "media", "Correct metadata for one track or matching batch"),
     ("lk media", "[...]", "media", "Media library, queue, playlists, transport", "lk music"),
     ("lk player", "", "media", "Live LOOK miniplayer"),
     ("lk mp", "[QUERY]", "media", "Integrated Fabric media player"),
@@ -20958,7 +21071,7 @@ def main():
         import command_help
         return command_help.show(sys.argv[2:])
     if len(sys.argv)>2 and any(flag in sys.argv[2:] for flag in ('--help','-h')):
-        if sys.argv[1] not in {'notes','tasks','reminders','ytd','describe','notifications'} and not (sys.argv[1] in {'media','music'} and sys.argv[2] in {'import','disc','rip'}):
+        if sys.argv[1] not in {'notes','tasks','reminders','ytd','describe','notifications'} and not (sys.argv[1] in {'media','music'} and sys.argv[2] in {'import','disc','rip','edit'}):
             import command_help
             return command_help.show([word for word in sys.argv[1:] if word not in {'--help','-h'}])
     if len(sys.argv)>=2 and sys.argv[1] in {"notes","tasks","reminders"}:

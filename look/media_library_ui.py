@@ -54,9 +54,9 @@ def choose(items,title,read_key,hints):
 
 
 def browse(entries,field,query,read_key,hints,open_tracks):
-    items=groups(entries,field)
-    if query:items=[item for item in items if query.casefold() in item['label'].casefold()]
     while True:
+        items=groups(entries,field)
+        if query:items=[item for item in items if query.casefold() in item['label'].casefold()]
         selected=choose(items,'FABRIC MEDIA · '+('ALBUMS' if field=='album' else 'ARTISTS'),read_key,hints)
         if selected is None:return None
         if field=='artist':
