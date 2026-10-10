@@ -18828,6 +18828,10 @@ def _media_player_full_visual(snap,mode):
     art=_media_player_large_art(entry,width,art_height) if album_art else player_visuals.frame(mode,width,art_height,time.monotonic(),state in {'play','playing'},seed)
     lines=header+art+footer
     color=("1;32","1;36","1;35","1;34","1;37","1;33","1;36")[(mode-1)%len(player_visuals.NAMES)]
+    if album_art:
+        # Give each successive queue position a new tint, including tracks sharing a cover.
+        palette=("1;36","1;33","1;32","1;35","1;34","1;91","1;96","1;93")
+        color=palette[(seed+snap['index'])%len(palette)]
     return "\n".join(_c(_media_player_line(line,width),color) if len(header)<=i<len(header)+len(art) else _media_player_style(_media_player_line(line,width),6 if i>=len(header)+len(art) else 0 if i==1 else 4 if i==2 else 1) for i,line in enumerate(lines[:height]))
 
 
