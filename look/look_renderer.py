@@ -915,6 +915,21 @@ def copy_text(value:str)->bool:
         pass
     return False
 
+def clipboard_text()->str:
+    """Clipboard support is optional; a missing tool never blocks editing."""
+    if sys.platform=='darwin' and shutil.which('pbpaste'):
+        command=['pbpaste']
+    elif shutil.which('wl-paste'):
+        command=['wl-paste','--no-newline']
+    elif shutil.which('xclip'):
+        command=['xclip','-selection','clipboard','-o']
+    else: return ''
+    try:
+        result=subprocess.run(command,capture_output=True,text=True,encoding='utf-8',errors='replace',timeout=1,check=True)
+        return result.stdout if len(result.stdout)<=256_000 else ''
+    except (OSError,subprocess.SubprocessError): return ''
+
+
 def copy_path(path:Path)->bool:
     value=str(path.resolve())
     try:
