@@ -5034,7 +5034,7 @@ def _peer_bases(peer):
 
 def _peer_json(peer, path, timeout=12.0, total_timeout=None):
     """Try every authenticated route for a peer; one stale preferred URL must not hide a catalog."""
-    last=None
+    last=None;errors=[]
     deadline=time.monotonic()+total_timeout if total_timeout is not None else None
     for base in _peer_bases(peer):
         remaining=deadline-time.monotonic() if deadline is not None else timeout
@@ -5050,7 +5050,8 @@ def _peer_json(peer, path, timeout=12.0, total_timeout=None):
             except (OSError,ValueError,TypeError):pass
         except Exception as exc:
             last=exc
-    raise RuntimeError(str(last or "peer has no reachable endpoint"))
+        errors.append(f'{base}: {last}')
+    raise RuntimeError('; '.join(errors) or str(last or "peer has no reachable endpoint"))
 
 
 def _fabric_route_diagnostics(timeout=2.0):
