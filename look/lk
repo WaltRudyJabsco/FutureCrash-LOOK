@@ -12656,6 +12656,16 @@ def _read_tty_key(fd, timeout=None):
         seq.extend(os.read(fd,1))
         if seq[-1:] in b"~ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz\r\n":
             break
+    if bytes(seq)==b"\x1b[200~":
+        # Bracketed paste is one payload, not a stream of editor commands.
+        payload=bytearray()
+        end=b"\x1b[201~"
+        while len(payload)<256_000:
+            ready,_,_=select.select([fd],[],[],1)
+            if not ready: break
+            payload.extend(os.read(fd,min(4096,256_000-len(payload))))
+            if end in payload: break
+        return "paste:"+bytes(payload).split(end,1)[0].decode("utf-8","replace")
     return {
         b"\x1b[13;2u":"shiftenter", b"\x1b[27;2;13~":"shiftenter",
         b"\x1b\r":"shiftenter", b"\x1b\n":"shiftenter",
