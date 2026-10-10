@@ -31,7 +31,7 @@ try:
 except Exception:
     readline = None
 
-VERSION="4.60.0"
+VERSION="4.61.0"
 
 LOOK_WORDMARK = r"""       ██╗      ██╗  ██╗
        ██║      ██║ ██╔╝
@@ -8451,7 +8451,7 @@ _TOOL_POLICY = {
     "video_download":("workspace","mutation"),
     "notebook_search":("all","observation"),
     "notebook_list":("all","observation"),"notebook_read":("all","observation"),
-    "notebook_capture":("workspace","mutation"),"notebook_complete":("workspace","mutation"),
+    "notebook_capture":("workspace","mutation"),"notebook_complete":("workspace","mutation"),"notebook_update":("workspace","mutation"),
     "run_command":("power","command"),
 }
 _PROFILE_RANK={"conservative":0,"workspace":1,"power":2,"unsafe":3}
@@ -10014,7 +10014,7 @@ def _direct_searxng_search(query, limit=8):
     params=urllib.parse.urlencode({"q":query,"format":"json"})
     request=urllib.request.Request(base+"/search?"+params,headers={
         "Accept":"application/json",
-        "User-Agent":"Future-Crash-Fabric/8.13.0",
+        "User-Agent":"Future-Crash-Fabric/8.14.0",
     })
     with urllib.request.urlopen(request,timeout=12) as response:
         data=json.load(response)
@@ -11095,7 +11095,9 @@ def ollama_chat(force_search=False, initial_prompt=None, allow_start=True, host_
         'LOOK NOTEBOOK: explicit user records are separate from model memory. Use notebook_list to list notes without a keyword; '
         'notebook_search with an empty query also lists records. Use notebook_read for full text by ID or position. '
         'First/second note refers to positions in the current LKN listing, newest updated first. '
-        'When asked what notes say, retrieve their bodies; do not ask for keywords merely to list them.'})
+        'When asked what notes say, retrieve their bodies; do not ask for keywords merely to list them. '
+        'For edits, additions, or rescheduling: read the matching record first, then use notebook_update with its id and revision. '
+        'Use append_text for additions; preserve unrelated text and metadata. Never create a duplicate to edit an existing note.'})
     thinking_mode=_load_thinking()
     thinking_notes={
         "light":"THINKING DEPTH: LIGHT. Give fast, direct answers.",
@@ -12059,10 +12061,10 @@ def ollama_chat(force_search=False, initial_prompt=None, allow_start=True, host_
                     tool_event_started=time.monotonic()
                     if events: events.emit("tool_start", tool=name)
 
-                    if name in {"notebook_search","notebook_list","notebook_read","notebook_capture","notebook_complete"}:
+                    if name in {"notebook_search","notebook_list","notebook_read","notebook_capture","notebook_complete","notebook_update"}:
                         import notebook
                         try:
-                            if name in {'notebook_capture','notebook_complete'} and not re.search(r'\b(note|notes|save|record|remember|remind|task|todo|to.do|complete|done|finish)\b',prompt,re.I):
+                            if name in {'notebook_capture','notebook_complete','notebook_update'} and not re.search(r'\b(save|record|remember|remind|create|add|append|edit|update|change|rewrite|replace|reschedule|snooze|complete|done|finish|mark|move|set|remove|reopen)\b',prompt,re.I):
                                 raise ValueError('The user has not requested a notebook change')
                             tool_content=notebook.tool(name,args)
                         except Exception as exc: tool_content=f"NOTEBOOK FAILED · {exc}"
@@ -18130,18 +18132,20 @@ def _media_browse_command(args):
 
 
 def _media_group_command(field,args):
-    query=" ".join(args).casefold().strip()
-    rows,_=_media_catalog_entries()
-    counts={}
-    for row in rows:
-        value=str(row.get(field) or "").strip()
-        if not value or (query and query not in value.casefold()):
-            continue
-        counts[value]=counts.get(value,0)+1
-    label="ARTISTS" if field=="artist" else "ALBUMS"
-    print(f"FABRIC MEDIA {label} · {len(counts):,}")
-    for value,count in sorted(counts.items(),key=lambda item:item[0].casefold())[:200]:
-        print(f"  {count:>4}  {value}")
+    import media_library_ui
+    query=" ".join(x for x in args if x not in {"--json","--list"}).strip()
+    rows,catalog_meta=_media_catalog_entries()
+    if sys.stdin.isatty() and sys.stdout.isatty() and not any(x in args for x in {"--json","--list"}):
+        def tracks(entries,label):
+            action,payload=_media_selector(entries,label,"",catalog_meta)
+            return _media_selector_finish(action,payload)
+        return media_library_ui.browse(rows,field,query,_read_tty_key,_media_hints,tracks) or 0
+    items=media_library_ui.groups(rows,field)
+    items=[item for item in items if not query or query.casefold() in item['label'].casefold()]
+    if "--json" in args:
+        print(json.dumps(items,ensure_ascii=False));return 0
+    print(f"FABRIC MEDIA {'ARTISTS' if field=='artist' else 'ALBUMS'} · {len(items):,}")
+    for item in items: print(f"  {len(item['entries']):>4}  {item['label']}")
     return 0
 
 
@@ -19116,6 +19120,16 @@ def media(args):
         ok=isinstance(result,str) and result.startswith("URL OPEN OK")
         print("LOOK media · Classic Arts Showcase · default browser" if ok else f"LOOK media · {result}")
         return 0 if ok else 1
+    if raw in {"import","disc","rip"}:
+        import disc_ui
+        def factory(node):
+            def request(action,payload):
+                suffix=["--node",node] if node else []
+                result=_media_fabric_cli(["disc-import",action,json.dumps(payload),*suffix])
+                if result.get("ok") is False:raise ValueError(result.get("error") or "Import request failed")
+                return result
+            return request
+        return disc_ui.main(args[1:],factory,_read_tty_key,_media_hints)
     if raw=="add": return _media_add_command(args[1:])
     if raw=="info": return _media_info_command(args[1:])
     if raw in {"stream","open"}: return _media_stream_command(args[1:])
@@ -19726,6 +19740,10 @@ _COMMANDS = [
     ("lk ytd jobs", "[--node NODE]", "media", "List download jobs"),
     ("lk ytd cancel", "<JOB> [--node NODE]", "media", "Cancel a download"),
     ("lk ytd index", "<JOB> [--node NODE]", "media", "Retry catalog registration"),
+    ('lk media import', '[drives|scan|start|jobs|status ID|watch ID|cancel ID] [--node NODE]', 'media', 'Import optical discs on their owner; monitor durable jobs'),
+    ('lk media albums', '[QUERY] [--list|--json]', 'media', 'Browse albums and their ordered tracks'),
+    ('lk media artists', '[QUERY] [--list|--json]', 'media', 'Browse artists, albums and tracks'),
+    ('lk notifications', '[desktop|sound|voice on|off] [--node NODE]', 'fabric', 'Configure native reminder delivery'),
     ('lk media find', '[QUERY]', 'media', 'Search and select logical Fabric media'),
     ('lk media browse', '[QUERY]', 'media', 'Browse the Fabric media catalog'),
     ('lk media play', '<TARGET> [--shuffle] [--exact] [--kind KIND] [--artist ARTIST] [--selection SELECTION] [--limit N]', 'media', 'Create or resume a LOOK queue'),
@@ -20935,7 +20953,7 @@ def main():
         import command_help
         return command_help.show(sys.argv[2:])
     if len(sys.argv)>2 and any(flag in sys.argv[2:] for flag in ('--help','-h')):
-        if sys.argv[1] not in {'notes','tasks','reminders','ytd','describe'}:
+        if sys.argv[1] not in {'notes','tasks','reminders','ytd','describe','notifications'} and not (sys.argv[1] in {'media','music'} and sys.argv[2] in {'import','disc','rip'}):
             import command_help
             return command_help.show([word for word in sys.argv[1:] if word not in {'--help','-h'}])
     if len(sys.argv)>=2 and sys.argv[1] in {"notes","tasks","reminders"}:
@@ -21059,6 +21077,19 @@ def main():
     if cmd=="personality": return lo_personality(rest)
     if cmd=="thinking": return lo_thinking(rest)
     if cmd in {"think-display","thinkdisplay"}: return lo_think_display(rest)
+    if cmd=="notifications":
+        import argparse
+        parser=argparse.ArgumentParser(prog="lk notifications",description="Native reminder delivery: desktop/sound on by default; voice off. Settings belong to the chosen node.")
+        parser.add_argument("channel",nargs="?",choices=["desktop","sound","voice"])
+        parser.add_argument("state",nargs="?",choices=["on","off"])
+        parser.add_argument("--node")
+        selected=parser.parse_args(rest)
+        if bool(selected.channel)!=bool(selected.state):parser.error("Choose CHANNEL on/off")
+        command=["notifications"]
+        if selected.channel:command.append(json.dumps({selected.channel:selected.state=="on"}))
+        if selected.node:command += ["--node",selected.node]
+        try:print(json.dumps(_media_fabric_cli(command),indent=2));return 0
+        except RuntimeError as exc:print(str(exc));return 1
     if cmd in {"media","music"}: return media(rest)
     # Natural shorthand: `lk play TARGET` is the obvious media entry point.
     # Named canned stations/intents already belong to media(); route them there

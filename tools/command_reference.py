@@ -41,7 +41,7 @@ def collect(root=ROOT):
         forms.append((f'lk {command}','[ARGS]','aliases','Additional routed entry point; see usage details below'))
     usages={}
     options={}
-    for relative in ['look/lk','look/look_renderer.py','look/ytd.py','look/games.py','look/notebook.py']:
+    for relative in ['look/lk','look/look_renderer.py','look/ytd.py','look/games.py','look/notebook.py','look/disc_ui.py']:
         parsed=ast.parse((root/relative).read_text())
         lines=set(); flags=set()
         for n in ast.walk(parsed):
@@ -247,7 +247,7 @@ def command_help_pages(root,forms,usages):
             'settings':'Settings opens a searchable picker. Supply a word to start filtered, e.g. lk settings voice. Arrows choose; Enter opens the setting.',
             'models':'Models opens the local model chooser. Supply an installed model name to select it. Use lk ollama models for model management and lk fabric models for Fabric inventory.',
             'mp':'LK MP: / search; arrows choose; Tab marks; A marks all shown; Enter plays; B adds to queue; L library; Q queue; Space pause; Esc clears filter, then exits.',
-            'media':'Media Find: type or / filters; arrows move; Tab marks; A marks all shown; Enter plays; Q adds to queue; Esc ends search, clears filter, then exits.',
+            'media':'Artist/album browsing: lk media artists or albums opens groups; Enter opens albums/tracks; Esc returns. lk media import opens the owner-local CD/DVD/Blu-ray workbench; --node selects a paired owner. Use lk media import --help for capture, title choice, metadata and job flags. Media Find: type or / filters; arrows move; Tab marks; A marks all shown; Enter plays; Q adds to queue; Esc ends search, clears filter, then exits.',
             'lo':'LO flags: --conservative, --workspace, --power, --unsafe select access; --no-start avoids starting inference; --events-json emits machine events. @NODE selects a host. search PROMPT requests web search; bg PROMPT queues background work.',
         }
         if name in surface_help: parts.extend(['','INTERFACE',surface_help[name]])

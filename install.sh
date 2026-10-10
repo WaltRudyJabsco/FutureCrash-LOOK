@@ -1,20 +1,20 @@
 #!/usr/bin/env bash
 set -euo pipefail
 ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
-echo "Future Crash + LOOK 8.13.0 · RESTORE CHANNELS"
+echo "Future Crash + LOOK 8.14.0 · RESTORE CHANNELS"
 echo "────────────────────────────────────────"
 
 # Refuse a mixed bundle before mutating the machine. A unified release must move
 # LOOK and the node together.
 EXPECTED_RELEASE="$(tr -d '[:space:]' < "$ROOT/VERSION")"
-[[ "$EXPECTED_RELEASE" == "8.13.0" ]] || { echo "BUNDLE ERROR: expected release 8.13.0, found $EXPECTED_RELEASE"; exit 4; }
+[[ "$EXPECTED_RELEASE" == "8.14.0" ]] || { echo "BUNDLE ERROR: expected release 8.14.0, found $EXPECTED_RELEASE"; exit 4; }
 echo "BUNDLE SOURCE  $ROOT"
 echo "BUNDLE RELEASE $EXPECTED_RELEASE · FABRIC VISION"
 LOOK_COMPONENT_VERSION="$(tr -d '[:space:]' < "$ROOT/look/VERSION")"
 FUTURE_CRASH_COMPONENT_VERSION="$(tr -d '[:space:]' < "$ROOT/future-crash/VERSION")"
 ALBERT_COMPONENT_VERSION="$(tr -d '[:space:]' < "$ROOT/albert/VERSION")"
-[[ "$LOOK_COMPONENT_VERSION" == "4.60.0" ]] || { echo "BUNDLE ERROR: LOOK component reports $LOOK_COMPONENT_VERSION, expected 4.60.0"; exit 4; }
-[[ "$FUTURE_CRASH_COMPONENT_VERSION" == "1.2.5" ]] || { echo "BUNDLE ERROR: Future Crash component reports $FUTURE_CRASH_COMPONENT_VERSION, expected 1.2.5"; exit 4; }
+[[ "$LOOK_COMPONENT_VERSION" == "4.61.0" ]] || { echo "BUNDLE ERROR: LOOK component reports $LOOK_COMPONENT_VERSION, expected 4.61.0"; exit 4; }
+[[ "$FUTURE_CRASH_COMPONENT_VERSION" == "1.3.0" ]] || { echo "BUNDLE ERROR: Future Crash component reports $FUTURE_CRASH_COMPONENT_VERSION, expected 1.3.0"; exit 4; }
 [[ "$ALBERT_COMPONENT_VERSION" == "$EXPECTED_RELEASE" ]] || { echo "BUNDLE ERROR: Albert integration reports $ALBERT_COMPONENT_VERSION, expected $EXPECTED_RELEASE"; exit 4; }
 python3 - "$ROOT" "$EXPECTED_RELEASE" <<'PY_BUNDLE'
 import re,sys
@@ -55,7 +55,7 @@ FCL_UNIFIED_INSTALL_CHILD=1 "$ROOT/install-look.sh" "$@"
 ((UNINSTALL)) && exit 0
 if ((DRY_RUN)); then
   echo
-  echo "[dry-run] would install/restart Unified Node 8.13.0 · RESTORE CHANNELS with signed Fabric rendezvous, Tailcat direct transport, ONE BRAIN cognition, LIVING MIND memory, browser endpoints, SearXNG, Media, Artifacts, and Signal Window 1.11.0"
+  echo "[dry-run] would install/restart Unified Node 8.14.0 · RESTORE CHANNELS with signed Fabric rendezvous, Tailcat direct transport, ONE BRAIN cognition, LIVING MIND memory, browser endpoints, SearXNG, Media, Artifacts, and Signal Window 1.11.0"
   echo "[dry-run] OpenJev mode: $OPENJEV_MODE (auto provisions on capable nodes; absence/failure is non-fatal)"
   echo "[dry-run] would initialize Tailcat :7443, install optional signed rendezvous discovery, keep Tailscale :7332 → fcl-ingress :7333 as fallback, and verify Fabric CLI wiring"
   exit 0
@@ -160,6 +160,7 @@ install -m 0644 "$ROOT/core/world_state.py" "$HOME/.local/share/future-crash-loo
 install -m 0644 "$ROOT/core/live_state.py" "$HOME/.local/share/future-crash-look/core/live_state.py"
 install -m 0644 "$ROOT/core/observation.py" "$HOME/.local/share/future-crash-look/core/observation.py"
 install -m 0644 "$ROOT/core/attention.py" "$HOME/.local/share/future-crash-look/core/attention.py"
+install -m 0644 "$ROOT/core/notifications.py" "$HOME/.local/share/future-crash-look/core/notifications.py"
 install -m 0644 "$ROOT/core/memory_store.py" "$HOME/.local/share/future-crash-look/core/memory_store.py"
 install -m 0644 "$ROOT/core/ui_model.py" "$HOME/.local/share/future-crash-look/core/ui_model.py"
 install -m 0755 "$ROOT/core/fcl-node" "$HOME/.local/bin/fcl-node"

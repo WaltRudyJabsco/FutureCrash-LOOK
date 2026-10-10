@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Future Crash + LOOK Unified Node 8.13.0.
+"""Future Crash + LOOK Unified Node 8.14.0.
 
 A small distributed supervisor for trusted personal machines. Immediate events stay
 asynchronous; a one-second fabric pulse reconciles presence, leases and stale work.
@@ -152,7 +152,7 @@ def _file_peer_json(peer,path):
     return _file_race(peer,path)[1]
 
 
-VERSION = "8.13.0"
+VERSION = "8.14.0"
 RELEASE_NAME = "FABRIC VISION"
 DEFAULT_HOST = "127.0.0.1"
 DEFAULT_PORT = 7332
@@ -2429,6 +2429,18 @@ def _notebook_tick():
                         'start_pulse':pulse_number()+1})
         FABRIC_STORE.event(None,'reminder','due',reminder['title'],node=identity()['name'],
                            data={'id':reminder['id'],'event_id':event_id,'due':reminder['remind_at']})
+        try:
+            try: from . import notifications
+            except ImportError: import notifications
+            prefs=notifications.settings()
+            receipt=notifications.deliver('Fabric reminder',reminder['title'],prefs)
+            if prefs['voice']:
+                receipt['voice']=_attention_route({'type':'reminder','message':reminder['title'],
+                    'channels':['voice'],'target':'origin','source':event_id})
+            FABRIC_STORE.event(None,'reminder-delivery','requested',reminder['title'],node=identity()['name'],
+                               data={'event_id':event_id,'receipt':receipt})
+        except Exception as exc:
+            FABRIC_STORE.event(None,'reminder-delivery','error',str(exc)[:200],node=identity()['name'],data={'event_id':event_id})
         store.mark_delivered(event_id)
 
 
@@ -2620,7 +2632,7 @@ def _local_web_search(query, limit=8):
     base=os.environ.get("FCL_SEARXNG_URL","http://127.0.0.1:8888").rstrip("/")
     request=urllib.request.Request(base+"/search?"+params,headers={
         "Accept":"application/json",
-        "User-Agent":"Future-Crash-Fabric/8.13.0",
+        "User-Agent":"Future-Crash-Fabric/8.14.0",
     })
     try:
         with urllib.request.urlopen(request,timeout=8) as response:
@@ -4273,6 +4285,19 @@ class API(BaseHTTPRequestHandler):
     def do_GET(self):
         path = urlparse(self.path).path
         if not self._authorized_ingress(path): return
+        if path == '/v1/media/import':
+            params=parse_qs(urlparse(self.path).query)
+            try:
+                _look_catalog_modules();import disc_import
+                action=(params.get('action') or ['drives'])[0]
+                if action not in {'drives','jobs','status'}:raise ValueError('Use POST for this action')
+                result=disc_import.request(action,{'id':(params.get('id') or [''])[0]})
+                return self.sendj(200,dict(result,node=identity()['name']))
+            except (OSError,ValueError,TypeError) as exc:return self.sendj(400,{'ok':False,'error':str(exc)})
+        if path == '/v1/notifications':
+            try: from . import notifications
+            except ImportError: import notifications
+            return self.sendj(200,{'ok':True,'settings':notifications.settings()})
         if path == "/v1/downloads" or path.startswith("/v1/downloads/"): return self._downloads_request()
         if path == "/v1/files/browse": return self._files_browse()
         if path == "/v1/files/copy/status": return self._files_copy_status()
@@ -4517,6 +4542,19 @@ class API(BaseHTTPRequestHandler):
         if not self._authorized_ingress(path): return
         if path == "/v1/files/copy": return self._files_copy()
         d = self.body()
+        if path == '/v1/media/import':
+            try:
+                if not isinstance(d,dict) or not isinstance(d.get('payload',{}),dict):raise ValueError('Import request must be an object')
+                _look_catalog_modules();import disc_import
+                result=disc_import.request(d.get('action'),d.get('payload',{}))
+                return self.sendj(200,dict(result,node=identity()['name']))
+            except (OSError,ValueError,TypeError,subprocess.SubprocessError) as exc:return self.sendj(400,{'ok':False,'error':str(exc)})
+        if path == '/v1/notifications':
+            try:
+                try: from . import notifications
+                except ImportError: import notifications
+                return self.sendj(200,{'ok':True,'settings':notifications.settings(d)})
+            except ValueError as exc: return self.sendj(400,{'ok':False,'error':str(exc)})
         if path.startswith('/v1/notebook/'):
             try:
                 if not isinstance(d,dict): raise ValueError('Notebook request must be an object')
@@ -6103,7 +6141,7 @@ def main():
     ap.add_argument("command",nargs="?",default="serve",
         choices=["serve","status","nodes","activity","pulse","fabric","watch","dashboard","models","route","qualify","services","service","release","maintenance","update",
                  "jobs","job","submit","packet","cancel","events","http","beacon","lights","artifact-add","artifact","artifacts","file-catalog","file-find","media-catalog","media-identify",
-                 "decisions","decision","answer","ask","decision-shadow","decision-provider","identity","trust","untrust","pair-code","pair","transport","rendezvous","endpoints","endpoint-code","allow","revoke-endpoint","media-outputs","media-state","media-play","media-control","speak","alert"])
+                 "decisions","decision","answer","ask","decision-shadow","decision-provider","identity","trust","untrust","pair-code","pair","transport","rendezvous","endpoints","endpoint-code","allow","revoke-endpoint","media-outputs","media-state","media-play","media-control","speak","alert","disc-import","notifications"])
     ap.add_argument("args",nargs="*")
     ap.add_argument("--node",dest="node",default=None,help="target Fabric node name")
     ap.add_argument("--voice-profile",dest="voice_profile",default="default",choices=["default","albert","warm","crisp","deep","max","philosopher","pirate","wopr"],help="speech voice profile")
@@ -6447,6 +6485,16 @@ def main():
                     print(f"FABRIC FILES · {int(payload.get('locations',payload.get('count',0))):,} cataloged locations")
                     for row in payload.get("nodes") or []: print(f"  {str(row.get('node') or '?'):<20} {int(row.get('count') or 0):>9,} files")
                 return 0
+            if a.command=="disc-import":
+                action=a.args[0] if a.args else "drives"
+                body=json.loads(a.args[1]) if len(a.args)>1 else {}
+                result=_target_post(a.host,a.port,a.node,"/v1/media/import",{"action":action,"payload":body},timeout=120.0)
+                print(json.dumps(result,indent=2));return 0
+            if a.command=="notifications":
+                if a.args:
+                    body=json.loads(a.args[0]);result=_target_post(a.host,a.port,a.node,"/v1/notifications",body)
+                else:result=_target_get(a.host,a.port,a.node,"/v1/notifications")
+                print(json.dumps(result,indent=2));return 0
             if a.command=="media-catalog":
                 payload = _target_get(a.host, a.port, a.node, "/v1/media/catalog") if a.node else _daemon_get(a.host, a.port, "/v1/media/fabric", timeout=45.0)
                 if a.json:

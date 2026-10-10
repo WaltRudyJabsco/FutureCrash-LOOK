@@ -12,8 +12,8 @@ if [[ "${FCL_UNIFIED_INSTALL_CHILD:-0}" != "1" && -x "$ROOT/install.sh" ]]; then
 fi
 
 PRODUCT_VERSION="$(tr -d '[:space:]' < "$ROOT/VERSION")"
-LOOK_VERSION="4.60.0"
-FUTURE_CRASH_VERSION="1.2.5"
+LOOK_VERSION="4.61.0"
+FUTURE_CRASH_VERSION="1.3.0"
 
 DRY=0
 ASSUME_YES=0
@@ -197,6 +197,32 @@ if ((${#missing[@]})); then
   if ((!DRY)); then installed_packages+=("${missing[@]}"); fi
 fi
 
+echo
+echo "DISC IMPORT + REMINDERS"
+if ask "  Install disc import and native notification helpers?" Y; then
+  if ! have HandBrakeCLI; then
+    run brew install handbrake || echo "  HandBrake unavailable; lk media import drives reports available adapters."
+  fi
+  if [[ "$(uname -s)" == "Darwin" ]]; then
+    if ! have makemkvcon && [[ ! -x /Applications/MakeMKV.app/Contents/MacOS/makemkvcon ]]; then
+      echo "  MakeMKV adapter ready; official installation: https://www.makemkv.com/download/"
+      echo "  Homebrew currently disables this cask for Gatekeeper compatibility; LOOK does not bypass that check."
+    fi
+    echo "  Audio CDs use the mounted macOS audio volume and ffmpeg; native alerts use macOS."
+  elif command -v apt-get >/dev/null 2>&1; then
+    run sudo apt-get install -y cdparanoia libnotify-bin pulseaudio-utils sound-theme-freedesktop || echo "  Some optical/notification helpers unavailable; check lk media import drives."
+  elif command -v dnf >/dev/null 2>&1; then
+    run sudo dnf install -y cdparanoia libnotify pulseaudio-utils sound-theme-freedesktop || echo "  Some optical/notification helpers unavailable; check lk media import drives."
+  elif command -v pacman >/dev/null 2>&1; then
+    run sudo pacman -S --needed --noconfirm cdparanoia libnotify libpulse sound-theme-freedesktop || echo "  Some optical/notification helpers unavailable; check lk media import drives."
+  else
+    echo "  Install cd-paranoia/cdparanoia, notify-send and an audio notification player with your system package manager."
+  fi
+  if [[ "$(uname -s)" != "Darwin" ]]; then
+    echo "  MakeMKV Linux CLI is detected when installed; official setup: https://www.makemkv.com/download/"
+  fi
+fi
+
 # Remote is deliberately offered rather than silently assumed: installation is
 # useful only after the user authenticates this machine into a tailnet.
 echo
@@ -339,6 +365,9 @@ install_file "$ROOT/look/docs/command_help.json" "$HOME/.local/share/look/docs/c
 install_file "$ROOT/look/notebook_core.py" "$HOME/.local/share/look/notebook_core.py"
 install_file "$ROOT/look/weather_forecast.py" "$HOME/.local/share/look/weather_forecast.py"
 install_file "$ROOT/look/media_core.py" "$HOME/.local/share/look/media_core.py"
+install_file "$ROOT/look/media_library_ui.py" "$HOME/.local/share/look/media_library_ui.py"
+install_file "$ROOT/look/disc_import.py" "$HOME/.local/share/look/disc_import.py"
+install_file "$ROOT/look/disc_ui.py" "$HOME/.local/share/look/disc_ui.py"
 install_file "$ROOT/look/fabric_files.py" "$HOME/.local/share/look/fabric_files.py"
 install_file "$ROOT/look/media_art.py" "$HOME/.local/share/look/media_art.py"
 install_file "$ROOT/look/player_visuals.py" "$HOME/.local/share/look/player_visuals.py"

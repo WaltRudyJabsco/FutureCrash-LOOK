@@ -42,12 +42,15 @@ def test_tick_emits_one_event_per_local_occurrence(tmp_path,monkeypatch):
     store=Notebook(tmp_path,'Mac'); store.create('Due',remind_at=1000)
     monkeypatch.setattr(node,'_notebook_store',lambda:store)
     monkeypatch.setattr(node,'identity',lambda:{'name':'Mac'})
+    from core import notifications
+    monkeypatch.setattr(notifications,'deliver',Mock(return_value={'ok':True,'delivery':[]}))
     beacon=Mock(); events=Mock()
     monkeypatch.setattr(node,'_beacon_record',beacon)
     monkeypatch.setattr(node.FABRIC_STORE,'event',events)
     node._notebook_tick(); node._notebook_tick()
-    assert beacon.call_count==events.call_count==1
-    assert events.call_args.args[1:3]==('reminder','due')
+    assert beacon.call_count==1
+    assert [call.args[1] for call in events.call_args_list].count('reminder')==1
+    assert events.call_args_list[0].args[1:3]==('reminder','due')
 
 
 def test_sync_uses_only_paired_nodes_and_exchanges_edits(tmp_path,monkeypatch):
@@ -67,9 +70,11 @@ def test_sync_uses_only_paired_nodes_and_exchanges_edits(tmp_path,monkeypatch):
     assert {r['title'] for r in remote.list()}=={'Local','Remote'}
 
 
-def test_browser_reminder_text_and_ack_controls(tmp_path):
-    source=(ROOT/'signal-window/app.js').read_text()
-    ui=source[source.index('// Reminder content'):source.index('async function pollFabricLight')]
+@pytest.mark.parametrize('surface',['signal','albert'])
+def test_browser_reminder_text_and_ack_controls(tmp_path,surface):
+    source=(ROOT/('signal-window/app.js' if surface=='signal' else 'albert/index.html')).read_text()
+    end=source.index('async function pollFabricLight') if surface=='signal' else source.index("let lastBeacon=''")
+    ui=source[source.index("let notebookReminderKey=''"):end]
     script=r'''
 const assert=require('node:assert/strict');
 class Element {
@@ -82,20 +87,26 @@ class Element {
 }
 const document={body:new Element('body'),createElement:tag=>new Element(tag)};
 let submitted;
+const window={};let notices=[];
+function Notification(title,options){notices.push({title,options})}
+Notification.permission='granted';window.Notification=Notification;
 const fetch=async(url,options)=>{submitted={url,payload:JSON.parse(options.body)};return {ok:true,json:async()=>({ok:true})}};
 '''+ui+r'''
 (async()=>{
  const row={id:'note',revision:'revision',event_id:'occurrence',title:'<script>saved text</script>',body:'Long note',remind_at:1};
  renderNotebookReminders([row]);
  assert.equal(notebookReminderPanel.hidden,false);
- const card=notebookReminderPanel.children[0];
+ const card=notebookReminderPanel.children.find(child=>child.tag==='article');
  assert.ok(card.children[0].textContent.includes('<script>saved text</script>'));
  assert.equal(card.children[1].children[1].textContent,'Long note');
- renderNotebookReminders([row]);assert.equal(notebookReminderPanel.children[0],card);
+ renderNotebookReminders([row]);assert.equal(notebookReminderPanel.children.find(child=>child.tag==='article'),card);
  await card.children[2].onclick();
  assert.deepEqual(submitted,{url:'/api/notebook/answer',payload:{id:'note',revision:'revision',choice:'done'}});
  assert.equal(notebookReminderPanel.hidden,true);
  renderNotebookReminders([]);assert.equal(notebookReminderPanel.children.length,0);
+ enableReminderAlerts();renderNotebookReminders([row]);
+ renderNotebookReminders([{...row,revision:'new-revision'}]);
+ assert.equal(notices.length,1);assert.equal(notices[0].options.tag,'occurrence');
 })().catch(error=>{console.error(error);process.exit(1)});
 '''
     subprocess.run(['node','-e',script],check=True)

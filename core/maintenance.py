@@ -48,6 +48,7 @@ def allowed(relative):
     if parent == '.local/share/look/docs': return p.name in {'REFERENCE.md','command_forms.json','command_help.json'}
     if parent == '.local/share/signal-window':
         return p.name in {'server.py', 'app.js', 'media-session.js', 'media-art.js', 'index.html', 'style.css'}
+    if parent == '.local/share/albert': return p.name in {'server.py','index.html','VERSION'}
     if parent == '.local/share/future-crash': return p.name in {'future_crash.py','lo_worker.py'}
     if parent == '.local/bin':
         return p.name in {'fcl-node', 'fcl-ingress', 'fcl-tailcat', 'fcl-rendezvous', 'fcl-openjev-worker', 'future-crash'}
@@ -63,7 +64,7 @@ def destination(relative):
     return path
 
 
-def register_install(source):
+def register_install(source, *, include_albert=True):
     source = Path(source)
     mappings = []
     for p in (source / 'core').glob('*.py'):
@@ -78,6 +79,8 @@ def register_install(source):
     mappings.append((source / 'VERSION', '.local/share/future-crash-look/RELEASE'))
     mappings += [(source / 'signal-window' / n, '.local/share/signal-window/' + n)
                  for n in ('server.py', 'app.js', 'media-session.js', 'media-art.js', 'index.html', 'style.css')]
+    if include_albert:
+        mappings += [(source/'albert'/name,'.local/share/albert/'+name) for name in ('server.py','index.html','VERSION')]
     mappings += [(source / 'future-crash' / n, target) for n, target in
                  [('future_crash.py', '.local/share/future-crash/future_crash.py'), ('lo_worker.py','.local/share/future-crash/lo_worker.py'), ('future-crash', '.local/bin/future-crash')]]
     files = []
@@ -382,7 +385,8 @@ def run_job(job):
 if __name__ == '__main__':
     ap = argparse.ArgumentParser()
     ap.add_argument('--register')
+    ap.add_argument('--without-albert',action='store_true',help='Bootstrap peers whose maintenance allowlist predates Albert integration; register normally after the first update')
     ap.add_argument('--run-job')
     args = ap.parse_args()
-    if args.register: register_install(args.register)
+    if args.register: register_install(args.register,include_albert=not args.without_albert)
     elif args.run_job: run_job(args.run_job)

@@ -501,7 +501,14 @@ def tools():
         ('notebook_capture','Save a note, task or reminder only when the user asks to record it.',
          {'text':{'type':'string'},'kind':{'type':'string','enum':['note','task','reminder']},'project':{'type':'string'},
           'due':{'type':'string'},'remind_at':{'type':'string'},'target':{'type':'string'}},['text']),
-        ('notebook_complete','Complete a saved note/task/reminder explicitly requested by the user.',{'id':{'type':'string'}},['id'])]
+        ('notebook_complete','Complete a saved note/task/reminder explicitly requested by the user.',{'id':{'type':'string'}},['id']),
+        ('notebook_update','Edit or append to an existing note/task/reminder only when requested. Read it first; use its id and revision. Change remind_at to reschedule, or null to remove an alert. Preserve unspecified fields.',
+         {'id':{'type':'string'},'revision':{'type':'string'},'append_text':{'type':'string'},
+          'changes':{'type':'object','additionalProperties':False,'properties':{
+              'title':{'type':'string'},'body':{'type':'string'},'project':{'type':'string'},
+              'kind':{'type':'string','enum':['note','task','reminder']},
+              'status':{'type':'string','enum':['open','done']},
+              'due':{'type':['string','null']},'remind_at':{'type':['string','null']},'target':{'type':'string'}}}},['id','revision'])]
     return [{'type':'function','function':{'name':name,'description':description,
         'parameters':{'type':'object','properties':properties,'required':required}}} for name,description,properties,required in definitions]
 
@@ -518,5 +525,24 @@ def tool(name,args):
         result=store.create(args.get('text',''),**options)
         nudge_sync()
     elif name=='notebook_complete': result=store.change(args.get('id',''),{'status':'done','remind_at':None}); nudge_sync()
+    elif name=='notebook_update':
+        if not args.get('revision'): raise ValueError('Read the record first; its revision is required')
+        row=read_records(store,{'id':args.get('id',''),'include_done':True})
+        changes=dict(args.get('changes') or {})
+        allowed={'title','body','project','kind','status','due','remind_at','target'}
+        if set(changes)-allowed: raise ValueError('Unknown notebook update field')
+        if changes.get('status')=='deleted': raise ValueError('Deletion is not an editing action')
+        if 'append_text' in args:
+            if 'body' in changes: raise ValueError('Use append_text or body, not both')
+            if not isinstance(args['append_text'],str): raise ValueError('Append text must be a string')
+            changes['body']=row['body']+('\n' if row['body'] and not row['body'].endswith('\n') else '')+args['append_text']
+        if not changes: raise ValueError('No changes supplied')
+        for field in ('due','remind_at'):
+            if field in changes: changes[field]=timestamp(changes[field])
+        if 'target' in changes: changes['target']=local_target(changes['target'])
+        if changes.get('status')=='done': changes['remind_at']=None
+        if changes.get('kind',row['kind'])=='reminder' and changes.get('status',row['status'])=='open' and not changes.get('remind_at',row['remind_at']):
+            raise ValueError('An open reminder needs a date/time')
+        result=store.change(row['id'],changes,expected=args['revision']); nudge_sync()
     else: raise ValueError('Unknown notebook tool')
     return json.dumps(result,ensure_ascii=False)

@@ -124,3 +124,28 @@ Use `lkn To Do` to reopen it.
 The preview shows headings without hashes, readable emphasis and ☐/☑ task
 markers. Enter saves an edit and returns to that preview. Formatting never
 rewrites the saved Markdown or the file opened by V.
+
+LO can edit existing records: ask “Add buy milk to To Do,” “Rewrite the Scratch
+Pad note,” or “Move the call reminder to tomorrow.” It reads the record first
+and supplies that revision to `notebook_update`; stale or conflicted edits are
+rejected. Appending keeps the title, project and schedule. Rescheduling changes
+only the requested field. Conservatively configured LO remains read-only.
+
+Reminders now request native desktop notifications and sound on each targeted
+node, even when no browser or dashboard is open. Operating-system permissions
+and an audio/session backend still determine presentation. Delivery failures
+are recorded; the persistent reminder card remains available for Done/Snooze.
+Future Crash adds a reminder cue while its sound chip is enabled. Albert and
+Signal have an Enable browser sound / notifications button; the browser needs
+that gesture and permission for its own sound/notification channel.
+
+```sh
+lk notifications
+lk notifications voice on --node 3090
+lk notifications sound off
+lk notifications desktop off
+```
+
+Speech is off by default. Targeted nodes deliver each occurrence once; snoozing
+creates a new occurrence. Browser alerts likewise deduplicate an occurrence
+within the open page. Visual reminder cards persist until completion or snooze.

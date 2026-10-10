@@ -46,3 +46,18 @@ or sound output works correctly.
 A Fabric media result may contain a complete queue. Albert retains that queue, displays the current position, advances automatically at track end, and provides previous/next/clear controls. A later audio play result replaces the earlier Albert audio queue.
 
 Albert stores `{node,id}` for catalog items. At playback time it requests `/api/media/ticket`, assigns the returned same-origin `/api/media/audio` URL to the native media element, and lets the facade proxy Range requests to Fabric. The native `<audio>` element remains the playback engine; visualization is presentation-only.
+
+## Artist and album browsing
+
+`lk media artists` opens artists → albums → ordered tracks. `lk media albums`
+opens albums directly. Enter opens the selected group; Escape returns to its
+parent. Tracks retain Media Find playback, selection, queue and playlist actions.
+Albums are grouped by album artist plus title, keeping identically named albums
+separate while supporting compilation album-artist tags. Disc and track numbers
+control order. `--list` retains a printed listing; `--json` returns group data.
+
+## Optical import
+
+`lk media import` opens a disc workbench. `--node 3090` selects a paired owner.
+See [Disc import](MEDIA-IMPORT.md) for drive discovery, supported adapters,
+metadata review, title selection and background-job progress.

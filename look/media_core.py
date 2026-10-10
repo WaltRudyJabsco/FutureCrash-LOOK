@@ -144,6 +144,8 @@ def entry_from_path(path: str | Path, root: str | Path | None = None, sidecar: b
         if data:
             row.update(title=data.get('title') or row['title'],artist=data.get('channel') or data.get('uploader') or row['artist'],
                        source_url=data.get('webpage_url') or '',description=data.get('description') or '',keywords=data.get('tags') or [])
+            for key in ('artist','album','album_artist','track','disc'):
+                if data.get(key):row[key]=data[key]
     return row
 
 

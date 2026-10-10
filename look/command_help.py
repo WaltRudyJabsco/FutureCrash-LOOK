@@ -6,6 +6,9 @@ from pathlib import Path
 def show(words):
     text=' '.join(words).strip()
     text=text.removeprefix('lk ')
+    if text in {'media import','media disc','media rip'}:
+        import disc_ui
+        return disc_ui.main(['--help'],None,None,None)
     if text in {'notes','tasks','reminders','lkn'}:
         import notebook
         return notebook.main(['--help'])

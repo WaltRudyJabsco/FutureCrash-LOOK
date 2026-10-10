@@ -73,7 +73,7 @@ WHITE = CSI + "38;5;255m"
 GRAY = CSI + "38;5;245m"
 DARK = CSI + "38;5;239m"
 
-VERSION = "1.2.5"
+VERSION = "1.3.0"
 GLYPHS = "0123456789ABCDEF"
 SPARKS = "▁▂▃▄▅▆▇█"
 
@@ -351,6 +351,7 @@ class AudioEngine:
             "ask": [(440,.05,.08),(660,.05,.08)],
             "oracle": [(760,.05,.08),(980,.07,.07)],
             "fortune": [(520,.04,.06),(650,.04,.06),(780,.05,.06)],
+            "reminder": [(660,.08,.09),(880,.10,.08)],
             "incident": [(180,.06,.08),(135,.07,.07)],
             "panic": [(220,.07,.11),(110,.10,.11),(330,.07,.09)],
             "recover": [(330,.05,.07),(495,.05,.07),(660,.07,.07)],
@@ -2350,6 +2351,7 @@ class FutureCrash:
         self.work_detached = False
         self.ask_detached = False
         self.notebook_reminders = []
+        self.reminder_cues_seen = set()
         self.look_path = shutil.which("lk")
         self.threads = ThreadStore()
         self.thread_selected = 0
@@ -3113,6 +3115,10 @@ class FutureCrash:
         try:
             with urllib.request.urlopen('http://127.0.0.1:7332/v1/notebook/reminders',timeout=1) as response:
                 self.notebook_reminders = json.load(response).get('reminders',[])
+            seen=getattr(self,'reminder_cues_seen',set())
+            fresh={row['event_id'] for row in self.notebook_reminders}-seen
+            if fresh: self.audio.cue('reminder'); self.last_frame=''
+            self.reminder_cues_seen=seen|fresh
         except (OSError,ValueError):
             pass
 

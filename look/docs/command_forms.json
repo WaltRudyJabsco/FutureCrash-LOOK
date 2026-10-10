@@ -710,6 +710,30 @@
     "Retry catalog registration"
   ],
   [
+    "lk media import",
+    "[drives|scan|start|jobs|status ID|watch ID|cancel ID] [--node NODE]",
+    "media",
+    "Import optical discs on their owner; monitor durable jobs"
+  ],
+  [
+    "lk media albums",
+    "[QUERY] [--list|--json]",
+    "media",
+    "Browse albums and their ordered tracks"
+  ],
+  [
+    "lk media artists",
+    "[QUERY] [--list|--json]",
+    "media",
+    "Browse artists, albums and tracks"
+  ],
+  [
+    "lk notifications",
+    "[desktop|sound|voice on|off] [--node NODE]",
+    "fabric",
+    "Configure native reminder delivery"
+  ],
+  [
     "lk media find",
     "[QUERY]",
     "media",
