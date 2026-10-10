@@ -12681,6 +12681,10 @@ def _read_tty_key(fd, timeout=None):
         return "paste:"+bytes(payload[:-len(end)] if payload.endswith(end) else payload).decode("utf-8","replace")
     return {
         # Enhanced keyboards distinguish Ctrl-letter keys from their legacy bytes.
+        b"\x1b[1;3D":"wordleft", b"\x1b[1;3C":"wordright",
+        b"\x1b[1;5D":"wordleft", b"\x1b[1;5C":"wordright",
+        b"\x1b[1;3A":"paragraphup", b"\x1b[1;3B":"paragraphdown",
+        b"\x1bb":"wordleft", b"\x1bf":"wordright",
         b"\x1b[107;5u":"\x0b", b"\x1b[110;5u":"\x0e",
         b"\x1b[115;5u":"\x13", b"\x1b[106;5u":"\n",
         b"\x1b[99;5u":"\x03",
@@ -19834,6 +19838,7 @@ _COMMANDS = [
     ('lh', '[PATH]', 'files', 'LOOK with hidden files shown'),
     ('lk hidden', '[PATH]', 'files', 'LOOK with hidden files shown'),
     ('lk doc', '', 'meta', 'Full generated command, option and keyboard reference'),
+    ('lk terminal', '[theme NAME|launch NAME]', 'meta', 'Kitty palettes: neon, paper, slate; reset restores existing appearance'),
     ("lk tldr", "", "meta", "Short offline command examples"),
     ('lk dash', '', 'fabric', 'Live Fabric dashboard'),
     ('lk fabric', '[...]', 'fabric', 'Fabric nodes, transfers, jobs, repair and update'),
@@ -21166,13 +21171,16 @@ def main():
         import command_help
         return command_help.show(sys.argv[2:])
     if len(sys.argv)>2 and any(flag in sys.argv[2:] for flag in ('--help','-h')):
-        if sys.argv[1] not in {'notes','tasks','reminders','ytd','describe','notifications'} and not (sys.argv[1] in {'media','music'} and sys.argv[2] in {'import','disc','rip','edit','storage'}):
+        if sys.argv[1] not in {'terminal','notes','tasks','reminders','ytd','describe','notifications'} and not (sys.argv[1] in {'media','music'} and sys.argv[2] in {'import','disc','rip','edit','storage'}):
             import command_help
             return command_help.show([word for word in sys.argv[1:] if word not in {'--help','-h'}])
     if len(sys.argv)>=2 and sys.argv[1] in {"notes","tasks","reminders"}:
         import notebook
         kind={"notes":None,"tasks":"task","reminders":"reminder"}[sys.argv[1]]
         return notebook.main(sys.argv[2:],kind=kind,read_key=_read_tty_key,hints=_media_hints)
+    if len(sys.argv)>=2 and sys.argv[1]=='terminal':
+        import terminal_style
+        return terminal_style.main(sys.argv[2:])
     if len(sys.argv)>=2 and sys.argv[1]=="ytd":
         import ytd
         return ytd.main(sys.argv[2:])

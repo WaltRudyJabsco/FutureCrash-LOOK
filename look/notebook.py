@@ -14,6 +14,7 @@ import termios
 import textwrap
 import time
 import tty
+import unicodedata
 import urllib.request
 
 try:
@@ -108,8 +109,10 @@ or [label](<@3090:/path with spaces>). Relative paths start beside the note.
 E shows the original Markdown marks; saving returns to the rendered preview.
 In the view: arrows/Space scroll, E edits the body, V opens your full editor.
 Quick edits keep the title; Enter adds a newline; Shift-Enter/Ctrl-S saves.
-Editor: Shift-Left/Right jumps to the start/end of the note; Home/End moves
-within the line. Shift-Up/Down or Page Up/Down moves a page of lines.
+Editor: Option/Alt-Left/Right (or Ctrl-Left/Right) jumps across words.
+Option/Alt-Up/Down jumps between blank-line-separated paragraphs.
+Shift-Up/Down and Page Up/Down retain page movement.
+Shift-Left/Right jumps to the note start/end; Home/End moves within the line.
 Escape returns to the list. Explicit lkn edit NAME also opens the full editor.
 
 File (P): change the project label; text and stable ID stay the same.
@@ -228,6 +231,28 @@ def dialog_line(text,width):
     return ''.join(output)
 
 
+def word_cursor(text,cursor,direction):
+    """Move by Unicode word or punctuation group, skipping intervening spaces."""
+    def word(char): return char.isalnum() or char=='_' or unicodedata.category(char).startswith('M')
+    if direction<0:
+        while cursor and text[cursor-1].isspace(): cursor-=1
+        if cursor:
+            group=word(text[cursor-1])
+            while cursor and not text[cursor-1].isspace() and word(text[cursor-1])==group: cursor-=1
+    else:
+        while cursor<len(text) and text[cursor].isspace(): cursor+=1
+        if cursor<len(text):
+            group=word(text[cursor])
+            while cursor<len(text) and not text[cursor].isspace() and word(text[cursor])==group: cursor+=1
+    return cursor
+
+
+def paragraph_cursor(text,cursor,direction):
+    starts=[0]+[match.end() for match in re.finditer(r'\n[ \t]*\n(?:[ \t]*\n)*',text)]
+    if direction<0: return next((start for start in reversed(starts) if start<cursor),0)
+    return next((start for start in starts if start>cursor),len(text))
+
+
 def choose_note(store,fd,read_key):
     rows=store.list(include_done=True); query=''; selected=0
     while True:
@@ -292,9 +317,11 @@ def insert_link(store,fd,read_key):
                 else: return make_link(values[1],values[0])
             except ValueError as exc: notice=str(exc);active=0
             continue
-        if key in {'left','right','home','end'}:
+        if key in {'wordleft','wordright','left','right','home','end'}:
             replace[active]=False
-            if key=='left': cursors[active]=max(0,cursors[active]-1)
+            if key in {'wordleft','wordright'}:
+                cursors[active]=word_cursor(values[active],cursors[active],-1 if key=='wordleft' else 1)
+            elif key=='left': cursors[active]=max(0,cursors[active]-1)
             elif key=='right': cursors[active]=min(len(values[active]),cursors[active]+1)
             elif key=='home': cursors[active]=0
             else: cursors[active]=len(values[active])
@@ -334,7 +361,7 @@ def capture_note(fd,read_key,initial_text='',label='NEW NOTE',store=None):
             heading=(label+' · ')[:max(1,width-1)]
             actions='Enter newline · Shift-Enter/Ctrl-S save · Esc cancel'[:max(0,width-1-len(heading))]
             frame=[KEY_CYAN+heading+'\033[0m'+command_hints(actions),
-                   command_hints('Ctrl-K insert link · Shift-↑↓ page · Shift-←→ note start/end · Home/End line'[:max(1,width-1)])]
+                   command_hints('Ctrl-K link · Alt-←→ words · Alt-↑↓ paragraphs · Shift-↑↓/PgUp/PgDn page'[:max(1,width-1)])]
             if boxed:
                 frame.extend(['┌'+'─'*columns+'┐',*['│'+line.ljust(columns)+'│' for line in visible],'└'+'─'*columns+'┘'])
             else: frame.extend(visible)
@@ -355,6 +382,8 @@ def capture_note(fd,read_key,initial_text='',label='NEW NOTE',store=None):
                 text=text[:cursor-1]+text[cursor:]; cursor-=1
             elif key=='left': cursor=max(0,cursor-1)
             elif key=='right': cursor=min(len(text),cursor+1)
+            elif key in {'wordleft','wordright'}: cursor=word_cursor(text,cursor,-1 if key=='wordleft' else 1)
+            elif key in {'paragraphup','paragraphdown'}: cursor=paragraph_cursor(text,cursor,-1 if key=='paragraphup' else 1)
             elif key=='delete': text=text[:cursor]+text[cursor+1:]
             elif key=='shiftleft': cursor=0
             elif key=='shiftright': cursor=len(text)
