@@ -68,6 +68,16 @@ def test_catalog_gateway_error_preserves_backend_diagnostic(monkeypatch):
         node._peer_json({},'/v1/media/catalog')
 
 
+def test_failed_catalog_keeps_each_route_failure(monkeypatch):
+    import pytest
+    from core import node
+    monkeypatch.setattr(node,'_peer_bases',lambda peer:['https://lan','https://tailnet'])
+    def request(url,timeout):raise OSError('failed '+url)
+    monkeypatch.setattr(node,'http_json',request)
+    with pytest.raises(RuntimeError) as result:node._peer_json({},'/v1/media/catalog')
+    assert 'https://lan' in str(result.value) and 'https://tailnet' in str(result.value)
+
+
 def test_unpaired_tailscale_devices_are_not_missing_catalog_owners(monkeypatch):
     from core import node
     monkeypatch.setattr(node,'_refresh_media_peers_background',lambda:None)
