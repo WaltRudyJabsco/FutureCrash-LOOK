@@ -21,7 +21,7 @@
     "lk terminal",
     "[theme NAME|launch NAME|customize]",
     "meta",
-    "Kitty palettes and one editable custom style; reset removes the appearance overlay"
+    "Kitty palette picker and custom inks/highlighter; reset removes the appearance overlay"
   ],
   [
     "lk tldr",

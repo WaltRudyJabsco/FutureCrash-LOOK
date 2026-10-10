@@ -117,3 +117,59 @@ def test_invalid_custom_color_never_reaches_config(tmp_path,monkeypatch):
     (path/'look-custom.json').write_text(json.dumps({'accent':'#123\nmap x quit'}))
     with pytest.raises(ValueError):styles.select_theme('custom',path)
     assert not (path/'look-theme.conf').exists()
+
+
+def test_paper_prompt_panels_contrast_with_existing_dark_os_time_and_git_text():
+    palette=styles.settings('paper')
+    # P10K's existing OS/time use panel 7, Git uses panels 2/3 and foreground 0.
+    for foreground,background in (('#080808','color7'),(palette['color0'],'color7'),
+                                 (palette['color0'],'color2'),(palette['color0'],'color3')):
+        assert styles.contrast(foreground,palette[background])>=4.5
+    assert styles.contrast(palette['selection_background'],palette['selection_foreground'])>=4.5
+    assert palette['selection_background']=='#f3d76a'
+
+
+def test_picker_edits_highlighted_preset_and_cancels_without_saving(terminal):
+    keys=iter(['down','E'])
+    assert styles.choose_theme(lambda *args:next(keys))==('paper',True)
+    assert styles.choose_theme(lambda *args:'esc') is None
+
+
+def test_fine_tuning_paper_seeds_custom_without_overwriting_preset(tmp_path,monkeypatch,terminal):
+    path=folder(tmp_path,monkeypatch);monkeypatch.setattr(styles,'reload_kitty',lambda:False)
+    (path/'look-custom.json').write_text(json.dumps(dict(styles.CUSTOM_DEFAULTS,accent='#213f65')))
+    original=dict(styles.settings('paper'))
+    assert styles.customize(lambda *args:'s',path,base='paper')
+    saved=json.loads((path/'look-custom.json').read_text())
+    assert saved['accent']==original['url_color']
+    assert saved['selection']=='#f3d76a'
+    assert styles.settings('paper')==original
+    custom=styles.settings('custom',path)
+    assert custom['color2']==original['color2']
+    assert custom['color7']==original['color7']
+    assert 'Red pen' in terminal.getvalue() and 'Selected notes.md' in terminal.getvalue()
+
+
+@pytest.mark.parametrize('truecolor',[True,False])
+def test_marked_filter_selection_keeps_highlighter_and_legible_text(tmp_path,monkeypatch,truecolor):
+    path=folder(tmp_path,monkeypatch);styles.select_theme('paper',path)
+    listing=tmp_path/'listing';listing.mkdir();(listing/'notes.md').write_text('Notes')
+    code=r'''
+from pathlib import Path
+from look import look_renderer as r
+import sys
+root=Path(sys.argv[1]);note=root/'notes.md'
+expected='\x1b[48;2;243;215;106m\x1b[38;2;32;30;26m'
+assert r.ACTIVE.startswith(expected),repr(r.ACTIVE)
+rows=r._CatalogView([note],[],root,100,note,{note.resolve()})
+row=rows[0]
+assert row.startswith(expected),repr(row)
+assert '✓' in row and 'notes.md' in row
+assert row.count(r.RESET)==1,repr(row)
+entries=r.read_entries(root,False)
+for row in r.column_grid(entries,100,note,{note.resolve()})+r.detail_rows(entries,100,note,{note.resolve()}):
+ assert row.startswith(expected),repr(row)
+ assert r.RESET not in row.split('notes.md')[0],repr(row)
+'''
+    env=dict(os.environ,COLORTERM='truecolor' if truecolor else '')
+    subprocess.run([sys.executable,'-c',code,str(listing)],cwd=ROOT,env=env,check=True)

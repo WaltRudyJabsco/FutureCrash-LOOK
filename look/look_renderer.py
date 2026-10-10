@@ -81,7 +81,7 @@ except ImportError:
 _APP_COLORS=application_colors()
 for _role,_color in _APP_COLORS.items():
     if _TRUECOLOR and not _role.startswith('ACTIVE_'):globals()[_role]=_rgb(*_color)
-if _TRUECOLOR and _APP_COLORS:
+if _APP_COLORS:
     ACTIVE=_bg(*_APP_COLORS['ACTIVE_BG'])+_rgb(*_APP_COLORS['ACTIVE_FG'])+BOLD
 
 CLEAR='\x1b[2J\x1b[H'; HIDE='\x1b[?25l'; SHOW='\x1b[?25h'
@@ -251,11 +251,11 @@ def column_grid(entries:list[Entry], width:int, highlight_path:Path|None=None, m
     for start in range(0,len(labels),cols):
         pieces=[]
         for e,text in labels[start:start+cols]:
-            plain=text
+            style=ACTIVE if highlight_path is not None and e.path==highlight_path else color_for(e)
+            plain=strip_ansi(text) if style==ACTIVE else text
             if len(plain)>cellw-2:
                 plain=plain[:max(1,cellw-3)]+'…'
             padding=' ' * max(1,cellw-len(plain))
-            style=ACTIVE if highlight_path is not None and e.path==highlight_path else color_for(e)
             pieces.append(style+plain+RESET+padding)
         rows.append(''.join(pieces).rstrip())
     return rows
@@ -270,8 +270,9 @@ def detail_rows(entries:list[Entry], width:int, highlight_path:Path|None=None, m
         when=age_text(e.mtime)
         right=f'{size:>7}  {when:>10}'
         avail=max(10,width-len(right)-3)
-        if len(left)>avail: left=left[:max(1,avail-1)]+'…'
         style=ACTIVE if highlight_path is not None and e.path==highlight_path else color_for(e)
+        if style==ACTIVE:left=strip_ansi(left)
+        if len(left)>avail: left=left[:max(1,avail-1)]+'…'
         rows.append(f'{style}{left:<{avail}}{RESET} {GRAY}{right}{RESET}')
     return rows
 
@@ -325,7 +326,7 @@ def tree_rows(target:Path, depth:int, width:int, hidden:bool, query:str='', high
             mark=(f'{GREEN}✓{RESET} ' if marked and e.path.resolve() in marked else '  ')
             line=f'{prefix}{branch} {mark}{marker(e)} {e.name}{"/" if e.is_dir else ""}'
             style=ACTIVE if highlight_path is not None and e.path==highlight_path else color_for(e)
-            rendered.append(style+fit(line,width)+RESET)
+            rendered.append(style+fit(strip_ansi(line) if style==ACTIVE else line,width)+RESET)
             rendered.extend(descendants)
             any_match=True
         return rendered,any_match
@@ -2000,7 +2001,8 @@ class _CatalogView:
             except OSError:
                 style=WHITE
         suffix='/' if p.is_dir() else ''
-        return style+fit(f'{mark}{rel}{suffix}',width)+RESET
+        label=f'{mark}{rel}{suffix}'
+        return style+fit(strip_ansi(label) if style==ACTIVE else label,width)+RESET
 
 
 def _catalog_view(paths:list[Path],root:Path,width:int,query:str='',highlight_path:Path|None=None,marked:set[Path]|None=None,scanning:bool=False,hidden:bool=True,include_headers:bool=True,matched_paths=None):
