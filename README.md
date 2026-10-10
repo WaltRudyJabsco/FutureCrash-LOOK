@@ -1,6 +1,6 @@
-# Future Crash + LOOK 8.16.0 — FABRIC MEDIA
+# Future Crash + LOOK 8.16.1 — FABRIC MEDIA
 
-8.16.0 remembers library destinations and delivers verified disc imports through
+8.16.1 remembers library destinations and delivers verified disc imports through
 node-local inboxes into music/movies categories, retaining source copies.
 
 8.15.0 adds shared metadata editing: Tab marks tracks, A selects all shown,
@@ -41,7 +41,7 @@ and synchronize revisions across paired nodes. Due reminders appear in Albert
 and Signal with Done, Snooze, and Open note controls. Future Crash's workstation
 keeps Escape responsive during host operations. See [Notebook guide](docs/NOTEBOOK.md).
 
-8.16.0 stabilizes the Phase-2 refactor and hardens Fabric media across nodes: faster catalog discovery, reliable remote playback, browser handoff by media ownership, remote artwork and previews, removable-media wake-up, and cleaner LOOK filter interaction.
+8.16.1 stabilizes the Phase-2 refactor and hardens Fabric media across nodes: faster catalog discovery, reliable remote playback, browser handoff by media ownership, remote artwork and previews, removable-media wake-up, and cleaner LOOK filter interaction.
 
 **One local-first personal computer made from the machines you already own.**
 
@@ -51,8 +51,8 @@ Remote and local media covers now use the same explicit full-RGB Chafa symbol co
 
 | Layer | Version |
 | --- | ---: |
-| Future Crash + LOOK bundle | **8.16.0** |
-| LOOK component | **4.63.0** |
+| Future Crash + LOOK bundle | **8.16.1** |
+| LOOK component | **4.63.1** |
 | Future Crash component | **1.3.0** |
 
 Use `lk version` for installed LOOK/bundle identity, `lk help` for the starter map, `lk commands` for the searchable index, `lk doc` / `lk help all` / `man lk` for the full reference, and `lk tldr` for short examples. Component versions intentionally advance independently.
@@ -520,7 +520,7 @@ For repository health, run `./tools/verify.sh`; `docs/CODE_HEALTH.md` documents 
 
 ## Historical release note: 6.1.10
 
-The following section describes **6.1.10 — Media Mount Race Repair** and is preserved for release-history context. The current bundle is **8.16.0 — FABRIC MEDIA**.
+The following section describes **6.1.10 — Media Mount Race Repair** and is preserved for release-history context. The current bundle is **8.16.1 — FABRIC MEDIA**.
 
 Browser endpoint management is now Fabric-wide: `lk fabric endpoints`, `allow`, and `revoke-endpoint` work from any reachable trusted node rather than only the Signal host. Tailcat adds direct certificate-pinned TLS transport between paired nodes on reachable LAN/IP paths and is preferred automatically; Tailscale remains a fallback for reachability and bootstrap rather than the definition of Fabric networking. Existing 6.0 pairings learn Tailcat metadata from authenticated peer identity and do not require another re-pair.
 

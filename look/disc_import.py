@@ -139,7 +139,7 @@ def lookup(toc):
     if not toc:return []
     from urllib.parse import urlencode
     url='https://musicbrainz.org/ws/2/discid/'+toc['disc_id']+'?'+urlencode({'toc':toc['toc'],'inc':'artists+recordings','fmt':'json'})
-    request=urllib.request.Request(url,headers={'User-Agent':'FutureCrash-LOOK/8.16.0 (personal disc importer)'})
+    request=urllib.request.Request(url,headers={'User-Agent':'FutureCrash-LOOK/8.16.1 (personal disc importer)'})
     try:
         with urllib.request.urlopen(request,timeout=5) as response:data=json.load(response)
     except (OSError,ValueError):return []

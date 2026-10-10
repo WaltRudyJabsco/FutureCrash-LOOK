@@ -31,7 +31,7 @@ try:
 except Exception:
     readline = None
 
-VERSION="4.63.0"
+VERSION="4.63.1"
 
 LOOK_WORDMARK = r"""       ██╗      ██╗  ██╗
        ██║      ██║ ██╔╝
@@ -10014,7 +10014,7 @@ def _direct_searxng_search(query, limit=8):
     params=urllib.parse.urlencode({"q":query,"format":"json"})
     request=urllib.request.Request(base+"/search?"+params,headers={
         "Accept":"application/json",
-        "User-Agent":"Future-Crash-Fabric/8.16.0",
+        "User-Agent":"Future-Crash-Fabric/8.16.1",
     })
     with urllib.request.urlopen(request,timeout=12) as response:
         data=json.load(response)

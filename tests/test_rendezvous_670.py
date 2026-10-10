@@ -84,7 +84,7 @@ def test_registry_is_ephemeral_slot_scoped(monkeypatch):
 
 def test_670_bundle_installs_rendezvous_and_keeps_tailscale_fallback():
     root=Path(__file__).resolve().parents[1]
-    assert (root/'VERSION').read_text().strip()=='8.16.0'
+    assert (root/'VERSION').read_text().strip()=='8.16.1'
     install=(root/'install.sh').read_text()
     lk=(root/'look/lk').read_text()
     node_text=(root/'core/node.py').read_text()

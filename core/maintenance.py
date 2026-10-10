@@ -187,6 +187,26 @@ def draining():
     return True
 
 
+def launch_runner(folder,job):
+    command=[sys.executable,str(folder/'runner.py'),'--run-job',job]
+    if platform.system().lower()=='linux' and (Path.home()/'.config/systemd/user/future-crash-look-node.service').is_file():
+        # setsid separates terminals, not systemd cgroups. Stopping node.service
+        # would also kill its updater; the user manager must own a separate unit.
+        unit='future-crash-look-maintenance-'+job
+        launched=subprocess.run(['systemd-run','--user','--quiet','--collect','--unit='+unit,
+            '--property=Type=exec','--property=StandardOutput=append:'+str(folder/'runner.log'),
+            '--property=StandardError=append:'+str(folder/'runner.log'),'--',*command],capture_output=True,text=True,timeout=10)
+        if launched.returncode:raise RuntimeError('Cannot isolate maintenance from node service: '+launched.stderr.strip())
+        result=subprocess.run(['systemctl','--user','show',unit,'--property=MainPID','--value'],capture_output=True,text=True,timeout=3)
+        try:pid=int(result.stdout.strip())
+        except ValueError:pid=0
+        if result.returncode or pid<=0:raise RuntimeError('Maintenance service did not report a running worker')
+        return pid
+    with open(folder/'runner.log','ab') as log:
+        proc=subprocess.Popen(command,stdin=subprocess.DEVNULL,stdout=log,stderr=log,start_new_session=True)
+    return proc.pid
+
+
 def schedule(action, *, data=None, expected=None):
     if action not in {'update', 'restart'}: raise ValueError('unsupported maintenance action')
     root().mkdir(parents=True, exist_ok=True)
@@ -208,14 +228,10 @@ def schedule(action, *, data=None, expected=None):
         atomic_json(root() / 'active.json', {'job': job})
         # Run a pinned copy: replacing the installed maintenance module cannot kill recovery.
         shutil.copyfile(__file__, folder / 'runner.py')
-        with open(folder / 'runner.log', 'ab') as log:
-            try:
-                proc = subprocess.Popen([sys.executable, str(folder / 'runner.py'), '--run-job', job],
-                                        stdin=subprocess.DEVNULL, stdout=log, stderr=log, start_new_session=True)
-            except OSError as exc:
-                atomic_json(folder / 'receipt.json', {**config, 'state': 'failed', 'error': str(exc)})
-                raise
-        config['pid'] = proc.pid
+        try:config['pid']=launch_runner(folder,job)
+        except (OSError,RuntimeError,subprocess.SubprocessError) as exc:
+            atomic_json(folder/'receipt.json',{**config,'state':'failed','error':str(exc)})
+            raise
         atomic_json(folder / 'receipt.json', config)
         (folder / 'go').touch()
         return config
@@ -297,7 +313,7 @@ def health(expected=None, seconds=45, services=()):
 
 def run_job(job):
     folder = root() / 'jobs' / job
-    deadline = time.monotonic() + 5
+    deadline = time.monotonic() + 15
     while not (folder / 'go').exists():
         if time.monotonic() >= deadline: return
         time.sleep(.05)

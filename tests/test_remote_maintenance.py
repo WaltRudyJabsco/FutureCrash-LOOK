@@ -17,7 +17,7 @@ RUNTIME = ['.local/share/look/lk', '.local/share/future-crash-look/core/node.py'
 
 def package(files=None, commit='new'):
     files = files or {p: b'# runtime\nvalue = 2\n' for p in RUNTIME}
-    manifest = {'protocol': 1, 'release': '8.16.0', 'commit': commit, 'files': [
+    manifest = {'protocol': 1, 'release': '8.16.1', 'commit': commit, 'files': [
         {'path': p, 'sha256': m.digest(data), 'size': len(data), 'mode': 0o644}
         for p, data in sorted(files.items())]}
     data = io.BytesIO()
@@ -182,8 +182,8 @@ def test_manual_install_registers_only_code_not_catalogs(home, monkeypatch, tmp_
         src = source / p; src.parent.mkdir(parents=True, exist_ok=True); src.write_text('# code\n')
         target = ('.local/share/look/' + src.name) if p.startswith('look/') else '.local/share/future-crash-look/core/' + src.name
         m.write_runtime(m.destination(target), src.read_bytes(), 0o644)
-    (source / 'VERSION').write_text('8.16.0')
-    m.write_runtime(m.destination('.local/share/future-crash-look/RELEASE'), b'8.16.0', 0o644)
+    (source / 'VERSION').write_text('8.16.1')
+    m.write_runtime(m.destination('.local/share/future-crash-look/RELEASE'), b'8.16.1', 0o644)
     (home / '.local/share/look/lo_history.json').write_text('["private prompt"]')
     monkeypatch.setattr(m.subprocess, 'run', Mock(side_effect=FileNotFoundError('git missing')))
     result = m.register_install(source)
@@ -296,3 +296,28 @@ def test_receiver_resolves_source_with_real_peer_registry_and_stages(home, monke
     assert result['ok'] and result['state'] == 'staged'
     assert opener.call_args.args[0].full_url == 'https://3090.example:7443/v1/maintenance/bundle'
     stage.assert_called_once_with('update', data=data, expected=expected)
+
+
+def test_linux_runner_uses_independent_user_unit_before_stopping_node(home,monkeypatch):
+    unit=home/'.config/systemd/user/future-crash-look-node.service';unit.parent.mkdir(parents=True);unit.touch()
+    monkeypatch.setattr(m.platform,'system',lambda:'Linux')
+    calls=[]
+    def run(args,**kwargs):
+        calls.append(args)
+        return Mock(returncode=0,stdout='12345\n' if args[0]=='systemctl' else '',stderr='')
+    monkeypatch.setattr(m.subprocess,'run',run)
+    popen=Mock();monkeypatch.setattr(m.subprocess,'Popen',popen)
+    folder=home/'job';folder.mkdir()
+    assert m.launch_runner(folder,'a'*32)==12345
+    assert calls[0][0]=='systemd-run' and '--property=Type=exec' in calls[0]
+    assert '--unit=future-crash-look-maintenance-'+'a'*32 in calls[0]
+    popen.assert_not_called()
+
+
+def test_linux_isolation_failure_has_no_unsafe_detached_fallback(home,monkeypatch):
+    unit=home/'.config/systemd/user/future-crash-look-node.service';unit.parent.mkdir(parents=True);unit.touch()
+    monkeypatch.setattr(m.platform,'system',lambda:'Linux')
+    monkeypatch.setattr(m.subprocess,'run',lambda *args,**kwargs:Mock(returncode=1,stderr='No user bus'))
+    popen=Mock();monkeypatch.setattr(m.subprocess,'Popen',popen)
+    with pytest.raises(RuntimeError,match='Cannot isolate'):m.launch_runner(home,'a'*32)
+    popen.assert_not_called()
