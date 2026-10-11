@@ -1,9 +1,3 @@
-## 2026-10-11 · Fabric audio output picker
-
-- Discover node-owned native audio, Linux RAOP/AirPlay and Mac Bonjour receivers through Settings, Player/MP and `lk media outputs`; retain local outputs when peers are unavailable.
-- Explicitly choose and verify the active player output, persist preferences per account, and reject disconnected selections without automatic fallback. Bluetooth uses host pairing; Linux AirPlay discovery is opt-in and session-only.
-- Add explicit remote selection and queue handoff commands; preserve public stream URLs during handoff. Discovery and upgrades preserve system defaults and backup configuration.
-
 ## 2026-10-10 · Guided Fabric backup setup
 
 - Add a connected-drive setup guide and Settings backup menu for macOS/Linux; choose contributors, spare-key location and daily/manual schedule with verified first backup.
