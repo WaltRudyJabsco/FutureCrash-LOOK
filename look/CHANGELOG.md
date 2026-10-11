@@ -1,3 +1,9 @@
+## 2026-10-11 · Artwork and playback duplicate fallback
+
+- Try reachable duplicates before accepting an unverified slow primary copy, and keep the selected artwork identity aligned with playback.
+- Let old queues retrieve terminal art from alternate catalog locations when their preferred drive is unmounted; do not retry a definitive owner 404 through every network address.
+- Preserve existing cover lookup/cache behavior and audio routing.
+
 ## 2026-10-10 · Guided Fabric backup setup
 
 - Add a connected-drive setup guide and Settings backup menu for macOS/Linux; choose contributors, spare-key location and daily/manual schedule with verified first backup.

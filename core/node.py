@@ -4029,7 +4029,8 @@ class API(BaseHTTPRequestHandler):
         snapshot={"self":node_info(),"peers":PEERS.public()}
         try:
             peer=_peer_for_target(snapshot,target); last_exc=None
-            for base in _peer_bases(peer):
+            live,_ident=_file_race(peer,"/v1/identity")
+            for base in [live]+[b for b in _peer_bases(peer) if b!=live]:
                 params={"id":entry_id,"path":path_hint}
                 if browser: params["representation"]="browser"
                 url=base+"/v1/media/item?"+urllib.parse.urlencode(params)
@@ -4055,6 +4056,11 @@ class API(BaseHTTPRequestHandler):
                                 if not chunk: break
                                 self.wfile.write(chunk)
                         return
+                except urllib.error.HTTPError as exc:
+                    # A reachable owner definitively reports this copy absent.
+                    # Retrying its other addresses delays duplicate selection.
+                    if exc.code==404:raise
+                    last_exc=exc
                 except Exception as exc:
                     last_exc=exc
             raise RuntimeError(f"media item transport failed: {last_exc}")
@@ -4085,7 +4091,8 @@ class API(BaseHTTPRequestHandler):
         snapshot={"self":node_info(),"peers":PEERS.public()}
         try:
             peer=_peer_for_target(snapshot,target); last_exc=None
-            for base in _peer_bases(peer):
+            live,_ident=_file_race(peer,"/v1/identity")
+            for base in [live]+[b for b in _peer_bases(peer) if b!=live]:
                 url=base+"/v1/media/cover?"+urllib.parse.urlencode({"id":entry_id,"path":path_hint})
                 headers=FABRIC_IDENTITY.auth_headers_for_url(url)
                 req=urllib.request.Request(url,headers=headers,method="HEAD" if head else "GET")
@@ -4107,6 +4114,11 @@ class API(BaseHTTPRequestHandler):
                                 if not chunk: break
                                 self.wfile.write(chunk)
                         return
+                except urllib.error.HTTPError as exc:
+                    # A reachable owner definitively reports this copy absent.
+                    # Retrying its other addresses delays duplicate selection.
+                    if exc.code==404:raise
+                    last_exc=exc
                 except Exception as exc:
                     last_exc=exc
             raise RuntimeError(f"media cover transport failed: {last_exc}")
@@ -4223,7 +4235,8 @@ class API(BaseHTTPRequestHandler):
         snapshot={"self":node_info(),"peers":PEERS.public()}
         try:
             peer=_peer_for_target(snapshot,target); last_exc=None
-            for base in _peer_bases(peer):
+            live,_ident=_file_race(peer,"/v1/identity")
+            for base in [live]+[b for b in _peer_bases(peer) if b!=live]:
                 url=base+"/v1/preview/terminal?"+urllib.parse.urlencode({"id":entry_id,"path":path_hint,"width":width,"height":height})
                 headers=FABRIC_IDENTITY.auth_headers_for_url(url)
                 req=urllib.request.Request(url,headers=headers)
@@ -4237,9 +4250,16 @@ class API(BaseHTTPRequestHandler):
                         raise RuntimeError("invalid terminal preview response")
                     payload["owner"]=target
                     return self.sendj(200,payload)
+                except urllib.error.HTTPError as exc:
+                    # A reachable owner definitively reports this copy absent.
+                    # Retrying its other addresses delays duplicate selection.
+                    if exc.code==404:raise
+                    last_exc=exc
                 except Exception as exc:
                     last_exc=exc
             raise RuntimeError(f"terminal preview transport failed: {last_exc}")
+        except urllib.error.HTTPError as exc:
+            return self.sendj(exc.code,{"error":"Artwork unavailable on selected media copy"})
         except Exception as exc:
             return self.sendj(502,{"error":str(exc)})
 

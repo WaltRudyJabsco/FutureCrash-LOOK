@@ -14,7 +14,7 @@ def test_daemon_media_helpers_find_package_manager_bins():
 
 
 def test_remote_preview_inherits_working_playback_route():
-    block=LK[LK.index('def _media_remote_preview_identity'):LK.index('def _media_remote_preview_key')]
+    block=LK[LK.index('def _media_remote_preview_identities'):LK.index('def _media_remote_preview_key')]
     assert 'source=_media_entry_source(row)' in block
     assert 'parsed.path=="/v1/media/item"' in block
     assert 'q.get("node")' in block and 'q.get("id")' in block
