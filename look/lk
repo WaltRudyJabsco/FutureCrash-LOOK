@@ -14295,6 +14295,9 @@ def _settings_rows():
         ("apps","DESKTOP","Preferred apps",f"{len(_load_apps())} overrides",
          "Choose preferred apps for browser, editor, images, PDF, video, and audio. System defaults remain available.",
          "apps applications desktop open preview video vlc mpv pdf image editor browser audio"),
+        ("mediaoutputs","MEDIA","Audio outputs","discover / choose",
+         "Choose computer, AirPlay or paired Bluetooth outputs through their owning Fabric node. Discovery never changes playback.",
+         "media audio output speaker airplay bluetooth soundtouch airport playback"),
         ("comfy","MEDIA","Image generation",_settings_comfy_state(),
          "Configure optional ComfyUI generation, discover older installs/models, choose workflow/output folder, and auto-preview results.",
          "comfy stable diffusion image generation render workflow checkpoint model media"),
@@ -14569,6 +14572,7 @@ def _settings_action(key):
     if key=="personalityvoices": return _settings_pick_personality_voices()
     if key=="voicepreview": return _voice_command(["preview"])
     if key=="motion": return _settings_pick_motion()
+    if key=="mediaoutputs": return _media_outputs_command(["discover"])
     if key=="recovery": return _fabric_command(["backup","menu"])
     if key=="profile": return _profile_status()
     if key=="memory": return _memory_command([])
@@ -16895,6 +16899,10 @@ def _media_reuse_needs_visible_restart(wants_video):
 
 def _media_launch_session(session):
     """Mirror LOOK's canonical queue into mpv and start at the requested item."""
+    import media_outputs
+    try:audio_device=media_outputs.selected_device()
+    except (OSError,ValueError,subprocess.TimeoutExpired) as exc:
+        print("LOOK OUTPUTS · "+media_outputs.clean(exc));return 1
     session=media_core.normalize_session(session)
     queue=session.get("queue") or []
     if not queue:
@@ -16953,6 +16961,9 @@ def _media_launch_session(session):
     queue_video=_media_queue_has_video(queue)
     if _media_mpv_alive():
         if not _media_reuse_needs_visible_restart(queue_video):
+            output_result=_media_mpv_request(["set_property","audio-device",audio_device])
+            if (audio_device!="auto" and not output_result) or (output_result and output_result.get("error")!="success"):
+                print("LOOK OUTPUTS · player could not select this speaker");return 1
             loaded=_media_mpv_request(["loadlist",str(MEDIA_QUEUE_FILE),"replace"])
             if loaded and loaded.get("error")=="success":
                 _media_mpv_request(["set_property","playlist-pos",idx])
@@ -16994,6 +17005,7 @@ def _media_launch_session(session):
         f"--log-file={MEDIA_MPV_LOG}",
         f"--playlist={MEDIA_QUEUE_FILE}",
         f"--playlist-start={idx}",
+        f"--audio-device={audio_device}",
     ]
     if queue_video:
         cmd.append("--force-window=immediate")
@@ -17022,11 +17034,18 @@ def _media_launch_session(session):
 
 def _media_launch_stream(url,source="",session=None):
     """Launch one Fabric byte stream using a mature media engine."""
+    import media_outputs
+    try:audio_device=media_outputs.selected_device()
+    except (OSError,ValueError,subprocess.TimeoutExpired) as exc:
+        print("LOOK OUTPUTS · "+media_outputs.clean(exc));return 1
     stream_video=_media_queue_has_video((session or {}).get("queue") or [])
     mpv=_media_mpv_binary()
     if mpv:
         if _media_mpv_alive():
             if not _media_reuse_needs_visible_restart(stream_video):
+                output_result=_media_mpv_request(["set_property","audio-device",audio_device])
+                if (audio_device!="auto" and not output_result) or (output_result and output_result.get("error")!="success"):
+                    print("LOOK OUTPUTS · player could not select this speaker");return 1
                 loaded=_media_mpv_request(["loadfile",url,"replace"])
                 if loaded and loaded.get("error")=="success":
                     _media_mpv_request(["set_property","pause",False])
@@ -17045,7 +17064,7 @@ def _media_launch_stream(url,source="",session=None):
         _media_stop_owned_mpvs()
         try: MEDIA_IPC_FILE.unlink(missing_ok=True)
         except OSError: pass
-        cmd=[mpv,"--no-config",f"--input-ipc-server={MEDIA_IPC_FILE}","--no-terminal","--idle=yes",f"--log-file={MEDIA_MPV_LOG}"]
+        cmd=[mpv,"--no-config",f"--input-ipc-server={MEDIA_IPC_FILE}","--no-terminal","--idle=yes",f"--log-file={MEDIA_MPV_LOG}",f"--audio-device={audio_device}"]
         if stream_video: cmd.append("--force-window=immediate")
         cmd.append(url)
         try:
@@ -19052,7 +19071,7 @@ def _media_player_render(visualizer=0,visual_elapsed=0):
                 f"Shuffle {'on' if snap['session'].get('shuffle') else 'off'}  ·  "
                 f"Repeat {snap['session'].get('repeat','off')}")
         eq=_media_player_visualizer(entry,snap["state"],inner)
-        player_controls="space play/pause · ←/→ seek 10s · p/n previous/next · s shuffle · r repeat · v visuals · x stop · q/Esc close player"
+        player_controls="space play/pause · ←/→ seek 10s · p/n previous/next · s shuffle · r repeat · v visuals · o outputs · x stop · q/Esc close player"
         raw_body=[
             f"{artist} — {title}" if artist else title, album, eq or "",
             f"{time_text}  {bar}",
@@ -19121,6 +19140,11 @@ def media_player(initial_visualizer=0):
             elif key=="right": _media_mpv_request(["seek",10,"relative"])
             elif key=="s": _media_shuffle_command()
             elif key=="r": _media_repeat_command([])
+            elif key=="o":
+                termios.tcsetattr(fd,termios.TCSADRAIN,old)
+                try: _media_outputs_command(['discover'])
+                finally: tty.setcbreak(fd)
+                sys.stdout.write("\033[2J")
             elif key=="x": _media_control_session("stop")
     except KeyboardInterrupt:
         return 0
@@ -19306,7 +19330,7 @@ def media_mp(initial_query=""):
                     print(_c(filter_text,"1;36"))
                     controls="↑↓ select · Shift-arrows page/ends · Tab mark · A select all · E edit metadata · R refresh · C clear selection · Enter play · B add queue · D hide dir · L library · Q queue"
                     print(_media_hints(controls,width))
-                    print(_media_hints("/ search · space pause · ←/→ seek 10s · p/n prev/next · v visuals · s shuffle · r repeat · x stop · Esc finish/clear/exit",width),end="")
+                    print(_media_hints("/ search · space pause · ←/→ seek 10s · p/n prev/next · v visuals · o outputs · s shuffle · r repeat · x stop · Esc finish/clear/exit",width),end="")
                     if notice:
                         print("  "+_c(notice,"33"),end="")
                         notice=""
@@ -19360,6 +19384,13 @@ def media_mp(initial_query=""):
                 termios.tcsetattr(fd,termios.TCSADRAIN,old)
                 media_player(initial_visualizer=1)
                 tty.setcbreak(fd)
+                native_preview.frame_cleared()
+                continue
+            if key=="o":
+                native_preview.invalidate()
+                termios.tcsetattr(fd,termios.TCSADRAIN,old)
+                try: _media_outputs_command(['discover'])
+                finally: tty.setcbreak(fd)
                 native_preview.frame_cleared()
                 continue
             if key=="/":
@@ -19434,19 +19465,52 @@ def media_mp(initial_query=""):
         sys.stdout.write("\n")
         sys.stdout.flush()
 
-def _media_outputs_command():
+def _media_output_local(args):
+    import media_outputs
     try:
-        payload=_media_fabric_cli(["media-outputs"])
-    except RuntimeError as exc:
-        print(f"LOOK media · {exc}")
-        return 1
-    rows=payload.get("outputs") or []
-    print(f"FABRIC MEDIA OUTPUTS · {len(rows)}")
-    for row in rows:
-        mark="●" if row.get("available") else "○"
-        active=f" · {row.get('state')}" if row.get("active") else ""
-        print(f"  {mark} {str(row.get('node') or '?'):<20} {str(row.get('output_id') or 'default')}{active}")
-    return 0
+        if args and args[0]=='select':
+            if len(args)!=2:raise ValueError('Output ID required')
+            result=media_outputs.select(args[1],_media_mpv_request if _media_mpv_alive() else None)
+        elif args and args[0]=='enable-airplay':result=media_outputs.enable_airplay()
+        else:result={'outputs':media_outputs.catalog(discover='discover' in args)}
+        print(json.dumps(result,ensure_ascii=False));return 0
+    except (OSError,ValueError,subprocess.TimeoutExpired) as exc:
+        print(json.dumps({'ok':False,'error':media_outputs.clean(exc)}));return 1
+
+
+def _media_outputs_command(args=()):
+    import media_outputs
+    try:
+        if args and args[0] in {'select','enable-airplay','move'}:
+            import argparse
+            parser=argparse.ArgumentParser(prog='lk media outputs '+args[0])
+            parser.add_argument('value',nargs='?');parser.add_argument('--node')
+            choice=parser.parse_args(args[1:])
+            command={'select':'media-output','enable-airplay':'media-airplay','move':'media-move'}[args[0]]
+            argv=[command]+([choice.value] if choice.value else [])+(['--node',choice.node] if choice.node else [])
+            payload=_media_fabric_cli(argv);print(media_outputs.clean(payload.get('message') or 'Output action completed'));return 0
+        payload=_media_fabric_cli(['media-outputs']+(['discover'] if 'discover' in args else []))
+        rows=payload.get('outputs') or []
+        if '--json' in args:print(json.dumps(payload,ensure_ascii=False));return 0
+        print(f'FABRIC MEDIA OUTPUTS · {len(rows)}')
+        for number,row in enumerate(rows,1):
+            print(f"  {number:>2}. {'●' if row.get('available') else '○'} {media_outputs.clean(row.get('label') or row.get('output_id'))} · via {media_outputs.clean(row.get('node'))}"+(' · selected' if row.get('selected') else ''))
+            if row.get('reason'):print('      '+media_outputs.clean(row['reason']))
+        for error in payload.get('errors') or []:print('  Unavailable: '+media_outputs.clean(error.get('node'))+' · '+media_outputs.clean(error.get('error')))
+        print('Choose an output explicitly; discovery never changes playback. Bluetooth: pair in the host settings, then refresh.')
+        if not (sys.stdin.isatty() and sys.stdout.isatty()) or '--list' in args:return 0
+        entered=input('Output number (Enter: back): ').strip()
+        if not entered:return 0
+        if not entered.isdigit() or not 1<=int(entered)<=len(rows):raise ValueError('Choose a listed output number')
+        row=rows[int(entered)-1]
+        if not row.get('available'):raise ValueError(row.get('reason') or 'Output unavailable')
+        result=_media_fabric_cli(['media-output',row['output_id'],'--node',row['node']])
+        print(media_outputs.clean(result.get('message') or 'Output selected'))
+        print('Play there: lk media on '+media_outputs.clean(row['node'])+' play TARGET')
+        print('Move this computer’s current queue: lk media outputs move --node '+media_outputs.clean(row['node']))
+        return 0
+    except (OSError,ValueError,RuntimeError,subprocess.TimeoutExpired) as exc:
+        print('LOOK OUTPUTS · '+media_outputs.clean(exc));return 1
 
 
 def _media_on_command(args):
@@ -19525,7 +19589,8 @@ def media(args):
     if raw=="scan": return _media_scan_command(args[1:])
     if raw in {"library","lib"}: return _media_library_command()
     if raw in {"fabric","catalog"}: return _media_fabric_command()
-    if raw in {"outputs","output"}: return _media_outputs_command()
+    if raw=="output-local": return _media_output_local(args[1:])
+    if raw in {"outputs","output"}: return _media_outputs_command(args[1:])
     if raw=="on": return _media_on_command(args[1:])
     if raw=="mp": return media_mp(" ".join(args[1:]))
     if raw=="find": return _media_find_command(args[1:])
@@ -20144,7 +20209,6 @@ _COMMANDS = [
     ('lk media scan', '<ROOT>|--relocate <OLD_ROOT> <NEW_ROOT>', 'media', 'Scan or relocate a media root'),
     ('lk media library', '', 'media', 'Inspect indexed roots'),
     ('lk media artwork', '[on|off|status]', 'media', 'Optional background album covers from MusicBrainz and Cover Art Archive'),
-    ('lk media outputs', '', 'media', 'List reachable playback endpoints'),
     ('lk media on', '<NODE> play <TARGET>', 'media', 'Play on a specified node'),
     ('lk media identify', '<QUERY|PATH|--all>', 'media', 'Promote discoveries to SHA identity'),
     ('lk media shuffle', '[on|off]', 'media', 'Toggle or set shuffle'),
@@ -20169,6 +20233,7 @@ _COMMANDS = [
     ("lk ttt", "[0p|1p|2p]", "meta", "Tic-Tac-Toe alias"),
     ("lk gtnw", "", "meta", "Global Thermonuclear War alias"),
     # Config/meta
+    ("lk media outputs", "[discover|select ID --node NODE|enable-airplay --node NODE|move --node NODE|--list|--json]", "media", "Choose a node-owned audio output; discovery never switches playback"),
     ("lk fabric backup", "[add|configure|drives|status [--json]|inventory|run|restore DIR]", "fabric", "Encrypted essential-state recovery"),
     ("lk settings", "[SEARCH]", "config", "Unified settings"),
     ("lk config", "", "config", "Configuration surface"),
