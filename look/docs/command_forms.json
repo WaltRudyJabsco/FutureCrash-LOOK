@@ -936,6 +936,12 @@
     "Global Thermonuclear War alias"
   ],
   [
+    "lk fabric backup",
+    "[status|inventory|init --uuid UUID|run|restore DIR]",
+    "fabric",
+    "Encrypted essential-state recovery"
+  ],
+  [
     "lk settings",
     "[SEARCH]",
     "config",

@@ -1,0 +1,8 @@
+[Unit]
+Description=Verified encrypted Fabric essential-state backup
+
+[Service]
+Type=oneshot
+UMask=0077
+ExecStart=%h/.local/bin/fcl-recovery run --due
+Nice=10
