@@ -65,7 +65,7 @@ def test_shift_h_preserves_filter_query_and_refreshes_candidates(tmp_path,monkey
     assert not any(query!='notes' for query,_ in queries)
 
 
-@pytest.mark.parametrize('mode',range(1,7))
+@pytest.mark.parametrize('mode',[*range(1,7),8])
 def test_ambient_frames_animate_stay_bounded_and_pause(mode):
     for width,height in [(1,1),(18,7),(120,35)]:
         a=player_visuals.frame(mode,width,height,1.3)
@@ -86,20 +86,20 @@ def test_player_cycles_all_views_without_losing_transport_controls(lk,monkeypatc
     terminal(monkeypatch,lk)
     modes=[]; calls=[]
     monkeypatch.setattr(lk,'_media_player_render',lambda mode=0,visual_elapsed=0:modes.append(mode) or 'frame')
-    keys=iter(['v']*9+[' ','n','p','left','right','s','r','x','q'])
+    keys=iter(['v']*(len(player_visuals.NAMES)+1)+[' ','n','p','left','right','s','r','x','q'])
     monkeypatch.setattr(lk,'_read_tty_key',lambda *args:next(keys))
     monkeypatch.setattr(lk,'_media_control_session',lambda action:calls.append(action))
     monkeypatch.setattr(lk,'_media_mpv_request',lambda args:calls.append(args))
     monkeypatch.setattr(lk,'_media_shuffle_command',lambda:calls.append('shuffle'))
     monkeypatch.setattr(lk,'_media_repeat_command',lambda args:calls.append('repeat'))
     assert lk.media_player()==0
-    assert modes[:10]==list(range(9))+[0]
+    assert modes[:len(player_visuals.NAMES)+2]==list(range(len(player_visuals.NAMES)+1))+[0]
     assert calls==['toggle','next','prev',['seek',-10,'relative'],['seek',10,'relative'],'shuffle','repeat','stop']
 
 
 def test_cycle_holds_each_visual_ten_seconds_and_includes_album_art():
     mode=player_visuals.CYCLE_MODE
-    assert [player_visuals.active_mode(mode,seconds) for seconds in (0,9.99,10,60,69.99,70)]==[1,1,2,7,7,1]
+    assert [player_visuals.active_mode(mode,seconds) for seconds in (0,9.99,10,60,69.99,70,79.99,80)]==[1,1,2,7,7,8,8,1]
     assert all(player_visuals.active_mode(mode,second)!=0 for second in range(200))
     for fixed in range(mode):assert player_visuals.active_mode(fixed,120)==fixed
 
@@ -124,8 +124,8 @@ def test_selecting_cycle_starts_its_own_timer(lk,monkeypatch):
         value,clock[0]=next(keys)
         return value
     monkeypatch.setattr(lk,'_read_tty_key',key)
-    assert lk.media_player(initial_visualizer=7)==0
-    assert frames[1:]==[(8,0.0),(8,9.0),(8,10.0)]
+    assert lk.media_player(initial_visualizer=player_visuals.CYCLE_MODE-1)==0
+    assert frames[1:]==[(player_visuals.CYCLE_MODE,age) for age in (0.0,9.0,10.0)]
 
 
 def test_full_visual_keeps_metadata_within_terminal(lk,monkeypatch):
@@ -205,3 +205,38 @@ def test_album_colors_change_on_each_transition_including_hash_collision(lk,monk
         assert current!=first
         assert current==visuals.album_color(snap)
         first=current
+
+
+def test_black_hole_has_dark_horizon_and_seeded_disc():
+    a=player_visuals.frame(8,80,24,2,seed=1)
+    assert a[11][39:41]=='  '
+    assert any('@' in row or '#' in row for row in a)
+    assert a==player_visuals.frame(8,80,24,2,seed=1)
+    assert a!=player_visuals.frame(8,80,24,2,seed=2)
+
+
+def test_album_shimmer_moves_diagonally_without_changing_text():
+    line='@'*80
+    def highlighted(y,elapsed):
+        spans=player_visuals.shimmer_spans(line,y,80,24,elapsed)
+        assert ''.join(text for text,_ in spans)==line
+        return sum(len(text) for text,bright in spans if bright)
+    assert highlighted(0,5)>0 and highlighted(23,5)==0
+    assert highlighted(23,7.99)>0 and highlighted(0,7.99)==0
+    assert 0<highlighted(12,6.5)<25
+    for elapsed in (0,4.99,8,17.99):
+        assert player_visuals.shimmer_spans(line,0,80,24,elapsed)==[(line,False)]
+    assert player_visuals.shimmer_spans(line,0,80,24,5,False)==[(line,False)]
+
+
+def test_album_shimmer_preserves_terminal_width_and_transport(lk,monkeypatch):
+    snap={'entry':{'title':'Song'},'state':'playing','position':0,'duration':60,
+          'index':0,'session':{'queue':[{}]}}
+    monkeypatch.setattr(lk.shutil,'get_terminal_size',lambda fallback:os.terminal_size((80,24)))
+    monkeypatch.setattr(lk,'_media_player_large_art',lambda entry,w,h:['@'*w]*h)
+    monkeypatch.setattr(lk,'_c',lambda text,code:'\x1b['+code+'m'+text+'\x1b[0m')
+    idle=lk._media_player_full_visual(snap,7,0)
+    sweep=lk._media_player_full_visual(snap,7,6.5)
+    assert idle!=sweep and lk._strip_ansi(idle)==lk._strip_ansi(sweep)
+    assert all(len(lk._strip_ansi(row))==79 for row in sweep.splitlines())
+    assert 'space pause' in lk._strip_ansi(sweep)

@@ -1,10 +1,10 @@
-"""Six bounded terminal ambient animations; these do not measure audio PCM."""
+"""Bounded terminal ambient animations; these do not measure audio PCM."""
 from __future__ import annotations
 import math
 import hashlib
 import json
 
-NAMES = ('Bars', 'Waves', 'Orbit', 'Tunnel', 'Stars', 'Plasma', 'Album Art', 'Cycle')
+NAMES = ('Bars', 'Waves', 'Orbit', 'Tunnel', 'Stars', 'Plasma', 'Album Art', 'Black Hole', 'Cycle')
 CYCLE_MODE = len(NAMES)
 CYCLE_INTERVAL_SECONDS = 10.0
 
@@ -53,6 +53,8 @@ def frame(mode, width, height, phase, playing=True, seed=0):
             depth=(i*.618034+t*.18)%1
             point((width-1)/2+math.cos(angle)*depth*width*.65,
                   (height-1)/2+math.sin(angle)*depth*height*.65,'.+*'[min(2,int(depth*3))])
+    elif mode==7:
+        return black_hole_frame(width,height,t,seed)
     else:
         ramp=' .:-=+*#%@'
         for y in range(height):
@@ -62,7 +64,57 @@ def frame(mode, width, height, phase, playing=True, seed=0):
     return [''.join(row) for row in canvas]
 
 
-# Muted foreground accents; no background changes or animation.
+# Terminal cells are approximately twice as tall as they are wide.
+BLACK_HOLE_RADIUS = .23
+BLACK_HOLE_DISC_TILT = .30
+BLACK_HOLE_COLOR = '38;5;180'
+SHIMMER_PERIOD_SECONDS = 18.0
+SHIMMER_DELAY_SECONDS = 5.0
+SHIMMER_DURATION_SECONDS = 3.0
+SHIMMER_BAND_WIDTH = .065
+
+
+def black_hole_frame(width,height,phase,seed=0):
+    """A dark horizon, tilted accretion disc and lensed light above it."""
+    scale=max(1.0,min(width/2,height))
+    ramp=' .:-=+*#%@'
+    rows=[]
+    for y in range(height):
+        row=[]
+        for x in range(width):
+            dx=(x-(width-1)/2)/scale
+            dy=(y-(height-1)/2)*2/scale
+            radius=math.hypot(dx,dy)
+            disc_radius=math.hypot(dx,dy/BLACK_HOLE_DISC_TILT)
+            angle=math.atan2(dy/BLACK_HOLE_DISC_TILT,dx)
+            swirl=.65+.35*math.sin(angle*5-disc_radius*11+phase*1.4+seed)
+            disc=math.exp(-((disc_radius-.66)/.23)**2)*swirl
+            # The upper arc suggests light bent around the horizon.
+            lens=math.exp(-((radius-.34)/.045)**2)*(.85 if dy<0 else .22)
+            light=max(disc,lens) if radius>BLACK_HOLE_RADIUS else 0
+            row.append(ramp[min(len(ramp)-1,int(light*(len(ramp)-1)))])
+        rows.append(''.join(row))
+    return rows
+
+
+def shimmer_spans(line,y,width,height,elapsed,playing=True):
+    """Return plain text runs with a narrow diagonal foreground highlight."""
+    age=max(0.0,float(elapsed))%SHIMMER_PERIOD_SECONDS-SHIMMER_DELAY_SECONDS
+    if not playing or not 0<=age<SHIMMER_DURATION_SECONDS:
+        return [(line,False)]
+    progress=age/SHIMMER_DURATION_SECONDS
+    runs=[];start=0;previous=None
+    for x in range(len(line)):
+        diagonal=(x/max(1,width-1)+y/max(1,height-1))/2
+        highlight=abs(diagonal-progress)<SHIMMER_BAND_WIDTH
+        if previous is not None and highlight!=previous:
+            runs.append((line[start:x],previous));start=x
+        previous=highlight
+    if line:runs.append((line[start:],bool(previous)))
+    return runs
+
+
+# Muted per-track foreground accents; shimmer never changes the palette.
 ALBUM_COLORS=('38;5;117','38;5;180','38;5;150','38;5;183','38;5;110','38;5;211')
 _album_track=None
 _album_color=0

@@ -16616,6 +16616,11 @@ def _media_pin_playable_entry(entry, timeout=1.5):
         if key in seen: continue
         seen.add(key); ordered.append(loc)
 
+    # Prefer owner-local copies before spending time on remote probes. Missing
+    # local paths still fall through to the existing confirmed-copy fallback.
+    ordered.sort(key=lambda loc: bool(str(loc.get("node") or row.get("node") or "").strip()) and
+                 str(loc.get("node") or row.get("node") or "").strip().casefold() not in local_names)
+
     errors=[]; optimistic=[]
     for loc in ordered:
         node=str(loc.get("node") or row.get("node") or "").strip()
@@ -19047,7 +19052,19 @@ def _media_player_full_visual(snap,mode,visual_elapsed=0):
     art=_media_player_large_art(entry,width,art_height) if album_art else player_visuals.frame(mode,width,art_height,time.monotonic(),state in {'play','playing'},seed)
     lines=header+art+footer
     color=player_visuals.album_color(snap) if album_art else ("1;32","1;36","1;35","1;34","1;37","1;33")[(mode-1)%6]
-    return "\n".join(_c(_media_player_line(line,width),color) if len(header)<=i<len(header)+len(art) else _media_player_style(_media_player_line(line,width),6 if i>=len(header)+len(art) else 0 if i==1 else 4 if i==2 else 1) for i,line in enumerate(lines[:height]))
+    if name=='Black Hole': color=player_visuals.BLACK_HOLE_COLOR
+    elapsed=visual_elapsed%player_visuals.CYCLE_INTERVAL_SECONDS if cycling else visual_elapsed
+    shimmer=album_art and state in {'play','playing'} and not any(
+        status in line for line in art for status in ('Loading album art','Album art unavailable'))
+    rendered=[]
+    for i,line in enumerate(lines[:height]):
+        plain=_media_player_line(line,width)
+        if len(header)<=i<len(header)+len(art):
+            spans=player_visuals.shimmer_spans(plain,i-len(header),width,len(art),elapsed,shimmer)
+            rendered.append(''.join(_c(text,('1;' if bright else '')+color) for text,bright in spans))
+        else:
+            rendered.append(_media_player_style(plain,6 if i>=len(header)+len(art) else 0 if i==1 else 4 if i==2 else 1))
+    return "\n".join(rendered)
 
 
 def _media_player_render(visualizer=0,visual_elapsed=0):
