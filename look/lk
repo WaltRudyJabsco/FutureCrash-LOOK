@@ -66,6 +66,7 @@ MEDIA_SESSION_FILE=STATE_DIR/"media_session.json"
 MEDIA_LIBRARY_FILE=STATE_DIR/"media_library.json"
 MEDIA_PLAYLIST_DIR=STATE_DIR/"media_playlists"
 MEDIA_QUEUE_FILE=STATE_DIR/"media_queue.m3u8"
+REMOTE_ART_RETRY_SECONDS=20.0
 _REMOTE_MEDIA_ART_MISS={}
 _REMOTE_MEDIA_PREVIEW_CACHE={}
 _REMOTE_MEDIA_PREVIEW_LOADING=set()
@@ -17484,7 +17485,7 @@ def _media_fetch_remote_preview(row,width,height):
     now=time.monotonic()
     cached=_REMOTE_MEDIA_PREVIEW_CACHE.get(key)
     if cached: return list(cached)
-    if now-float(_REMOTE_MEDIA_PREVIEW_MISS.get(key) or 0)<20.0: return []
+    if now-float(_REMOTE_MEDIA_PREVIEW_MISS.get(key) or 0)<REMOTE_ART_RETRY_SECONDS: return []
     # Old queues can retain art metadata for a now-unmounted preferred copy.
     # Try their explicit alternate locations within one shared request budget.
     deadline=now+10.0
@@ -17540,7 +17541,7 @@ def _media_queue_remote_preview(row,width,height):
     key,ident=_media_remote_preview_key(row,width,height)
     if not key or not ident: return False
     if _REMOTE_MEDIA_PREVIEW_CACHE.get(key): return False
-    if time.monotonic()-float(_REMOTE_MEDIA_PREVIEW_MISS.get(key) or 0)<20.0: return False
+    if time.monotonic()-float(_REMOTE_MEDIA_PREVIEW_MISS.get(key) or 0)<REMOTE_ART_RETRY_SECONDS: return False
     with _REMOTE_MEDIA_PREVIEW_LOCK:
         # Do not duplicate the in-flight request; otherwise latest selection wins.
         if key not in _REMOTE_MEDIA_PREVIEW_LOADING:
@@ -17565,7 +17566,7 @@ def _media_remote_preview_state(row,width,height):
     if not key or not ident: return ("local","")
     if _REMOTE_MEDIA_PREVIEW_CACHE.get(key): return ("ready",str(ident.get("node") or "remote"))
     now=time.monotonic()
-    if now-float(_REMOTE_MEDIA_PREVIEW_MISS.get(key) or 0)<20.0:
+    if now-float(_REMOTE_MEDIA_PREVIEW_MISS.get(key) or 0)<REMOTE_ART_RETRY_SECONDS:
         return ("unavailable",str(ident.get("node") or "remote"))
     with _REMOTE_MEDIA_PREVIEW_LOCK:
         queued=bool(_REMOTE_MEDIA_PREVIEW_LATEST and _REMOTE_MEDIA_PREVIEW_LATEST[0]==key)
@@ -17617,7 +17618,7 @@ def _media_remote_cover_path(row, fetch=True):
         if not fetch:
             continue
         miss_key=f"{node}|{entry_id}|{path}"
-        if now-float(_REMOTE_MEDIA_ART_MISS.get(miss_key) or 0)<20.0: continue
+        if now-float(_REMOTE_MEDIA_ART_MISS.get(miss_key) or 0)<REMOTE_ART_RETRY_SECONDS: continue
         url='http://127.0.0.1:7332/v1/media/cover?'+urllib.parse.urlencode({"node":node,"id":entry_id,"path":path})
         tmp=cache/f'.{token}.{os.getpid()}.jpg'
         try:
@@ -19230,6 +19231,7 @@ def media_mp(initial_query=""):
     # immediately replacing it with the ASCII fallback again.
     dirty=True
     pending=False
+    art_retry_at=None
     last_terminal_size=None
 
     def row_id(row):
@@ -19347,6 +19349,7 @@ def media_mp(initial_query=""):
                     native_preview.invalidate()
 
                 pending=bool(chosen and right_w and not art and art_status.startswith("ART…"))
+                art_retry_at=time.monotonic()+REMOTE_ART_RETRY_SECONDS if chosen and right_w and not art and art_status=="ART unavailable" else None
                 dirty=False
 
             key=_read_tty_key(fd,.10 if pending else .25)
@@ -19354,7 +19357,7 @@ def media_mp(initial_query=""):
             if not key:
                 # Remote artwork may become available while idle. Keep checking
                 # only while that asynchronous request is genuinely pending.
-                if pending:
+                if pending or (art_retry_at is not None and time.monotonic()>=art_retry_at):
                     dirty=True
                 continue
 

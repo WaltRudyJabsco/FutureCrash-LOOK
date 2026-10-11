@@ -20,6 +20,9 @@ MAX_METADATA_BYTES=512*1024
 MISS_SECONDS=6*60*60
 ERROR_SECONDS=5*60
 RATE_SECONDS=1.1
+MATCHER_VERSION=2
+# Exact title and credited artist are still required; collaborations score lower.
+MIN_MATCH_SCORE=80
 USER_AGENT='FutureCrash-LOOK/8.16.1 (https://github.com/WaltRudyJabsco/FutureCrash-LOOK)'
 _AUDIO={'.mp3','.m4a','.flac','.ogg','.opus','.wav','.aif','.aiff','.alac','.aac'}
 _JOBS=queue.Queue(maxsize=64)
@@ -51,9 +54,15 @@ def normalized(value):
     return ' '.join(''.join(c if c.isalnum() or c.isspace() else ' ' for c in text if not unicodedata.combining(c)).split())
 
 
+def lookup_album(value):
+    album=str(value or '').strip()
+    # Disc numbering identifies a copy within an album, not a different cover.
+    return re.sub(r'(?:\s*[-–:]\s*|\s*\()(?:disc|cd)\s*\d+\)?\s*$', '', album, flags=re.I).strip() or album
+
+
 def album_key(row):
     artist=str(row.get('album_artist') or row.get('artist') or '').strip()
-    album=str(row.get('album') or '').strip()
+    album=lookup_album(row.get('album'))
     if normalized(artist) in {'','unknown','unknown artist'} or normalized(album) in {'','unknown','unknown album','music','downloads'}:return None
     token=hashlib.sha256((normalized(artist)+'\0'+normalized(album)).encode()).hexdigest()[:32]
     return token,artist,album
@@ -77,7 +86,9 @@ def record(token):
 
 
 def retry_after(token):
-    value=record(token).get('retry_at')
+    prior=record(token)
+    if prior.get('state')=='missing' and prior.get('matcher_version')!=MATCHER_VERSION:return 0
+    value=prior.get('retry_at')
     return float(value) if isinstance(value,(int,float)) else 0
 
 def cached(token):
@@ -137,8 +148,11 @@ def choose_group(data,artist,album):
     matches={}
     for item in data.get('release-groups',[]):
         credit=''.join(str(c.get('name') or (c.get('artist') or {}).get('name') or '')+str(c.get('joinphrase') or '') for c in item.get('artist-credit',[]) if isinstance(c,dict))
-        if normalized(item.get('title'))!=normalized(album) or normalized(credit)!=normalized(artist):continue
-        if int(item.get('score') or 0)<90:continue
+        credited={normalized(c.get('name') or '') for c in item.get('artist-credit',[]) if isinstance(c,dict)}
+        credited.update(normalized((c.get('artist') or {}).get('name') or '') for c in item.get('artist-credit',[]) if isinstance(c,dict))
+        if normalized(item.get('title'))!=normalized(album):continue
+        if normalized(credit)!=normalized(artist) and normalized(artist) not in credited:continue
+        if int(item.get('score') or 0)<MIN_MATCH_SCORE:continue
         try:group=str(uuid.UUID(str(item.get('id'))))
         except ValueError:continue
         matches[group]=item
@@ -154,7 +168,7 @@ def lookup(token,artist,album):
         fcntl.flock(lock,fcntl.LOCK_EX)
         if cached(token):return record(token)
         if retry_after(token)>time.time():return record(token)
-        result={'artist':artist,'album':album,'checked_at':time.time()}
+        result={'artist':artist,'album':album,'checked_at':time.time(),'matcher_version':MATCHER_VERSION}
         try:
             rate_limit()
             quoted=lambda text:'"'+str(text).replace('\\','\\\\').replace('"','\\"')+'"'

@@ -17,7 +17,7 @@ def functions():
     tree=ast.parse((ROOT/'look/lk').read_text())
     ns={'Path':Path,'socket':socket,'platform':platform,'urllib':urllib,'time':time,'hashlib':hashlib,'json':json,
         '_media_local_node_names':lambda:{'mac'},'_media_entry_label':lambda r:'Song',
-        '_REMOTE_MEDIA_PREVIEW_CACHE':{},'_REMOTE_MEDIA_PREVIEW_MISS':{}}
+        'REMOTE_ART_RETRY_SECONDS':20.0,'_REMOTE_MEDIA_PREVIEW_CACHE':{},'_REMOTE_MEDIA_PREVIEW_MISS':{}}
     exec(compile(ast.Module(body=[n for n in tree.body if isinstance(n,ast.FunctionDef) and n.name in names],type_ignores=[]),'lk-test','exec'),ns)
     return ns
 
