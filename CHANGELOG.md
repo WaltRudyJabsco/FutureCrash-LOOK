@@ -1,3 +1,9 @@
+## 2026-10-11 · Black Hole, album shimmer and local playback preference
+
+- Add an animated ASCII Black Hole with a rotating accretion disc; Cycle includes all eight visuals, preserving Album Art as the seventh mode.
+- Add an occasional narrow diagonal Album Art foreground highlight while playing; preserve track colors, cover caching and transport controls.
+- Prefer existing local duplicates before remote probes, retaining confirmed remote fallback for missing local files. Clarify that catalog copies are not verified media backups.
+
 ## 2026-10-11 · Missing-cover matching and refresh
 
 - Match exact album titles against credited collaborators as well as the combined credit; tolerate provider search-score variation while retaining unique-match and confidence checks.

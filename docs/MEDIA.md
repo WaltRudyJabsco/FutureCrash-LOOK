@@ -170,12 +170,25 @@ Matched audio CDs download a 500-pixel front cover from the Cover Art Archive in
 ## Player visuals
 
 In `lk player`, press lowercase `v` to cycle Bars, Waves, Orbit, Tunnel, Stars,
-Plasma, **Album Art**, then **Cycle**, followed by the normal player view. In
-`lk mp`, `v` opens the same player visuals. Cycle rotates through the seven
+Plasma, **Album Art**, **Black Hole**, then **Cycle**, followed by the normal player view. In
+`lk mp`, `v` opens the same player visuals. Cycle rotates through the eight
 visualizers every ten seconds while its view is open, including Album Art, and
 never switches automatically to the normal player view. Selecting Cycle starts
 at Bars; pressing `v` again returns to the normal view. Transport controls remain
 available throughout. Album Art fills the available canvas with a centered ASCII
 cover while keeping track information and transport controls visible. Covers
 preserve their proportions for terminal cells, and remote covers load in the
-background. Missing artwork displays an availability message.
+background. Missing artwork displays an availability message. While playing,
+a narrow diagonal foreground highlight crosses Album Art for three seconds every
+18 seconds, beginning five seconds after entering the view. Pausing disables the
+highlight; each track keeps its existing foreground color. Black Hole draws a
+rotating ASCII accretion disc around a dark horizon with a curved arc of light.
+These animations are ambient, rather than measurements of the audio signal.
+
+When a track has multiple catalog locations, playback checks local copies first,
+then remote copies. Missing local paths fall through to reachable remote copies;
+a remote timeout is used only after confirmed alternatives have been tried.
+This chooses availability and locality, not bitrate or codec quality. Multiple
+locations do not establish a verified backup. The configured library destination
+is an import destination; Fabric Recovery essential-state backups exclude music
+and video bytes.

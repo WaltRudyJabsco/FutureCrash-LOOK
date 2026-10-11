@@ -67,3 +67,20 @@ def test_owner_missing_copy_is_not_retried_at_every_address(monkeypatch):
     handler._serve_media_terminal_preview('owner','missing')
     assert request.call_count==1
     assert handler.sendj.call_args.args[0]==404
+
+
+def test_confirmed_local_duplicate_precedes_healthy_remote(monkeypatch,tmp_path):
+    ns=functions();local=tmp_path/'song.mp3';local.write_bytes(b'ordinary audio')
+    request=Mock(return_value=response());monkeypatch.setattr(urllib.request,'urlopen',request)
+    entry=row();entry['locations'].append({'node':'mac','id':'local','path':str(local)})
+    pinned=ns['_media_pin_playable_entry'](entry)
+    assert pinned['id']=='local' and pinned['art']['path']==str(local)
+    request.assert_not_called()
+
+
+def test_missing_local_duplicate_still_uses_remote(monkeypatch,tmp_path):
+    ns=functions();request=Mock(return_value=response())
+    monkeypatch.setattr(urllib.request,'urlopen',request)
+    entry=row();entry['locations'].append({'node':'mac','id':'local','path':str(tmp_path/'absent.mp3')})
+    assert ns['_media_pin_playable_entry'](entry)['id']=='missing'
+    assert request.call_count==1
