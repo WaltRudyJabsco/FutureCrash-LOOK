@@ -3,7 +3,7 @@
 <plist version="1.0"><dict>
 <key>Label</key><string>com.futurecrash.look.recovery-send</string>
 <key>ProgramArguments</key><array>
-<string>__HOME__/.local/bin/fcl-recovery</string><string>send</string><string>--due</string><string>jreno@3090.tailb77b68.ts.net</string>
+<string>__HOME__/.local/bin/fcl-recovery</string><string>send</string><string>--due</string><string>__DESTINATION_USER_AT_HOST__</string>
 </array>
 <key>StartInterval</key><integer>3600</integer>
 <key>RunAtLoad</key><true/>

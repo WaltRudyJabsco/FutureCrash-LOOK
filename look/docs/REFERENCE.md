@@ -315,7 +315,7 @@ lk ttt [0p|1p|2p]
   [meta] Tic-Tac-Toe alias
 lk gtnw
   [meta] Global Thermonuclear War alias
-lk fabric backup [status|inventory|init --uuid UUID|run|restore DIR]
+lk fabric backup [add|configure|drives|status [--json]|inventory|run|restore DIR]
   [fabric] Encrypted essential-state recovery
 lk settings [SEARCH]
   [config] Unified settings
