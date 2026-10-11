@@ -1,3 +1,9 @@
+## 2026-10-11 · Readable help and consistent pager keys
+
+- Highlight full command forms, section headings and keyboard combinations in the generated help reference; keep descriptions at normal contrast and piped output plain.
+- Reuse the shared terminal decoder so Shift-arrow sequences no longer close the help pager. Support Shift-Up/Down pages, Shift-Left/Right ends, Left/Right pages and Home/End alongside existing shortcuts.
+- Preserve the command return-to-note flow and recognize enhanced-keyboard Ctrl-T for the insertion helper.
+
 ## 2026-10-11 · Ctrl-K command-block authoring
 
 - Keep Link as Ctrl-K's default and add an explicit Ctrl-T switch to Command with multiline text, label and optional working directory.

@@ -868,8 +868,10 @@ FILE CARD
 HELP PAGER
   j / k / ↑ / ↓       line down / up
   Space / b            page forward / back
-  PgDn / PgUp          page forward / back
-  g / G                beginning / end
+  PgUp / PgDn / ←→     page back / forward
+  Shift-↑ / Shift-↓    page back / forward
+  Shift-← / Shift-→    beginning / end
+  Home / End / g / G   beginning / end
   q / Esc              quit
 
 USAGE AND OPTIONS

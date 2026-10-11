@@ -1443,52 +1443,37 @@ def _page_text(body: str) -> int:
     try:
         tty.setcbreak(sys.stdin.fileno())
         while True:
-            os.system("clear")
-            page = lines[top:top + height - 1]
+            height = max(6, shutil.get_terminal_size((80, 24)).lines - 1)
+            page_size = height - 1
+            top = min(top, max(0, len(lines) - page_size))
+            sys.stdout.write("\033[2J\033[H")
+            page = lines[top:top + page_size]
             sys.stdout.write("\n".join(page))
             sys.stdout.write(
-                f"\n\033[2m{min(top + height - 1, len(lines))}/{len(lines)}"
-                " · j/k ↑/↓ line · Space/PgDn page · b/PgUp back · g/G ends · q quit\033[0m"
+                f"\n{min(top + page_size, len(lines))}/{len(lines)}"
+                " · \033[1;36m↑↓\033[0m line · \033[1;36mShift-↑↓\033[0m page"
+                " · \033[1;36mShift-←→\033[0m ends · \033[1;36mq/Esc\033[0m quit"
             )
             sys.stdout.flush()
 
-            # Read from the file descriptor directly. TextIO buffering can split
-            # an ANSI arrow sequence after ESC, which used to make ↑/↓ look like
-            # a bare Escape and drop out of the help pager.
-            fd = sys.stdin.fileno()
-            ch = os.read(fd, 1)
-            key = ch.decode("utf-8", "ignore")
-            if ch == b"\x1b":
-                seq = bytearray(ch)
-                while len(seq) < 6:
-                    ready, _, _ = select.select([fd], [], [], 0.10)
-                    if not ready:
-                        break
-                    seq.extend(os.read(fd, 1))
-                    if seq[-1:] in b"~ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz":
-                        break
-                key = {
-                    b"\x1b[A": "up",
-                    b"\x1b[B": "down",
-                    b"\x1b[5~": "pageup",
-                    b"\x1b[6~": "pagedown",
-                }.get(bytes(seq), "esc")
+            # Share the decoder so modified arrows are consumed in full rather
+            # than mistaken for Escape halfway through their terminal sequence.
+            key = _read_tty_key(sys.stdin.fileno())
 
-            page_size = height - 1
             max_top = max(0, len(lines) - page_size)
-            if key in {"q", "esc"}:
+            if key in {"q", "Q", "esc", "\x03", ""}:
                 break
             if key in {"j", "down"}:
                 top = min(max_top, top + 1)
             elif key in {"k", "up"}:
                 top = max(0, top - 1)
-            elif key in {" ", "pagedown"}:
+            elif key in {" ", "pagedown", "shiftdown", "right"}:
                 top = min(max_top, top + page_size)
-            elif key in {"b", "pageup"}:
+            elif key in {"b", "pageup", "shiftup", "left"}:
                 top = max(0, top - page_size)
-            elif key == "g":
+            elif key in {"g", "home", "shiftleft"}:
                 top = 0
-            elif key == "G":
+            elif key in {"G", "end", "shiftright"}:
                 top = max_top
     finally:
         termios.tcsetattr(sys.stdin.fileno(), termios.TCSADRAIN, old)
@@ -1502,31 +1487,25 @@ def _help_color(body):
     if not sys.stdout.isatty():
         return body
     reset="\033[0m"; bold="\033[1m"; cyan="\033[36m"; magenta="\033[35m"
-    section_names={"LOOK","INSPECT","SYSTEM","FILE CARD","FILE ACTIONS","SHORTCUTS","LIVE FILTER / SELECTION","HELP PAGER"}
-    shortcut_tokens=("lk","lkl","lkd","lkf","lkt","lkr","lkz","zll WORD","cdl WORD",
-                     "fznv","f","rs","rb","lh","lo","lo ASK")
+    executables={row[0].split()[0] for row in _COMMANDS}
     out=[]
-    in_shortcuts=False
     for line in body.splitlines():
         stripped=line.strip()
-        if "LOOK " in line and ("filesystem, navigation, shell" in line or "inspect the computer" in line):
-            out.append(cyan+bold+line+reset); continue
-        if stripped in section_names:
-            in_shortcuts=(stripped=="SHORTCUTS")
-            out.append(magenta+bold+line+reset); continue
-        if in_shortcuts and stripped:
-            colored=line
-            for token in sorted(shortcut_tokens,key=len,reverse=True):
-                colored=re.sub(
-                    rf'(?<!\S){re.escape(token)}(?=\s|$)',
-                    lambda m: cyan+bold+m.group(0)+reset,
-                    colored
-                )
-            out.append(colored); continue
-        m=re.match(r'^(\s{2})(\S+(?:\s*/\s*\S+)?)(.*)$', line)
-        if m and stripped:
-            out.append(m.group(1)+cyan+bold+m.group(2)+reset+m.group(3)); continue
-        out.append(line)
+        # Generated command forms have no indentation; glossary forms put the
+        # description after a column gap. Style the whole form, not only "lk".
+        if stripped and (stripped.isupper() and any(c.isalpha() for c in stripped)
+                         or stripped.startswith("LOOK ")):
+            out.append(magenta+bold+line+reset)
+        elif line and not line[0].isspace() and line.split()[0] in executables:
+            out.append(cyan+bold+line+reset)
+        else:
+            match=re.match(r"^(\s{2})(\S.*?)(\s{2,}.*)$",line)
+            if match:
+                out.append(match[1]+cyan+bold+match[2]+reset+match[3])
+            elif stripped.startswith("usage: "):
+                out.append(line[:line.index("usage: ")+7]+cyan+bold+stripped[7:]+reset)
+            else:
+                out.append(line)
     return "\n".join(out)+"\n"
 
 def help_screen():
@@ -1872,8 +1851,10 @@ FILE CARD
 HELP PAGER
   j / k / ↑ / ↓       line down / up
   Space / b            page forward / back
-  PgDn / PgUp          page forward / back
-  g / G                beginning / end
+  PgUp / PgDn / ←→     page back / forward
+  Shift-↑ / Shift-↓    page back / forward
+  Shift-← / Shift-→    beginning / end
+  Home / End / g / G   beginning / end
   q / Esc              quit
 """
     reference=ROOT/"docs"/"REFERENCE.md"
@@ -12696,7 +12677,7 @@ def _read_tty_key(fd, timeout=None):
         b"\x1b[1;3A":"paragraphup", b"\x1b[1;3B":"paragraphdown",
         b"\x1bb":"wordleft", b"\x1bf":"wordright",
         b"\x1b[107;5u":"\x0b", b"\x1b[110;5u":"\x0e",
-        b"\x1b[115;5u":"\x13", b"\x1b[106;5u":"\n",
+        b"\x1b[116;5u":"\x14", b"\x1b[115;5u":"\x13", b"\x1b[106;5u":"\n",
         b"\x1b[99;5u":"\x03",
         b"\x1b[13;2u":"shiftenter", b"\x1b[27;2;13~":"shiftenter",
         b"\x1b\r":"shiftenter", b"\x1b\n":"shiftenter",
