@@ -1,3 +1,9 @@
+## 2026-10-11 · Missing-cover matching and refresh
+
+- Match exact album titles against credited collaborators as well as the combined credit; tolerate provider search-score variation while retaining unique-match and confidence checks.
+- Ignore trailing disc/CD numbers for album lookup and cache keys, preserving media tags; retry negatives made by the previous matcher.
+- Retry unavailable artwork in an idle MP view so background lookup completion can appear without moving the cursor.
+
 ## 2026-10-11 · Artwork and playback duplicate fallback
 
 - Try reachable duplicates before accepting an unverified slow primary copy, and keep the selected artwork identity aligned with playback.

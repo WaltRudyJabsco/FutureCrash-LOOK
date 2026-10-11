@@ -83,3 +83,27 @@ def test_lookup_toggle_persists_for_ui_and_daemon_and_defaults_off(tmp_path,monk
     covers.configure(True);assert covers.enabled()
     covers.configure(False);assert not covers.enabled()
     monkeypatch.setenv('LOOK_MEDIA_ARTWORK_LOOKUP','1');assert covers.enabled()
+
+
+def test_exact_collaboration_album_can_match_below_solo_search_score():
+    item=match(artist='Wyclef Jean',album='The Carnival',score=82)
+    item['artist-credit'].extend([{'joinphrase':' featuring '},{'name':'Refugee Allstars'}])
+    assert covers.choose_group({'release-groups':[item]},'Wyclef Jean','The Carnival')==(GROUP,'matched')
+    assert covers.choose_group({'release-groups':[item]},'Wyclef Jean Tribute','The Carnival')==(None,'missing')
+    assert covers.choose_group({'release-groups':[item]},'Wyclef Jean','The Carnival Extras')==(None,'missing')
+
+
+def test_disc_suffixes_share_album_cache_without_changing_real_album_titles():
+    a=covers.album_key({'artist':'Beastie Boys','album':'The Sounds of Science - Disc 1'})
+    b=covers.album_key({'artist':'Beastie Boys','album':'The Sounds of Science (Disc 2)'})
+    assert a==b and a[2]=='The Sounds of Science'
+    assert covers.lookup_album('Volume 1')=='Volume 1'
+
+
+def test_old_negative_match_is_retried_after_matcher_fix(tmp_path,monkeypatch):
+    monkeypatch.setattr(covers,'root',lambda:tmp_path)
+    token='album'
+    covers.atomic(tmp_path/(token+'.json'),json.dumps({'state':'missing','retry_at':9999999999}).encode())
+    assert covers.retry_after(token)==0
+    covers.atomic(tmp_path/(token+'.json'),json.dumps({'state':'missing','matcher_version':covers.MATCHER_VERSION,'retry_at':9999999999}).encode())
+    assert covers.retry_after(token)==9999999999
