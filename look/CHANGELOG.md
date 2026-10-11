@@ -1,3 +1,9 @@
+## 2026-10-11 · Ctrl-K command-block authoring
+
+- Keep Link as Ctrl-K's default and add an explicit Ctrl-T switch to Command with multiline text, label and optional working directory.
+- Preserve both form drafts, distinguish Enter-newline from block insertion, quote header fields and choose fences that safely contain pasted backticks.
+- Reuse the existing numbered run preview, explicit R confirmation and return-to-note flow; creating a command block never executes it.
+
 ## 2026-10-11 · Runnable notebook command blocks
 
 - Add explicit Markdown `command` fences to Notes' existing numbered link selector, with optional label and local working directory.

@@ -167,6 +167,19 @@ nvim manuscript.md
 ```
 ````
 
+Ctrl-K now starts in **Link** mode as before. **Ctrl-T** switches the helper to
+**Command** mode, prefilled from the clipboard. The fields become Command,
+Label and Working directory (optional), so a path containing spaces is never
+mistaken for executable code. Paste multiline command text into Command; Enter
+adds a newline there. Tab moves to Label and then Working directory. Use
+Shift-Enter/Ctrl-S to insert the finished block; Enter in the last field also
+inserts it. Save the note as usual afterward. Ctrl-T switches back to Link and
+preserves both drafts; Ctrl-N's note picker stays available in Link mode.
+
+The helper supplies quoting and a suitable Markdown fence, even when the pasted
+script contains backticks, and inserts it on its own lines. Creating the block
+never runs it. You can edit its source later with E or V.
+
 The rendered preview shows **Run: Open manuscript [2]**, using the same numbering
 as Markdown links in document order. Press its number (1–9) or L to choose from
 all links and commands, including multi-digit entries. Selection opens a preview
