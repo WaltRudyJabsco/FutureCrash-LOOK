@@ -14,7 +14,8 @@ Choose a mode in the menu, or include it in the command:
 | `lk games rooftops 2p` | Two runners on one keyboard | Z for P1, / for P2 |
 
 The runners share the same course in separate lanes. Jump before a rooftop gap;
-you cannot jump again in midair. A missed landing ends that runner's attempt.
+you cannot jump again in midair. Roofs provide five seconds of running room
+between small gaps, so there is time to settle before the next jump. A missed landing ends that runner's attempt.
 The other runner continues, and the longest distance wins. Simultaneous falls
 are a draw. This is local play; no networking or separate accounts are needed.
 
@@ -24,7 +25,8 @@ the game selector. Small terminals pause the simulation until enlarged: at
 least 40 columns and 12 rows for one runner, or 19 rows for two.
 
 The game generates an original 92 BPM swing loop locally: bleep bass, light
-percussion and a sparse melody. M toggles music, which pauses with the game and
+percussion and a sparse melody. It uses standard 48 kHz stereo PCM for reliable
+macOS and Linux playback. M toggles music, which pauses with the game and
 stops on game-over, help or exit. Playback uses its own mpv process at 25% player
 volume through the host's current default output; LOOK queues and OS routing
 settings are untouched. Missing mpv leaves the game playable with an

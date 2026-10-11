@@ -1,3 +1,9 @@
+## 2026-10-11 · Gentler Rooftops and stereo music
+
+- Extend playable roof lengths from 24 to 60 columns, keeping small six-column gaps and the same jump controls; allow five seconds of running room per roof.
+- Keep rendered foreground widths aligned with collision geometry; background layer spacing no longer overwrites the requested roof span.
+- Generate the original loop as 48 kHz stereo PCM to avoid the observed macOS mono CoreAudio layout failure. Show paused music status when the game-owned player is stopped.
+
 ## 2026-10-11 · Rooftops game and original chiptune
 
 - Add `lk games rooftops` with automatic demo, solo and two-player shared-keyboard modes; fixed-step jump/fall physics, reproducible skyline seeds and survival distance scoring.

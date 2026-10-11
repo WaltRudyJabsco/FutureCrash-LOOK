@@ -126,13 +126,13 @@ def rooftop_frame(width,height,phase,seed=0,*,runners=None,span=None):
         return ((tile*1103515245+seed*12345+layer*2654435761)&0xffffffff)
     for x in range(width):
         if (x+seed)%23==0:put(x,1,'.')
-    for layer,(speed,span,baseline,edge) in enumerate(ROOFTOP_LAYERS):
+    for layer,(speed,layer_span,baseline,edge) in enumerate(ROOFTOP_LAYERS):
         offset=int(phase*speed)
         floor=min(height-1,int(height*baseline))
         for x in range(width):
-            tile,column=divmod(x+offset,span)
+            tile,column=divmod(x+offset,layer_span)
             pattern=shape(tile,layer)
-            building_width=span-3-pattern%3
+            building_width=layer_span-3-pattern%3
             if column>=building_width:continue
             roof=max(2,floor-2-pattern%max(1,height//3))
             for y in range(roof,height):
