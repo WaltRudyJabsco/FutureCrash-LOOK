@@ -3217,7 +3217,7 @@ def _local_media_audio_path(index=None):
         return source, str(meta.get("media_type") or entry.get("media_type") or mimetypes.guess_type(source.name)[0] or "application/octet-stream")
     raise FileNotFoundError("media bytes are not local to this playback node")
 
-def _local_media_output(discover=False):
+def _local_media_output():
     state = _local_media_state()
     player=_media_player_binary()
     # Output availability means this node can ACCEPT a media session. An empty
@@ -3225,7 +3225,7 @@ def _local_media_output(discover=False):
     look_cmd=_look_command()
     available=bool(player) and bool(look_cmd)
     reason="" if available else ("mpv missing" if not player else "LOOK command unavailable")
-    result = {
+    return {
         "node": identity()["name"],
         "output_id": "default",
         "label": f"{identity()['name']} · default",
@@ -3237,20 +3237,6 @@ def _local_media_output(discover=False):
         "presentation": "native",
         "capabilities": ["media.playback", "media.queue", "media.control", "media.video"] if available else ["media.queue", "media.control"],
     }
-
-    outputs=[dict(result)]
-    try:
-        cp=subprocess.run([look_cmd,'media','output-local',*(['discover'] if discover else [])],capture_output=True,text=True,timeout=15)
-        if cp.returncode:raise ValueError((cp.stderr or cp.stdout).strip()[:300])
-        rows=json.loads(cp.stdout).get('outputs') or []
-        for row in rows:
-            outputs.append({**row,'node':identity()['name'],'active':bool(state.get('active'))})
-        outputs[0]['selected']=not any(r.get('selected') for r in rows)
-    except (OSError,ValueError,TypeError,subprocess.TimeoutExpired) as exc:
-        result['discovery_error']=str(exc)[:300]
-        outputs[0]['reason']='Native output discovery unavailable: '+str(exc)[:300]
-    result['outputs']=outputs
-    return result
 
 
 def _local_media_route(operation, payload):
@@ -3293,10 +3279,6 @@ def _local_media_route(operation, payload):
             argv = [lk, "media", action]
         else:
             raise ValueError("invalid media control")
-    elif operation == "output":
-        argv=[lk,"media","output-local","select",str(payload.get("output_id") or "default")]
-    elif operation == "airplay":
-        argv=[lk,"media","output-local","enable-airplay"]
     elif operation == "adopt":
         session=payload.get("session")
         if not isinstance(session,dict) or not session.get("queue"):
@@ -3306,12 +3288,7 @@ def _local_media_route(operation, payload):
         raise ValueError("invalid media operation")
     cp = subprocess.run(argv, input=(json.dumps(session) if operation=="adopt" else None), capture_output=True, text=True, timeout=90.0, env={**os.environ, "NO_COLOR": "1"})
     if cp.returncode:
-        detail=(cp.stderr or cp.stdout or f"media {operation} failed").strip()[:1000]
-        try:detail=json.loads(cp.stdout).get("error") or detail
-        except (ValueError,TypeError,AttributeError):pass
-        raise RuntimeError(detail)
-    if operation in {"output","airplay"}:
-        result=json.loads(cp.stdout);result["node"]=identity()["name"];return result
+        raise RuntimeError((cp.stderr or cp.stdout or f"media {operation} failed").strip()[:1000])
     if operation == "prepare":
         try:
             prepared=json.loads((cp.stdout or "{}").strip() or "{}")
@@ -3329,25 +3306,24 @@ def _local_media_route(operation, payload):
     return state
 
 
-def _fabric_media_outputs(discover=False):
-    """Each node owns discovery and output selection on its attached audio service."""
-    local=_local_media_output(discover)
-    outputs=list(local.get('outputs') or [local]);errors=[]
-    snapshot={'self':node_info(),'peers':PEERS.public()}
-    def fetch(peer):
-        name=peer.get('name') or ((peer.get('node') or {}).get('identity') or {}).get('name')
+def _fabric_media_outputs():
+    """Discover one default playback endpoint per reachable Fabric node."""
+    local = _local_media_output()
+    outputs = [local]
+    errors = []
+    snapshot = {"self": node_info(), "peers": PEERS.public()}
+    for peer in snapshot.get("peers") or []:
+        ad = peer.get("node") or {}
+        name = ((ad.get("identity") or {}).get("name") or peer.get("name"))
+        if not name or not (peer.get("url") or peer.get("tailcat_endpoints") or peer.get("dns")) or not ad:
+            continue
         try:
-            remote=_peer_json(peer,'/v1/media/output'+('?discover=1' if discover else ''),timeout=16,total_timeout=20)
-            rows=remote.get('outputs') or [remote]
-            return [{**row,'node':name} for row in rows if isinstance(row,dict)],None
-        except Exception as exc:return [],{'node':name,'error':str(exc)}
-    peers=[p for p in snapshot['peers'] if p.get('trusted')]
-    if peers:
-        with concurrent.futures.ThreadPoolExecutor(max_workers=4) as pool:
-            for rows,error in pool.map(fetch,peers):
-                outputs.extend(rows)
-                if error:errors.append(error)
-    return {'schema':'fabric-media-outputs-v1','generated':now(),'outputs':outputs,'count':len(outputs),'errors':errors}
+            remote = http_json(_remote_url(snapshot, name, "/v1/media/output"), timeout=.8)
+            if isinstance(remote, dict):
+                outputs.append(remote)
+        except Exception as exc:
+            errors.append({"node": name, "error": str(exc)})
+    return {"schema": "fabric-media-outputs-v1", "generated": now(), "outputs": outputs, "count": len(outputs), "errors": errors}
 
 
 def _fabric_media_state(target=None):
@@ -3405,8 +3381,7 @@ def _fabric_media_move(source,target,index=None):
         for i,row in enumerate(queue):
             item=dict(row)
             item["source_path"]=str(item.get("path") or "")
-            if not str(item.get("path") or "").startswith(("http://","https://")):
-                item["path"]=_remote_url(snapshot,source,"/v1/media/audio?index="+str(i))
+            item["path"]=_remote_url(snapshot,source,"/v1/media/audio?index="+str(i))
             item["node"]=source
             streamed.append(item)
         session=dict(session); session["queue"]=streamed
@@ -4594,9 +4569,9 @@ class API(BaseHTTPRequestHandler):
             q=parse_qs(urlparse(self.path).query); target=str((q.get("node") or [""])[0]); digest=str((q.get("digest") or [""])[0])
             return self._serve_media_artifact(target,digest)
         if path == "/v1/media/output":
-            return self.sendj(200, _local_media_output("discover=1" in urlparse(self.path).query))
+            return self.sendj(200, _local_media_output())
         if path == "/v1/media/outputs":
-            return self.sendj(200, _fabric_media_outputs("discover=1" in urlparse(self.path).query))
+            return self.sendj(200, _fabric_media_outputs())
         if path == "/v1/media/state":
             return self.sendj(200, _local_media_state())
         if path == "/v1/media/session-full":
@@ -5001,9 +4976,9 @@ def _daemon_get(host: str, port: int, path: str, timeout=2.5):
         ) from exc
 
 
-def _daemon_post(host: str, port: int, path: str, payload, timeout=35.0):
+def _daemon_post(host: str, port: int, path: str, payload):
     try:
-        return http_json(_daemon_url(host, port, path), payload, timeout=timeout)
+        return http_json(_daemon_url(host, port, path), payload, timeout=35.0)
     except Exception as exc:
         raise RuntimeError(f"Unified Node request failed at {host}:{port}: {exc}") from exc
 
@@ -6285,7 +6260,7 @@ def main():
     ap.add_argument("command",nargs="?",default="serve",
         choices=["serve","status","nodes","activity","pulse","fabric","watch","dashboard","models","route","qualify","services","service","release","maintenance","update",
                  "jobs","job","submit","packet","cancel","events","http","beacon","lights","artifact-add","artifact","artifacts","file-catalog","file-find","media-catalog","media-identify",
-                 "decisions","decision","answer","ask","decision-shadow","decision-provider","identity","trust","untrust","pair-code","pair","transport","rendezvous","endpoints","endpoint-code","allow","revoke-endpoint","media-outputs","media-output","media-airplay","media-move","media-state","media-play","media-control","speak","alert","disc-import","media-edit","media-store","notifications"])
+                 "decisions","decision","answer","ask","decision-shadow","decision-provider","identity","trust","untrust","pair-code","pair","transport","rendezvous","endpoints","endpoint-code","allow","revoke-endpoint","media-outputs","media-state","media-play","media-control","speak","alert","disc-import","media-edit","media-store","notifications"])
     ap.add_argument("args",nargs="*")
     ap.add_argument("--node",dest="node",default=None,help="target Fabric node name")
     ap.add_argument("--voice-profile",dest="voice_profile",default="default",choices=["default","albert","warm","crisp","deep","max","philosopher","pirate","wopr"],help="speech voice profile")
@@ -6587,7 +6562,7 @@ def main():
                     print(f"FABRIC SPEAK · {target} · {result.get('engine') or '?'} · {status}")
                 return 0
             if a.command=="media-outputs":
-                payload = _daemon_get(a.host, a.port, "/v1/media/outputs"+("?discover=1" if "discover" in a.args else ""),timeout=45)
+                payload = _daemon_get(a.host, a.port, "/v1/media/outputs")
                 if a.json:
                     print(json.dumps(payload, indent=2))
                 else:
@@ -6596,18 +6571,6 @@ def main():
                         mark="●" if row.get("available") else "○"
                         active=" · "+str(row.get("state") or "") if row.get("active") else ""
                         print(f"  {mark} {str(row.get('node') or '?'):<20} {str(row.get('output_id') or 'default')}{active}")
-                return 0
-            if a.command in {"media-output","media-airplay","media-move"}:
-                operation={'media-output':'output','media-airplay':'airplay','media-move':'move'}[a.command]
-                body={'node':a.node or '', 'operation':operation}
-                if operation=='output':
-                    if not a.args:ap.error('media-output requires OUTPUT_ID')
-                    body['output_id']=a.args[0]
-                if operation=='move':
-                    if not a.node:ap.error('media-move requires --node TARGET')
-                    if a.args:body['source']=a.args[0]
-                payload=_daemon_post(a.host,a.port,'/v1/media/route',body,timeout=90)
-                print(json.dumps(payload,ensure_ascii=False) if a.json else payload.get('message','Output action completed'))
                 return 0
             if a.command=="media-state":
                 payload = _target_get(a.host, a.port, a.node, "/v1/media/state") if a.node else _daemon_get(a.host, a.port, "/v1/media/state")
