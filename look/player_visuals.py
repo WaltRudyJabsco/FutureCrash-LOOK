@@ -116,7 +116,7 @@ ROOFTOP_RUN_FRAMES = ((' o ', '/|>', '/ >'),(' o ', '<|\\', ' >\\'))
 ROOFTOP_COLOR = '38;5;110'
 
 
-def rooftop_frame(width,height,phase,seed=0):
+def rooftop_frame(width,height,phase,seed=0,*,runners=None,span=None):
     """A looping city run; world-space gaps also drive the runner's jumps."""
     canvas=[[' ']*width for _ in range(height)]
     def put(x,y,char):
@@ -140,7 +140,7 @@ def rooftop_frame(width,height,phase,seed=0):
                 if roof<y and column%4==2 and y%3==0:char='.' if layer==0 else '+'
                 put(x,y,char)
             if pattern%3==0 and column==building_width//2:put(x,roof-1,'!')
-    span=max(16,min(36,width//3))
+    span=span or max(16,min(36,width//3))
     gap=max(3,min(6,span//5))
     roof=max(0,height-3)
     offset=phase*ROOFTOP_SPEED
@@ -161,8 +161,10 @@ def rooftop_frame(width,height,phase,seed=0):
     progress=distance/jump_distance
     lift=round(4*progress*(1-progress)*min(5,max(1,height//4))) if jumping else 0
     sprite=(' o ','/|>', ' /\\') if jumping else ROOFTOP_RUN_FRAMES[int(phase*8)%len(ROOFTOP_RUN_FRAMES)]
-    for dy,row in enumerate(sprite):
-        for dx,char in enumerate(row):put(runner_x+dx,roof-3-lift+dy,char)
+    poses=[(runner_x,lift,sprite)] if runners is None else runners
+    for runner_x,lift,sprite in poses:
+        for dy,row in enumerate(sprite):
+            for dx,char in enumerate(row):put(runner_x+dx,roof-3-lift+dy,char)
     return [''.join(row) for row in canvas]
 
 

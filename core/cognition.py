@@ -81,7 +81,7 @@ ACTION_SPECS = (
     ActionSpec("media_queue", "media", "local_effect", "action", ("queue", "add to queue")),
     ActionSpec("media_control", "media", "local_effect", "action", ("pause", "resume", "next track", "previous track", "stop playback")),
     ActionSpec("audio_speak", "speech", "local_effect", "action", ("say", "speak", "read aloud", "tell me aloud")),
-    ActionSpec("game_action", "games", "local_effect", "action", ("game", "chess", "checkers", "backgammon", "tic tac toe", "gtnw")),
+    ActionSpec("game_action", "games", "local_effect", "action", ("game", "chess", "checkers", "backgammon", "tic tac toe", "rooftops", "gtnw")),
     ActionSpec("generate_image", "image", "local_effect", "action", ("generate image", "draw", "render image", "make a picture")),
     ActionSpec("schedule_prompt", "schedule", "external_effect", "action", ("schedule", "remind", "every day", "later")),
     ActionSpec("schedule_list", "schedule", "read", "observation", ("scheduled jobs", "reminders")),

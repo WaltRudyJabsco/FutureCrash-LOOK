@@ -20,6 +20,10 @@ import shlex
 import termios
 import time
 import tty
+import tempfile
+import wave
+import array
+import player_visuals
 from contextlib import contextmanager
 from dataclasses import dataclass
 from pathlib import Path
@@ -794,6 +798,215 @@ def play_backgammon(mode="1p"):
             if not dice: who="B" if who=="W" else "W"
 
 
+# ── Rooftops ──────────────────────────────────────────────────────────────────
+ROOFTOPS_DT=1/60
+ROOFTOPS_SPAN=30
+ROOFTOPS_GAP=6
+ROOFTOPS_ANCHOR=10
+ROOFTOPS_GRAVITY=26.0
+ROOFTOPS_JUMP_SPEED=13.0
+ROOFTOPS_FALL_LIMIT=-4.0
+ROOFTOPS_MUSIC_RATE=22050
+ROOFTOPS_MUSIC_BPM=92
+ROOFTOPS_MUSIC_BEATS=16
+
+
+@dataclass
+class RoofRunner:
+    height:float=0.0
+    velocity:float=0.0
+    grounded:bool=True
+    alive:bool=True
+    distance:float=0.0
+
+
+@dataclass
+class RoofRun:
+    seed:int
+    mode:str
+    runners:list[RoofRunner]
+    elapsed:float=0.0
+    distance:float=0.0
+
+
+def rooftops_initial(mode='1p',seed=0):
+    return RoofRun(seed,mode,[RoofRunner() for _ in range(2 if mode=='2p' else 1)])
+
+
+def rooftops_step(run,jumps=()):
+    """One fixed tick. Rendering, terminal input and audio never advance physics."""
+    if not any(r.alive for r in run.runners):return
+    slot=(run.distance+ROOFTOPS_ANCHOR+1)%ROOFTOPS_SPAN
+    for index,runner in enumerate(run.runners):
+        auto=run.mode=='0p' and slot>=ROOFTOPS_SPAN-ROOFTOPS_GAP-3
+        if runner.alive and runner.grounded and (index in jumps or auto):
+            runner.velocity=ROOFTOPS_JUMP_SPEED;runner.grounded=False
+    run.elapsed+=ROOFTOPS_DT
+    run.distance+=player_visuals.ROOFTOP_SPEED*ROOFTOPS_DT
+    solid=(run.distance+ROOFTOPS_ANCHOR+1)%ROOFTOPS_SPAN<ROOFTOPS_SPAN-ROOFTOPS_GAP
+    for runner in run.runners:
+        if not runner.alive:continue
+        runner.distance=run.distance
+        if runner.grounded and not solid:runner.grounded=False
+        if not runner.grounded:
+            before=runner.height
+            runner.height+=runner.velocity*ROOFTOPS_DT
+            runner.velocity-=ROOFTOPS_GRAVITY*ROOFTOPS_DT
+            # Only a downward crossing can land. A runner below the roof cannot
+            # be rescued by a later building scrolling over the same position.
+            if before>=0 and runner.height<=0 and solid:
+                runner.height=0;runner.velocity=0;runner.grounded=True
+            elif runner.height<ROOFTOPS_FALL_LIMIT:runner.alive=False
+
+
+def rooftops_result(run):
+    if any(r.alive for r in run.runners):return ''
+    if len(run.runners)==1:return 'RUN OVER · R retry the same skyline'
+    a,b=(r.distance for r in run.runners)
+    return ('DRAW' if abs(a-b)<player_visuals.ROOFTOP_SPEED*ROOFTOPS_DT/2 else
+            'P1 WINS' if a>b else 'P2 WINS')+' · R rematch'
+
+
+def rooftops_lines(run,width,height,paused=False,music='on'):
+    width=max(1,min(240,width));height=max(1,height)
+    controls='SPACE jump' if run.mode=='1p' else 'Z P1 jump · / P2 jump' if run.mode=='2p' else 'SPACE pause'
+    header=['LOOK GAMES // ROOFTOPS · '+run.mode,
+            controls+' · seed '+str(run.seed),
+            rooftops_result(run) or ('PAUSED' if paused else 'Keep running. Mind the gaps.')]
+    footer=['P pause · R restart · M music '+music,'H help · S stop · Q / Esc menu']
+    lane_height=(height-len(header)-len(footer)-len(run.runners))//len(run.runners)
+    if width<40 or lane_height<6:
+        rows=['ROOFTOPS · enlarge terminal to 40 columns and '+str(5+7*len(run.runners))+' rows',
+              'P pause · M mute · Q / Esc menu']
+    else:
+        rows=header
+        for index,runner in enumerate(run.runners):
+            rows.append(f'P{index+1} · {int(runner.distance)}m'+(' · OUT' if not runner.alive else ''))
+            sprite=(' o ','/|>', ' /\\') if not runner.grounded else player_visuals.ROOFTOP_RUN_FRAMES[int(run.elapsed*8)%2]
+            poses=[(ROOFTOPS_ANCHOR,round(runner.height),sprite)] if runner.alive else []
+            rows.extend(player_visuals.rooftop_frame(width,lane_height,run.elapsed,run.seed,
+                        runners=poses,span=ROOFTOPS_SPAN))
+        rows+=footer
+    return [row[:width].ljust(width) for row in rows[:height]]
+
+
+def rooftops_soundtrack(path):
+    """Original 92 BPM swing loop; no samples, network or external synthesizer."""
+    rate=ROOFTOPS_MUSIC_RATE;beat=60/ROOFTOPS_MUSIC_BPM
+    samples=[0.0]*round(rate*beat*ROOFTOPS_MUSIC_BEATS)
+    rng=random.Random(92016)
+    def note(start,duration,frequency,gain,kind='tone'):
+        offset=round(start*rate);count=round(duration*rate)
+        for i in range(count):
+            at=offset+i
+            if at>=len(samples):break
+            age=i/rate; envelope=min(1,age/.005)*math.exp(-age/(duration*.35))
+            if kind=='noise':value=rng.uniform(-1,1)
+            elif kind=='kick':value=math.sin(math.tau*(45*age+50*.025*(1-math.exp(-age/.025))))
+            else:
+                cycle=(frequency*age)%1
+                value=(1 if cycle<.35 else -1)*.7+math.sin(math.tau*cycle)*.3
+            samples[at]+=value*gain*envelope
+    bass=(38,38,41,43,38,45,43,41)
+    melody=(74,None,77,None,79,77,None,72)
+    for pulse in range(ROOFTOPS_MUSIC_BEATS*2):
+        start=(pulse/2+(.07 if pulse%2 else 0))*beat
+        note(start,.05,0,.035,'noise')
+        if pulse%2==0:
+            note(start,.22,0,.24,'kick') if pulse%8 in (0,4) else note(start,.13,0,.13,'noise')
+        if pulse%4 in (0,3):
+            midi=bass[(pulse//4)%len(bass)]
+            note(start,beat*.55,440*2**((midi-69)/12),.13)
+        midi=melody[(pulse//2)%len(melody)]
+        if pulse%2==0 and midi is not None:
+            note(start,beat*.28,440*2**((midi-69)/12),.06)
+    pcm=array.array('h',(round(max(-1,min(1,v))*32767) for v in samples))
+    if sys.byteorder!='little':pcm.byteswap()
+    with wave.open(str(path),'wb') as out:
+        out.setnchannels(1);out.setsampwidth(2);out.setframerate(rate);out.writeframes(pcm.tobytes())
+
+
+class RooftopsMusic:
+    """Own only this game's player process; never touch LOOK playback or routing."""
+    def __init__(self):
+        self.player=shutil.which('mpv');self.process=None;self.directory=None;self.path=None
+        self.enabled=os.environ.get('LOOK_GAMES_MUSIC','1').casefold() not in {'0','off','false','no'}
+        self.failed=False
+    def sync(self,active):
+        wanted=active and self.enabled and self.player and not self.failed
+        if not wanted:self.stop();return
+        if self.process is not None:
+            if self.process.poll() is None:return
+            self.failed=True;self.stop();return
+        try:
+            if self.path is None:
+                self.directory=tempfile.TemporaryDirectory(prefix='look-rooftops-')
+                self.path=Path(self.directory.name)/'city-loop.wav';rooftops_soundtrack(self.path)
+            self.process=subprocess.Popen([self.player,'--no-config','--no-video','--audio-display=no',
+                '--no-terminal','--input-terminal=no','--loop-file=inf','--volume=25',str(self.path)],
+                stdin=subprocess.DEVNULL,stdout=subprocess.DEVNULL,stderr=subprocess.DEVNULL)
+        except (OSError,ValueError):self.failed=True;self.stop()
+    def stop(self):
+        if self.process is not None:
+            if self.process.poll() is None:
+                self.process.terminate()
+                try:self.process.wait(timeout=1)
+                except subprocess.TimeoutExpired:self.process.kill();self.process.wait()
+            self.process=None
+    def close(self):
+        self.stop()
+        if self.directory is not None:self.directory.cleanup()
+    @property
+    def status(self):
+        return 'unavailable' if not self.player or self.failed else 'on' if self.enabled else 'off'
+
+
+def play_rooftops(mode='1p'):
+    music=RooftopsMusic()
+    try:
+        with terminal() as fd:
+            run=rooftops_initial(mode,random.randrange(10000));paused=False
+            last=time.monotonic();accumulator=0.0;pending=set()
+            while True:
+                size=shutil.get_terminal_size((80,24))
+                width=min(240,size.columns-1);height=size.lines-1
+                fits=width>=40 and (height-5-len(run.runners))//len(run.runners)>=6
+                over=bool(rooftops_result(run))
+                active=not paused and fits and not over
+                music.sync(active)
+                lines=rooftops_lines(run,width,height,paused,music.status)
+                sys.stdout.write('\033[H'+'\n'.join(CYAN+row+RESET+'\033[K' for row in lines)+'\033[J')
+                sys.stdout.flush()
+                key=read_key(fd,ROOFTOPS_DT)
+                for _ in range(16):
+                    if key is None:break
+                    if key in {'q','esc'}:return MENU_RETURN
+                    if key=='s':return 0
+                    if key=='r':run=rooftops_initial(mode,run.seed);paused=False;over=False;pending.clear();accumulator=0;last=time.monotonic()
+                    if key=='p' or (key==' ' and mode=='0p'):paused=not paused;pending.clear()
+                    if key=='m':music.enabled=not music.enabled
+                    if key=='h':
+                        music.sync(False)
+                        help_screen(fd,'Rooftops',['Run across the skyline. Jump before the gaps.',
+                            '1p: Space or Z jumps. 2p: Z jumps for P1; / jumps for P2.',
+                            '0p: automatic runner. Longest distance wins in 2p.',
+                            'P pauses both players; M mutes the original chiptune loop.',
+                            'R restarts the same seed. S stops; Q/Esc returns to games.'])
+                        last=time.monotonic();accumulator=0;pending.clear()
+                    if not paused and fits and not over:
+                        if (mode=='1p' and key in {' ','z'}) or (mode=='2p' and key=='z'):pending.add(0)
+                        if mode=='2p' and key=='/':pending.add(1)
+                    key=read_key(fd,0)
+                now=time.monotonic()
+                active=not paused and fits and not rooftops_result(run)
+                accumulator+=min(.1,max(0,now-last)) if active else 0
+                last=now
+                if not active:accumulator=0;pending.clear()
+                while accumulator>=ROOFTOPS_DT:
+                    rooftops_step(run,pending);pending.clear();accumulator-=ROOFTOPS_DT
+    finally:music.close()
+
+
 # ── WOPR doorway ───────────────────────────────────────────────────────────────
 _GAMES_STATE=Path.home()/".local/share/look/games.json"
 _GAME_ITEMS=[
@@ -802,6 +1015,7 @@ _GAME_ITEMS=[
     ("3","CHESS","chess"),
     ("4","BACKGAMMON","backgammon"),
     ("5","GLOBAL THERMONUCLEAR WAR","gtnw"),
+    ("6","ROOFTOPS","rooftops"),
 ]
 
 
@@ -846,9 +1060,9 @@ def launcher(fd:int, preselected:str=""):
             cursor=">" if game==selected else " "
             lines.append(f" {cursor} {key}   {name}")
         if selected:
-            lines += ["",DIM+"enter accept   1-5 choose another   q/esc exit"+RESET]
+            lines += ["",DIM+"enter accept   1-6 choose another   q/esc exit"+RESET]
         else:
-            lines += ["",DIM+"choose 1-5   q/esc exit"+RESET]
+            lines += ["",DIM+"choose 1-6   q/esc exit"+RESET]
         sys.stdout.write("\n".join(lines)); sys.stdout.flush()
         k=read_key(fd)
         if k in {"q","esc","s"}: return None
@@ -868,7 +1082,7 @@ def choose_mode(fd:int, game:str, default="1p") -> str|None:
     labels={"0p":"COMPUTER / COMPUTER","1p":"HUMAN / COMPUTER","2p":"HUMAN / HUMAN"}
     while True:
         lines=chrome(next((n for _,n,g in _GAME_ITEMS if g==game),game),"PLAYERS")
-        lines += ["  0   COMPUTER / COMPUTER","  1   HUMAN / COMPUTER","  2   HUMAN / HUMAN","",DIM+"choose 0-2   q/esc exit"+RESET]
+        lines += (["  0   AUTOMATIC ROOFTOP RUN","  1   SOLO RUNNER","  2   TWO RUNNERS / SAME KEYBOARD"] if game=="rooftops" else ["  0   COMPUTER / COMPUTER","  1   HUMAN / COMPUTER","  2   HUMAN / HUMAN"])+["",DIM+"choose 0-2   q/esc exit"+RESET]
         sys.stdout.write("\n".join(lines)); sys.stdout.flush()
         k=read_key(fd)
         if k in {"q","esc","s"}: return None
@@ -876,6 +1090,7 @@ def choose_mode(fd:int, game:str, default="1p") -> str|None:
 
 
 def _dispatch(game:str, mode:str, gtnw_runner=None) -> int:
+    if game=="rooftops": return play_rooftops(mode)
     if game=="ttt": return play_ttt(mode)
     if game=="checkers": return play_checkers(mode)
     if game=="chess": return play_chess(mode)
@@ -889,7 +1104,7 @@ def _dispatch(game:str, mode:str, gtnw_runner=None) -> int:
 
 def run(args:list[str], *, gtnw_runner=None) -> int:
     args=list(args or [])
-    aliases={"tic-tac-toe":"ttt","tic":"ttt","draughts":"checkers","bg":"backgammon","war":"gtnw","thermonuclear":"gtnw"}
+    aliases={"tic-tac-toe":"ttt","tic":"ttt","draughts":"checkers","bg":"backgammon","war":"gtnw","thermonuclear":"gtnw","roof":"rooftops","roofs":"rooftops","rooftop":"rooftops"}
 
     # The bare command now performs the full theatrical security gag before
     # denying the existence of the games it plainly knows about.

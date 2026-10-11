@@ -6988,7 +6988,7 @@ def _lo_game_intent(prompt):
     exact={
         "ttt":"ttt","tic tac toe":"ttt","tic tac toe game":"ttt",
         "checkers":"checkers","draughts":"checkers","chess":"chess",
-        "backgammon":"backgammon","gtnw":"gtnw",
+        "backgammon":"backgammon","rooftops":"rooftops","rooftop":"rooftops","roofs":"rooftops","gtnw":"gtnw",
         "global thermonuclear war":"gtnw","global thermonuclear war game":"gtnw",
         "play a game":"","play game":"","games":"",
     }
@@ -7001,7 +7001,7 @@ def _lo_game_intent(prompt):
     aliases={
         "game":"","games":"","ttt":"ttt","tic tac toe":"ttt",
         "checkers":"checkers","draughts":"checkers","chess":"chess",
-        "backgammon":"backgammon","gtnw":"gtnw","global thermonuclear war":"gtnw",
+        "backgammon":"backgammon","rooftops":"rooftops","rooftop":"rooftops","roofs":"rooftops","gtnw":"gtnw","global thermonuclear war":"gtnw",
     }
     if noun not in aliases:
         return None
@@ -7030,10 +7030,10 @@ def _lo_game_direct_answer(tool_content,ok):
     if not ok:
         return "LOOK Games is unavailable right now."
     if text.startswith("GAME MENU ·"):
-        return "Available simulations: Tic-Tac-Toe, Checkers, Chess, Backgammon, and Global Thermonuclear War. In LOOK, enter `lk games <name>`."
+        return "Available simulations: Tic-Tac-Toe, Checkers, Chess, Backgammon, Rooftops, and Global Thermonuclear War. In LOOK, enter `lk games <name>`."
     m=re.match(r"GAME READY · ([a-z0-9-]+) · (.+)$",text)
     if m:
-        labels={"ttt":"Tic-Tac-Toe","checkers":"Checkers","chess":"Chess","backgammon":"Backgammon","gtnw":"Global Thermonuclear War"}
+        labels={"ttt":"Tic-Tac-Toe","checkers":"Checkers","chess":"Chess","backgammon":"Backgammon","rooftops":"Rooftops","gtnw":"Global Thermonuclear War"}
         return f"{labels.get(m.group(1),m.group(1))} is ready on the LOOK terminal surface. Use `{m.group(2)}`."
     return text
 
@@ -8310,9 +8310,9 @@ def _capability_tools():
         }},
         {"type":"function","function":{
             "name":"game_action",
-            "description":"Resolve LOOK Games requests such as chess, checkers, backgammon, Tic-Tac-Toe, or Global Thermonuclear War. This returns the canonical LOOK game command; browser surfaces must not pretend an interactive terminal game was launched.",
+            "description":"Resolve LOOK Games requests such as chess, checkers, backgammon, Tic-Tac-Toe, Rooftops, or Global Thermonuclear War. This returns the canonical LOOK game command; browser surfaces must not pretend an interactive terminal game was launched.",
             "parameters":{"type":"object","properties":{
-                "game":{"type":"string","enum":["","ttt","checkers","chess","backgammon","gtnw"]}
+                "game":{"type":"string","enum":["","ttt","checkers","chess","backgammon","rooftops","gtnw"]}
             }}
         }},
         {"type":"function","function":{
@@ -8407,8 +8407,8 @@ def _run_capability_tool(name,args,workspace,profile):
         aliases={"tic-tac-toe":"ttt","tic tac toe":"ttt","draughts":"checkers","global thermonuclear war":"gtnw"}
         game=aliases.get(game,game)
         if not game:
-            return "GAME MENU · lk games <ttt|checkers|chess|backgammon|gtnw>"
-        if game not in {"ttt","checkers","chess","backgammon","gtnw"}:
+            return "GAME MENU · lk games <ttt|checkers|chess|backgammon|rooftops|gtnw>"
+        if game not in {"ttt","checkers","chess","backgammon","rooftops","gtnw"}:
             return f"GAME FAILED · unknown simulation: {game}"
         return f"GAME READY · {game} · lk games {game}"
     if name=="audio_speak":
@@ -20214,6 +20214,7 @@ _COMMANDS = [
     ("lk games checkers", "[0p|1p|2p]", "meta", "Checkers"),
     ("lk games chess", "[0p|1p|2p]", "meta", "Chess"),
     ("lk games backgammon", "[0p|1p|2p]", "meta", "Backgammon"),
+    ("lk games rooftops", "[0p|1p|2p]", "meta", "ASCII rooftop runner · Space or Z / slash · original chiptune"),
     ("lk games gtnw", "", "meta", "Global Thermonuclear War"),
     ("lk ttt", "[0p|1p|2p]", "meta", "Tic-Tac-Toe alias"),
     ("lk gtnw", "", "meta", "Global Thermonuclear War alias"),
