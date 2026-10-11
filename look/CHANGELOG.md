@@ -1,3 +1,9 @@
+## 2026-10-11 · Runnable notebook command blocks
+
+- Add explicit Markdown `command` fences to Notes' existing numbered link selector, with optional label and local working directory.
+- Show exact source and resolved directory, require R to run, restore the ordinary terminal for interactive tools and return to the same note with an exit status.
+- Keep ordinary code blocks inert, preserve Unicode/multiline commands, reject hidden controls and perform no execution during preview or synchronization.
+
 ## 2026-10-11 · Gentler Rooftops and stereo music
 
 - Extend playable roof lengths from 24 to 60 columns, keeping small six-column gaps and the same jump controls; allow five seconds of running room per roof.

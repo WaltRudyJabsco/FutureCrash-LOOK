@@ -19,10 +19,10 @@ import urllib.request
 
 try:
     from .notebook_core import Notebook, timestamp
-    from .notebook_markdown import render as render_markdown, safe_text, extract_links, markdown_link, inline, cell_width
+    from .notebook_markdown import render as render_markdown, safe_text, extract_links, markdown_link, inline, cell_width, wrap_spans
 except ImportError:
     from notebook_core import Notebook, timestamp
-    from notebook_markdown import render as render_markdown, safe_text, extract_links, markdown_link, inline, cell_width
+    from notebook_markdown import render as render_markdown, safe_text, extract_links, markdown_link, inline, cell_width, wrap_spans
 
 
 def daemon(action,payload=None,timeout=10):
@@ -100,7 +100,11 @@ HELP_TEXT='''LOOK NOTEBOOK — notes, tasks and reminders share one record.
 Capture: N opens a draft. Enter/Ctrl-J inserts a newline; Shift-Enter/Ctrl-S saves.
 Escape cancels a draft. Enter opens a boxed Markdown note view.
 The view previews headings, bold/italic, lists, checkboxes, quotes and code.
-L selects numbered Markdown links; B shows notes linking back to this ID.
+L selects numbered links and command blocks; B shows notes linking back to this ID.
+Use a closed ```command fence to make its contents runnable.
+Optional header: command label="Project tests" cwd="~/Projects/My Book".
+Selecting a command shows its text and local working directory; R confirms execution.
+Ordinary code fences stay inert; commands never run during preview or sync.
 Y copies this note's complete Markdown link from the list or preview.
 Editor Ctrl-K inserts a clipboard path/URL/link and lets you name it.
 Ctrl-N inside that dialog finds notes by title/project and inserts their ID.
@@ -425,8 +429,60 @@ def quick_edit(store,row,fd,read_key):
 
 
 
+def resolve_command(row,target):
+    command=target.get('command');directory=target.get('cwd','')
+    if not isinstance(command,str) or not command.strip() or not isinstance(directory,str):
+        raise ValueError('Command block needs command text and a local working directory')
+    for text in (command,directory):
+        if any((unicodedata.category(char) in {'Cc','Cs'} and char not in '\n\t') or
+               char in '\u202a\u202b\u202c\u202d\u202e\u2066\u2067\u2068\u2069' for char in text):
+            raise ValueError('Command contains hidden or terminal controls')
+    if '\n' in directory or '\t' in directory or directory.startswith('@'):
+        raise ValueError('Commands need a local working directory')
+    cwd=Path(directory).expanduser() if directory else Path.cwd()
+    if directory and not cwd.is_absolute():cwd=Path(row['path']).parent/cwd
+    cwd=cwd.resolve()
+    if not cwd.is_dir():raise ValueError('Command working directory does not exist')
+    return {'command':command,'cwd':cwd}
+
+
+def confirm_command(fd,read_key,target):
+    """Require a deliberate run key after showing the exact source and cwd."""
+    top=0
+    while True:
+        width,height=shutil.get_terminal_size((100,30));width=max(1,width-1);page=max(1,height-3)
+        lines=[]
+        for line in ('Working directory: '+str(target['cwd'])+'\n\n'+target['command']).split('\n'):
+            lines.extend(wrap_spans([(safe_text(line).expandtabs(4),())],width))
+        top=max(0,min(top,max(0,len(lines)-page)))
+        frame=['RUN NOTE COMMAND'[:width]]+lines[top:top+page]+['↑↓/Space scroll · R run · Esc cancel'[:width]]
+        sys.stdout.write('\033[2J\033[H'+'\n'.join(frame)+'\033[J');sys.stdout.flush()
+        key=read_key(fd,None)
+        if key in {'R','r'}:return True
+        if key in {'esc','q','\x03'}:return False
+        if key in {'down','j'}:top+=1
+        elif key in {'up','k'}:top-=1
+        elif key in {'pagedown',' '}:top+=page
+        elif key=='pageup':top-=page
+
+
+def run_note_command(target):
+    shell=os.environ.get('SHELL') or '/bin/sh'
+    sys.stdout.write('\033[2J\033[H'+safe_text('Working directory: '+str(target['cwd'])+'\n'+target['command'])+'\n\n')
+    sys.stdout.flush()
+    try:
+        code=subprocess.run([shell,'-c',target['command']],cwd=target['cwd'],check=False).returncode
+    except KeyboardInterrupt:code=130
+    try:input(f'\nCommand exited {code}. Press Enter to return to the note. ')
+    except (KeyboardInterrupt,EOFError):pass
+    return code
+
+
 def resolve_link(store,row,target):
-    """Validate at the edge; never send note text through a shell."""
+    """Validate targets; only explicit command blocks may request execution."""
+    if isinstance(target,dict):
+        if target.get('kind')!='command':raise ValueError('Unknown note action')
+        return 'command',resolve_command(row,target)
     from urllib.parse import urlsplit, unquote
     try:
         from . import fabric_files
@@ -472,7 +528,7 @@ def choose_link(fd,read_key,links,label='NOTE LINKS'):
         width,height=shutil.get_terminal_size((100,30)); page=max(1,height-4)
         top=max(0,selected-page+1)
         lines=[label]
-        lines.extend(('› ' if i==selected else '  ')+str(i+1)+'. '+safe_text(name)+' · '+safe_text(target)
+        lines.extend(('› ' if i==selected else '  ')+str(i+1)+'. '+safe_text(name)+' · '+safe_text(target['command'].replace('\n',' · ') if isinstance(target,dict) else target)
                      for i,(name,target) in enumerate(links[top:top+page],top))
         lines.append('↑↓/Tab select · number then Enter open · Esc back '+digits)
         sys.stdout.write('\033[2J\033[H'+'\n'.join(line[:max(1,width-1)] for line in lines)+'\033[J'); sys.stdout.flush()
@@ -549,12 +605,15 @@ def note_view(store,row,read_key):
                     if kind=='note':
                         row=value; top=0; notice=''
                     else:
+                        if kind=='command' and not confirm_command(fd,read_key,value):
+                            notice='Command cancelled';continue
                         termios.tcsetattr(fd,termios.TCSADRAIN,old)
                         sys.stdout.write('\033[?25h'); sys.stdout.flush()
-                        try: open_link(kind,value)
+                        try:
+                            code=run_note_command(value) if kind=='command' else open_link(kind,value)
                         finally:
                             tty.setcbreak(fd); sys.stdout.write('\033[?25l')
-                        notice='Opened '+safe_text(target)
+                        notice=('Command exited '+str(code)) if kind=='command' else 'Opened '+safe_text(target)
                 except (ValueError,OSError,RuntimeError,subprocess.SubprocessError) as exc:
                     notice=safe_text(str(exc))
             elif key in {'E','V'}:

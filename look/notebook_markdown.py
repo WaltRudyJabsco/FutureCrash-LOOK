@@ -2,6 +2,7 @@
 from __future__ import annotations
 
 import re
+import shlex
 import unicodedata
 
 RESET='\033[0m'
@@ -114,10 +115,26 @@ def wrap_spans(spans,width):
     return rows
 
 
+def command_block(info,body):
+    """Only explicit command fences become actions; no URL command protocol."""
+    parts=shlex.split(info)
+    if not parts or parts[0]!='command':return None
+    options={}
+    for part in parts[1:]:
+        key,separator,value=part.partition('=')
+        if not separator or key not in {'label','cwd'} or key in options:
+            raise ValueError('Use command label="Name" cwd="/local/project"')
+        options[key]=value
+    if not body.strip():raise ValueError('Command block is empty')
+    label=options.get('label') or next(line.strip() for line in body.splitlines() if line.strip())
+    return label,{'kind':'command','command':body,'cwd':options.get('cwd','')}
+
+
 def render(text,width,links=None):
     """Render common note Markdown without HTML, image fetching, or side effects."""
     width=max(1,width)
     # Notes cannot inject terminal commands. Tabs keep a predictable visual width.
+    raw_lines=text.replace('\r\n','\n').replace('\r','\n').split('\n')
     text=safe_text(text).expandtabs(4)
     lines=text.splitlines(); rows=[]; fence=None; index=0
     while index<len(lines):
@@ -129,6 +146,24 @@ def render(text,width,links=None):
             else: rows.extend(wrap_spans([(line,CODE)],width))
             continue
         if marker:
+            info=raw_lines[index-1].lstrip()[len(marker[1]):].strip()
+            if info.split(None,1)[:1]==['command']:
+                end=index
+                while end<len(lines):
+                    close=re.match(r'^ {0,3}(`{3,}|~{3,})\s*$',lines[end])
+                    if close and close[1][0]==marker[1][0] and len(close[1])>=len(marker[1]):break
+                    end+=1
+                if end<len(lines):
+                    try:
+                        label,target=command_block(info,'\n'.join(raw_lines[index:end]))
+                        if links is not None:
+                            links.append((safe_text(label),target))
+                            rows.extend(wrap_spans([('Run: '+safe_text(label)+' ['+str(len(links))+']',CYAN)],width))
+                        else:rows.extend(wrap_spans([('Run: '+safe_text(label),CYAN)],width))
+                    except ValueError as exc:
+                        rows.extend(wrap_spans([('Command unavailable: '+str(exc),DIM)],width))
+                    for body_line in lines[index:end]:rows.extend(wrap_spans([(body_line,CODE)],width))
+                    index=end+1;continue
             fence=marker[1]; continue
         heading=re.match(r'^ {0,3}(#{1,6})\s+(.+?)\s*$',line)
         setext=index<len(lines) and line.strip() and re.fullmatch(r' {0,3}(=+|-+)\s*',lines[index])
@@ -159,4 +194,4 @@ def render(text,width,links=None):
 def extract_links(text):
     links=[]
     render(text,240,links)
-    return links
+    return [(label,target) for label,target in links if isinstance(target,str)]
