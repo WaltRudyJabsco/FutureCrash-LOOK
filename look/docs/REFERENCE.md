@@ -267,8 +267,6 @@ lk media library
   [media] Inspect indexed roots
 lk media artwork [on|off|status]
   [media] Optional background album covers from MusicBrainz and Cover Art Archive
-lk media outputs
-  [media] List reachable playback endpoints
 lk media on <NODE> play <TARGET>
   [media] Play on a specified node
 lk media identify <QUERY|PATH|--all>
@@ -315,6 +313,8 @@ lk ttt [0p|1p|2p]
   [meta] Tic-Tac-Toe alias
 lk gtnw
   [meta] Global Thermonuclear War alias
+lk media outputs [discover|select ID --node NODE|enable-airplay --node NODE|move --node NODE|--list|--json]
+  [media] Choose a node-owned audio output; discovery never switches playback
 lk fabric backup [add|configure|drives|status [--json]|inventory|run|restore DIR]
   [fabric] Encrypted essential-state recovery
 lk settings [SEARCH]
@@ -979,6 +979,7 @@ _looks_like_shell_file_discovery: --files, --files-with-matches
 _match_command: --all
 _media_group_command: --json, --list
 _media_identify_command: --all
+_media_outputs_command: --json, --list
 _media_playlist_command: --shuffle
 _media_resolve_targets: --artist, --exact, --kind, --limit, --literal, --selection, --shuffle
 _media_scan_command: --forget, --move-root, --relocate
