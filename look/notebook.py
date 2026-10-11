@@ -106,7 +106,7 @@ Optional header: command label="Project tests" cwd="~/Projects/My Book".
 Selecting a command shows its text and local working directory; R confirms execution.
 Ordinary code fences stay inert; commands never run during preview or sync.
 Y copies this note's complete Markdown link from the list or preview.
-Editor Ctrl-K inserts a clipboard path/URL/link and lets you name it.
+Editor Ctrl-K opens Insert Link; Ctrl-T switches to a multiline Command block.
 Ctrl-N inside that dialog finds notes by title/project and inserts their ID.
 Use [label](note:FULL_ID), [label](<file path>), [label](https://example.com),
 or [label](<@3090:/path with spaces>). Relative paths start beside the note.
@@ -149,6 +149,9 @@ Targets: --target all (default), a node name, or comma-separated node names.
 LO can list notes or read a note by its position in the newest-updated-first list.
 Reminder durations accept ten minutes, 10 minutes, or in 10 minutes.
 Full command flags: lkn --help. Global reference: lk doc or man lk.
+
+Command mode: Tab selects text/label/directory; Enter adds a line in the text.
+Shift-Enter/Ctrl-S inserts the block, then save the note as usual.
 '''
 
 
@@ -282,28 +285,62 @@ def choose_note(store,fd,read_key):
         elif len(key)==1 and key.isprintable(): query+=key;selected=0
 
 
+def make_command(body,label='',directory=''):
+    if not body.strip():raise ValueError('Paste or type a command first')
+    validate_command_text(body,directory)
+    validate_command_text(label,'')
+    if any(unicodedata.category(char) in {'Cc','Cs'} for char in label):
+        raise ValueError('Use a single-line label')
+    # A longer fence preserves pasted scripts containing literal backticks.
+    fence='`'*max(3,1+max((len(run) for run in re.findall(r'`+',body)),default=0))
+    header='command'
+    if label:header+=' label='+shlex.quote(label)
+    if directory:header+=' cwd='+shlex.quote(directory)
+    return '\n\n'+fence+header+'\n'+body+'\n'+fence+'\n\n'
+
+
 def insert_link(store,fd,read_key):
     try:
         from .look_renderer import clipboard_text
     except ImportError:
         from look_renderer import clipboard_text
-    values=['','']; notice=''; active=0
+    clipboard=clipboard_text().replace('\r\n','\n').replace('\r','\n')
+    values=['','']; notice=''; active=0; mode='link'
     try:
-        values[:]=link_fields(clipboard_text()); active=1
+        values[:]=link_fields(clipboard); active=1
     except ValueError: pass
     cursors=[len(value) for value in values]; replace=[bool(value) for value in values]
+    forms={'command':([clipboard,'',''],[len(clipboard),0,0],[bool(clipboard),False,False],0)}
     while True:
-        width,_=shutil.get_terminal_size((100,30)); rows=['INSERT LINK']
-        for index,(name,value) in enumerate(zip(('Target','Label'),values)):
+        width,height=shutil.get_terminal_size((100,30))
+        rows=['INSERT LINK · Type: Link' if mode=='link' else 'INSERT COMMAND · Type: Command']
+        names=('Target','Label') if mode=='link' else ('Command','Label','Working directory (optional)')
+        for index,(name,value) in enumerate(zip(names,values)):
             cursor=cursors[index]
             shown=value[:cursor]+'█'+value[cursor:] if active==index else value
-            rows.append(('› ' if active==index else '  ')+name+': '+shown)
-        rows+=['Type replaces suggestion · arrows edit · Enter confirms',
-               'Tab target/label · Ctrl-N find note · Esc cancel',notice]
+            if mode=='command' and index==0:
+                rows.append(('› ' if active==index else '  ')+name+':')
+                body_rows=[part for line in shown.split('\n') for part in
+                           (textwrap.wrap(line,max(1,width-5),replace_whitespace=False,drop_whitespace=False) or [''])]
+                page=max(1,height-10)
+                cursor_row=next((i for i,line in enumerate(body_rows) if '█' in line),0)
+                top=max(0,cursor_row-page+1) if active==0 else 0
+                rows.extend('    '+line for line in body_rows[top:top+page])
+            else:rows.append(('› ' if active==index else '  ')+name+': '+shown)
+        rows+=(['Type replaces suggestion · arrows edit · Enter confirms',
+                'Tab target/label · Ctrl-N find note · Esc cancel'] if mode=='link' else
+               ['Enter newline in Command · Tab next field',
+                'Shift-Enter/Ctrl-S insert block · Esc cancel'])
+        rows+=['Ctrl-T switch Link / Command',notice]
         sys.stdout.write('\033[2J\033[H'+'\r\n'.join(dialog_line(line,max(1,width-1)) for line in rows)+'\033[J');sys.stdout.flush()
         key=read_key(fd,None);notice=''
         if key in {'esc','\x03'}: return None
-        if key=='\x0e':
+        if key=='\x14':
+            forms[mode]=(values,cursors,replace,active)
+            mode='command' if mode=='link' else 'link'
+            values,cursors,replace,active=forms[mode]
+            continue
+        if key=='\x0e' and mode=='link':
             try:
                 row=choose_note(store if store is not None else Notebook(),fd,read_key)
             except (OSError,ValueError) as exc:
@@ -311,7 +348,17 @@ def insert_link(store,fd,read_key):
             if row:
                 values=['note:'+row['id'],row['title']];cursors=[len(value) for value in values];replace=[True,True];active=1
             continue
-        if key=='\t': active=1-active;continue
+        if key=='\t': active=(active+1)%len(values);continue
+        if mode=='command' and (key in {'shiftenter','\x13'} or (key in {'\r','\n','enter'} and active==2)):
+            try:return make_command(*values)
+            except ValueError as exc:notice=str(exc)
+            continue
+        if mode=='command' and key in {'\r','\n','enter'}:
+            if active==0:
+                replace[0]=False
+                cursor=cursors[0];values[0]=values[0][:cursor]+'\n'+values[0][cursor:];cursors[0]+=1
+            else:active=2
+            continue
         if key in {'\r','\n','enter'}:
             try:
                 if active==0:
@@ -321,14 +368,24 @@ def insert_link(store,fd,read_key):
                 else: return make_link(values[1],values[0])
             except ValueError as exc: notice=str(exc);active=0
             continue
+        if mode=='command' and active==0 and key in {'up','down'}:
+            replace[0]=False;text=values[0];cursor=cursors[0]
+            start=text.rfind('\n',0,cursor)+1;column=cursor-start;end=text.find('\n',cursor)
+            if key=='up' and start:
+                previous=text.rfind('\n',0,start-1)+1;cursors[0]=min(previous+column,start-1)
+            elif key=='down' and end>=0:
+                following=text.find('\n',end+1);cursors[0]=min(end+1+column,len(text) if following<0 else following)
+            continue
         if key in {'wordleft','wordright','left','right','home','end'}:
             replace[active]=False
             if key in {'wordleft','wordright'}:
                 cursors[active]=word_cursor(values[active],cursors[active],-1 if key=='wordleft' else 1)
             elif key=='left': cursors[active]=max(0,cursors[active]-1)
             elif key=='right': cursors[active]=min(len(values[active]),cursors[active]+1)
-            elif key=='home': cursors[active]=0
-            else: cursors[active]=len(values[active])
+            elif key=='home': cursors[active]=values[active].rfind('\n',0,cursors[active])+1 if mode=='command' and active==0 else 0
+            else:
+                end=values[active].find('\n',cursors[active]) if mode=='command' and active==0 else -1
+                cursors[active]=len(values[active]) if end<0 else end
             continue
         if key in {'\b','\x7f','delete'}:
             value=values[active];cursor=cursors[active]
@@ -339,7 +396,11 @@ def insert_link(store,fd,read_key):
         text=key[6:] if key.startswith('paste:') else key if len(key)==1 and key.isprintable() else ''
         if text:
             # Paste is field data, never dialog keys.
-            if any(ord(char)<32 or ord(char)==127 for char in text):
+            if mode=='command' and active==0:
+                text=text.replace('\r\n','\n').replace('\r','\n')
+                try:validate_command_text(text,'')
+                except ValueError as exc:notice=str(exc);continue
+            elif any(ord(char)<32 or ord(char)==127 for char in text):
                 notice='Paste a single target or label';continue
             if replace[active]: values[active]='';cursors[active]=0;replace[active]=False
             cursor=cursors[active];values[active]=values[active][:cursor]+text+values[active][cursor:];cursors[active]+=len(text)
@@ -365,7 +426,7 @@ def capture_note(fd,read_key,initial_text='',label='NEW NOTE',store=None):
             heading=(label+' · ')[:max(1,width-1)]
             actions='Enter newline · Shift-Enter/Ctrl-S save · Esc cancel'[:max(0,width-1-len(heading))]
             frame=[KEY_CYAN+heading+'\033[0m'+command_hints(actions),
-                   command_hints('Ctrl-K link · Alt-←→ words · Alt-↑↓ paragraphs · Shift-↑↓/PgUp/PgDn page'[:max(1,width-1)])]
+                   command_hints('Ctrl-K insert link/command · Alt-←→ words · Alt-↑↓ paragraphs · Shift-↑↓/PgUp/PgDn page'[:max(1,width-1)])]
             if boxed:
                 frame.extend(['┌'+'─'*columns+'┐',*['│'+line.ljust(columns)+'│' for line in visible],'└'+'─'*columns+'┘'])
             else: frame.extend(visible)
@@ -429,16 +490,20 @@ def quick_edit(store,row,fd,read_key):
 
 
 
-def resolve_command(row,target):
-    command=target.get('command');directory=target.get('cwd','')
-    if not isinstance(command,str) or not command.strip() or not isinstance(directory,str):
-        raise ValueError('Command block needs command text and a local working directory')
+def validate_command_text(command,directory):
     for text in (command,directory):
         if any((unicodedata.category(char) in {'Cc','Cs'} and char not in '\n\t') or
                char in '\u202a\u202b\u202c\u202d\u202e\u2066\u2067\u2068\u2069' for char in text):
             raise ValueError('Command contains hidden or terminal controls')
     if '\n' in directory or '\t' in directory or directory.startswith('@'):
         raise ValueError('Commands need a local working directory')
+
+
+def resolve_command(row,target):
+    command=target.get('command');directory=target.get('cwd','')
+    if not isinstance(command,str) or not command.strip() or not isinstance(directory,str):
+        raise ValueError('Command block needs command text and a local working directory')
+    validate_command_text(command,directory)
     cwd=Path(directory).expanduser() if directory else Path.cwd()
     if directory and not cwd.is_absolute():cwd=Path(row['path']).parent/cwd
     cwd=cwd.resolve()
