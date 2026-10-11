@@ -1,3 +1,9 @@
+## 2026-10-11 · Rooftops, Spectrum and a UFO
+
+- Add a miniature ASCII rooftop runner with three scrolling city depths and jumps synchronized to roof gaps.
+- Add gradient EQ-style Spectrum columns with fading sparks and an occasional Black Hole UFO flyby.
+- Include both new modes in Cycle; preserve existing visual modes, pause behavior and transport shortcuts.
+
 ## 2026-10-11 · Black Hole, album shimmer and local playback preference
 
 - Add an animated ASCII Black Hole with a rotating accretion disc; Cycle includes all eight visuals, preserving Album Art as the seventh mode.

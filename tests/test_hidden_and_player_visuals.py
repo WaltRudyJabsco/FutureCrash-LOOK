@@ -65,7 +65,7 @@ def test_shift_h_preserves_filter_query_and_refreshes_candidates(tmp_path,monkey
     assert not any(query!='notes' for query,_ in queries)
 
 
-@pytest.mark.parametrize('mode',[*range(1,7),8])
+@pytest.mark.parametrize('mode',[*range(1,7),8,9,10])
 def test_ambient_frames_animate_stay_bounded_and_pause(mode):
     for width,height in [(1,1),(18,7),(120,35)]:
         a=player_visuals.frame(mode,width,height,1.3)
@@ -99,7 +99,7 @@ def test_player_cycles_all_views_without_losing_transport_controls(lk,monkeypatc
 
 def test_cycle_holds_each_visual_ten_seconds_and_includes_album_art():
     mode=player_visuals.CYCLE_MODE
-    assert [player_visuals.active_mode(mode,seconds) for seconds in (0,9.99,10,60,69.99,70,79.99,80)]==[1,1,2,7,7,8,8,1]
+    assert [player_visuals.active_mode(mode,seconds) for seconds in (0,9.99,10,60,69.99,70,79.99,80,89.99,90,99.99,100)]==[1,1,2,7,7,8,8,9,9,10,10,1]
     assert all(player_visuals.active_mode(mode,second)!=0 for second in range(200))
     for fixed in range(mode):assert player_visuals.active_mode(fixed,120)==fixed
 
@@ -240,3 +240,59 @@ def test_album_shimmer_preserves_terminal_width_and_transport(lk,monkeypatch):
     assert idle!=sweep and lk._strip_ansi(idle)==lk._strip_ansi(sweep)
     assert all(len(lk._strip_ansi(row))==79 for row in sweep.splitlines())
     assert 'space pause' in lk._strip_ansi(sweep)
+
+
+def test_rooftops_runner_clears_gap_and_lands_on_roof():
+    width,height=90,24
+    span=width//3;gap=span//5;anchor=int(width*.28)
+    # At the middle of a gap the runner rises; on solid roof it returns.
+    def scene(world):
+        phase=(world-anchor-1)/player_visuals.ROOFTOP_SPEED
+        return player_visuals.frame(9,width,height,phase,seed=3)
+    ground=scene(span*2+12)
+    airborne=scene(span*2+span-gap/2)
+    assert ground[height-6][anchor:anchor+3]==' o '
+    head=next(y for y,row in enumerate(airborne) if row[anchor:anchor+3]==' o ')
+    assert head<height-6
+    assert airborne[height-3][anchor+1]!='='
+    assert ground[height-3][anchor+1]=='='
+    assert ground==scene(span*2+12)
+    assert ground!=player_visuals.frame(9,width,height,2,seed=4)
+
+
+def test_cycle_rooftops_keeps_track_and_transport(lk,monkeypatch):
+    snap={'entry':{'title':'City Song'},'state':'playing','position':2,'duration':60,
+          'index':0,'session':{'queue':[{}]}}
+    monkeypatch.setattr(lk.shutil,'get_terminal_size',lambda fallback:os.terminal_size((100,30)))
+    text=lk._strip_ansi(lk._media_player_full_visual(snap,player_visuals.CYCLE_MODE,80))
+    assert 'Cycle · Rooftops' in text and 'City Song' in text and 'space pause' in text
+    assert len(text.splitlines())==29
+
+
+def test_spectrum_has_bar_tops_and_fading_sparks():
+    rows=player_visuals.frame(10,80,24,3.7,seed=2)
+    assert any('*' in row or ':' in row or '.' in row for row in rows)
+    assert sum(row.count('=') for row in rows)>=20
+    assert player_visuals.spectrum_color(0,24)!=player_visuals.spectrum_color(23,24)
+    assert all(player_visuals.spectrum_color(y,24) in player_visuals.SPECTRUM_COLORS for y in range(24))
+
+
+def test_black_hole_ufo_is_occasional_and_pauses():
+    mode=8;phase=player_visuals.UFO_DELAY_SECONDS+player_visuals.UFO_FLIGHT_SECONDS/2
+    rows=player_visuals.frame(mode,80,24,phase)
+    assert any('(o---o)' in row for row in rows)
+    assert not any('(o---o)' in row for row in player_visuals.frame(mode,80,24,0))
+    assert not any('(o---o)' in row for row in player_visuals.frame(mode,80,24,phase,False))
+    assert not any('(o---o)' in row for row in player_visuals.frame(mode,80,24,phase+player_visuals.UFO_FLIGHT_SECONDS))
+
+
+def test_spectrum_renderer_uses_gradient_without_expanding_rows(lk,monkeypatch):
+    snap={'entry':{'title':'City Song'},'state':'playing','position':2,'duration':60,
+          'index':0,'session':{'queue':[{}]}}
+    monkeypatch.setattr(lk.shutil,'get_terminal_size',lambda fallback:os.terminal_size((80,24)))
+    monkeypatch.setattr(lk,'_c',lambda text,code:'\x1b['+code+'m'+text+'\x1b[0m')
+    text=lk._media_player_full_visual(snap,10,3.7)
+    assert player_visuals.SPECTRUM_COLORS[0] in text and player_visuals.SPECTRUM_COLORS[-1] in text
+    plain=lk._strip_ansi(text)
+    assert all(len(row)==79 for row in plain.splitlines())
+    assert 'space pause' in plain and 'Spectrum' in plain

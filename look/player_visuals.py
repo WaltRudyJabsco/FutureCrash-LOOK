@@ -4,7 +4,7 @@ import math
 import hashlib
 import json
 
-NAMES = ('Bars', 'Waves', 'Orbit', 'Tunnel', 'Stars', 'Plasma', 'Album Art', 'Black Hole', 'Cycle')
+NAMES = ('Bars', 'Waves', 'Orbit', 'Tunnel', 'Stars', 'Plasma', 'Album Art', 'Black Hole', 'Rooftops', 'Spectrum', 'Cycle')
 CYCLE_MODE = len(NAMES)
 CYCLE_INTERVAL_SECONDS = 10.0
 
@@ -53,6 +53,10 @@ def frame(mode, width, height, phase, playing=True, seed=0):
             depth=(i*.618034+t*.18)%1
             point((width-1)/2+math.cos(angle)*depth*width*.65,
                   (height-1)/2+math.sin(angle)*depth*height*.65,'.+*'[min(2,int(depth*3))])
+    elif mode==9:
+        return spectrum_frame(width,height,t,seed)
+    elif mode==8:
+        return rooftop_frame(width,height,t,seed)
     elif mode==7:
         return black_hole_frame(width,height,t,seed)
     else:
@@ -61,6 +65,104 @@ def frame(mode, width, height, phase, playing=True, seed=0):
             for x in range(width):
                 value=(math.sin(x*.10+t)+math.sin(y*.25-t*.8)+math.sin(math.hypot(x-width/2,(y-height/2)*2)*.12-t))/6+.5
                 point(x,y,ramp[max(0,min(len(ramp)-1,int(value*len(ramp))))])
+    return [''.join(row) for row in canvas]
+
+
+SPECTRUM_BAR_SPACING = 4
+SPECTRUM_SPARK_INTERVAL_SECONDS = .9
+SPECTRUM_SPARK_LIFETIME_SECONDS = 1.8
+# Warm tips grading into green at the base, without changing terminal backgrounds.
+SPECTRUM_COLORS = ('38;5;203','38;5;209','38;5;215','38;5;221','38;5;150','38;5;114','38;5;78')
+UFO_PERIOD_SECONDS = 47.0
+UFO_DELAY_SECONDS = 12.0
+UFO_FLIGHT_SECONDS = 6.0
+UFO_SPRITE = (' _===_ ', '(o---o)')
+
+
+def spectrum_frame(width,height,phase,seed=0):
+    """Ambient EQ columns with deterministic, fading particles above their tips."""
+    canvas=[[' ']*width for _ in range(height)]
+    def level(bar,t):
+        pulse=(math.sin(t*1.7+bar*.63+seed)+math.sin(t*.8-bar*.37))/4+.5
+        return max(1,int((.12+.8*pulse)*height))
+    for bar,x in enumerate(range(0,width,SPECTRUM_BAR_SPACING)):
+        top=height-level(bar,phase)
+        for y in range(top,height):
+            for dx in range(min(2,width-x)):canvas[y][x+dx]='=' if y==top else '|'
+        # Birth times, rather than redraw counts, keep particles independent of
+        # frame rate and allow pause to render the same frame without state.
+        interval=SPECTRUM_SPARK_INTERVAL_SECONDS
+        birth=math.floor((phase-bar*.17)/interval)*interval+bar*.17
+        for previous in range(2):
+            emitted=birth-previous*interval
+            age=phase-emitted
+            if emitted<0 or not 0<=age<SPECTRUM_SPARK_LIFETIME_SECONDS:continue
+            y=height-level(bar,emitted)-1-int(age*3)
+            px=x+int(math.sin(bar+seed+age*2)*age)
+            if 0<=px<width and 0<=y<height and canvas[y][px]==' ':
+                canvas[y][px]='*:. '[min(3,int(age/SPECTRUM_SPARK_LIFETIME_SECONDS*4))]
+    return [''.join(row) for row in canvas]
+
+
+def spectrum_color(y,height):
+    return SPECTRUM_COLORS[min(len(SPECTRUM_COLORS)-1,y*len(SPECTRUM_COLORS)//max(1,height))]
+
+
+# Slow skyline, middle-distance towers, then the runner's faster rooftops.
+ROOFTOP_LAYERS = ((1.2,14,.42,':'),(4.0,22,.62,'|'))
+ROOFTOP_SPEED = 12.0
+ROOFTOP_JUMP_LEAD = 4
+ROOFTOP_RUN_FRAMES = ((' o ', '/|>', '/ >'),(' o ', '<|\\', ' >\\'))
+ROOFTOP_COLOR = '38;5;110'
+
+
+def rooftop_frame(width,height,phase,seed=0):
+    """A looping city run; world-space gaps also drive the runner's jumps."""
+    canvas=[[' ']*width for _ in range(height)]
+    def put(x,y,char):
+        if 0<=x<width and 0<=y<height:canvas[y][x]=char
+    def shape(tile,layer):
+        # Integer mixing keeps buildings stable as they scroll through the view.
+        return ((tile*1103515245+seed*12345+layer*2654435761)&0xffffffff)
+    for x in range(width):
+        if (x+seed)%23==0:put(x,1,'.')
+    for layer,(speed,span,baseline,edge) in enumerate(ROOFTOP_LAYERS):
+        offset=int(phase*speed)
+        floor=min(height-1,int(height*baseline))
+        for x in range(width):
+            tile,column=divmod(x+offset,span)
+            pattern=shape(tile,layer)
+            building_width=span-3-pattern%3
+            if column>=building_width:continue
+            roof=max(2,floor-2-pattern%max(1,height//3))
+            for y in range(roof,height):
+                char=edge if y==roof or column in (0,building_width-1) else ' '
+                if roof<y and column%4==2 and y%3==0:char='.' if layer==0 else '+'
+                put(x,y,char)
+            if pattern%3==0 and column==building_width//2:put(x,roof-1,'!')
+    span=max(16,min(36,width//3))
+    gap=max(3,min(6,span//5))
+    roof=max(0,height-3)
+    offset=phase*ROOFTOP_SPEED
+    for x in range(width):
+        tile,column=divmod(x+int(offset),span)
+        if column>=span-gap:continue
+        for y in range(roof,height):
+            char='=' if y==roof else '|' if column in (0,span-gap-1) else ' '
+            if y>roof and column%6 in (2,3):char=':'
+            put(x,y,char)
+    runner_x=max(0,min(width-3,int(width*.28)))
+    # Start before the edge and land beyond the next edge; no independent
+    # animation clock that could make the runner jump into a gap.
+    jump_start=span-gap-ROOFTOP_JUMP_LEAD
+    distance=(runner_x+1+int(offset)-jump_start)%span
+    jump_distance=gap+2*ROOFTOP_JUMP_LEAD
+    jumping=distance<jump_distance
+    progress=distance/jump_distance
+    lift=round(4*progress*(1-progress)*min(5,max(1,height//4))) if jumping else 0
+    sprite=(' o ','/|>', ' /\\') if jumping else ROOFTOP_RUN_FRAMES[int(phase*8)%len(ROOFTOP_RUN_FRAMES)]
+    for dy,row in enumerate(sprite):
+        for dx,char in enumerate(row):put(runner_x+dx,roof-3-lift+dy,char)
     return [''.join(row) for row in canvas]
 
 
@@ -94,6 +196,15 @@ def black_hole_frame(width,height,phase,seed=0):
             light=max(disc,lens) if radius>BLACK_HOLE_RADIUS else 0
             row.append(ramp[min(len(ramp)-1,int(light*(len(ramp)-1)))])
         rows.append(''.join(row))
+    age=max(0.0,phase)%UFO_PERIOD_SECONDS-UFO_DELAY_SECONDS
+    if width>=len(UFO_SPRITE[0]) and height>=8 and 0<=age<UFO_FLIGHT_SECONDS:
+        left=round(-len(UFO_SPRITE[0])+(width+len(UFO_SPRITE[0]))*age/UFO_FLIGHT_SECONDS)
+        top=max(0,height//6-1)
+        for dy,sprite in enumerate(UFO_SPRITE):
+            row=list(rows[top+dy])
+            for dx,char in enumerate(sprite):
+                if 0<=left+dx<width and char!=' ':row[left+dx]=char
+            rows[top+dy]=''.join(row)
     return rows
 
 
