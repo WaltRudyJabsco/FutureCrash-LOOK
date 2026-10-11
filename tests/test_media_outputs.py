@@ -169,3 +169,18 @@ def test_remote_outputs_use_trusted_peer_name(monkeypatch):
  monkeypatch.setattr(node.PEERS,'public',lambda:[{'name':'bridge','trusted':True}])
  monkeypatch.setattr(node,'_peer_json',lambda *args,**kw:{'outputs':[{'node':'wrong','output_id':'default'}]})
  assert node._fabric_media_outputs()['outputs'][-1]['node']=='bridge'
+
+
+@pytest.mark.parametrize('command,extra,operation',[
+ ('media-output',['audio-a'],'output'),('media-airplay',[],'airplay'),('media-move',[],'move')])
+def test_output_commands_reach_daemon_with_supported_timeout(monkeypatch,capsys,command,extra,operation):
+ from core import node
+ import sys
+ request=Mock(return_value={'ok':True,'message':'confirmed'})
+ monkeypatch.setattr(node,'http_json',request)
+ monkeypatch.setattr(sys,'argv',['fcl-node',command,*extra,'--node','bridge','--json'])
+ assert node.main()==0
+ assert request.call_args.kwargs['timeout']==90
+ body=request.call_args.args[1]
+ assert body['operation']==operation and body['node']=='bridge'
+ assert json.loads(capsys.readouterr().out)['ok']

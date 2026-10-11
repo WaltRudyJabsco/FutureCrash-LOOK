@@ -5001,9 +5001,9 @@ def _daemon_get(host: str, port: int, path: str, timeout=2.5):
         ) from exc
 
 
-def _daemon_post(host: str, port: int, path: str, payload):
+def _daemon_post(host: str, port: int, path: str, payload, timeout=35.0):
     try:
-        return http_json(_daemon_url(host, port, path), payload, timeout=35.0)
+        return http_json(_daemon_url(host, port, path), payload, timeout=timeout)
     except Exception as exc:
         raise RuntimeError(f"Unified Node request failed at {host}:{port}: {exc}") from exc
 
