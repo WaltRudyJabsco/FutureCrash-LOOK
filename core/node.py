@@ -3997,6 +3997,16 @@ class API(BaseHTTPRequestHandler):
                 else:
                     row,source=_local_media_entry(entry_id,path_hint)
                     ctype=str(row.get("media_type") or mimetypes.guess_type(str(source))[0] or "application/octet-stream")
+                # Inspect on the owner: encrypted samples must not reach generic players.
+                import importlib.util
+                module_path=Path.home()/'.local/share/look/media_protection.py'
+                if module_path.is_file():
+                    spec=importlib.util.spec_from_file_location('look_media_protection',module_path)
+                    guard=importlib.util.module_from_spec(spec);spec.loader.exec_module(guard)
+                    if guard.protected(source):
+                        if head:
+                            self.send_response(409);self.send_header('X-LOOK-Media-Playback','requires-provider-app');self.send_header('Content-Length','0');self.end_headers();return
+                        return self.sendj(409,{'error':'Protected media requires an authorized provider app; on a Mac use Media Find T (Apple TV) or O (Open with)'})
                 return self._serve_file_range(source,ctype,head=head)
             except Exception as exc:
                 if head:

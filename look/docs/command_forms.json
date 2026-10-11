@@ -1075,6 +1075,12 @@
     "Additional routed entry point; see usage details below"
   ],
   [
+    "lk meaty",
+    "[ARGS]",
+    "aliases",
+    "Additional routed entry point; see usage details below"
+  ],
+  [
     "lk music",
     "[ARGS]",
     "aliases",
