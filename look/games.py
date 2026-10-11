@@ -800,13 +800,13 @@ def play_backgammon(mode="1p"):
 
 # ── Rooftops ──────────────────────────────────────────────────────────────────
 ROOFTOPS_DT=1/60
-ROOFTOPS_SPAN=30
+ROOFTOPS_SPAN=66
 ROOFTOPS_GAP=6
 ROOFTOPS_ANCHOR=10
 ROOFTOPS_GRAVITY=26.0
 ROOFTOPS_JUMP_SPEED=13.0
 ROOFTOPS_FALL_LIMIT=-4.0
-ROOFTOPS_MUSIC_RATE=22050
+ROOFTOPS_MUSIC_RATE=48000
 ROOFTOPS_MUSIC_BPM=92
 ROOFTOPS_MUSIC_BEATS=16
 
@@ -884,7 +884,7 @@ def rooftops_lines(run,width,height,paused=False,music='on'):
             rows.append(f'P{index+1} · {int(runner.distance)}m'+(' · OUT' if not runner.alive else ''))
             sprite=(' o ','/|>', ' /\\') if not runner.grounded else player_visuals.ROOFTOP_RUN_FRAMES[int(run.elapsed*8)%2]
             poses=[(ROOFTOPS_ANCHOR,round(runner.height),sprite)] if runner.alive else []
-            rows.extend(player_visuals.rooftop_frame(width,lane_height,run.elapsed,run.seed,
+            rows.extend(player_visuals.rooftop_frame(width,lane_height,run.distance/player_visuals.ROOFTOP_SPEED,run.seed,
                         runners=poses,span=ROOFTOPS_SPAN))
         rows+=footer
     return [row[:width].ljust(width) for row in rows[:height]]
@@ -920,10 +920,11 @@ def rooftops_soundtrack(path):
         midi=melody[(pulse//2)%len(melody)]
         if pulse%2==0 and midi is not None:
             note(start,beat*.28,440*2**((midi-69)/12),.06)
-    pcm=array.array('h',(round(max(-1,min(1,v))*32767) for v in samples))
+    # Stereo 48 kHz avoids CoreAudio rejecting the old mono input layout.
+    pcm=array.array('h',(round(max(-1,min(1,v))*32767) for v in samples for _ in range(2)))
     if sys.byteorder!='little':pcm.byteswap()
     with wave.open(str(path),'wb') as out:
-        out.setnchannels(1);out.setsampwidth(2);out.setframerate(rate);out.writeframes(pcm.tobytes())
+        out.setnchannels(2);out.setsampwidth(2);out.setframerate(rate);out.writeframes(pcm.tobytes())
 
 
 class RooftopsMusic:
@@ -958,7 +959,9 @@ class RooftopsMusic:
         if self.directory is not None:self.directory.cleanup()
     @property
     def status(self):
-        return 'unavailable' if not self.player or self.failed else 'on' if self.enabled else 'off'
+        if not self.player or self.failed:return 'unavailable'
+        if not self.enabled:return 'off'
+        return 'on' if self.process is not None else 'paused'
 
 
 def play_rooftops(mode='1p'):

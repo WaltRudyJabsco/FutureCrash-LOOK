@@ -31,9 +31,9 @@ def test_two_player_input_is_independent_and_longest_run_wins():
     run=g.rooftops_initial('2p')
     for _ in range(300):
         slot=(run.distance+g.ROOFTOPS_ANCHOR+1)%g.ROOFTOPS_SPAN
-        g.rooftops_step(run,[0] if slot>=21 else [])
+        g.rooftops_step(run,[0] if slot>=g.ROOFTOPS_SPAN-g.ROOFTOPS_GAP-3 else [])
     assert run.runners[0].alive and not run.runners[1].alive
-    for _ in range(300):g.rooftops_step(run)
+    for _ in range(360):g.rooftops_step(run)
     assert 'P1 WINS' in g.rooftops_result(run)
     tie=g.rooftops_initial('2p')
     for _ in range(300):g.rooftops_step(tie)
@@ -63,7 +63,7 @@ def test_original_soundtrack_is_repeatable_valid_nonempty_pcm(tmp_path):
     g.rooftops_soundtrack(a);g.rooftops_soundtrack(b)
     assert a.read_bytes()==b.read_bytes()
     with wave.open(str(a)) as source:
-        assert (source.getnchannels(),source.getsampwidth(),source.getframerate())==(1,2,g.ROOFTOPS_MUSIC_RATE)
+        assert (source.getnchannels(),source.getsampwidth(),source.getframerate())==(2,2,g.ROOFTOPS_MUSIC_RATE)
         assert source.getnframes()==round(g.ROOFTOPS_MUSIC_RATE*60/g.ROOFTOPS_MUSIC_BPM*g.ROOFTOPS_MUSIC_BEATS)
         pcm=array.array('h');pcm.frombytes(source.readframes(source.getnframes()))
     assert any(pcm) and max(abs(v) for v in pcm)<32767
@@ -132,3 +132,41 @@ def test_menu_dispatch_and_aliases(monkeypatch):
     for name in ('rooftops','roof','roofs','rooftop'):
         assert g.run([name,'2p'])==0
     assert all(call.args==('2p',) for call in play.call_args_list)
+
+
+def test_roofs_allow_five_seconds_of_ground_between_gaps():
+    assert g.ROOFTOPS_SPAN-g.ROOFTOPS_GAP>=60
+    assert (g.ROOFTOPS_SPAN-g.ROOFTOPS_GAP)/g.player_visuals.ROOFTOP_SPEED>=5
+    run=g.rooftops_initial()
+    for _ in range(180):g.rooftops_step(run)
+    assert run.runners[0].grounded and run.runners[0].alive
+    # The visual floor and physics floor agree at the new long roof edge.
+    run.distance=g.ROOFTOPS_SPAN-g.ROOFTOPS_GAP-g.ROOFTOPS_ANCHOR-1+1
+    run.elapsed=run.distance/g.player_visuals.ROOFTOP_SPEED
+    rows=g.rooftops_lines(run,80,24)
+    assert rows[-5][g.ROOFTOPS_ANCHOR+1]!='='
+
+
+def test_music_status_does_not_claim_on_while_stopped(monkeypatch):
+    monkeypatch.setattr(g.shutil,'which',lambda name:'/usr/bin/mpv')
+    music=g.RooftopsMusic()
+    assert music.status=='paused'
+    music.enabled=False;assert music.status=='off'
+    music.failed=True;assert music.status=='unavailable'
+
+
+def test_game_roof_graphics_match_collision_gaps_across_entire_course():
+    run=g.rooftops_initial()
+    for offset in range(g.ROOFTOPS_SPAN):
+        run.distance=float(offset);run.elapsed=run.distance/g.player_visuals.ROOFTOP_SPEED
+        rows=g.rooftops_lines(run,80,24)
+        slot=(offset+g.ROOFTOPS_ANCHOR+1)%g.ROOFTOPS_SPAN
+        assert (rows[-5][g.ROOFTOPS_ANCHOR+1]=='=')==(slot<g.ROOFTOPS_SPAN-g.ROOFTOPS_GAP)
+
+
+def test_running_course_does_not_drift_between_physics_and_drawing():
+    run=g.rooftops_initial('0p')
+    for _ in range(2000):
+        g.rooftops_step(run)
+        solid=(run.distance+g.ROOFTOPS_ANCHOR+1)%g.ROOFTOPS_SPAN<g.ROOFTOPS_SPAN-g.ROOFTOPS_GAP
+        assert (g.rooftops_lines(run,80,24)[-5][g.ROOFTOPS_ANCHOR+1]=='=')==solid
