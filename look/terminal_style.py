@@ -109,7 +109,8 @@ def settings(name,folder=None):
                       url_color=roles['accent'],selection_background=roles['selection'],
                       selection_foreground=readable_text(roles['selection']),
                       active_tab_background=roles['tabs'],active_tab_foreground=readable_text(roles['tabs']),
-                      inactive_tab_background=roles['background'],inactive_tab_foreground=roles['muted'])
+                      inactive_tab_background=roles['background'],inactive_tab_foreground=roles['muted'],
+                      active_border_color=roles['accent'],inactive_border_color=roles['muted'])
         for index in (4,6,12,14,75,81,110,117):result['color'+str(index)]=roles['accent']
         # Keep ANSI panel backgrounds distinct from LOOK text inks.
         result['color252']=roles['foreground']
@@ -121,6 +122,7 @@ def settings(name,folder=None):
     result={key:value for key,value in theme.items() if key not in {'colors','accents'}}
     result.update({'color'+str(index):color for index,color in enumerate(theme['colors'])})
     result.update({'color'+str(index):color for index,color in theme.get('accents',{}).items()})
+    result.update(active_border_color=result['url_color'],inactive_border_color=result['color8'])
     return result
 
 
@@ -343,6 +345,32 @@ def main(argv=None,read_key=None):
         return 0
     except (OSError,ValueError) as exc:
         print('LOOK TERMINAL · '+str(exc),file=sys.stderr);return 1
+
+
+def open_pane(path):
+    """Open a sibling shell; the terminal owns its lifetime, never LOOK."""
+    cwd=Path(path).expanduser().resolve()
+    if not cwd.is_dir(): return 'Pane needs a local directory'
+    try:
+        if os.environ.get('TMUX') and shutil.which('tmux'):
+            command=['tmux','split-window','-h','-c',str(cwd)]
+            commands=[command]
+        elif os.environ.get('KITTY_WINDOW_ID','').isdecimal():
+            window=os.environ['KITTY_WINDOW_ID']
+            client=shutil.which('kitten')
+            base=([client,'@'] if client else [kitty_executable(),'@'])+['--password','look-panes']
+            commands=[base+['goto-layout','--match',f'window_id:{window}','splits'],
+                      base+['launch','--match',f'window_id:{window}','--next-to',f'id:{window}',
+                            '--source-window',f'id:{window}','--location=vsplit','--cwd',str(cwd)]]
+        else:
+            return 'Split panes need Kitty or tmux; LOOK still works in this terminal'
+        for command in commands:
+            result=subprocess.run(command,capture_output=True,text=True,timeout=8,check=False)
+            if result.returncode:
+                return 'Pane unavailable; enable the LOOK Kitty profile (./install.sh --kitty) or use tmux'
+        return 'Shell opened beside LOOK'
+    except (OSError,ValueError,subprocess.TimeoutExpired):
+        return 'Pane unavailable; check the terminal setup'
 
 
 if __name__=='__main__': raise SystemExit(main())

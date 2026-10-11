@@ -78,3 +78,11 @@ enabled in that terminal's settings. Existing list/preview shortcuts are unchang
 Kitty's official configuration reference documents include files, reload,
 and indexed-color customization:
 https://sw.kovidgoyal.net/kitty/conf/
+
+Sibling shell panes: W from LOOK browse, Option/Alt-Shift-W switches focus,
+Ctrl-Shift-W closes the focused pane. See [pane workflow](PANES-AND-PACIFIC-TECH.md).
+
+Future Crash uses the same Paper and Custom ink roles when the shared LOOK helper
+is installed: forest green activity, navy/teal accents, red/amber warnings and
+charcoal text. Restart Future Crash after changing the palette. Neon and Slate
+retain their existing display; standalone Future Crash needs no LOOK dependency.

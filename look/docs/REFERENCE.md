@@ -309,6 +309,16 @@ lk games chess [0p|1p|2p]
   [meta] Chess
 lk games backgammon [0p|1p|2p]
   [meta] Backgammon
+lk genius [--tour]
+  [meta] Pacific Tech ASCII laboratory · popcorn, closet, compact parking and optical party finder
+lk popcorn
+  [meta] ASCII popcorn home improvement
+lk lazlo
+  [meta] Fictional sweepstakes closet printer
+lk kent
+  [meta] Some assembly required · dormitory parking
+lk laser
+  [meta] ASCII optical party finder
 lk games rooftops [0p|1p|2p]
   [meta] ASCII rooftop runner · Space or Z / slash · original chiptune
 lk games gtnw
@@ -873,6 +883,12 @@ HELP PAGER
   Shift-← / Shift-→    beginning / end
   Home / End / g / G   beginning / end
   q / Esc              quit
+
+SIBLING PANES
+  W                    shell pane in current directory (LOOK browse only)
+  Alt-Shift-W          next Kitty pane
+  Ctrl-Shift-W         close focused Kitty pane
+  Ctrl-Shift-Enter     new Kitty shell pane
 
 USAGE AND OPTIONS
 
