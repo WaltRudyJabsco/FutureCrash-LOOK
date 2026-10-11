@@ -122,7 +122,7 @@ Use `lkn To Do` to reopen it.
 ```
 
 The preview shows headings without hashes, readable emphasis and ☐/☑ task
-markers. Enter saves an edit and returns to that preview. Formatting never
+markers. Shift-Enter/Ctrl-S saves an edit and returns to that preview. Formatting never
 rewrites the saved Markdown or the file opened by V.
 
 LO can edit existing records: ask “Add buy milk to To Do,” “Rewrite the Scratch
@@ -149,3 +149,45 @@ lk notifications desktop off
 Speech is off by default. Targeted nodes deliver each occurrence once; snoozing
 creates a new occurrence. Browser alerts likewise deduplicate an occurrence
 within the open page. Visual reminder cards persist until completion or snooze.
+
+
+## Runnable project commands
+
+A note can keep reusable terminal commands beside project files, folders, URLs
+and related notes. In E (quick edit) or V (full editor), add an explicit, closed
+`command` fence:
+
+````markdown
+```command
+lk help all
+```
+
+```command label="Open manuscript" cwd="~/Projects/My Book"
+nvim manuscript.md
+```
+````
+
+The rendered preview shows **Run: Open manuscript [2]**, using the same numbering
+as Markdown links in document order. Press its number (1–9) or L to choose from
+all links and commands, including multi-digit entries. Selection opens a preview
+of the exact command and resolved working directory. Scroll if needed; **R** runs
+it and Escape cancels. Enter alone does not execute it.
+
+Commands run locally in the terminal with the current account, inherited PATH
+and the user's `$SHELL` (or `/bin/sh`), using noninteractive shell syntax.
+Pipelines and multiline commands work; shell aliases/functions that exist only
+in an interactive startup file may need an executable command instead. Full
+screen programs such as Neovim receive the ordinary terminal. When the command
+finishes, its exit status is shown; press Enter to return to the same note.
+
+`label` and `cwd` are optional quoted header fields. Without `cwd`, the command
+runs from the directory where Notes was launched. `~` expands to the current
+user's home; an explicitly relative `cwd` starts beside the note file, like
+relative file links. The directory must exist locally. `@node:/path` remains a
+Fabric file link, not a command working directory.
+
+Only `command` fences are runnable. Ordinary `sh`, `bash`, `python` and unmarked
+code blocks stay examples. Unclosed, empty or invalid command blocks cannot be
+selected. Terminal controls and hidden directional controls are rejected before
+execution. Previewing, editing, copying, syncing and opening a note never run
+its commands; each execution requires the explicit R confirmation.
