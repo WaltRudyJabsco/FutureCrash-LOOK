@@ -78,3 +78,34 @@ def test_paper_palette_has_readable_notes_and_album_accents():
     for key in ('foreground','color81','color117','color150','color180','color183','color110','color211'):
         ink=luminance(theme[key])
         assert (background+.05)/(ink+.05)>=4.5
+
+
+@pytest.mark.parametrize('theme',['paper','custom','slate','neon'])
+def test_future_crash_uses_shared_inks_and_retains_dark_theme_palette(monkeypatch,theme,tmp_path):
+    import importlib.util
+    monkeypatch.setenv('LOOK_TERMINAL_THEME',theme)
+    monkeypatch.setenv('KITTY_CONFIG_DIRECTORY',str(tmp_path))
+    spec=importlib.util.spec_from_file_location('fc_ink_test',ROOT/'future-crash/future_crash.py')
+    module=importlib.util.module_from_spec(spec)
+    import sys
+    monkeypatch.setitem(sys.modules,spec.name,module);spec.loader.exec_module(module)
+    if theme in {'paper','custom'}:
+        assert module.WHITE=='\x1b[38;2;32;30;26m'
+        assert module.GREEN.startswith('\x1b[38;2;')
+        assert module.GREEN2==module.GREEN
+        assert module.SignalCanvas.COLORS['green']==module.GREEN
+    else:
+        assert module.GREEN=='\x1b[38;5;121m'
+        assert module.WHITE=='\x1b[38;5;255m'
+
+
+def test_future_crash_standalone_needs_no_shared_theme_helper(tmp_path,monkeypatch):
+    import importlib.util,sys
+    path=tmp_path/'future_crash.py'
+    path.write_text((ROOT/'future-crash/future_crash.py').read_text())
+    monkeypatch.setenv('LOOK_TERMINAL_THEME','paper')
+    spec=importlib.util.spec_from_file_location('fc_standalone_ink_test',path)
+    module=importlib.util.module_from_spec(spec)
+    monkeypatch.setitem(sys.modules,spec.name,module);spec.loader.exec_module(module)
+    assert module.GREEN=='\x1b[38;5;121m'
+    assert module.application_palette()=={}

@@ -1,3 +1,11 @@
+## 2026-10-11 · Sibling panes and Pacific Tech
+
+- Open an independent shell beside LOOK with W from browse, using the viewed local directory. Preserve W as filter text; support Kitty and existing tmux sessions with clear unsupported-terminal feedback.
+- Add Kitty pane focus, gentle inactive dimming and a global split shortcut; limit helper control to launch/layout actions and preserve personal overrides.
+- Add original ASCII Pacific Tech lab, popcorn house, Lazlo closet printer, Kent car assembly and laser party finder, with scene switching, tour, pause and terminal cleanup.
+- Draw Future Crash in shared Paper/Custom inks instead of fixed neon greens and white, retaining standalone operation and existing Neon/Slate colors.
+- Add Moon Jelly aquarium to the player's ten-second visual rotation, preserving transport controls and paused rendering.
+
 ## 2026-10-11 · Readable help and consistent pager keys
 
 - Highlight full command forms, section headings and keyboard combinations in the generated help reference; keep descriptions at normal contrast and piped output plain.

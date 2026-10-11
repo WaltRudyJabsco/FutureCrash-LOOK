@@ -27,6 +27,7 @@ The terminal is the idle state. The assistant is the machine underneath it.
 from __future__ import annotations
 
 import argparse
+import importlib.util
 import json
 import math
 import struct
@@ -72,6 +73,26 @@ RED = CSI + "38;5;203m"
 WHITE = CSI + "38;5;255m"
 GRAY = CSI + "38;5;245m"
 DARK = CSI + "38;5;239m"
+
+
+def application_palette():
+    """Reuse LOOK's optional ink roles; standalone Future Crash keeps its palette."""
+    path=Path(__file__).resolve().parents[1]/"look"/"terminal_style.py"
+    if not path.is_file():return {}
+    try:
+        spec=importlib.util.spec_from_file_location("future_crash_terminal_style",path)
+        styles=importlib.util.module_from_spec(spec);spec.loader.exec_module(styles)
+        roles=styles.application_colors()
+    except (OSError,ValueError,ImportError):return {}
+    mapping={"GREEN":"GREEN","GREEN2":"GREEN","CYAN":"CYAN","AMBER":"YELLOW",
+             "MAGENTA":"MAGENTA","RED":"RED","WHITE":"WHITE","GRAY":"GRAY","DARK":"FAINT"}
+    return {name:CSI+"38;2;"+";".join(str(channel) for channel in roles[role])+"m"
+            for name,role in mapping.items() if role in roles}
+
+
+# Resolve once at launch, just like LOOK's renderer. No terminal or dependency
+# initialization is needed when the shared appearance helper is absent.
+globals().update(application_palette())
 
 VERSION = "1.3.0"
 GLYPHS = "0123456789ABCDEF"

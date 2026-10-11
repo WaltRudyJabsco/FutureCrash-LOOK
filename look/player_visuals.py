@@ -4,7 +4,7 @@ import math
 import hashlib
 import json
 
-NAMES = ('Bars', 'Waves', 'Orbit', 'Tunnel', 'Stars', 'Plasma', 'Album Art', 'Black Hole', 'Rooftops', 'Spectrum', 'Cycle')
+NAMES = ('Bars', 'Waves', 'Orbit', 'Tunnel', 'Stars', 'Plasma', 'Album Art', 'Black Hole', 'Rooftops', 'Spectrum', 'Moon Jelly', 'Cycle')
 CYCLE_MODE = len(NAMES)
 CYCLE_INTERVAL_SECONDS = 10.0
 
@@ -53,6 +53,8 @@ def frame(mode, width, height, phase, playing=True, seed=0):
             depth=(i*.618034+t*.18)%1
             point((width-1)/2+math.cos(angle)*depth*width*.65,
                   (height-1)/2+math.sin(angle)*depth*height*.65,'.+*'[min(2,int(depth*3))])
+    elif mode==10:
+        return moon_jelly_frame(width,height,t,seed)
     elif mode==9:
         return spectrum_frame(width,height,t,seed)
     elif mode==8:
@@ -245,3 +247,27 @@ def album_color(snapshot):
             choice=(choice+1)%len(ALBUM_COLORS)
         _album_track=identity; _album_color=choice
     return ALBUM_COLORS[_album_color]
+
+
+def moon_jelly_frame(width,height,phase,seed=0):
+    """A small nocturnal aquarium: pulsing bells, drifting tendrils and bubbles."""
+    canvas=[[' ']*width for _ in range(height)]
+    def dot(x,y,char):
+        x=round(x);y=round(y)
+        if 0<=x<width and 0<=y<height:canvas[y][x]=char
+    count=max(1,min(5,width//22))
+    for fish in range(count):
+        offset=fish*2.3+seed*.01
+        cx=(fish+.5)*width/count+math.sin(phase*.27+offset)*width/count*.14
+        cy=height*.3+math.sin(phase*.35+offset)*height*.12
+        radius=max(2,min(width/count*.3,height*.36))*(.86+.14*math.sin(phase*1.8+offset))
+        for i in range(48):
+            angle=math.pi+i*math.pi/47
+            dot(cx+math.cos(angle)*radius,cy+math.sin(angle)*radius*.45,'.:-'[i%3])
+        for strand in range(5):
+            anchor=cx+(strand-2)*radius*.35
+            for depth in range(max(1,int(height*.48))):
+                dot(anchor+math.sin(depth*.55-phase*1.3+offset+strand)*depth*.12,cy+depth,'|' if depth%3==0 else ':')
+    for bubble in range(max(2,width//12)):
+        dot((bubble*19+seed)%width+math.sin(phase*.4+bubble),height-1-(phase*.8+bubble*7)%height,'o' if bubble%3==0 else '.')
+    return [''.join(row) for row in canvas]

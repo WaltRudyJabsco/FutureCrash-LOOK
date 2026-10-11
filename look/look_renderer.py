@@ -11,11 +11,12 @@ Normally installed by the repository's ./install.sh.
 from __future__ import annotations
 import json
 try:
-    from . import fabric_files, media_open, destination_history
+    from . import fabric_files, media_open, destination_history, terminal_style
 except ImportError:
     import fabric_files
     import media_open
     import destination_history
+    import terminal_style
 
 import argparse
 import base64
@@ -1594,7 +1595,7 @@ def pager(rows:list[str],height:int,width:int,rebuild=None,browse_rebuild=None,f
             else:
                 back_hint='Esc back' if on_back else 'Esc exit'
                 action_parts=['H hidden','F sort','Enter/→ filter','Space/PgDn next','b/PgUp back',
-                              'g ends','G go','⇧↑/↓ page','⇧←/→ ends','←/< parent',back_hint,'Q quit']
+                              'g ends','G go','W shell pane','⇧↑/↓ page','⇧←/→ ends','←/< parent',back_hint,'Q quit']
             footer=action_footer(action_parts,width)
             # A wrapped command bar owns real rows; leave one spare row to avoid
             # terminal autowrap scrolling the filter prompt out of its frame.
@@ -1862,6 +1863,9 @@ def pager(rows:list[str],height:int,width:int,rebuild=None,browse_rebuild=None,f
                 continue
 
             if key in {'Q','\x03'}: break
+            if key=='W' and current_dir is not None:
+                notice=terminal_style.open_pane(current_dir)
+                continue
             if key=='F' and on_sort:
                 notice=on_sort()
                 current=browse_rebuild(None,marked) if browse_rebuild else current

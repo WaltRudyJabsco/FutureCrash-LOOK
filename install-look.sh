@@ -379,6 +379,7 @@ install_file "$ROOT/look/player_visuals.py" "$HOME/.local/share/look/player_visu
 install_file "$ROOT/look/terminal_style.py" "$HOME/.local/share/look/terminal_style.py"
 install_file "$ROOT/look/media_watch.py" "$HOME/.local/share/look/media_watch.py"
 install_file "$ROOT/look/file_catalog.py" "$HOME/.local/share/look/file_catalog.py"
+install_file "$ROOT/look/real_genius.py" "$HOME/.local/share/look/real_genius.py"
 install_file "$ROOT/look/games.py" "$HOME/.local/share/look/games.py"
 install_file "$ROOT/look/comfy_bootstrap.py" "$HOME/.local/share/look/comfy_bootstrap.py"
 run chmod +x "$HOME/.local/share/look/look_ai.py" "$HOME/.local/share/look/comfy_bootstrap.py" "$HOME/.local/share/look/media_watch.py"
