@@ -1,3 +1,9 @@
+## 2026-10-11 · Rooftops game and original chiptune
+
+- Add `lk games rooftops` with automatic demo, solo and two-player shared-keyboard modes; fixed-step jump/fall physics, reproducible skyline seeds and survival distance scoring.
+- Reuse the silent visualizer scene while keeping player-controlled jumps separate; preserve all existing game menu numbers and controls.
+- Generate an original local 92 BPM bleep soundtrack with game-owned playback, mute and cleanup on pause/game-over/exit; preserve LOOK playback and audio routing.
+
 ## 2026-10-11 · Rooftops, Spectrum and a UFO
 
 - Add a miniature ASCII rooftop runner with three scrolling city depths and jumps synchronized to roof gaps.

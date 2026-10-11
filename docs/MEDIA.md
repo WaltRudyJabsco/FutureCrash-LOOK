@@ -188,6 +188,8 @@ jumps follow the rooftop gaps. Spectrum draws EQ-style columns with a warm-to-gr
 foreground gradient and fading sparks. Black Hole has a rare UFO flyby when left
 open: a six-second pass beginning after 12 seconds, repeating every 47 seconds.
 These animations are ambient, rather than measurements of the audio signal.
+The Rooftops scene is also a playable [LOOK game](GAMES.md); its soundtrack is
+exclusive to the game and never runs in the visualizer.
 
 When a track has multiple catalog locations, playback checks local copies first,
 then remote copies. Missing local paths fall through to reachable remote copies;

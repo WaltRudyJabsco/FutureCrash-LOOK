@@ -309,6 +309,8 @@ lk games chess [0p|1p|2p]
   [meta] Chess
 lk games backgammon [0p|1p|2p]
   [meta] Backgammon
+lk games rooftops [0p|1p|2p]
+  [meta] ASCII rooftop runner · Space or Z / slash · original chiptune
 lk games gtnw
   [meta] Global Thermonuclear War
 lk ttt [0p|1p|2p]
