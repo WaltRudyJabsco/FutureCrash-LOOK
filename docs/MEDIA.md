@@ -170,8 +170,8 @@ Matched audio CDs download a 500-pixel front cover from the Cover Art Archive in
 ## Player visuals
 
 In `lk player`, press lowercase `v` to cycle Bars, Waves, Orbit, Tunnel, Stars,
-Plasma, **Album Art**, **Black Hole**, then **Cycle**, followed by the normal player view. In
-`lk mp`, `v` opens the same player visuals. Cycle rotates through the eight
+Plasma, **Album Art**, **Black Hole**, **Rooftops**, **Spectrum**, then **Cycle**, followed by the
+normal player view. In `lk mp`, `v` opens the same player visuals. Cycle rotates through the ten
 visualizers every ten seconds while its view is open, including Album Art, and
 never switches automatically to the normal player view. Selecting Cycle starts
 at Bars; pressing `v` again returns to the normal view. Transport controls remain
@@ -183,6 +183,10 @@ a narrow diagonal foreground highlight crosses Album Art for three seconds every
 18 seconds, beginning five seconds after entering the view. Pausing disables the
 highlight; each track keeps its existing foreground color. Black Hole draws a
 rotating ASCII accretion disc around a dark horizon with a curved arc of light.
+Rooftops is a miniature city run with three scrolling depths and a runner whose
+jumps follow the rooftop gaps. Spectrum draws EQ-style columns with a warm-to-green
+foreground gradient and fading sparks. Black Hole has a rare UFO flyby when left
+open: a six-second pass beginning after 12 seconds, repeating every 47 seconds.
 These animations are ambient, rather than measurements of the audio signal.
 
 When a track has multiple catalog locations, playback checks local copies first,
