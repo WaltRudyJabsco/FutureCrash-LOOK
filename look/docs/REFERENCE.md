@@ -361,6 +361,8 @@ lk live-state [ARGS]
   [aliases] Additional routed entry point; see usage details below
 lk livestate [ARGS]
   [aliases] Additional routed entry point; see usage details below
+lk meaty [ARGS]
+  [aliases] Additional routed entry point; see usage details below
 lk music [ARGS]
   [aliases] Additional routed entry point; see usage details below
 lk o [ARGS]
@@ -956,12 +958,17 @@ Parser arguments and recognized option tokens (grouped by handler):
 --album-artist — Shared album artist; keep compilations together
 --all — Apply shared fields to every matching track
 --artist — Shared performer name
+--directory
 --disc — Shared disc number
+--extras
 --json
 --keywords
+--limit
+--list
 --node
 --node — Preferred library node; local keeps new imports here
 --root — Library root on that node (absolute or ~/); existing folders are retained
+--shuffle
 --text
 --title — Song title for a single track
 --track — Track number for a single track
@@ -982,6 +989,7 @@ _profile_restore: --yes
 _translate_command: --status
 _vision_arm_command: --help
 _vision_screen_command: --all, --ask, --display, --displays, --every, --help, --max-width, --node, --quality, --save, --watch
+action
 channel
 main: --, --all, --events-json, --help, --hidden, --json, --no-hidden, --no-start, --parents, --resident-set, --version
 media: --shuffle
@@ -989,6 +997,7 @@ ollama_curate: --apply
 path
 query
 state
+value
 
 look/look_renderer.py
 

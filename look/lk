@@ -16563,7 +16563,10 @@ def _media_entry_source(entry):
         if node and str(node).casefold() not in local_names:
             continue
         target=Path(path).expanduser()
-        if target.is_file(): return str(target.resolve())
+        if target.is_file():
+            import media_protection
+            media_protection.require_generic_playback(target)
+            return str(target.resolve())
 
     stale_local=[]
     for node,path,entry_id,_digest in candidates:
@@ -16597,6 +16600,9 @@ def _media_pin_playable_entry(entry, timeout=1.5):
     cheap HEAD request. No media bytes are downloaded by this probe.
     """
     row=dict(entry or {})
+    if str(row.get('path') or '').startswith(('http://','https://')):
+        if any(ord(c)<32 or ord(c)==127 for c in str(row['path'])):raise ValueError('Invalid stream URL')
+        return row
     local_names=_media_local_node_names()
     local_name=platform.node() or socket.gethostname() or "local"
     candidates=[]
@@ -16619,10 +16625,12 @@ def _media_pin_playable_entry(entry, timeout=1.5):
             try:
                 source=Path(path).expanduser()
                 if source.is_file():
+                    import media_protection
+                    media_protection.require_generic_playback(source)
                     pinned=dict(row); pinned.update({"node":node or local_name,"path":str(source.resolve())})
                     if entry_id: pinned["id"]=entry_id
                     return pinned
-            except OSError as exc:
+            except (OSError,ValueError) as exc:
                 errors.append(str(exc)); continue
         if node and entry_id and not is_local:
             params={"node":node,"id":entry_id}
@@ -16638,7 +16646,7 @@ def _media_pin_playable_entry(entry, timeout=1.5):
             except urllib.error.HTTPError as exc:
                 # A concrete HTTP failure is evidence that this physical copy is
                 # unavailable; keep looking for another location.
-                errors.append(f"{node}: HTTP {exc.code}")
+                errors.append(f"{node}: protected media requires an authorized provider app" if exc.headers and exc.headers.get("X-LOOK-Media-Playback")=="requires-provider-app" else f"{node}: HTTP {exc.code}")
                 continue
             except (TimeoutError, socket.timeout) as exc:
                 # Sleeping disks and cross-Fabric startup routinely exceed a tiny
@@ -16900,6 +16908,7 @@ def _media_launch_session(session):
         print(f"LOOK media · {len(unreachable)} unreachable queue item(s) skipped")
     if not pinned:
         print("LOOK media · no queue item has a reachable Fabric location")
+        for title,error in unreachable[:3]:print(f"  {title} · {error}")
         return 1
     queue=pinned
     session["queue"]=queue
@@ -16947,6 +16956,7 @@ def _media_launch_session(session):
             loaded=_media_mpv_request(["loadlist",str(MEDIA_QUEUE_FILE),"replace"])
             if loaded and loaded.get("error")=="success":
                 _media_mpv_request(["set_property","playlist-pos",idx])
+                _media_mpv_request(["set_property","loop-playlist","inf" if session.get("repeat")=="all" else "no"])
                 _media_mpv_request(["set_property","pause",False])
                 if not _media_wait_for_mpv_loaded():
                     detail=" · ".join(line.strip() for line in _media_tail_player_log(6) if line.strip())
@@ -18195,7 +18205,7 @@ def _media_selector(rows,title="FABRIC MEDIA",initial_query="",catalog_meta=None
                             print(left)
 
                 filter_text=f"{_c('FILTER','1;36')} {query}█" if query else f"{_c('FILTER','1;36')} █"
-                actions=_media_hints("/ search · ↑↓/J/K move · Shift-arrows page/ends · Tab select · A select all · E edit metadata · R refresh · Enter/P play · Q queue · C clear selection · S save playlist · I info · V sources · H hidden · X hide · D hide by directory · U unhide · Esc finish/clear/exit",width)
+                actions=_media_hints("/ search · ↑↓/J/K move · Shift-arrows page/ends · Tab select · A select all · E edit metadata · R refresh · Enter/P play · O open with · T Apple TV · Q queue · C clear selection · S save playlist · I info · V sources · H hidden · X hide · D hide by directory · U unhide · Esc finish/clear/exit",width)
                 footer=f"{filter_text}  "+_c("◆ SHA · · scanned","2")+"\n"+actions
                 if notice:
                     footer+="  "+_c(notice,"33")
@@ -18217,7 +18227,7 @@ def _media_selector(rows,title="FABRIC MEDIA",initial_query="",catalog_meta=None
                     search_mode=False; continue
                 if key in {"\x7f","\b"}:
                     query=query[:-1]; idx=0; continue
-                if len(key)==1 and key.isprintable() and key not in "APQCSIVHXDUJKER":
+                if len(key)==1 and key.isprintable() and key not in "APQCSIVHXDUJKEROT":
                     query+=key; idx=0; continue
                 # Navigation and selection act on the filtered results immediately.
                 search_mode=False
@@ -18266,6 +18276,12 @@ def _media_selector(rows,title="FABRIC MEDIA",initial_query="",catalog_meta=None
                     if update:row.update(update)
                 notice=f"updated {result['count']} track(s)"+(' · '+' · '.join(result['errors']) if result['errors'] else '')
                 view_key=None;selected_ids.clear();continue
+            if key in {"O","T"} and visible:
+                termios.tcsetattr(fd,termios.TCSADRAIN,old)
+                try: opened,message=_media_open_with(visible[idx],'TV' if key=='T' else None)
+                finally:tty.setcbreak(fd)
+                notice=message or ('Opened in selected app' if opened else 'Open with cancelled')
+                continue
             if key in {"\r","\n","P"} and chosen:
                 action=("play",chosen); break
             if key=="Q" and chosen:
@@ -18340,6 +18356,78 @@ def _media_selector_finish(action,payload):
         print(f"  {path}")
         return 0
     return None
+
+def _media_open_with(row, app=None):
+    local_names=_media_local_node_names()
+    sources=[row]+[x for x in row.get("locations",[]) if isinstance(x,dict)]
+    path=next((Path(x['path']).expanduser() for x in sources
+               if x.get('path') and not str(x['path']).startswith(('http://','https://'))
+               and (not x.get('node') or str(x['node']).casefold() in local_names)
+               and Path(x['path']).expanduser().is_file()),None)
+    if path is None:
+        return False,"Open with needs a local file; copy or mount the remote source first"
+    if app=='TV':
+        if sys.platform!='darwin':return False,"Apple TV handoff is available on Macs"
+        result=subprocess.run(['open','-a','/System/Applications/TV.app',str(path)],capture_output=True,text=True)
+        return result.returncode==0, 'Handed to Apple TV; playback authorization belongs to the app' if result.returncode==0 else 'Apple TV could not open this file'
+    import look_renderer
+    return look_renderer.open_with(path)
+
+
+def _media_archive_command(args, meaty=False):
+    import argparse
+    import archive_tv
+    parser=argparse.ArgumentParser(prog='lk meaty' if meaty else 'lk media archive')
+    parser.add_argument('action',nargs='?',default='meaty' if meaty else 'channels')
+    parser.add_argument('value',nargs='?')
+    parser.add_argument('--shuffle',action='store_true')
+    parser.add_argument('--list',action='store_true')
+    parser.add_argument('--json',action='store_true')
+    parser.add_argument('--extras',action='store_true')
+    parser.add_argument('--limit',type=int,default=8)
+    parser.add_argument('--directory')
+    options=parser.parse_args(args)
+    try:
+        action=options.action
+        if meaty and action not in {'meaty','list','play'}:raise ValueError('Use lk meaty [--list|--json|--extras|--shuffle]')
+        if action=='channels':
+            for name,title in archive_tv.CHANNELS.items():print(f'  {name:<12} {title}')
+            print('Play: lk media archive play CHANNEL · or lk meaty')
+            return 0
+        if action=='status':
+            session=_media_session() or {};queue=session.get('queue') or []
+            rows=[r for r in queue if str(r.get('path','')).startswith('https://archive.org/download/')]
+            result={'active':bool(rows),'items':len(rows),'state':session.get('state','idle'),'index':session.get('current_index',0)}
+            if options.json:print(json.dumps(result));return 0
+            print('ARCHIVE TV · '+(f"{result['state']} · {len(rows)} items · item {result['index']+1}" if rows else 'no active Archive queue'))
+            return 0
+        if action=='find':
+            items=archive_tv.search('mediatype:movies AND ('+(options.value or '')+')',max(1,min(options.limit,40)))
+            print(json.dumps(items) if options.json else '\n'.join(f'https://archive.org/details/{item}' for item in items));return 0
+        if meaty or action=='meaty':rows=archive_tv.meaty_queue(extras=options.extras);errors=[]
+        elif action in {'item','download'}:
+            if not options.value:raise ValueError('Provide an Archive item ID or details URL')
+            rows=archive_tv.item_queue(options.value);errors=[]
+        elif action=='play':
+            rows,errors=archive_tv.channel_queue(options.value or 'mtv',max(1,min(options.limit,20)))
+        else:raise ValueError('Use channels, play CHANNEL, item ID, download ID --directory DIR, find QUERY, or status')
+        if action=='download':
+            if not options.directory:raise ValueError('Download requires --directory DIR; no automatic library changes')
+            print(f"ARCHIVE DOWNLOAD · {rows[0]['bytes']/1024**2:.0f} MiB · {rows[0]['title']}",flush=True)
+            path=archive_tv.download(rows[0],options.directory)
+            print(f'Saved {path} · add with lk media scan DIRECTORY');return 0
+        if options.json:print(json.dumps(rows,ensure_ascii=False));return 0
+        if options.list or action=='list':
+            for number,row in enumerate(rows,1):print(f"{number:>2}. {row['title']}")
+            return 0
+        print(f'ARCHIVE TV · {len(rows)} items · '+('shuffled' if options.shuffle else 'in order'),flush=True)
+        if errors:print(f'  Skipped {len(errors)} unavailable items')
+        result=_media_launch_session(media_core.new_session(rows,shuffle=options.shuffle,repeat='all'))
+        if result==0 and sys.stdin.isatty() and sys.stdout.isatty():return media_player()
+        return result
+    except (OSError,ValueError,RuntimeError) as exc:
+        print(f'ARCHIVE TV · {archive_tv.label(exc)}');return 1
+
 
 def _media_find_command(args):
     query=" ".join(args).strip()
@@ -19393,6 +19481,7 @@ def _media_on_command(args):
 
 def media(args):
     raw=(args[0].lower() if args else "status")
+    if raw in {"archive","archive-tv"}:return _media_archive_command(args[1:])
     if raw in {"classics","classical"}:
         url="https://allclassical.streamguys1.com/ac128kmp3"
         session=media_core.new_session([{"title":"All Classical Radio","artist":"KQAC · Portland","path":url,"media_type":"audio/mpeg","kind":"audio","source_kind":"stream"}])
@@ -21551,6 +21640,7 @@ def main():
     if cmd in {"receipts","receipt"}:
         return receipts(rest[0] if rest else 30)
     if cmd in {"ai-pool","aipool"}: return ai_pool(rest)
+    if cmd=="meaty": return _media_archive_command(rest,meaty=True)
     if cmd=="settings": return settings(" ".join(rest))
     if cmd=="uninstall": return uninstall()
     if cmd=="config":

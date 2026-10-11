@@ -1,3 +1,9 @@
+# 2026-10-10 — Archive TV and media application handoff
+
+- Added Archive TV queues for early MTV, Prelinger and animation, plus `lk meaty`: numeric season order, full specials last, optional extras, no duplicate derivatives. Reuse normal player transport, shuffle and repeat; explicit downloads remain separate from library import.
+- Media Find adds O Open with and T Apple TV on Mac, preserving filter/cursor and requiring an owner-appropriate local file.
+- Bounded encrypted-sample detection guards local generic playback and Fabric streaming while preserving ordinary unprotected m4v files. New Archive status/list commands are readable, with explicit JSON output.
+
 # 2026-10-10 — Fabric Recovery 0.1
 
 - Added encrypted Restic essential-state backups, UUID-identified external destinations, and verified isolated restores. Preserve identity/trust, consistent SQLite snapshots, notebook revisions, Albert history, memory and preferences; report media/model/OS exclusions.
