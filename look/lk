@@ -16615,7 +16615,7 @@ def _media_pin_playable_entry(entry, timeout=1.5):
         if key in seen: continue
         seen.add(key); ordered.append(loc)
 
-    errors=[]
+    errors=[]; optimistic=[]
     for loc in ordered:
         node=str(loc.get("node") or row.get("node") or "").strip()
         entry_id=str(loc.get("id") or row.get("id") or "").strip()
@@ -16629,6 +16629,7 @@ def _media_pin_playable_entry(entry, timeout=1.5):
                     media_protection.require_generic_playback(source)
                     pinned=dict(row); pinned.update({"node":node or local_name,"path":str(source.resolve())})
                     if entry_id: pinned["id"]=entry_id
+                    pinned["art"]={k:pinned.get(k) for k in ("node","id","path","mtime")}
                     return pinned
             except (OSError,ValueError) as exc:
                 errors.append(str(exc)); continue
@@ -16642,6 +16643,7 @@ def _media_pin_playable_entry(entry, timeout=1.5):
                     if int(getattr(response,"status",200)) < 400:
                         pinned=dict(row); pinned.update({"node":node,"id":entry_id})
                         if path: pinned["path"]=path
+                        pinned["art"]={k:pinned.get(k) for k in ("node","id","path","mtime")}
                         return pinned
             except urllib.error.HTTPError as exc:
                 # A concrete HTTP failure is evidence that this physical copy is
@@ -16655,7 +16657,8 @@ def _media_pin_playable_entry(entry, timeout=1.5):
                 pinned=dict(row); pinned.update({"node":node,"id":entry_id})
                 if path: pinned["path"]=path
                 pinned["reachability"]="optimistic"
-                return pinned
+                optimistic.append(pinned)
+                continue
             except urllib.error.URLError as exc:
                 # urllib wraps socket timeouts on some Python/platform versions.
                 reason=getattr(exc,"reason",None)
@@ -16663,10 +16666,18 @@ def _media_pin_playable_entry(entry, timeout=1.5):
                     pinned=dict(row); pinned.update({"node":node,"id":entry_id})
                     if path: pinned["path"]=path
                     pinned["reachability"]="optimistic"
-                    return pinned
+                    pinned["art"]={k:pinned.get(k) for k in ("node","id","path","mtime")}
+                    optimistic.append(pinned)
+                    continue
                 errors.append(f"{node}: {exc}")
             except Exception as exc:
                 errors.append(f"{node}: {exc}")
+
+    # A slow primary copy must not prevent a healthy duplicate being checked.
+    if optimistic:
+        pinned=optimistic[0]
+        pinned["art"]={k:pinned.get(k) for k in ("node","id","path","mtime")}
+        return pinned
 
     # Digest-backed artifacts remain valid when no ordinary location envelope is
     # available; _media_entry_source knows how to route these through Fabric.
@@ -17408,7 +17419,7 @@ def _media_art_source(row):
 
 
 
-def _media_remote_preview_identity(row):
+def _media_remote_preview_identities(row):
     """Return the remote owner identity needed for a source-local terminal preview.
 
     Artwork must follow the same routing decision as playback.  Prefer explicit
@@ -17416,7 +17427,7 @@ def _media_remote_preview_identity(row):
     `_media_entry_source()` would hand to mpv.  If remote audio can play, this keeps
     preview routing from independently choosing (or losing) a different owner.
     """
-    if not isinstance(row,dict): return None
+    if not isinstance(row,dict): return []
     candidates=[]
     art=row.get("art")
     if isinstance(art,dict): candidates.append(dict(art))
@@ -17428,12 +17439,17 @@ def _media_remote_preview_identity(row):
                 if not merged.get("node"): merged["node"]=row.get("node")
                 if not merged.get("id"): merged["id"]=row.get("id")
                 candidates.append(merged)
+    identities=[]; seen=set()
     local=_media_local_node_names()
     for item in candidates:
         node=str(item.get("node") or "").strip(); entry_id=str(item.get("id") or "").strip()
         if node and entry_id and node.casefold() not in local:
-            return {"node":node,"id":entry_id,"path":str(item.get("path") or ""),
-                    "mtime":item.get("mtime") or row.get("mtime") or ""}
+            key=(node,entry_id,str(item.get("path") or ""))
+            if key not in seen:
+                seen.add(key)
+                identities.append({"node":node,"id":entry_id,"path":key[2],
+                                   "mtime":item.get("mtime") or row.get("mtime") or ""})
+    if identities:return identities
 
     # Last authority: use the very source resolution that already makes playback
     # work.  This is especially important for normalized queue rows where the small
@@ -17447,10 +17463,14 @@ def _media_remote_preview_identity(row):
             entry_id=str((q.get("id") or [""])[0]).strip()
             path=str((q.get("path") or [""])[0])
             if node and entry_id and node.casefold() not in local:
-                return {"node":node,"id":entry_id,"path":path,"mtime":row.get("mtime") or ""}
+                return [{"node":node,"id":entry_id,"path":path,"mtime":row.get("mtime") or ""}]
     except Exception:
         pass
-    return None
+    return []
+
+def _media_remote_preview_identity(row):
+    identities=_media_remote_preview_identities(row)
+    return identities[0] if identities else None
 
 def _media_remote_preview_key(row,width,height):
     ident=_media_remote_preview_identity(row)
@@ -17465,25 +17485,30 @@ def _media_fetch_remote_preview(row,width,height):
     cached=_REMOTE_MEDIA_PREVIEW_CACHE.get(key)
     if cached: return list(cached)
     if now-float(_REMOTE_MEDIA_PREVIEW_MISS.get(key) or 0)<20.0: return []
-    url='http://127.0.0.1:7332/v1/preview/terminal?'+urllib.parse.urlencode({
-        "node":ident["node"],"id":ident["id"],"path":ident["path"],"width":int(width),"height":int(height)})
-    try:
-        req=urllib.request.Request(url,headers={"User-Agent":"LOOK-terminal-preview"})
-        with urllib.request.urlopen(req,timeout=10.0) as response:
-            payload=json.loads(response.read(256*1024).decode("utf-8"))
-        lines=payload.get("lines") if isinstance(payload,dict) else None
-        if not isinstance(lines,list) or not lines:
-            raise ValueError("empty terminal preview")
-        clean=[str(line) for line in lines[:max(3,int(height))]]
-        _REMOTE_MEDIA_PREVIEW_CACHE[key]=clean
-        _REMOTE_MEDIA_PREVIEW_MISS.pop(key,None)
-        # Bound memory without creating disk cache on every endpoint.
-        while len(_REMOTE_MEDIA_PREVIEW_CACHE)>64:
-            _REMOTE_MEDIA_PREVIEW_CACHE.pop(next(iter(_REMOTE_MEDIA_PREVIEW_CACHE)))
-        return list(clean)
-    except Exception:
-        _REMOTE_MEDIA_PREVIEW_MISS[key]=now
-        return []
+    # Old queues can retain art metadata for a now-unmounted preferred copy.
+    # Try their explicit alternate locations within one shared request budget.
+    deadline=now+10.0
+    for ident in _media_remote_preview_identities(row):
+        remaining=deadline-time.monotonic()
+        if remaining<=0:break
+        url='http://127.0.0.1:7332/v1/preview/terminal?'+urllib.parse.urlencode({
+            "node":ident["node"],"id":ident["id"],"path":ident["path"],"width":int(width),"height":int(height)})
+        try:
+            req=urllib.request.Request(url,headers={"User-Agent":"LOOK-terminal-preview"})
+            with urllib.request.urlopen(req,timeout=remaining) as response:
+                payload=json.loads(response.read(256*1024).decode("utf-8"))
+            lines=payload.get("lines") if isinstance(payload,dict) else None
+            if not isinstance(lines,list) or not lines:continue
+            clean=[str(line) for line in lines[:max(3,int(height))]]
+            _REMOTE_MEDIA_PREVIEW_CACHE[key]=clean
+            _REMOTE_MEDIA_PREVIEW_MISS.pop(key,None)
+            while len(_REMOTE_MEDIA_PREVIEW_CACHE)>64:
+                _REMOTE_MEDIA_PREVIEW_CACHE.pop(next(iter(_REMOTE_MEDIA_PREVIEW_CACHE)))
+            return list(clean)
+        except Exception:
+            continue
+    _REMOTE_MEDIA_PREVIEW_MISS[key]=now
+    return []
 
 def _media_remote_preview_worker_loop():
     """Resolve only the newest requested remote preview.

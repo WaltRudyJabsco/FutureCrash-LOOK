@@ -158,3 +158,8 @@ In the disc workbench, select an album and press **L** to deliver or retry using
 saved destination; **Enter** shows progress. Failed transfers retain the original
 album and an error receipt. Retry with **L** or `deliver ALBUM` when the recipient is
 available. New imports already deliver automatically when a remote library is saved.
+
+Artwork follows the selected physical copy. If a preferred drive is disconnected,
+LOOK tries the other catalog locations for playback and cover previews. Duplicate
+locations are copies of one logical track; they do not each need a downloaded cover.
+Missing-cover lookup remains optional and uses the owner node's album cache.
