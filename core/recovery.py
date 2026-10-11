@@ -10,6 +10,7 @@ import fcntl
 import hashlib
 import json
 import os
+import re
 from pathlib import Path, PurePosixPath
 import secrets
 import shutil
@@ -131,6 +132,15 @@ def copy_state(source, destination):
     os.chmod(destination, 0o600)
 
 
+def capsule_owner(home):
+    # Separate OS accounts on one computer must never share a snapshot owner.
+    home = Path(home)
+    identity_path = home / '.config/future-crash-look/identity/node_ed25519.pub'
+    if identity_path.is_file() and not identity_path.is_symlink():
+        return 'fabric-' + hashlib.sha256(identity_path.read_bytes()).hexdigest()[:24]
+    return socket.gethostname() + '-' + hashlib.sha256(str(home.resolve()).encode()).hexdigest()[:16]
+
+
 def export(home, output):
     home = Path(home).resolve(); output = Path(output)
     output.mkdir(mode=0o700, parents=True, exist_ok=False)
@@ -147,7 +157,7 @@ def export(home, output):
             destination = output / 'home' / relative
             copy_state(source, destination)
             rows.append({'path': relative, 'size': destination.stat().st_size, 'sha256': digest(destination)})
-    manifest = {'schema': SCHEMA, 'created_at': time.time(), 'node': socket.gethostname(),
+    manifest = {'schema': SCHEMA, 'created_at': time.time(), 'node': capsule_owner(home), 'label': socket.gethostname() + ' / ' + home.name,
                 'files': rows, 'skipped': skipped, 'excluded': EXCLUDED,
                 'consistency': 'SQLite online snapshots; notebook lock; other files checked individually. Not a global transaction.'}
     private_json(output / 'manifest.json', manifest)
@@ -180,6 +190,14 @@ def verify(output):
 def mount_for(uuid):
     if not uuid or any(c not in '0123456789abcdefABCDEF-' for c in uuid):
         raise ValueError('Invalid filesystem UUID')
+    if sys.platform == 'darwin':
+        try:
+            from . import recovery_setup
+        except ImportError:
+            import recovery_setup
+        rows = [d for d in recovery_setup.mounted_drives(external_only=False) if str(d['uuid']).casefold() == uuid.casefold()]
+        if len(rows) > 1: raise ValueError('Backup UUID does not identify exactly one mount')
+        return Path(rows[0]['mount']) if rows else None
     result = subprocess.run(['findmnt', '--json', '--source', 'UUID=' + uuid,
                              '--output', 'TARGET,SOURCE,FSTYPE,OPTIONS'], capture_output=True, text=True)
     if result.returncode != 0: return None
@@ -209,13 +227,22 @@ def restic(home, repo, *arguments):
     env = dict(os.environ)
     # Explicit CLI settings prevent inherited credentials from changing the repo.
     env.pop('RESTIC_PASSWORD', None); env.pop('RESTIC_PASSWORD_COMMAND', None)
-    process = subprocess.run(['restic', '--repo', str(repo), '--password-file', str(key), *arguments],
+    process = subprocess.run(['restic', '--repo', str(repo), '--password-file', str(key), '--cache-dir', str(Path(home)/'.cache/future-crash-look/recovery-restic'), *arguments],
                              env=env, capture_output=True, text=True)
     if process.returncode: raise RuntimeError('Restic failed: ' + process.stderr[-1500:])
     return process.stdout
 
 
 def initialize(home, uuid):
+    state = root(home)
+    if state.is_symlink(): raise ValueError('Recovery configuration must not redirect elsewhere')
+    state.mkdir(parents=True, exist_ok=True, mode=0o700)
+    with (state / 'run.lock').open('a') as lock:
+        fcntl.flock(lock, fcntl.LOCK_EX)
+        return _initialize(home, uuid)
+
+
+def _initialize(home, uuid):
     if shutil.which('restic') is None: raise ValueError('Install restic first')
     home = Path(home)
     if (root(home) / 'destination.json').exists(): raise ValueError('Destination already configured')
@@ -227,11 +254,18 @@ def initialize(home, uuid):
     root(home).mkdir(parents=True, exist_ok=True, mode=0o700)
     key = root(home) / 'key'
     fd = os.open(key, os.O_WRONLY | os.O_CREAT | os.O_EXCL, 0o600)
-    with os.fdopen(fd, 'w') as stream: stream.write(secrets.token_urlsafe(48) + '\n')
-    repo.parent.mkdir(mode=0o700)
-    private_json(repo.parent / 'destination.json', {'schema': SCHEMA, 'uuid': uuid})
-    restic(home, repo, 'init')
-    private_json(root(home) / 'destination.json', config)
+    created_directory = False
+    try:
+        with os.fdopen(fd, 'w') as stream: stream.write(secrets.token_urlsafe(48) + '\n')
+        repo.parent.mkdir(mode=0o700); created_directory = True
+        private_json(repo.parent / 'destination.json', {'schema': SCHEMA, 'uuid': uuid})
+        restic(home, repo, 'init')
+        private_json(root(home) / 'destination.json', config)
+    except BaseException:
+        # Only the new directory/key created by this attempt can be rolled back.
+        if created_directory and not repo.parent.is_symlink(): shutil.rmtree(repo.parent)
+        key.unlink(missing_ok=True)
+        raise
     return {'configured': True, 'repository': str(repo), 'key_file': str(key)}
 
 
@@ -252,7 +286,11 @@ def restore(home, output, snapshot='latest', host=None):
     output.parent.mkdir(parents=True, exist_ok=True)
     with tempfile.TemporaryDirectory(prefix='.fabric-restore-', dir=output.parent) as folder:
         os.chmod(folder, 0o700)
-        restic(home, repo, 'restore', snapshot, '--target', folder, '--host', host or socket.gethostname(), '--tag', 'fabric-essential')
+        owner = host or capsule_owner(home)
+        if host is None:
+            snapshots = json.loads(restic(home, repo, 'snapshots', '--json', '--host', owner, '--tag', 'fabric-essential'))
+            if not snapshots: owner = socket.gethostname()  # Read snapshots made before account isolation.
+        restic(home, repo, 'restore', snapshot, '--target', folder, '--host', owner, '--tag', 'fabric-essential')
         matches = list(Path(folder).rglob('manifest.json'))
         matches = [p for p in matches if (p.parent / 'home').is_dir()]
         if len(matches) != 1: raise ValueError('Snapshot lacks one recovery manifest')
@@ -293,7 +331,7 @@ def store_capsule(home, repo, capsule, receipt_path):
     with tempfile.TemporaryDirectory(prefix='fabric-restore-check-') as folder:
         restore(home, Path(folder) / 'verified', host=host)
     receipt = {'files': len(manifest['files']), 'bytes': sum(row['size'] for row in manifest['files']),
-               'node': host, 'verified_at': time.time(), 'uuid': load_config(home)['uuid'],
+               'node': host, 'label': manifest.get('label') or host, 'verified_at': time.time(), 'uuid': load_config(home)['uuid'],
                'restore_tested': True, 'scope': 'essential state of this node', 'excluded': EXCLUDED}
     private_json(receipt_path, receipt)
     return receipt
@@ -342,7 +380,7 @@ def receive(home, stream):
 
 
 def send(home, target, due=False):
-    if not target or target.startswith('-') or any(c not in 'abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789.-@' for c in target):
+    if not target or target.startswith('-') or not re.fullmatch(r'[A-Za-z0-9_][A-Za-z0-9_.-]*@[A-Za-z0-9][A-Za-z0-9.-]*', target):
         raise ValueError('Use an SSH user@host destination')
     sent = root(home) / 'last-sent.json'
     if due and sent.exists():
@@ -385,7 +423,7 @@ def stream_capsule(home, outgoing):
 
 def collect(home, source, target, due=False):
     for value in (source, target):
-        if not value or value.startswith('-') or any(c not in 'abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789.-@' for c in value):
+        if not value or value.startswith('-') or not re.fullmatch(r'[A-Za-z0-9_][A-Za-z0-9_.-]*@[A-Za-z0-9][A-Za-z0-9.-]*', value):
             raise ValueError('Use an SSH user@host source and destination')
     receipt_path = root(home) / ('collected-' + hashlib.sha256(source.encode()).hexdigest()[:16] + '.json')
     if due and receipt_path.exists():
@@ -429,30 +467,75 @@ def status(home):
 def main(argv=None):
     parser = argparse.ArgumentParser(description=__doc__)
     sub = parser.add_subparsers(dest='command', required=True)
-    sub.add_parser('inventory'); sub.add_parser('status'); sub.add_parser('receive'); sub.add_parser('stream')
+    sub.add_parser('inventory'); status_parser = sub.add_parser('status'); status_parser.add_argument('--json', action='store_true')
+    sub.add_parser('receive'); sub.add_parser('stream'); sub.add_parser('menu'); sub.add_parser('drives').add_argument('--json', action='store_true')
+    sub.add_parser('scheduled')
+    for action in ('add', 'configure'):
+        setup = sub.add_parser(action, help='Guided connected-drive, contributor and schedule setup')
+        setup.add_argument('--mount'); setup.add_argument('--key-copy'); setup.add_argument('--source', action='append', default=[])
+        setup.add_argument('--schedule', choices=['daily','manual'], default='daily'); setup.add_argument('--yes', action='store_true'); setup.add_argument('--json', action='store_true')
+    spare = sub.add_parser('key-copy'); spare.add_argument('output')
     gather = sub.add_parser('collect'); gather.add_argument('source'); gather.add_argument('target'); gather.add_argument('--due', action='store_true')
     ship = sub.add_parser('send'); ship.add_argument('target'); ship.add_argument('--due', action='store_true')
     init = sub.add_parser('init'); init.add_argument('--uuid', required=True)
-    run = sub.add_parser('run'); run.add_argument('--due', action='store_true')
+    run = sub.add_parser('run'); run.add_argument('--due', action='store_true'); run.add_argument('--json', action='store_true')
     out = sub.add_parser('export'); out.add_argument('output')
     check = sub.add_parser('verify'); check.add_argument('directory')
     recover = sub.add_parser('restore'); recover.add_argument('output'); recover.add_argument('--snapshot', default='latest'); recover.add_argument('--host')
     args = parser.parse_args(argv); home = Path.home()
     try:
+        try:
+            from . import recovery_setup as setup
+        except ImportError:
+            import recovery_setup as setup
+        if args.command == 'menu':
+            if not sys.stdin.isatty(): setup.show_status(home); return 0
+            setup.menu(home); return 0
+        if args.command in {'add','configure'}:
+            if args.command == 'add' and (root(home)/'destination.json').exists():
+                if args.json: print(json.dumps({'configured':True,'already_configured':True,'next':'Use configure for contributors and schedule'},indent=2))
+                else: setup.show_status(home); print('A drive is already configured; use configure for contributors and schedule.')
+                return 0
+            if args.yes:
+                result = setup.configure(home, mount=args.mount, key_copy=args.key_copy, sources=args.source, daily=args.schedule=='daily')
+            elif sys.stdin.isatty(): result = setup.wizard(home, updating=args.command=='configure')
+            else: raise ValueError('Run setup in a terminal, or provide --yes --mount PATH --key-copy NEW_FILE')
+            if args.json: print(json.dumps(result, indent=2))
+            else: setup.report(result)
+            return 1 if result.get('verified') is False else 0
+        if args.command == 'drives':
+            result = setup.mounted_drives()
+            if args.json: print(json.dumps(result, indent=2)); return 0
+            for number, drive in enumerate(result,1): print(f"{number}. {setup.clean(drive['name'])} · {drive['free_bytes']/1024**3:.0f} GiB free · {setup.clean(drive['mount'])}")
+            if not result: print('No writable external drive mounted. Connect/unlock one in your file manager.')
+            return 0
+        if args.command == 'status' and not args.json: setup.show_status(home); return 0
+        if args.command == 'key-copy':
+            print('Spare recovery key saved: ' + setup.copy_key(home,args.output)); return 0
+        if args.command == 'scheduled':
+            result = setup.run_configured(home)
+            print(json.dumps(result,indent=2)); return 1 if result.get('verified') is False else 0
         if args.command == 'stream': stream_capsule(home, sys.stdout.buffer); return 0
         if args.command == 'collect': result = collect(home, args.source, args.target, args.due)
         elif args.command == 'inventory': result = inventory(home)
         elif args.command == 'status': result = status(home)
         elif args.command == 'init': result = initialize(home, args.uuid)
-        elif args.command == 'run': result = backup(home, due=args.due)
+        elif args.command == 'run': result = setup.run_configured(home, due=args.due) if (root(home)/'setup.json').exists() else backup(home, due=args.due)
         elif args.command == 'send': result = send(home, args.target, args.due)
         elif args.command == 'receive': result = receive(home, sys.stdin.buffer)
         elif args.command == 'export': result = export(home, args.output)
         elif args.command == 'verify': result = verify(Path(args.directory).absolute())
         else: result = restore(home, args.output, args.snapshot, args.host)
-        print(json.dumps(result, indent=2)); return 0
+        if args.command == 'run' and not args.json: setup.report(result)
+        else: print(json.dumps(result, indent=2))
+        return 1 if result.get('verified') is False else 0
+    except (EOFError, KeyboardInterrupt):
+        print('Backup setup cancelled.'); return 130
     except (OSError, ValueError, RuntimeError, sqlite3.Error, tarfile.TarError, subprocess.TimeoutExpired) as exc:
-        print(json.dumps({'ok': False, 'error': str(exc)}), file=sys.stderr if args.command == 'stream' else sys.stdout); return 1
+        if args.command in {'add','configure','drives','menu','status','key-copy'} and not getattr(args,'json',False):
+            print('BACKUP · ' + setup.clean(exc))
+        else: print(json.dumps({'ok': False, 'error': str(exc)}), file=sys.stderr if args.command == 'stream' else sys.stdout)
+        return 1
 
 
 if __name__ == '__main__': raise SystemExit(main())

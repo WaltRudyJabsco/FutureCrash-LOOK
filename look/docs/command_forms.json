@@ -937,7 +937,7 @@
   ],
   [
     "lk fabric backup",
-    "[status|inventory|init --uuid UUID|run|restore DIR]",
+    "[add|configure|drives|status [--json]|inventory|run|restore DIR]",
     "fabric",
     "Encrypted essential-state recovery"
   ],

@@ -1250,6 +1250,19 @@ def _node_preferred_model(models):
     return preferred if preferred in names else None
 
 
+def _recovery_advertisement():
+    # Configuration only: disk availability is checked when a backup actually runs.
+    state = Path.home() / '.config/future-crash-look/recovery'
+    try:
+        config = json.loads((state / 'destination.json').read_text())
+        if not isinstance(config,dict) or not config.get('uuid'): return {'destination': False}
+        plan_path = state / 'setup.json'
+        plan = json.loads(plan_path.read_text()) if plan_path.exists() else None
+        return {'destination': True, 'scope': 'fabric-essential',
+                'setup_complete': bool(plan.get('ready')) if isinstance(plan,dict) else plan is None}
+    except (OSError, ValueError, TypeError): return {'destination': False}
+
+
 def _build_advertisement():
     """Build the complete routing advertisement off the HTTP request path."""
     ident = identity()
@@ -1277,6 +1290,7 @@ def _build_advertisement():
         "supervisor": SUP.status(),
         "curation": load_curator_state(),
         "maintenance": _maintenance_advertisement(),
+        "backup": _recovery_advertisement(),
     }
 
 def refresh_advertisement():

@@ -1,5 +1,9 @@
 # Future Crash + LOOK 8.16.1 — FABRIC MEDIA
 
+Connect a backup drive and open **`lk settings` → Recovery backup**, or run
+`lk fabric backup add`. The guided setup works for a fresh macOS/Linux account;
+see [Backup setup](docs/FABRIC-RECOVERY.md).
+
 8.16.1 remembers library destinations and delivers verified disc imports through
 node-local inboxes into music/movies categories, retaining source copies.
 

@@ -164,6 +164,7 @@ install -m 0644 "$ROOT/core/observation.py" "$HOME/.local/share/future-crash-loo
 install -m 0644 "$ROOT/core/attention.py" "$HOME/.local/share/future-crash-look/core/attention.py"
 install -m 0644 "$ROOT/core/notifications.py" "$HOME/.local/share/future-crash-look/core/notifications.py"
 install -m 0644 "$ROOT/core/memory_store.py" "$HOME/.local/share/future-crash-look/core/memory_store.py"
+install -m 0644 "$ROOT/core/recovery_setup.py" "$HOME/.local/share/future-crash-look/core/recovery_setup.py"
 install -m 0644 "$ROOT/core/recovery.py" "$HOME/.local/share/future-crash-look/core/recovery.py"
 install -m 0755 "$ROOT/core/fcl-recovery" "$HOME/.local/bin/fcl-recovery"
 install -m 0644 "$ROOT/core/ui_model.py" "$HOME/.local/share/future-crash-look/core/ui_model.py"
@@ -651,6 +652,7 @@ echo "Unified node installed and verified · release $EXPECTED_RELEASE"
 ( nohup "$HOME/.local/bin/lk" scan >"$HOME/.local/share/look/file-scan.log" 2>&1 & ) || true
 echo "  file/content catalog reconciliation started in background"
 
+echo "  lk fabric backup add # guided backup-drive setup"
 echo "  fcl-node identity   # stable Fabric node identity"
 echo "  fcl-tailcat show    # native encrypted transport endpoints"
 echo "  lk fabric rendezvous status  # optional public discovery state"
