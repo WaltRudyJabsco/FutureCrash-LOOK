@@ -51,7 +51,7 @@ def allowed(relative):
     if parent == '.local/share/albert': return p.name in {'server.py','index.html','VERSION'}
     if parent == '.local/share/future-crash': return p.name in {'future_crash.py','lo_worker.py'}
     if parent == '.local/bin':
-        return p.name in {'fcl-node', 'fcl-ingress', 'fcl-tailcat', 'fcl-rendezvous', 'fcl-openjev-worker', 'future-crash'}
+        return p.name in {'fcl-recovery', 'fcl-node', 'fcl-ingress', 'fcl-tailcat', 'fcl-rendezvous', 'fcl-openjev-worker', 'future-crash'}
     return False
 
 

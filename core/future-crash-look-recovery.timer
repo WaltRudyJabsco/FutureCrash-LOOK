@@ -1,0 +1,10 @@
+[Unit]
+Description=Check daily Fabric backup when its authorized drive is connected
+
+[Timer]
+OnBootSec=5min
+OnUnitActiveSec=1h
+RandomizedDelaySec=5min
+
+[Install]
+WantedBy=timers.target

@@ -23,3 +23,7 @@ destination by its stable UUID rather than a mutable label or mount path. Before
 creating an encrypted repository, choose the backup engine and recovery-key
 handling, inventory Fabric's essential state, and establish a restore check.
 Automatic backups, retention, cleanup, and backup initialization are future work.
+
+Discovery is complete for the first destination: filesystem UUID `D050-B176`,
+exFAT, approximately 1.17 TB free. The non-destructive implementation and recovery
+commands are documented in [Fabric Recovery](FABRIC-RECOVERY.md).

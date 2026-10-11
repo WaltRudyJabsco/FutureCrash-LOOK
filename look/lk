@@ -14324,6 +14324,10 @@ def _settings_rows():
          "Inspect portable LOOK profile and backup configuration.",
          "profile backup portable sync identity"),
 
+        ("recovery","FABRIC","Recovery backup","inspect",
+         "Encrypted essential-state backup, destination and last verified restore. Run lk fabric backup --help for operations.",
+         "fabric recovery backup restore restic fabback encryption"),
+
         ("doctor","SYSTEM","Doctor","run diagnostics",
          "Check LOOK's shell integration, optional helpers, Ollama, desktop bridge, and installation health.",
          "doctor diagnose diagnostics health broken install dependencies"),
@@ -14565,6 +14569,7 @@ def _settings_action(key):
     if key=="personalityvoices": return _settings_pick_personality_voices()
     if key=="voicepreview": return _voice_command(["preview"])
     if key=="motion": return _settings_pick_motion()
+    if key=="recovery": return _fabric_command(["backup","status"])
     if key=="profile": return _profile_status()
     if key=="memory": return _memory_command([])
     if key=="memorycompact": return _memory_command(["compact"])
@@ -20075,6 +20080,7 @@ _COMMANDS = [
     ("lk ttt", "[0p|1p|2p]", "meta", "Tic-Tac-Toe alias"),
     ("lk gtnw", "", "meta", "Global Thermonuclear War alias"),
     # Config/meta
+    ("lk fabric backup", "[status|inventory|init --uuid UUID|run|restore DIR]", "fabric", "Encrypted essential-state recovery"),
     ("lk settings", "[SEARCH]", "config", "Unified settings"),
     ("lk config", "", "config", "Configuration surface"),
     ("lk config paths", "", "config", "Show configuration paths", "lk config raw"),
@@ -21003,6 +21009,9 @@ def _fabric_command(args):
     aliases={"list":"nodes","node":"status","model":"models"}
     sub=aliases.get(sub,sub)
     if sub=="dash": sub="dashboard"
+    if sub in {"backup","recovery"}:
+        recovery=shutil.which("fcl-recovery") or str(HOME/".local/bin/fcl-recovery")
+        return subprocess.call([recovery,*args[1:]]) if args[1:] else subprocess.call([recovery,"status"])
     if sub in {"doctor","diagnose","debug"}: return _fabric_doctor()
     if sub not in {"fabric","doctor","watch","dashboard","dash","beacon","lights","nodes","activity","pulse","models","status","qualify","services","service","jobs","job","submit","packet","cancel","events","http","decisions","decision","answer","ask","decision-shadow","decision-provider","identity","trust","untrust","pair-code","pair","transport","rendezvous","endpoints","endpoint-code","allow","revoke-endpoint","speak","alert","route","release","maintenance","update"}:
         print("usage: lk fabric [doctor|identity|trust|pair-code [URL]|pair NODE CODE|untrust NODE_ID|transport|rendezvous [status|set URL|off|sync]|endpoints|endpoint-code URL [once|trust]|allow CODE [once|trust]|revoke-endpoint ENDPOINT_ID|watch|dashboard|decisions [NODE]|decision [NODE] ID|answer [NODE] ID CHOICE|ask [NODE] QUESTION [CHOICE ...]|decision-shadow [NODE] STATE QUESTION CANDIDATE...|decision-provider [NODE]|beacon|lights|nodes|status|activity|pulse|models|route reflex|balanced|deep|jobs|events|submit|packet|cancel|qualify|services|service|speak [NODE] TEXT|alert [@TARGET] MESSAGE]")

@@ -1,3 +1,9 @@
+# 2026-10-10 — Fabric Recovery 0.1
+
+- Added encrypted Restic essential-state backups, UUID-identified external destinations, and verified isolated restores. Preserve identity/trust, consistent SQLite snapshots, notebook revisions, Albert history, memory and preferences; report media/model/OS exclusions.
+- Added `lk fabric backup` / `fcl-recovery` and a Recovery row in Settings. SSH send/collect protects each node separately without exporting secrets through HTTP.
+- Supplied opt-in daily checks for a connected backup owner and Mac send/collect helpers. Missing drives skip safely; no automated pruning or live identity activation. Existing portable-profile commands remain intact.
+
 # 2026-10-10 — Timed player cycle and FabBack discovery
 
 - Added an eighth Cycle visual mode to Player/MP: rotate all seven visuals, including Album Art, every ten seconds without leaving visual mode or losing transport controls.

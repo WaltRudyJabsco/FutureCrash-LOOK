@@ -1,0 +1,14 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0"><dict>
+<key>Label</key><string>com.futurecrash.look.recovery-collect</string>
+<key>ProgramArguments</key><array>
+<string>__HOME__/.local/bin/fcl-recovery</string><string>collect</string><string>--due</string>
+<string>jreno@m4-air.tailb77b68.ts.net</string><string>jreno@3090.tailb77b68.ts.net</string>
+</array>
+<key>StartInterval</key><integer>3600</integer>
+<key>RunAtLoad</key><true/>
+<key>StandardOutPath</key><string>__HOME__/.local/share/future-crash-look/recovery-collect.log</string>
+<key>StandardErrorPath</key><string>__HOME__/.local/share/future-crash-look/recovery-collect.log</string>
+<key>Umask</key><integer>63</integer>
+</dict></plist>

@@ -164,6 +164,8 @@ install -m 0644 "$ROOT/core/observation.py" "$HOME/.local/share/future-crash-loo
 install -m 0644 "$ROOT/core/attention.py" "$HOME/.local/share/future-crash-look/core/attention.py"
 install -m 0644 "$ROOT/core/notifications.py" "$HOME/.local/share/future-crash-look/core/notifications.py"
 install -m 0644 "$ROOT/core/memory_store.py" "$HOME/.local/share/future-crash-look/core/memory_store.py"
+install -m 0644 "$ROOT/core/recovery.py" "$HOME/.local/share/future-crash-look/core/recovery.py"
+install -m 0755 "$ROOT/core/fcl-recovery" "$HOME/.local/bin/fcl-recovery"
 install -m 0644 "$ROOT/core/ui_model.py" "$HOME/.local/share/future-crash-look/core/ui_model.py"
 install -m 0755 "$ROOT/core/fcl-node" "$HOME/.local/bin/fcl-node"
 install -m 0755 "$ROOT/core/ingress.py" "$HOME/.local/share/future-crash-look/core/ingress.py"
