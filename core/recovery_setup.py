@@ -49,7 +49,9 @@ def mounted_drives(*, external_only=True):
             rows.append({'uuid': uuid, 'mount': mount, 'name': info.get('VolumeName') or device,
                          'filesystem': info.get('FilesystemType') or info.get('FilesystemName', ''), 'device': device})
     elif sys.platform.startswith('linux'):
-        data = json.loads(command(['lsblk', '--json', '--bytes', '--output', 'NAME,PATH,TYPE,LABEL,UUID,FSTYPE,MOUNTPOINTS,RO,RM,TRAN']))
+        # Homebrew's lsblk may lack the host's udev/blkid metadata.
+        lsblk = '/usr/bin/lsblk' if Path('/usr/bin/lsblk').is_file() else 'lsblk'
+        data = json.loads(command([lsblk, '--json', '--bytes', '--output', 'NAME,PATH,TYPE,LABEL,UUID,FSTYPE,MOUNTPOINTS,RO,RM,TRAN']))
         def visit(devices, external=False):
             for d in devices:
                 attached = external or d.get('tran') == 'usb' or bool(d.get('rm'))
