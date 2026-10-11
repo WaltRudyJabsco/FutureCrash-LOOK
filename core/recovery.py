@@ -198,7 +198,8 @@ def mount_for(uuid):
         rows = [d for d in recovery_setup.mounted_drives(external_only=False) if str(d['uuid']).casefold() == uuid.casefold()]
         if len(rows) > 1: raise ValueError('Backup UUID does not identify exactly one mount')
         return Path(rows[0]['mount']) if rows else None
-    result = subprocess.run(['findmnt', '--json', '--source', 'UUID=' + uuid,
+    findmnt = '/usr/bin/findmnt' if Path('/usr/bin/findmnt').is_file() else 'findmnt'
+    result = subprocess.run([findmnt, '--json', '--source', 'UUID=' + uuid,
                              '--output', 'TARGET,SOURCE,FSTYPE,OPTIONS'], capture_output=True, text=True)
     if result.returncode != 0: return None
     rows = json.loads(result.stdout).get('filesystems', [])

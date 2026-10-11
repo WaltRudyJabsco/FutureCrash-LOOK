@@ -272,3 +272,16 @@ def test_owner_collects_foreign_account_and_verifies_it_locally(home,tmp_path,mo
     assert result['node']!=r.capsule_owner(home)
     restored=tmp_path/'foreign-restore';r.restore(home,restored,host=result['node'])
     assert (restored/'home/.local/share/look/notebook/notes/b.md').read_text()=='Her notes'
+
+
+def test_linux_discovery_prefers_host_metadata_tools_over_homebrew(monkeypatch):
+    monkeypatch.setattr(s.sys,'platform','linux')
+    original=Path.is_file
+    monkeypatch.setattr(Path,'is_file',lambda path:True if str(path) in {'/usr/bin/lsblk','/usr/bin/findmnt'} else original(path))
+    commands=[]
+    monkeypatch.setattr(s,'command',lambda argv:commands.append(argv) or '{"blockdevices":[]}')
+    assert s.mounted_drives()==[]
+    assert commands[0][0]=='/usr/bin/lsblk'
+    run=Mock(return_value=SimpleNamespace(returncode=1));monkeypatch.setattr(r.subprocess,'run',run)
+    assert r.mount_for('ABCD') is None
+    assert run.call_args.args[0][0]=='/usr/bin/findmnt'

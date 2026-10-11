@@ -3,6 +3,7 @@
 - Add a connected-drive setup guide and Settings backup menu for macOS/Linux; choose contributors, spare-key location and daily/manual schedule with verified first backup.
 - Generate jobs from the current account, remove personal hosts from reference templates, and isolate snapshot owners between accounts on one machine while retaining old restore compatibility.
 - Explain protection scope and incomplete setup; missing drives never create fallback repositories.
+- Prefer native Linux disk metadata tools so Homebrew PATH overrides cannot hide volume UUIDs.
 
 # 2026-10-10 — Archive TV and media application handoff
 
