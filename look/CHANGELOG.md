@@ -1,3 +1,8 @@
+## 2026-10-12 · Browser movie audio compatibility
+
+- Use stereo AAC for browser movie audio when the source has surround/unknown channels, including AAC already inside MP4. Preserve compatible H.264 video and native/original soundtracks.
+- Version the browser video cache so older multichannel AAC representations rebuild automatically.
+
 ## 2026-10-12 · Media library location picker
 
 - Add Media library location to LK Settings and `lk media storage --pick`: choose the current preference, home folder, a mounted internal/external drive, or a custom folder.

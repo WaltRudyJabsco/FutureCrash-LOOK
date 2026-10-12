@@ -25,7 +25,7 @@ def test_browser_video_copies_supported_streams_and_caches(monkeypatch,tmp_path,
         if 'ffprobe' in command[0]:
             return SimpleNamespace(stdout=json.dumps({'streams':[
                 {'codec_type':'video','codec_name':video,'pix_fmt':pixels},
-                {'codec_type':'audio','codec_name':audio}]}))
+                {'codec_type':'audio','codec_name':audio,'channels':2}]}))
         commands.append(command);Path(command[-1]).write_bytes(b'browser movie')
         return SimpleNamespace(returncode=0,stdout='',stderr='')
     monkeypatch.setattr(node.subprocess,'run',run)
@@ -62,7 +62,7 @@ def test_real_h264_remux_preserves_decoded_video_and_source(monkeypatch,tmp_path
     source=tmp_path/'movie.mkv'
     subprocess.run(['ffmpeg','-v','error','-f','lavfi','-i','testsrc2=size=96x64:rate=12',
                     '-f','lavfi','-i','sine=frequency=400','-t','1','-c:v','libx264',
-                    '-pix_fmt','yuv420p','-c:a','ac3',str(source)],check=True,timeout=20)
+                    '-pix_fmt','yuv420p','-c:a','ac3','-ac','3',str(source)],check=True,timeout=20)
     original=hashlib.sha256(source.read_bytes()).hexdigest()
     monkeypatch.setattr(node.Path,'home',lambda:tmp_path)
     monkeypatch.setattr(node,'_local_media_entry',lambda *args:({'media_type':'video/matroska'},source))
@@ -72,5 +72,31 @@ def test_real_h264_remux_preserves_decoded_video_and_source(monkeypatch,tmp_path
         return [line.split(',')[-1].strip() for line in result.stdout.splitlines() if not line.startswith('#')]
     assert hashes(output)==hashes(source)
     assert hashlib.sha256(source.read_bytes()).hexdigest()==original
-    probe=subprocess.run(['ffprobe','-v','error','-show_entries','stream=codec_name','-of','json',str(output)],capture_output=True,text=True,check=True,timeout=10)
+    probe=subprocess.run(['ffprobe','-v','error','-show_entries','stream=codec_name,channels','-of','json',str(output)],capture_output=True,text=True,check=True,timeout=10)
     assert [row['codec_name'] for row in json.loads(probe.stdout)['streams']]==['h264','aac']
+
+    assert json.loads(probe.stdout)['streams'][1]['channels']==2
+
+
+@pytest.mark.parametrize('suffix',['.mkv','.mp4'])
+def test_surround_aac_is_downmixed_even_in_mp4(monkeypatch,tmp_path,suffix):
+    source=tmp_path/('movie'+suffix);source.write_bytes(b'original movie')
+    monkeypatch.setattr(node.Path,'home',lambda:tmp_path)
+    monkeypatch.setattr(node,'_local_media_entry',lambda *args:({'media_type':'video/mp4'},source))
+    monkeypatch.setattr(node.shutil,'which',lambda name:'/tools/'+name)
+    commands=[]
+    def run(command,**kwargs):
+        if 'ffprobe' in command[0]:
+            return SimpleNamespace(stdout=json.dumps({'streams':[
+                {'codec_type':'video','codec_name':'h264','pix_fmt':'yuv420p'},
+                {'codec_type':'audio','codec_name':'aac','channels':3}]}))
+        commands.append(command);Path(command[-1]).write_bytes(b'browser movie')
+        return SimpleNamespace(returncode=0,stdout='',stderr='')
+    monkeypatch.setattr(node.subprocess,'run',run)
+    output,kind=object.__new__(node.API)._browser_media_source('movie')
+    command=commands[0]
+    assert command[command.index('-c:v')+1]=='copy'
+    assert command[command.index('-c:a')+1]=='aac'
+    assert command[command.index('-ac')+1]=='2'
+    assert command[command.index('-ar')+1]=='48000'
+    assert output!=source and source.read_bytes()==b'original movie'
