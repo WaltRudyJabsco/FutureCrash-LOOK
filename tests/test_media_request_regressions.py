@@ -603,3 +603,19 @@ def test_remote_video_thumbnail_does_not_reuse_opening_frame_cache(lk,monkeypatc
     assert fresh.read_bytes()==b'fresh later frame'
     assert fresh!=folder/(old+'.jpg')
     assert lk._media_remote_cover_path(row,fetch=False)==fresh
+
+
+def test_audio_stream_stays_headless_and_hides_old_mpv_cover(lk,monkeypatch):
+    monkeypatch.setattr(lk,'_media_mpv_binary',lambda:'mpv')
+    monkeypatch.setattr(lk,'_media_mpv_alive',lambda:True)
+    monkeypatch.setattr(lk,'_media_reuse_needs_visible_restart',lambda video:False)
+    monkeypatch.setattr(lk,'_media_wait_for_mpv_loaded',lambda:True)
+    monkeypatch.setattr(lk,'_media_pause_playing_system',lambda:None)
+    calls=[]
+    monkeypatch.setattr(lk,'_media_mpv_request',lambda cmd:calls.append(cmd) or {'error':'success'})
+    session=lk.media_core.new_session([{'title':'Music','path':'/audio.mp4','media_type':'audio/mp4'}])
+    assert not lk._media_queue_has_video(session['queue'])
+    assert lk._media_launch_stream('http://localhost/music','Music',session)==0
+    assert calls.index(['set_property','audio-display','no'])<calls.index(['loadfile','http://localhost/music','replace'])
+    assert ['set_property','force-window','no'] in calls
+    assert lk._media_session()['presentation']=='audio'

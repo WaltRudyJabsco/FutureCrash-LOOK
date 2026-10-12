@@ -332,3 +332,31 @@ produce a much larger indexed count without making those files playable library 
 Movie preview extraction and remote JPEG caches share a frame-version marker.
 Updating the frame-selection rule refreshes old remote images even when movie
 files are unchanged; album-cover caches retain their existing identities.
+
+
+### Import setup and navigation
+
+`lk media import` → `n new import` asks for disc format and library category.
+CDs use Music; DVD/Blu-ray can use Movies or TV. The destination follows the
+chosen category in your configured library. TV suggests `all` with MakeMKV;
+review the scan because all titles can include extras as well as episodes.
+Use the series/season/disc label to keep multi-disc sets distinct. Movie title/year
+lookup remains optional; TV imports keep the label you supply.
+
+Destination supports Tab completion (ambiguous completion can open the picker),
+Right/Down for the existing LOOK folder picker, Ctrl-U to clear, and literal paths
+with spaces or Unicode. Long paths scroll within the input line. Remote addresses
+retain `@node:/library-root`; the selected category is added on the owner.
+
+Escape goes back one setup step; Escape at the first step cancels the new import
+and returns to the workbench. At review, `k` edits format, `c` category, `i` title
+selection, `m` name/metadata, and `d` destination. `y` starts; `n` cancels. Existing
+jobs continue while you edit. Library preferences are saved only after confirmed
+submission when you explicitly choose to remember the destination.
+
+CLI example: `lk media import start --drive /dev/sr0 --kind dvd --category tv
+--title "Series Season 1 Disc 1" --title-index all` (enter as one command).
+
+Music playback keeps mpv artwork windows disabled; LOOK owns terminal artwork.
+Video still opens its viewer. Reusing a previously visible player for music clears
+its forced-window setting before loading the audio queue.

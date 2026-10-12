@@ -294,6 +294,8 @@ def safe_name(value):return re.sub(r'[^\w .()-]+','_',str(value)).strip(' .')[:1
 def start(payload):
     kind=payload.get('kind','cd')
     if kind not in {'cd','dvd','bluray'}:raise ValueError('Use cd, dvd or bluray')
+    category=payload.get('category') or ('music' if kind=='cd' else 'movies')
+    if category not in {'music','movies','tv'} or (kind=='cd')!=(category=='music'):raise ValueError('Use music for CD, movies or tv for video')
     drive=selected_drive(payload.get('drive'))
     if not tool('ffmpeg') or not tool('ffprobe'):raise ValueError('ffmpeg and ffprobe are required')
     if kind!='cd' and not re.fullmatch(r'\d+|all',str(payload.get('title_index',''))):raise ValueError('Scan and choose --title-index for a movie')
@@ -314,7 +316,7 @@ def start(payload):
         except ImportError:import fabric_files
         target=fabric_files.parse(requested)
         local=fabric_files.request('/v1/identity').get('name') or ''
-        if target.node.casefold() in {'local',str(local).casefold()}:requested=str(Path(target.path)/('music' if kind=='cd' else 'movies'))
+        if target.node.casefold() in {'local',str(local).casefold()}:requested=str(Path(target.path)/category)
         else:remote_destination=requested;requested=''
     destination=Path(requested or Path.home()/('Music' if kind=='cd' else 'Movies')/'Fabric Imports').expanduser().resolve()
     if destination==Path(destination.anchor) or destination==Path.home():raise ValueError('Choose a dedicated import directory')
@@ -325,7 +327,7 @@ def start(payload):
         fcntl.flock(lock,fcntl.LOCK_EX)
         if any(row['drive']['id']==drive['id'] and row['state'] not in TERMINAL for row in list_jobs()):raise ValueError('This drive already has an import job')
         identifier=uuid.uuid4().hex
-        row={'id':identifier,'kind':kind,'drive':drive,'title':title,'metadata':metadata,'title_index':str(payload.get('title_index','')),
+        row={'id':identifier,'kind':kind,'category':category,'drive':drive,'title':title,'metadata':metadata,'title_index':str(payload.get('title_index','')),
              'destination':str(destination),'library_destination':remote_destination,'state':'queued','created':time.time(),'percent':None,'stage':'queued','cancel_requested':False}
         atomic(job_path(identifier),row)
         log=ROOT/'jobs'/(identifier+'.log')
@@ -459,7 +461,7 @@ def worker(identifier):
             try:
                 try:from . import media_storage
                 except ImportError:import media_storage
-                media_storage.start(identifier,final,row['library_destination'],row['kind'])
+                media_storage.start(identifier,final,row['library_destination'],row['kind'],row.get('category'))
             except Exception as exc:save(delivery_error=str(exc)[:1000])
     except Exception as exc:
         save(state='cancelled' if isinstance(exc,InterruptedError) else 'failed',error=str(exc)[:1000],finished=time.time())
@@ -472,7 +474,7 @@ def request(action,payload=None):
         if job['state']!='complete':raise ValueError('Finish the local import before delivering it')
         try:from . import media_storage
         except ImportError:import media_storage
-        return {'ok':True,'delivery':media_storage.start(job['id'],job['output'],payload['destination'],job['kind'])}
+        return {'ok':True,'delivery':media_storage.start(job['id'],job['output'],payload['destination'],job['kind'],job.get('category'))}
     if action=='drives':return drives()
     if action=='movie-lookup':
         try:from . import disc_metadata

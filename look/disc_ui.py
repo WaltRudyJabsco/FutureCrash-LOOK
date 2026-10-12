@@ -201,8 +201,9 @@ def watch_all(request,read_key,hints):
     finally:termios.tcsetattr(fd,termios.TCSADRAIN,old);sys.stdout.write('\033[0m\n');sys.stdout.flush()
 
 
-def capture(request,drive,kind,title='',destination='',title_index='',release=None,metadata=True):
+def capture(request,drive,kind,title='',destination='',title_index='',release=None,metadata=True,category=None):
     payload={'drive':drive,'kind':kind,'title':title,'destination':destination,'title_index':title_index}
+    if category:payload['category']=category
     if kind=='cd' and metadata:
         scan=request('scan',{'drive':drive,'kind':kind});releases=scan.get('releases') or []
         if scan.get('metadata'):payload['metadata']=scan['metadata']
@@ -232,11 +233,110 @@ def watch(identifier,request,read_key,hints):
     finally:termios.tcsetattr(fd,termios.TCSADRAIN,old);sys.stdout.write('\033[0m\n');sys.stdout.flush()
 
 
+class ImportBack(Exception):
+    """Escape is navigation during setup, before any import is submitted."""
+
+
+def import_options(request,inventory,drive,prompt,path_prompt):
+    try:from . import disc_metadata,media_storage,fabric_files
+    except ImportError:import disc_metadata,media_storage,fabric_files
+    from pathlib import Path
+    selected=next(row for row in inventory['drives'] if row['id']==drive)
+    hint=disc_metadata.disc_hint(selected)
+    kind=selected.get('kind') or hint['kind'] or 'cd'
+    category='music' if kind=='cd' else 'movies'
+    scan=None;scan_kind=None;metadata={};title='';title_index='';destination='';preferences=None
+    step=0
+    print('NEW IMPORT · Esc back; Esc at Disc kind cancels · nothing starts until review')
+    while True:
+        try:
+            if step==0:
+                value=prompt('Disc kind: cd / dvd / bluray',kind).casefold()
+                if value not in {'cd','dvd','bluray'}:raise ValueError('Choose cd, dvd or bluray')
+                if value!=kind:category='music' if value=='cd' else 'movies';destination='';scan=None
+                kind=value
+                if kind!='cd' and not inventory['tools'].get('makemkvcon'):
+                    print('MakeMKV is needed for protected discs and lossless import. Official setup: https://www.makemkv.com/download/')
+                    if prompt('Continue with HandBrake for an unprotected disc? y / n','n').casefold()!='y':return None
+            elif step==1:
+                value=prompt('Library category: music' if kind=='cd' else 'Library category: movie / tv',category).casefold()
+                value={'movie':'movies','m':'movies','t':'tv'}.get(value,value)
+                if value not in ({'music'} if kind=='cd' else {'movies','tv'}):raise ValueError('Choose music for CD, movie or tv for DVD/Blu-ray')
+                if value!=category:destination='';title_index=''
+                category=value
+            elif step==2:
+                if scan is None or scan_kind!=kind:
+                    print('Scanning inserted disc…',flush=True)
+                    scan=request('scan',{'drive':drive,'kind':kind});scan_kind=kind
+                    detected=scan.get('kind') or kind
+                    if detected!=kind:
+                        kind=detected;category='music' if kind=='cd' else 'movies';destination='';step=1;continue
+                    metadata=dict(scan.get('metadata') or {});title='';title_index=''
+                print('DISC · '+kind.upper()+' · '+str(scan.get('engine') or ''))
+                if kind=='cd':
+                    releases=scan.get('releases') or []
+                    for n,release in enumerate(releases,1):print(f"  {n}. {release['title']} · {release.get('artist') or ''}")
+                    choice=prompt('Release number (blank keeps detected labels)','1' if len(releases)==1 else '') if releases else ''
+                    if choice:
+                        if not choice.isdigit() or not 1<=int(choice)<=len(releases):raise ValueError('Release choice out of range')
+                        metadata=dict(releases[int(choice)-1])
+                else:
+                    for item in scan.get('titles') or []:print(f"  Title {item['index']} · {item.get('name') or 'Video title'} · {item.get('duration') or 'duration unavailable'}")
+                    default='all' if category=='tv' and scan.get('engine')=='makemkv' else feature_index(scan.get('titles') or [])
+                    title_index=prompt('Title index (all keeps every title with MakeMKV)',title_index or default)
+                    if title_index!='all' and not title_index.isdigit():raise ValueError('Choose a title index or all')
+            elif step==3:
+                if kind=='cd':
+                    title=prompt('Album title',title or metadata.get('title') or '')
+                    metadata['artist']=prompt('Artist (optional)',metadata.get('artist') or '')
+                elif category=='tv':
+                    title=prompt('Series / season / disc label',title or metadata.get('title') or hint.get('title') or '')
+                    metadata['title']=title
+                else:title,metadata=movie_details(request,prompt,dict(metadata,title=title or metadata.get('title') or ''))
+                if not title:raise ValueError('Give this import a name')
+            elif step==4:
+                default=media_storage.destination(kind,category)
+                print('DESTINATION · Tab completes; →/↓ opens LOOK picker; Ctrl-U clears; Esc goes back')
+                destination=path_prompt('Destination',destination or default)
+                if not destination:raise ValueError('Choose a destination')
+                target=fabric_files.parse(destination)
+                preferences=None
+                if destination.rstrip('/')!=default.rstrip('/'):
+                    if target:values={'node':target.node,'root':target.path}
+                    elif Path(destination.rstrip('/')).name==category:values={'node':inventory.get('node') or 'local','root':str(Path(destination).parent)}
+                    else:values=None
+                    if values and prompt('Remember this library for future imports? y / n','n').casefold()=='y':preferences=values
+            else:
+                target=fabric_files.parse(destination)
+                actual=str(target)+('/'+category if target else '') if target else destination
+                print(f"REVIEW · {title} · {kind.upper()} · {category} · title {title_index or 'audio tracks'}\nSave to {actual}")
+                print('y start · k kind · c category · i titles · m name/metadata · d destination · Esc back')
+                choice=prompt('Start or edit','y').casefold()
+                if choice=='y':return {'drive':drive,'kind':kind,'category':category,'title':title,'destination':destination,'title_index':title_index,'metadata':metadata,'preferences':preferences}
+                edits={'k':0,'c':1,'i':2,'m':3,'d':4}
+                if choice in edits:step=edits[choice];continue
+                if choice in {'n','cancel'}:return None
+                raise ValueError('Choose y to start, an edit letter, or Escape to go back')
+            step+=1
+        except ImportBack:
+            if step==0:return None
+            step-=1
+        except (OSError,ValueError,RuntimeError) as exc:
+            print('IMPORT SETUP · '+str(exc))
+
+
 def workspace(request,read_key,hints):
     fd=sys.stdin.fileno();old=termios.tcgetattr(fd);index=0;notice='';inventory=request('drives',{});show_history=True;colors=interface_colors()
-    def prompt(label,default=''):
+    def prompt(label,default='',path=False):
         termios.tcsetattr(fd,termios.TCSADRAIN,old);sys.stdout.write('\033[?25h');sys.stdout.flush()
-        try:return input(label+(f' [{default}]' if default else '')+' › ').strip() or default
+        try:
+            try:from . import look_renderer
+            except ImportError:import look_renderer
+            from pathlib import Path
+            caption=label+(f' [{default}]' if default and not path else '')+' › '
+            value,cancelled=look_renderer.prompt_line(caption,initial=default if path else '',picker_root=Path.cwd() if path else None)
+            if cancelled:raise ImportBack()
+            return value.strip() or default
         finally:tty.setcbreak(fd);sys.stdout.write('\033[?25l')
     try:
         tty.setcbreak(fd);sys.stdout.write('\033[?25l')
@@ -246,7 +346,7 @@ def workspace(request,read_key,hints):
             index=max(0,min(index,max(0,len(jobs)-1)))
             width,height=shutil.get_terminal_size((100,30))
             frame=workbench_lines(inventory,jobs,index,width,height,show_history,colors)
-            frame.extend(['',hints('n import · d discover · h history · ↑↓ jobs · Enter progress · l send to library · c cancel · Esc exit',width),notice])
+            frame.extend(['',hints('n new import · d discover · h history · ↑↓ jobs · Enter progress · l send to library · c cancel · Esc exit',width),notice])
             sys.stdout.write('\033[2J\033[H'+'\n'.join(line[:width-1] if '\033' not in line else line for line in frame)+'\033[J');sys.stdout.flush()
             key=read_key(fd,1)
             if key in {'n','d','h','l','c'}:key=key.upper()
@@ -261,7 +361,7 @@ def workspace(request,read_key,hints):
                 elif key=='L' and jobs:
                     try:from . import media_storage
                     except ImportError:import media_storage
-                    destination=media_storage.destination(jobs[index]['kind'])
+                    destination=media_storage.destination(jobs[index]['kind'],jobs[index].get('category'))
                     if not destination.startswith('@'):raise ValueError('Choose a library node first with lk media storage --node NODE --root PATH')
                     request('deliver',{'id':jobs[index]['id'],'destination':destination})
                     notice='Delivery started; originals kept. Enter shows progress.'
@@ -275,54 +375,16 @@ def workspace(request,read_key,hints):
                         choice=prompt('Drive number')
                         if not choice.isdigit() or not 1<=int(choice)<=len(available):raise ValueError('Connect a drive and choose its number')
                         drive=available[int(choice)-1]['id']
-                    try:from . import disc_metadata
-                    except ImportError:import disc_metadata
-                    selected=next(row for row in available if row['id']==drive)
-                    hint=disc_metadata.disc_hint(selected)
-                    kind=selected.get('kind') or hint['kind'] or prompt('Disc kind: cd / dvd / bluray','cd')
-                    if kind!='cd' and not inventory['tools'].get('makemkvcon'):
-                        print('MakeMKV is needed for protected discs and lossless video import.\nOfficial setup: https://www.makemkv.com/download/\nInstall it on the drive owner, then press D to rediscover.')
-                        if prompt('Continue with HandBrake for an unprotected disc? y / n','n').casefold()!='y':continue
-                    scan=request('scan',{'drive':drive,'kind':kind})
-                    kind=scan.get('kind') or kind
-                    termios.tcsetattr(fd,termios.TCSADRAIN,old)
-                    print('\nDISC · '+kind.upper()+' · '+str(scan.get('engine') or ''))
-                    for number,release in enumerate(scan.get('releases') or [],1):
-                        print(f"  {number}. {release['title']} · {release['artist']} · {len(release.get('tracks') or [])} tracks")
-                    for title in scan.get('titles') or []:
-                        print('  Title '+str(title['index'])+' · '+str(title.get('name') or 'Movie title')+' · '+str(title.get('duration') or 'duration unavailable'))
-                    if kind=='cd' and not scan.get('releases'):print('  No matching release · keeping detected album and track names')
-                    tty.setcbreak(fd)
-                    metadata=dict(scan.get('metadata') or {});title_index=''
-                    if kind=='cd':
-                        releases=scan.get('releases') or []
-                        choice='1' if len(releases)==1 else prompt('Release number (blank keeps detected labels)') if releases else ''
-                        if choice:
-                            number=int(choice)
-                            if not 1<=number<=len(releases):raise ValueError('Release choice out of range')
-                            metadata=releases[number-1]
-                        if not metadata.get('artist'):
-                            artist=prompt('Artist (optional; Return keeps Unknown artist)')
-                            if artist:metadata['artist']=artist
-                    else:title_index=prompt('Title index (suggested longest feature; type all for every title)',feature_index(scan.get('titles') or []))
-                    if kind=='cd':title=prompt('Album title',metadata.get('title') or '')
-                    else:title,metadata=movie_details(request,prompt,metadata)
-                    import media_storage
-                    destination=prompt('Destination (local folder or @node:library-root)',media_storage.destination(kind))
-                    if destination!=media_storage.destination(kind):
-                        from pathlib import Path
-                        try:from . import fabric_files
-                        except ImportError:import fabric_files
-                        remote=fabric_files.parse(destination)
-                        category='music' if kind=='cd' else 'movies'
-                        if remote:values={'node':remote.node,'root':remote.path}
-                        elif Path(destination).name==category:values={'node':inventory.get('node') or 'local','root':str(Path(destination).parent)}
-                        else:values=None
-                        if values and prompt('Remember this library for future imports? y / n','y').casefold()=='y':media_storage.settings(values)
-                    print(f'Import {title} · {kind.upper()} · title {title_index or "audio tracks"}\nSave to {destination}')
-                    if prompt('Start this import? y / n','y').casefold()!='y':continue
-                    request('start',{'drive':drive,'kind':kind,'title':title,'destination':destination,'title_index':title_index,'metadata':metadata})
+                    payload=import_options(request,inventory,drive,prompt,lambda label,default:prompt(label,default,path=True))
+                    if payload is None:notice='New import cancelled; existing jobs unchanged';continue
+                    preferences=payload.pop('preferences')
+                    request('start',payload)
+                    if preferences:
+                        try:from . import media_storage
+                        except ImportError:import media_storage
+                        media_storage.settings(preferences)
                     index=0;notice='Import started on the drive owner'
+            except ImportBack:notice='Cancelled; existing jobs unchanged'
             except (OSError,ValueError,RuntimeError) as exc:notice=str(exc)
     finally:termios.tcsetattr(fd,termios.TCSADRAIN,old);sys.stdout.write('\033[?25h\033[0m\n');sys.stdout.flush()
 
@@ -334,6 +396,7 @@ def main(argv,request_factory,read_key,hints):
     parser.add_argument('--node',help='Drive-owner node; watch/jobs default to Fabric, other actions to local')
     parser.add_argument('--drive',help='Drive ID shown by drives')
     parser.add_argument('--kind',choices=['cd','dvd','bluray'],default='cd')
+    parser.add_argument('--category',choices=['music','movies','tv'],help='Library category; CD defaults to music, video to movies')
     parser.add_argument('--title',default='',help='Album/movie label')
     parser.add_argument('--title-index',default='',help='Video title index from scan, or all for MakeMKV')
     parser.add_argument('--destination',default='',help='Local import folder or @node:library-root; otherwise remembered storage default')
@@ -360,7 +423,7 @@ def main(argv,request_factory,read_key,hints):
             action='status'
         if action=='start':
             import media_storage
-            result=capture(request,args.drive,args.kind,args.title,args.destination or media_storage.destination(args.kind),args.title_index,args.release,not args.no_metadata)
+            result=capture(request,args.drive,args.kind,args.title,args.destination or media_storage.destination(args.kind,args.category),args.title_index,args.release,not args.no_metadata,args.category)
         else:
             if action in {'status','cancel','deliver'}:
                 if action=='cancel' and not selector:raise ValueError('cancel requires an album name or job ID')
