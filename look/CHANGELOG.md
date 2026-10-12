@@ -1,3 +1,9 @@
+## 2026-10-11 · Negative Signal
+
+- Add a saved ambient V toggle and launch override for normal/negative Signal rendering, covering both ambient and conversation fields while preserving drawing programs and surrounding UI.
+- Use terminal reverse video so Paper glyphs cut through ink and other palettes follow their own background colors; use a uniform ink field and keep cell resets from clearing inversion mid-row or leaking beyond the field.
+- Clarify that Kitty split permissions require a full Kitty restart after profile activation, rather than a config reload.
+
 ## 2026-10-11 · Sibling panes and Pacific Tech
 
 - Open an independent shell beside LOOK with W from browse, using the viewed local directory. Preserve W as filter text; support Kitty and existing tmux sessions with clear unsupported-terminal feedback.

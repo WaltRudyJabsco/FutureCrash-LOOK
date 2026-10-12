@@ -367,7 +367,7 @@ def open_pane(path):
         for command in commands:
             result=subprocess.run(command,capture_output=True,text=True,timeout=8,check=False)
             if result.returncode:
-                return 'Pane unavailable; enable the LOOK Kitty profile (./install.sh --kitty) or use tmux'
+                return 'Pane blocked; fully restart Kitty after enabling the LOOK profile (./install.sh --kitty)'
         return 'Shell opened beside LOOK'
     except (OSError,ValueError,subprocess.TimeoutExpired):
         return 'Pane unavailable; check the terminal setup'

@@ -611,7 +611,7 @@ class ConfigStore:
     def __init__(self):
         self.root = Path.home() / ".future_crash"
         self.path = self.root / "config.json"
-        self.data = {"audio_enabled": True}
+        self.data = {"audio_enabled": True, "signal_style": "normal"}
         self.load()
 
     def load(self):
@@ -641,6 +641,18 @@ class ConfigStore:
     def audio_enabled(self, value):
         self.data["audio_enabled"] = bool(value)
         self.save()
+
+    @property
+    def signal_style(self):
+        value=self.data.get("signal_style", "normal")
+        return value if value in ("normal", "negative") else "normal"
+
+    @signal_style.setter
+    def signal_style(self,value):
+        if value not in ("normal", "negative"):raise ValueError("Unknown Signal style")
+        self.data["signal_style"]=value
+        self.save()
+
 
 # ---------- Memory ----------
 
@@ -2367,6 +2379,7 @@ class FutureCrash:
         self.audio = AudioEngine(enabled=audio_pref)
         self.memory = MemoryStore()
         self.signal = SignalCanvas()
+        self.signal_style = getattr(args,"signal_style",None) or self.config.signal_style
         self.host = HostTools()
         self.host_results = queue.Queue()
         self.work_detached = False
@@ -3182,6 +3195,10 @@ class FutureCrash:
                 self.busy = True
                 self.observation = "Oracle is listening to the static…"
                 self._ask_oracle("ambient", "Produce one ambient system observation.", priority="interactive")
+            elif key in ("v", "V"):
+                self.signal_style = "normal" if self.signal_style == "negative" else "negative"
+                self.config.signal_style = self.signal_style
+                self.last_frame = ""
             elif key in ("s", "S"):
                 self.signal.clear()
                 self.audio.cue("recover")
@@ -3514,6 +3531,7 @@ class FutureCrash:
         menu_items = [
             "[esc] shell", "[a] ask", "[x] workstation", "[t] threads",
             "[f] fortune", "[r] observe", "[s] signal", "[d] demo",
+            "[v] inverse " + ("on" if getattr(self,"signal_style","normal")=="negative" else "off"),
             "[m] mute", "[?] help", "[p] panic", "[q] quit",
         ]
         menu_rows = wrap_menu(menu_items, w)
@@ -3562,6 +3580,7 @@ class FutureCrash:
                 signal_title += " // " + str(self.signal.owner)[:9]
             if self.signal.title:
                 signal_title += " // " + self.signal.title
+        if getattr(self,"signal_style","normal")=="negative":signal_title += " // NEGATIVE"
         right_lines = [DIM + signal_title + RESET]
         rain_w = max(10, right_w - 6)
         rain_h = max(5, panel_h - 9)
@@ -3586,7 +3605,7 @@ class FutureCrash:
                     chars.append(GREEN2 + self.rng.choice("01") + RESET)
                 else:
                     chars.append(" ")
-            right_lines.append("".join(chars))
+            right_lines.append(self.render_signal_row("".join(chars)))
 
         right_lines += [
             "",
@@ -3672,6 +3691,14 @@ class FutureCrash:
         return "\n".join(safe_row(row, w) for row in rows[:h])
 
 
+    def render_signal_row(self,line):
+        """Cut the unchanged glyphs out of one theme-aware ink field."""
+        if getattr(self,"signal_style","normal")!="negative":return line
+        # Strip per-cell color/reset codes to keep the cutout field uniform.
+        # Terminal reverse video supplies its background-colored glyphs; normal
+        # mode retains every drawing color and the scan row keeps its emphasis.
+        return CYAN+CSI+"7m"+(BOLD if BOLD in line else "")+strip_ansi(line)+RESET
+
     def render_signal_panel(self, width, height):
         """Conversation-side view of the same persistent Signal Canvas."""
         width = max(24, width)
@@ -3694,11 +3721,12 @@ class FutureCrash:
                     # A very faint living field makes the pane feel connected
                     # without obscuring model drawings.
                     chars.append(DARK + ("." if (x * 7 + y * 11) % 29 == 0 else " ") + RESET)
-            lines.append("".join(chars))
+            lines.append(self.render_signal_row("".join(chars)))
         if active and self.signal.owner:
             title="SIGNAL // THREAD "+str(self.signal.owner)[:9]
         else:
             title="SIGNAL // "+("CANVAS ACTIVE" if active else "LISTENING")
+        if getattr(self,"signal_style","normal")=="negative":title += " // NEGATIVE"
         return self.box(title, lines, width, height, CYAN)
 
     def render_input(self, w, h, title, subtitle):
@@ -3868,6 +3896,7 @@ class FutureCrash:
                  ("r", "new observation"),
                  ("s", "clear Signal drawing"),
                  ("d", "Signal Canvas demo"),
+                 ("v", "normal / negative Signal style (saved)"),
                  ("m", "mute / unmute sound"),
                  ("p", "panic"),
                  ("?", "this help"),
@@ -4165,6 +4194,7 @@ def parse_args():
     p.add_argument("--ollama", default=None, help="Ollama base URL (default: LOOK selected host, then localhost)")
     p.add_argument("--fps", type=int, default=12, help="UI refresh rate (default: 12)")
     p.add_argument("--no-ai-ambient", action="store_true", help="disable ambient LLM observations")
+    p.add_argument("--signal-style", choices=("normal","negative"), default=None, help="Signal appearance for this launch (default: saved preference)")
     p.add_argument("--no-audio", action="store_true", help="disable synthesized terminal sounds for this launch (overrides saved audio preference)")
     return p.parse_args()
 

@@ -86,3 +86,12 @@ Future Crash uses the same Paper and Custom ink roles when the shared LOOK helpe
 is installed: forest green activity, navy/teal accents, red/amber warnings and
 charcoal text. Restart Future Crash after changing the palette. Neon and Slate
 retain their existing display; standalone Future Crash needs no LOOK dependency.
+
+Signal negative style: press V in Future Crash's ambient screen to toggle and save
+normal/negative rendering. The field reverses foreground/background within its
+bounds, cutting paper-colored glyphs out of ink on Paper and following the selected
+terminal colors on Neon/Slate. Borders, headings and other panels remain normal.
+Signal drawing programs, history and scan animation are unchanged; conversation
+Signal panels use the same selected style. `future-crash --signal-style negative`
+(or `normal`) overrides the saved choice for that launch. V in text editors is
+ordinary input. Press D in ambient to try a drawing, then V to compare styles.
