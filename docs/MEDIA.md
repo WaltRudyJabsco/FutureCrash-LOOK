@@ -246,3 +246,9 @@ conversion, the existing H.264/AAC encoder is used. Remuxing reduces preparation
 work, not the original video's bitrate or storage requirement. The current browser
 representation still finishes before serving; segmented/adaptive streaming is not
 implemented by this update.
+
+Browser movie representations use mono/stereo AAC or MP3 when already compatible;
+other movie soundtracks are converted to stereo AAC at 48 kHz. This keeps the
+browser copy conservative for phones/tablets while native playback and original
+rips retain their original audio channels. Older browser cache copies rebuild
+when the representation changes.

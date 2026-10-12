@@ -3940,17 +3940,18 @@ class API(BaseHTTPRequestHandler):
             copy_video=False;copy_audio=False
             if ffprobe:
                 try:
-                    probe=subprocess.run([ffprobe,"-v","error","-show_entries","stream=codec_type,codec_name,pix_fmt","-of","json",str(source)],capture_output=True,text=True,timeout=12,check=True)
+                    probe=subprocess.run([ffprobe,"-v","error","-show_entries","stream=codec_type,codec_name,pix_fmt,channels","-of","json",str(source)],capture_output=True,text=True,timeout=12,check=True)
                     streams=json.loads(probe.stdout or "{}").get("streams") or []
                     video={str(x.get("codec_name") or "") for x in streams if x.get("codec_type")=="video"}
                     audio={str(x.get("codec_name") or "") for x in streams if x.get("codec_type")=="audio"}
                     copy_video=bool(video) and video.issubset({"h264"}) and all(x.get('pix_fmt')=='yuv420p' for x in streams if x.get('codec_type')=='video')
-                    copy_audio=audio.issubset({"aac","mp3"})
-                    compatible=source.suffix.casefold() in {".mp4",".m4v"} and video.issubset({"h264"}) and audio.issubset({"aac","mp3"})
+                    copy_audio=audio.issubset({"aac","mp3"}) and all(0<int(x.get('channels') or 0)<=2 for x in streams if x.get('codec_type')=='audio')
+                    compatible=source.suffix.casefold() in {".mp4",".m4v"} and copy_video and copy_audio
                 except Exception: compatible=False
             if compatible: return source,"video/mp4"
             cache=Path.home()/".cache"/"future-crash-look"/"browser-media"; cache.mkdir(parents=True,exist_ok=True)
-            stat=source.stat(); key=hashlib.sha256(f"video:{source}:{stat.st_size}:{stat.st_mtime_ns}".encode()).hexdigest()[:24]
+            # Version the representation so older surround-AAC copies are rebuilt.
+            stat=source.stat(); key=hashlib.sha256(f"video:stereo-v2:{source}:{stat.st_size}:{stat.st_mtime_ns}".encode()).hexdigest()[:24]
             target=cache/(key+".mp4")
             if not target.exists() or target.stat().st_size==0:
                 tmp=target.with_name(key+f".{os.getpid()}.{threading.get_ident()}.tmp.mp4")
@@ -3962,7 +3963,8 @@ class API(BaseHTTPRequestHandler):
                 last_error=""
                 try:
                     for encoder,video_args in encoders:
-                        audio_args=["-c:a","copy"] if encoder=="copy" and copy_audio else ["-c:a","aac","-b:a","160k"]
+                        # Stereo AAC is the conservative common browser endpoint.
+                        audio_args=["-c:a","copy"] if encoder=="copy" and copy_audio else ["-c:a","aac","-ac","2","-ar","48000","-b:a","160k"]
                         pixel_args=[] if encoder=="copy" else ["-pix_fmt","yuv420p"]
                         cmd=[ffmpeg,"-nostdin","-v","error","-y","-i",str(source),"-map","0:v:0","-map","0:a:0?","-c:v",encoder,*video_args,*pixel_args,*audio_args,"-movflags","+faststart",str(tmp)]
                         cp=subprocess.run(cmd,capture_output=True,text=True,timeout=1800)
