@@ -587,3 +587,19 @@ def test_mp_sort_actions_preserve_queue_order():
     assert 'if mode=="library":visible=_media_find_order' in source
     assert 'key not in "ABCDLQJKERMFG"' in source
     assert 'Queue order follows playback' in source
+
+
+def test_remote_video_thumbnail_does_not_reuse_opening_frame_cache(lk,monkeypatch,tmp_path):
+    import hashlib,io
+    monkeypatch.setattr(Path,'home',lambda:tmp_path)
+    monkeypatch.setattr(lk,'_media_local_node_names',lambda:{'local'})
+    row={'node':'server','id':'movie','path':'/Movie.mkv','mtime':12}
+    folder=tmp_path/'.cache/look/media-art/remote';folder.mkdir(parents=True)
+    old=hashlib.sha256(b'server|movie|/Movie.mkv|12').hexdigest()[:28]
+    (folder/(old+'.jpg')).write_bytes(b'old black frame')
+    assert lk._media_remote_cover_path(row,fetch=False) is None
+    monkeypatch.setattr(lk.urllib.request,'urlopen',lambda *a,**k:io.BytesIO(b'fresh later frame'))
+    fresh=lk._media_remote_cover_path(row)
+    assert fresh.read_bytes()==b'fresh later frame'
+    assert fresh!=folder/(old+'.jpg')
+    assert lk._media_remote_cover_path(row,fetch=False)==fresh
