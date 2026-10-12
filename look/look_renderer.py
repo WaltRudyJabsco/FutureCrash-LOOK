@@ -586,7 +586,7 @@ class NativePreviewController:
         pixel_edge=max(320,min(1600,max(rows*36,cols*18)))
         token=hashlib.sha256(f'{path}|{stamp}|{pixel_edge}'.encode()).hexdigest()[:24]
         out=cache/f'{token}.png'
-        if out.exists(): return out
+        if out.exists() and self._png_dimensions(out): return out
         temp=out.with_suffix('.tmp.png')
         try:
             if path.suffix.casefold()=='.pdf':
@@ -612,7 +612,7 @@ class NativePreviewController:
                 if sys.platform=='darwin':
                     sips=shutil.which('sips')
                     if not sips: return None
-                    proc=subprocess.run([sips,'-Z',str(pixel_edge),str(path),'--out',str(temp)],stdout=subprocess.DEVNULL,stderr=subprocess.DEVNULL,timeout=8)
+                    proc=subprocess.run([sips,'-s','format','png','-Z',str(pixel_edge),str(path),'--out',str(temp)],stdout=subprocess.DEVNULL,stderr=subprocess.DEVNULL,timeout=8)
                 else:
                     convert=shutil.which('magick') or shutil.which('convert')
                     if not convert: return None
@@ -671,6 +671,7 @@ class NativePreviewController:
         if not ready: return
         generation,image,row,col,rows,cols=ready
         if generation!=self._generation: return
+        if not self._png_dimensions(image): return
         draw_row,draw_col,draw_rows,draw_cols=self._contained_rect(image,row,col,rows,cols)
         try:
             # ASCII remains the immediate fallback. Once native pixels are ready,

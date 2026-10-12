@@ -100,3 +100,17 @@ def test_surround_aac_is_downmixed_even_in_mp4(monkeypatch,tmp_path,suffix):
     assert command[command.index('-ac')+1]=='2'
     assert command[command.index('-ar')+1]=='48000'
     assert output!=source and source.read_bytes()==b'original movie'
+
+
+def test_provider_download_copies_original_but_playback_stays_guarded(monkeypatch,tmp_path):
+    runtime=tmp_path/'.local/share/look';runtime.mkdir(parents=True)
+    (runtime/'media_protection.py').write_text('def protected(path):return True\n')
+    source=tmp_path/'movie.m4v';source.write_bytes(b'encrypted original')
+    monkeypatch.setattr(node.Path,'home',lambda:tmp_path)
+    monkeypatch.setattr(node,'identity',lambda:{'name':'server'})
+    monkeypatch.setattr(node,'_local_media_entry',lambda *args:({'media_type':'video/mp4'},source))
+    handler=object.__new__(node.API)
+    monkeypatch.setattr(handler,'sendj',lambda status,payload:(status,payload))
+    monkeypatch.setattr(handler,'_serve_file_range',lambda path,kind,**kwargs:path.read_bytes())
+    assert handler._serve_media_item('server','film')[0]==409
+    assert handler._serve_media_item('server','film',representation='download')==b'encrypted original'
