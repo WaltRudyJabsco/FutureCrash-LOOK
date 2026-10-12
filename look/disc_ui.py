@@ -15,7 +15,8 @@ def summary(job):
     eta=job.get('estimated_remaining_seconds');remaining=f' · ETA ~{eta//60}:{eta%60:02d}' if isinstance(eta,int) else ''
     delivery=job.get('delivery') or {}
     library=' · library '+str(delivery.get('state'))+' / '+str(delivery.get('stage')) if delivery else (' · library failed: '+str(job['delivery_error']) if job.get('delivery_error') else '')
-    return f"{job['title']} · {job['state']} · {job['stage']} · {progress} · {elapsed//60}:{elapsed%60:02d}"+remaining+library
+    owner=str(job.get('node') or '')
+    return (owner+' · ' if owner else '')+f"{job['title']} · {job['state']} · {job['stage']} · {progress} · {elapsed//60}:{elapsed%60:02d}"+remaining+library
 
 
 def active(job):
@@ -54,16 +55,18 @@ def watch_all(request,read_key,hints):
     try:
         tty.setcbreak(fd)
         while True:
-            jobs=request('jobs',{})['jobs'];current=[job for job in jobs if active(job)]
+            snapshot=request('jobs',{});jobs=snapshot['jobs'];current=[job for job in jobs if active(job)]
             shown=current or jobs[:1];width,height=shutil.get_terminal_size((100,30))
             frame=['\033[1;38;5;117mFABRIC IMPORT PROGRESS\033[0m']
             frame.extend(summary(job) for job in shown[:max(1,height-4)])
             if not shown:frame.append('No imports yet')
+            unavailable=snapshot.get('unavailable') or []
+            if unavailable:frame.append('Unavailable: '+', '.join(row['node'] for row in unavailable))
             if not current and shown:
                 frame.append(shown[0].get('error') or (shown[0].get('delivery') or {}).get('error') or shown[0].get('output') or '')
             frame.append(hints('Esc return · Jobs continue in background',width))
             sys.stdout.write('\033[2J\033[H'+'\n'.join(line[:width-1] if '\033' not in line else line for line in frame)+'\033[J');sys.stdout.flush()
-            if not current:return 0 if not shown or (shown[0]['state']=='complete' and (shown[0].get('delivery') or {}).get('state') not in {'failed','cancelled'}) else 1
+            if not current and not snapshot.get('fabric'):return 0 if not shown or (shown[0]['state']=='complete' and (shown[0].get('delivery') or {}).get('state') not in {'failed','cancelled'}) else 1
             if read_key(fd,1) in {'esc','q','\x03'}:return 0
     finally:termios.tcsetattr(fd,termios.TCSADRAIN,old);sys.stdout.write('\033[0m\n');sys.stdout.flush()
 
@@ -175,16 +178,20 @@ def main(argv,request_factory,read_key,hints):
     parser.add_argument('--release',type=int,help='MusicBrainz release number from scan (starting at 1)')
     parser.add_argument('--no-metadata',action='store_true',help='Skip the MusicBrainz lookup for CD capture')
     parser.add_argument('--json',action='store_true')
-    args=parser.parse_args(argv);request=request_factory(args.node);selector=' '.join(args.id)
+    args=parser.parse_args(argv);selector=' '.join(args.id)
+    fabric=args.node is None and (args.action=='jobs' or (args.action=='watch' and not selector))
+    request=request_factory('fabric' if fabric else args.node)
     try:
         if not args.action and sys.stdin.isatty() and sys.stdout.isatty():return workspace(request,read_key,hints)
         action=args.action or 'drives'
         if action=='watch':
             if not selector:
                 if sys.stdin.isatty() and sys.stdout.isatty():return watch_all(request,read_key,hints)
-                jobs=request('jobs',{})['jobs'];shown=[job for job in jobs if active(job)] or jobs[:1]
-                if args.json:print(json.dumps({'ok':True,'jobs':shown},ensure_ascii=False,indent=2))
-                else:print('\n'.join(summary(job) for job in shown) or 'No imports yet')
+                snapshot=request('jobs',{});jobs=snapshot['jobs'];shown=[job for job in jobs if active(job)] or jobs[:1]
+                if args.json:print(json.dumps(dict(snapshot,jobs=shown),ensure_ascii=False,indent=2))
+                else:
+                    print('\n'.join(summary(job) for job in shown) or 'No imports yet')
+                    if snapshot.get('unavailable'):print('Unavailable: '+', '.join(row['node'] for row in snapshot['unavailable']))
                 return 0
             selector=resolve_job(request,selector,action)
             if sys.stdin.isatty() and sys.stdout.isatty():return watch(selector,request,read_key,hints)
