@@ -73,7 +73,7 @@ def test_workbench_confirms_movie_and_remembers_chosen_library(tmp_path,monkeypa
         raise AssertionError(action)
     answers=iter(['','','','','/mounted/Library/movies','',''])
     monkeypatch.setattr('builtins.input',lambda prompt:next(answers))
-    keys=iter(['N','esc'])
+    keys=iter(['n','esc'])
     assert disc_ui.workspace(request,lambda *args:next(keys),lambda text,width:text)==0
     assert started[0]['title']=='PCU (1994)' and started[0]['title_index']=='0'
     assert started[0]['destination']=='/mounted/Library/movies'

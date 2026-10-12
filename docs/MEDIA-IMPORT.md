@@ -22,8 +22,11 @@ work it shows the most recent available result. Use `--node local` or
 `--node NAME` to focus on one computer. A specific job selector still uses its
 chosen node; cancellation and starting imports always remain owner-scoped.
 
-The workbench has N import, D rediscover, arrows select a job, Enter progress,
-L deliver/retry, C cancel, and Escape return. Jobs continue when a window closes. Receipts show
+The workbench has n import, d rediscover, h history, arrows select a job, Enter progress,
+l send to library/retry delivery, c cancel, and Escape return. Uppercase variants
+also work; Shift is not required. The inserted disc appears above a separate job
+history section, with distinct label, title and status colors following the terminal palette.
+Jobs continue when a window closes. Receipts show
 stage, elapsed time, progress when the adapter supplies it, and estimated time
 remaining when a meaningful percentage is available. Returning from a progress
 view keeps the job running; cancellation terminates its own tool process group.

@@ -9,6 +9,44 @@ import time
 import tty
 
 
+def interface_colors():
+    try:from . import terminal_style
+    except ImportError:import terminal_style
+    palette=terminal_style.application_colors()
+    defaults={'CYAN':'36','GREEN':'32','RED':'31','YELLOW':'33','WHITE':'97','GRAY':'90'}
+    return {role:'\033['+('38;2;'+';'.join(map(str,palette[role])) if role in palette else code)+'m'
+            for role,code in defaults.items()}
+
+
+def workbench_lines(inventory,jobs,index,width,height,show_history,colors):
+    def ink(value,role):return colors[role]+str(value)+'\033[0m'
+    frame=[ink('FABRIC DISC WORKBENCH','CYAN')+' · '+ink(inventory.get('node') or 'local','WHITE'),'']
+    for row in inventory['drives']:
+        disc=(row.get('disc') or '').replace('_',' ') or 'No named disc detected'
+        frame.append(ink('INSERTED DISC  ','GRAY')+'\033[1m'+ink(disc,'GREEN'))
+        frame.append(ink('DRIVE          ','GRAY')+ink(row['label'],'WHITE')+' · '+ink(row['id'],'GRAY'))
+    if not inventory['drives']:frame.append(ink('No optical drive detected · connect one and press d','YELLOW'))
+    else:frame.append(ink('n imports the inserted disc · d refreshes discovery','YELLOW'))
+    frame.append(ink('TOOLS  ','CYAN')+ink(', '.join(name for name,path in inventory['tools'].items() if path),'GRAY'))
+    frame.extend(['',ink('IMPORT JOBS','CYAN')+' · '+ink('active + saved history' if show_history else 'active only','GRAY')])
+    usable=max(1,height-len(frame)-4);top=max(0,index-usable+1)
+    for n,job in enumerate(jobs[top:top+usable],top):
+        prefix=('› ' if n==index else '  ')
+        body=summary(job)
+        title=job['title'];owner=str(job.get('node') or '')
+        subject=(owner+' · ' if owner else '')+title
+        status=job['state'];tail=body[len(subject)+3+len(status):]
+        # Remove the repeated phase in terminal receipts: "complete · complete".
+        if job.get('stage')==status:tail=tail.removeprefix(' · '+status)
+        plain=prefix+subject+' · '+status+tail
+        if len(plain)>width-1:tail=tail[:max(0,width-2-len(prefix+subject+' · '+status))]+'…'
+        role='GREEN' if status=='complete' else 'RED' if status in {'failed','cancelled'} else 'YELLOW'
+        frame.append(ink(prefix,'YELLOW' if n==index else 'GRAY')+ink(subject,'WHITE' if n%2==0 else 'CYAN')+
+                     ' · '+ink(status,role)+ink(tail,'GRAY'))
+    if not jobs:frame.append(ink('No jobs shown · n starts a new import','GRAY'))
+    return frame
+
+
 def summary(job):
     progress=f"{job['percent']:.1f}%" if isinstance(job.get('percent'),(int,float)) else 'working'
     elapsed=int(job.get('elapsed_seconds') or max(0,time.time()-job['created']))
@@ -129,7 +167,7 @@ def watch(identifier,request,read_key,hints):
 
 
 def workspace(request,read_key,hints):
-    fd=sys.stdin.fileno();old=termios.tcgetattr(fd);index=0;notice='';inventory=request('drives',{});show_history=True
+    fd=sys.stdin.fileno();old=termios.tcgetattr(fd);index=0;notice='';inventory=request('drives',{});show_history=True;colors=interface_colors()
     def prompt(label,default=''):
         termios.tcsetattr(fd,termios.TCSADRAIN,old);sys.stdout.write('\033[?25h');sys.stdout.flush()
         try:return input(label+(f' [{default}]' if default else '')+' › ').strip() or default
@@ -141,15 +179,11 @@ def workspace(request,read_key,hints):
             if not show_history:jobs=[job for job in jobs if active(job)]
             index=max(0,min(index,max(0,len(jobs)-1)))
             width,height=shutil.get_terminal_size((100,30))
-            frame=['\033[1;38;5;117mFABRIC DISC WORKBENCH\033[0m · '+str(inventory.get('node') or 'local')]
-            frame.extend('DRIVE '+row['id']+' · '+row['label']+' · '+row.get('disc','') for row in inventory['drives'])
-            if not inventory['drives']:frame.append('No optical drive detected · connect one and press D')
-            frame.append('TOOLS '+', '.join(name for name,path in inventory['tools'].items() if path))
-            usable=max(1,height-len(frame)-4);top=max(0,index-usable+1)
-            for n,job in enumerate(jobs[top:top+usable],top):frame.append(('› ' if n==index else '  ')+summary(job))
-            frame.extend(['',hints('N import · D discover · H history · ↑↓ jobs · Enter progress · L send to library · C cancel · Esc exit',width),notice])
+            frame=workbench_lines(inventory,jobs,index,width,height,show_history,colors)
+            frame.extend(['',hints('n import · d discover · h history · ↑↓ jobs · Enter progress · l send to library · c cancel · Esc exit',width),notice])
             sys.stdout.write('\033[2J\033[H'+'\n'.join(line[:width-1] if '\033' not in line else line for line in frame)+'\033[J');sys.stdout.flush()
             key=read_key(fd,1)
+            if key in {'n','d','h','l','c'}:key=key.upper()
             if key in {'esc','q','\x03'}:return 0
             try:
                 if key=='D':inventory=request('drives',{});notice='Discovery refreshed'
