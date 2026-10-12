@@ -281,3 +281,8 @@ and track number; different codec formats no longer split an album.
 Shift-T hands a local file to Apple TV on a Mac. A source stored on another node
 must first be copied or mounted on that Mac. The error names the source owner;
 Shift-T does not transfer files or change Apple TV's playback authorization.
+
+Video previews use a cached still at the earlier of one minute or 20% of the
+clip's duration. Unknown-duration clips try one minute, then the opening frame
+if that seek produces no image. Explicit poster/cover files take precedence.
+Local and Fabric previews share this frame; the movie itself stays unchanged.

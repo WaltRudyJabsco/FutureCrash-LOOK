@@ -5,12 +5,49 @@ all failures simply return None. Missing album covers are requested by a separat
 background lookup worker; rendering never waits for its network calls.
 """
 from __future__ import annotations
-import hashlib, os, shutil, subprocess, time
+import hashlib, os, shutil, subprocess, time, math
 from itertools import islice
 from pathlib import Path
 
 IMAGE_SUFFIXES={'.jpg','.jpeg','.png','.webp'}
 AUDIO_SUFFIXES={'.m4a','.mp4a','.mp3','.flac','.ogg','.oga','.opus','.aac','.wav','.aiff','.aif','.alac'}
+VIDEO_SUFFIXES={'.mp4','.m4v','.mov','.mkv','.avi','.webm','.wmv','.flv','.vob','.mts','.m2ts','.ts','.mpeg','.mpg','.3gp'}
+VIDEO_PREVIEW_SECONDS=60.0
+
+
+def video_preview_second(duration=None):
+    try:
+        duration=float(duration)
+        if math.isfinite(duration) and duration>0:return min(VIDEO_PREVIEW_SECONDS,duration*.2)
+    except (TypeError,ValueError):pass
+    return VIDEO_PREVIEW_SECONDS
+
+
+def video_frame(path,ffmpeg=None,ffprobe=None,timeout=3.0):
+    """Seek on the owner; a bounded cached still serves local and remote previews."""
+    path=Path(path)
+    if not path.is_file() or path.suffix.casefold() not in VIDEO_SUFFIXES:return None
+    ffmpeg=ffmpeg or shutil.which('ffmpeg');ffprobe=ffprobe or shutil.which('ffprobe')
+    if not ffmpeg:return None
+    stat=path.stat();token=hashlib.sha256(f'video-minute-v1|{path.resolve()}|{stat.st_size}|{stat.st_mtime_ns}'.encode()).hexdigest()[:28]
+    folder=Path.home()/'.cache/look/media-art';out=folder/(token+'.jpg')
+    if out.is_file() and out.stat().st_size:return out
+    duration=None
+    if ffprobe:
+        try:
+            probe=subprocess.run([ffprobe,'-v','error','-show_entries','format=duration','-of','default=noprint_wrappers=1:nokey=1',str(path)],capture_output=True,text=True,timeout=2,check=True)
+            duration=probe.stdout.strip()
+        except (OSError,subprocess.SubprocessError):pass
+    folder.mkdir(parents=True,exist_ok=True);tmp=folder/f'.{token}.{os.getpid()}.{time.time_ns()}.jpg'
+    try:
+        for second in (video_preview_second(duration),0):
+            command=[ffmpeg,'-nostdin','-loglevel','error','-ss',str(second),'-i',str(path),'-map','0:v:0','-frames:v','1','-q:v','3','-y',str(tmp)]
+            proc=subprocess.run(command,stdout=subprocess.DEVNULL,stderr=subprocess.DEVNULL,timeout=timeout)
+            if proc.returncode==0 and tmp.is_file() and tmp.stat().st_size:
+                tmp.replace(out);return out
+    except (OSError,subprocess.SubprocessError):pass
+    finally:tmp.unlink(missing_ok=True)
+    return None
 # Misses expire: a failed optional decoder must never permanently hide artwork.
 _EMBEDDED_MISSES={}
 _ALBUM_RESULTS={}
@@ -108,6 +145,9 @@ def artwork_for(pathlike:str|Path,lookup:bool=True)->Path|None:
     path=Path(pathlike).expanduser()
     if not path.exists(): return None
     if path.is_file() and path.suffix.casefold() in IMAGE_SUFFIXES: return path
+    if path.suffix.casefold() in VIDEO_SUFFIXES:
+        try:return _external(path) or video_frame(path)
+        except OSError:return None
     existing=_embedded(path) or _external(path) or _album_art(path)
     if existing:return existing
     if not lookup:return None
