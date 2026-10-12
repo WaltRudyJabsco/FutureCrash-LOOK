@@ -174,6 +174,66 @@ form.addEventListener('submit',async e=>{e.preventDefault();if(!endpointAuthoriz
 
 let mediaNode='',mediaOutputs=[],lastMediaState=null,nodeMediaState=null;
 const browserAudio=new Audio();browserAudio.preload='metadata';
+// Full screen changes presentation only: the playing media element stays attached.
+function createMediaFullscreen(doc){
+ let host=null,previousFocus=null,nativeVideo=null,playingVideo=null,oldControls=false;
+ const active=target=>host===target;
+ function refresh(){
+  for(const button of doc.querySelectorAll('[data-media-fullscreen]')){
+   const target=button.closest('.media')||button.closest('#mediaPanel');
+   const on=active(target);button.textContent=on?'Exit full screen':'Full screen';
+   button.setAttribute('aria-pressed',String(on));
+  }
+ }
+ function finish(){
+  const old=host;host=null;
+  if(old)old.classList.remove('media-fullscreen');if(playingVideo)playingVideo.controls=oldControls;playingVideo=null;
+  nativeVideo=null;doc.body.classList.remove('media-fullscreen-open');refresh();
+  if(previousFocus?.isConnected)previousFocus.focus();else old?.querySelector('[data-media-fullscreen]')?.focus();previousFocus=null;
+ }
+ async function exit(){
+  try{
+   if(nativeVideo?.webkitDisplayingFullscreen)nativeVideo.webkitExitFullscreen();
+   else if(doc.fullscreenElement||doc.webkitFullscreenElement)await (doc.exitFullscreen?.()||doc.webkitExitFullscreen?.());
+  }finally{finish()}
+ }
+ async function toggle(target){
+  if(!target)return;
+  if(active(target)){await exit();return}
+  if(host)await exit();
+  host=target;previousFocus=doc.activeElement;const video=target.querySelector('video');
+  playingVideo=video;oldControls=video?.controls||false;if(video)video.controls=true;
+  target.classList.add('media-fullscreen');doc.body.classList.add('media-fullscreen-open');refresh();
+  if(video&&!video.dataset.fullscreenBound){
+   video.dataset.fullscreenBound='1';video.addEventListener('webkitendfullscreen',finish);
+  }
+  try{
+   const request=target.requestFullscreen||target.webkitRequestFullscreen;
+   if(request){await request.call(target);return}
+   if(video?.webkitEnterFullscreen){nativeVideo=video;video.webkitEnterFullscreen();return}
+  }catch{
+   // Some iOS browsers expose the API but only permit native video full screen.
+   try{if(video?.webkitEnterFullscreen){nativeVideo=video;video.webkitEnterFullscreen();return}}catch{nativeVideo=null}
+  }
+  target.querySelector('[data-media-fullscreen]')?.focus();
+ }
+ function changed(){if(host&&!doc.fullscreenElement&&!doc.webkitFullscreenElement&&!nativeVideo)finish()}
+ doc.addEventListener('fullscreenchange',changed);doc.addEventListener('webkitfullscreenchange',changed);
+ doc.addEventListener('keydown',event=>{
+  if(!host)return;
+  if(event.key==='Escape'){event.preventDefault();exit().catch(finish)}
+  if(event.key==='Tab'){
+   const buttons=[...host.querySelectorAll('button,a[href],input,select,video[controls],audio[controls]')].filter(el=>!el.disabled&&!el.hidden&&(!el.getClientRects||el.getClientRects().length));
+   if(!buttons.length)return;
+   const first=buttons[0],last=buttons[buttons.length-1];
+   if(event.shiftKey&&(doc.activeElement===first||!host.contains(doc.activeElement))){event.preventDefault();last.focus()}
+   else if(!event.shiftKey&&(doc.activeElement===last||!host.contains(doc.activeElement))){event.preventDefault();first.focus()}
+  }
+ });
+ return {toggle,exit,active,refresh,closeWithin(root){if(host&&(root===host||root.contains(host)))exit().catch(finish)}};
+}
+
+const signalFullscreen=createMediaFullscreen(document);
 const browserVideo=document.createElement('video');browserVideo.preload='metadata';browserVideo.controls=false;browserVideo.playsInline=true;browserVideo.className='media-video';
 let browserElement=browserAudio,browserPlayGeneration=0;
 function browserIsVideo(entry){return String(entry?.media_type||'').startsWith('video/')||/\.(mp4|m4v|mov|mkv|webm|avi)$/i.test(String(entry?.path||entry?.title||''))}
@@ -232,8 +292,8 @@ function renderMedia(d,force=false){
  // the card/select until Safari finishes the interaction.
  if(mediaPickerActive)return;
  const queue=Array.isArray(d?.queue)?d.queue:[],active=Boolean(d?.active),entry=d?.entry||{};const key=[selectedMediaOutput,d?.state,d?.index,d?.count,entry.artist,entry.album,entry.title].join('|');if(key!==lastMediaKey){if(active)mediaDismissed=false;lastMediaKey=key}
- if(!d?.available||!queue.length||mediaDismissed){mediaPanel.hidden=true;mediaPanel.innerHTML='';return}
- mediaPanel.hidden=false;
+ if(!d?.available||!queue.length||mediaDismissed){signalFullscreen.closeWithin(mediaPanel);mediaPanel.hidden=true;mediaPanel.innerHTML='';return}
+ mediaPanel.hidden=false;mediaPanel.dataset.playback=d.state||'';mediaPanel.dataset.video=String(browserIsVideo(entry));
  // Keep an active <video> attached while rebuilding the surrounding controls.
  // Chromium aborts play() when the media element itself is removed from the DOM;
  // Safari is more forgiving, which hid this lifecycle bug during the first demo.
@@ -249,16 +309,16 @@ function renderMedia(d,force=false){
  for(const choice of choices){const b=document.createElement('button');b.type='button';b.className='media-output-choice'+(choice.target===selectedMediaOutput?' selected':'');b.disabled=!choice.available;b.textContent=choice.label+(choice.target===selectedMediaOutput?' ●':'')+(!choice.available&&choice.reason?` · ${choice.reason}`:'');b.onclick=()=>selectMediaOutput(choice.target,b);outMenu.append(b)}
  outputRow.append(outLabel,outMenu);
  const shownOutput=selectedMediaOutput==='browser'?thisDeviceLabel():(targetNode(selectedMediaOutput)||d.node||mediaNode||'local');const meta=document.createElement('div');meta.className='media-meta';const playability=String(entry?.playability?.status||'');const playHint=playability&&playability!=='browser_candidate'?` · ${playability.replaceAll('_',' ')}`:'';const playerHint=selectedMediaOutput==='browser'?'browser':String(d.player||'mpv');meta.textContent=`${shownOutput} · ${playerHint} · queue ${d.count||queue.length} tracks · ${Number(d.index||0)+1}/${d.count||queue.length}${playHint}`;
- const actions=document.createElement('div');actions.className='media-actions';const q=document.createElement('button');q.type='button';q.className='media-link';q.textContent=mediaExpanded?'Hide queue':'Queue';q.onclick=()=>{mediaExpanded=!mediaExpanded;renderMedia(selectedMediaOutput==='browser'?browserSnapshot():d,true)};const stop=mediaButton('Stop','Stop playback','stop');stop.classList.add('media-link');const dismiss=document.createElement('button');dismiss.type='button';dismiss.className='media-link';dismiss.textContent='Dismiss';dismiss.onclick=()=>{mediaDismissed=true;mediaPanel.hidden=true};const artMode=document.createElement('div');artMode.className='media-art-modes';artMode.setAttribute('role','group');artMode.setAttribute('aria-label','Album art style');for(const [value,label] of [['ascii','ASCII'],['image','Image'],['off','Art off']]){const b=document.createElement('button');b.type='button';b.className='media-link';b.textContent=label;b.setAttribute('aria-pressed',String(value===signalArtwork.mode));b.onclick=()=>{signalArtwork.setMode(value);renderMedia(selectedMediaOutput==='browser'?browserSnapshot():d,true)};artMode.append(b)};actions.append(q,artMode,stop,dismiss);
+ const actions=document.createElement('div');actions.className='media-actions';const q=document.createElement('button');q.type='button';q.className='media-link';q.textContent=mediaExpanded?'Hide queue':'Queue';q.onclick=()=>{mediaExpanded=!mediaExpanded;renderMedia(selectedMediaOutput==='browser'?browserSnapshot():d,true)};const stop=mediaButton('Stop','Stop playback','stop');stop.classList.add('media-link');const dismiss=document.createElement('button');dismiss.type='button';dismiss.className='media-link';dismiss.textContent='Dismiss';dismiss.onclick=()=>{signalFullscreen.closeWithin(mediaPanel);mediaDismissed=true;mediaPanel.hidden=true};const artMode=document.createElement('div');artMode.className='media-art-modes';artMode.setAttribute('role','group');artMode.setAttribute('aria-label','Album art style');for(const [value,label] of [['ascii','ASCII'],['image','Image'],['off','Art off']]){const b=document.createElement('button');b.type='button';b.className='media-link';b.textContent=label;b.setAttribute('aria-pressed',String(value===signalArtwork.mode));b.onclick=()=>{signalArtwork.setMode(value);renderMedia(selectedMediaOutput==='browser'?browserSnapshot():d,true)};artMode.append(b)};const full=document.createElement('button');full.type='button';full.className='media-link';full.dataset.mediaFullscreen='';full.onclick=()=>signalFullscreen.toggle(mediaPanel).catch(err=>event('FULL SCREEN · '+err.message));head.append(full);actions.append(q,artMode,stop,dismiss);
  if(keepVideo){mediaPanel.insertBefore(head,browserVideo);mediaPanel.insertBefore(title,browserVideo);mediaPanel.insertBefore(artist,browserVideo)}
  else{mediaPanel.append(head,title,artist);if(selectedMediaOutput==='browser'&&browserIsVideo(entry))mediaPanel.append(browserVideo)}
- if(!browserIsVideo(entry)){const art=signalArtwork.render(mediaCoverUrl(entry,d.node==='browser'?browserMedia.sourceNode:d.node));if(art)mediaPanel.append(art)}
- mediaPanel.append(progress,controls,outputRow,meta,actions);if(mediaExpanded){const list=document.createElement('div');list.className='media-queue';queue.forEach((row,i)=>{const b=document.createElement('button');b.type='button';b.className='media-queue-row'+(i===Number(d.index)?' current':'');b.onclick=()=>mediaControl('jump',i);const n=document.createElement('span');n.textContent=String(i+1).padStart(2,'0');const t=document.createElement('span');t.textContent=[row.artist,row.title].filter(Boolean).join(' — ')||'Media';b.append(n,t);list.append(b)});mediaPanel.append(list)}}
+ if(!browserIsVideo(entry)){const art=signalArtwork.render(mediaCoverUrl(entry,d.node==='browser'?browserMedia.sourceNode:d.node));if(art)mediaPanel.append(art);const ambient=document.createElement('div');ambient.className='media-ambient';ambient.setAttribute('aria-label','Ambient audio visualization');for(let i=0;i<16;i++){const bar=document.createElement('i');bar.style.setProperty('--bar',i);ambient.append(bar)}mediaPanel.append(ambient)}
+ mediaPanel.append(progress,controls,outputRow,meta,actions);signalFullscreen.refresh();if(mediaExpanded){const list=document.createElement('div');list.className='media-queue';queue.forEach((row,i)=>{const b=document.createElement('button');b.type='button';b.className='media-queue-row'+(i===Number(d.index)?' current':'');b.onclick=()=>mediaControl('jump',i);const n=document.createElement('span');n.textContent=String(i+1).padStart(2,'0');const t=document.createElement('span');t.textContent=[row.artist,row.title].filter(Boolean).join(' — ')||'Media';b.append(n,t);list.append(b)});mediaPanel.append(list)}}
 async function mediaControl(action,index=null){try{event('MEDIA · '+action.toUpperCase(),true);if(selectedMediaOutput==='browser'){
- if(action==='play'){await browserElement.play();browserMedia.active=true;browserMedia.state='playing'}else if(action==='pause'){browserElement.pause();browserMedia.state='paused'}else if(action==='seek'){const duration=browserElement.duration;if(Number.isFinite(duration)&&Number.isFinite(Number(index)))browserElement.currentTime=Math.max(0,Math.min(Number(index),duration))}else if(action==='toggle'){if(browserElement.paused){await browserElement.play();browserMedia.active=true;browserMedia.state='playing'}else{browserElement.pause();browserMedia.state='paused'}}else if(action==='next'){await browserPlayIndex(browserMedia.index+1)}else if(action==='prev'){await browserPlayIndex(browserMedia.index-1)}else if(action==='jump'){await browserPlayIndex(index)}else if(action==='stop'){browserElement.pause();browserMedia.active=false;browserMedia.state='stopped';signalMediaSession.update(false);mediaPanel.hidden=true}else throw Error('unsupported browser media control');if(browserMedia.active)renderMedia(browserSnapshot(),true);event('MEDIA · '+action.toUpperCase());return}
+ if(action==='play'){await browserElement.play();browserMedia.active=true;browserMedia.state='playing'}else if(action==='pause'){browserElement.pause();browserMedia.state='paused'}else if(action==='seek'){const duration=browserElement.duration;if(Number.isFinite(duration)&&Number.isFinite(Number(index)))browserElement.currentTime=Math.max(0,Math.min(Number(index),duration))}else if(action==='toggle'){if(browserElement.paused){await browserElement.play();browserMedia.active=true;browserMedia.state='playing'}else{browserElement.pause();browserMedia.state='paused'}}else if(action==='next'){await browserPlayIndex(browserMedia.index+1)}else if(action==='prev'){await browserPlayIndex(browserMedia.index-1)}else if(action==='jump'){await browserPlayIndex(index)}else if(action==='stop'){browserElement.pause();browserMedia.active=false;browserMedia.state='stopped';signalMediaSession.update(false);signalFullscreen.closeWithin(mediaPanel);mediaPanel.hidden=true}else throw Error('unsupported browser media control');if(browserMedia.active)renderMedia(browserSnapshot(),true);event('MEDIA · '+action.toUpperCase());return}
  const node=targetNode(selectedMediaOutput)||mediaNode;const r=await fetch('/api/media/control',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({action,index,node})});const d=await r.json();if(!r.ok||d.error)throw Error(d.error||r.statusText);nodeMediaState=d;mediaDismissed=false;renderMedia(d,true);event('MEDIA · '+action.toUpperCase())}catch(err){event('MEDIA ERROR · '+err.message)}}
 async function pollMedia(force=false){if(mediaHandoff)return;if(selectedMediaOutput==='browser'){renderMedia(browserSnapshot(),force);return}const node=targetNode(selectedMediaOutput)||mediaNode;try{const r=await fetch('/api/media?node='+encodeURIComponent(node||''),{cache:'no-store'});if(!r.ok)return;const d=await r.json();nodeMediaState=d;renderMedia(d,force)}catch{}}
-for(const el of [browserAudio,browserVideo]){el.addEventListener('error',()=>{if(selectedMediaOutput==='browser'&&browserElement===el){browserMedia.state='error';browserMedia.active=false;renderMedia(browserSnapshot())}});el.addEventListener('timeupdate',()=>{if(selectedMediaOutput==='browser'&&browserElement===el)renderMedia(browserSnapshot())});el.addEventListener('pause',()=>{if(selectedMediaOutput==='browser'&&browserElement===el&&browserMedia.active){browserMedia.state='paused';renderMedia(browserSnapshot())}});el.addEventListener('playing',()=>{if(selectedMediaOutput==='browser'&&browserElement===el){browserMedia.active=true;browserMedia.state='playing';renderMedia(browserSnapshot())}});el.addEventListener('ended',()=>{if(selectedMediaOutput!=='browser'||browserElement!==el)return;if(browserMedia.index+1<browserMedia.queue.length)browserPlayIndex(browserMedia.index+1).catch(err=>event('MEDIA ERROR · '+err.message));else{browserMedia.state='stopped';browserMedia.active=false;signalMediaSession.update(false);mediaPanel.hidden=true}})}
+for(const el of [browserAudio,browserVideo]){el.addEventListener('error',()=>{if(selectedMediaOutput==='browser'&&browserElement===el){browserMedia.state='error';browserMedia.active=false;renderMedia(browserSnapshot())}});el.addEventListener('timeupdate',()=>{if(selectedMediaOutput==='browser'&&browserElement===el)renderMedia(browserSnapshot())});el.addEventListener('pause',()=>{if(selectedMediaOutput==='browser'&&browserElement===el&&browserMedia.active){browserMedia.state='paused';renderMedia(browserSnapshot())}});el.addEventListener('playing',()=>{if(selectedMediaOutput==='browser'&&browserElement===el){browserMedia.active=true;browserMedia.state='playing';renderMedia(browserSnapshot())}});el.addEventListener('ended',()=>{if(selectedMediaOutput!=='browser'||browserElement!==el)return;if(browserMedia.index+1<browserMedia.queue.length)browserPlayIndex(browserMedia.index+1).catch(err=>event('MEDIA ERROR · '+err.message));else{browserMedia.state='stopped';browserMedia.active=false;signalMediaSession.update(false);signalFullscreen.closeWithin(mediaPanel);mediaPanel.hidden=true}})}
 setInterval(()=>pollMedia(false),1000);pollMediaOutputs().then(()=>pollMedia(true));setInterval(pollMediaOutputs,8000);
 
 let activeDecisionKey='';
