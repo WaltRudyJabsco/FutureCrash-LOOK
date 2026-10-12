@@ -17,7 +17,8 @@ def test_kitty_pane_targets_original_tab_and_quotes_directory_as_one_argument(tm
     monkeypatch.delenv('TMUX',raising=False);monkeypatch.setenv('KITTY_WINDOW_ID','42')
     monkeypatch.setattr(style.shutil,'which',lambda name:'/bin/'+name)
     run=Mock(return_value=SimpleNamespace(returncode=0));monkeypatch.setattr(style.subprocess,'run',run)
-    assert style.open_pane(path)=='Shell opened beside LOOK'
+    result=style.open_pane(path)
+    assert result.startswith('Shell opened beside LOOK') and 'switch pane' in result and 'Ctrl-Shift-W close focused pane' in result
     first,second=[call.args[0] for call in run.call_args_list]
     assert first[-3:]==['--match','window_id:42','splits']
     assert '--source-window' in second and '--next-to' in second
@@ -58,6 +59,83 @@ def test_w_remains_filter_text_then_opens_from_browse(tmp_path,monkeypatch):
     assert 'aW' in queries and opened==[tmp_path]
 
 
+@pytest.mark.parametrize('platform,focus',[('darwin','Option-Shift-W'),('linux','Alt-Shift-W')])
+def test_pane_shortcuts_match_terminal_and_platform(monkeypatch,platform,focus):
+    monkeypatch.delenv('TMUX',raising=False);monkeypatch.setattr(style.sys,'platform',platform)
+    assert style.pane_shortcuts()==[focus+' switch pane','Ctrl-Shift-W close focused pane']
+    monkeypatch.setenv('TMUX','session')
+    assert style.pane_shortcuts()==['Ctrl-B then O switch pane','exit closes shell pane']
+
+
+def test_pane_help_persists_after_notice_and_in_filter(tmp_path,monkeypatch):
+    from test_hidden_and_player_visuals import terminal
+    terminal(monkeypatch,renderer);monkeypatch.setattr(renderer,'NativePreviewController',Mock)
+    monkeypatch.delenv('TMUX',raising=False)
+    path=tmp_path/'file.txt';path.write_text('text')
+    keys=iter(['W','/','\x1b','Q']);monkeypatch.setattr(renderer,'read_key',lambda *args,**kwargs:next(keys))
+    monkeypatch.setattr(style,'open_pane',lambda cwd:'Shell opened beside LOOK')
+    footer=renderer.action_footer;frames=[]
+    def capture(parts,width):
+        frames.append(list(parts));return footer(parts,width)
+    monkeypatch.setattr(renderer,'action_footer',capture)
+    renderer.pager(['file.txt'],24,80,force_interactive=True,current_dir=tmp_path,
+                   candidates=lambda query:[path],rebuild=lambda *args:['file.txt'],
+                   browse_rebuild=lambda *args:['file.txt'])
+    assert not any('switch pane' in part for part in frames[0])
+    assert all('Ctrl-Shift-W close focused pane' in frame for frame in frames[1:])
+    assert any('Esc clear' in frame and 'Ctrl-Shift-W close focused pane' in frame for frame in frames)
+
+
+def test_pane_resize_reflows_browse_without_a_keypress(tmp_path,monkeypatch):
+    from test_hidden_and_player_visuals import terminal
+    terminal(monkeypatch,renderer);monkeypatch.setattr(renderer,'NativePreviewController',Mock)
+    sizes=iter([os.terminal_size((40,24)),os.terminal_size((100,30))])
+    monkeypatch.setattr(renderer.shutil,'get_terminal_size',lambda fallback:next(sizes))
+    keys=iter([renderer.RESIZE_KEY,'Q'])
+    monkeypatch.setattr(renderer,'read_key',lambda *args,**kwargs:next(keys))
+    widths=[]
+    def rebuild(picked=None,marked=None,width=None):
+        widths.append(width);return [f'grid at {width}']
+    renderer.pager(['rows'],24,80,force_interactive=True,browse_rebuild=rebuild,current_dir=tmp_path)
+    assert widths==[None,40,100]
+
+
+def test_resize_clamps_browse_page_after_wider_grid_has_fewer_rows(tmp_path,monkeypatch):
+    from test_hidden_and_player_visuals import terminal
+    terminal(monkeypatch,renderer);monkeypatch.setattr(renderer,'NativePreviewController',Mock)
+    sizes=iter([os.terminal_size((40,24)),os.terminal_size((40,24)),os.terminal_size((100,30))])
+    monkeypatch.setattr(renderer.shutil,'get_terminal_size',lambda fallback:next(sizes))
+    keys=iter(['g',renderer.RESIZE_KEY,'Q'])
+    monkeypatch.setattr(renderer,'read_key',lambda *args,**kwargs:next(keys))
+    def rebuild(picked=None,marked=None,width=None):
+        return ['wide grid row'] if width==100 else [f'narrow row {n}' for n in range(100)]
+    renderer.pager(['rows'],24,40,force_interactive=True,browse_rebuild=rebuild,current_dir=tmp_path)
+    assert 'wide grid row' in renderer.sys.stdout.getvalue()
+
+
+def test_resize_wakes_blocked_input_and_preserves_pending_key(monkeypatch):
+    import signal
+    keyboard=os.pipe();real_select=renderer.select.select;raised=False
+    monkeypatch.setattr(renderer.sys,'stdin',Mock(fileno=lambda:keyboard[0]))
+    monkeypatch.setattr(renderer.termios,'tcgetattr',lambda fd:[])
+    monkeypatch.setattr(renderer.termios,'tcsetattr',lambda *args:None)
+    monkeypatch.setattr(renderer.tty,'setcbreak',lambda *args:None)
+    monkeypatch.setattr(renderer.shutil,'get_terminal_size',lambda fallback:os.terminal_size((80,24)))
+    previous=signal.getsignal(signal.SIGWINCH)
+    def select_once(*args):
+        nonlocal raised
+        if not raised:raised=True;signal.raise_signal(signal.SIGWINCH)
+        return real_select(*args)
+    monkeypatch.setattr(renderer.select,'select',select_once)
+    try:
+        os.write(keyboard[1],b'q')
+        assert renderer.read_key(timeout=1,expected_size=(80,24))==renderer.RESIZE_KEY
+        assert signal.getsignal(signal.SIGWINCH)==previous
+        assert renderer.read_key(timeout=0)=='q'
+    finally:
+        for pipe in keyboard:os.close(pipe)
+
+
 @pytest.mark.parametrize('scene',genius.SCENES)
 @pytest.mark.parametrize('size',[(1,1),(24,8),(80,24),(180,50)])
 def test_scenes_are_bounded_deterministic_and_animate(scene,size):
@@ -79,7 +157,7 @@ def test_scene_commands_are_plain_and_finish_when_redirected(monkeypatch):
 def test_moon_jelly_pauses_and_joins_rotation():
     mode=player_visuals.NAMES.index('Moon Jelly')+1
     assert player_visuals.active_mode(player_visuals.CYCLE_MODE,100)==mode
-    assert player_visuals.active_mode(player_visuals.CYCLE_MODE,110)==1
+    assert player_visuals.active_mode(player_visuals.CYCLE_MODE,(player_visuals.CYCLE_MODE-1)*player_visuals.CYCLE_INTERVAL_SECONDS)==1
     assert player_visuals.frame(mode,80,24,0)!=player_visuals.frame(mode,80,24,2)
     assert player_visuals.frame(mode,80,24,0,False)==player_visuals.frame(mode,80,24,2,False)
 

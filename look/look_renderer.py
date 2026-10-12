@@ -29,6 +29,7 @@ import shutil
 import stat as statmod
 import stat
 import select
+import signal
 import subprocess
 import sys
 import termios
@@ -408,18 +409,33 @@ def build_view(target:Path, mode:str, hidden:bool, width:int, tree_depth:int, qu
     return rows
 
 
-def read_key(timeout:float|None=None,wakeup_fd:int|None=None,on_wakeup=None)->str:
+RESIZE_KEY='\x00resize'
+
+
+def read_key(timeout:float|None=None,wakeup_fd:int|None=None,on_wakeup=None,expected_size=None)->str:
     fd=sys.stdin.fileno(); old=termios.tcgetattr(fd)
+    resize_pipe=None;previous_resize=None
     try:
+        if expected_size is not None and threading.current_thread() is threading.main_thread():
+            previous_resize=signal.getsignal(signal.SIGWINCH)
+            resize_pipe=os.pipe()
+            for pipe in resize_pipe:os.set_blocking(pipe,False)
+            def resized(signum,frame):
+                try:os.write(resize_pipe[1],b'r')
+                except OSError:pass
+            signal.signal(signal.SIGWINCH,resized)
+            # Also catch a size change that happened while the last frame rendered.
+            if tuple(shutil.get_terminal_size(expected_size))!=tuple(expected_size):return RESIZE_KEY
         # cbreak gives us immediate keystrokes without changing terminal output
         # processing. Native preview preparation may wake this same blocking read;
         # painting then happens on the pager thread, never from a worker thread.
         tty.setcbreak(fd)
         while True:
-            watched=[fd] + ([wakeup_fd] if wakeup_fd is not None else [])
+            watched=[fd] + ([wakeup_fd] if wakeup_fd is not None else []) + ([resize_pipe[0]] if resize_pipe else [])
             ready,_,_=select.select(watched,[],[],timeout)
             if not ready:
                 return ''
+            if resize_pipe and resize_pipe[0] in ready:return RESIZE_KEY
             if wakeup_fd is not None and wakeup_fd in ready:
                 try: os.read(wakeup_fd,4096)
                 except OSError: pass
@@ -440,6 +456,9 @@ def read_key(timeout:float|None=None,wakeup_fd:int|None=None,on_wakeup=None)->st
             return bytes(seq).decode('latin1')
         return ch.decode('utf-8','ignore')
     finally:
+        if resize_pipe:
+            signal.signal(signal.SIGWINCH,previous_resize)
+            for pipe in resize_pipe:os.close(pipe)
         termios.tcsetattr(fd,termios.TCSADRAIN,old)
 
 
@@ -1348,6 +1367,7 @@ def pager(rows:list[str],height:int,width:int,rebuild=None,browse_rebuild=None,f
     rows=current
     matches:list[Path]=[]
     notice=''
+    pane_help=False
     pending=''
     revision=None
     marked:set[Path]=marked_set if marked_set is not None else set()
@@ -1586,7 +1606,11 @@ def pager(rows:list[str],height:int,width:int,rebuild=None,browse_rebuild=None,f
                     if filtering: refresh_filter()
                     elif rebuild: current=rebuild('',None,width,marked)
             terminal=shutil.get_terminal_size((width,height))
+            resized=terminal.columns!=width or terminal.lines!=height
             width,height=terminal.columns,terminal.lines
+            if resized and not filtering:
+                if browse_rebuild:current=browse_rebuild(None,marked,width)
+                elif rebuild:current=rebuild('',None,width,marked)
             if filtering:
                 if preview_view:
                     action_parts=['J/K move','Space/Tab mark','V list','Enter/→ open','B clipboard','T Cut','P Paste',
@@ -1600,6 +1624,7 @@ def pager(rows:list[str],height:int,width:int,rebuild=None,browse_rebuild=None,f
                 back_hint='Esc back' if on_back else 'Esc exit'
                 action_parts=['H hidden','F sort','Enter/→ filter','Space/PgDn next','b/PgUp back',
                               'g ends','G go','W shell pane','⇧↑/↓ page','⇧←/→ ends','←/< parent',back_hint,'Q quit']
+            if pane_help:action_parts.extend(terminal_style.pane_shortcuts())
             footer=action_footer(action_parts,width)
             # A wrapped command bar owns real rows; leave one spare row to avoid
             # terminal autowrap scrolling the filter prompt out of its frame.
@@ -1633,6 +1658,8 @@ def pager(rows:list[str],height:int,width:int,rebuild=None,browse_rebuild=None,f
                 if focus_row < top: top=focus_row
                 elif focus_row >= top+list_view_h:
                     top=max(0,focus_row-list_view_h+1)
+                top=max(0,min(top,max(0,len(current)-list_view_h)))
+            elif resized:
                 top=max(0,min(top,max(0,len(current)-list_view_h)))
             page=current[top:top+list_view_h]
             native_preview.frame_cleared()
@@ -1710,10 +1737,11 @@ def pager(rows:list[str],height:int,width:int,rebuild=None,browse_rebuild=None,f
                 key,pending=pending,''
             else:
                 if live_revision and not revision[1]:
-                    key=read_key(timeout=.25,wakeup_fd=native_preview.wakeup_fd,on_wakeup=native_preview.paint_ready)
+                    key=read_key(timeout=.25,wakeup_fd=native_preview.wakeup_fd,on_wakeup=native_preview.paint_ready,expected_size=(width,height))
                 else:
-                    key=read_key(wakeup_fd=native_preview.wakeup_fd,on_wakeup=native_preview.paint_ready)
+                    key=read_key(wakeup_fd=native_preview.wakeup_fd,on_wakeup=native_preview.paint_ready,expected_size=(width,height))
 
+            if key==RESIZE_KEY:continue
             if not key and live_revision: continue
             if key=='H' and on_hidden:
                 previous=selected_path()
@@ -1869,6 +1897,7 @@ def pager(rows:list[str],height:int,width:int,rebuild=None,browse_rebuild=None,f
             if key in {'Q','\x03'}: break
             if key=='W' and current_dir is not None:
                 notice=terminal_style.open_pane(current_dir)
+                if notice.startswith('Shell opened beside LOOK'):pane_help=True
                 continue
             if key=='F' and on_sort:
                 notice=on_sort()

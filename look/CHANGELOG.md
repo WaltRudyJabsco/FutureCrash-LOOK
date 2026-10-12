@@ -1,3 +1,8 @@
+## 2026-10-12 · Pane reminders and resize redraw
+
+- Keep terminal-specific pane focus/close shortcuts in LOOK's browse/filter footer after opening a sibling shell; include them in the opening notice.
+- Wake blocked pager input on terminal resize, reflow browse grids immediately, and clamp the page after width changes. Restore the prior signal handler and preserve pending keyboard input.
+
 ## 2026-10-12 · Media Find sort and reverse
 
 - Match LOOK with Shift-F sort cycling (default, title, newest modified, recently added, type, largest first) and Shift-G reverse, with a clear active-mode header.
