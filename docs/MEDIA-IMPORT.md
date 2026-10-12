@@ -51,6 +51,32 @@ generic names; they are never silently assigned uncertain album metadata.
 
 ## DVD and Blu-ray
 
+The workbench selects a sole drive automatically and recognizes mounted CD,
+DVD and Blu-ray layouts. If a layout is unavailable it asks for the disc kind.
+The longest video title is offered as a suggestion; review its duration and
+press Return to select it, or type another index or `all` explicitly.
+Blank Return does not mean all titles.
+
+Movie names are prefilled from Blu-ray metadata or the disc label. Labels are
+only hints, not authoritative identities. The optional Wikidata lookup sends
+the entered movie name and offers title/year matches for confirmation. No
+match or a network failure keeps the entered name; selected metadata and its
+source are preserved in the import receipt and video sidecar. CDs retain their
+MusicBrainz album/track lookup. See [Wikidata data access](https://www.wikidata.org/wiki/Wikidata:Data_access).
+
+Existing owner library configuration supplies the default destination when no
+separate import preference exists. A changed category destination can be saved
+for future imports. The final summary shows the title, kind and destination
+before you start. H toggles completed/failed history without deleting receipts
+or media; C cancels active work. L sends a completed import to the configured
+remote library, including retrying a failed delivery.
+
+MakeMKV's preparation and saving phases have separate labels and percentages.
+A percentage reset at the start of saving does not mean copying restarted.
+When MakeMKV is missing, the workbench links its official setup before offering
+HandBrake for an unprotected disc. Install on the drive owner, then D refreshes
+tool and drive discovery.
+
 ```sh
 lk media import scan --kind dvd --node 3090
 lk media import start --kind dvd --title "My Movie" --title-index 0 --node 3090

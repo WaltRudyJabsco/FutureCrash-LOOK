@@ -4,7 +4,7 @@ import math
 import hashlib
 import json
 
-NAMES = ('Bars', 'Waves', 'Orbit', 'Tunnel', 'Stars', 'Plasma', 'Album Art', 'Black Hole', 'Rooftops', 'Spectrum', 'Moon Jelly', 'Cycle')
+NAMES = ('Bars', 'Waves', 'Orbit', 'Tunnel', 'Stars', 'Plasma', 'Album Art', 'Black Hole', 'Rooftops', 'Spectrum', 'Moon Jelly', 'Firefly Garden', 'Cycle')
 CYCLE_MODE = len(NAMES)
 CYCLE_INTERVAL_SECONDS = 10.0
 
@@ -53,6 +53,8 @@ def frame(mode, width, height, phase, playing=True, seed=0):
             depth=(i*.618034+t*.18)%1
             point((width-1)/2+math.cos(angle)*depth*width*.65,
                   (height-1)/2+math.sin(angle)*depth*height*.65,'.+*'[min(2,int(depth*3))])
+    elif mode==11:
+        return firefly_garden_frame(width,height,t,seed)
     elif mode==10:
         return moon_jelly_frame(width,height,t,seed)
     elif mode==9:
@@ -270,4 +272,32 @@ def moon_jelly_frame(width,height,phase,seed=0):
                 dot(anchor+math.sin(depth*.55-phase*1.3+offset+strand)*depth*.12,cy+depth,'|' if depth%3==0 else ':')
     for bubble in range(max(2,width//12)):
         dot((bubble*19+seed)%width+math.sin(phase*.4+bubble),height-1-(phase*.8+bubble*7)%height,'o' if bubble%3==0 else '.')
+    return [''.join(row) for row in canvas]
+
+
+FIREFLY_BLINK_SECONDS=4.8
+FIREFLY_COLOR='32'  # Follow the terminal's green ink, including Paper palettes.
+
+
+def firefly_garden_frame(width,height,phase,seed=0):
+    """Slow firefly trails above a breeze through a midnight meadow."""
+    canvas=[[' ']*width for _ in range(height)]
+    def dot(x,y,char):
+        x=round(x);y=round(y)
+        if 0<=x<width and 0<=y<height:canvas[y][x]=char
+    for blade in range(0,width,3):
+        length=1+(blade//3*13+seed*3)%max(1,height//4)
+        sway=math.sin(phase*.7+blade*.3)
+        for stem in range(length):dot(blade+sway*stem*.3,height-1-stem,'/' if sway>0 else '\\')
+    for fly in range(max(3,min(36,width*height//65))):
+        offset=fly*2.399963+seed*.17
+        light=(phase/FIREFLY_BLINK_SECONDS+fly*.381)%1
+        if light>.58:continue
+        def position(age):
+            return ((fly*17+seed+age*(1+fly%3)*.8)%width,
+                    height*.38+math.sin(age*.4+offset)*height*.28)
+        x,y=position(phase)
+        if light<.32:
+            tx,ty=position(phase-.8);dot(tx,ty,'.')
+        dot(x,y,'*' if .12<light<.3 else '+' if light<.42 else '.')
     return [''.join(row) for row in canvas]

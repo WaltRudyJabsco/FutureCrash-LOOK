@@ -19037,13 +19037,14 @@ def _media_player_full_visual(snap,mode,visual_elapsed=0):
             '←/→ seek · s shuffle · r repeat · x stop · q close']
     art_height=max(1,height-len(header)-len(footer))
     elapsed=visual_elapsed%player_visuals.CYCLE_INTERVAL_SECONDS if cycling else visual_elapsed
-    phase=elapsed if name in {'Black Hole','Rooftops','Spectrum','Moon Jelly'} else time.monotonic()
+    phase=elapsed if name in {'Black Hole','Rooftops','Spectrum','Moon Jelly','Firefly Garden'} else time.monotonic()
     art=_media_player_large_art(entry,width,art_height) if album_art else player_visuals.frame(mode,width,art_height,phase,state in {'play','playing'},seed)
     lines=header+art+footer
     color=player_visuals.album_color(snap) if album_art else ("1;32","1;36","1;35","1;34","1;37","1;33")[(mode-1)%6]
     if name=='Black Hole': color=player_visuals.BLACK_HOLE_COLOR
     if name=='Rooftops': color=player_visuals.ROOFTOP_COLOR
     if name=='Moon Jelly': color='36'
+    if name=='Firefly Garden': color=player_visuals.FIREFLY_COLOR
     shimmer=album_art and state in {'play','playing'} and not any(
         status in line for line in art for status in ('Loading album art','Album art unavailable'))
     rendered=[]

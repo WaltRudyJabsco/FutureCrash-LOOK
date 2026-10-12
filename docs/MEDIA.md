@@ -170,8 +170,8 @@ Matched audio CDs download a 500-pixel front cover from the Cover Art Archive in
 ## Player visuals
 
 In `lk player`, press lowercase `v` to cycle Bars, Waves, Orbit, Tunnel, Stars,
-Plasma, **Album Art**, **Black Hole**, **Rooftops**, **Spectrum**, **Moon Jelly**, then **Cycle**, followed by the
-normal player view. In `lk mp`, `v` opens the same player visuals. Cycle rotates through the eleven
+Plasma, **Album Art**, **Black Hole**, **Rooftops**, **Spectrum**, **Moon Jelly**, **Firefly Garden**, then **Cycle**, followed by the
+normal player view. In `lk mp`, `v` opens the same player visuals. Cycle rotates through the twelve
 visualizers every ten seconds while its view is open, including Album Art, and
 never switches automatically to the normal player view. Selecting Cycle starts
 at Bars; pressing `v` again returns to the normal view. Transport controls remain

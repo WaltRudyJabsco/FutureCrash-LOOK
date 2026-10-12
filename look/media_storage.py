@@ -22,7 +22,13 @@ def config_path():return Path.home()/'.config/look/media_storage.json'
 
 def settings(values=None):
     try:data={**DEFAULTS,**json.loads(config_path().read_text())}
-    except (OSError,ValueError,TypeError):data=dict(DEFAULTS)
+    except (OSError,ValueError,TypeError):
+        data=dict(DEFAULTS)
+        # Reuse an already configured owner library before proposing a new one.
+        try:
+            owner=json.loads((Path.home()/'.config/look/media_library.json').read_text())
+            if isinstance(owner.get('root'),str):data['root']=owner['root']
+        except (OSError,ValueError,TypeError):pass
     if values is not None:
         if not isinstance(values,dict) or set(values)-set(DEFAULTS):raise ValueError('Choose node or root')
         data.update(values)
