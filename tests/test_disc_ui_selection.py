@@ -26,6 +26,26 @@ def test_workbench_separates_inserted_disc_from_history_and_colors_states(monkey
     assert '38;2;' in colors['GREEN'] and 'Shift' not in plain
 
 
+@pytest.mark.parametrize('theme',('paper','neon','slate'))
+def test_selected_row_uses_theme_background_readable_inks_and_resets(monkeypatch,theme):
+    import re
+    from look import terminal_style
+    monkeypatch.setenv('LOOK_TERMINAL_THEME',theme)
+    colors=disc_ui.interface_colors()
+    def hex_color(code):
+        channels=re.search(r';2;(\d+);(\d+);(\d+)m',code).groups()
+        return '#'+''.join(f'{int(value):02x}' for value in channels)
+    background=hex_color(colors['SELECT_BG'])
+    assert background==terminal_style.settings(theme)['selection_background']
+    for role in ('FG','GRAY','GREEN','RED','YELLOW'):
+        assert terminal_style.contrast(background,hex_color(colors['SELECT_'+role]))>=4.5
+    rows=disc_ui.workbench_lines({'drives':[],'tools':{}},[job(1,'Film'),job(2,'Other')],0,60,30,True,colors)
+    selected=next(row for row in rows if colors['SELECT_BG'] in row)
+    assert len(re.sub(r'\x1b\[[0-9;]*m','',selected))==59
+    assert selected.endswith('\033[0m') and '› ' in selected
+    assert colors['SELECT_BG'] not in next(row for row in rows if 'Other' in row)
+
+
 @pytest.fixture
 def plain(monkeypatch):
     monkeypatch.setattr(disc_ui.sys,'stdin',io.StringIO())

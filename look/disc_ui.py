@@ -7,6 +7,7 @@ import sys
 import termios
 import time
 import tty
+import os
 
 
 def interface_colors():
@@ -14,8 +15,28 @@ def interface_colors():
     except ImportError:import terminal_style
     palette=terminal_style.application_colors()
     defaults={'CYAN':'36','GREEN':'32','RED':'31','YELLOW':'33','WHITE':'97','GRAY':'90'}
-    return {role:'\033['+('38;2;'+';'.join(map(str,palette[role])) if role in palette else code)+'m'
+    colors={role:'\033['+('38;2;'+';'.join(map(str,palette[role])) if role in palette else code)+'m'
             for role,code in defaults.items()}
+    name=os.environ.get('LOOK_TERMINAL_THEME','')
+    if not name:
+        try:name=(terminal_style.directory()/'look-theme.conf').read_text().splitlines()[0].removeprefix('# LOOK palette: ')
+        except (OSError,IndexError):name='neon'
+    try:selected=terminal_style.settings(name)
+    except (OSError,ValueError):selected=terminal_style.settings('neon')
+    background=selected['selection_background'];foreground=selected['selection_foreground']
+    if terminal_style.contrast(background,foreground)<4.5:foreground=terminal_style.readable_text(background)
+    def rgb(value):return tuple(int(value[i:i+2],16) for i in (1,3,5))
+    def escape(value,channel='38'):return '\033['+channel+';2;'+';'.join(map(str,rgb(value)))+'m'
+    colors['SELECT_BG']=escape(background,'48');colors['SELECT_FG']=escape(foreground)
+    for role,key in {'GREEN':'color114','RED':'color203','YELLOW':'color221','GRAY':'color8'}.items():
+        original=selected.get(key) or foreground
+        # Preserve the ink hue where possible, moving toward selection text for contrast.
+        for step in range(11):
+            amount=step/10
+            candidate='#'+''.join(f'{round(a*(1-amount)+b*amount):02x}' for a,b in zip(rgb(original),rgb(foreground)))
+            if terminal_style.contrast(background,candidate)>=4.5:break
+        colors['SELECT_'+role]=escape(candidate)
+    return colors
 
 
 def workbench_lines(inventory,jobs,index,width,height,show_history,colors):
@@ -38,11 +59,17 @@ def workbench_lines(inventory,jobs,index,width,height,show_history,colors):
         status=job['state'];tail=body[len(subject)+3+len(status):]
         # Remove the repeated phase in terminal receipts: "complete · complete".
         if job.get('stage')==status:tail=tail.removeprefix(' · '+status)
-        plain=prefix+subject+' · '+status+tail
-        if len(plain)>width-1:tail=tail[:max(0,width-2-len(prefix+subject+' · '+status))]+'…'
         role='GREEN' if status=='complete' else 'RED' if status in {'failed','cancelled'} else 'YELLOW'
-        frame.append(ink(prefix,'YELLOW' if n==index else 'GRAY')+ink(subject,'WHITE' if n%2==0 else 'CYAN')+
-                     ' · '+ink(status,role)+ink(tail,'GRAY'))
+        selected=n==index
+        parts=[(prefix,'SELECT_FG' if selected else 'GRAY'),
+               (subject,'SELECT_FG' if selected else 'WHITE' if n%2==0 else 'CYAN'),
+               (' · ','SELECT_GRAY' if selected else 'GRAY'),
+               (status,'SELECT_'+role if selected else role),(tail,'SELECT_GRAY' if selected else 'GRAY')]
+        remaining=max(0,width-1);line=colors['SELECT_BG'] if selected else ''
+        for value,color in parts:
+            value=value[:remaining];remaining-=len(value);line+=colors[color]+value
+        if selected:line+=' '*remaining
+        frame.append(line+'\033[0m')
     if not jobs:frame.append(ink('No jobs shown · n starts a new import','GRAY'))
     return frame
 
