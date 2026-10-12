@@ -8,6 +8,13 @@ The Fabric catalog answers *what media exists and on which node*. A queue answer
 
 ## LOOK Media Find
 
+Media Find and LKMP use subtle alternating foreground tones, with distinct
+artist, title, album and source inks. Selected rows use the terminal palette's
+selection background, retain muted supporting details, and show alerts in amber.
+LOOK's file lists share the same treatment while retaining file-type and Nerd
+Font icon colors. Selection styling ends at each row or column cell; surrounding
+backgrounds retain their usual transparency.
+
 `lk media find QUERY` is both a catalog search and a lightweight playlist builder. Filtering follows LOOK's include/exclude grammar. `clash london` requires both terms; `clash \\live \\remix` requires `clash` while excluding rows containing `live` or `remix`.
 
 Lowercase `q` is filter text, including in artist/album browsing. Escape exits; uppercase `Q` keeps its queue action.

@@ -197,6 +197,101 @@ def kitty_executable():
     raise ValueError('Kitty is not installed')
 
 
+def list_colors():
+    palette=application_colors()
+    defaults={'CYAN':'36','GREEN':'32','RED':'31','YELLOW':'33','WHITE':'97','GRAY':'90'}
+    colors={role:'\033['+('38;2;'+';'.join(map(str,palette[role])) if role in palette else code)+'m'
+            for role,code in defaults.items()}
+    name=os.environ.get('LOOK_TERMINAL_THEME','')
+    if not name:
+        try:name=(directory()/'look-theme.conf').read_text().splitlines()[0].removeprefix('# LOOK palette: ')
+        except (OSError,IndexError):name='neon'
+    if name not in NAMES:name='neon'
+    try:selected=settings(name)
+    except (OSError,ValueError):selected=settings('neon')
+    background=selected['selection_background'];foreground=selected['selection_foreground']
+    if contrast(background,foreground)<4.5:foreground=readable_text(background)
+    def rgb(value):return tuple(int(value[i:i+2],16) for i in (1,3,5))
+    def escape(value,channel='38'):return '\033['+channel+';2;'+';'.join(map(str,rgb(value)))+'m'
+    colors['SELECT_BG']=escape(background,'48');colors['SELECT_FG']=escape(foreground)
+    for role,key in {'GREEN':'color114','RED':'color203','YELLOW':'color221','GRAY':'color8'}.items():
+        original=selected.get(key) or selected[{'GREEN':'color2','RED':'color1','YELLOW':'color3','GRAY':'color8'}[role]]
+        if role=='RED':original='#f5ad62' if luminance(background)<.3 else '#84320c'
+        # Preserve the ink hue where possible, moving toward selection text for contrast.
+        for step in range(11):
+            amount=step/10
+            candidate='#'+''.join(f'{round(a*(1-amount)+b*amount):02x}' for a,b in zip(rgb(original),rgb(foreground)))
+            if contrast(background,candidate)>=4.5:break
+        colors['SELECT_'+role]=escape(candidate)
+    colors['_palette']=selected
+    return colors
+
+
+def list_row(line,width,index=0,selected=False,colors=None):
+    """Keep foreground meanings while shading alternating rows and selecting one."""
+    import unicodedata
+    colors=colors or list_colors();palette=colors['_palette']
+    bg=palette['selection_background'] if selected else palette['background']
+    def channels(value):return tuple(int(value[i:i+2],16) for i in (1,3,5))
+    def fg(value):return '\033[38;2;'+';'.join(map(str,channels(value)))+'m'
+    def from_code(code):
+        rgb=re.search(r'38;2;(\d+);(\d+);(\d+)',code)
+        if rgb:return '#'+''.join(f'{int(v):02x}' for v in rgb.groups())
+        ansi=re.search(r'38;5;(\d+)',code)
+        if ansi:
+            value=int(ansi[1])
+            if 'color'+str(value) in palette:return palette['color'+str(value)]
+            if 16<=value<232:
+                value-=16;cube=(0,95,135,175,215,255)
+                return '#'+''.join(f'{cube[v]:02x}' for v in (value//36,value//6%6,value%6))
+            if 232<=value<=255:return '#'+f'{8+(value-232)*10:02x}'*3
+        for value in reversed(code.split(';')):
+            if value.isdigit() and 30<=int(value)<=37:
+                if int(value)==37:return palette['foreground']
+                accent={31:203,32:114,33:221,34:75,35:176,36:81}.get(int(value))
+                return palette.get('color'+str(accent),palette['color'+str(int(value)-30)])
+            if value.isdigit() and 90<=int(value)<=97:return palette['color'+str(int(value)-90+8)]
+        return None
+    def readable(value):
+        # Selected alerts use amber; other hues retain their identity.
+        red,green,blue=channels(value)
+        if selected and (value in {palette.get('color1'),palette.get('color9'),palette.get('color203')} or
+                         red>green*1.3 and red>blue*1.15):
+            return colors['SELECT_RED']
+        if selected and value==palette.get('color8'):return colors['SELECT_GRAY']
+        if not selected and index%2:
+            value='#'+''.join(f'{round(a*.88+b*.12):02x}' for a,b in zip(channels(value),channels(palette['background'])))
+        if selected:
+            target=from_code(colors['SELECT_FG'][2:-1])
+            for step in range(11):
+                candidate='#'+''.join(f'{round(a*(1-step/10)+b*step/10):02x}' for a,b in zip(channels(value),channels(target)))
+                if contrast(bg,candidate)>=4.5:return fg(candidate)
+        return fg(value)
+    current=palette['selection_foreground'] if selected else palette['foreground']
+    attrs='';remaining=max(0,width-1);result=colors['SELECT_BG'] if selected else ''
+    for token in re.split(r'(\x1b\[[0-9;]*m)',line):
+        if token.startswith('\033['):
+            code=token[2:-1]
+            if code in {'','0'}:
+                current=palette['selection_foreground'] if selected else palette['foreground'];attrs=''
+            else:
+                value=from_code(code)
+                if value:current=value
+                if code=='2':current=palette['color8']
+                if code in {'1','3','4'}:attrs=token
+            continue
+        shown=''
+        for char in token:
+            if ord(char)<32 or 127<=ord(char)<160:char='?'
+            cells=0 if unicodedata.combining(char) else 2 if unicodedata.east_asian_width(char) in {'W','F'} else 1
+            if cells>remaining:break
+            shown+=char;remaining-=cells
+        if shown:result+='\033[22;23;24m'+attrs+readable(current)+shown
+        if remaining==0:break
+    if selected:result+=' '*remaining
+    return result+'\033[0m'
+
+
 def preset_roles(name,folder):
     palette=settings(name,folder)
     mapping={'background':'background','foreground':'foreground','accent':'url_color',

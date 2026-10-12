@@ -14,6 +14,8 @@ if str(_LOOK_MODULE_DIR) not in sys.path:
 import media_core
 import media_art
 import player_visuals
+import terminal_style
+_LIST_COLORS=terminal_style.list_colors()
 import lo_stream
 import lo_history
 import file_catalog
@@ -17339,6 +17341,15 @@ def _media_row_label(row):
     return main
 
 
+def _media_styled_row_label(row,label):
+    artist=str(row.get('artist') or '').strip();album=str(row.get('album') or '').strip()
+    prefix=artist+' — ' if artist else ''
+    prefix_length=min(len(label),len(prefix)) if prefix and label.startswith(prefix) else 0
+    album_start=len(_media_row_label(row))-len(' · '+album) if album else len(label)
+    album_start=max(prefix_length,min(len(label),album_start))
+    return _c(label[:prefix_length],'36')+_c(label[prefix_length:album_start],'37')+_c(label[album_start:],'2')
+
+
 def _strip_ansi(text):
     return re.sub(r"\x1b\[[0-9;?]*[ -/]*[@-~]", "", str(text))
 
@@ -18195,7 +18206,8 @@ def _media_selector(rows,title="FABRIC MEDIA",initial_query="",catalog_meta=None
                     max_label=max(12,width-len(right)-7)
                     if len(label)>max_label:
                         label=label[:max(1,max_label-1)]+"…"
-                    print(f"{focus}{mark} {label:<{max_label}}  {_c(right,'32' if row.get('digest') else '2')}")
+                    metadata=_c(identity,'32' if row.get('digest') else '2')+_c(right[len(identity):],'2')
+                    print(terminal_style.list_row(f"{focus}{mark} {_media_styled_row_label(row,label.ljust(max_label))}  {metadata}",width,n,n==idx,_LIST_COLORS))
                 if not visible:
                     print("  no matches")
                 art_pending=False
@@ -18737,7 +18749,8 @@ def _media_queue_command():
         row=queue[pos]
         album=str(row.get("album") or "")
         suffix=f" · {album}" if album else ""
-        print(f" {marker} {pos+1:>4}  {_media_entry_label(row)}{suffix}")
+        width=shutil.get_terminal_size((100,30)).columns
+        print(terminal_style.list_row(f" {_c(marker,'36')} {_c(str(pos+1).rjust(4),'2')}  {_c(_media_entry_label(row),'37')}{_c(suffix,'2')}",width,pos,pos==idx,_LIST_COLORS))
     if end < len(queue):
         print(f"     … {len(queue)-end} more")
     return 0
@@ -19319,7 +19332,8 @@ def media_mp(initial_query=""):
                             node=str(row.get("node") or "local")
                             suffix=f" · {node}"
                             max_label=max(12,left_w-len(suffix)-5)
-                            left=f"{focus}{mark} "+(label[:max_label-1]+"…" if len(label)>max_label else label.ljust(max_label))+_c(suffix,"2")
+                            label=label[:max_label-1]+"…" if len(label)>max_label else label.ljust(max_label)
+                            left=terminal_style.list_row(f"{focus}{mark} "+_media_styled_row_label(row,label)+_c(suffix,"2"),left_w if right_w else width,n,n==idx,_LIST_COLORS)
                         else:
                             left=""
                         if right_w:
