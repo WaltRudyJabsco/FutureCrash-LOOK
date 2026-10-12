@@ -110,3 +110,24 @@ def test_cancellation_never_signals_a_reused_worker_pid(home,monkeypatch):
     killed=Mock();monkeypatch.setattr(storage.os,'killpg',killed)
     with pytest.raises(ValueError,match='identity changed'):storage.cancel('a'*32)
     killed.assert_not_called()
+
+
+def test_library_choices_preserve_fresh_home_default_without_creating_folders(home):
+    rows=storage.library_choices()
+    assert len(rows)==1 and rows[0]['node']=='local'
+    assert Path(rows[0]['root']).expanduser()==home/'Media'
+    assert not (home/'Media').exists() and not storage.config_path().exists()
+
+
+def test_library_choices_include_internal_drives_and_reuse_existing_library(home):
+    mount=home/'Storage';existing=mount/'srv/media';existing.mkdir(parents=True)
+    rows=storage.library_choices([{'mount':str(mount),'name':'Storage'}])
+    assert rows[-1]['root']==str(existing) and rows[-1]['node']=='local'
+    assert not (mount/'Media').exists()
+
+
+def test_library_choices_keep_remote_preference_and_offer_local_home(home):
+    storage.settings({'node':'library-node','root':'/srv/media'})
+    rows=storage.library_choices()
+    assert rows[0]['node']=='library-node' and rows[1]['node']=='local'
+    assert storage.settings()['node']=='library-node'

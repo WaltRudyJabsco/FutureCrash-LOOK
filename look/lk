@@ -14288,6 +14288,9 @@ def _settings_rows():
         ("comfy","MEDIA","Image generation",_settings_comfy_state(),
          "Configure optional ComfyUI generation, discover older installs/models, choose workflow/output folder, and auto-preview results.",
          "comfy stable diffusion image generation render workflow checkpoint model media"),
+        ("medialibrary","MEDIA","Media library location","choose folder",
+         "Choose this computer's home folder or a mounted drive for future imports. Existing media stays where it is; backup storage is separate.",
+         "media library storage drive disk folder destination movies music import home"),
         ("schedule","AUTOMATION","Scheduler",_settings_schedule_state(),
          "Persistent delayed and recurring LO jobs run through the resident LOOK service.",
          "schedule scheduler cron recurring daily every reminder later background jobs automation"),
@@ -14569,6 +14572,7 @@ def _settings_action(key):
         print("LOOK vision · include an image path in LO, or run `lk vision IMAGE [QUESTION]`")
         return 0
     if key=="comfy": return comfy_command([])
+    if key=="medialibrary": return _media_storage_command(['--pick'])
     if key=="schedule": return schedule_command([])
     if key=="doctor": return doctor()
     if key=="version":
@@ -18068,13 +18072,62 @@ def _media_edit_prompt(rows,fd,old):
     finally:tty.setcbreak(fd)
 
 
+def _media_storage_pick():
+    import media_storage
+    if not (sys.stdin.isatty() and sys.stdout.isatty()):
+        print('Choose a library with lk media storage --node local --root PATH');return 0
+    drives=[]
+    try:
+        for path in (ROOT.parent/'core',Path.home()/'.local/share/future-crash-look/core'):
+            if (path/'recovery_setup.py').is_file() and str(path) not in sys.path:sys.path.insert(0,str(path))
+        import recovery_setup
+        drives=recovery_setup.mounted_drives(external_only=False)
+    except (ImportError,OSError,ValueError,RuntimeError,subprocess.SubprocessError) as exc:
+        print('Drive discovery unavailable: '+str(exc)+' · home and custom folders are available')
+    choices=media_storage.library_choices(drives)
+    _title('media library','future imports · existing files stay in place')
+    for number,row in enumerate(choices,1):
+        print(f"  {_c(str(number),'36')} · {row['label']} · {row['node']} · {row['root']}")
+    print(f"  {_c('c','36')} · custom folder on this computer · Enter/Esc back")
+    try:
+        if shutil.which('fzf'):
+            payload='\n'.join(f"{number}\t{row['label']} · {row['node']} · {row['root']}" for number,row in enumerate(choices,1))+'\nc\tCustom folder on this computer\n'
+            selected=subprocess.run(['fzf','--prompt','library › ','--header','Future imports only · Enter choose · Esc back','--height','~45%','--reverse','--no-multi','--delimiter','\t','--with-nth','2..'],input=payload,text=True,capture_output=True)
+            if selected.returncode or not selected.stdout.strip():return 0
+            value=selected.stdout.split('\t',1)[0].strip()
+        else:value=input('Library › ').strip()
+        if value in {'','\x1b'}:return 0
+        if value.lower()=='c':
+            root=input('Folder (absolute path or ~/path) › ').strip()
+            if not root or root=='\x1b':return 0
+            chosen={'node':'local','root':root}
+        elif value.isdigit() and 1<=int(value)<=len(choices):chosen=choices[int(value)-1]
+        else:print('Choose a listed number or c');return 1
+        # Validate without writing: setup should show its full effect before saving.
+        if chosen['node']=='local':
+            root=Path(chosen['root']).expanduser()
+            if not root.is_absolute() or root.resolve() in {Path(root.anchor),Path.home().resolve()}:raise ValueError('Choose a dedicated absolute or ~/ media folder')
+            chosen=dict(chosen,root=str(root.resolve()))
+        print('Library: '+chosen['node']+' · '+chosen['root'])
+        print('Future imports use music/ and movies/. Create music, movies, tv, books and inbox if needed.')
+        print('Existing files are not moved or removed. Backup destinations are unchanged.')
+        if input('Save this library location? [y/N] › ').strip().lower() not in {'y','yes'}:return 0
+        return _media_storage_command(['--node',chosen['node'],'--root',chosen['root']])
+    except (EOFError,KeyboardInterrupt):return 0
+    except (OSError,ValueError) as exc:print('MEDIA LIBRARY · '+str(exc),file=sys.stderr);return 1
+
+
 def _media_storage_command(args):
     import argparse,media_storage
     parser=argparse.ArgumentParser(prog='lk media storage',description='Remember a preferred library node and map its canonical media root. Each node has music, movies, tv, books and an inbox; extra scan roots are separate.')
     parser.add_argument('--node',help='Preferred library node; local keeps new imports here')
     parser.add_argument('--root',help='Library root on that node (absolute or ~/); existing folders are retained')
     parser.add_argument('--json',action='store_true')
+    parser.add_argument('--pick',action='store_true',help='Choose this computer’s home folder or a mounted drive interactively')
     args=parser.parse_args(args)
+    if args.pick:
+        if args.node or args.root or args.json:parser.error('--pick is a separate interactive action')
+        return _media_storage_pick()
     try:
         current=media_storage.settings();owner=args.node or current['node']
         payload={'root':args.root} if args.root else {}
@@ -20243,7 +20296,7 @@ _COMMANDS = [
     ('lk media identify', '<QUERY|PATH|--all>', 'media', 'Promote discoveries to SHA identity'),
     ('lk media shuffle', '[on|off]', 'media', 'Toggle or set shuffle'),
     ('lk media repeat', '[off|all]', 'media', 'Cycle or set repeat'),
-    ("lk media storage", "[--node NODE] [--root PATH] [--json]", "media", "Remember a library node and map its canonical media root"),
+    ("lk media storage", "[--pick | --node NODE --root PATH] [--json]", "media", "Remember a library node and map its canonical media root"),
     ("lk media edit", "<QUERY> --artist NAME [--album NAME] [--album-artist NAME] [--title NAME] [--track N] [--disc N] [--all] [--json]", "media", "Correct metadata for one track or matching batch"),
     ("lk media", "[...]", "media", "Media library, queue, playlists, transport", "lk music"),
     ("lk player", "", "media", "Live LOOK miniplayer"),

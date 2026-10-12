@@ -45,6 +45,23 @@ def destination(kind):
     return str(Path(path)/('music' if kind=='cd' else 'movies')) if config['node']=='local' else '@'+config['node']+':'+path
 
 
+def library_choices(drives=()):
+    """Propose folders without creating them or changing this user's preference."""
+    current=settings()
+    rows=[{'node':current['node'],'root':current['root'],'label':'Current library'},
+          {'node':'local','root':str(Path.home()/'Media'),'label':'Home folder · this computer'}]
+    for drive in drives:
+        mount=Path(drive['mount'])
+        # Reuse an existing dedicated library before proposing a new directory.
+        root=next((p for p in (mount/'srv/media',mount/'media',mount/'Media') if p.is_dir()),mount/'Media')
+        rows.append({'node':'local','root':str(root),'label':str(drive['name'])+' · this computer'})
+    unique=[];seen=set()
+    for row in rows:
+        key=(row['node'],str(Path(row['root']).expanduser()))
+        if key not in seen:unique.append(row);seen.add(key)
+    return unique
+
+
 def atomic(path,data):
     import tempfile
     fd,temp=tempfile.mkstemp(prefix='.'+path.name,dir=path.parent)
