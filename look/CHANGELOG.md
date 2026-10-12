@@ -1,3 +1,8 @@
+## 2026-10-11 · Consistent list readability
+
+- Share theme-aware list inks across Media Find, LKMP, queues and LOOK detail/grid/tree views, with subtle alternating foreground tones.
+- Retain icon/file-type hues, muted selected metadata and amber alerts; clip by Unicode display cells and clear selection backgrounds at row boundaries.
+
 ## 2026-10-11 · Disc identification and Firefly Garden
 
 - Suggest disc names and confirmed Wikidata movie title/year matches; recognize mounted disc types and offer the longest feature as a visible default.

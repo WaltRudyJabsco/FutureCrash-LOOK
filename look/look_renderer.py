@@ -86,6 +86,7 @@ if _APP_COLORS:
     ACTIVE=_bg(*_APP_COLORS['ACTIVE_BG'])+_rgb(*_APP_COLORS['ACTIVE_FG'])+BOLD
 
 CLEAR='\x1b[2J\x1b[H'; HIDE='\x1b[?25l'; SHOW='\x1b[?25h'
+_LIST_COLORS=terminal_style.list_colors()
 
 _RENDERER_CONFIG=Path.home()/'.config'/'look'/'renderer.json'
 
@@ -244,7 +245,7 @@ def column_grid(entries:list[Entry], width:int, highlight_path:Path|None=None, m
     labels=[]
     for e in entries:
         suffix='/' if e.is_dir else ''
-        labels.append((e, f'{GREEN}✓{RESET} {marker(e)} {e.name}{suffix}' if marked and e.path.resolve() in marked else f'  {marker(e)} {e.name}{suffix}'))
+        labels.append((e, f'✓ {marker(e)} {e.name}{suffix}' if marked and e.path.resolve() in marked else f'  {marker(e)} {e.name}{suffix}'))
     maxw=min(max(len(t) for _,t in labels)+3, 38)
     cols=max(1,width//maxw)
     cellw=max(1,width//cols)
@@ -252,12 +253,14 @@ def column_grid(entries:list[Entry], width:int, highlight_path:Path|None=None, m
     for start in range(0,len(labels),cols):
         pieces=[]
         for e,text in labels[start:start+cols]:
-            style=ACTIVE if highlight_path is not None and e.path==highlight_path else color_for(e)
-            plain=strip_ansi(text) if style==ACTIVE else text
+            style=color_for(e)
+            plain=text
             if len(plain)>cellw-2:
                 plain=plain[:max(1,cellw-3)]+'…'
             padding=' ' * max(1,cellw-len(plain))
-            pieces.append(style+plain+RESET+padding)
+            selected=highlight_path is not None and e.path==highlight_path
+            text=GREEN+'✓'+RESET+style+plain[1:] if plain.startswith('✓') else style+plain
+            pieces.append(terminal_style.list_row(text+RESET+padding,cellw+1,len(rows),selected,_LIST_COLORS))
         rows.append(''.join(pieces).rstrip())
     return rows
 
@@ -266,15 +269,17 @@ def detail_rows(entries:list[Entry], width:int, highlight_path:Path|None=None, m
     rows=[]
     for e in entries:
         suffix='/' if e.is_dir else ''
-        left=(f'{GREEN}✓{RESET} {marker(e)} {e.name}{suffix}' if marked and e.path.resolve() in marked else f'  {marker(e)} {e.name}{suffix}')
+        mark=f'{GREEN}✓{RESET} ' if marked and e.path.resolve() in marked else '  '
+        left=f'{marker(e)} {e.name}{suffix}'
         size='—' if e.is_dir else human_size(e.size)
         when=age_text(e.mtime)
         right=f'{size:>7}  {when:>10}'
         avail=max(10,width-len(right)-3)
-        style=ACTIVE if highlight_path is not None and e.path==highlight_path else color_for(e)
-        if style==ACTIVE:left=strip_ansi(left)
-        if len(left)>avail: left=left[:max(1,avail-1)]+'…'
-        rows.append(f'{style}{left:<{avail}}{RESET} {GRAY}{right}{RESET}')
+        style=color_for(e)
+        available=max(1,avail-2)
+        if len(left)>available:left=left[:max(1,available-1)]+'…'
+        line=f'{mark}{style}{left:<{available}}{RESET} {GRAY}{right}{RESET}'
+        rows.append(terminal_style.list_row(line,width,len(rows),highlight_path is not None and e.path==highlight_path,_LIST_COLORS))
     return rows
 
 
@@ -325,15 +330,14 @@ def tree_rows(target:Path, depth:int, width:int, hidden:bool, query:str='', high
 
             branch='└─' if i==len(kids)-1 else '├─'
             mark=(f'{GREEN}✓{RESET} ' if marked and e.path.resolve() in marked else '  ')
-            line=f'{prefix}{branch} {mark}{marker(e)} {e.name}{"/" if e.is_dir else ""}'
-            style=ACTIVE if highlight_path is not None and e.path==highlight_path else color_for(e)
-            rendered.append(style+fit(strip_ansi(line) if style==ACTIVE else line,width)+RESET)
+            line=f'{prefix}{branch} {mark}{color_for(e)}{marker(e)} {e.name}{"/" if e.is_dir else ""}'
+            rendered.append((color_for(e)+fit(line,width)+RESET,highlight_path is not None and e.path==highlight_path))
             rendered.extend(descendants)
             any_match=True
         return rendered,any_match
 
     rows,_=collect(target,'',1)
-    return rows
+    return [terminal_style.list_row(line,width,index,selected,_LIST_COLORS) for index,(line,selected) in enumerate(rows)]
 
 
 def build_view(target:Path, mode:str, hidden:bool, width:int, tree_depth:int, query:str='', highlight_path:Path|None=None, marked:set[Path]|None=None, interactive_rows:bool=False)->list[str]:
