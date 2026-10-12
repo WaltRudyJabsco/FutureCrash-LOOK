@@ -216,9 +216,11 @@ def scan_root(root: str | Path, existing: Any = None) -> dict[str, Any]:
     base_s = str(base)
 
     existing_by_path = {str(row.get("path") or ""): row for row in library["entries"]}
-    keep = [row for row in library["entries"] if str(row.get("root") or "") != base_s]
+    unreadable=[]
     found: list[dict[str, Any]] = []
-    for dirpath, dirnames, filenames in os.walk(base):
+    def failed_walk(error):
+        if error.filename:unreadable.append(Path(error.filename))
+    for dirpath, dirnames, filenames in os.walk(base,onerror=failed_walk):
         filenames=set(filenames)
         dirnames[:] = sorted((d for d in dirnames if not d.startswith(".")), key=str.casefold)
         for name in sorted(filenames, key=str.casefold):
@@ -243,11 +245,21 @@ def scan_root(root: str | Path, existing: Any = None) -> dict[str, Any]:
                 for key in ('artist','album'):
                     if not row.get(key) and previous.get(key):row[key]=previous[key]
                 found.append(row)
-            except (FileNotFoundError, PermissionError, OSError):
+            except FileNotFoundError:
+                continue
+            except OSError:
+                unreadable.append(path)
                 continue
 
     found_paths={row['path'] for row in found}
-    library["entries"] = sorted([row for row in keep if row['path'] not in found_paths]+found,key=entry_sort_key)
+    def retain(row):
+        path=Path(row['path'])
+        if row['path'] in found_paths:return False
+        # A successful parent scan also reconciles its separately indexed imports.
+        # Unreachable mounts outside this scope and unreadable subtrees keep receipts.
+        if not path.is_relative_to(base):return True
+        return any(path==folder or path.is_relative_to(folder) for folder in unreadable)
+    library["entries"] = sorted([row for row in library['entries'] if retain(row)]+found,key=entry_sort_key)
     roots = [r for r in library["roots"] if r != base_s]
     roots.append(base_s)
     library["roots"] = sorted(set(roots), key=str.casefold)
