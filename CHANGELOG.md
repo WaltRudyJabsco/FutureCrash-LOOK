@@ -1,3 +1,9 @@
+## 2026-10-12 · Native media previews and integrated MP transport
+
+- Add automatic native images to Media Find's info pane, retaining ASCII fallback; Shift-M toggles Auto/ASCII in Find and MP. Promote delayed remote artwork without blocking navigation.
+- Give MP a four-line now-playing panel with live progress and existing transport keys. Update only that rectangle while idle, preserving native artwork and the list.
+- Add Clockwork Garden: slow counter-rotating ASCII flowers, included in the ten-second visualizer rotation and the dedicated ASCII player.
+
 ## 2026-10-12 · Later video preview frames
 
 - Generate cached video stills about one minute in; use 20% of duration for short clips and fall back to the opening frame if duration is unknown and the seek has no image.

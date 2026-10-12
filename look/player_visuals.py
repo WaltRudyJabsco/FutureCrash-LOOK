@@ -4,7 +4,7 @@ import math
 import hashlib
 import json
 
-NAMES = ('Bars', 'Waves', 'Orbit', 'Tunnel', 'Stars', 'Plasma', 'Album Art', 'Black Hole', 'Rooftops', 'Spectrum', 'Moon Jelly', 'Firefly Garden', 'Cycle')
+NAMES = ('Bars', 'Waves', 'Orbit', 'Tunnel', 'Stars', 'Plasma', 'Album Art', 'Black Hole', 'Rooftops', 'Spectrum', 'Moon Jelly', 'Firefly Garden', 'Clockwork Garden', 'Cycle')
 CYCLE_MODE = len(NAMES)
 CYCLE_INTERVAL_SECONDS = 10.0
 
@@ -53,6 +53,8 @@ def frame(mode, width, height, phase, playing=True, seed=0):
             depth=(i*.618034+t*.18)%1
             point((width-1)/2+math.cos(angle)*depth*width*.65,
                   (height-1)/2+math.sin(angle)*depth*height*.65,'.+*'[min(2,int(depth*3))])
+    elif mode==12:
+        return clockwork_garden_frame(width,height,t,seed)
     elif mode==11:
         return firefly_garden_frame(width,height,t,seed)
     elif mode==10:
@@ -300,4 +302,33 @@ def firefly_garden_frame(width,height,phase,seed=0):
         if light<.32:
             tx,ty=position(phase-.8);dot(tx,ty,'.')
         dot(x,y,'*' if .12<light<.3 else '+' if light<.42 else '.')
+    return [''.join(row) for row in canvas]
+
+
+CLOCKWORK_PETALS=7
+CLOCKWORK_TURN_RATE=.22
+CLOCKWORK_COLOR='33'
+
+
+def clockwork_garden_frame(width,height,phase,seed=0):
+    """Slow counter-rotating rosettes on mechanical stems; purely ambient."""
+    canvas=[[' ']*width for _ in range(height)]
+    def dot(x,y,char):
+        x=round(x);y=round(y)
+        if 0<=x<width and 0<=y<height:canvas[y][x]=char
+    count=max(1,min(4,width//24))
+    for flower in range(count):
+        cx=(flower+.5)*width/count;cy=height*(.32+.10*(flower%2))
+        radius=max(1,min(width/count*.4,height*.38))
+        turn=phase*CLOCKWORK_TURN_RATE*(1 if flower%2 else -1)+flower+seed*.03
+        for y in range(round(cy)+1,height):
+            dot(cx+math.sin(y*.22+turn)*1.5,y,'|' if y%3 else '+')
+        for sample in range(160):
+            angle=sample*math.tau/160
+            r=radius*(.72+.28*math.cos(CLOCKWORK_PETALS*(angle-turn)))
+            dot(cx+math.cos(angle)*r*1.6,cy+math.sin(angle)*r,'.o+'[sample%3])
+        for tooth in range(12):
+            angle=tooth*math.tau/12-turn
+            dot(cx+math.cos(angle)*radius*.35*1.6,cy+math.sin(angle)*radius*.35,':')
+        dot(cx,cy,'@')
     return [''.join(row) for row in canvas]

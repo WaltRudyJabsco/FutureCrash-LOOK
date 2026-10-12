@@ -99,7 +99,8 @@ def test_player_cycles_all_views_without_losing_transport_controls(lk,monkeypatc
 
 def test_cycle_holds_each_visual_ten_seconds_and_includes_album_art():
     mode=player_visuals.CYCLE_MODE
-    assert [player_visuals.active_mode(mode,seconds) for seconds in (0,9.99,10,60,69.99,70,79.99,80,89.99,90,99.99,100,109.99,110,119.99,120)]==[1,1,2,7,7,8,8,9,9,10,10,11,11,12,12,1]
+    assert player_visuals.active_mode(mode,(mode-1)*player_visuals.CYCLE_INTERVAL_SECONDS)==1
+    assert [player_visuals.active_mode(mode,seconds) for seconds in (0,9.99,10,60,69.99,70,79.99,80,89.99,90,99.99,100,109.99,110,119.99,120)]==[1,1,2,7,7,8,8,9,9,10,10,11,11,12,12,13]
     assert all(player_visuals.active_mode(mode,second)!=0 for second in range(200))
     for fixed in range(mode):assert player_visuals.active_mode(fixed,120)==fixed
 
@@ -296,3 +297,15 @@ def test_spectrum_renderer_uses_gradient_without_expanding_rows(lk,monkeypatch):
     plain=lk._strip_ansi(text)
     assert all(len(row)==79 for row in plain.splitlines())
     assert 'space pause' in plain and 'Spectrum' in plain
+
+
+
+def test_clockwork_garden_is_in_cycle_and_pauses_deterministically():
+    from look import player_visuals as visuals
+    mode=visuals.NAMES.index('Clockwork Garden')+1
+    for width,height in [(1,1),(20,8),(80,24)]:
+        lines=visuals.frame(mode,width,height,2,True,3)
+        assert len(lines)==height and all(len(line)==width for line in lines)
+    assert visuals.frame(mode,80,24,2,True,3)!=visuals.frame(mode,80,24,7,True,3)
+    assert visuals.frame(mode,80,24,2,False,3)==visuals.frame(mode,80,24,7,False,3)
+    assert mode in {visuals.active_mode(visuals.CYCLE_MODE,i*visuals.CYCLE_INTERVAL_SECONDS) for i in range(visuals.CYCLE_MODE-1)}
