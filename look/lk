@@ -17618,7 +17618,10 @@ def _media_remote_cover_path(row, fetch=True):
         path=str(item.get("path") or "").strip()
         if not node or not entry_id or node.casefold() in local_names: continue
         stamp=str(item.get("mtime") or row.get("mtime") or "")
-        token=hashlib.sha256(f"{node}|{entry_id}|{path}|{stamp}".encode()).hexdigest()[:28]
+        # Movie extraction moved past opening frames; old remote JPEGs must
+        # expire too, even though the original movie's timestamp never changed.
+        frame_version='video-minute-v1|' if Path(path).suffix.casefold() in media_art.VIDEO_SUFFIXES else ''
+        token=hashlib.sha256(f"{frame_version}{node}|{entry_id}|{path}|{stamp}".encode()).hexdigest()[:28]
         out=cache/f'{token}.jpg'
         try:
             if out.is_file() and out.stat().st_size>0: return out

@@ -1,3 +1,7 @@
+## Remote movie preview cache
+
+- Refresh old opening-frame JPEGs after switching to later movie stills.
+
 ## Preview and local-copy polish
 
 - Repair Mac native JPEG previews, retaining ASCII for invalid prepared images.

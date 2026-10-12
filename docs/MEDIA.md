@@ -328,3 +328,7 @@ The transfer serves original bytes, without decrypting or transcoding protected 
 The Find header's indexed-location count includes hidden entries and backup copies.
 The shown count is the current logical, visible result. Broad scan roots can therefore
 produce a much larger indexed count without making those files playable library items.
+
+Movie preview extraction and remote JPEG caches share a frame-version marker.
+Updating the frame-selection rule refreshes old remote images even when movie
+files are unchanged; album-cover caches retain their existing identities.
