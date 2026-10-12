@@ -301,3 +301,30 @@ MP has a live now-playing panel beneath the list. Space toggles play/pause;
 p/n skip, left/right seek, s shuffles, r repeats, and x stops. Progress updates
 preserve the list and native artwork. Lowercase v opens the dedicated ASCII
 player/visualizer, now including Clockwork Garden in its ten-second rotation.
+
+
+### Preview and local Apple TV copies
+
+Media Find: **Shift-I** opens the preview; **Shift-M** toggles Auto image/ASCII.
+MP uses the same Shift-M toggle in its side pane (terminal width at least 96 columns).
+Native images need Kitty or iTerm; other terminals retain ASCII. On macOS, preview
+conversion explicitly produces PNG, including when the source cover is JPEG.
+Invalid image preparation leaves the ASCII fallback visible.
+
+MP library supports **Shift-F** sort cycling and **Shift-G** reverse, matching
+Media Find. Queue order remains playback order; switch to **Shift-L** to sort the
+library. Lowercase f/g/m remain filter text.
+
+On a Mac, **Shift-T** uses an existing local file or offers to copy a trusted remote
+source. Choose `t` for a temporary playback cache or `k` to keep it in this Mac's
+configured library. The confirmation shows source size, destination and free space.
+The original stays on its owner. Failed or cancelled transfers do not publish a
+partial movie. Completed copies are checked for length and local checksum (and
+source digest where available); permanent copies are scanned into the local catalog.
+Temporary files remain in `~/.cache/look/playback` until explicitly removed; close
+Apple TV before removing them. Apple TV still handles account authorization.
+The transfer serves original bytes, without decrypting or transcoding protected media.
+
+The Find header's indexed-location count includes hidden entries and backup copies.
+The shown count is the current logical, visible result. Broad scan roots can therefore
+produce a much larger indexed count without making those files playable library items.

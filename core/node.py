@@ -4038,7 +4038,7 @@ class API(BaseHTTPRequestHandler):
                 if module_path.is_file():
                     spec=importlib.util.spec_from_file_location('look_media_protection',module_path)
                     guard=importlib.util.module_from_spec(spec);spec.loader.exec_module(guard)
-                    if guard.protected(source):
+                    if representation!="download" and guard.protected(source):
                         if head:
                             self.send_response(409);self.send_header('X-LOOK-Media-Playback','requires-provider-app');self.send_header('Content-Length','0');self.end_headers();return
                         return self.sendj(409,{'error':'Protected media requires an authorized provider app; on a Mac use Media Find T (Apple TV) or O (Open with)'})
@@ -4053,7 +4053,7 @@ class API(BaseHTTPRequestHandler):
             live,_ident=_file_race(peer,"/v1/identity")
             for base in [live]+[b for b in _peer_bases(peer) if b!=live]:
                 params={"id":entry_id,"path":path_hint}
-                if browser: params["representation"]="browser"
+                if representation in {"browser","download"}: params["representation"]=representation
                 url=base+"/v1/media/item?"+urllib.parse.urlencode(params)
                 headers=FABRIC_IDENTITY.auth_headers_for_url(url)
                 if self.headers.get("Range"): headers["Range"]=self.headers.get("Range")

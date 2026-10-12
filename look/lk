@@ -18311,7 +18311,7 @@ def _media_selector(rows,title="FABRIC MEDIA",initial_query="",catalog_meta=None
             with redirect_stdout(frame_io):
                 mode=("ALL SOURCES" if show_all else "LOGICAL")+(" + HIDDEN" if show_hidden else "")
                 location_count=sum(int(row.get('copies') or 1) for row in rows)
-                suffix=f"{len(visible):,} shown · {location_count:,} Fabric locations · {len(selected_rows)} selected · {_c(mode,'1;35')}"
+                suffix=f"{len(visible):,} shown · {location_count:,} indexed locations (hidden/copies included) · {len(selected_rows)} selected · {_c(mode,'1;35')}"
                 _title(title,suffix)
                 print(_c('SORT '+MEDIA_FIND_SORTS[sort_mode]+(' · reversed' if reverse_sort else ''),'1;36'))
                 if catalog_meta:
@@ -18370,7 +18370,7 @@ def _media_selector(rows,title="FABRIC MEDIA",initial_query="",catalog_meta=None
                             print(left)
 
                 filter_text=f"{_c('FILTER','1;36')} {query}█" if query else f"{_c('FILTER','1;36')} █"
-                actions=_media_hints("/ search · ↑↓/J/K move · Shift-arrows page/ends · F sort · G reverse · Tab select · A select all · C clear selection · Enter/P play · O open with · T Apple TV · Q queue · S save playlist · I info · M image/ASCII · V sources · R refresh · E edit metadata · H hidden · X hide · D hide by directory · U unhide · Esc finish/clear/exit",width)
+                actions=_media_hints("I info · M image/ASCII · F sort · G reverse · / search · ↑↓/J/K move · Shift-arrows page/ends · Tab select · A select all · C clear selection · Enter/P play · O open with · T Apple TV · Q queue · S save playlist · V sources · R refresh · E edit metadata · H hidden · X hide · D hide by directory · U unhide · Esc finish/clear/exit",width)
                 footer=f"{filter_text}  "+_c("◆ SHA · · scanned","2")+"\n"+actions
                 if notice:
                     footer+="  "+_c(notice,"33")
@@ -18482,7 +18482,7 @@ def _media_selector(rows,title="FABRIC MEDIA",initial_query="",catalog_meta=None
             if key=="S" and chosen:
                 action=("save",chosen); break
             if key=="M":
-                native_images=not native_images;notice="Preview: Auto image" if native_images else "Preview: ASCII";continue
+                native_images=not native_images;notice=("Preview: Auto image" if native_preview.enabled else "Preview: ASCII · native images need Kitty/iTerm and LOOK_NATIVE_PREVIEW enabled") if native_images else "Preview: ASCII";continue
             if key=="I" and visible:
                 info_mode=not info_mode
                 continue
@@ -18541,6 +18541,70 @@ def _media_selector_finish(action,payload):
         return 0
     return None
 
+def _media_copy_for_app(row):
+    """Copy original bytes through the trusted Fabric proxy, then publish locally."""
+    import media_storage
+    local=_media_local_node_names()
+    sources=[row]+[x for x in row.get('locations',[]) if isinstance(x,dict)]
+    source=next((x for x in sources if x.get('node') and str(x['node']).casefold() not in local and x.get('id')),None)
+    if not source:return None,'No remote source available'
+    url='http://127.0.0.1:7332/v1/media/item?'+urllib.parse.urlencode({
+        'node':source['node'],'id':source['id'],'path':source.get('path',''),'representation':'download'})
+    stage=None
+    try:
+        with urllib.request.urlopen(urllib.request.Request(url,method='HEAD'),timeout=15) as response:
+            total=int(response.headers.get('Content-Length') or 0)
+        if total<=0:raise ValueError('Source size is unavailable; refresh the catalog and retry')
+        cache=Path.home()/'.cache/look/playback'
+        owner=_media_read_json(Path.home()/'.config/look/media_library.json',{})
+        root=Path(owner.get('root') or '~/Media').expanduser()
+        print('\nCOPY TO THIS MAC · '+str(row.get('title') or Path(source.get('path','')).name))
+        print(f"  Source: {source['node']} · {total/1024**3:.2f} GiB")
+        print('  t temporary playback copy · k keep in this Mac’s library · Enter cancel')
+        choice=input('Copy: ').strip().casefold()
+        if choice not in {'t','k'}:return None,'Copy cancelled'
+        category='tv' if _media_find_type(row)=='TV' else 'movies'
+        token=hashlib.sha256(url.encode()).hexdigest()[:20]
+        folder=(cache if choice=='t' else root/category)/token
+        folder.mkdir(parents=True,exist_ok=True)
+        free=shutil.disk_usage(folder).free
+        print(f'  Destination: {folder} · {free/1024**3:.2f} GiB free')
+        if free<total:raise ValueError('Not enough free space for this copy')
+        if input('Copy original file here and open Apple TV? [y/N] ').strip().casefold()!='y':return None,'Copy cancelled'
+        target=folder/Path(source.get('path') or 'movie.m4v').name
+        # A completed receipt permits reuse; a partial file is never handed off.
+        receipt=folder/'copy.json'
+        prior=_media_read_json(receipt,{})
+        if not (target.is_file() and target.stat().st_size==total and prior.get('sha256')==media_storage.sha(target)):
+            fd,temp=tempfile.mkstemp(prefix='.copy-',dir=folder);stage=Path(temp)
+            copied=0;digest=hashlib.sha256();next_report=0
+            with os.fdopen(fd,'wb') as output,urllib.request.urlopen(url,timeout=60) as response:
+                if int(response.headers.get('Content-Length') or 0)!=total:raise ValueError('Source changed; refresh and retry')
+                while True:
+                    chunk=response.read(1024*1024)
+                    if not chunk:break
+                    copied+=len(chunk)
+                    if copied>total:raise ValueError('Source length changed during transfer')
+                    output.write(chunk);digest.update(chunk)
+                    if time.monotonic()>=next_report:
+                        print(f'\r  Copying {copied/total:.0%} · {copied/1024**3:.2f}/{total/1024**3:.2f} GiB',end='',flush=True);next_report=time.monotonic()+1
+                output.flush();os.fsync(output.fileno())
+            print()
+            if copied!=total:raise ValueError('Incomplete transfer; original file remains on its source')
+            expected=str(source.get('digest') or row.get('digest') or '').removeprefix('sha256:')
+            if len(expected)==64 and digest.hexdigest()!=expected:raise ValueError('Source checksum mismatch')
+            if media_storage.sha(stage)!=digest.hexdigest():raise ValueError('Local copy checksum mismatch')
+            stage.replace(target);stage=None
+            _atomic_json(receipt,{'sha256':digest.hexdigest(),'bytes':total,'source':source})
+        if choice=='k':
+            media_core.update_library(MEDIA_LIBRARY_FILE,lambda library:media_core.scan_root(folder,library))
+        return target,'Copied locally'
+    except (OSError,ValueError,RuntimeError,KeyboardInterrupt) as exc:
+        return None,'Copy cancelled' if isinstance(exc,KeyboardInterrupt) else 'Copy failed: '+str(exc)
+    finally:
+        if stage is not None:stage.unlink(missing_ok=True)
+
+
 def _media_open_with(row, app=None):
     if app=='TV' and sys.platform!='darwin':return False,'Apple TV handoff is available on Macs'
     local_names=_media_local_node_names()
@@ -18551,9 +18615,13 @@ def _media_open_with(row, app=None):
                and Path(x['path']).expanduser().is_file()),None)
     if path is None:
         if app=='TV':
-            owners=', '.join(sorted({str(x.get('node') or 'remote') for x in sources}))
-            return False,'Apple TV needs a local file on this Mac; available on '+owners+'. Copy or mount that source here first; Shift-T does not transfer it.'
-        return False,"Open with needs a local file; copy or mount the remote source first"
+            if sys.stdin.isatty():
+                path,message=_media_copy_for_app(row)
+                if path is None:return False,message
+            else:
+                owners=', '.join(sorted({str(x.get('node') or 'remote') for x in sources}))
+                return False,'Apple TV needs a local file on this Mac; available on '+owners+'. Copy or mount that source here first; Shift-T does not transfer it.'
+        elif path is None:return False,"Open with needs a local file; copy or mount the remote source first"
     if app=='TV':
         if sys.platform!='darwin':return False,"Apple TV handoff is available on Macs"
         result=subprocess.run(['open','-a','/System/Applications/TV.app',str(path)],capture_output=True,text=True)
@@ -19416,6 +19484,7 @@ def media_mp(initial_query=""):
     fd=sys.stdin.fileno()
     old=termios.tcgetattr(fd)
     mode="library"
+    sort_mode=0;reverse_sort=False
     query=str(initial_query or "")
     idx=0
     selected_ids=set()
@@ -19453,9 +19522,10 @@ def media_mp(initial_query=""):
                 dirty=True
 
             if dirty:
-                next_key=(mode,query)
+                next_key=(mode,query,sort_mode,reverse_sort)
                 if next_key != view_key:
                     visible=_media_mp_rows(mode,library_rows,query)
+                    if mode=="library":visible=_media_find_order(visible,sort_mode,reverse_sort)
                     view_key=next_key
                     idx=max(0,min(idx,max(0,len(visible)-1)))
                 terminal=shutil.get_terminal_size((120,34))
@@ -19533,7 +19603,7 @@ def media_mp(initial_query=""):
                     print(_c(filter_text,"1;36"))
                     controls="↑↓ select · Shift-arrows page/ends · Tab mark · A select all · E edit metadata · R refresh · C clear selection · Enter play · B add queue · D hide dir · L library · Q queue"
                     print(_media_hints(controls,width))
-                    print(_media_hints("/ search · space pause · ←/→ seek 10s · p/n prev/next · v visuals · M image/ASCII · s shuffle · r repeat · x stop · Esc finish/clear/exit",width),end="")
+                    print(_media_hints("F sort · G reverse · / search · space pause · ←/→ seek 10s · p/n prev/next · v visuals · M image/ASCII · s shuffle · r repeat · x stop · Esc finish/clear/exit",width),end="")
                     if notice:
                         print("  "+_c(notice,"33"),end="")
                         notice=""
@@ -19586,7 +19656,7 @@ def media_mp(initial_query=""):
                 if key in {"\x7f","\b"}:
                     if query: query=query[:-1]; idx=0; view_key=None
                     continue
-                if len(key)==1 and key.isprintable() and key not in "ABCDLQJKERM":
+                if len(key)==1 and key.isprintable() and key not in "ABCDLQJKERMFG":
                     query+=key; idx=0; view_key=None
                     continue
                 # Arrow/Tab/action keys leave editing and operate on this view.
@@ -19595,8 +19665,15 @@ def media_mp(initial_query=""):
                 if query:
                     query=""; idx=0; view_key=None; continue
                 return 0
+            if key in {"F","G"}:
+                if mode=="queue":notice="Queue order follows playback · switch to L library to sort"
+                else:
+                    if key=="F":sort_mode=(sort_mode+1)%len(MEDIA_FIND_SORTS)
+                    else:reverse_sort=not reverse_sort
+                    idx=0;notice="Sort: "+MEDIA_FIND_SORTS[sort_mode]+(" · reversed" if reverse_sort else "")
+                continue
             if key=="M":
-                native_images=not native_images;notice="Preview: Auto image" if native_images else "Preview: ASCII";continue
+                native_images=not native_images;notice=("Preview: Auto image" if native_preview.enabled else "Preview: ASCII · native images need Kitty/iTerm and LOOK_NATIVE_PREVIEW enabled") if native_images else "Preview: ASCII";continue
             if key=="v":
                 native_preview.invalidate()
                 termios.tcsetattr(fd,termios.TCSADRAIN,old)

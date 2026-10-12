@@ -1,3 +1,10 @@
+## Preview and local-copy polish
+
+- Repair Mac native JPEG previews, retaining ASCII for invalid prepared images.
+- Add MP library Shift-F sort and Shift-G reverse; preserve playback queue order.
+- Offer verified temporary/permanent remote copies for Mac Apple TV handoff.
+- Clarify that indexed-location counts include hidden entries and backup copies.
+
 ## 2026-10-12 · Native media previews and integrated MP transport
 
 - Add automatic native images to Media Find's info pane, retaining ASCII fallback; Shift-M toggles Auto/ASCII in Find and MP. Promote delayed remote artwork without blocking navigation.

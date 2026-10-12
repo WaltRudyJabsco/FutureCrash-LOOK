@@ -543,3 +543,47 @@ def test_media_find_image_toggle_keeps_filter_selection(lk,monkeypatch):
     action,selected=lk._media_selector(rows)
     assert action=='play' and selected[0]['id']=='1'
     assert 'Preview: ASCII' in out.getvalue()
+
+
+def test_remote_app_copy_verifies_and_keeps_only_on_request(lk,monkeypatch,tmp_path):
+    import io
+    import media_storage
+    payload=b'original protected movie bytes'
+    class Response(io.BytesIO):
+        headers={'Content-Length':str(len(payload))}
+    monkeypatch.setattr(Path,'home',lambda:tmp_path)
+    monkeypatch.setenv('HOME',str(tmp_path))
+    monkeypatch.setattr(lk,'_media_local_node_names',lambda:{'local','mac'})
+    monkeypatch.setattr(lk.urllib.request,'urlopen',lambda *a,**k:Response(payload))
+    monkeypatch.setattr(lk,'MEDIA_LIBRARY_FILE',tmp_path/'library.json')
+    answers=iter(['t','y']);monkeypatch.setattr('builtins.input',lambda *a:next(answers))
+    path,message=lk._media_copy_for_app({'node':'server','id':'film','path':'/movies/Film.m4v'})
+    assert path.read_bytes()==payload and message=='Copied locally'
+    assert not lk.MEDIA_LIBRARY_FILE.exists()
+    assert not (tmp_path/'Media').exists()
+    answers=iter(['k','y']);monkeypatch.setattr('builtins.input',lambda *a:next(answers))
+    path,message=lk._media_copy_for_app({'node':'server','id':'film','path':'/movies/Film.m4v'})
+    assert path.is_relative_to(tmp_path/'Media/movies')
+    assert any(row['path']==str(path) for row in lk._media_library()['entries'])
+
+
+def test_remote_app_copy_rejects_truncation(lk,monkeypatch,tmp_path):
+    import io
+    class Response(io.BytesIO):
+        headers={'Content-Length':'100'}
+    monkeypatch.setattr(Path,'home',lambda:tmp_path)
+    monkeypatch.setenv('HOME',str(tmp_path))
+    monkeypatch.setattr(lk,'_media_local_node_names',lambda:{'local'})
+    monkeypatch.setattr(lk.urllib.request,'urlopen',lambda *a,**k:Response(b'partial'))
+    answers=iter(['t','y']);monkeypatch.setattr('builtins.input',lambda *a:next(answers))
+    path,message=lk._media_copy_for_app({'node':'server','id':'film','path':'/Film.m4v'})
+    assert path is None and 'Incomplete' in message
+    assert not list(tmp_path.rglob('*.m4v')) and not list(tmp_path.rglob('.copy-*'))
+
+
+def test_mp_sort_actions_preserve_queue_order():
+    source=(ROOT/'look/lk').read_text().split('def media_mp(initial_query=""):',1)[1]
+    assert 'next_key=(mode,query,sort_mode,reverse_sort)' in source
+    assert 'if mode=="library":visible=_media_find_order' in source
+    assert 'key not in "ABCDLQJKERMFG"' in source
+    assert 'Queue order follows playback' in source
