@@ -70,3 +70,19 @@ def test_mac_mpv_preference_works_without_an_app_bundle(tmp_path,monkeypatch):
     monkeypatch.setattr(media_open.sys,'platform','darwin')
     monkeypatch.setattr(media_open,'mpv_binary',lambda:'/opt/homebrew/bin/mpv')
     assert media_open.command(tmp_path/'video.mp4','mpv')[0]=='/opt/homebrew/bin/mpv'
+
+
+def test_background_media_refresh_preserves_arrival_and_unknown_legacy(tmp_path,monkeypatch):
+    monkeypatch.setattr(Path,'home',classmethod(lambda cls:tmp_path))
+    monkeypatch.setattr(media_watch,'LIBRARY',tmp_path/'library.json')
+    monkeypatch.setattr(media_watch,'STATUS',tmp_path/'status.json')
+    root=tmp_path/'Music';root.mkdir();track=root/'song.mp3';track.write_bytes(b'old')
+    library=media_core.scan_root(root);library['entries'][0]['added_at']=100
+    media_watch.LIBRARY.write_text(json.dumps(library))
+    track.write_bytes(b'new file content')
+    media_watch.refresh_existing({})
+    assert media_watch.load()['entries'][0]['added_at']==100
+    library=media_watch.load();library['entries'][0].pop('added_at')
+    media_watch.LIBRARY.write_text(json.dumps(library));track.write_bytes(b'another new file content')
+    media_watch.refresh_existing({})
+    assert 'added_at' not in media_watch.load()['entries'][0]

@@ -117,6 +117,9 @@ def refresh_existing(previous):
             for path in visible:
                 try:
                     row=media_core.entry_from_path(path,base,sidecar=Path(path).with_suffix('.info.json').name in names); old=known.get(path)
+                    if old:
+                        if old.get('added_at') is not None:row['added_at']=old['added_at']
+                        else:row.pop('added_at',None)
                     if old and old.get('bytes')==row['bytes'] and old.get('mtime')==row['mtime'] and old.get('source_url')==row.get('source_url') and old.get('description')==row.get('description'): continue
                     changes[path]=row
                     file_catalog.register(Path.home()/'.local/share/look/file_catalog.sqlite3',path)

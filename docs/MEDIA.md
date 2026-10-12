@@ -21,6 +21,19 @@ Lowercase `q` is filter text, including in artist/album browsing. Escape exits; 
 
 Controls: Tab toggles the focused row; Shift-A selects/unselects every currently visible row; Enter or Shift-P plays selected rows (or the focused row); Shift-Q appends selected/focused rows to the queue; Shift-S saves selected/focused rows as a playlist; Shift-C clears selection; Shift-I shows identity/details; Esc clears the filter and then exits.
 
+**Shift-F** cycles Default → Title → Newest modified → Recently added → Type →
+Largest first. **Shift-G** reverses the current order, matching LOOK's sort/reverse
+convention. The header shows the criterion and reversed state; these choices
+combine with search, hidden/source modes and marked selections. Type groups audio
+and video, then file format; reverse puts video before audio. Lowercase `g` and `f`
+remain search text. Shift-Left/Right (or Home/End) jump to the list's beginning/end.
+
+Recently added uses the entry's recorded catalog arrival, preserved on rescans
+and background refreshes. Older entries with no recorded arrival stay last in
+both directions; file modification time remains a separate order. These view
+choices apply to the current browsing session. Photos are not part of Media Find's
+audio/video catalog.
+
 Shift-I also opens the existing quiet artwork/details preview. At widths of at
 least 78 columns, a small terminal image appears beside the details when artwork
 is available. The remote owner can extract a video's first frame and return only

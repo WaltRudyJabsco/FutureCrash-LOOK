@@ -10,7 +10,7 @@ def test_media_hide_ancestor_picker_is_counted_and_root_guarded():
 
 def test_media_find_modern_navigation_and_hot_loop_cache():
     for token in ('"shiftup"','"shiftdown"','"shiftleft"','"shiftright"','"home"','"end"'): assert token in LK
-    assert 'next_view_key=(query,show_all,show_hidden)' in LK
+    assert 'next_view_key=(query,show_all,show_hidden,sort_mode,reverse_sort)' in LK
     collapse=LK[LK.index('def _media_collapse'):LK.index('def _media_tree_candidates')]
     assert '.exists()' not in collapse
 
