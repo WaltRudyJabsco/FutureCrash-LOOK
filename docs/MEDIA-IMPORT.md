@@ -88,7 +88,9 @@ The unified installer offers optical and native notification helpers. It uses
 Homebrew HandBrake on macOS/Linux and distribution packages
 for Linux CD extraction, desktop notification and sound. Optional package
 failures preserve the rest of the installation; `drives` reports available tools.
-MakeMKV is detected when installed. Homebrew currently disables its macOS cask
+MakeMKV is detected when installed, including executable user-local installs in
+`~/.local/bin` when the background service's PATH omits that directory.
+Homebrew currently disables its macOS cask
 for Gatekeeper compatibility, so automatic installation is unavailable. Use the
 vendor’s normal supported setup; LOOK does not disable Gatekeeper.
 Linux MakeMKV is detected when installed; follow its official setup rather than

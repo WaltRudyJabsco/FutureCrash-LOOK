@@ -35,6 +35,17 @@ def fake_tool(path,body):
     path.write_text('#!'+os.sys.executable+'\n'+body);path.chmod(0o755);return str(path)
 
 
+def test_user_local_importer_is_found_outside_service_path(isolated,monkeypatch):
+    monkeypatch.setattr(discs.shutil,'which',lambda name:None)
+    executable=isolated/'.local/bin/makemkvcon'
+    executable.parent.mkdir(parents=True)
+    executable.write_text('#!/bin/sh\nexit 0\n')
+    executable.chmod(0o755)
+    assert discs.tool('makemkvcon')==str(executable)
+    executable.chmod(0o644)
+    assert discs.tool('makemkvcon')!=str(executable)
+
+
 def test_robot_progress_and_toc_are_stable():
     text=' 1. 100 [00:01.25] 0 [00:00.00]\n 2. 200 [00:02.50] 100 [00:01.25]'
     toc=discs.toc_from_query(text)
@@ -44,6 +55,17 @@ def test_robot_progress_and_toc_are_stable():
     assert discs.progress('Encoding: 37.25 %')==37.25
     assert discs.progress('reading') is None
     assert list(discs.robot_records('DRV:0,1,1,0,"USB drive","Disc, title","/dev/sr0"','DRV'))[0][5]=='Disc, title'
+
+
+@pytest.mark.parametrize('state',('0,999','2,999','1,1'))
+def test_makemkv_inventory_states_attach_lossless_source(monkeypatch,state):
+    monkeypatch.setattr(discs.sys,'platform','fixture')
+    monkeypatch.setattr(discs,'tool',lambda name:name if name=='makemkvcon' else None)
+    monkeypatch.setattr(discs,'query',lambda *args:f'DRV:0,{state},12,"USB Blu-ray","Film","/dev/sr0"\nDRV:1,256,999,0,"","",""')
+    rows=discs.drives()['drives']
+    assert len(rows)==1
+    assert rows[0]['device']=='/dev/sr0'
+    assert rows[0]['makemkv_source']=='disc:0'
 
 
 def test_drive_selection_and_job_ids_do_not_accept_arbitrary_paths(monkeypatch):
