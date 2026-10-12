@@ -22,6 +22,13 @@ work it shows the most recent available result. Use `--node local` or
 `--node NAME` to focus on one computer. A specific job selector still uses its
 chosen node; cancellation and starting imports always remain owner-scoped.
 
+Interactive progress views wrap long titles, stages, paths and errors to the
+terminal's current width. Every continuation retains its import row's ink;
+alternating shading advances for the next job, not the next screen line. Arrows
+scroll when wrapped receipts fill the screen; Shift-Up/Down and Page-Up/Down move
+by a page. Escape returns while the import continues. Piped text and JSON remain
+unchanged.
+
 The workbench has n import, d rediscover, h history, arrows select a job, Enter progress,
 l send to library/retry delivery, c cancel, and Escape return. Uppercase variants
 also work; Shift is not required. The inserted disc appears above a separate job
@@ -102,6 +109,28 @@ CD/DVD drive. Linux discovery checks optical block devices; macOS uses drutil
 and diskutil; MakeMKV adds its native drive inventory. If a drive is missing,
 check its USB connection and device access. SuperDrive behavior on Linux must
 be verified with the actual connected hardware; no firmware is altered.
+
+## Re-importing a different edition
+
+To change from full-frame to widescreen, insert the desired side/disc, press `d`
+to refresh discovery, then `n` for a new import. Review the scan and select the
+desired title; duration alone does not establish its aspect ratio. Label it, for
+example, `My Movie (widescreen)` so both editions are easy to distinguish during
+review. The new import is verified and published in its own directory; the old
+copy is never overwritten. There is currently no automatic replacement action.
+
+Play the new copy and check its framing before removing the old full-frame copy
+with LOOK's normal file browser. On the owning computer, rescan the same indexed
+folder if it still exists: `lk media scan "/path/to/old-import"`. If you removed
+the whole import directory, use `lk media scan --forget "/path/to/old-import"`
+to forget that specific catalog root. This command changes the index only and
+does not remove files. Refresh Media Find on other nodes afterward. Old job
+receipts are history, not another playable copy; `h` hides completed history.
+
+Other feature cuts and extras can be imported separately with descriptive
+labels. A commentary may be an additional audio track inside the same title,
+rather than a separate video title; MakeMKV's title/track selection determines
+what is retained. LOOK does not yet offer a commentary-track selector.
 
 ## Storage and recovery
 

@@ -170,3 +170,66 @@ def test_idle_fabric_monitor_sees_reconnecting_work(monkeypatch):
     keys=iter([None,'esc'])
     assert disc_ui.watch_all(request,lambda *args:next(keys),lambda text,width:text)==0
     assert request.call_count==2 and 'Tower · Reconnected film' in output.getvalue()
+
+
+@pytest.mark.parametrize('theme',('paper','neon','slate'))
+def test_wrapped_progress_preserves_metrics_and_logical_row_inks(monkeypatch,theme):
+    import re
+    monkeypatch.setenv('LOOK_TERMINAL_THEME',theme)
+    colors=disc_ui.interface_colors()
+    first=dict(job(1,'A very long movie title with many words','running'),
+               stage='Saving available titles to MKV files',percent=52.3,
+               elapsed_seconds=120,estimated_remaining_seconds=180)
+    second=dict(first,title='Another long title with several words')
+    for width in (20,40,80):
+        rows=disc_ui.progress_lines([first],width,colors)
+        plain=[re.sub(r'\x1b\[[0-9;]*m','',row) for row in rows]
+        assert all(len(row)<=width-1 for row in plain)
+        assert '52.3%' in ' '.join(plain) and 'ETA ~3:00' in ' '.join(plain)
+        inks=[re.findall(r'\x1b\[38;2;[0-9;]+m',row)[0] for row in rows]
+        assert len(set(inks))==1
+        following=disc_ui.progress_lines([first,second],width,colors)[len(rows):]
+        assert len(set(re.findall(r'\x1b\[38;2;[0-9;]+m',row)[0] for row in following))==1
+        assert re.findall(r'\x1b\[38;2;[0-9;]+m',following[0])[0]!=inks[0]
+
+
+def test_wrapping_uses_cells_and_handles_paths_controls_and_newlines():
+    import unicodedata
+    text='电影e\u0301 /a/very/long/unbroken/path\nnext\x1bline'
+    rows=disc_ui.wrapped_lines(text,9)
+    for row in rows:
+        cells=sum(0 if unicodedata.combining(c) else 2 if unicodedata.east_asian_width(c) in {'W','F'} else 1 for c in row)
+        assert cells<=8 and '\x1b' not in row
+    assert '电影e\u0301/a/very/long/unbroken/pathnext?line'==''.join(rows).replace(' ','')
+
+
+def test_progress_viewport_keeps_header_footer_and_scrolls_to_metrics(monkeypatch):
+    monkeypatch.setenv('LOOK_TERMINAL_THEME','paper')
+    colors=disc_ui.interface_colors();lines=[f'line {n}' for n in range(20)]
+    offset=disc_ui.progress_scroll('shiftdown',0,4)
+    frame,offset=disc_ui.progress_frame(lines,'IMPORT',40,6,offset,lambda text,width:text,colors)
+    assert len(frame)==6 and frame[1:5]==lines[4:8] and '5–8/20' in frame[0]
+    assert disc_ui.progress_scroll('shiftup',offset,4)==0
+    assert disc_ui.progress_frame(lines,'IMPORT',40,6,999,lambda text,width:text,colors)[1]==16
+
+
+@pytest.mark.parametrize('single',(False,True))
+def test_watch_wraps_in_a_narrow_terminal_and_scrolls(monkeypatch,single):
+    class Terminal(io.StringIO):
+        def fileno(self):return 0
+    output=Terminal()
+    monkeypatch.setattr(disc_ui.sys,'stdin',Terminal())
+    monkeypatch.setattr(disc_ui.sys,'stdout',output)
+    monkeypatch.setattr(disc_ui.termios,'tcgetattr',lambda fd:['saved'])
+    monkeypatch.setattr(disc_ui.termios,'tcsetattr',lambda *args:None)
+    monkeypatch.setattr(disc_ui.tty,'setcbreak',lambda fd:None)
+    monkeypatch.setattr(disc_ui.shutil,'get_terminal_size',lambda default:(32,6))
+    row=dict(job(1,'An exceptionally long film title','running'),
+             stage='Saving available titles to MKV files',percent=67.8,
+             elapsed_seconds=300,estimated_remaining_seconds=60)
+    request=Mock(return_value={'job':row} if single else {'jobs':[row],'fabric':True})
+    keys=iter(['shiftdown','esc'])
+    reader=lambda *args:next(keys)
+    assert (disc_ui.watch(row['id'],request,reader,lambda text,width:text) if single else
+            disc_ui.watch_all(request,reader,lambda text,width:text))==0
+    assert request.call_count==2 and '67.8%' in output.getvalue() and 'ETA ~1:00' in output.getvalue()

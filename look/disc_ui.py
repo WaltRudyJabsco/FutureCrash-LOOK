@@ -8,6 +8,9 @@ import termios
 import time
 import tty
 import os
+import unicodedata
+
+PROGRESS_HINTS='Esc return · ↑↓ scroll · Shift-↑↓ page'
 
 
 def interface_colors():
@@ -63,6 +66,56 @@ def summary(job):
 
 def active(job):
     return job.get('state') not in {'complete','failed','cancelled'} or (job.get('delivery') or {}).get('state') in {'queued','running'}
+
+
+def wrapped_lines(value,width):
+    """Wrap receipt text by terminal cells, including unbroken paths and titles."""
+    limit=max(2,width-1);lines=[];line='';cells=0
+    for char in str(value):
+        if char=='\n':
+            lines.append(line);line='';cells=0;continue
+        if char=='\t':char=' '
+        elif ord(char)<32 or 127<=ord(char)<160:char='?'
+        size=0 if unicodedata.combining(char) else 2 if unicodedata.east_asian_width(char) in {'W','F'} else 1
+        if cells+size>limit:
+            # Prefer a word boundary; a long filename still makes forward progress.
+            boundary=line.rfind(' ')
+            if boundary>0:
+                lines.append(line[:boundary]);line=line[boundary+1:]
+                cells=sum(0 if unicodedata.combining(c) else 2 if unicodedata.east_asian_width(c) in {'W','F'} else 1 for c in line)
+            else:lines.append(line);line='';cells=0
+        line+=char;cells+=size
+    lines.append(line)
+    return lines
+
+
+def progress_lines(jobs,width,colors):
+    try:from . import terminal_style
+    except ImportError:import terminal_style
+    lines=[]
+    for index,job in enumerate(jobs):
+        # All continuations belong to the same logical row, never the next stripe.
+        for line in wrapped_lines(summary(job),width):
+            lines.append(terminal_style.list_row(colors['WHITE']+line,width,index=index,colors=colors))
+    return lines
+
+
+def progress_frame(lines,title,width,height,offset,hints,colors):
+    try:from . import terminal_style
+    except ImportError:import terminal_style
+    footer=hints(PROGRESS_HINTS,width).splitlines()
+    visible=max(1,height-1-len(footer));offset=max(0,min(offset,max(0,len(lines)-visible)))
+    if len(lines)>visible:title+=f' · {offset+1}–{min(len(lines),offset+visible)}/{len(lines)}'
+    header=terminal_style.list_row(colors['CYAN']+title,width,colors=colors)
+    return [header,*lines[offset:offset+visible],*footer],offset
+
+
+def progress_scroll(key,offset,page_size):
+    if key=='up':return max(0,offset-1)
+    if key=='down':return offset+1
+    if key in {'pageup','shiftup'}:return max(0,offset-page_size)
+    if key in {'pagedown','shiftdown'}:return offset+page_size
+    return offset
 
 
 def movie_details(request,prompt,metadata):
@@ -125,23 +178,26 @@ def resolve_job(request,selector,action):
 
 def watch_all(request,read_key,hints):
     """Follow active imports and deliveries, or show the most recent result."""
-    fd=sys.stdin.fileno();old=termios.tcgetattr(fd)
+    fd=sys.stdin.fileno();old=termios.tcgetattr(fd);colors=interface_colors();offset=0
     try:
         tty.setcbreak(fd)
         while True:
             snapshot=request('jobs',{});jobs=snapshot['jobs'];current=[job for job in jobs if active(job)]
             shown=current or jobs[:1];width,height=shutil.get_terminal_size((100,30))
-            frame=['\033[1;38;5;117mFABRIC IMPORT PROGRESS\033[0m']
-            frame.extend(summary(job) for job in shown[:max(1,height-4)])
-            if not shown:frame.append('No imports yet')
+            lines=progress_lines(shown,width,colors)
+            if not shown:lines.append('No imports yet')
             unavailable=snapshot.get('unavailable') or []
-            if unavailable:frame.append('Unavailable: '+', '.join(row['node'] for row in unavailable))
+            if unavailable:lines.extend(colors['YELLOW']+line+'\033[0m' for line in wrapped_lines('Unavailable: '+', '.join(row['node'] for row in unavailable),width))
             if not current and shown:
-                frame.append(shown[0].get('error') or (shown[0].get('delivery') or {}).get('error') or shown[0].get('output') or '')
-            frame.append(hints('Esc return · Jobs continue in background',width))
-            sys.stdout.write('\033[2J\033[H'+'\n'.join(line[:width-1] if '\033' not in line else line for line in frame)+'\033[J');sys.stdout.flush()
-            if not current and not snapshot.get('fabric'):return 0 if not shown or (shown[0]['state']=='complete' and (shown[0].get('delivery') or {}).get('state') not in {'failed','cancelled'}) else 1
-            if read_key(fd,1) in {'esc','q','\x03'}:return 0
+                detail=shown[0].get('error') or (shown[0].get('delivery') or {}).get('error') or shown[0].get('output') or ''
+                lines.extend(colors['GRAY']+line+'\033[0m' for line in wrapped_lines(detail,width))
+            frame,offset=progress_frame(lines,'FABRIC IMPORT PROGRESS',width,height,offset,hints,colors)
+            page_size=max(1,height-1-len(hints(PROGRESS_HINTS,width).splitlines()))
+            sys.stdout.write('\033[2J\033[H'+'\n'.join(frame)+'\033[J');sys.stdout.flush()
+            if not current and not snapshot.get('fabric') and len(lines)<=page_size:return 0 if not shown or (shown[0]['state']=='complete' and (shown[0].get('delivery') or {}).get('state') not in {'failed','cancelled'}) else 1
+            key=read_key(fd,1)
+            if key in {'esc','q','\x03'}:return 0
+            offset=progress_scroll(key,offset,page_size)
     finally:termios.tcsetattr(fd,termios.TCSADRAIN,old);sys.stdout.write('\033[0m\n');sys.stdout.flush()
 
 
@@ -158,15 +214,21 @@ def capture(request,drive,kind,title='',destination='',title_index='',release=No
 
 
 def watch(identifier,request,read_key,hints):
-    fd=sys.stdin.fileno();old=termios.tcgetattr(fd)
+    fd=sys.stdin.fileno();old=termios.tcgetattr(fd);colors=interface_colors();offset=0
     try:
         tty.setcbreak(fd)
         while True:
             job=request('status',{'id':identifier})['job'];width,height=shutil.get_terminal_size((100,30))
-            frame=['\033[1;38;5;117mFABRIC IMPORT\033[0m',summary(job),job.get('error') or (job.get('delivery') or {}).get('error') or job.get('output') or job.get('partial_path') or '',hints('Esc return · Job continues in background',width)]
-            sys.stdout.write('\033[2J\033[H'+'\n'.join(line[:width-1] if '\033' not in line else line for line in frame)+'\033[J');sys.stdout.flush()
-            if job['state'] in {'complete','failed','cancelled'} and (job.get('delivery') or {}).get('state') not in {'queued','running'}:return 0 if job['state']=='complete' and (job.get('delivery') or {}).get('state') not in {'failed','cancelled'} and not job.get('delivery_error') else 1
-            if read_key(fd,1) in {'esc','q','\x03'}:return 0
+            lines=progress_lines([job],width,colors)
+            detail=job.get('error') or (job.get('delivery') or {}).get('error') or job.get('output') or job.get('partial_path') or ''
+            lines.extend(colors['GRAY']+line+'\033[0m' for line in wrapped_lines(detail,width))
+            frame,offset=progress_frame(lines,'FABRIC IMPORT',width,height,offset,hints,colors)
+            page_size=max(1,height-1-len(hints(PROGRESS_HINTS,width).splitlines()))
+            sys.stdout.write('\033[2J\033[H'+'\n'.join(frame)+'\033[J');sys.stdout.flush()
+            if job['state'] in {'complete','failed','cancelled'} and (job.get('delivery') or {}).get('state') not in {'queued','running'} and len(lines)<=page_size:return 0 if job['state']=='complete' and (job.get('delivery') or {}).get('state') not in {'failed','cancelled'} and not job.get('delivery_error') else 1
+            key=read_key(fd,1)
+            if key in {'esc','q','\x03'}:return 0
+            offset=progress_scroll(key,offset,page_size)
     finally:termios.tcsetattr(fd,termios.TCSADRAIN,old);sys.stdout.write('\033[0m\n');sys.stdout.flush()
 
 
