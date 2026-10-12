@@ -14,6 +14,14 @@ lk media import watch --node 3090
 lk media import cancel FULL_JOB_ID --node 3090
 ```
 
+`lk media import watch` and `lk media import jobs` read receipts across trusted
+Fabric nodes by default. Active imports and deliveries appear with their owning
+computer's name; unreachable nodes are listed separately. The interactive Fabric
+monitor stays open while idle and refreshes as nodes reconnect. With no active
+work it shows the most recent available result. Use `--node local` or
+`--node NAME` to focus on one computer. A specific job selector still uses its
+chosen node; cancellation and starting imports always remain owner-scoped.
+
 The workbench has N import, D rediscover, arrows select a job, Enter progress,
 L deliver/retry, C cancel, and Escape return. Jobs continue when a window closes. Receipts show
 stage, elapsed time, progress when the adapter supplies it, and estimated time

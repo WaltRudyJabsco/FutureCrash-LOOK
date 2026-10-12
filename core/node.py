@@ -5003,6 +5003,37 @@ def _daemon_post(host: str, port: int, path: str, payload):
         raise RuntimeError(f"Unified Node request failed at {host}:{port}: {exc}") from exc
 
 
+def _fabric_import_jobs(host,port):
+    """Read owner receipts in parallel through the existing trusted file routes."""
+    try:snapshot=_daemon_get(host,port,'/v1/nodes')
+    except Exception as exc:
+        _look_catalog_modules();import disc_import
+        return {'ok':True,'fabric':True,'jobs':[dict(row,node='local') for row in disc_import.list_jobs()],
+                'available':['local'],'unavailable':[{'node':'Fabric discovery','error':str(exc)[:200]}]}
+    local=str((snapshot.get('self') or {}).get('name') or 'local')
+    targets=[(local,None)]
+    seen={local.casefold()}
+    for peer in snapshot.get('peers') or []:
+        name=str(((peer.get('node') or {}).get('identity') or {}).get('name') or peer.get('name') or '')
+        if peer.get('trusted') and name and name.casefold() not in seen:
+            targets.append((name,peer));seen.add(name.casefold())
+    def collect(peer):
+        route='/v1/media/import?action=jobs'
+        result=_file_peer_json(peer,route) if peer else _daemon_get(host,port,route)
+        if result.get('ok') is False:raise RuntimeError(result.get('error') or 'Import receipts unavailable')
+        return result.get('jobs') or []
+    jobs=[];available=[];unavailable=[]
+    with concurrent.futures.ThreadPoolExecutor(max_workers=min(8,len(targets))) as pool:
+        pending={pool.submit(collect,peer):name for name,peer in targets}
+        for future in concurrent.futures.as_completed(pending):
+            name=pending[future]
+            try:
+                jobs.extend(dict(row,node=name) for row in future.result());available.append(name)
+            except Exception as exc:unavailable.append({'node':name,'error':str(exc)[:200]})
+    jobs.sort(key=lambda row:row.get('created',0),reverse=True)
+    return {'ok':True,'fabric':True,'jobs':jobs,'available':sorted(available),'unavailable':unavailable}
+
+
 def _endpoint_allow_cli_fallback(host, port, code, mode):
     """6.1 migration fallback: route an endpoint approval from the CLI itself.
 
@@ -6635,6 +6666,8 @@ def main():
             if a.command=="disc-import":
                 action=a.args[0] if a.args else "drives"
                 body=json.loads(a.args[1]) if len(a.args)>1 else {}
+                if action=='fabric-jobs':
+                    print(json.dumps(_fabric_import_jobs(a.host,a.port),indent=2));return 0
                 result=_target_post(a.host,a.port,a.node,"/v1/media/import",{"action":action,"payload":body},timeout=120.0)
                 print(json.dumps(result,indent=2));return 0
             if a.command=="notifications":

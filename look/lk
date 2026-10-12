@@ -19544,6 +19544,8 @@ def media(args):
     if raw in {"import","disc","rip"}:
         import disc_ui
         def factory(node):
+            if node=='fabric':
+                return lambda action,payload:_media_fabric_cli(['disc-import','fabric-jobs','{}'])
             if sys.platform=='darwin' and (node is None or node.casefold() in _media_local_node_names()):
                 # macOS grants removable-volume access to the foreground terminal.
                 # The launch agent can discover a disc but cannot necessarily read it.
