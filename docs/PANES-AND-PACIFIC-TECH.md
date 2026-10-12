@@ -6,8 +6,7 @@ The original LOOK stays open. The new shell can run `l`, `lk`, `lkn`, `lk player
 or any other command. W remains search text in FILTER and is not an editor shortcut.
 Remote Fabric directories are not local shell working directories.
 
-With the shared Kitty profile (`./install.sh --kitty`, then reload with
-Ctrl-Shift-F5 or restart Kitty):
+With the shared Kitty profile (`./install.sh --kitty`, then fully quit and restart Kitty once):
 
 - Option/Alt-Shift-W cycles pane focus; two panes toggle back and forth.
 - Ctrl-Shift-W closes the focused pane; Command-W also works on Mac.

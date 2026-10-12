@@ -40,7 +40,7 @@ def test_refused_pane_does_not_launch_shell(tmp_path,monkeypatch):
     monkeypatch.delenv('TMUX',raising=False);monkeypatch.setenv('KITTY_WINDOW_ID','42')
     monkeypatch.setattr(style.shutil,'which',lambda name:'/bin/'+name)
     run=Mock(return_value=SimpleNamespace(returncode=1));monkeypatch.setattr(style.subprocess,'run',run)
-    assert 'enable the LOOK Kitty profile' in style.open_pane(tmp_path)
+    assert 'fully restart Kitty' in style.open_pane(tmp_path)
     assert run.call_count==1
 
 
