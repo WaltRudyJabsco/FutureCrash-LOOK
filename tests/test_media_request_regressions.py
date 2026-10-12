@@ -483,3 +483,40 @@ def test_media_find_sort_filter_keys_and_selection(lk,monkeypatch,keys,expected)
     action,selected=lk._media_selector(rows)
     assert action=='play' and [row['id'] for row in selected]==expected
     assert 'SORT ' in output.getvalue()
+
+
+@pytest.mark.parametrize('row,label',[
+    ({'path':'/music/a.flac'},'Audio'),
+    ({'path':'/movies/PCU.mkv'},'Movie'),
+    ({'path':'/television/episode.m4v'},'TV'),
+    ({'path':'/Podcasts/episode.mp3'},'Podcast'),
+    ({'path':'/clips/a.mp4'},'Video'),
+])
+def test_media_find_readable_types(lk,row,label):
+    assert lk._media_find_type(row)==label
+
+
+def test_type_sort_groups_albums_across_formats_and_track_artists(lk):
+    def row(title,album,track,artist,fmt):
+        return {'title':title,'album':album,'track':track,'disc':1,'artist':artist,'album_artist':'Oscar Peterson & Stéphane Grappelli','format':fmt,'path':'/music/'+title+'.'+fmt}
+    rows=[row('Z first','Together',1,'Oscar Peterson','flac'),row('A second','Together',2,'Stéphane Grappelli','mp3'),row('Other album','Another',1,'Oscar Peterson','flac')]
+    assert [r['title'] for r in lk._media_find_order(rows,4)]==['Other album','Z first','A second']
+
+
+@pytest.mark.parametrize('width',[33,65,87,120])
+def test_media_columns_fit_unicode_and_have_readable_headers(lk,width):
+    row={'path':'/music/a.flac','artist':'Stéphane 演奏者','title':'Very long title '*12,'album':'Together','track':2}
+    text=lk._strip_ansi(lk._media_find_row(row,width))
+    import unicodedata
+    cells=sum(0 if unicodedata.combining(c) else 2 if unicodedata.east_asian_width(c) in {'W','F'} else 1 for c in text)
+    assert cells==width and text.startswith('Audio')
+    header=lk._strip_ansi(lk._media_find_row({},width,header=True))
+    assert 'TYPE' in header and 'TITLE' in header
+    if width>=65:assert 'ARTIST' in header and 'ALBUM' in header
+
+
+def test_apple_tv_remote_error_names_owner_and_does_not_launch(lk,monkeypatch):
+    monkeypatch.setattr(lk.sys,'platform','darwin')
+    monkeypatch.setattr(lk,'_media_local_node_names',lambda:{'m3'})
+    opened,message=lk._media_open_with({'node':'3090','path':'/tv/episode.m4v'},'TV')
+    assert not opened and '3090' in message and 'Shift-T does not transfer' in message

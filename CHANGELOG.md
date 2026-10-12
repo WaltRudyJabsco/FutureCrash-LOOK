@@ -1,3 +1,9 @@
+## 2026-10-12 · Readable Media Find types and albums
+
+- Show type markers and aligned Artist / Title / Album columns, with a compact title-first layout in narrow terminals and the existing row/selection palette.
+- Type sort groups by album artist/artist, album, disc and track rather than splitting albums by codec format.
+- Clarify that remote Apple TV sources must be copied or mounted on the Mac before local handoff; name the source owner.
+
 ## 2026-10-12 · Optical disc catalog cleanup
 
 - Exclude raw DVD VIDEO_TS VOB segments and Blu-ray BDMV/STREAM transport pieces from Media Find, including cached entries from ejected discs.

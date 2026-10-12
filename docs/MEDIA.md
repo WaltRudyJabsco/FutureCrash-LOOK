@@ -270,3 +270,14 @@ The button requests the browser's full-screen mode directly from your tap. On
 Apple browsers that only support native video full screen, it uses that video
 player. Where system full screen is unavailable, the player fills the browser
 viewport with the same exit button; browser chrome may remain visible.
+
+Media Find shows readable type labels (Audio, Movie, TV, Video, Podcast), plus
+aligned Artist, Title and Album columns when space permits. Narrow terminals
+use a compact title-first row. Movie/TV/Podcast labels use explicit category or
+folder context; unknown audio remains Audio. This does not add photo/PDF scanning.
+Shift-F's Type order groups by album artist (falling back to artist), album, disc
+and track number; different codec formats no longer split an album.
+
+Shift-T hands a local file to Apple TV on a Mac. A source stored on another node
+must first be copied or mounted on that Mac. The error names the source owner;
+Shift-T does not transfer files or change Apple TV's playback authorization.
