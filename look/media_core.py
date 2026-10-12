@@ -155,7 +155,16 @@ def empty_library() -> dict[str, Any]:
 
 
 
+def is_optical_fragment(path: Path) -> bool:
+    """Disc menus/title segments belong to import discovery, not the library."""
+    parts=tuple(part.casefold() for part in path.parts)
+    suffix=path.suffix.casefold()
+    return (suffix=='.vob' and 'video_ts' in parts[:-1]) or (
+        suffix in {'.m2ts','.mts'} and any(parts[i:i+2]==('bdmv','stream') for i in range(len(parts)-2)))
+
+
 def is_media_path(path: Path) -> bool:
+    if is_optical_fragment(path):return False
     if path.suffix.casefold() not in MEDIA_EXTENSIONS:return False
     if path.suffix.casefold()!='.ts':return True
     # .ts is both TypeScript and MPEG transport stream. Check packet sync bytes,
@@ -177,7 +186,8 @@ def normalize_library(data: Any) -> dict[str, Any]:
     if not isinstance(data, dict):
         return empty_library()
     roots = [str(x) for x in (data.get("roots") or []) if str(x).strip()]
-    entries = [dict(x) for x in (data.get("entries") or []) if isinstance(x, dict) and x.get("path")]
+    # Old scans may retain ejected discs; apply the same rule when reading receipts.
+    entries = [dict(x) for x in (data.get("entries") or []) if isinstance(x, dict) and x.get("path") and not is_optical_fragment(Path(str(x['path'])))]
     # Overlapping scans describe one physical file, not additional copies.
     unique={}
     for row in entries:
