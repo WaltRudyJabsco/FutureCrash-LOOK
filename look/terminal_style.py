@@ -442,6 +442,13 @@ def main(argv=None,read_key=None):
         print('LOOK TERMINAL · '+str(exc),file=sys.stderr);return 1
 
 
+def pane_shortcuts():
+    if os.environ.get('TMUX'):
+        return ['Ctrl-B then O switch pane','exit closes shell pane']
+    focus='Option-Shift-W' if sys.platform=='darwin' else 'Alt-Shift-W'
+    return [focus+' switch pane','Ctrl-Shift-W close focused pane']
+
+
 def open_pane(path):
     """Open a sibling shell; the terminal owns its lifetime, never LOOK."""
     cwd=Path(path).expanduser().resolve()
@@ -463,7 +470,7 @@ def open_pane(path):
             result=subprocess.run(command,capture_output=True,text=True,timeout=8,check=False)
             if result.returncode:
                 return 'Pane blocked; fully restart Kitty after enabling the LOOK profile (./install.sh --kitty)'
-        return 'Shell opened beside LOOK'
+        return 'Shell opened beside LOOK · '+' · '.join(pane_shortcuts())
     except (OSError,ValueError,subprocess.TimeoutExpired):
         return 'Pane unavailable; check the terminal setup'
 

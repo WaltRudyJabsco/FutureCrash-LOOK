@@ -16,6 +16,16 @@ With the shared Kitty profile (`./install.sh --kitty`, then fully quit and resta
 - Escape keeps the active application's meaning. Exiting LOOK in a sibling shell
   returns to that shell; `exit` or the terminal close shortcut closes the pane.
 
+After W successfully opens a pane, LOOK keeps the focus/close shortcuts in its
+footer in both BROWSE and FILTER. The opening notice includes the same reminder.
+On Mac it says Option-Shift-W; on other Kitty platforms it says Alt-Shift-W.
+This reminder belongs to the original LOOK session; the sibling remains a normal
+independent shell.
+
+Opening or closing a pane wakes LOOK on the terminal's resize signal. The surviving
+browser reflows its grid and footer at the new width immediately, preserving its
+filter/marks and keeping the current page within the rebuilt list.
+
 The W helper also supports existing tmux sessions. Use tmux's configured pane
 focus/close shortcuts there (defaults: Ctrl-B then O, and shell `exit`).
 Other terminals continue to run LOOK normally; W explains that splits require
