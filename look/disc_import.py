@@ -139,8 +139,12 @@ def drives():
                 if not matches and len(rows)==1 and len(visible)==1:matches=rows
                 if matches:
                     matches[0]['makemkv_source']='disc:'+fields[0]
+                    if fields[5]:matches[0]['disc']=fields[5]
                 else:rows.append({'id':'disc:'+fields[0],'device':device,'label':fields[4],'disc':fields[5],'mount':'','makemkv_source':'disc:'+fields[0]})
         except (OSError,ValueError,subprocess.SubprocessError) as exc:warnings.append(str(exc)[:200])
+    try:from . import disc_metadata
+    except ImportError:import disc_metadata
+    for row in rows:row['kind']=disc_metadata.disc_hint(row)['kind']
     return {'ok':True,'platform':sys.platform,'drives':rows,'tools':{name:tool(name) for name in
         ('ffmpeg','ffprobe','cd-paranoia','cdparanoia','HandBrakeCLI','makemkvcon')},'warnings':warnings}
 
@@ -223,6 +227,10 @@ def audio_tracks(mount):
 def inspect(identifier,kind='cd'):
     if kind not in {'cd','dvd','bluray'}:raise ValueError('Use cd, dvd or bluray')
     drive=selected_drive(identifier)
+    try:from . import disc_metadata
+    except ImportError:import disc_metadata
+    hint=disc_metadata.disc_hint(drive)
+    if hint['kind']:kind=hint['kind']
     if kind=='cd':
         ripper=tool('cd-paranoia') or tool('cdparanoia');toc=None
         if ripper and drive['device']:toc=toc_from_query(query([ripper,'-d',drive['device'],'-Q']))
@@ -230,21 +238,24 @@ def inspect(identifier,kind='cd'):
         if native and not toc:toc=toc_from_mount(drive['mount'])
         if not toc and not native:raise ValueError('Audio CD not readable; insert a CD and check drive permissions / cd-paranoia')
         metadata={'title':drive.get('disc') or '', 'tracks':[re.sub(r'^\d+\s*[-.]?\s*','',path.stem) for path in native]}
-        return {'ok':True,'drive':drive,'engine':'cd-paranoia' if ripper and drive['device'] else 'macOS audio volume','toc':toc,'releases':lookup(toc),'metadata':metadata,'tracks':len(native) if not toc else toc['count']}
+        return {'ok':True,'kind':kind,'drive':drive,'engine':'cd-paranoia' if ripper and drive['device'] else 'macOS audio volume','toc':toc,'releases':lookup(toc),'metadata':metadata,'tracks':len(native) if not toc else toc['count']}
     if drive.get('makemkv_source'):
         text=query([tool('makemkvcon'),'-r','--cache=128','info',drive['makemkv_source']],90)
         titles={}
         for fields in robot_records(text,'TINFO'):
             if len(fields)>=4 and fields[1] in {'2','9','10','16','27'}:
                 titles.setdefault(fields[0],{'index':fields[0]})[{'2':'name','9':'duration','10':'bytes','16':'source','27':'filename'}[fields[1]]]=fields[3]
-        return {'ok':True,'drive':drive,'engine':'makemkv','titles':list(titles.values())}
+        for fields in robot_records(text,'CINFO'):
+            if len(fields)>=3 and fields[0]=='2' and not hint['title']:
+                hint['title']=disc_metadata.disc_hint({'disc':fields[-1]})['title']
+        return {'ok':True,'kind':kind,'drive':drive,'engine':'makemkv','titles':list(titles.values()),'metadata':{'title':hint['title']}}
     engine=tool('HandBrakeCLI')
     if not engine:raise ValueError('Install HandBrakeCLI or MakeMKV for DVD/Blu-ray imports')
     text=query([engine,'-i',drive['mount'] or drive['device'],'-t','0','--scan'],90)
     titles=[]
     for match in re.finditer(r'\+ title (\d+):(.*?)(?=\+ title \d+:|\Z)',text,re.S):
         duration=re.search(r'duration:\s*([\d:]+)',match[2]);titles.append({'index':match[1],'duration':duration[1] if duration else ''})
-    return {'ok':True,'drive':drive,'engine':'handbrake','titles':titles}
+    return {'ok':True,'kind':kind,'drive':drive,'engine':'handbrake','titles':titles,'metadata':{'title':hint['title']}}
 
 
 def job_path(identifier):
@@ -290,7 +301,7 @@ def start(payload):
     if kind!='cd' and not drive.get('makemkv_source') and payload.get('title_index')=='all':raise ValueError('HandBrake imports one chosen title; all requires MakeMKV')
     metadata=payload.get('metadata') or {}
     if not isinstance(metadata,dict):raise ValueError('Invalid metadata')
-    if any(key in metadata and (not isinstance(metadata[key],str) or len(metadata[key])>300) for key in ('title','artist','release_id')):raise ValueError('Invalid release metadata')
+    if any(key in metadata and (not isinstance(metadata[key],str) or len(metadata[key])>300) for key in ('title','artist','release_id','year','source','description')):raise ValueError('Invalid release metadata')
     tracks=metadata.get('tracks',[])
     if not isinstance(tracks,list) or len(tracks)>99 or any(not isinstance(value,str) or len(value)>300 for value in tracks):raise ValueError('Invalid track metadata')
     if 'disc' in metadata and (not isinstance(metadata['disc'],int) or not 1<=metadata['disc']<=99):raise ValueError('Invalid disc number')
@@ -369,6 +380,12 @@ def worker(identifier):
                     parts=re.split(rb'[\r\n]',buffer);buffer=parts.pop()
                     for part in parts:
                         line=part.decode('utf-8','replace');print(line,flush=True)
+                        if line.startswith('PRGT:'):
+                            fields=next(robot_records(line,'PRGT'),[])
+                            if len(fields)>=3:
+                                # MakeMKV restarts progress when preparation ends.
+                                label=''.join(char for char in fields[2] if ord(char)>=32 and not 127<=ord(char)<160)[:160]
+                                save(stage=label,percent=None,phase_started=time.time())
                         if progress(line) is not None:save(percent=progress(line))
                     buffer=buffer[-65536:]
                 elif process.poll() is not None:break
@@ -410,7 +427,8 @@ def worker(identifier):
         if row['kind']!='cd':
             for path in outputs:
                 atomic(path.with_suffix('.info.json'),{'title':row['title'] if len(outputs)==1 else row['title']+' · '+path.stem,
-                    'description':'Imported from '+drive.get('label','optical disc')})
+                    'description':metadata.get('description') or 'Imported from '+drive.get('label','optical disc'),
+                    'year':metadata.get('year') or '', 'metadata_source':metadata.get('source') or ''})
         for path in outputs:
             if not path.is_file() or path.stat().st_size==0:raise ValueError('Empty import output')
             save(stage='verifying media')
@@ -456,6 +474,10 @@ def request(action,payload=None):
         except ImportError:import media_storage
         return {'ok':True,'delivery':media_storage.start(job['id'],job['output'],payload['destination'],job['kind'])}
     if action=='drives':return drives()
+    if action=='movie-lookup':
+        try:from . import disc_metadata
+        except ImportError:import disc_metadata
+        return disc_metadata.movies(payload.get('query'))
     if action=='scan':return inspect(payload.get('drive'),payload.get('kind','cd'))
     if action=='start':return start(payload)
     if action=='jobs':return {'ok':True,'jobs':list_jobs()}

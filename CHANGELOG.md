@@ -1,3 +1,10 @@
+## 2026-10-11 · Disc identification and Firefly Garden
+
+- Suggest disc names, detect mounted CD/DVD/Blu-ray formats, and offer confirmed Wikidata movie title/year matches with saved provenance.
+- Offer the longest feature as an explicit default, show an import summary, reuse configured library roots, and optionally remember changed destinations.
+- Explain missing MakeMKV setup, distinguish preparation/saving progress, and let H hide old job history without deleting files.
+- Add Firefly Garden's drifting lights and moving meadow to the player's twelve visual modes and ten-second Cycle, using the terminal palette's green.
+
 ## 2026-10-11 · Negative Signal
 
 - Add a saved ambient V toggle and launch override for normal/negative Signal rendering, covering both ambient and conversation fields while preserving drawing programs and surrounding UI.
