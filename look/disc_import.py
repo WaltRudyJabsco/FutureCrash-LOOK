@@ -57,7 +57,8 @@ def download_cover(folder,release_id):
 def tool(name):
     found=shutil.which(name)
     if found:return found
-    for base in ('/opt/homebrew/bin','/usr/local/bin','/home/linuxbrew/.linuxbrew/bin','/usr/bin','/bin'):
+    # Background services often omit the user's executable directory from PATH.
+    for base in (Path.home()/'.local/bin','/opt/homebrew/bin','/usr/local/bin','/home/linuxbrew/.linuxbrew/bin','/usr/bin','/bin'):
         path=Path(base)/name
         if path.is_file() and os.access(path,os.X_OK):return str(path)
     if name=='makemkvcon':
@@ -129,7 +130,9 @@ def drives():
     if tool('makemkvcon'):
         try:
             text=query([tool('makemkvcon'),'-r','--noscan','--cache=1','info','disc:9999'],15)
-            visible=[fields for fields in robot_records(text,'DRV') if len(fields)>=6 and fields[1]=='1' and fields[2]=='1']
+            # Current MakeMKV reports real drives as 0/999 or 2/999; empty
+            # inventory slots have no drive name. Do not treat state as booleans.
+            visible=[fields for fields in robot_records(text,'DRV') if len(fields)>=6 and fields[0].isdigit() and fields[4]]
             for fields in visible:
                 device=fields[6] if len(fields)>6 else ''
                 matches=[row for row in rows if device and row['device']==device]
