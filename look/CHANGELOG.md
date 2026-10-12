@@ -1,3 +1,9 @@
+## 2026-10-12 · Signal and Albert full-screen players
+
+- Add Full screen / Exit full screen controls for video and audio. Prefer browser full screen, fall back to native iOS video full screen, then a viewport-filling view when the browser cannot grant full screen.
+- Keep playback elements attached and restore inline controls on exit. Support Escape, system exits, focus return and cleanup when media is dismissed.
+- Keep video controls visible; enlarge audio artwork/activity visuals without routing audio through Web Audio. Respect reduced motion for Signal's ambient visualization.
+
 ## 2026-10-12 · Browser movie audio compatibility
 
 - Use stereo AAC for browser movie audio when the source has surround/unknown channels, including AAC already inside MP4. Preserve compatible H.264 video and native/original soundtracks.

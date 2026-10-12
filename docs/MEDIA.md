@@ -252,3 +252,21 @@ other movie soundtracks are converted to stereo AAC at 48 kHz. This keeps the
 browser copy conservative for phones/tablets while native playback and original
 rips retain their original audio channels. Older browser cache copies rebuild
 when the representation changes.
+
+### Full-screen browser players
+
+Signal and Albert have a **Full screen** button for video and audio. Video keeps
+its native playback controls and fits the screen without cropping. Use **Exit
+full screen**, Escape on a keyboard, or the device's native Done/back control to
+return to the inline player. Playback position and the playing media element are
+preserved. Albert's existing expand/contract option remains available separately.
+
+Audio opens a larger view of the title and artwork/activity visualization, with
+playback controls. Signal keeps its ASCII/Image/Art off choices and adds subtle
+ambient bars; these are decorative activity visuals, not measured audio levels.
+Albert enlarges its existing audio activity display. Neither changes audio routing.
+
+The button requests the browser's full-screen mode directly from your tap. On
+Apple browsers that only support native video full screen, it uses that video
+player. Where system full screen is unavailable, the player fills the browser
+viewport with the same exit button; browser chrome may remain visible.

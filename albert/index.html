@@ -61,6 +61,19 @@ body.dark .beacon-layer,body.terminal .beacon-layer{mix-blend-mode:screen}
 .auth-gate{position:fixed;inset:0;z-index:10000;background:rgba(243,239,227,.97);display:flex;align-items:center;justify-content:center;padding:24px}.auth-gate[hidden]{display:none}.auth-card{width:min(520px,100%);border-top:1px solid var(--ink);padding-top:16px}.auth-kicker{font-size:9px;letter-spacing:.16em;text-transform:uppercase;color:var(--muted)}.auth-title{font-family:ui-serif,Georgia,serif;font-size:24px;margin:8px 0 18px}.auth-code{font-size:42px;letter-spacing:.16em;margin:16px 0}.auth-command{font-size:12px;border:1px solid var(--line);padding:10px;margin:10px 0}.auth-note{font-size:10px;color:var(--muted);line-height:1.5}
 
 .place-map{border:1px solid var(--line);background:var(--wash);margin:10px 0;padding:10px}.place-map svg{display:block;width:100%;height:230px}.map-line{stroke:var(--line);stroke-width:.6;fill:none}.map-point{fill:var(--paper);stroke:var(--ink);stroke-width:1.2}.map-label{font-size:4px;fill:var(--ink);font-family:ui-monospace,SFMono-Regular,Menlo,monospace}.place-list{display:grid;gap:6px;margin-top:9px}.place-row{font-size:10px;line-height:1.45;border-top:1px dotted var(--line);padding-top:6px}.saved-tools{display:flex;gap:6px;flex-wrap:wrap;margin-top:8px}.saved-title{border:0;border-bottom:1px solid var(--line);background:transparent;padding:5px 2px;min-width:180px;font-size:11px}
+
+body.media-fullscreen-open{overflow:hidden}
+.media-fullscreen-button{position:absolute;z-index:4;left:8px;top:8px;border:1px solid rgba(255,255,255,.6);background:#171717;color:#fff;padding:9px 12px;font:inherit;cursor:pointer}
+.media-audio .audio-card{padding-top:58px}
+.media.media-fullscreen{position:fixed;inset:0;z-index:10000;margin:0;width:100%;height:100dvh;box-sizing:border-box;border:0;background:#111;display:flex;flex-direction:column;overflow:auto;padding:env(safe-area-inset-top) env(safe-area-inset-right) env(safe-area-inset-bottom) env(safe-area-inset-left)}
+.media-fullscreen .media-viewport{flex:1;aspect-ratio:auto;min-height:0;height:100%;overflow:hidden}
+.media-fullscreen .media-viewport>video{height:100%;max-height:none;object-fit:contain}
+.media-fullscreen .media-expand{display:none}
+.media-fullscreen .media-preparation{flex:0 0 auto}
+.media-fullscreen .audio-card{flex:1;display:flex;flex-direction:column;justify-content:center;align-items:center;text-align:center}
+.media-fullscreen .now{font-size:clamp(24px,5vw,48px)}
+.media-fullscreen .audio-eq{width:min(80vw,800px);height:30vh;min-height:100px}
+.media-fullscreen audio{flex:0 0 auto;padding:12px 0}
 </style>
 </head>
 <body>
@@ -141,7 +154,7 @@ const capabilities=[
   ['watch.create','Create a quiet recurring/conditional watch','external effect'],['system.open_app','Open an available application','local effect']
 ];
 async function loadSaved(){
-  try{const r=await fetch('/api/saved',{cache:'no-store'});if(r.ok){const d=await r.json();state.saved=d.items||[];render();return}}catch{}
+  try{const r=await fetch('/api/saved',{cache:'no-store'});if(r.ok){const d=await r.json();state.saved=d.items||[];render();return}}catch{nativeVideo=null}
   try{state.saved=JSON.parse(localStorage.getItem('albert5.saved')||'[]')}catch{state.saved=[]}
 }
 async function savedRequest(body){const r=await fetch('/api/saved',{method:'POST',headers:{'content-type':'application/json'},body:JSON.stringify(body)});if(!r.ok)throw new Error('saved object update failed');return r.json()}
@@ -164,7 +177,7 @@ function renderBody(f){
     const subtitle=item?[item.artist,item.album].filter(Boolean).join(' · '):(f.subtitle||'');
     const attrs=media.id?` data-media-node="${esc(media.node||'')}" data-media-id="${esc(media.id)}" data-media-index="${qi}" data-fold-id="${esc(f.id)}"`:` src="${esc(f.src||'')}"`;
     const transport=queue?`<div class="audio-transport"><button onclick="event.stopPropagation();mediaStep('${f.id}',-1)" title="Previous">◀</button><span class="count">${qi+1} / ${queue.length}</span><button onclick="event.stopPropagation();mediaStep('${f.id}',1)" title="Next">▶</button><button onclick="event.stopPropagation();mediaClear('${f.id}')" title="Clear queue">clear</button></div>`:'';
-    return `<div class="media"><div class="audio-card"><div class="now">${esc(title)}</div><div class="sub">${esc(subtitle)}</div>${transport}<div class="audio-eq" id="eq-${f.id}" aria-label="audio activity">${'<i></i>'.repeat(16)}</div></div><audio data-eq="eq-${f.id}" controls autoplay${attrs}></audio></div>${f.note?`<div class="meta">${esc(f.note)}</div>`:''}`;
+    return `<div class="media media-audio"><button class="media-fullscreen-button" data-media-fullscreen onclick="toggleMediaFullscreen(this,event)">Full screen</button><div class="audio-card"><div class="now">${esc(title)}</div><div class="sub">${esc(subtitle)}</div>${transport}<div class="audio-eq" id="eq-${f.id}" aria-label="audio activity">${'<i></i>'.repeat(16)}</div></div><audio data-eq="eq-${f.id}" controls autoplay${attrs}></audio></div>${f.note?`<div class="meta">${esc(f.note)}</div>`:''}`;
   }
   if(f.type==='video'){
     const queue=Array.isArray(f.queue)&&f.queue.length?f.queue:null;
@@ -174,7 +187,7 @@ function renderBody(f){
     const attrs=media.id?` data-media-node="${esc(media.node||'')}" data-media-id="${esc(media.id)}" data-media-index="${qi}" data-fold-id="${esc(f.id)}"`:` src="${esc(f.src||'')}"`;
     const transport=queue?`<div class="audio-transport"><button onclick="event.stopPropagation();mediaStep('${f.id}',-1)">◀</button><span class="count">${qi+1} / ${queue.length}</span><button onclick="event.stopPropagation();mediaStep('${f.id}',1)">▶</button><button onclick="event.stopPropagation();mediaClear('${f.id}')">clear</button></div>`:'';
     const player=(media.id||f.src)?`<video controls autoplay playsinline${attrs}></video>`:`${scaledPage(f.embed||CLASSIC_ARTS,f.id)}`;
-    return `<div class="media-grid" id="media-grid-${f.id}"><div class="media"><div class="media-viewport" id="media-view-${f.id}"><button class="media-expand" onclick="toggleMediaExpand('${f.id}',event)">expand</button>${player}</div>${media.id?'<div class="prose media-preparation" role="status">Preparing / loading video · first playback may take a few minutes</div>':''}${transport}</div><div class="side"><div class="prose">${esc(f.text||f.note||'')}</div>${f.external?`<div class="actions"><button class="action primary" onclick="window.open('${esc(f.external)}','_blank','noopener')">open official feed</button></div>`:''}</div></div>`;
+    return `<div class="media-grid" id="media-grid-${f.id}"><div class="media"><div class="media-viewport" id="media-view-${f.id}"><button class="media-fullscreen-button" data-media-fullscreen onclick="toggleMediaFullscreen(this,event)">Full screen</button><button class="media-expand" onclick="toggleMediaExpand('${f.id}',event)">expand</button>${player}</div>${media.id?'<div class="prose media-preparation" role="status">Preparing / loading video · first playback may take a few minutes</div>':''}${transport}</div><div class="side"><div class="prose">${esc(f.text||f.note||'')}</div>${f.external?`<div class="actions"><button class="action primary" onclick="window.open('${esc(f.external)}','_blank','noopener')">open official feed</button></div>`:''}</div></div>`;
   }
   if(f.type==='image') return `<div class="media"><img src="${esc(f.src)}" alt="${esc(f.title||'image')}" /></div>${f.text?`<div class="prose">${esc(f.text)}</div>`:''}`;
   if(f.type==='file') return `<div class="object"><div class="object-label">${esc(f.mime||'object')}</div>${esc(f.name||f.title)}${f.detail?`<div class="meta">${esc(f.detail)}</div>`:''}</div>`;
@@ -203,8 +216,69 @@ async function replyFold(id){const input=document.getElementById(`thread-${id}`)
 function scaledPage(url,id){return `<div class="scaled-page" data-scaled-page><iframe allow="autoplay; fullscreen" referrerpolicy="no-referrer" src="${esc(url||CLASSIC_ARTS)}"></iframe></div>`}
 function fitScaledPages(){document.querySelectorAll('[data-scaled-page]').forEach(box=>{const frame=box.querySelector('iframe');if(!frame)return;const baseW=1200,baseH=760;const scale=Math.min(box.clientWidth/baseW,box.clientHeight/baseH);frame.style.transform=`scale(${Math.max(.1,scale)})`;frame.style.left=Math.max(0,(box.clientWidth-baseW*scale)/2)+'px';frame.style.top=Math.max(0,(box.clientHeight-baseH*scale)/2)+'px'})}
 function videoFallback(video){const url=video.dataset.fallback;if(!url)return;try{video.pause()}catch{}const host=video.parentElement;video.remove();host.insertAdjacentHTML('beforeend',scaledPage(url,host.id));requestAnimationFrame(fitScaledPages)}
+// Full screen changes presentation only: the playing media element stays attached.
+function createMediaFullscreen(doc){
+ let host=null,previousFocus=null,nativeVideo=null,playingVideo=null,oldControls=false;
+ const active=target=>host===target;
+ function refresh(){
+  for(const button of doc.querySelectorAll('[data-media-fullscreen]')){
+   const target=button.closest('.media')||button.closest('#mediaPanel');
+   const on=active(target);button.textContent=on?'Exit full screen':'Full screen';
+   button.setAttribute('aria-pressed',String(on));
+  }
+ }
+ function finish(){
+  const old=host;host=null;
+  if(old)old.classList.remove('media-fullscreen');if(playingVideo)playingVideo.controls=oldControls;playingVideo=null;
+  nativeVideo=null;doc.body.classList.remove('media-fullscreen-open');refresh();
+  if(previousFocus?.isConnected)previousFocus.focus();else old?.querySelector('[data-media-fullscreen]')?.focus();previousFocus=null;
+ }
+ async function exit(){
+  try{
+   if(nativeVideo?.webkitDisplayingFullscreen)nativeVideo.webkitExitFullscreen();
+   else if(doc.fullscreenElement||doc.webkitFullscreenElement)await (doc.exitFullscreen?.()||doc.webkitExitFullscreen?.());
+  }finally{finish()}
+ }
+ async function toggle(target){
+  if(!target)return;
+  if(active(target)){await exit();return}
+  if(host)await exit();
+  host=target;previousFocus=doc.activeElement;const video=target.querySelector('video');
+  playingVideo=video;oldControls=video?.controls||false;if(video)video.controls=true;
+  target.classList.add('media-fullscreen');doc.body.classList.add('media-fullscreen-open');refresh();
+  if(video&&!video.dataset.fullscreenBound){
+   video.dataset.fullscreenBound='1';video.addEventListener('webkitendfullscreen',finish);
+  }
+  try{
+   const request=target.requestFullscreen||target.webkitRequestFullscreen;
+   if(request){await request.call(target);return}
+   if(video?.webkitEnterFullscreen){nativeVideo=video;video.webkitEnterFullscreen();return}
+  }catch{
+   // Some iOS browsers expose the API but only permit native video full screen.
+   try{if(video?.webkitEnterFullscreen){nativeVideo=video;video.webkitEnterFullscreen();return}}catch{nativeVideo=null}
+  }
+  target.querySelector('[data-media-fullscreen]')?.focus();
+ }
+ function changed(){if(host&&!doc.fullscreenElement&&!doc.webkitFullscreenElement&&!nativeVideo)finish()}
+ doc.addEventListener('fullscreenchange',changed);doc.addEventListener('webkitfullscreenchange',changed);
+ doc.addEventListener('keydown',event=>{
+  if(!host)return;
+  if(event.key==='Escape'){event.preventDefault();exit().catch(finish)}
+  if(event.key==='Tab'){
+   const buttons=[...host.querySelectorAll('button,a[href],input,select,video[controls],audio[controls]')].filter(el=>!el.disabled&&!el.hidden&&(!el.getClientRects||el.getClientRects().length));
+   if(!buttons.length)return;
+   const first=buttons[0],last=buttons[buttons.length-1];
+   if(event.shiftKey&&(doc.activeElement===first||!host.contains(doc.activeElement))){event.preventDefault();last.focus()}
+   else if(!event.shiftKey&&(doc.activeElement===last||!host.contains(doc.activeElement))){event.preventDefault();first.focus()}
+  }
+ });
+ return {toggle,exit,active,refresh,closeWithin(root){if(host&&(root===host||root.contains(host)))exit().catch(finish)}};
+}
+
+const albertFullscreen=createMediaFullscreen(document);
+function toggleMediaFullscreen(button,event){event?.stopPropagation();albertFullscreen.toggle(button.closest('.media')).then(()=>requestAnimationFrame(fitScaledPages)).catch(err=>statusLine('full screen · '+err.message))}
 function toggleMediaExpand(id,event){event?.stopPropagation();const grid=document.getElementById(`media-grid-${id}`);if(!grid)return;grid.classList.toggle('expanded');const btn=grid.querySelector('.media-expand');if(btn)btn.textContent=grid.classList.contains('expanded')?'contract':'expand';requestAnimationFrame(fitScaledPages)}
-window.addEventListener('resize',()=>requestAnimationFrame(fitScaledPages));
+window.addEventListener('resize',()=>requestAnimationFrame(fitScaledPages));document.addEventListener('fullscreenchange',()=>requestAnimationFrame(fitScaledPages));
 
 function renderPipeline(p){if(!p)return'';return Object.entries(p).map(([k,v])=>`<div class="route"><b>${esc(k)}</b><div>${esc(v)}</div></div>`).join('')}
 function renderSources(s){if(!s?.length)return'';return `<div class="pillbar">${s.map(x=>`<span class="pill">${esc(x)}</span>`).join('')}</div>`}
@@ -217,6 +291,7 @@ function savedShell(f){
   return `<article class="fold saved-fold" id="saved-${f.id}" data-kind="${esc(f.kind||'thing')}"><button class="summary" onclick="reopenSaved('${f.id}')"><div><div class="title">${esc(f.title||'Untitled')}</div><div class="meta">${esc(f.meta||'')} · saved${f.pinned?' · pinned':''}</div></div><div class="right">open</div></button><div class="body open"><div class="inner"><div class="content"><div class="saved-tools"><button class="action primary" onclick="reopenSaved('${f.id}')">open on paper</button><input class="saved-title" id="saved-title-${f.id}" value="${esc(f.title||'')}" onclick="event.stopPropagation()" onkeydown="if(event.key==='Enter'){event.stopPropagation();renameSaved('${f.id}')}"/><button class="action" onclick="renameSaved('${f.id}')">rename</button><button class="action" onclick="toggleSavedPin('${f.id}')">${pin}</button><button class="action quiet-action" onclick="removeSaved('${f.id}')">delete</button></div></div></div></div></article>`
 }
 function teardownMedia(root=stream){
+  albertFullscreen.closeWithin(root);
   root.querySelectorAll('audio,video').forEach(media=>{
     const eq=AUDIO_EQ.get(media);if(eq){try{eq.stop()}catch{}AUDIO_EQ.delete(media)}
     try{media.pause()}catch{}
