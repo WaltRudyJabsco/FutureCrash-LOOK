@@ -1,3 +1,9 @@
+## 2026-10-12 · Wrapped import progress
+
+- Wrap interactive import progress, errors and paths by terminal display width; keep continuation lines in the same logical row ink.
+- Add arrow and Shift-arrow/Page-key scrolling for receipts taller than the terminal, retaining live refresh and background imports.
+- Document safe re-importing of another edition and removal of the old import's specific catalog root after verification.
+
 ## 2026-10-11 · Consistent list readability
 
 - Apply subtle alternating foreground tones and shared theme selection backgrounds to Media Find, LKMP, queues, and LOOK detail/grid/tree lists.

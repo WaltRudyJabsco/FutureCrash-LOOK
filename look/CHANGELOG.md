@@ -1,3 +1,8 @@
+## 2026-10-12 · Wrapped import progress
+
+- Wrap long import receipts and preserve each job's stripe across continuation lines; scroll with arrows and Shift-arrows/Page keys.
+- Explain re-importing widescreen/other editions without overwriting a verified original.
+
 ## 2026-10-11 · Consistent list readability
 
 - Share theme-aware list inks across Media Find, LKMP, queues and LOOK detail/grid/tree views, with subtle alternating foreground tones.
