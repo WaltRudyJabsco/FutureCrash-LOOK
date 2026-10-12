@@ -1,3 +1,8 @@
+## 2026-10-12 · Later video preview frames
+
+- Generate cached video stills about one minute in; use 20% of duration for short clips and fall back to the opening frame if duration is unknown and the seek has no image.
+- Share the same frame for local/remote ASCII and image previews, retain explicit posters, and version the cache so old black opening frames rebuild.
+
 ## 2026-10-12 · Readable Media Find types and albums
 
 - Show type markers and aligned Artist / Title / Album columns, with a compact title-first layout in narrow terminals and the existing row/selection palette.

@@ -2884,7 +2884,15 @@ def _local_media_cover(entry_id, path_hint=""):
     except OSError:
         by_name={}
     ffmpeg=_service_media_tool("ffmpeg")
-    if ffmpeg:
+    _look_catalog_modules()
+    import media_art
+    is_video=str(row.get('media_type') or '').startswith('video/') or source.suffix.casefold() in media_art.VIDEO_SUFFIXES
+    if is_video:
+        poster=media_art._external(source)
+        if poster:return poster,mimetypes.guess_type(str(poster))[0] or 'image/jpeg'
+        frame=media_art.video_frame(source,ffmpeg=ffmpeg,ffprobe=_service_media_tool('ffprobe'))
+        if frame:return frame,'image/jpeg'
+    if ffmpeg and not is_video:
         try:
             stat=source.stat()
             cache=Path.home()/".cache"/"look"/"media-art"/"served"
