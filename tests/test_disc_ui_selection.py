@@ -12,6 +12,20 @@ def job(number,title='Album',state='complete',delivery=None):
     return row
 
 
+def test_workbench_separates_inserted_disc_from_history_and_colors_states(monkeypatch):
+    import re
+    monkeypatch.setenv('LOOK_TERMINAL_THEME','paper')
+    colors=disc_ui.interface_colors()
+    inventory={'node':'Tower','drives':[{'id':'/dev/sr0','label':'Blu-ray drive','disc':'FRENCH_KISS'}],
+               'tools':{'makemkvcon':'/bin/makemkvcon'}}
+    rows=disc_ui.workbench_lines(inventory,[job(1,'PCU'),job(2,'Old failure','failed')],0,100,30,True,colors)
+    rendered='\n'.join(rows);plain=re.sub(r'\x1b\[[0-9;]*m','',rendered)
+    assert plain.index('FRENCH KISS')<plain.index('IMPORT JOBS')<plain.index('PCU')
+    assert 'complete · complete' not in plain
+    assert colors['GREEN']+'complete' in rendered and colors['RED']+'failed' in rendered
+    assert '38;2;' in colors['GREEN'] and 'Shift' not in plain
+
+
 @pytest.fixture
 def plain(monkeypatch):
     monkeypatch.setattr(disc_ui.sys,'stdin',io.StringIO())
