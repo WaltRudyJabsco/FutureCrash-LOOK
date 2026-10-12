@@ -435,3 +435,51 @@ def test_forget_root_backs_up_only_catalog_and_keeps_files(lk,monkeypatch,tmp_pa
     assert json.loads(library.read_text())['entries']==[]
     backup=next(tmp_path.glob('media_library.before-forget-*'))
     assert len(json.loads(backup.read_text())['entries'])==1
+
+
+def test_media_find_orders_and_types_use_metadata_not_filesystem(lk):
+    rows=[{'id':'a','path':'/a.mp3','title':'Zulu','media_type':'audio/mpeg','mtime':10,'added_at':20,'bytes':100},
+          {'id':'b','path':'/b.mkv','title':'Alpha','media_type':'video/matroska','mtime':30,'bytes':200},
+          {'id':'c','path':'/c.flac','title':'Beta','format':'flac','mtime':20,'added_at':40,'bytes':50}]
+    def ids(mode,reverse=False):return [row['id'] for row in lk._media_find_order(rows,mode,reverse)]
+    assert ids(0)==['a','b','c']
+    assert ids(1)==['b','c','a']
+    assert ids(2)==['b','c','a']
+    assert ids(3)==['c','a','b']
+    assert ids(4)==['c','a','b']
+    assert ids(5)==['b','a','c']
+    assert ids(0,True)==['c','b','a'] and ids(1,True)==['a','c','b']
+    assert ids(2,True)==['a','c','b'] and ids(3,True)==['a','c','b']
+    assert ids(4,True)==['b','a','c']
+    rows[0]['sources']=[{'added_at':100,'mtime':200}]
+    assert ids(2)[0]=='a' and ids(3)[0]=='a'
+    rows[0]['added_at']='nan';rows[0]['sources']=[]
+    assert ids(3)[0]=='c'
+
+
+@pytest.mark.parametrize('keys,expected',[
+    (['F','F','\r'],['new']),
+    (['G','\r'],['new']),
+    (['G','G','\r'],['old']),
+    (['F','G','\r'],['old']),
+    (['f','\r'],['old']),
+    (['F','\t','G','\r'],['new']),
+    (['/','F','F','\r'],['new']),
+])
+def test_media_find_sort_filter_keys_and_selection(lk,monkeypatch,keys,expected):
+    import io
+    class Terminal(io.StringIO):
+        def isatty(self):return True
+        def fileno(self):return 0
+    output=Terminal()
+    monkeypatch.setattr(sys,'stdin',Terminal());monkeypatch.setattr(sys,'stdout',output)
+    monkeypatch.setattr(lk.termios,'tcgetattr',lambda fd:[])
+    monkeypatch.setattr(lk.termios,'tcsetattr',lambda *args:None)
+    monkeypatch.setattr(lk.tty,'setcbreak',lambda *args:None)
+    sequence=iter(keys);monkeypatch.setattr(lk,'_read_tty_key',lambda *args:next(sequence))
+    monkeypatch.setattr(lk,'_media_visibility',lambda:{'hidden_paths':[],'hidden_trees':[],'fabric_hidden_paths':[],'fabric_hidden_trees':[]})
+    rows=[{'id':'old','path':'/old.mp3','title':'Zulu f song','media_type':'audio/mpeg','mtime':10},
+          {'id':'new','path':'/new.mkv','title':'Alpha movie','media_type':'video/matroska','mtime':30}]
+    action,selected=lk._media_selector(rows)
+    assert action=='play' and [row['id'] for row in selected]==expected
+    assert 'SORT ' in output.getvalue()

@@ -1,3 +1,9 @@
+## 2026-10-12 · Media Find sort and reverse
+
+- Match LOOK with Shift-F sort cycling (default, title, newest modified, recently added, type, largest first) and Shift-G reverse, with a clear active-mode header.
+- Keep lowercase search, marks, query and existing navigation/actions; regroup the footer by browsing, selection, playback and catalog actions.
+- Record arrival timestamps for new catalog entries, preserve them on rescans/background refreshes, and leave legacy arrival dates unknown. Carry source timestamps through Fabric collapse.
+
 ## 2026-10-12 · Catalog cleanup and browser delivery
 
 - Reconcile deleted files under nested import roots during an explicit parent scan, preserving unrelated offline roots and unreadable subtrees.

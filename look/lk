@@ -18118,6 +18118,37 @@ def _media_edit_command(args):
     except (OSError,ValueError,RuntimeError) as exc:print('LOOK MEDIA · '+str(exc),file=sys.stderr);return 1
 
 
+MEDIA_FIND_SORTS=('Default','Title','Newest modified','Recently added','Type','Largest first')
+
+
+def _media_find_order(rows,sort_mode=0,reverse=False):
+    def kind(row):
+        mime=str(row.get('media_type') or '').split('/',1)[0]
+        if mime in {'audio','video'}:return mime
+        suffix='.'+str(row.get('format') or Path(str(row.get('path') or '')).suffix.lstrip('.')).casefold()
+        return 'audio' if suffix in media_core.AUDIO_EXTENSIONS else 'video' if suffix in media_core.VIDEO_EXTENSIONS else 'other'
+    result=list(rows)
+    if not sort_mode:return result[::-1] if reverse else result
+    def number(value):
+        try:
+            value=float(value or 0)
+            return value if math.isfinite(value) else 0
+        except (TypeError,ValueError):return 0
+    def stamp(row,field):
+        return max(number(item.get(field)) for item in [row,*(row.get('sources') or row.get('locations') or [])] if isinstance(item,dict))
+    def order(row):
+        title=str(row.get('title') or '').casefold()
+        tie=(title,media_core.entry_sort_key(row),str(row.get('node') or ''),str(row.get('path') or ''))
+        if sort_mode==1:return tie
+        if sort_mode in {2,3}:return (-stamp(row,'mtime' if sort_mode==2 else 'added_at'),tie)
+        if sort_mode==4:return (kind(row),str(row.get('format') or Path(str(row.get('path') or '')).suffix.lstrip('.')).casefold(),tie)
+        return (-number(row.get('bytes')),tie)
+    result=sorted(result,key=order,reverse=reverse)
+    if sort_mode==3:
+        result=[row for row in result if stamp(row,'added_at')>0]+[row for row in result if stamp(row,'added_at')<=0]
+    return result
+
+
 def _media_selector(rows,title="FABRIC MEDIA",initial_query="",catalog_meta=None,discover=True):
     """LOOK filter semantics over Fabric media rows, with media-specific actions.
 
@@ -18151,16 +18182,18 @@ def _media_selector(rows,title="FABRIC MEDIA",initial_query="",catalog_meta=None
     info_mode=False
     show_all=False
     show_hidden=False
+    sort_mode=0;reverse_sort=False
     action=("none",None)
     view_key=None; visible=[]
     try:
         tty.setcbreak(fd)
         while True:
             # A 100k-row catalog view changes on query/mode changes, not cursor moves.
-            next_view_key=(query,show_all,show_hidden)
+            next_view_key=(query,show_all,show_hidden,sort_mode,reverse_sort)
             if next_view_key != view_key:
                 base_rows=_media_filter_rows(rows,query)
                 visible=_media_collapse(base_rows,show_all=show_all,show_hidden=show_hidden)
+                visible=_media_find_order(visible,sort_mode,reverse_sort)
                 view_key=next_view_key
             idx=max(0,min(idx,max(0,len(visible)-1)))
             selected_rows=[row for row in visible if row_id(row) in selected_ids]
@@ -18168,7 +18201,7 @@ def _media_selector(rows,title="FABRIC MEDIA",initial_query="",catalog_meta=None
             height=max(10,terminal.lines)
             width=max(56,terminal.columns)
             info_rows=13 if info_mode else 0
-            usable=max(4,height-11-info_rows-(1 if catalog_meta else 0)-(1 if catalog_meta and (catalog_meta.get("errors") or catalog_meta.get("fallback")) else 0)-(1 if catalog_meta and catalog_meta.get('stale') else 0))
+            usable=max(4,height-12-info_rows-(1 if catalog_meta else 0)-(1 if catalog_meta and (catalog_meta.get("errors") or catalog_meta.get("fallback")) else 0)-(1 if catalog_meta and catalog_meta.get('stale') else 0))
             top=max(0,min(max(0,len(visible)-usable),idx-usable+1))
             page=visible[top:top+usable]
 
@@ -18180,6 +18213,7 @@ def _media_selector(rows,title="FABRIC MEDIA",initial_query="",catalog_meta=None
                 location_count=sum(int(row.get('copies') or 1) for row in rows)
                 suffix=f"{len(visible):,} shown · {location_count:,} Fabric locations · {len(selected_rows)} selected · {_c(mode,'1;35')}"
                 _title(title,suffix)
+                print(_c('SORT '+MEDIA_FIND_SORTS[sort_mode]+(' · reversed' if reverse_sort else ''),'1;36'))
                 if catalog_meta:
                     nodes=catalog_meta.get("nodes") or []
                     errors=catalog_meta.get("errors") or []
@@ -18235,7 +18269,7 @@ def _media_selector(rows,title="FABRIC MEDIA",initial_query="",catalog_meta=None
                             print(left)
 
                 filter_text=f"{_c('FILTER','1;36')} {query}█" if query else f"{_c('FILTER','1;36')} █"
-                actions=_media_hints("/ search · ↑↓/J/K move · Shift-arrows page/ends · Tab select · A select all · E edit metadata · R refresh · Enter/P play · O open with · T Apple TV · Q queue · C clear selection · S save playlist · I info · V sources · H hidden · X hide · D hide by directory · U unhide · Esc finish/clear/exit",width)
+                actions=_media_hints("/ search · ↑↓/J/K move · Shift-arrows page/ends · F sort · G reverse · Tab select · A select all · C clear selection · Enter/P play · O open with · T Apple TV · Q queue · S save playlist · I info · V sources · R refresh · E edit metadata · H hidden · X hide · D hide by directory · U unhide · Esc finish/clear/exit",width)
                 footer=f"{filter_text}  "+_c("◆ SHA · · scanned","2")+"\n"+actions
                 if notice:
                     footer+="  "+_c(notice,"33")
@@ -18257,7 +18291,7 @@ def _media_selector(rows,title="FABRIC MEDIA",initial_query="",catalog_meta=None
                     search_mode=False; continue
                 if key in {"\x7f","\b"}:
                     query=query[:-1]; idx=0; continue
-                if len(key)==1 and key.isprintable() and key not in "APQCSIVHXDUJKEROT":
+                if len(key)==1 and key.isprintable() and key not in "APQCSIVHXDUJKEROTGF":
                     query+=key; idx=0; continue
                 # Navigation and selection act on the filtered results immediately.
                 search_mode=False
@@ -18294,6 +18328,12 @@ def _media_selector(rows,title="FABRIC MEDIA",initial_query="",catalog_meta=None
                 continue
 
             chosen=selected_rows or ([visible[idx]] if visible else [])
+            if key in {'G','F'}:
+                if key=='F':sort_mode=(sort_mode+1)%len(MEDIA_FIND_SORTS)
+                else:reverse_sort=not reverse_sort
+                idx=0;notice='Sort: '+MEDIA_FIND_SORTS[sort_mode]+(' · reversed' if reverse_sort else '')
+                if sort_mode==3:notice+=' · unknown arrival dates last'
+                continue
             if key=="R":
                 try:_media_refresh_rows(rows,discover=discover,catalog_meta=catalog_meta);notice="catalog refreshed";view_key=None
                 except (OSError,RuntimeError) as exc:notice=str(exc)

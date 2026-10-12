@@ -136,6 +136,7 @@ def entry_from_path(path: str | Path, root: str | Path | None = None, sidecar: b
         "playability": media_playability(target.suffix.casefold().lstrip("."), _media_type(target)),
         "bytes": stat.st_size,
         "mtime": stat.st_mtime,
+        "added_at": _now(),
     }
     if sidecar:
         try: from . import media_sidecar
@@ -232,6 +233,10 @@ def scan_root(root: str | Path, existing: Any = None) -> dict[str, Any]:
             try:
                 row = entry_from_path(path, base,sidecar=path.with_suffix(".info.json").name in filenames)
                 previous = existing_by_path.get(str(row.get("path") or "")) or {}
+                if previous:
+                    # Legacy rows have no known arrival date; don't label a rescan new.
+                    if previous.get('added_at') is not None:row['added_at']=previous['added_at']
+                    else:row.pop('added_at',None)
                 # A rescan must not throw away expensive content identity. Preserve it
                 # only when the cheap filesystem fingerprint still matches.
                 if (previous.get("digest")
@@ -495,7 +500,9 @@ def merge_catalog_entries(rows: Iterable[dict[str, Any]], *, local_node: str = "
         primary = dict(copies[0])
         locations = []
         for row in copies:
-            locations.append({k: row.get(k) for k in ("node", "path", "id", "digest", "root", "fabric_hidden_by") if row.get(k) is not None})
+            location={k: row.get(k) for k in ("node", "path", "id", "digest", "root", "fabric_hidden_by", "mtime") if row.get(k) is not None}
+            location['added_at']=row.get('added_at')
+            locations.append(location)
         primary["locations"] = locations
         primary["copies"] = len(locations)
         merged.append(primary)

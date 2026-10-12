@@ -146,3 +146,15 @@ def test_rescan_preserves_unreadable_subtree(monkeypatch,tmp_path):
         yield str(root),[],[]
     monkeypatch.setattr(media_core.os,'walk',walk)
     assert media_core.scan_root(root,library)['entries']==library['entries']
+
+
+def test_arrival_date_survives_rescan_and_legacy_dates_stay_unknown(monkeypatch,tmp_path):
+    root=tmp_path/'Music';root.mkdir();track=root/'track.mp3';track.write_bytes(b'first')
+    monkeypatch.setattr(media_core,'_now',lambda:100)
+    library=media_core.scan_root(root);assert library['entries'][0]['added_at']==100
+    track.write_bytes(b'updated');monkeypatch.setattr(media_core,'_now',lambda:200)
+    library=media_core.scan_root(root,library);assert library['entries'][0]['added_at']==100
+    library['entries'][0].pop('added_at')
+    (root/'new.mp3').write_bytes(b'new')
+    library=media_core.scan_root(root,library)
+    assert {Path(row['path']).name:row.get('added_at') for row in library['entries']}=={'track.mp3':None,'new.mp3':200}
