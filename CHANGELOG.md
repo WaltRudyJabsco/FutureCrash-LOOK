@@ -1,3 +1,11 @@
+## Import setup and terminal music playback
+
+- Reuse LOOK path completion and folder picking for import destinations.
+- Choose Movies/TV before suggesting a destination; retain category through delivery.
+- Add Escape back/cancel and editable final review before starting an import.
+- Preserve Unicode input, add Ctrl-U clearing, and fit long paths to the input line.
+- Keep music playback in the terminal by disabling mpv cover-art windows.
+
 ## Remote movie preview cache
 
 - Refresh old opening-frame JPEGs after switching to later movie stills.

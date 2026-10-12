@@ -131,3 +131,11 @@ def test_library_choices_keep_remote_preference_and_offer_local_home(home):
     rows=storage.library_choices()
     assert rows[0]['node']=='library-node' and rows[1]['node']=='local'
     assert storage.settings()['node']=='library-node'
+
+
+def test_tv_destination_uses_category_without_changing_fresh_defaults(monkeypatch):
+    monkeypatch.setattr(storage,'settings',lambda:{'node':'local','root':'~/Media'})
+    assert storage.destination('dvd','tv')=='~/Media/tv'
+    assert storage.destination('dvd')=='~/Media/movies'
+    monkeypatch.setattr(storage,'settings',lambda:{'node':'peer','root':'/Library'})
+    assert storage.destination('dvd','tv')=='@peer:/Library'

@@ -16885,6 +16885,7 @@ def _media_queue_has_video(queue):
     for row in queue or []:
         media_type=str(row.get("media_type") or "").casefold()
         path=str(row.get("path") or row.get("title") or "").casefold()
+        if media_type.startswith("audio/"):continue
         if media_type.startswith("video/") or Path(path).suffix in {".mp4",".m4v",".mov",".mkv",".webm",".avi",".wmv",".flv",".vob",".mts",".m2ts",".ts"}:
             return True
     return False
@@ -16964,6 +16965,8 @@ def _media_launch_session(session):
     queue_video=_media_queue_has_video(queue)
     if _media_mpv_alive():
         if not _media_reuse_needs_visible_restart(queue_video):
+            _media_mpv_request(["set_property","audio-display","no"])
+            _media_mpv_request(["set_property","force-window","no"])
             loaded=_media_mpv_request(["loadlist",str(MEDIA_QUEUE_FILE),"replace"])
             if loaded and loaded.get("error")=="success":
                 _media_mpv_request(["set_property","playlist-pos",idx])
@@ -16978,6 +16981,7 @@ def _media_launch_session(session):
                 session["owner_updated"]=time.time()
                 session["state"]="playing"
                 session["current_index"]=index_map[idx]
+                session["presentation"]="video" if queue_video else "audio"
                 _media_save_session(session)
                 _media_pause_playing_system()
                 print(f"LOOK media · queue → existing mpv · {len(queue)} item{'s' if len(queue)!=1 else ''}")
@@ -17001,13 +17005,15 @@ def _media_launch_session(session):
         "--no-config",
         f"--input-ipc-server={MEDIA_IPC_FILE}",
         "--no-terminal",
+        "--audio-display=no",
+        "--force-window=no",
         "--idle=yes",
         f"--log-file={MEDIA_MPV_LOG}",
         f"--playlist={MEDIA_QUEUE_FILE}",
         f"--playlist-start={idx}",
     ]
     if queue_video:
-        cmd.append("--force-window=immediate")
+        if _media_queue_has_video([queue[wanted]]):cmd.append("--force-window=immediate")
     if session.get("repeat")=="all":
         cmd.append("--loop-playlist=inf")
     try:
@@ -17038,6 +17044,8 @@ def _media_launch_stream(url,source="",session=None):
     if mpv:
         if _media_mpv_alive():
             if not _media_reuse_needs_visible_restart(stream_video):
+                _media_mpv_request(["set_property","audio-display","no"])
+                _media_mpv_request(["set_property","force-window","no"])
                 loaded=_media_mpv_request(["loadfile",url,"replace"])
                 if loaded and loaded.get("error")=="success":
                     _media_mpv_request(["set_property","pause",False])
@@ -17048,6 +17056,7 @@ def _media_launch_stream(url,source="",session=None):
                     if session is None:
                         session=media_core.new_session([{"title":source or "Fabric media","digest":"stream"}])
                     session["url"]=url; session["source"]=source; session["started"]=time.time()
+                    session["presentation"]="video" if stream_video else "audio"
                     session["player"]="mpv"; session["owner"]="look"; session["owner_updated"]=time.time(); session["state"]="playing"
                     _media_save_session(session)
                     _media_pause_playing_system()
@@ -17056,7 +17065,7 @@ def _media_launch_stream(url,source="",session=None):
         _media_stop_owned_mpvs()
         try: MEDIA_IPC_FILE.unlink(missing_ok=True)
         except OSError: pass
-        cmd=[mpv,"--no-config",f"--input-ipc-server={MEDIA_IPC_FILE}","--no-terminal","--idle=yes",f"--log-file={MEDIA_MPV_LOG}"]
+        cmd=[mpv,"--no-config",f"--input-ipc-server={MEDIA_IPC_FILE}","--no-terminal","--audio-display=no","--force-window=no","--idle=yes",f"--log-file={MEDIA_MPV_LOG}"]
         if stream_video: cmd.append("--force-window=immediate")
         cmd.append(url)
         try:

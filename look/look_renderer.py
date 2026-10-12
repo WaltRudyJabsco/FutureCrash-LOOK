@@ -20,6 +20,7 @@ except ImportError:
 
 import argparse
 import base64
+import unicodedata
 import hashlib
 import queue
 import fcntl
@@ -1175,12 +1176,18 @@ def prompt_line(prompt:str, *, initial:str='', picker_root:Path|None=None)->tupl
     cursor=len(chars)
 
     def redraw():
-        # Repaint the full line, then place the caret at the logical cursor position.
-        text=''.join(chars)
-        tail=len(chars)-cursor
-        sys.stdout.write('\r\x1b[2K'+prompt+text)
-        if tail:
-            sys.stdout.write(f'\x1b[{tail}D')
+        # Keep long mount paths on one line; the full value remains editable.
+        width=max(20,shutil.get_terminal_size((100,30)).columns-1)
+        label=prompt if len(prompt)<width//2 else prompt[:width//2-2]+'… '
+        available=width-len(label)
+        def cells(text):return sum(0 if unicodedata.combining(c) else 2 if unicodedata.east_asian_width(c) in {'W','F'} else 1 for c in text)
+        start=cursor
+        while start>0 and cells(chars[start-1:cursor])<available-1:start-=1
+        end=cursor
+        while end<len(chars) and cells(chars[start:end+1])<=available:end+=1
+        shown=''.join(chars[start:end]);tail=cells(chars[cursor:end])
+        sys.stdout.write('\r\x1b[2K'+label+shown)
+        if tail:sys.stdout.write(f'\x1b[{tail}D')
         sys.stdout.flush()
 
     try:
@@ -1246,13 +1253,28 @@ def prompt_line(prompt:str, *, initial:str='', picker_root:Path|None=None)->tupl
                 if cursor>0:
                     cursor-=1; chars.pop(cursor); redraw()
                 continue
+            if ch==b'\x15':
+                chars.clear();cursor=0;redraw();continue
             if ch==b'\t':
                 before=''.join(chars); after=_complete_path_text(before)
                 if after!=before:
                     chars[:]=list(after); cursor=len(chars); redraw()
-                else: sys.stdout.write('\a'); sys.stdout.flush()
+                elif picker_root is not None:
+                    try:
+                        candidate=resolve_action_destination(before,picker_root) if before else picker_root.resolve()
+                        start=candidate.parent if isinstance(candidate,fabric_files.Destination) or not candidate.is_dir() else candidate
+                        termios.tcsetattr(fd,termios.TCSADRAIN,old)
+                        picked=_destination_picker(start)
+                        tty.setcbreak(fd)
+                        if picked is not None:chars[:]=list(str(picked));cursor=len(chars)
+                        redraw()
+                    except (OSError,ValueError,RuntimeError):sys.stdout.write('\a');sys.stdout.flush()
+                else:sys.stdout.write('\a');sys.stdout.flush()
                 continue
             if ch==b'\x03': raise KeyboardInterrupt
+            if ch and ch[0]>=128:
+                count=2 if ch[0]<224 else 3 if ch[0]<240 else 4
+                for _ in range(count-1):ch+=os.read(fd,1)
             text=ch.decode('utf-8','ignore')
             if text and text.isprintable():
                 chars[cursor:cursor]=list(text); cursor+=len(text); redraw()

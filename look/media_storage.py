@@ -40,9 +40,11 @@ def settings(values=None):
     return data
 
 
-def destination(kind):
+def destination(kind,category=None):
+    category=category or ('music' if kind=='cd' else 'movies')
+    if category not in CATEGORIES:raise ValueError('Choose music, movies, tv or books')
     config=settings();path=config['root']
-    return str(Path(path)/('music' if kind=='cd' else 'movies')) if config['node']=='local' else '@'+config['node']+':'+path
+    return str(Path(path)/category) if config['node']=='local' else '@'+config['node']+':'+path
 
 
 def library_choices(drives=()):
@@ -155,7 +157,9 @@ def receipt(identifier):
     return row
 
 
-def start(identifier,source,dest,kind='cd'):
+def start(identifier,source,dest,kind='cd',category=None):
+    category=category or ('music' if kind=='cd' else 'movies')
+    if category not in CATEGORIES:raise ValueError('Invalid library category')
     if fabric_files.parse(dest) is None:raise ValueError('Use @node:/path or @node:~/path for library delivery')
     path=receipt_path(identifier);path.parent.mkdir(parents=True,exist_ok=True)
     # The import submit lock also protects a delivery from two simultaneous starts.
@@ -164,7 +168,7 @@ def start(identifier,source,dest,kind='cd'):
         fcntl.flock(lock,fcntl.LOCK_EX)
         previous=receipt(identifier)
         if previous and previous['state'] in {'queued','running'}:raise ValueError('Library delivery already running')
-        row={'id':identifier,'source':str(source),'destination':dest,'category':'music' if kind=='cd' else 'movies','state':'queued','stage':'queued','created':time.time(),'source_retained':True}
+        row={'id':identifier,'source':str(source),'destination':dest,'category':category,'state':'queued','stage':'queued','created':time.time(),'source_retained':True}
         atomic(path,row)
         try:
             with path.with_suffix('.log').open('ab') as log:

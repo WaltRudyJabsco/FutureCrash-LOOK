@@ -233,3 +233,56 @@ def test_watch_wraps_in_a_narrow_terminal_and_scrolls(monkeypatch,single):
     assert (disc_ui.watch(row['id'],request,reader,lambda text,width:text) if single else
             disc_ui.watch_all(request,reader,lambda text,width:text))==0
     assert request.call_count==2 and '67.8%' in output.getvalue() and 'ETA ~1:00' in output.getvalue()
+
+
+def test_tv_setup_uses_tv_destination_all_titles_and_review_edit(monkeypatch):
+    monkeypatch.setattr(media_storage,'settings',lambda:{'node':'local','root':'~/Media'})
+    inventory={'drives':[{'id':'drive','kind':'dvd','disc':'BOOSH'}],'tools':{'makemkvcon':'mk'}}
+    request=Mock(return_value={'kind':'dvd','engine':'makemkv','titles':[{'index':'0','duration':'30:00'}],'metadata':{'title':'Boosh'}})
+    visits={}
+    def prompt(label,default=''):
+        visits[label]=visits.get(label,0)+1
+        if label.startswith('Library category'):return 'tv'
+        if label.startswith('Series'):return 'Boosh Season 1 Disc 1' if visits[label]==1 else 'The Mighty Boosh S1 Disc 1'
+        if label=='Start or edit':return 'm' if visits[label]==1 else 'y'
+        return default
+    destinations=[]
+    result=disc_ui.import_options(request,inventory,'drive',prompt,lambda label,default:destinations.append(default) or default)
+    assert result['category']=='tv' and result['title_index']=='all'
+    assert result['title']=='The Mighty Boosh S1 Disc 1'
+    assert destinations==['~/Media/tv','~/Media/tv']
+    assert request.call_count==1 and request.call_args.args[0]=='scan'
+
+
+def test_escape_goes_back_and_cancels_before_submission(monkeypatch):
+    monkeypatch.setattr(media_storage,'settings',lambda:{'node':'local','root':'~/Media'})
+    inventory={'drives':[{'id':'drive','kind':'dvd'}],'tools':{'makemkvcon':'mk'}}
+    request=Mock(return_value={'kind':'dvd','engine':'makemkv','titles':[{'index':'0'}],'metadata':{'title':'Film'}})
+    visits=[]
+    def prompt(label,default=''):
+        visits.append(label)
+        if label.startswith('Library category'):raise disc_ui.ImportBack()
+        if label.startswith('Disc kind') and len(visits)>1:raise disc_ui.ImportBack()
+        return default
+    assert disc_ui.import_options(request,inventory,'drive',prompt,Mock()) is None
+    assert not request.called
+    assert len(visits)==3
+
+
+def test_destination_escape_returns_to_name_then_accepts_manual_folder(monkeypatch):
+    monkeypatch.setattr(media_storage,'settings',lambda:{'node':'local','root':'~/Media'})
+    inventory={'drives':[{'id':'drive','kind':'dvd'}],'tools':{'makemkvcon':'mk'}}
+    request=Mock(return_value={'kind':'dvd','engine':'makemkv','titles':[{'index':'0'}],'metadata':{'title':'Show'}})
+    labels=[];paths=[]
+    def prompt(label,default=''):
+        labels.append(label)
+        if label.startswith('Library category'):return 'tv'
+        return default
+    def path_prompt(label,default):
+        paths.append(default)
+        if len(paths)==1:raise disc_ui.ImportBack()
+        return '/Volumes/My Library/tv'
+    result=disc_ui.import_options(request,inventory,'drive',prompt,path_prompt)
+    assert result['destination']=='/Volumes/My Library/tv'
+    assert sum(label.startswith('Series') for label in labels)==2
+    assert result['preferences'] is None

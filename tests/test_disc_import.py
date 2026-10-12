@@ -248,3 +248,22 @@ def test_job_discovery_includes_delivery_without_treating_receipt_as_import(isol
     jobs=discs.list_jobs()
     assert len(jobs)==1 and jobs[0]['id']==identifier
     assert jobs[0]['delivery']['state']=='complete'
+
+
+def test_tv_import_keeps_category_and_resolves_owner_library(isolated,monkeypatch):
+    from look import fabric_files
+    monkeypatch.setattr(discs,'selected_drive',lambda identifier:{'id':'test','makemkv_source':'disc:0'})
+    monkeypatch.setattr(discs,'tool',lambda name:name)
+    monkeypatch.setattr(discs.subprocess,'Popen',Mock(return_value=Mock(pid=123)))
+    monkeypatch.setattr(fabric_files,'request',lambda *args:{'name':'owner'})
+    result=discs.start({'kind':'dvd','category':'tv','title_index':'all','title':'Series S1 D1','destination':'@owner:'+str(isolated/'Library')})
+    job=discs.read_job(result['job']['id'])
+    assert job['category']=='tv'
+    assert job['destination']==str(isolated/'Library/tv')
+    assert job['title_index']=='all'
+
+
+def test_cd_rejects_video_category_before_creating_job(isolated):
+    with pytest.raises(ValueError,match='music for CD'):
+        discs.start({'kind':'cd','category':'tv'})
+    assert not discs.list_jobs()
