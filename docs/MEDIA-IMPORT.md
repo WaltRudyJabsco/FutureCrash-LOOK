@@ -26,6 +26,10 @@ The workbench has n import, d rediscover, h history, arrows select a job, Enter 
 l send to library/retry delivery, c cancel, and Escape return. Uppercase variants
 also work; Shift is not required. The inserted disc appears above a separate job
 history section, with distinct label, title and status colors following the terminal palette.
+The selected job uses the terminal theme's selection background across the row:
+Paper uses its yellow highlighter, while Neon/Slate use their subdued selections.
+The caret, subject, status and supporting ink retain readable contrast; surrounding
+rows keep their normal background and alternating subject colors.
 Jobs continue when a window closes. Receipts show
 stage, elapsed time, progress when the adapter supplies it, and estimated time
 remaining when a meaningful percentage is available. Returning from a progress
