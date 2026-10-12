@@ -235,3 +235,19 @@ Artwork follows the selected physical copy. If a preferred drive is disconnected
 LOOK tries the other catalog locations for playback and cover previews. Duplicate
 locations are copies of one logical track; they do not each need a downloaded cover.
 Missing-cover lookup remains optional and uses the owner node's album cache.
+
+### Choose the main library
+
+Open `lk settings` and search for **Media library location**, or run
+`lk media storage --pick`. Choose the home folder, an available mounted drive,
+or a custom dedicated folder. The picker includes internal storage drives and
+reuses an existing `srv/media`, `media`, or `Media` folder when available.
+It shows the chosen node/path and asks before saving or creating the standard
+`music`, `movies`, `tv`, `books`, and `inbox` folders.
+
+Fresh installations use `~/Media`; no second drive is required. A server can
+choose a separate internal drive to keep media off its startup disk. Backup
+storage is configured separately. Changing the library location affects future
+imports; it does **not** migrate existing files or remove their catalog entries.
+Existing libraries can also be configured with
+`lk media storage --node local --root /path/to/library`.

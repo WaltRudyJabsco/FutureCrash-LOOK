@@ -1,3 +1,8 @@
+## 2026-10-12 · Media library location picker
+
+- Add Media library location to LK Settings and `lk media storage --pick`: choose the current preference, home folder, a mounted internal/external drive, or a custom folder.
+- Reuse existing dedicated library folders, show the effect before saving, and keep fresh installs on `~/Media`. Choosing a destination does not move existing files or change backups.
+
 ## 2026-10-12 · Pane reminders and resize redraw
 
 - Keep terminal-specific pane focus/close shortcuts in LOOK's browse/filter footer after opening a sibling shell; include them in the opening notice.
