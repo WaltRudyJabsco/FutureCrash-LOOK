@@ -1,3 +1,8 @@
+## 2026-10-12 · Optical disc catalog cleanup
+
+- Exclude raw DVD VIDEO_TS VOB segments and Blu-ray BDMV/STREAM transport pieces from Media Find, including cached entries from ejected discs.
+- Preserve finished imports and standalone video files; optical import discovery and original files stay unchanged.
+
 ## 2026-10-12 · Signal and Albert full-screen players
 
 - Add Full screen / Exit full screen controls for video and audio. Prefer browser full screen, fall back to native iOS video full screen, then a viewport-filling view when the browser cannot grant full screen.

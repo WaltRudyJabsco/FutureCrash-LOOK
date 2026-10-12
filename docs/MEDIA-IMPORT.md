@@ -251,3 +251,8 @@ storage is configured separately. Changing the library location affects future
 imports; it does **not** migrate existing files or remove their catalog entries.
 Existing libraries can also be configured with
 `lk media storage --node local --root /path/to/library`.
+
+Raw DVD `VIDEO_TS/*.VOB` and Blu-ray `BDMV/STREAM/*.m2ts`/`*.mts` pieces
+are excluded from the media library, including older cached disc scans. They
+remain available to the import workbench and file browser. Finished imports and
+standalone VOB/M2TS videos outside those disc structures remain cataloged.
