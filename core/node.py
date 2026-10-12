@@ -2972,6 +2972,9 @@ def _identify_media_entry(entry_id):
 
 
 MEDIA_PEER_REFRESH_LOCK = threading.Lock()
+MEDIA_CATALOG_ROUTE_LOCK = threading.Lock()
+MEDIA_CATALOG_ROUTES = {}
+MEDIA_CATALOG_ROUTE_TTL_SECONDS = 90.0
 
 
 def _refresh_media_peers_background():
@@ -3934,12 +3937,15 @@ class API(BaseHTTPRequestHandler):
 
         if is_video:
             compatible=False
+            copy_video=False;copy_audio=False
             if ffprobe:
                 try:
-                    probe=subprocess.run([ffprobe,"-v","error","-show_entries","stream=codec_type,codec_name","-of","json",str(source)],capture_output=True,text=True,timeout=12,check=True)
+                    probe=subprocess.run([ffprobe,"-v","error","-show_entries","stream=codec_type,codec_name,pix_fmt","-of","json",str(source)],capture_output=True,text=True,timeout=12,check=True)
                     streams=json.loads(probe.stdout or "{}").get("streams") or []
                     video={str(x.get("codec_name") or "") for x in streams if x.get("codec_type")=="video"}
                     audio={str(x.get("codec_name") or "") for x in streams if x.get("codec_type")=="audio"}
+                    copy_video=bool(video) and video.issubset({"h264"}) and all(x.get('pix_fmt')=='yuv420p' for x in streams if x.get('codec_type')=='video')
+                    copy_audio=audio.issubset({"aac","mp3"})
                     compatible=source.suffix.casefold() in {".mp4",".m4v"} and video.issubset({"h264"}) and audio.issubset({"aac","mp3"})
                 except Exception: compatible=False
             if compatible: return source,"video/mp4"
@@ -3950,10 +3956,15 @@ class API(BaseHTTPRequestHandler):
                 tmp=target.with_name(key+f".{os.getpid()}.{threading.get_ident()}.tmp.mp4")
                 encoders=[("libx264",["-preset","veryfast","-crf","21"])]
                 if platform.system()=="Darwin": encoders.append(("h264_videotoolbox",["-b:v","6M"]))
+                # Most H.264 Blu-ray rips need a container/audio change, not new video.
+                # If remuxing fails, keep the existing conservative encoder fallback.
+                if copy_video:encoders.insert(0,("copy",[]))
                 last_error=""
                 try:
                     for encoder,video_args in encoders:
-                        cmd=[ffmpeg,"-nostdin","-v","error","-y","-i",str(source),"-map","0:v:0","-map","0:a:0?","-c:v",encoder,*video_args,"-pix_fmt","yuv420p","-c:a","aac","-b:a","160k","-movflags","+faststart",str(tmp)]
+                        audio_args=["-c:a","copy"] if encoder=="copy" and copy_audio else ["-c:a","aac","-b:a","160k"]
+                        pixel_args=[] if encoder=="copy" else ["-pix_fmt","yuv420p"]
+                        cmd=[ffmpeg,"-nostdin","-v","error","-y","-i",str(source),"-map","0:v:0","-map","0:a:0?","-c:v",encoder,*video_args,*pixel_args,*audio_args,"-movflags","+faststart",str(tmp)]
                         cp=subprocess.run(cmd,capture_output=True,text=True,timeout=1800)
                         if cp.returncode==0 and tmp.exists() and tmp.stat().st_size>0:
                             os.replace(tmp,target); last_error=""; break
@@ -5111,11 +5122,26 @@ def _peer_json(peer, path, timeout=12.0, total_timeout=None):
     """Try every authenticated route for a peer; one stale preferred URL must not hide a catalog."""
     last=None;errors=[]
     deadline=time.monotonic()+total_timeout if total_timeout is not None else None
-    for base in _peer_bases(peer):
+    bases=_peer_bases(peer);catalog=path=='/v1/media/catalog';key=tuple(bases)
+    if catalog:
+        # A small health response can succeed where a bulk LAN transfer stalls.
+        # Try the advertised DNS transport before another address on the same LAN.
+        dns=str(peer.get('dns') or '').rstrip('.').casefold()
+        if bases and dns:
+            bases=[bases[0]]+[b for b in bases[1:] if (urllib.parse.urlparse(b).hostname or '').rstrip('.').casefold()==dns]+[b for b in bases[1:] if (urllib.parse.urlparse(b).hostname or '').rstrip('.').casefold()!=dns]
+        with MEDIA_CATALOG_ROUTE_LOCK:cached=MEDIA_CATALOG_ROUTES.get(key)
+        if cached and time.monotonic()-cached[1]<MEDIA_CATALOG_ROUTE_TTL_SECONDS and cached[0] in bases:
+            bases=[cached[0]]+[b for b in bases if b!=cached[0]]
+    for base in bases:
         remaining=deadline-time.monotonic() if deadline is not None else timeout
         if remaining<=0:break
         try:
-            return http_json(base+path, timeout=min(timeout,remaining))
+            result=http_json(base+path, timeout=min(timeout,remaining))
+            if catalog:
+                with MEDIA_CATALOG_ROUTE_LOCK:
+                    if len(MEDIA_CATALOG_ROUTES)>=128:MEDIA_CATALOG_ROUTES.clear()
+                    MEDIA_CATALOG_ROUTES[key]=(base,time.monotonic())
+            return result
         except urllib.error.HTTPError as exc:
             last=exc
             try:

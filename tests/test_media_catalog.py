@@ -121,3 +121,28 @@ def test_broad_rescan_updates_changed_file_without_reassigning_specific_root(tmp
     row=rescanned['entries'][0]
     assert row['root']==str(album) and row['bytes']==len(b'changed content')
     assert 'digest' not in row
+
+
+def test_parent_rescan_removes_deleted_nested_import_but_keeps_other_roots(tmp_path):
+    import shutil
+    movies=tmp_path/'Movies';old=movies/'Old edition';new=movies/'Widescreen'
+    outside=tmp_path/'Offline drive'
+    for folder in (old,new,outside):
+        folder.mkdir(parents=True);(folder/'movie.mkv').write_bytes(b'movie')
+    library=media_core.empty_library()
+    for folder in (old,new,outside):library=media_core.scan_root(folder,library)
+    shutil.rmtree(old);shutil.rmtree(outside)
+    library=media_core.scan_root(movies,library)
+    assert {row['path'] for row in library['entries']}=={str(new/'movie.mkv'),str(outside/'movie.mkv')}
+    assert next(row for row in library['entries'] if row['path']==str(new/'movie.mkv'))['root']==str(new)
+
+
+def test_rescan_preserves_unreadable_subtree(monkeypatch,tmp_path):
+    root=tmp_path/'Movies';folder=root/'Private';folder.mkdir(parents=True)
+    movie=folder/'film.mkv';movie.write_bytes(b'movie')
+    library=media_core.scan_root(root)
+    def walk(base,onerror):
+        onerror(PermissionError(13,'Permission denied',str(folder)))
+        yield str(root),[],[]
+    monkeypatch.setattr(media_core.os,'walk',walk)
+    assert media_core.scan_root(root,library)['entries']==library['entries']

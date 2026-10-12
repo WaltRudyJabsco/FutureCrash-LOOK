@@ -21,6 +21,13 @@ Lowercase `q` is filter text, including in artist/album browsing. Escape exits; 
 
 Controls: Tab toggles the focused row; Shift-A selects/unselects every currently visible row; Enter or Shift-P plays selected rows (or the focused row); Shift-Q appends selected/focused rows to the queue; Shift-S saves selected/focused rows as a playlist; Shift-C clears selection; Shift-I shows identity/details; Esc clears the filter and then exits.
 
+Shift-I also opens the existing quiet artwork/details preview. At widths of at
+least 78 columns, a small terminal image appears beside the details when artwork
+is available. The remote owner can extract a video's first frame and return only
+the tiny terminal preview; navigating the list does not start playback. An opening
+black frame, missing source or unavailable decoder can still yield a poor/missing
+preview. This is a still-image preview, not automatic audio/video auditioning.
+
 `/` starts search editing. Enter or Esc finishes editing while keeping the filter.
 Arrows, Tab, and selection actions work directly on the filtered results, including
 while editing. A subsequent Esc clears the filter; another exits.
@@ -48,6 +55,15 @@ pinned certificate applies only to its advertised HTTPS host and port; the
 Tailscale HTTPS fallback keeps normal certificate and hostname verification.
 Short-lived discovered IP routes survive advertisement refreshes while the
 paired Tailcat certificate remains unchanged.
+
+Large catalog requests try the peer's advertised DNS fallback before exhausting
+the budget on another LAN address. A successful bulk-transfer route is remembered
+for 90 seconds; ordinary control route order and authentication stay unchanged.
+Passing a small health probe does not guarantee a large catalog transfer succeeds.
+
+An explicit scan reconciles all indexed files inside its scope, including nested
+import folders: deleted files disappear while surviving imports keep their own
+root identity. Unrelated offline roots and unreadable subtrees are preserved.
 
 Simultaneous catalog readers share a local publication for up to three seconds;
 changes to the catalog or owner visibility file invalidate it immediately. Old
@@ -205,3 +221,15 @@ This chooses availability and locality, not bitrate or codec quality. Multiple
 locations do not establish a verified backup. The configured library destination
 is an import destination; Fabric Recovery essential-state backups exclude music
 and video bytes.
+
+## Browser video preparation
+
+Signal and Albert show a preparation/loading message before browser video becomes
+ready, and a source-error message if loading fails. Preparation is performed on
+the file's owning node and cached; original rips remain unchanged. For H.264 video
+with 8-bit 4:2:0 pixels, the owner first copies the video into MP4, copying compatible
+AAC/MP3 audio or converting other audio to AAC. If that fails, or the video needs
+conversion, the existing H.264/AAC encoder is used. Remuxing reduces preparation
+work, not the original video's bitrate or storage requirement. The current browser
+representation still finishes before serving; segmented/adaptive streaming is not
+implemented by this update.

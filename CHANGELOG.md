@@ -1,3 +1,10 @@
+## 2026-10-12 · Catalog cleanup and browser delivery
+
+- Reconcile deleted files under nested import roots during an explicit parent scan, preserving unrelated offline roots and unreadable subtrees.
+- Try advertised DNS catalog fallback before repeated LAN attempts, and remember a working bulk route briefly without changing trust or control routing.
+- Prefer copying compatible H.264 video into cached browser MP4 rather than re-encoding it; retain encoder fallback and original rips.
+- Show browser video preparation/source errors in Signal and Albert; document the existing quiet Media Find preview.
+
 ## 2026-10-12 · Wrapped import progress
 
 - Wrap interactive import progress, errors and paths by terminal display width; keep continuation lines in the same logical row ink.
