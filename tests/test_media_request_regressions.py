@@ -520,3 +520,26 @@ def test_apple_tv_remote_error_names_owner_and_does_not_launch(lk,monkeypatch):
     monkeypatch.setattr(lk,'_media_local_node_names',lambda:{'m3'})
     opened,message=lk._media_open_with({'node':'3090','path':'/tv/episode.m4v'},'TV')
     assert not opened and '3090' in message and 'Shift-T does not transfer' in message
+
+
+
+def test_mp_transport_panel_has_progress_and_existing_controls(lk):
+    snap={'state':'playing','position':30,'duration':60,'entry':{'artist':'Artist','title':'Song'},'index':0,'session':{'queue':[{}]}}
+    lines=lk._media_mp_transport_lines(snap,100)
+    assert len(lines)==4 and all('\n' not in line for line in lines)
+    plain=' '.join(lk._strip_ansi(x) for x in lines)
+    assert 'NOW PLAYING' in plain and 'PLAYING' in plain and 'Song' in plain and 'Queue 1/1' in plain
+    assert '=' in lines[2] and 'space' in plain and 'seek' in plain
+    assert len(lk._media_mp_transport_lines(None,72))==4
+
+
+def test_media_find_image_toggle_keeps_filter_selection(lk,monkeypatch):
+    import io
+    rows=[{'id':'1','path':'/music/a.flac','title':'Alpha'}]
+    monkeypatch.setattr(lk.sys,'stdin',type('Input',(object,),{'isatty':lambda self:True,'fileno':lambda self:0})())
+    out=io.StringIO();out.isatty=lambda:True;monkeypatch.setattr(lk.sys,'stdout',out)
+    monkeypatch.setattr(lk.termios,'tcgetattr',lambda fd:[]);monkeypatch.setattr(lk.termios,'tcsetattr',lambda *a:None);monkeypatch.setattr(lk.tty,'setcbreak',lambda fd:None)
+    keys=iter(['M','\t','\r']);monkeypatch.setattr(lk,'_read_tty_key',lambda *a:next(keys))
+    action,selected=lk._media_selector(rows)
+    assert action=='play' and selected[0]['id']=='1'
+    assert 'Preview: ASCII' in out.getvalue()

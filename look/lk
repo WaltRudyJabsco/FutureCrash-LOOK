@@ -18281,6 +18281,7 @@ def _media_selector(rows,title="FABRIC MEDIA",initial_query="",catalog_meta=None
     show_all=False
     show_hidden=False
     sort_mode=0;reverse_sort=False
+    native_preview=NativePreviewController();native_images=True
     action=("none",None)
     view_key=None; visible=[]
     try:
@@ -18305,6 +18306,7 @@ def _media_selector(rows,title="FABRIC MEDIA",initial_query="",catalog_meta=None
 
             # Build the complete next frame away from the terminal, then swap it in
             # with one write.  Never clear to blank between arrow-key frames.
+            native_art=None;art_geometry=None
             frame_io=_TerminalFrameBuffer()
             with redirect_stdout(frame_io):
                 mode=("ALL SOURCES" if show_all else "LOGICAL")+(" + HIDDEN" if show_hidden else "")
@@ -18354,6 +18356,8 @@ def _media_selector(rows,title="FABRIC MEDIA",initial_query="",catalog_meta=None
                     art_pending=bool(art_w and not art and art_state=="loading")
                     status=(f"ART… requesting {art_owner}" if art_state in {"loading","idle"} and art_owner else
                             "ART unavailable" if art_state=="unavailable" else "")
+                    if art_w and native_images and native_preview.enabled:
+                        native_art=_media_native_art(visible[idx]);art_geometry=(frame_io.getvalue().count('\n')+1,detail_w+3,info_height,art_w)
                     for line_no in range(max(len(details),len(art),1 if status else 0)):
                         left=details[line_no] if line_no<len(details) else ""
                         if art:
@@ -18366,21 +18370,31 @@ def _media_selector(rows,title="FABRIC MEDIA",initial_query="",catalog_meta=None
                             print(left)
 
                 filter_text=f"{_c('FILTER','1;36')} {query}█" if query else f"{_c('FILTER','1;36')} █"
-                actions=_media_hints("/ search · ↑↓/J/K move · Shift-arrows page/ends · F sort · G reverse · Tab select · A select all · C clear selection · Enter/P play · O open with · T Apple TV · Q queue · S save playlist · I info · V sources · R refresh · E edit metadata · H hidden · X hide · D hide by directory · U unhide · Esc finish/clear/exit",width)
+                actions=_media_hints("/ search · ↑↓/J/K move · Shift-arrows page/ends · F sort · G reverse · Tab select · A select all · C clear selection · Enter/P play · O open with · T Apple TV · Q queue · S save playlist · I info · M image/ASCII · V sources · R refresh · E edit metadata · H hidden · X hide · D hide by directory · U unhide · Esc finish/clear/exit",width)
                 footer=f"{filter_text}  "+_c("◆ SHA · · scanned","2")+"\n"+actions
                 if notice:
                     footer+="  "+_c(notice,"33")
                     notice=""
                 print("\n"+footer,end="")
             frame=frame_io.getvalue()
+            native_preview.frame_cleared()
             sys.stdout.write(_terminal_frame_payload(frame))
             sys.stdout.flush()
 
             # While remote art is resolving, poll briefly so it can appear without
             # requiring another navigation key.  Otherwise block exactly as before.
-            key=_read_tty_key(fd,.08 if art_pending else None)
-            if not key and art_pending:
-                continue
+            if native_art and art_geometry:native_preview.request(native_art,*art_geometry)
+            while True:
+                key=_read_tty_key(fd,.08 if art_pending else .25 if native_preview.enabled else None)
+                native_preview.paint_ready()
+                if key or art_pending:break
+                if native_images and art_geometry and not native_art and visible:
+                    candidate=_media_remote_cover_path(visible[idx],fetch=False)
+                    if candidate:
+                        native_art=Path(candidate);native_preview.request(native_art,*art_geometry)
+                current=shutil.get_terminal_size((110,32))
+                if (max(56,current.columns),max(10,current.lines))!=(width,height):break
+            if not key:continue
             if key=="\x03":
                 break
             if search_mode:
@@ -18388,7 +18402,7 @@ def _media_selector(rows,title="FABRIC MEDIA",initial_query="",catalog_meta=None
                     search_mode=False; continue
                 if key in {"\x7f","\b"}:
                     query=query[:-1]; idx=0; continue
-                if len(key)==1 and key.isprintable() and key not in "APQCSIVHXDUJKEROTGF":
+                if len(key)==1 and key.isprintable() and key not in "APQCSIVHXDUJKEROTGFM":
                     query+=key; idx=0; continue
                 # Navigation and selection act on the filtered results immediately.
                 search_mode=False
@@ -18467,6 +18481,8 @@ def _media_selector(rows,title="FABRIC MEDIA",initial_query="",catalog_meta=None
                 continue
             if key=="S" and chosen:
                 action=("save",chosen); break
+            if key=="M":
+                native_images=not native_images;notice="Preview: Auto image" if native_images else "Preview: ASCII";continue
             if key=="I" and visible:
                 info_mode=not info_mode
                 continue
@@ -18491,6 +18507,7 @@ def _media_selector(rows,title="FABRIC MEDIA",initial_query="",catalog_meta=None
                 query+=key; idx=0
                 continue
     finally:
+        native_preview.invalidate()
         termios.tcsetattr(fd,termios.TCSADRAIN,old)
         if sys.stdout.isatty():
             sys.stdout.write("\n")
@@ -19191,7 +19208,7 @@ def _media_player_full_visual(snap,mode,visual_elapsed=0):
             '←/→ seek · s shuffle · r repeat · x stop · q close']
     art_height=max(1,height-len(header)-len(footer))
     elapsed=visual_elapsed%player_visuals.CYCLE_INTERVAL_SECONDS if cycling else visual_elapsed
-    phase=elapsed if name in {'Black Hole','Rooftops','Spectrum','Moon Jelly','Firefly Garden'} else time.monotonic()
+    phase=elapsed if name in {'Black Hole','Rooftops','Spectrum','Moon Jelly','Firefly Garden','Clockwork Garden'} else time.monotonic()
     art=_media_player_large_art(entry,width,art_height) if album_art else player_visuals.frame(mode,width,art_height,phase,state in {'play','playing'},seed)
     lines=header+art+footer
     color=player_visuals.album_color(snap) if album_art else ("1;32","1;36","1;35","1;34","1;37","1;33")[(mode-1)%6]
@@ -19199,6 +19216,7 @@ def _media_player_full_visual(snap,mode,visual_elapsed=0):
     if name=='Rooftops': color=player_visuals.ROOFTOP_COLOR
     if name=='Moon Jelly': color='36'
     if name=='Firefly Garden': color=player_visuals.FIREFLY_COLOR
+    if name=='Clockwork Garden': color=player_visuals.CLOCKWORK_COLOR
     shimmer=album_art and state in {'play','playing'} and not any(
         status in line for line in art for status in ('Loading album art','Album art unavailable'))
     rendered=[]
@@ -19337,6 +19355,28 @@ def _media_mp_rows(mode, library_rows, query):
     return _media_filter_rows(rows,query) if query else rows
 
 
+def _media_native_art(row):
+    source=_media_art_source(row)
+    candidate=media_art.artwork_for(source) if source else _media_remote_cover_path(row,fetch=False)
+    return Path(candidate) if candidate else None
+
+
+def _media_mp_transport_lines(snap,width):
+    snap=snap or {};entry=snap.get('entry') or {};session=snap.get('session') or {}
+    position=max(0,float(snap.get('position') or 0));duration=max(0,float(snap.get('duration') or 0))
+    state=str(snap.get('state') or 'stopped').upper()
+    title=_media_entry_label(entry) if entry else 'Choose tracks and press Enter to play'
+    clock=f'{_media_time(position)} / {_media_time(duration)}'
+    bar_width=max(8,min(48,width-len(clock)-5));filled=int(bar_width*min(1,position/duration)) if duration else 0
+    bar='['+'='*filled+'-'*(bar_width-filled)+']'
+    queue=session.get('queue') or [];index=int(snap.get('index') or 0)
+    lines=[_c('NOW PLAYING','1;36')+'  '+_c(state,'32' if state in {'PLAYING','PLAY'} else '33'),
+           _c(_media_find_cell(title,width),'37'),
+           _c(bar,'36')+' '+_c(clock,'2')+_c(f' · Queue {index+1 if queue else 0}/{len(queue)}','2'),
+           _media_hints('space play/pause · p/n previous/next · ←/→ seek · s shuffle · r repeat · x stop',width).replace('\n',' ')]
+    return [_ansi_clip(line,width) for line in lines]
+
+
 def _media_mp_now_playing(width):
     """One-line player status for the integrated media surface."""
     snap=_media_status_snapshot()
@@ -19388,7 +19428,8 @@ def media_mp(initial_query=""):
     search_before=query
     # MP owns its own graphics plane. ASCII/Fabric text art is immediate;
     # supported terminals may progressively replace only the art rectangle.
-    native_preview=NativePreviewController()
+    native_preview=NativePreviewController();native_images=True
+    next_transport_poll=0.0;transport_signature=None;transport_row=None;transport_width=None
 
     # Full terminal redraws erase native graphics. Repaint only when MP state
     # actually changes; idle polling may paint a completed native image without
@@ -19422,7 +19463,7 @@ def media_mp(initial_query=""):
                 height=max(20,terminal.lines)
                 right_w=min(40,max(28,width//3)) if width>=96 else 0
                 left_w=width-right_w-3 if right_w else width
-                list_rows=max(6,height-13)
+                list_rows=max(4,height-16)
                 top=max(0,min(max(0,len(visible)-list_rows),idx-list_rows+1))
                 page=visible[top:top+list_rows]
                 chosen=visible[idx] if visible else None
@@ -19438,15 +19479,7 @@ def media_mp(initial_query=""):
                     # local media artwork immediately; for remote rows use only an
                     # already-cached cover here so cursor movement never waits on
                     # Fabric/network I/O.
-                    local_source=_media_art_source(chosen)
-                    if local_source:
-                        candidate=media_art.artwork_for(local_source)
-                        if candidate:
-                            native_art=Path(candidate)
-                    else:
-                        candidate=_media_remote_cover_path(chosen,fetch=False)
-                        if candidate:
-                            native_art=Path(candidate)
+                    if native_images and native_preview.enabled:native_art=_media_native_art(chosen)
                     state,owner=_media_remote_preview_state(chosen,right_w,art_h)
                     if not art and state in {"loading","idle"}:
                         art_status=f"ART… requesting {owner}" if owner else "ART… loading"
@@ -19490,7 +19523,9 @@ def media_mp(initial_query=""):
                         else:
                             print(_ansi_clip(left,width))
                     print("─"*min(width,140))
-                    print(_c(_media_mp_now_playing(width),"32" if (_media_status_snapshot() or {}).get("state")=="playing" else "33"))
+                    playback=_media_status_snapshot()
+                    for line in _media_mp_transport_lines(playback,width):print(line)
+                    transport_row=list_rows+5;transport_width=width
                     if search_mode:
                         filter_text=f"SEARCH /{query}█"
                     else:
@@ -19498,7 +19533,7 @@ def media_mp(initial_query=""):
                     print(_c(filter_text,"1;36"))
                     controls="↑↓ select · Shift-arrows page/ends · Tab mark · A select all · E edit metadata · R refresh · C clear selection · Enter play · B add queue · D hide dir · L library · Q queue"
                     print(_media_hints(controls,width))
-                    print(_media_hints("/ search · space pause · ←/→ seek 10s · p/n prev/next · v visuals · s shuffle · r repeat · x stop · Esc finish/clear/exit",width),end="")
+                    print(_media_hints("/ search · space pause · ←/→ seek 10s · p/n prev/next · v visuals · M image/ASCII · s shuffle · r repeat · x stop · Esc finish/clear/exit",width),end="")
                     if notice:
                         print("  "+_c(notice,"33"),end="")
                         notice=""
@@ -19508,7 +19543,7 @@ def media_mp(initial_query=""):
 
                 # Header occupies three terminal rows; the list/art pane begins on
                 # row 4. The right pane begins immediately after " │ ".
-                if native_art and right_w:
+                if native_images and native_art and right_w:
                     native_preview.request(native_art,4,left_w+4,art_h,right_w)
                 else:
                     native_preview.invalidate()
@@ -19517,11 +19552,23 @@ def media_mp(initial_query=""):
                 art_retry_at=time.monotonic()+REMOTE_ART_RETRY_SECONDS if chosen and right_w and not art and art_status=="ART unavailable" else None
                 dirty=False
 
+            now=time.monotonic()
+            if now>=next_transport_poll and transport_row:
+                next_transport_poll=now+.8
+                playback=_media_status_snapshot();lines=_media_mp_transport_lines(playback,transport_width)
+                signature=tuple(lines)
+                if signature!=transport_signature:
+                    transport_signature=signature
+                    payload='\x1b7'+''.join(f'\x1b[{transport_row+i};1H\x1b[2K'+line for i,line in enumerate(lines))+'\x1b8'
+                    sys.stdout.write(payload);sys.stdout.flush()
             key=_read_tty_key(fd,.10 if pending else .25)
             native_preview.paint_ready()
             if not key:
                 # Remote artwork may become available while idle. Keep checking
                 # only while that asynchronous request is genuinely pending.
+                if native_images and native_preview.enabled and chosen and right_w and not native_art:
+                    candidate=_media_remote_cover_path(chosen,fetch=False)
+                    if candidate:dirty=True
                 if pending or (art_retry_at is not None and time.monotonic()>=art_retry_at):
                     dirty=True
                 continue
@@ -19539,7 +19586,7 @@ def media_mp(initial_query=""):
                 if key in {"\x7f","\b"}:
                     if query: query=query[:-1]; idx=0; view_key=None
                     continue
-                if len(key)==1 and key.isprintable() and key not in "ABCDLQJKER":
+                if len(key)==1 and key.isprintable() and key not in "ABCDLQJKERM":
                     query+=key; idx=0; view_key=None
                     continue
                 # Arrow/Tab/action keys leave editing and operate on this view.
@@ -19548,6 +19595,8 @@ def media_mp(initial_query=""):
                 if query:
                     query=""; idx=0; view_key=None; continue
                 return 0
+            if key=="M":
+                native_images=not native_images;notice="Preview: Auto image" if native_images else "Preview: ASCII";continue
             if key=="v":
                 native_preview.invalidate()
                 termios.tcsetattr(fd,termios.TCSADRAIN,old)

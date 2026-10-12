@@ -286,3 +286,18 @@ Video previews use a cached still at the earlier of one minute or 20% of the
 clip's duration. Unknown-duration clips try one minute, then the opening frame
 if that seek produces no image. Explicit poster/cover files take precedence.
 Local and Fabric previews share this frame; the movie itself stays unchanged.
+
+### Find, MP and the ASCII player
+
+Media Find is the inspection/curation surface (types, sources, visibility and
+metadata); MP is the approved-visible library, queues and playback workspace.
+Existing shortcuts remain available. Media Find's Shift-I info pane and MP's
+artwork pane automatically promote ASCII to native images in Kitty/iTerm when
+supported. Shift-M toggles Auto/ASCII. Other terminals keep ASCII;
+`LOOK_NATIVE_PREVIEW=off` disables native images. Remote images are fetched as
+small cached cover/preview assets, not full movies or songs.
+
+MP has a live now-playing panel beneath the list. Space toggles play/pause;
+p/n skip, left/right seek, s shuffles, r repeats, and x stops. Progress updates
+preserve the list and native artwork. Lowercase v opens the dedicated ASCII
+player/visualizer, now including Clockwork Garden in its ten-second rotation.

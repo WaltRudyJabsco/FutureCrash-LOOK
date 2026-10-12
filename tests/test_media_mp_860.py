@@ -31,3 +31,12 @@ def test_media_mp_initializes_search_state_before_first_frame():
     assert 'search_mode=False' in init
     assert 'search_before=query' in init
     assert init.index('search_mode=False') < body.index('if search_mode:')
+
+
+
+def test_mp_live_transport_does_not_clear_native_art_on_idle_update():
+    assert 'def _media_mp_transport_lines(snap,width):' in LK
+    assert 'transport_row=list_rows+5' in LK
+    assert 'signature!=transport_signature' in LK
+    assert 'M image/ASCII' in LK
+    assert 'candidate=_media_remote_cover_path(chosen,fetch=False)' in LK
