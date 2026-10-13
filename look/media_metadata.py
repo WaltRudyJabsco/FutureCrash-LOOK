@@ -22,7 +22,7 @@ def changes(values):
         if key in {'track','disc','season','episode'}:
             if isinstance(value,bool) or not isinstance(value,int) or not (0 if key=='season' else 1)<=value<=999:raise ValueError(key+' must be '+('0–999' if key=='season' else '1–999'))
         elif not isinstance(value,str) or not value.strip() or len(value)>300 or any(ord(c)<32 for c in value):raise ValueError(key+' must contain 1–300 printable characters')
-        if key=='content_kind' and value not in {'episode','special','extra'}:raise ValueError('Content kind must be episode, special or extra')
+        if key=='content_kind' and value not in {'episode','special','extra','unclassified'}:raise ValueError('Content kind must be episode, special, extra or unclassified')
         result[key]=value.strip() if isinstance(value,str) else value
     return result
 

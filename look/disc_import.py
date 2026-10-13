@@ -224,6 +224,20 @@ def audio_tracks(mount):
     return sorted(tracks,key=order)
 
 
+def video_metadata(label):
+    try:from . import disc_metadata
+    except ImportError:import disc_metadata
+    metadata={'title':label}
+    # Reuse a confirmed edition only for a matching series; always show it again.
+    query=disc_metadata.series_query(label).casefold()
+    for job in list_jobs():
+        previous=job.get('metadata') or {};release=previous.get('discogs_release')
+        if job.get('category')=='tv' and isinstance(release,dict) and release.get('id') and query in {
+                disc_metadata.series_query(job.get('title','')).casefold(),str(previous.get('series') or '').casefold()}:
+            metadata['discogs_release']=release;metadata['series']=previous.get('series') or disc_metadata.series_query(label);break
+    return metadata
+
+
 def inspect(identifier,kind='cd'):
     if kind not in {'cd','dvd','bluray'}:raise ValueError('Use cd, dvd or bluray')
     drive=selected_drive(identifier)
@@ -248,14 +262,14 @@ def inspect(identifier,kind='cd'):
         for fields in robot_records(text,'CINFO'):
             if len(fields)>=3 and fields[0]=='2' and not hint['title']:
                 hint['title']=disc_metadata.disc_hint({'disc':fields[-1]})['title']
-        return {'ok':True,'kind':kind,'drive':drive,'engine':'makemkv','titles':list(titles.values()),'metadata':{'title':hint['title']}}
+        return {'ok':True,'kind':kind,'drive':drive,'engine':'makemkv','titles':list(titles.values()),'metadata':video_metadata(hint['title'])}
     engine=tool('HandBrakeCLI')
     if not engine:raise ValueError('Install HandBrakeCLI or MakeMKV for DVD/Blu-ray imports')
     text=query([engine,'-i',drive['mount'] or drive['device'],'-t','0','--scan'],90)
     titles=[]
     for match in re.finditer(r'\+ title (\d+):(.*?)(?=\+ title \d+:|\Z)',text,re.S):
         duration=re.search(r'duration:\s*([\d:]+)',match[2]);titles.append({'index':match[1],'duration':duration[1] if duration else ''})
-    return {'ok':True,'kind':kind,'drive':drive,'engine':'handbrake','titles':titles,'metadata':{'title':hint['title']}}
+    return {'ok':True,'kind':kind,'drive':drive,'engine':'handbrake','titles':titles,'metadata':video_metadata(hint['title'])}
 
 
 def job_path(identifier):
@@ -503,6 +517,10 @@ def request(action,payload=None):
         try:from . import disc_metadata
         except ImportError:import disc_metadata
         return disc_metadata.movies(payload.get('query'))
+    if action=='discogs-release':
+        try:from . import disc_metadata
+        except ImportError:import disc_metadata
+        return disc_metadata.discogs_lookup(payload.get('id'))
     if action in {'cd-barcode','cd-release'}:
         try:from . import disc_metadata
         except ImportError:import disc_metadata
