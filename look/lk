@@ -20492,6 +20492,7 @@ _COMMANDS = [
     ('lk hidden', '[PATH]', 'files', 'LOOK with hidden files shown'),
     ('lk doc', '', 'meta', 'Full generated command, option and keyboard reference'),
     ('lk terminal', '[theme NAME|launch NAME|customize]', 'meta', 'Kitty palette picker and custom inks/highlighter; reset removes the appearance overlay'),
+    ('lk web', '[URL|search WORDS|home|list] [--browser NAME] [--native-style]', 'apps', 'Keyboard reading desk, terminal browsers and an explicit qutebrowser handoff'),
     ("lk tldr", "", "meta", "Short offline command examples"),
     ('lk dash', '', 'fabric', 'Live Fabric dashboard'),
     ('lk fabric', '[...]', 'fabric', 'Fabric nodes, transfers, jobs, repair and update'),
@@ -21836,7 +21837,7 @@ def main():
         import command_help
         return command_help.show(sys.argv[2:])
     if len(sys.argv)>2 and any(flag in sys.argv[2:] for flag in ('--help','-h')):
-        if sys.argv[1] not in {'terminal','notes','tasks','reminders','ytd','describe','notifications'} and not (sys.argv[1] in {'media','music'} and sys.argv[2] in {'import','disc','rip','edit','storage'}):
+        if sys.argv[1] not in {'web','terminal','notes','tasks','reminders','ytd','describe','notifications'} and not (sys.argv[1] in {'media','music'} and sys.argv[2] in {'import','disc','rip','edit','storage'}):
             import command_help
             return command_help.show([word for word in sys.argv[1:] if word not in {'--help','-h'}])
     if len(sys.argv)>=2 and sys.argv[1] in {"notes","tasks","reminders"}:
@@ -21846,6 +21847,9 @@ def main():
     if len(sys.argv)>=2 and sys.argv[1]=='terminal':
         import terminal_style
         return terminal_style.main(sys.argv[2:],read_key=_read_tty_key)
+    if len(sys.argv)>=2 and sys.argv[1]=='web':
+        import web_desk
+        return web_desk.main(sys.argv[2:],read_key=_read_tty_key)
     if len(sys.argv)>=2 and sys.argv[1]=="ytd":
         import ytd
         return ytd.main(sys.argv[2:])

@@ -24,6 +24,12 @@
     "Kitty palette picker and custom inks/highlighter; reset removes the appearance overlay"
   ],
   [
+    "lk web",
+    "[URL|search WORDS|home|list] [--browser NAME] [--native-style]",
+    "apps",
+    "Keyboard reading desk, terminal browsers and an explicit qutebrowser handoff"
+  ],
+  [
     "lk tldr",
     "",
     "meta",

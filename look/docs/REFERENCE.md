@@ -17,6 +17,8 @@ lk doc
   [meta] Full generated command, option and keyboard reference
 lk terminal [theme NAME|launch NAME|customize]
   [meta] Kitty palette picker and custom inks/highlighter; reset removes the appearance overlay
+lk web [URL|search WORDS|home|list] [--browser NAME] [--native-style]
+  [apps] Keyboard reading desk, terminal browsers and an explicit qutebrowser handoff
 lk tldr
   [meta] Short offline command examples
 lk dash
@@ -1090,3 +1092,10 @@ look/terminal_style.py
 Parser arguments and recognized option tokens (grouped by handler):
 base — Preset to fine-tune into custom
 name
+
+look/web_desk.py
+
+Parser arguments and recognized option tokens (grouped by handler):
+--browser — Select a browser; qutebrowser opens a graphical window
+--native-style — Keep the browser appearance instead of LOOK invocation colors
+target — URL, search WORDS, home, or list
