@@ -162,6 +162,7 @@ def desk(state, browsers, read_key, styled):
     name = state.get('browser') if state.get('browser') in browsers else names[0] if names else ''
     index = 0
     notice = ''
+    pane_help = False
     colors = terminal_style.list_colors()
     def prompt(label, initial=''):
         termios.tcsetattr(fd, termios.TCSADRAIN, old)
@@ -184,7 +185,8 @@ def desk(state, browsers, read_key, styled):
             header += ink(name + (' · graphical window' if name == 'qutebrowser' else ' · inside this terminal') if name else 'No supported browser installed', 'GREEN')
             header += ink(GUIDES.get(name, 'Install w3m, Lynx, Links, Chawan or qutebrowser; reopen lk web.'), 'GRAY') + ['']
             footer = [''] + ink('↑↓ choose · Shift-arrows page/ends · Enter read · b browser · u URL · s search', 'CYAN')
-            footer += ink('a bookmark · y copy Notebook link · h home page · q/Esc exit', 'CYAN')
+            footer += ink('W shell pane · a bookmark · y copy Notebook link · h home page · q/Esc exit', 'CYAN')
+            if pane_help:footer += ink(' · '.join(terminal_style.pane_shortcuts()), 'CYAN')
             footer += ink(clean(notice), 'YELLOW') or ['']
             page_size = max(1, (height - len(header) - len(footer) - 1) // 2)
             top = max(0, index - page_size + 1)
@@ -196,11 +198,15 @@ def desk(state, browsers, read_key, styled):
             lines += footer
             sys.stdout.write('\033[H\033[2J\033[?25l' + '\n'.join(lines) + '\n')
             sys.stdout.flush()
-            key = read_key(fd)
+            key = read_key(fd,1)
+            if not key:continue
             notice = ''
             if key in {'q', 'esc', '\x03'}:
                 return 0
-            if key == 'up':index = max(0, index-1)
+            if key == 'W':
+                notice = terminal_style.open_pane(Path.cwd())
+                if notice.startswith('Shell opened beside LOOK'):pane_help = True
+            elif key == 'up':index = max(0, index-1)
             elif key == 'down':index = min(len(rows)-1, index+1)
             elif key in {'shiftup', 'pageup'}:index = max(0, index-page_size)
             elif key in {'shiftdown', 'pagedown'}:index = min(len(rows)-1, index+page_size)

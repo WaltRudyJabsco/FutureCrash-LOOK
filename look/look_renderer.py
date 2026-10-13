@@ -230,16 +230,20 @@ def strip_ansi(s:str)->str:
 
 
 def fit(s:str,width:int)->str:
+    import re
+    if width<=0:return ''
     raw=strip_ansi(s)
     if len(raw)<=width: return s
-    keep=max(1,width-1)
-    # Most content lines have color only at the beginning and RESET at the end.
-    if s.startswith('\x1b['):
-        # crude but safe: preserve prefix through final m
-        end=s.find('m')+1
-        prefix=s[:end]; body=strip_ansi(s)
-        return prefix+body[:keep]+'…'+RESET
-    return raw[:keep]+'…'
+    keep=width-1; pieces=[]
+    # List rows contain several color spans, sometimes after an attribute reset.
+    # Clipping only the first escape loses file types when the preview narrows them.
+    for token in re.split(r'(\x1b\[[0-9;?]*[ -/]*[@-~])',s):
+        if token.startswith('\x1b['):
+            pieces.append(token)
+        else:
+            pieces.append(token[:keep]); keep-=min(keep,len(token))
+            if not keep:break
+    return ''.join(pieces)+'…'+RESET
 
 
 def column_grid(entries:list[Entry], width:int, highlight_path:Path|None=None, marked:set[Path]|None=None)->list[str]:
@@ -1657,7 +1661,7 @@ def pager(rows:list[str],height:int,width:int,rebuild=None,browse_rebuild=None,f
                 # Side previews consume terminal width. Reflow the grid to the
                 # visible list pane so highlighted matches cannot live beneath
                 # the preview in an off-screen column.
-                render_width=max(48,width-min(34,max(26,width//4))-3) if picked and width>=96 else width
+                render_width=max(44,width-min(60,max(40,(width*2)//5))-3) if picked and width>=96 else width
                 current=rebuild(query, picked, render_width, marked)
             context_rows=[]
             if header_rows:

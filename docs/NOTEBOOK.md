@@ -204,3 +204,17 @@ code blocks stay examples. Unclosed, empty or invalid command blocks cannot be
 selected. Terminal controls and hidden directional controls are rejected before
 execution. Previewing, editing, copying, syncing and opening a note never run
 its commands; each execution requires the explicit R confirmation.
+
+## Adjacent shell pane
+
+Press **Shift-W** from the Notes list or a rendered note preview to open
+a sibling shell in the current working directory. Your selection, filter and
+scroll position stay in the original view. In Kitty, **Option-Shift-W** on Mac
+(**Alt-Shift-W** on Linux) switches focus, and **Ctrl-Shift-W** closes the focused
+pane. In tmux, **Ctrl-B then O** switches; `exit` closes the shell. These hints
+remain visible after opening a pane. The terminal owns the sibling shell.
+
+The views redraw to fit the terminal after panes open or close. Shift-W stays
+ordinary text inside note editors and URL/bookmark prompts. In a launched web
+browser, the browser owns its keys; quit back to the desk to use Shift-W.
+Without Kitty or tmux, LOOK explains the requirement and stays in your view.

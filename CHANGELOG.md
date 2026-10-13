@@ -1,3 +1,13 @@
+## File colors during selection
+
+- Preserve file-type and metadata colors when filter/selection rows are narrowed by previews.
+- Reflow the file list to the actual preview-pane width while keeping the focused highlight.
+
+## Notes and Web shell panes
+
+- Add Shift-W sibling shells to Notebook lists/previews and the Web reading desk.
+- Keep focus/close hints visible and redraw after pane resizing; preserve editor text input.
+
 ## The web reading desk
 
 - Add lk web with installed-browser discovery, search, bookmarks and Notebook link copying.
