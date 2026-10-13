@@ -279,7 +279,7 @@ lk media repeat [off|all]
   [media] Cycle or set repeat
 lk media storage [--pick | --node NODE --root PATH] [--json]
   [media] Remember a library node and map its canonical media root
-lk media edit <QUERY> [--artist NAME] [--album NAME] [--album-artist NAME] [--title NAME] [--track N] [--disc N] [--series NAME] [--season N] [--episode N] [--content-kind episode|special|extra] [--all] [--json]
+lk media edit <QUERY> [--artist NAME] [--album NAME] [--album-artist NAME] [--title NAME] [--track N] [--disc N] [--series NAME] [--season N] [--episode N] [--content-kind episode|special|extra|unclassified] [--all] [--json]
   [media] Correct metadata for one track or matching batch
 lk media [...]
   [media] Media library, queue, playlists, transport · alias: lk music

@@ -70,8 +70,21 @@ cannot guarantee a database match.
 
 ## TV box sets
 
-Choose **tv** for the library category. The workbench offers TVmaze series lookup,
-then episodes in airing order and known specials. Confirm the series; choose an
+Choose **tv** for the library category. First, optionally enter a Discogs release
+or master link, `r12345`, `m12345`, or a numeric ID. A master offers specific
+editions by country/year; confirm your physical edition. Then choose a disc when
+the release supplies numbered positions. Public ID lookups need no account token;
+automated Discogs name/barcode search is not implemented and requires authentication.
+`0` skips the remembered edition suggestion. A confirmed edition is suggested for
+later imports with the same series label, and is shown for confirmation again.
+
+Discogs supplies release contents and extras. TVmaze supplements series/episode
+numbers through exact title matches. Edition/disc suffixes are removed from the
+suggested series search, without changing your import label. Headings and disc
+positions never determine season numbers. Unique duration matches within two
+seconds suggest a selection for review; duplicate or missing durations do not.
+Unclassified release entries keep that status, instead of being called extras.
+TVmaze also offers episodes in airing order and known specials. Confirm the series; choose an
 episode number for each scanned disc title, `x Interview` (or another label) for
 an extra, or `0` to leave it unidentified. Exact episode names suggest a choice;
 generic names and durations alone never establish identity. Review shows the
@@ -81,9 +94,8 @@ Confirmed mappings use MakeMKV's scanned output filenames, not sorted file order
 Matched files receive readable series/season/episode names, descriptive sidecars
 and catalog fields; extras remain explicitly labelled extras. Specials without an
 episode number keep that distinction rather than receiving invented numbering.
-Disc-only content absent from the provider needs a manual label. This is not an
-automatic edition-specific DVD menu or barcode recognition service. Camera/case
-recognition is not implemented. Metadata attribution: [TVmaze API and licensing](https://www.tvmaze.com/api).
+Disc-only content absent from the provider needs a manual label. DVD menu recognition and DVD/Blu-ray barcode search are not implemented. Camera/case
+recognition is not implemented. Metadata attribution: [TVmaze API and licensing](https://www.tvmaze.com/api), [Discogs API](https://www.discogs.com/developers).
 
 ## DVD and Blu-ray
 

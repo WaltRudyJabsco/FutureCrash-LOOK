@@ -142,45 +142,89 @@ def movie_details(request,prompt,metadata):
 def tv_details(request,prompt,metadata,titles,title_index):
     try:from . import disc_metadata
     except ImportError:import disc_metadata
+    import re
     metadata=dict(metadata)
     title=prompt('Series / season / disc label',metadata.get('title') or '')
     metadata['title']=title
-    if prompt('Search TVmaze for series and episodes (sends series name)? y / n','y').casefold()!='y':return title,metadata
-    query=prompt('Series name to search',metadata.get('series') or title)
-    try:
-        matches=request('tv-lookup',{'query':query}).get('matches') or []
-        for number,row in enumerate(matches,1):print(f"  {number}. {row['title']} · {row.get('year') or ''}")
-        if not matches:
-            print('No series match; keeping disc labels.');return title,metadata
-        choice=prompt('Confirm series number; 0 keeps disc labels','1' if len(matches)==1 else '0')
-        if choice=='0':return title,metadata
-        if not choice.isdigit() or not 1<=int(choice)<=len(matches):raise ValueError('Series choice out of range')
-        show=matches[int(choice)-1]
-        episodes=request('tv-episodes',{'id':show['id']}).get('episodes') or []
-        for number,item in enumerate(episodes,1):
-            print(f"  {number}. {disc_metadata.episode_label(item)} · {item.get('runtime') or '?'} min")
-        print('Match disc titles below. Numbers choose episodes; x NAME labels an extra; 0 keeps unidentified. Disc order is not episode order.')
-        mapped={}
-        for item in titles:
-            index=str(item['index'])
-            if title_index!='all' and index!=title_index:continue
-            previous=(metadata.get('tv_titles') or {}).get(index,{})
-            exact=[str(n) for n,ep in enumerate(episodes,1) if item.get('name','').casefold()==ep['title'].casefold()]
-            default=exact[0] if len(exact)==1 else '0'
-            if previous.get('content_kind')=='extra':default='x '+previous['title']
-            else:
-                for n,ep in enumerate(episodes,1):
-                    if previous.get('source')==ep.get('source'):default=str(n)
-            answer=prompt(f"Disc title {index} · {item.get('name') or 'unnamed'} · {item.get('duration') or '?'}",default)
-            if answer=='0':continue
-            if answer.casefold().startswith('x '):selected={'title':answer[2:].strip(),'content_kind':'extra'}
-            elif answer.isdigit() and 1<=int(answer)<=len(episodes):selected=dict(episodes[int(answer)-1])
-            else:raise ValueError('Choose an episode number, x NAME, or 0')
-            selected.update(series=show['title'],filename=item.get('filename') or '')
-            mapped[index]=selected
-        metadata.update(series=show['title'],source=show['source'],tv_titles=disc_metadata.validate_tv_titles(mapped))
-        print('Episode choices saved for review; unmatched titles remain unnamed.')
-    except (OSError,ValueError,RuntimeError) as exc:print('TV lookup unavailable · '+str(exc)+' · keeping existing labels.')
+    candidates=[];release=None
+    previous=metadata.get('discogs_release') or {}
+    link=prompt('Discogs release/master link or r/m-number (0 skips; blank uses suggestion)',str(previous.get('id') or ''))
+    if link and link!='0':
+        try:
+            found=request('discogs-release',{'id':link})
+            if found.get('master'):
+                editions=found.get('editions') or []
+                print('BOX SET · '+found['master']['title'])
+                for n,item in enumerate(editions,1):print(f"  {n}. {item['country']} · {item['year']} · {item['title']} · {item['format']} · r{item['id']}")
+                if found.get('more_editions'):print('More editions exist; use a direct release link if yours is absent.')
+                choice=prompt('Choose your edition number; 0 skips','1' if len(editions)==1 else '0')
+                if choice=='0':found={}
+                else:
+                    if not choice.isdigit() or not 1<=int(choice)<=len(editions):raise ValueError('Edition choice out of range')
+                    found=request('discogs-release',{'id':str(editions[int(choice)-1]['id'])})
+            if not found.get('release'):raise ValueError('No edition selected')
+            release=found['release']
+            print('RELEASE · '+release['artist']+' - '+release['title']+' · '+release['year']+' · '+release['country']+' · '+release.get('formats',''))
+            if prompt('Use this physical edition? y / n','y').casefold()=='y':
+                candidates=[dict(item) for item in release['tracks']]
+                discs=sorted({match[1] for item in candidates if (match:=re.match(r'^(?:DVD|CD)?(\d+)[.-]',item['position'],re.I))},key=int)
+                if discs:
+                    hint=re.search(r'\b(?:disc|disk)\s*(\d+)',title,re.I)
+                    choice=prompt('Disc in this release: '+', '.join(discs)+' / all',hint[1] if hint and hint[1] in discs else 'all')
+                    if choice!='all':
+                        if choice not in discs:raise ValueError('Choose a listed disc or all')
+                        candidates=[item for item in candidates if re.match(r'^(?:DVD|CD)?'+re.escape(choice)+r'[.-]',item['position'],re.I)]
+                metadata['discogs_release']={key:release[key] for key in ('id','title','artist','source')}
+                if not candidates:print('Edition has no usable contents list; trying series metadata.')
+            else:release=None
+        except (OSError,ValueError,RuntimeError) as exc:
+            print('Discogs lookup · '+str(exc)+' · series lookup remains available.');release=None;candidates=[]
+    series=metadata.get('series') or disc_metadata.series_query(title)
+    source=release['source'] if release else metadata.get('source') or ''
+    if prompt('Search TVmaze for series and episodes (sends series name)? y / n','y').casefold()=='y':
+        query=prompt('Series name to search',series)
+        try:
+            matches=request('tv-lookup',{'query':query}).get('matches') or []
+            for number,row in enumerate(matches,1):print(f"  {number}. {row['title']} · {row.get('year') or ''}")
+            if matches:
+                choice=prompt('Confirm series number; 0 keeps release labels','1' if len(matches)==1 else '0')
+                if choice!='0':
+                    if not choice.isdigit() or not 1<=int(choice)<=len(matches):raise ValueError('Series choice out of range')
+                    show=matches[int(choice)-1];episodes=request('tv-episodes',{'id':show['id']}).get('episodes') or []
+                    series=show['title'];source=show['source']
+                    if candidates:
+                        for item in candidates:
+                            exact=[ep for ep in episodes if ep['title'].casefold()==item['title'].casefold()]
+                            if len(exact)==1:item.update(exact[0])
+                    else:candidates=episodes
+            else:print('No series match; keeping available release labels.')
+        except (OSError,ValueError,RuntimeError) as exc:print('TV lookup unavailable · '+str(exc)+' · keeping available labels.')
+    if not candidates:return title,metadata
+    for number,item in enumerate(candidates,1):
+        print(f"  {number}. {item.get('position') or ''} {disc_metadata.episode_label(item)} · {item.get('duration') or str(item.get('runtime') or '?')+' min'} · {item.get('heading') or ''}")
+    print('Match disc titles below. Numbers choose listed contents; x NAME labels an extra; 0 keeps unidentified. DVD title order is not episode order.')
+    mapped={}
+    for item in titles:
+        index=str(item['index'])
+        if title_index!='all' and index!=title_index:continue
+        previous=(metadata.get('tv_titles') or {}).get(index,{})
+        exact=[str(n) for n,ep in enumerate(candidates,1) if item.get('name','').casefold()==ep['title'].casefold()]
+        suggestion=disc_metadata.duration_suggestion(item,candidates)
+        default=exact[0] if len(exact)==1 else suggestion or '0'
+        if not exact and suggestion:print('Duration suggests '+candidates[int(suggestion)-1]['title']+'; confirm against the disc contents.')
+        if previous.get('content_kind')=='extra':default='x '+previous['title']
+        else:
+            for n,ep in enumerate(candidates,1):
+                if previous.get('title')==ep.get('title') and previous.get('source')==ep.get('source'):default=str(n)
+        answer=prompt(f"Disc title {index} · {item.get('name') or 'unnamed'} · {item.get('duration') or '?'}",default)
+        if answer=='0':continue
+        if answer.casefold().startswith('x '):selected={'title':answer[2:].strip(),'content_kind':'extra'}
+        elif answer.isdigit() and 1<=int(answer)<=len(candidates):selected=dict(candidates[int(answer)-1])
+        else:raise ValueError('Choose a listed content number, x NAME, or 0')
+        selected.update(series=series,filename=item.get('filename') or '')
+        mapped[index]=selected
+    metadata.update(series=series,source=source,tv_titles=disc_metadata.validate_tv_titles(mapped))
+    print('Content choices saved for review; unmatched titles remain unnamed.')
     return title,metadata
 
 

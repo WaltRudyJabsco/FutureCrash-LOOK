@@ -118,6 +118,7 @@ def tv_episodes(identifier):
 def episode_label(item):
     if item.get('content_kind')=='episode':
         return f"S{item['season']:02d}E{item['episode']:02d} - {item['title']}"
+    if item.get('content_kind')=='unclassified':return item['title']
     return ('Special' if item.get('content_kind')=='special' else 'Extra')+' - '+item['title']
 
 
@@ -127,7 +128,7 @@ def validate_tv_titles(value):
         if not isinstance(index,str) or not index.isdigit() or not isinstance(item,dict):raise ValueError('Invalid TV title mapping')
         for key in ('title','series','source','filename'):
             if key in item and (not isinstance(item[key],str) or len(item[key])>300):raise ValueError('Invalid TV title metadata')
-        if not item.get('title') or not item.get('series') or item.get('content_kind') not in {'episode','special','extra'}:raise ValueError('Invalid TV title metadata')
+        if not item.get('title') or not item.get('series') or item.get('content_kind') not in {'episode','special','extra','unclassified'}:raise ValueError('Invalid TV title metadata')
         for key in ('season','episode'):
             if item.get(key) is not None and (type(item[key]) is not int or not 0<=item[key]<=999):raise ValueError('Invalid episode number')
         filename=item.get('filename','')
@@ -173,3 +174,105 @@ def cd_release(identifier):
                          'disc':medium.get('position'),
                          'tracks':[text(track.get('title') or (track.get('recording') or {}).get('title')) for track in tracks]})
     return {'ok':True,'releases':releases,'source':'MusicBrainz'}
+
+
+def series_query(label):
+    """Edition and disc suffixes identify the box, not the television series."""
+    value=text(label).replace('_',' ').strip()
+    value=re.sub(r'\s*[-–:]?\s*(?:special|collector.s|complete|deluxe)\s+edition\b.*$','',value,flags=re.I)
+    value=re.sub(r'\s*[-–:]?\s*(?:disc|disk|dvd|blu[ -]?ray|season|series)\s*\d+.*$','',value,flags=re.I)
+    value=re.sub(r'\s+(?:dvd|blu[ -]?ray|box\s*set)\s*$','',value,flags=re.I)
+    return value.strip(' -:') or text(label)
+
+
+def discogs_reference(value):
+    raw=str(value or '').strip()
+    match=re.fullmatch(r'\[?([rm]?)(\d+)\]?',raw,re.I)
+    if match:kind='masters' if match[1].lower()=='m' else 'releases';identifier=int(match[2])
+    else:
+        parsed=urllib.parse.urlparse(raw)
+        if parsed.scheme!='https' or parsed.hostname not in {'discogs.com','www.discogs.com'} or parsed.username or parsed.port:raise ValueError('Enter a Discogs link, r-number, m-number or release ID')
+        match=re.match(r'^/(?:[a-z]{2}/)?(release|master)/(\d+)(?:-|/|$)',parsed.path)
+        if not match:raise ValueError('Choose a Discogs release or master link')
+        kind='masters' if match[1]=='master' else 'releases';identifier=int(match[2])
+    if not 0<identifier<10**10:raise ValueError('Invalid Discogs ID')
+    return kind,identifier
+
+
+def discogs_id(value):
+    kind,identifier=discogs_reference(value)
+    if kind!='releases':raise ValueError('Choose an edition from this master first')
+    return identifier
+
+
+def _discogs_json(identifier,resource='releases'):
+    request=urllib.request.Request('https://api.discogs.com/'+resource+'/'+str(identifier),
+        headers={'User-Agent':'FutureCrash-LOOK/8.16 (reviewed disc metadata; https://github.com/WaltRudyJabsco/FutureCrash-LOOK)'})
+    with urllib.request.urlopen(request,timeout=LOOKUP_TIMEOUT_SECONDS) as response:
+        data=response.read(LOOKUP_MAX_BYTES+1)
+    if len(data)>LOOKUP_MAX_BYTES:raise ValueError('Discogs response too large')
+    result=json.loads(data)
+    if not isinstance(result,dict):raise ValueError('Invalid Discogs response')
+    return result
+
+
+def discogs_release(value):
+    identifier=discogs_id(value);data=_discogs_json(identifier)
+    source='https://www.discogs.com/release/'+str(identifier)
+    tracks=[]
+    def collect(items,heading='',depth=0):
+        if not isinstance(items,list) or depth>4:raise ValueError('Invalid Discogs contents nesting')
+        for row in items[:1000]:
+            if not isinstance(row,dict):continue
+            if row.get('type_')=='heading':heading=text(row.get('title'));continue
+            title=text(row.get('title'));position=text(row.get('position'))
+            if row.get('sub_tracks'):collect(row['sub_tracks'],title or heading,depth+1)
+            elif title:tracks.append({'title':title,'position':position,'heading':heading,
+                                      'duration':text(row.get('duration')),'source':source,
+                                      'content_kind':'unclassified'})
+    collect(data.get('tracklist') or [])
+    artist=text(' / '.join(row.get('name','') for row in data.get('artists',[]) if isinstance(row,dict)))
+    return {'ok':True,'release':{'id':identifier,'title':text(data.get('title')),'artist':artist,
+            'year':text(data.get('year')),'country':text(data.get('country')),'source':source,
+            'formats':text(' / '.join(str(item.get('qty') or '')+' '+str(item.get('name') or '')+' '+', '.join(item.get('descriptions') or []) for item in data.get('formats',[]) if isinstance(item,dict))),
+            'tracks':tracks[:1000]},'source':'Discogs'}
+
+
+def discogs_lookup(value):
+    kind,identifier=discogs_reference(value)
+    if kind=='releases':
+        try:return discogs_release(str(identifier))
+        except urllib.error.HTTPError as exc:
+            if exc.code!=404 or not str(value).strip().isdigit():raise
+            kind='masters'  # Bare spoken numbers may identify a master; editions still require confirmation.
+    master=_discogs_json(identifier,'masters')
+    # Exact editions differ in country, video standard and sometimes contents.
+    versions=_discogs_json(str(identifier)+'/versions?per_page=100','masters')
+    editions=[]
+    for item in (versions.get('versions') or [])[:100]:
+        if not isinstance(item,dict) or type(item.get('id')) is not int:continue
+        editions.append({'id':item['id'],'title':text(item.get('title')),'country':text(item.get('country')),
+                         'year':text(item.get('released')),'format':text(item.get('format'))})
+    return {'ok':True,'master':{'title':text(master.get('title')),'id':identifier},'editions':editions,
+            'more_editions':int((versions.get('pagination') or {}).get('items') or 0)>100,'source':'Discogs'}
+
+
+DURATION_MATCH_TOLERANCE_SECONDS=2
+
+
+def duration_seconds(value):
+    if not re.fullmatch(r'\d+(?::\d{1,2}){1,2}',str(value or '')):return None
+    parts=[int(part) for part in value.split(':')]
+    if any(part>=60 for part in parts[1:]):return None
+    total=0
+    for part in parts:total=total*60+part
+    return total or None
+
+
+def duration_suggestion(title,candidates):
+    seconds=duration_seconds(title.get('duration'))
+    if seconds is None:return None
+    matches=[index for index,item in enumerate(candidates,1)
+             if (duration:=duration_seconds(item.get('duration'))) is not None
+             and abs(seconds-duration)<=DURATION_MATCH_TOLERANCE_SECONDS]
+    return str(matches[0]) if len(matches)==1 else None

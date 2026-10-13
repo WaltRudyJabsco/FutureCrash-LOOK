@@ -1,3 +1,10 @@
+## Physical release lookup for TV disc imports
+
+- Accept Discogs release/master links and IDs; confirm edition and disc contents.
+- Supplement exact episode names with TVmaze; preserve unclassified extras and provider provenance.
+- Suggest unique duration matches for review and reuse confirmed edition suggestions.
+- Separate box-set/disc labels from series search queries.
+
 ## Edit TV metadata and every listed source
 
 - Extend Shift-E with series, season, episode and special/extra labels.

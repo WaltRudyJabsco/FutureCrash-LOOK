@@ -20,7 +20,7 @@ def test_tv_provider_preserves_specials_without_inventing_episode_numbers(monkey
 def test_tv_review_keeps_unnamed_titles_and_labels_extras():
     episodes=[{'title':'Pilot','season':1,'episode':1,'content_kind':'episode','source':'https://www.tvmaze.com/episodes/12'}]
     request=Mock(side_effect=[{'matches':[{'id':10,'title':'Series','source':'https://www.tvmaze.com/shows/10'}]}, {'episodes':episodes}])
-    answers=iter(['Disc one','y','Series','1','1','x Interview','0'])
+    answers=iter(['Disc one','','y','Series','1','1','x Interview','0'])
     title,data=disc_ui.tv_details(request,lambda *args:next(answers),{},[
         {'index':'0','filename':'title_t00.mkv'}, {'index':'1','filename':'title_t01.mkv'}, {'index':'2','filename':'title_t02.mkv'}],'all')
     assert title=='Disc one'
@@ -93,3 +93,53 @@ def test_cd_barcode_fallback_confirms_release_and_matching_disc(monkeypatch):
         return '012345678905' if label.startswith('CD barcode') else default
     payload=disc_ui.import_options(request,inventory,'drive',prompt,lambda label,default:default)
     assert payload['metadata']['tracks']==['One','Two'] and payload['metadata']['disc']==1
+
+
+def test_series_search_separates_physical_disc_label():
+    assert metadata.series_query('The Mighty Boosh Special Edition Disc 3')=='The Mighty Boosh'
+    assert metadata.series_query('THE_MIGHTY_BOOSH_DISC2')=='THE MIGHTY BOOSH'
+    assert metadata.series_query('2001 A Space Odyssey')=='2001 A Space Odyssey'
+
+
+def test_discogs_release_preserves_positions_and_typo_without_guessing_seasons(monkeypatch):
+    data={'title':'Box','artists':[{'name':'Series'}],'tracklist':[
+        {'type_':'heading','title':'Seires Two'},
+        {'type_':'track','position':'3-1','title':'Episode','duration':'28:25'},
+        {'type_':'track','position':'3-2','title':'Interview','duration':''}]}
+    monkeypatch.setattr(metadata,'_discogs_json',lambda *args:data)
+    result=metadata.discogs_release('https://www.discogs.com/release/123-Box')['release']
+    assert result['tracks'][0]['heading']=='Seires Two'
+    assert result['tracks'][0]['position']=='3-1' and 'season' not in result['tracks'][0]
+    assert result['tracks'][1]['content_kind']=='unclassified'
+    with pytest.raises(ValueError):metadata.discogs_reference('https://evil.example/release/123')
+    assert metadata.discogs_reference('[m2626853]')==('masters',2626853)
+
+
+def test_duration_is_only_a_unique_review_suggestion():
+    assert metadata.duration_suggestion({'duration':'0:28:25'},[{'duration':'28:25'}])=='1'
+    assert metadata.duration_suggestion({'duration':'28:25'},[{'duration':'28:25'},{'duration':'28:26'}]) is None
+    assert metadata.duration_suggestion({'duration':'28:25'},[{'duration':'28:30'}]) is None
+
+
+def test_discogs_edition_then_disc_then_tv_enrichment(monkeypatch):
+    release={'id':123,'artist':'Series','title':'Special Edition','year':'2008','country':'UK','source':'Discogs',
+             'tracks':[{'title':'Pilot','position':'1-1','duration':'28:25','source':'Discogs','content_kind':'unclassified'},
+                       {'title':'Extra','position':'2-1','duration':'','source':'Discogs','content_kind':'unclassified'}]}
+    def request(action,payload):
+        if action=='discogs-release':
+            if payload['id']=='m1':return {'master':{'title':'Box'},'editions':[{'id':123,'country':'UK','year':'2008','title':'Box','format':'DVD'}]}
+            return {'release':release}
+        if action=='tv-lookup':return {'matches':[{'id':10,'title':'Series','source':'TVmaze'}]}
+        if action=='tv-episodes':return {'episodes':[{'title':'Pilot','season':1,'episode':1,'content_kind':'episode','source':'TVmaze'}]}
+        raise AssertionError(action)
+    answers=iter(['Series Disc 1','m1','1','y','1','y','Series','1','1'])
+    title,data=disc_ui.tv_details(request,lambda *args:next(answers),{},[{'index':'0','duration':'28:25','filename':'t00.mkv'}],'all')
+    assert data['discogs_release']['id']==123
+    assert data['tv_titles']['0']['episode']==1 and data['tv_titles']['0']['filename']=='t00.mkv'
+
+
+def test_confirmed_box_set_suggestion_stays_with_its_series(monkeypatch):
+    monkeypatch.setattr(disc_import,'list_jobs',lambda:[{'category':'tv','title':'Series Special Edition Disc 1',
+        'metadata':{'series':'Series','discogs_release':{'id':123}}}])
+    assert disc_import.video_metadata('Series Special Edition Disc 2')['discogs_release']['id']==123
+    assert 'discogs_release' not in disc_import.video_metadata('Another Show Disc 1')
