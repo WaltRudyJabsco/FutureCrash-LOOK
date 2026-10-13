@@ -55,3 +55,17 @@ personal browser configuration or key bindings.
 You can run `lk web` in LOOK's adjacent shell pane. Exit the browser to return to
 the desk, then exit the desk to return to that pane's shell. Existing pane focus
 and close shortcuts remain unchanged.
+
+## Adjacent shell pane
+
+Press **Shift-W** from the Web reading desk to open
+a sibling shell in the current working directory. Your selection, filter and
+scroll position stay in the original view. In Kitty, **Option-Shift-W** on Mac
+(**Alt-Shift-W** on Linux) switches focus, and **Ctrl-Shift-W** closes the focused
+pane. In tmux, **Ctrl-B then O** switches; `exit` closes the shell. These hints
+remain visible after opening a pane. The terminal owns the sibling shell.
+
+The views redraw to fit the terminal after panes open or close. Shift-W stays
+ordinary text inside note editors and URL/bookmark prompts. In a launched web
+browser, the browser owns its keys; quit back to the desk to use Shift-W.
+Without Kitty or tmux, LOOK explains the requirement and stays in your view.

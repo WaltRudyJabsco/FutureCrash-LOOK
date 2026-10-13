@@ -16,6 +16,10 @@ import time
 import tty
 import unicodedata
 import urllib.request
+try:
+    from . import terminal_style
+except ImportError:
+    import terminal_style
 
 try:
     from .notebook_core import Notebook, timestamp
@@ -152,6 +156,10 @@ Full command flags: lkn --help. Global reference: lk doc or man lk.
 
 Command mode: Tab selects text/label/directory; Enter adds a line in the text.
 Shift-Enter/Ctrl-S inserts the block, then save the note as usual.
+
+W opens a sibling shell from the list or note preview, in the current working directory.
+Kitty: Option/Alt-Shift-W switches panes; Ctrl-Shift-W closes the focused pane.
+tmux uses Ctrl-B then O to switch; exit closes the shell. W stays text in editors.
 '''
 
 
@@ -627,12 +635,15 @@ def open_link(kind,target):
 
 def note_view(store,row,read_key):
     """Own terminal state so the same view works from the list and named CLI entry."""
-    fd=sys.stdin.fileno(); old=termios.tcgetattr(fd); top=0; notice=''
+    fd=sys.stdin.fileno(); old=termios.tcgetattr(fd); top=0; notice=''; pane_help=False
     try:
         tty.setcbreak(fd); sys.stdout.write('\033[?25l')
         while True:
             width,height=shutil.get_terminal_size((100,30))
-            inner=max(1,min(96,width-4)); page=max(1,height-8)
+            controls='↑↓/Space scroll · W shell pane · L links · Y copy link · B related · E edit · V editor · H help · Esc back'
+            if pane_help:controls+=' · '+' · '.join(terminal_style.pane_shortcuts())
+            control_rows=textwrap.wrap(controls,max(1,width-1))
+            inner=max(1,min(96,width-4)); page=max(1,height-5-len(control_rows))
             links=[]
             content=render_markdown(row['body'],inner,links)
             top=max(0,min(top,max(0,len(content)-page)))
@@ -644,11 +655,10 @@ def note_view(store,row,read_key):
             for line in content[top:top+page]:
                 frame.append('│'+line+'│')
             frame.extend(['│'+' '*inner+'│']*max(0,page-len(content[top:top+page])))
-            frame.extend(['└'+border+'┘',
-                          command_hints('↑↓/Space scroll · L links · Y copy link · B related · E edit · V editor · H help · Esc back'[:max(1,width-1)]),
-                          notice[:max(1,width-1)]])
+            frame.extend(['└'+border+'┘',command_hints('\n'.join(control_rows)),notice[:max(1,width-1)]])
             sys.stdout.write('\033[2J\033[H'+'\n'.join(frame)+'\033[J'); sys.stdout.flush()
-            key=read_key(fd,None)
+            key=read_key(fd,1)
+            if not key:continue
             if key in {'esc','q','\x03'}: return
             if key in {'down','j','\r','\n'}: top+=1
             elif key in {'up','k'}: top-=1
@@ -656,6 +666,9 @@ def note_view(store,row,read_key):
             elif key in {'pageup','shiftup'}: top-=page
             elif key in {'home','shiftleft'}: top=0
             elif key in {'end','shiftright'}: top=len(content)
+            elif key=='W':
+                notice=terminal_style.open_pane(Path.cwd())
+                if notice.startswith('Shell opened beside LOOK'):pane_help=True
             elif key in {'H','?'}: show_help(fd,read_key)
             elif key=='Y':
                 notice='Copied note link · paste into another note' if copy_note_link(row) else 'Clipboard unavailable'
@@ -699,7 +712,7 @@ def note_view(store,row,read_key):
 
 def workspace(store,kind,read_key,hints,initial_query=''):
     fd=sys.stdin.fileno(); old=termios.tcgetattr(fd)
-    query=initial_query; index=0; marked=set(); notice=''; scope='title'; sort='updated'; focused=None
+    query=initial_query; index=0; marked=set(); notice=''; scope='title'; sort='updated'; focused=None; pane_help=False
     def prompt(label):
         termios.tcsetattr(fd,termios.TCSADRAIN,old)
         sys.stdout.write('\033[?25h'); sys.stdout.flush()
@@ -716,15 +729,19 @@ def workspace(store,kind,read_key,hints,initial_query=''):
                 index=next((i for i,row in enumerate(rows) if row['revision']==focused),index)
                 focused=None
             index=max(0,min(index,max(0,len(rows)-1)))
-            width,height=shutil.get_terminal_size((100,30)); usable=max(1,(height-7)//2)
+            width,height=shutil.get_terminal_size((100,30))
+            controls='↑↓ move · W shell pane · Tab mark · Enter view · V full editor · Y copy link · N new · P file · C done · R remind · F sort · T type · / full text · H help · Esc clear/exit'
+            if pane_help:controls+=' · '+' · '.join(terminal_style.pane_shortcuts())
+            control_rows=hints(controls,width).splitlines()
+            usable=max(1,(height-5-len(control_rows))//2)
             top=max(0,index-usable+1)
             lines=[KEY_CYAN+'LOOK NOTEBOOK'+RESET+' · '+(kind or 'all')+f' · sort {sort} · {len(rows)} shown · {len(marked)} marked','']
             for number,row in enumerate(rows[top:top+usable],top):
                 marker='✓' if row['id'] in marked else ' '
                 lines.append((KEY_CYAN+'›' if number==index else ' ')+marker+' '+display(row)[:max(10,width-5)]+'\033[0m')
                 lines.append('\033[2m   '+metadata(row)[:max(1,width-4)]+'\033[0m')
-            while len(lines)<height-4: lines.append('')
-            lines.extend([('FILTER ' if scope=='title' else 'SEARCH ')+query+'█',command_hints(hints('↑↓ move · Tab mark · Enter view · V full editor · Y copy link · N new · P file · C done · R remind · F sort · T type · / full text · H help · Esc clear/exit',width)),notice])
+            while len(lines)<height-2-len(control_rows): lines.append('')
+            lines.extend([('FILTER ' if scope=='title' else 'SEARCH ')+query+'█',command_hints('\n'.join(control_rows)),notice])
             sys.stdout.write('\033[H'+ '\033[K\n'.join(lines)+'\033[K\033[J'); sys.stdout.flush()
             key=read_key(fd,1)
             if not key: continue
@@ -733,6 +750,10 @@ def workspace(store,kind,read_key,hints,initial_query=''):
             if key=='esc':
                 if query: query=''; index=0; continue
                 break
+            if key=='W':
+                notice=terminal_style.open_pane(Path.cwd())
+                if notice.startswith('Shell opened beside LOOK'):pane_help=True
+                continue
             if key in {'H','?'}:
                 show_help(fd,read_key); continue
             if key=='F':
