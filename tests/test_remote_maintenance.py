@@ -138,6 +138,7 @@ def test_explicit_restart_can_recover_busy_worker_without_updating_files(home, m
     job = staged(home, action='restart')
     wait = Mock(side_effect=AssertionError('must not wait for ghost busy lease'))
     monkeypatch.setattr(m, 'wait_idle', wait)
+    monkeypatch.setattr(m, 'wait_imports', lambda: None)
     actions = []
     monkeypatch.setattr(m, 'platform_service', lambda *a: actions.append(a))
     monkeypatch.setattr(m, 'health', lambda expected=None, **kwargs: None)
@@ -198,6 +199,7 @@ def test_idle_update_reserves_worker_and_respects_active_media_stream(home, monk
         rounds.append(path)
         if path == '/v1/activity': return {'active': None}
         if path == '/v1/media/state': return {'active': False}
+        if path == '/v1/media/import?action=jobs': return {'jobs': []}
         if path == '/v1/http':
             return stream if rounds.count(path) == 1 else {'listeners': {}}
         assert path == '/v1/lease/acquire'
@@ -208,6 +210,36 @@ def test_idle_update_reserves_worker_and_respects_active_media_stream(home, monk
     assert m.wait_idle(1) == 'reserved'
     assert rounds.count('/v1/http') == 2
     assert rounds.count('/v1/lease/acquire') == 1
+
+
+def test_idle_update_waits_for_disc_import(home, monkeypatch):
+    reads = []
+    def local(path, payload=None):
+        reads.append(path)
+        if path == '/v1/activity': return {'active': None}
+        if path == '/v1/media/state': return {'active': False}
+        if path == '/v1/http': return {'listeners': {}}
+        if path == '/v1/media/import?action=jobs':
+            return {'jobs': [{'state': 'running' if reads.count(path) == 1 else 'complete'}]}
+        assert path == '/v1/lease/acquire'
+        return {'lease': {'id': 'reserved'}}
+    monkeypatch.setattr(m, 'local_json', local)
+    monkeypatch.setattr(m.time, 'sleep', lambda s: None)
+    assert m.wait_idle(1) == 'reserved'
+    assert reads.count('/v1/media/import?action=jobs') == 2
+    assert reads.count('/v1/lease/acquire') == 1
+
+
+def test_restart_waits_for_import_without_requiring_worker_lease(home, monkeypatch):
+    calls = []
+    def local(path, payload=None):
+        assert path == '/v1/media/import?action=jobs'
+        calls.append(path)
+        return {'jobs': [{'state': 'queued' if len(calls) == 1 else 'failed'}]}
+    monkeypatch.setattr(m, 'local_json', local)
+    monkeypatch.setattr(m.time, 'sleep', lambda s: None)
+    m.wait_imports(1)
+    assert len(calls) == 2
 
 
 def test_linux_service_status_and_restart_use_user_units(home, monkeypatch):
