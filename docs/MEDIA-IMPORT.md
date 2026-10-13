@@ -122,6 +122,9 @@ remote library, including retrying a failed delivery.
 Disc title scans allow up to five minutes; the Fabric request allows additional
 transport time. A failed scan does not automatically rescan: choose `r` to retry,
 `b` to go back, or `c`/Escape to cancel. No import starts until the final review.
+The authenticated Fabric gateway also permits the full scan deadline; other
+control requests retain their shorter limits. Gateway timeouts report an error
+instead of silently dropping the connection.
 
 MakeMKV's preparation and saving phases have separate labels and percentages.
 A percentage reset at the start of saving does not mean copying restarted.

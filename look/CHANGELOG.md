@@ -1,5 +1,6 @@
 ## Bounded disc scanning and explicit retry
 
+- Keep remote scans connected through the ingress gateway and report gateway timeouts.
 - Stop automatic rescanning after a failed scan; offer retry, back or cancel.
 - Allow five minutes for video disc scans and align Fabric transport timeouts.
 - Report readable tool timeout errors in both local and remote setup.
