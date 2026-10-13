@@ -723,7 +723,7 @@
   ],
   [
     "lk media import",
-    "[drives|scan|start|jobs|status ID|watch ID|cancel ID] [--node NODE]",
+    "[drives|scan|start|jobs|status ID|watch ID|cancel ID|dismiss ID] [--node NODE]",
     "media",
     "Import optical discs on their owner; monitor durable jobs"
   ],

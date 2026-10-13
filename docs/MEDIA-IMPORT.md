@@ -297,3 +297,22 @@ Raw DVD `VIDEO_TS/*.VOB` and Blu-ray `BDMV/STREAM/*.m2ts`/`*.mts` pieces
 are excluded from the media library, including older cached disc scans. They
 remain available to the import workbench and file browser. Finished imports and
 standalone VOB/M2TS videos outside those disc structures remain cataloged.
+
+## Workbench readability and saved history
+
+Long setup questions wrap above the editable answer instead of being shortened
+to half the terminal width. Defaults are filled into the answer for partial edits.
+The workbench uses Title, State, Progress and Time columns (Time moves out of the
+row at narrow widths). The selected title and phase wrap below the list; Enter
+opens full progress and error details. Stable text is used instead of a ticker.
+
+Press **x** to dismiss a completed, failed or cancelled entry, then confirm with
+`yes`. This removes it from the normal list while retaining its receipt, logs,
+partial output and imported media. Active imports and deliveries cannot be
+dismissed. `lk media import dismiss ID --node NODE` does the same explicitly.
+A receipt remains accessible by its full ID through `status ID`. Dismissed
+receipts still contribute confirmed disc-metadata suggestions.
+
+Finished jobs have a frozen elapsed time and no import ETA. For older failed
+receipts without a finish timestamp, LOOK uses the last saved receipt update;
+this is an estimate of the stop time rather than a clock that keeps growing.

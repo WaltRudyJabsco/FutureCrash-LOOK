@@ -30,34 +30,57 @@ def workbench_lines(inventory,jobs,index,width,height,show_history,colors):
     else:frame.append(ink('n imports the inserted disc · d refreshes discovery','YELLOW'))
     frame.append(ink('TOOLS  ','CYAN')+ink(', '.join(name for name,path in inventory['tools'].items() if path),'GRAY'))
     frame.extend(['',ink('IMPORT JOBS','CYAN')+' · '+ink('active + saved history' if show_history else 'active only','GRAY')])
-    usable=max(1,height-len(frame)-4);top=max(0,index-usable+1)
+    def cell(value,size):
+        text=''.join(c if c.isprintable() else ' ' for c in str(value))
+        cells=lambda value:sum(0 if unicodedata.combining(c) else 2 if unicodedata.east_asian_width(c) in {'W','F'} else 1 for c in value)
+        if cells(text)>size:
+            clipped=''
+            for char in text:
+                if cells(clipped+char)>max(0,size-1):break
+                clipped+=char
+            text=clipped+'…'
+        return text+' '*max(0,size-cells(text))
+    columns=[('STATE',9),('%',7)]+([('TIME',8)] if width>=58 else [])
+    title_width=max(1,width-3-sum(size+2 for _,size in columns))
+    frame.append(ink('  '+cell('TITLE',title_width)+'  '+'  '.join(cell(label,size) for label,size in columns),'GRAY'))
+    details=[]
+    if jobs:
+        chosen=jobs[index]
+        details=wrapped_lines('SELECTED · '+chosen['title'],width)
+        detail='PHASE · '+str(chosen.get('stage') or chosen['state'])
+        if chosen.get('error'):detail+=' · '+str(chosen['error'])
+        if chosen.get('estimated_remaining_seconds') is not None and active(chosen):detail+=' · ETA ~'+str(chosen['estimated_remaining_seconds']//60)+' min'
+        details+=wrapped_lines(detail,width)
+        details=details[:max(1,min(5,height//4))]
+    usable=max(1,height-len(frame)-len(details)-5);top=max(0,index-usable+1)
     for n,job in enumerate(jobs[top:top+usable],top):
-        prefix=('› ' if n==index else '  ')
-        body=summary(job)
-        title=job['title'];owner=str(job.get('node') or '')
-        subject=(owner+' · ' if owner else '')+title
-        status=job['state'];tail=body[len(subject)+3+len(status):]
-        # Remove the repeated phase in terminal receipts: "complete · complete".
-        if job.get('stage')==status:tail=tail.removeprefix(' · '+status)
-        role='GREEN' if status=='complete' else 'RED' if status in {'failed','cancelled'} else 'YELLOW'
+        status=job['state'];role='GREEN' if status=='complete' else 'RED' if status in {'failed','cancelled'} else 'YELLOW'
         selected=n==index
-        parts=[(prefix,'SELECT_FG' if selected else 'GRAY'),
-               (subject,'SELECT_FG' if selected else 'WHITE' if n%2==0 else 'CYAN'),
-               (' · ','SELECT_GRAY' if selected else 'GRAY'),
-               (status,'SELECT_'+role if selected else role),(tail,'SELECT_GRAY' if selected else 'GRAY')]
-        remaining=max(0,width-1);line=colors['SELECT_BG'] if selected else ''
-        for value,color in parts:
-            value=value[:remaining];remaining-=len(value);line+=colors[color]+value
-        if selected:line+=' '*remaining
+        elapsed=elapsed_seconds(job)
+        progress=f"{job['percent']:.1f}%" if isinstance(job.get('percent'),(int,float)) else '—'
+        parts=[(('› ' if selected else '  ')+cell(job['title'],title_width),'SELECT_FG' if selected else 'WHITE' if n%2==0 else 'CYAN'),
+               ('  ','SELECT_GRAY' if selected else 'GRAY'),(cell(status,9),'SELECT_'+role if selected else role),
+               ('  '+cell(progress,7),'SELECT_GRAY' if selected else 'GRAY')]
+        if width>=58:parts.append(('  '+cell(f'{elapsed//60}:{elapsed%60:02d}',8),'SELECT_GRAY' if selected else 'GRAY'))
+        line=colors['SELECT_BG'] if selected else ''
+        for value,color in parts:line+=colors[color]+value
         frame.append(line+'\033[0m')
+    if details:frame.extend(['']+[ink(line,'GRAY') for line in details])
     if not jobs:frame.append(ink('No jobs shown · n starts a new import','GRAY'))
     return frame
 
 
+def elapsed_seconds(job):
+    value=job.get('elapsed_seconds')
+    if isinstance(value,(int,float)):return max(0,int(value))
+    end=(job.get('finished') or job['created']) if job.get('state') in {'complete','failed','cancelled'} else time.time()
+    return max(0,int(end-job['created']))
+
+
 def summary(job):
     progress=f"{job['percent']:.1f}%" if isinstance(job.get('percent'),(int,float)) else 'working'
-    elapsed=int(job.get('elapsed_seconds') or max(0,time.time()-job['created']))
-    eta=job.get('estimated_remaining_seconds');remaining=f' · ETA ~{eta//60}:{eta%60:02d}' if isinstance(eta,int) else ''
+    elapsed=elapsed_seconds(job)
+    eta=job.get('estimated_remaining_seconds');remaining=f' · ETA ~{eta//60}:{eta%60:02d}' if isinstance(eta,int) and active(job) else ''
     delivery=job.get('delivery') or {}
     library=' · library '+str(delivery.get('state'))+' / '+str(delivery.get('stage')) if delivery else (' · library failed: '+str(job['delivery_error']) if job.get('delivery_error') else '')
     owner=str(job.get('node') or '')
@@ -447,8 +470,8 @@ def workspace(request,read_key,hints):
             try:from . import look_renderer
             except ImportError:import look_renderer
             from pathlib import Path
-            caption=label+(f' [{default}]' if default and not path else '')+' › '
-            value,cancelled=look_renderer.prompt_line(caption,initial=default if path else '',picker_root=Path.cwd() if path else None)
+            caption=label+' › '
+            value,cancelled=look_renderer.prompt_line(caption,initial=default,picker_root=Path.cwd() if path else None)
             if cancelled:raise ImportBack()
             return value.strip() or default
         finally:tty.setcbreak(fd);sys.stdout.write('\033[?25l')
@@ -459,11 +482,12 @@ def workspace(request,read_key,hints):
             if not show_history:jobs=[job for job in jobs if active(job)]
             index=max(0,min(index,max(0,len(jobs)-1)))
             width,height=shutil.get_terminal_size((100,30))
-            frame=workbench_lines(inventory,jobs,index,width,height,show_history,colors)
-            frame.extend(['',hints('n new import · d discover · h history · ↑↓ jobs · Enter progress · l send to library · c cancel · Esc exit',width),notice])
+            controls=hints('n new import · d discover · h history · ↑↓ jobs · Enter progress · l send to library · c cancel · x dismiss finished · Esc exit',width)
+            frame=workbench_lines(inventory,jobs,index,width,height-max(0,len(controls.splitlines())-2),show_history,colors)
+            frame.extend(['',controls,notice])
             sys.stdout.write('\033[2J\033[H'+'\n'.join(line[:width-1] if '\033' not in line else line for line in frame)+'\033[J');sys.stdout.flush()
             key=read_key(fd,1)
-            if key in {'n','d','h','l','c'}:key=key.upper()
+            if key in {'n','d','h','l','c','x'}:key=key.upper()
             if key in {'esc','q','\x03'}:return 0
             try:
                 if key=='D':inventory=request('drives',{});notice='Discovery refreshed'
@@ -479,6 +503,10 @@ def workspace(request,read_key,hints):
                     if not destination.startswith('@'):raise ValueError('Choose a library node first with lk media storage --node NODE --root PATH')
                     request('deliver',{'id':jobs[index]['id'],'destination':destination})
                     notice='Delivery started; originals kept. Enter shows progress.'
+                elif key=='X' and jobs:
+                    if active(jobs[index]):raise ValueError('Finish or cancel the job before dismissing it')
+                    if prompt('Dismiss '+jobs[index]['title']+' from the list? Type yes; media and receipts stay')=='yes':
+                        request('dismiss',{'id':jobs[index]['id']});notice='Dismissed from list; media and receipts retained'
                 elif key=='C' and jobs:
                     if prompt('Cancel selected import? Type yes')=='yes':request('cancel',{'id':jobs[index]['id']});notice='Cancellation requested; partial files retained'
                 elif key=='N':
@@ -505,7 +533,7 @@ def workspace(request,read_key,hints):
 
 def main(argv,request_factory,read_key,hints):
     parser=argparse.ArgumentParser(prog='lk media import',description='CD/DVD/Blu-ray import on the node owning the drive. No arguments opens the workbench.')
-    parser.add_argument('action',nargs='?',choices=['drives','scan','start','jobs','status','watch','cancel','deliver'])
+    parser.add_argument('action',nargs='?',choices=['drives','scan','start','jobs','status','watch','cancel','deliver','dismiss'])
     parser.add_argument('id',nargs='*',help='Album name, latest, short ID, or full ID; watch defaults to all active work, deliver offers completed imports')
     parser.add_argument('--node',help='Drive-owner node; watch/jobs default to Fabric, other actions to local')
     parser.add_argument('--drive',help='Drive ID shown by drives')
@@ -539,8 +567,8 @@ def main(argv,request_factory,read_key,hints):
             import media_storage
             result=capture(request,args.drive,args.kind,args.title,args.destination or media_storage.destination(args.kind,args.category),args.title_index,args.release,not args.no_metadata,args.category)
         else:
-            if action in {'status','cancel','deliver'}:
-                if action=='cancel' and not selector:raise ValueError('cancel requires an album name or job ID')
+            if action in {'status','cancel','deliver','dismiss'}:
+                if action in {'cancel','dismiss'} and not selector:raise ValueError(action+' requires an album name or job ID')
                 if not selector and action!='deliver':selector='latest'
                 selector=resolve_job(request,selector,action)
             destination=args.destination
