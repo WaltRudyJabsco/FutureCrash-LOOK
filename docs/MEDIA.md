@@ -189,6 +189,10 @@ When a shared field has different values, it starts blank; typing a value applie
 it to every selected item, while blank keeps each item's own value.
 Review all proposed changes before saving. Individual mode gives each selected
 episode its own title and number, without leaving the editor between items.
+Media Find and LKMP show TV series names in the artist position and season/episode
+details in the album position. Keep the episode title in Title; the series name
+is shown separately. Music metadata is unchanged. Type sorting groups TV by
+series, season and episode number.
 Corrections apply to every listed source of each item, including remote files.
 Offline or read-only sources report failures; successful sources are counted
 separately. Refresh before retrying a stale selection. Filenames stay unchanged.

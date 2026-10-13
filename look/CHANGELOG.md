@@ -1,3 +1,8 @@
+## TV series in media lists
+
+- Show series names and season/episode details in Media Find and LKMP.
+- Group TV episodes by series, season and episode in type sorting.
+
 ## Editable metadata fields
 
 - Prefill current media metadata for partial edits instead of retyping names.
