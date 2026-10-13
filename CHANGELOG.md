@@ -1,3 +1,8 @@
+## Editable metadata fields
+
+- Prefill current media metadata for partial edits instead of retyping names.
+- Explain each field with numbered headings and keep unchanged values untouched.
+
 ## Bounded disc scanning and explicit retry
 
 - Keep remote scans connected through the ingress gateway and report gateway timeouts.

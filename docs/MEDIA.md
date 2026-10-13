@@ -181,7 +181,12 @@ In Media Find, album tracks or LKMP, mark tracks with Tab (A selects all shown),
 then press Shift-E. Choose `s` for shared corrections or `i` to name each item
 individually. Music fields include artist, album artist, album, disc, title and
 track. Video fields include series, season, episode, title and content kind
-(`episode`, `special`, `extra`). Return keeps each value; `-` clears a TV field.
+(`episode`, `special`, `extra`, `unclassified`). Each field has a numbered heading
+and a short explanation. Current values are filled into the editor: use arrows
+and Backspace to change just part of a name, then Enter to accept. An unchanged
+or blank field keeps its value; `-` clears a TV field. Esc cancels before saving.
+When a shared field has different values, it starts blank; typing a value applies
+it to every selected item, while blank keeps each item's own value.
 Review all proposed changes before saving. Individual mode gives each selected
 episode its own title and number, without leaving the editor between items.
 Corrections apply to every listed source of each item, including remote files.
