@@ -233,7 +233,7 @@ def video_metadata(label):
     metadata={'title':label}
     # Reuse a confirmed edition only for a matching series; always show it again.
     query=disc_metadata.series_query(label).casefold()
-    for job in list_jobs():
+    for job in list_jobs(include_dismissed=True):
         previous=job.get('metadata') or {};release=previous.get('discogs_release')
         if job.get('category')=='tv' and isinstance(release,dict) and release.get('id') and query in {
                 disc_metadata.series_query(job.get('title','')).casefold(),str(previous.get('series') or '').casefold()}:
@@ -287,22 +287,39 @@ def read_job(identifier):
     except ImportError:import media_storage
     delivery=media_storage.receipt(identifier)
     if delivery:row['delivery']=delivery
-    row['elapsed_seconds']=round((row.get('finished') or time.time())-row['created'],1)
+    if row['state'] in TERMINAL and not row.get('finished'):
+        # Legacy failed receipts lack a finish stamp. Their last durable update is
+        # a better bound than an ever-growing clock; freeze it on the first read.
+        row['finished']=max(row['created'],job_path(identifier).stat().st_mtime)
+        atomic(job_path(identifier),row)
+    row['elapsed_seconds']=round(max(0,(row.get('finished') or time.time())-row['created']),1)
     percent=row.get('percent')
-    if isinstance(percent,(int,float)) and 0<percent<100:
+    if row['state'] not in TERMINAL and isinstance(percent,(int,float)) and 0<percent<100:
         phase_elapsed=time.time()-row.get('phase_started',row['created'])
         row['estimated_remaining_seconds']=round(phase_elapsed*(100-percent)/percent)
     if row['state'] not in TERMINAL and row.get('pid'):
         try:os.kill(row['pid'],0)
         except ProcessLookupError:
             row.update(state='failed',error='Import worker stopped; partial output retained',finished=time.time());atomic(job_path(identifier),row)
+    if row['state'] in TERMINAL:row.pop('estimated_remaining_seconds',None)
     return row
 
 
-def list_jobs():
+def list_jobs(include_dismissed=False):
     # Delivery receipts share this directory but are read through their parent job.
-    return sorted([read_job(path.stem) for path in (ROOT/'jobs').glob('*.json')
-                   if re.fullmatch('[0-9a-f]{32}',path.stem)],key=lambda row:row['created'],reverse=True)
+    rows=[read_job(path.stem) for path in (ROOT/'jobs').glob('*.json') if re.fullmatch('[0-9a-f]{32}',path.stem)]
+    return sorted([row for row in rows if include_dismissed or not row.get('dismissed') or
+                   row['state'] not in TERMINAL or (row.get('delivery') or {}).get('state') in {'queued','running'}],
+                  key=lambda row:row['created'],reverse=True)
+
+
+def dismiss(identifier):
+    row=read_job(identifier)
+    if row['state'] not in TERMINAL or (row.get('delivery') or {}).get('state') in {'queued','running'}:
+        raise ValueError('Only finished imports with no active delivery can be dismissed')
+    row['dismissed']=True
+    atomic(job_path(identifier),row)
+    return {'ok':True,'job':row,'message':'Removed from the workbench; receipts, logs and media retained'}
 
 
 def safe_name(value):return re.sub(r'[^\w .()-]+','_',str(value)).strip(' .')[:120] or 'Untitled'
@@ -537,6 +554,7 @@ def request(action,payload=None):
     if action=='jobs':return {'ok':True,'jobs':list_jobs()}
     if action=='status':return {'ok':True,'job':read_job(payload.get('id'))}
     if action=='cancel':return cancel(payload.get('id'))
+    if action=='dismiss':return dismiss(payload.get('id'))
     raise ValueError('Unknown disc import action')
 
 

@@ -139,7 +139,7 @@ def test_discogs_edition_then_disc_then_tv_enrichment(monkeypatch):
 
 
 def test_confirmed_box_set_suggestion_stays_with_its_series(monkeypatch):
-    monkeypatch.setattr(disc_import,'list_jobs',lambda:[{'category':'tv','title':'Series Special Edition Disc 1',
+    monkeypatch.setattr(disc_import,'list_jobs',lambda **kwargs:[{'category':'tv','title':'Series Special Edition Disc 1',
         'metadata':{'series':'Series','discogs_release':{'id':123}}}])
     assert disc_import.video_metadata('Series Special Edition Disc 2')['discogs_release']['id']==123
     assert 'discogs_release' not in disc_import.video_metadata('Another Show Disc 1')

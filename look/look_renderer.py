@@ -1176,13 +1176,20 @@ def prompt_line(prompt:str, *, initial:str='', picker_root:Path|None=None)->tupl
     """
     fd=sys.stdin.fileno()
     old=termios.tcgetattr(fd)
+    # Questions belong above the editor when they would crowd out the answer.
+    # Keep their complete wording rather than hiding half of it behind an ellipsis.
+    width=max(20,shutil.get_terminal_size((100,30)).columns-1)
+    if len(prompt)>=width//2:
+        import textwrap
+        sys.stdout.write('\n'.join(textwrap.wrap(prompt.strip(),width))+'\n')
+        prompt='› '
     chars:list[str]=list(initial)
     cursor=len(chars)
 
     def redraw():
         # Keep long mount paths on one line; the full value remains editable.
         width=max(20,shutil.get_terminal_size((100,30)).columns-1)
-        label=prompt if len(prompt)<width//2 else prompt[:width//2-2]+'… '
+        label=prompt
         available=width-len(label)
         def cells(text):return sum(0 if unicodedata.combining(c) else 2 if unicodedata.east_asian_width(c) in {'W','F'} else 1 for c in text)
         start=cursor

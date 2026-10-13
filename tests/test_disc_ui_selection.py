@@ -310,3 +310,21 @@ def test_failed_scan_retries_only_on_r(monkeypatch):
         return default
     result=disc_ui.import_options(request,inventory,'drive',prompt,lambda label,default:default)
     assert result['title']=='My disc' and request.call_count==2
+
+
+def test_columns_keep_progress_and_time_visible_with_long_titles():
+    import re
+    row=job(1,'A long Cousteau title '*15,'running');row.update(percent=4.5,elapsed_seconds=123,stage='saving MKV')
+    lines=disc_ui.workbench_lines({'drives':[],'tools':{}},[row],0,80,30,True,disc_ui.interface_colors())
+    plain=[re.sub(r'\x1b\[[0-9;]*m','',line) for line in lines]
+    selected=next(line for line in plain if line.startswith('› '))
+    assert 'running' in selected and '4.5%' in selected and '2:03' in selected
+    assert any('SELECTED ·' in line for line in plain)
+    assert all(len(line)<80 for line in plain if line.startswith('› '))
+
+
+def test_zero_elapsed_does_not_restart_failed_clock(monkeypatch):
+    row=job(1,state='failed');row.update(created=1,elapsed_seconds=0,percent=4,estimated_remaining_seconds=999)
+    monkeypatch.setattr(disc_ui.time,'time',lambda:100000)
+    assert disc_ui.elapsed_seconds(row)==0
+    assert 'ETA' not in disc_ui.summary(row)

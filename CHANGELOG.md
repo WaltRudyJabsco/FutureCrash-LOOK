@@ -1,3 +1,9 @@
+## Import workbench readability
+
+- Wrap complete setup questions and prefill editable defaults.
+- Align job columns, show wrapped selected details, and allow dismissing finished rows without deleting evidence or media.
+- Freeze legacy failed-job clocks and suppress finished-job ETAs.
+
 ## File colors during selection
 
 - Preserve file-type and metadata colors when filter/selection rows are narrowed by previews.

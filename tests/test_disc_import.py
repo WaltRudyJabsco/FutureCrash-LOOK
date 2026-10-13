@@ -283,3 +283,31 @@ def test_scan_transport_outlasts_owner_scan(monkeypatch,capsys):
     monkeypatch.setattr(node.sys,'argv',['fcl-node','disc-import','scan','{}','--node','owner','--json'])
     assert node.main()==0
     assert routed.call_args.kwargs['timeout']>discs.DISC_SCAN_TIMEOUT_SECONDS
+
+
+def test_legacy_failed_clock_freezes_and_dismiss_keeps_evidence(isolated,monkeypatch):
+    identifier=seed(isolated)
+    path=discs.job_path(identifier);row=json.loads(path.read_text())
+    row.update(state='failed',stage='reading movie',created=100,percent=4,error='old failure')
+    discs.atomic(path,row);os.utime(path,(150,150))
+    monkeypatch.setattr(discs.time,'time',lambda:10000)
+    first=discs.read_job(identifier)
+    assert first['elapsed_seconds']==50 and 'estimated_remaining_seconds' not in first
+    monkeypatch.setattr(discs.time,'time',lambda:20000)
+    assert discs.read_job(identifier)['elapsed_seconds']==50
+    media=isolated/'media'/'keep.mkv';media.write_bytes(b'movie')
+    discs.request('dismiss',{'id':identifier})
+    assert discs.list_jobs()==[] and len(discs.list_jobs(include_dismissed=True))==1
+    assert path.exists() and media.read_bytes()==b'movie'
+    assert discs.read_job(identifier)['elapsed_seconds']==50
+
+
+def test_dismiss_rejects_active_import_or_delivery(isolated,monkeypatch):
+    from look import media_storage
+    monkeypatch.setattr(media_storage,'receipt',lambda identifier:None)
+    identifier=seed(isolated)
+    with pytest.raises(ValueError,match='finished'):discs.dismiss(identifier)
+    row=json.loads(discs.job_path(identifier).read_text());row.update(state='complete',finished=time.time())
+    discs.atomic(discs.job_path(identifier),row)
+    monkeypatch.setattr(media_storage,'receipt',lambda identifier:{'state':'running'})
+    with pytest.raises(ValueError,match='delivery'):discs.dismiss(identifier)

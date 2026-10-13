@@ -52,3 +52,18 @@ def test_prompt_path_completion_picker_clear_and_unicode(tmp_path,monkeypatch,ca
     assert picks==[tmp_path] and value==str(folder)+'/' and not cancel
     output=re.sub(r'\x1b\[[0-9;]*[A-Za-z]','',capsys.readouterr().out)
     assert all(len(segment)<=39 for segment in output.split('\r') if '\n' not in segment)
+
+
+def test_long_prompt_prints_complete_question_above_input(monkeypatch,capsys):
+    from look import look_renderer as renderer
+    monkeypatch.setattr(renderer.sys.stdin,'fileno',lambda:0)
+    monkeypatch.setattr(renderer.termios,'tcgetattr',lambda fd:None)
+    monkeypatch.setattr(renderer.termios,'tcsetattr',lambda *args:None)
+    monkeypatch.setattr(renderer.tty,'setcbreak',lambda *args:None)
+    monkeypatch.setattr(renderer.shutil,'get_terminal_size',lambda *args:__import__('os').terminal_size((80,24)))
+    monkeypatch.setattr(renderer.os,'read',lambda *args:b'\r')
+    question='Send movie name to metadata lookup? y / n; Enter keeps the current choice'
+    value,cancelled=renderer.prompt_line(question,initial='y')
+    assert value=='y' and not cancelled
+    output=capsys.readouterr().out
+    assert question in output and '…' not in output
