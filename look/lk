@@ -19599,7 +19599,7 @@ def _media_mp_transport_lines(snap,width):
     lines=[_c('NOW PLAYING','1;36')+'  '+_c(state,'32' if state in {'PLAYING','PLAY'} else '33'),
            _c(_media_find_cell(title,width),'37'),
            _c(bar,'36')+' '+_c(clock,'2')+_c(f' · Queue {index+1 if queue else 0}/{len(queue)}','2'),
-           _media_hints('space play/pause · p/n previous/next · ←/→ seek · s shuffle · r repeat · x stop',width).replace('\n',' ')]
+           _media_hints('space play/pause · p/n previous/next · ←/→ seek 10s · s shuffle · r repeat · x stop',width).replace('\n',' ')]
     return [_ansi_clip(line,width) for line in lines]
 
 
@@ -19759,9 +19759,9 @@ def media_mp(initial_query=""):
                     else:
                         filter_text=f"FILTER {query or 'all media'} · / search"
                     print(_c(filter_text,"1;36"))
-                    controls="↑↓ select · Shift-arrows page/ends · Tab mark · A select all · E edit metadata · R refresh · C clear selection · Enter play · B add queue · D hide dir · L library · Q queue"
+                    controls="↑↓ select · Shift-↑↓ page · Shift-←→ top/bottom · Tab mark · A select all · E edit metadata · R refresh · C clear selection · Enter play · B add queue · D hide dir · L library · Q queue"
                     print(_media_hints(controls,width))
-                    print(_media_hints("F sort · G reverse · / search · space pause · ←/→ seek 10s · p/n prev/next · v visuals · M image/ASCII · s shuffle · r repeat · x stop · Esc finish/clear/exit",width),end="")
+                    print(_media_hints("F sort · G reverse · / search · v visuals · M image/ASCII · Esc finish/clear/exit",width),end="")
                     if notice:
                         print("  "+_c(notice,"33"),end="")
                         notice=""

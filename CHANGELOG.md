@@ -1,3 +1,8 @@
+## LKMP control hints
+
+- Show playback controls once beside Now Playing, without duplicate footer hints.
+- Distinguish arrow seeking from Shift-arrow list paging and top/bottom navigation.
+
 ## TV series in media lists
 
 - Show series names and season/episode details in Media Find and LKMP.
