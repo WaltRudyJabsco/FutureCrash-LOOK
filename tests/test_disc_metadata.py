@@ -71,8 +71,10 @@ def test_workbench_confirms_movie_and_remembers_chosen_library(tmp_path,monkeypa
         if action=='movie-lookup':return {'matches':[{'title':'PCU','year':'1994','source':'https://www.wikidata.org/wiki/Q7118672'}]}
         if action=='start':started.append(payload);return {'ok':True}
         raise AssertionError(action)
-    answers=iter(['','','','','/mounted/Library/movies','',''])
+    answers=iter(['','','','','','','/mounted/Library/movies','y',''])
     monkeypatch.setattr('builtins.input',lambda prompt:next(answers))
+    from look import look_renderer
+    monkeypatch.setattr(look_renderer,'prompt_line',lambda caption,**kwargs:(next(answers),False))
     keys=iter(['n','esc'])
     assert disc_ui.workspace(request,lambda *args:next(keys),lambda text,width:text)==0
     assert started[0]['title']=='PCU (1994)' and started[0]['title_index']=='0'

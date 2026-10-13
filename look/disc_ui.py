@@ -139,6 +139,51 @@ def movie_details(request,prompt,metadata):
     return title,metadata
 
 
+def tv_details(request,prompt,metadata,titles,title_index):
+    try:from . import disc_metadata
+    except ImportError:import disc_metadata
+    metadata=dict(metadata)
+    title=prompt('Series / season / disc label',metadata.get('title') or '')
+    metadata['title']=title
+    if prompt('Search TVmaze for series and episodes (sends series name)? y / n','y').casefold()!='y':return title,metadata
+    query=prompt('Series name to search',metadata.get('series') or title)
+    try:
+        matches=request('tv-lookup',{'query':query}).get('matches') or []
+        for number,row in enumerate(matches,1):print(f"  {number}. {row['title']} · {row.get('year') or ''}")
+        if not matches:
+            print('No series match; keeping disc labels.');return title,metadata
+        choice=prompt('Confirm series number; 0 keeps disc labels','1' if len(matches)==1 else '0')
+        if choice=='0':return title,metadata
+        if not choice.isdigit() or not 1<=int(choice)<=len(matches):raise ValueError('Series choice out of range')
+        show=matches[int(choice)-1]
+        episodes=request('tv-episodes',{'id':show['id']}).get('episodes') or []
+        for number,item in enumerate(episodes,1):
+            print(f"  {number}. {disc_metadata.episode_label(item)} · {item.get('runtime') or '?'} min")
+        print('Match disc titles below. Numbers choose episodes; x NAME labels an extra; 0 keeps unidentified. Disc order is not episode order.')
+        mapped={}
+        for item in titles:
+            index=str(item['index'])
+            if title_index!='all' and index!=title_index:continue
+            previous=(metadata.get('tv_titles') or {}).get(index,{})
+            exact=[str(n) for n,ep in enumerate(episodes,1) if item.get('name','').casefold()==ep['title'].casefold()]
+            default=exact[0] if len(exact)==1 else '0'
+            if previous.get('content_kind')=='extra':default='x '+previous['title']
+            else:
+                for n,ep in enumerate(episodes,1):
+                    if previous.get('source')==ep.get('source'):default=str(n)
+            answer=prompt(f"Disc title {index} · {item.get('name') or 'unnamed'} · {item.get('duration') or '?'}",default)
+            if answer=='0':continue
+            if answer.casefold().startswith('x '):selected={'title':answer[2:].strip(),'content_kind':'extra'}
+            elif answer.isdigit() and 1<=int(answer)<=len(episodes):selected=dict(episodes[int(answer)-1])
+            else:raise ValueError('Choose an episode number, x NAME, or 0')
+            selected.update(series=show['title'],filename=item.get('filename') or '')
+            mapped[index]=selected
+        metadata.update(series=show['title'],source=show['source'],tv_titles=disc_metadata.validate_tv_titles(mapped))
+        print('Episode choices saved for review; unmatched titles remain unnamed.')
+    except (OSError,ValueError,RuntimeError) as exc:print('TV lookup unavailable · '+str(exc)+' · keeping existing labels.')
+    return title,metadata
+
+
 def feature_index(titles):
     def duration(row):
         try:
@@ -275,6 +320,22 @@ def import_options(request,inventory,drive,prompt,path_prompt):
                 print('DISC · '+kind.upper()+' · '+str(scan.get('engine') or ''))
                 if kind=='cd':
                     releases=scan.get('releases') or []
+                    if not releases:
+                        print('No automatic album match. Optional barcode lookup sends the digits to MusicBrainz.')
+                        barcode=prompt('CD barcode digits (blank keeps disc labels)','')
+                        if barcode:
+                            found=request('cd-barcode',{'barcode':barcode}).get('releases') or []
+                            for n,item in enumerate(found,1):print(f"  {n}. {item['title']} · {item.get('artist') or ''} · {item.get('date') or ''} · {item.get('country') or ''}")
+                            if found:
+                                choice=prompt('Confirm barcode release; 0 keeps disc labels','1' if len(found)==1 else '0')
+                                if choice!='0':
+                                    if not choice.isdigit() or not 1<=int(choice)<=len(found):raise ValueError('Release choice out of range')
+                                    import time
+                                    time.sleep(1)  # MusicBrainz asks for at most one request per second.
+                                    releases=request('cd-release',{'id':found[int(choice)-1]['release_id']}).get('releases') or []
+                                    releases=[item for item in releases if len(item.get('tracks') or [])==scan.get('tracks')]
+                                    if not releases:print('Release track count does not match this disc; keeping disc labels.')
+                            else:print('Barcode not found; keeping disc labels.')
                     for n,release in enumerate(releases,1):print(f"  {n}. {release['title']} · {release.get('artist') or ''}")
                     choice=prompt('Release number (blank keeps detected labels)','1' if len(releases)==1 else '') if releases else ''
                     if choice:
@@ -290,8 +351,7 @@ def import_options(request,inventory,drive,prompt,path_prompt):
                     title=prompt('Album title',title or metadata.get('title') or '')
                     metadata['artist']=prompt('Artist (optional)',metadata.get('artist') or '')
                 elif category=='tv':
-                    title=prompt('Series / season / disc label',title or metadata.get('title') or hint.get('title') or '')
-                    metadata['title']=title
+                    title,metadata=tv_details(request,prompt,dict(metadata,title=title or metadata.get('title') or hint.get('title') or ''),scan.get('titles') or [],title_index)
                 else:title,metadata=movie_details(request,prompt,dict(metadata,title=title or metadata.get('title') or ''))
                 if not title:raise ValueError('Give this import a name')
             elif step==4:
@@ -310,6 +370,9 @@ def import_options(request,inventory,drive,prompt,path_prompt):
                 target=fabric_files.parse(destination)
                 actual=str(target)+('/'+category if target else '') if target else destination
                 print(f"REVIEW · {title} · {kind.upper()} · {category} · title {title_index or 'audio tracks'}\nSave to {actual}")
+                for index,item in (metadata.get('tv_titles') or {}).items():
+                    print('  Title '+index+' → '+disc_metadata.episode_label(item))
+                if category=='tv':print('Metadata · '+str(metadata.get('series') or 'series not identified')+' · '+str(len(metadata.get('tv_titles') or {}))+' matched titles · unmatched titles kept')
                 print('y start · k kind · c category · i titles · m name/metadata · d destination · Esc back')
                 choice=prompt('Start or edit','y').casefold()
                 if choice=='y':return {'drive':drive,'kind':kind,'category':category,'title':title,'destination':destination,'title_index':title_index,'metadata':metadata,'preferences':preferences}

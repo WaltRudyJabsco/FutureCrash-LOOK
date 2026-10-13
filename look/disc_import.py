@@ -307,6 +307,11 @@ def start(payload):
     tracks=metadata.get('tracks',[])
     if not isinstance(tracks,list) or len(tracks)>99 or any(not isinstance(value,str) or len(value)>300 for value in tracks):raise ValueError('Invalid track metadata')
     if 'disc' in metadata and (not isinstance(metadata['disc'],int) or not 1<=metadata['disc']<=99):raise ValueError('Invalid disc number')
+    if 'tv_titles' in metadata:
+        try:from . import disc_metadata
+        except ImportError:import disc_metadata
+        disc_metadata.validate_tv_titles(metadata['tv_titles'])
+        if category!='tv':raise ValueError('Episode mapping requires TV category')
     title=str(payload.get('title') or metadata.get('title') or drive.get('disc') or ('Audio CD' if kind=='cd' else 'Movie'))[:200]
     remote_destination=''
     requested=payload.get('destination') or ''
@@ -427,10 +432,28 @@ def worker(identifier):
             outputs=[output]
         if not outputs:raise ValueError('No media produced; partial files retained')
         if row['kind']!='cd':
-            for path in outputs:
-                atomic(path.with_suffix('.info.json'),{'title':row['title'] if len(outputs)==1 else row['title']+' · '+path.stem,
-                    'description':metadata.get('description') or 'Imported from '+drive.get('label','optical disc'),
-                    'year':metadata.get('year') or '', 'metadata_source':metadata.get('source') or ''})
+            try:from . import disc_metadata
+            except ImportError:import disc_metadata
+            mapped=metadata.get('tv_titles') or {}
+            for position,path in enumerate(outputs):
+                # Match MakeMKV's scanned output filename, never lexical title order.
+                choices=[item for index,item in mapped.items() if item.get('filename')==path.name]
+                if len(outputs)==1 and row['title_index']!='all' and row['title_index'] in mapped:
+                    choices=[mapped[row['title_index']]]
+                item=choices[0] if len(choices)==1 else None
+                info={'title':row['title'] if len(outputs)==1 else row['title']+' · '+path.stem,
+                      'description':metadata.get('description') or 'Imported from '+drive.get('label','optical disc'),
+                      'year':metadata.get('year') or '', 'webpage_url':metadata.get('source') or ''}
+                if item:
+                    info.update({key:item[key] for key in ('series','season','episode','content_kind') if key in item})
+                    info.update(title=item['series']+' - '+disc_metadata.episode_label(item),webpage_url=item.get('source') or '',
+                                album=item['series'],tags=[item['series'],item['content_kind']])
+                    renamed=stage/(safe_name(info['title'])+path.suffix)
+                    if renamed!=path:
+                        if renamed.exists():renamed=stage/(safe_name(info['title'])+' - '+path.stem+path.suffix)
+                        if renamed.exists():raise ValueError('Duplicate TV output name; partial files retained')
+                        path.rename(renamed);path=renamed;outputs[position]=path
+                atomic(path.with_suffix('.info.json'),info)
         for path in outputs:
             if not path.is_file() or path.stat().st_size==0:raise ValueError('Empty import output')
             save(stage='verifying media')
@@ -480,6 +503,14 @@ def request(action,payload=None):
         try:from . import disc_metadata
         except ImportError:import disc_metadata
         return disc_metadata.movies(payload.get('query'))
+    if action in {'cd-barcode','cd-release'}:
+        try:from . import disc_metadata
+        except ImportError:import disc_metadata
+        return disc_metadata.cd_barcode(payload.get('barcode')) if action=='cd-barcode' else disc_metadata.cd_release(payload.get('id'))
+    if action in {'tv-lookup','tv-episodes'}:
+        try:from . import disc_metadata
+        except ImportError:import disc_metadata
+        return disc_metadata.tv_search(payload.get('query')) if action=='tv-lookup' else disc_metadata.tv_episodes(payload.get('id'))
     if action=='scan':return inspect(payload.get('drive'),payload.get('kind','cd'))
     if action=='start':return start(payload)
     if action=='jobs':return {'ok':True,'jobs':list_jobs()}

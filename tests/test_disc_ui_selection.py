@@ -242,6 +242,7 @@ def test_tv_setup_uses_tv_destination_all_titles_and_review_edit(monkeypatch):
     visits={}
     def prompt(label,default=''):
         visits[label]=visits.get(label,0)+1
+        if label.startswith('Search TVmaze'):return 'n'
         if label.startswith('Library category'):return 'tv'
         if label.startswith('Series'):return 'Boosh Season 1 Disc 1' if visits[label]==1 else 'The Mighty Boosh S1 Disc 1'
         if label=='Start or edit':return 'm' if visits[label]==1 else 'y'
@@ -276,6 +277,7 @@ def test_destination_escape_returns_to_name_then_accepts_manual_folder(monkeypat
     labels=[];paths=[]
     def prompt(label,default=''):
         labels.append(label)
+        if label.startswith('Search TVmaze'):return 'n'
         if label.startswith('Library category'):return 'tv'
         return default
     def path_prompt(label,default):

@@ -1,3 +1,9 @@
+## TV disc metadata and CD barcode fallback
+
+- Search series, episodes and known specials; review per-title matches and label extras.
+- Publish confirmed TV names and catalog fields without guessing unnamed DVD title order.
+- Type CD barcode digits when fingerprint lookup has no release; confirm matching discs.
+
 ## Shared Fabric upkeep tools
 
 - Add Albert/Lo/Signal tools for installed-release checks and restore-tested backup status.
