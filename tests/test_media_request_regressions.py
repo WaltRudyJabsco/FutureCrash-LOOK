@@ -619,3 +619,36 @@ def test_audio_stream_stays_headless_and_hides_old_mpv_cover(lk,monkeypatch):
     assert calls.index(['set_property','audio-display','no'])<calls.index(['loadfile','http://localhost/music','replace'])
     assert ['set_property','force-window','no'] in calls
     assert lk._media_session()['presentation']=='audio'
+
+
+def test_fabric_care_tool_authority_and_read_only_profile(lk,monkeypatch):
+    import io,json
+    calls=[]
+    def request(req,**kwargs):
+        calls.append(json.loads(req.data));return io.BytesIO(json.dumps({'nodes':[],'releases_match':True}).encode())
+    monkeypatch.setattr(lk.urllib.request,'urlopen',request)
+    lk._fabric_care_tool('fabric_status',{},'conservative','check our fabric')
+    with pytest.raises(PermissionError):lk._fabric_care_tool('fabric_maintain',{'operation':'backup'},'workspace','explain fabric backups')
+    with pytest.raises(PermissionError):lk._fabric_care_tool('fabric_maintain',{'operation':'backup'},'conservative','back up our fabric')
+    with pytest.raises(PermissionError):lk._fabric_care_tool('fabric_maintain',{'operation':'sync','source':'other'},'workspace','update all computers from this computer')
+    lk._fabric_care_tool('fabric_maintain',{'operation':'sync','source':'local'},'workspace','update all computers from this computer')
+    assert len(calls)==2 and calls[-1]['source']=='local'
+
+
+def test_fabric_care_oneshot_does_not_need_model(lk,monkeypatch,capsys):
+    import io,json
+    monkeypatch.setattr(lk.urllib.request,'urlopen',lambda *a,**k:io.BytesIO(json.dumps({'nodes':[],'releases_match':True}).encode()))
+    assert lk.ollama_chat(initial_prompt='check our fabric',access_profile='workspace',one_shot=True)==0
+    assert 'Fabric check' in capsys.readouterr().out
+
+
+def test_shared_engine_care_has_fabric_provenance(lk,monkeypatch,tmp_path):
+    import io,json
+    from look import lo_engine
+    monkeypatch.setattr(lo_engine,'_load_core',lambda:lk)
+    monkeypatch.setattr(lo_engine,'_load_web_key',lambda:None)
+    monkeypatch.setattr(lk.urllib.request,'urlopen',lambda *a,**k:io.BytesIO(json.dumps({'nodes':[],'releases_match':True}).encode()))
+    result=lo_engine.chat_once('check our fabric',workspace=str(tmp_path))
+    assert result['provenance']['edge']=='FABRIC'
+    assert result['provenance']['confidence']=='OBSERVED'
+    assert 'Fabric check' in result['text']

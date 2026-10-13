@@ -105,7 +105,8 @@ def test_ff_background_completion_refreshes_without_a_keystroke(tmp_path,monkeyp
         return 'Q'
     monkeypatch.setattr(renderer,'read_key',key)
     renderer.pager(['scanning'],24,80,force_interactive=True,
-                   rebuild=lambda *args:[str(path) for path in catalog] or ['scanning'],
+                   # Keep the fake rendered label short: this tests refresh, not path truncation.
+                   rebuild=lambda *args:[path.name for path in catalog] or ['scanning'],
                    live_revision=lambda:(len(catalog),done))
     assert 'new result' in output.getvalue()
     assert calls==[.25,None]
