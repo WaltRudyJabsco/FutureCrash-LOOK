@@ -1,3 +1,9 @@
+## The web reading desk
+
+- Add lk web with installed-browser discovery, search, bookmarks and Notebook link copying.
+- Coordinate terminal browser colors with LOOK and provide an explicit qutebrowser handoff.
+- Support numbered links in Lynx/Links and discover Chawan for terminal letter hints.
+
 ## LKMP control hints
 
 - Show playback controls once beside Now Playing, without duplicate footer hints.

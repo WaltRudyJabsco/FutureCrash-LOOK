@@ -581,3 +581,6 @@ The WOPR profile uses the same offline `espeak-ng` + SoX chain on macOS and Linu
 - `docs/RELEASE-HISTORY.md` — historical record.
 
 Terminal palettes and editor movement: [Terminal styles](docs/TERMINAL-STYLES.md). Use lk terminal to list Neon, Paper, and Slate; palette selection is local to each computer.
+
+Terminal browsing: [`lk web`](docs/WEB.md) opens a keyboard reading desk for installed
+browsers, bookmarks and search, with an explicit qutebrowser choice.
