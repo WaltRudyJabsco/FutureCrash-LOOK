@@ -25,6 +25,7 @@ LIBRARY=Path.home()/'.local/share/look/media_library.json'
 TERMINAL={'complete','failed','cancelled'}
 MIN_FREE_BYTES=1024**3
 COVER_MAX_BYTES=2*1024*1024
+DISC_SCAN_TIMEOUT_SECONDS=300
 
 
 def download_cover(folder,release_id):
@@ -78,7 +79,9 @@ def atomic(path,value):
 
 
 def query(command,timeout=30):
-    result=subprocess.run(command,stdin=subprocess.DEVNULL,capture_output=True,timeout=timeout)
+    try:result=subprocess.run(command,stdin=subprocess.DEVNULL,capture_output=True,timeout=timeout)
+    except subprocess.TimeoutExpired as exc:
+        raise ValueError(Path(command[0]).name+' did not finish within '+str(timeout)+' seconds') from exc
     text=(result.stdout+result.stderr).decode('utf-8','replace')
     if result.returncode:raise ValueError(text.strip()[-1200:] or 'Disc command failed')
     return text
@@ -254,7 +257,7 @@ def inspect(identifier,kind='cd'):
         metadata={'title':drive.get('disc') or '', 'tracks':[re.sub(r'^\d+\s*[-.]?\s*','',path.stem) for path in native]}
         return {'ok':True,'kind':kind,'drive':drive,'engine':'cd-paranoia' if ripper and drive['device'] else 'macOS audio volume','toc':toc,'releases':lookup(toc),'metadata':metadata,'tracks':len(native) if not toc else toc['count']}
     if drive.get('makemkv_source'):
-        text=query([tool('makemkvcon'),'-r','--cache=128','info',drive['makemkv_source']],90)
+        text=query([tool('makemkvcon'),'-r','--cache=128','info',drive['makemkv_source']],DISC_SCAN_TIMEOUT_SECONDS)
         titles={}
         for fields in robot_records(text,'TINFO'):
             if len(fields)>=4 and fields[1] in {'2','9','10','16','27'}:
@@ -265,7 +268,7 @@ def inspect(identifier,kind='cd'):
         return {'ok':True,'kind':kind,'drive':drive,'engine':'makemkv','titles':list(titles.values()),'metadata':video_metadata(hint['title'])}
     engine=tool('HandBrakeCLI')
     if not engine:raise ValueError('Install HandBrakeCLI or MakeMKV for DVD/Blu-ray imports')
-    text=query([engine,'-i',drive['mount'] or drive['device'],'-t','0','--scan'],90)
+    text=query([engine,'-i',drive['mount'] or drive['device'],'-t','0','--scan'],DISC_SCAN_TIMEOUT_SECONDS)
     titles=[]
     for match in re.finditer(r'\+ title (\d+):(.*?)(?=\+ title \d+:|\Z)',text,re.S):
         duration=re.search(r'duration:\s*([\d:]+)',match[2]);titles.append({'index':match[1],'duration':duration[1] if duration else ''})

@@ -119,6 +119,10 @@ before you start. H toggles completed/failed history without deleting receipts
 or media; C cancels active work. L sends a completed import to the configured
 remote library, including retrying a failed delivery.
 
+Disc title scans allow up to five minutes; the Fabric request allows additional
+transport time. A failed scan does not automatically rescan: choose `r` to retry,
+`b` to go back, or `c`/Escape to cancel. No import starts until the final review.
+
 MakeMKV's preparation and saving phases have separate labels and percentages.
 A percentage reset at the start of saving does not mean copying restarted.
 When MakeMKV is missing, the workbench links its official setup before offering

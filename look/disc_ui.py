@@ -356,7 +356,14 @@ def import_options(request,inventory,drive,prompt,path_prompt):
             elif step==2:
                 if scan is None or scan_kind!=kind:
                     print('Scanning inserted disc…',flush=True)
-                    scan=request('scan',{'drive':drive,'kind':kind});scan_kind=kind
+                    try:scan=request('scan',{'drive':drive,'kind':kind})
+                    except (OSError,ValueError,RuntimeError) as exc:
+                        print('SCAN FAILED · '+str(exc)+' · no import started')
+                        choice=prompt('r retry scan / b back / c cancel','c').casefold()
+                        if choice=='r':continue
+                        if choice=='b':step=1;continue
+                        return None
+                    scan_kind=kind
                     detected=scan.get('kind') or kind
                     if detected!=kind:
                         kind=detected;category='music' if kind=='cd' else 'movies';destination='';step=1;continue
