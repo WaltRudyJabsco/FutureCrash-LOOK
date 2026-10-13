@@ -742,3 +742,29 @@ def test_accepting_all_prefilled_values_does_not_write(lk,monkeypatch):
     edited=Mock();monkeypatch.setattr(lk,'_media_edit_rows',edited)
     assert lk._media_edit_prompt([{'title':'Keep me','artist':'Artist'}],0,None)['count']==0
     edited.assert_not_called()
+
+
+def test_tv_rows_show_series_and_episode_without_changing_music_metadata(lk):
+    row={'media_type':'video/mp4','series':'A Comedy','season':1,'episode':1,
+         'content_kind':'episode','title':'First episode','artist':'','album':''}
+    assert lk._media_row_label(row)=='A Comedy — First episode · Season 1 · Ep 1'
+    rendered=lk._strip_ansi(lk._media_find_row(row,120))
+    assert 'A Comedy' in rendered and 'Season 1' in rendered and 'Ep 1' in rendered
+    assert rendered.startswith('TV')
+    assert row['artist']=='' and row['album']=='' and row['title']=='First episode'
+    label=lk._media_row_label(row)
+    assert lk._strip_ansi(lk._media_styled_row_label(row,label))==label
+    music={'artist':'Artist','album':'Album','title':'Song','track':3}
+    assert lk._media_row_label(music)=='Artist — 03 Song · Album'
+    movie={'media_type':'video/mp4','category':'movies','title':'A Movie'}
+    assert lk._media_row_label(movie)=='A Movie'
+
+
+def test_tv_type_sort_groups_series_seasons_and_episodes(lk):
+    rows=[{'title':'Later','series':'Show','season':2,'episode':1,'media_type':'video/mp4'},
+          {'title':'Z first','series':'Show','season':1,'episode':1,'media_type':'video/mp4'},
+          {'title':'A second','series':'Show','season':1,'episode':2,'media_type':'video/mp4'},
+          {'title':'Unknown','artist':'Show','album':'Legacy','category':'tv','media_type':'video/mp4'}]
+    assert [r['title'] for r in lk._media_find_order(rows,4)]==['Unknown','Z first','A second','Later']
+    special={'series':'Show','season':0,'episode':2,'content_kind':'special'}
+    assert lk._media_display_groups(special)==('Show','Season 0 · Ep 2 · Special')

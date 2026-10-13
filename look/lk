@@ -17403,9 +17403,20 @@ def _media_fabric_command():
     return 0
 
 
+def _media_display_groups(row):
+    series=str(row.get('series') or '').strip()
+    if series:
+        parts=[]
+        if row.get('season') is not None:parts.append('Season '+str(row['season']))
+        if row.get('episode') is not None:parts.append('Ep '+str(row['episode']))
+        kind=row.get('content_kind')
+        if kind in {'special','extra','unclassified'}:parts.append(str(kind).title())
+        return series,' · '.join(parts)
+    return str(row.get('artist') or '').strip(),str(row.get('album') or '').strip()
+
+
 def _media_row_label(row):
-    artist=str(row.get("artist") or "").strip()
-    album=str(row.get("album") or "").strip()
+    artist,album=_media_display_groups(row)
     title=str(row.get("title") or Path(str(row.get("path") or "media")).name).strip()
     track=row.get("track")
     prefix=f"{track:02d} " if isinstance(track,int) else ""
@@ -17416,7 +17427,7 @@ def _media_row_label(row):
 
 
 def _media_styled_row_label(row,label):
-    artist=str(row.get('artist') or '').strip();album=str(row.get('album') or '').strip()
+    artist,album=_media_display_groups(row)
     prefix=artist+' — ' if artist else ''
     prefix_length=min(len(label),len(prefix)) if prefix and label.startswith(prefix) else 0
     album_start=len(_media_row_label(row))-len(' · '+album) if album else len(label)
@@ -18329,6 +18340,7 @@ def _media_find_type(row):
     if mime.startswith('audio/') or suffix in media_core.AUDIO_EXTENSIONS:
         return 'Podcast' if category=='podcast' or 'podcasts' in parts else 'Audio'
     if mime.startswith('video/') or suffix in media_core.VIDEO_EXTENSIONS:
+        if row.get('series'):return 'TV'
         if category in {'movie','movies'} or 'movies' in parts:return 'Movie'
         if category in {'tv','television'} or parts & {'tv','television'}:return 'TV'
         return 'Video'
@@ -18360,9 +18372,10 @@ def _media_find_columns(width):
 def _media_find_row(row,width,header=False):
     title=str(row.get('title') or Path(str(row.get('path') or 'media')).name)
     track=row.get('track');prefix=f'{track:02d} ' if isinstance(track,int) else ''
-    values={'type':_media_find_type(row),'artist':row.get('artist'),'title':prefix+title,'album':row.get('album')}
-    values['compact']=' · '.join(str(x) for x in (prefix+title,row.get('artist'),row.get('album')) if x)
-    labels={'type':'TYPE','artist':'ARTIST','title':'TITLE','album':'ALBUM','compact':'TITLE · ARTIST · ALBUM'}
+    artist,album=_media_display_groups(row)
+    values={'type':_media_find_type(row),'artist':artist,'title':prefix+title,'album':album}
+    values['compact']=' · '.join(str(x) for x in (prefix+title,artist,album) if x)
+    labels={'type':'TYPE','artist':'ARTIST/SERIES','title':'TITLE','album':'ALBUM/EPISODE','compact':'TITLE · ARTIST/SERIES · ALBUM/EPISODE'}
     colors={'type':'35','artist':'36','title':'37','album':'2','compact':'37'}
     return '  '.join(_c(_media_find_cell(labels[key] if header else values[key],size),'2' if header else colors[key]) for key,size in _media_find_columns(width))
 
@@ -18385,7 +18398,9 @@ def _media_find_order(rows,sort_mode=0,reverse=False):
         if sort_mode==4:
             # Formats are representations, not album boundaries.
             album_order=(str(row.get('album_artist') or row.get('artist') or '').casefold(),str(row.get('album') or '').casefold(),number(row.get('disc')),number(row.get('track')) or float('inf'),title)
-            return (_media_find_type(row),album_order,tie)
+            if row.get('series'):
+                album_order=(str(row['series']).casefold(),number(row.get('season')),number(row.get('episode')) or float('inf'),str(row.get('content_kind') or ''),title)
+            return (_media_find_type(row),bool(row.get('series')),album_order,tie)
         return (-number(row.get('bytes')),tie)
     result=sorted(result,key=order,reverse=reverse)
     if sort_mode==3:
