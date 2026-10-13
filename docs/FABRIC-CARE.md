@@ -38,8 +38,12 @@ changed by these tools. Fresh installations report setup needed and point to
 remain authoritative. Incomplete contributor collection is reported as incomplete.
 
 Queued backups and staged updates are accepted work, not finished work. Ask
-“check our Fabric” again to read job state and installed release digests. A backup
-worker records completion only after restore testing. Disconnected drives, offline
+“check our Fabric” again to verify job state and installed release digests.
+Runtime updates and node restarts wait
+for active disc imports to finish; if an import remains busy, retry maintenance
+after it completes. An interrupted import retains partial output but requires
+a new import rather than resuming that output.
+A backup worker records completion only after restore testing. Disconnected drives, offline
 nodes, old nodes without the new API, and failed workers remain visible failures.
 
 Conservative Lo sessions are read-only. Workspace sessions, including Albert and

@@ -283,21 +283,38 @@ def platform_service(action, name):
     if proc.returncode: raise RuntimeError(f'{action} {name}: {proc.stderr.strip()}')
 
 
+def imports_active():
+    imports = local_json('/v1/media/import?action=jobs')
+    # Detached import workers still belong to the node's systemd service;
+    # restarting that service can kill them along with the node.
+    return any(job.get('state') not in {'complete', 'failed', 'cancelled'}
+               for job in imports.get('jobs', []))
+
+
+def wait_imports(seconds=300):
+    deadline = time.monotonic() + seconds
+    while time.monotonic() < deadline:
+        if not imports_active(): return
+        time.sleep(.5)
+    raise TimeoutError('disc import still running; finish importing and retry maintenance')
+
+
 def wait_idle(seconds=300):
     deadline = time.monotonic() + seconds
     while time.monotonic() < deadline:
         activity = local_json('/v1/activity')
         media = local_json('/v1/media/state')
         traffic = local_json('/v1/http')
+        importing = imports_active()
         streaming = any(str(request.get('path', '')).split('?', 1)[0] in {'/v1/media/browser', '/v1/media/audio', '/v1/media/item', '/v1/media/artifact'}
                         for meter in (traffic.get('listeners') or {}).values()
                         for request in meter.get('oldest_active', []))
-        if activity.get('active') is None and not media.get('active') and not streaming:
+        if activity.get('active') is None and not media.get('active') and not streaming and not importing:
             reserved = local_json('/v1/lease/acquire', {'owner': 'runtime-maintenance', 'priority': 'interactive',
                                    'phase': 'maintenance', 'detail': 'install approved runtime'})
             if reserved.get('lease'): return reserved['lease']['id']
         time.sleep(.5)
-    raise TimeoutError('node still busy; finish playback or inference and retry maintenance')
+    raise TimeoutError('node still busy; finish imports, playback or inference and retry maintenance')
 
 
 def health(expected=None, seconds=45, services=()):
@@ -333,6 +350,7 @@ def run_job(job):
             manifest, payload = validate_bundle((folder / 'release.zip').read_bytes(), info['digest'])
         phase('draining')
         if info['action'] == 'update': lease_id = wait_idle()
+        else: wait_imports()
         if payload is not None:
             previous = registry().read_bytes()
             backup = folder / 'previous'
