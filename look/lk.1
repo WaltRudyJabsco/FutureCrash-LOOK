@@ -284,7 +284,7 @@ lk media repeat [off|all]
   [media] Cycle or set repeat
 lk media storage [--pick | --node NODE --root PATH] [--json]
   [media] Remember a library node and map its canonical media root
-lk media edit <QUERY> --artist NAME [--album NAME] [--album-artist NAME] [--title NAME] [--track N] [--disc N] [--all] [--json]
+lk media edit <QUERY> [--artist NAME] [--album NAME] [--album-artist NAME] [--title NAME] [--track N] [--disc N] [--series NAME] [--season N] [--episode N] [--content-kind episode|special|extra] [--all] [--json]
   [media] Correct metadata for one track or matching batch
 lk media [...]
   [media] Media library, queue, playlists, transport · alias: lk music
@@ -985,8 +985,10 @@ Parser arguments and recognized option tokens (grouped by handler):
 --album-artist — Shared album artist; keep compilations together
 --all — Apply shared fields to every matching track
 --artist — Shared performer name
+--content-kind
 --directory
 --disc — Shared disc number
+--episode — Episode number for one item
 --extras
 --json
 --keywords
@@ -996,6 +998,8 @@ Parser arguments and recognized option tokens (grouped by handler):
 --node — Preferred library node; local keeps new imports here
 --pick — Choose this computer’s home folder or a mounted drive interactively
 --root — Library root on that node (absolute or ~/); existing folders are retained
+--season — Season number; 0 for specials
+--series — TV series name
 --shuffle
 --text
 --title — Song title for a single track

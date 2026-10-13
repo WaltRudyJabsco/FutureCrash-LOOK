@@ -264,7 +264,7 @@ def test_metadata_prompt_blank_fields_preserve_each_title(lk,monkeypatch):
     monkeypatch.setitem(sys.modules,'media_metadata',media_metadata)
     monkeypatch.setattr(lk.termios,'tcsetattr',lambda *args:None)
     monkeypatch.setattr(lk.tty,'setcbreak',lambda *args:None)
-    answers=iter(['New Artist','','','','yes'])
+    answers=iter(['s','New Artist','','','','yes'])
     monkeypatch.setattr('builtins.input',lambda label:next(answers))
     edited=Mock(return_value={'ok':True,'count':2,'entries':[],'errors':[]});monkeypatch.setattr(lk,'_media_edit_rows',edited)
     rows=[{'title':'First','artist':'Old'},{'title':'Second','artist':'Old'}]
@@ -652,3 +652,50 @@ def test_shared_engine_care_has_fabric_provenance(lk,monkeypatch,tmp_path):
     assert result['provenance']['edge']=='FABRIC'
     assert result['provenance']['confidence']=='OBSERVED'
     assert 'Fabric check' in result['text']
+
+
+def test_editor_routes_every_copy_with_its_own_expected_values(lk,monkeypatch,tmp_path):
+    import json
+    from unittest.mock import Mock
+    from look import media_metadata
+    monkeypatch.setitem(sys.modules,'media_metadata',media_metadata)
+    monkeypatch.setattr(lk,'HOME',tmp_path)
+    monkeypatch.setattr(lk,'_media_local_node_names',lambda:{'local'})
+    rows=[{'id':'a','node':'owner-a','title':'Original','locations':[
+        {'id':'a','node':'owner-a','title':'Original','episode':1},
+        {'id':'b','node':'owner-b','title':'Old copy','episode':None}]}]
+    def route(args):
+        body=json.loads(args[1]);item=body['entries'][0]
+        return {'ok':True,'entries':[{'id':item['id'],'title':'Corrected','episode':2}]}
+    routed=Mock(side_effect=route);monkeypatch.setattr(lk,'_media_fabric_cli',routed)
+    result=lk._media_edit_rows(rows,{'title':'Corrected','episode':2})
+    assert result['count']==2 and routed.call_count==2
+    bodies=[json.loads(call.args[0][1]) for call in routed.call_args_list]
+    assert [body['entries'][0]['expected']['episode'] for body in bodies]==[1,None]
+    assert all(row['title']=='Corrected' for row in rows[0]['locations'])
+
+
+def test_individual_tv_edit_reviews_distinct_titles_before_writing(lk,monkeypatch):
+    from unittest.mock import Mock
+    monkeypatch.setattr(lk.termios,'tcsetattr',lambda *args:None)
+    monkeypatch.setattr(lk.tty,'setcbreak',lambda *args:None)
+    rows=[{'id':str(n),'title':'Unnamed '+str(n),'media_type':'video/mp4'} for n in (1,2)]
+    answers=iter(['i','Series','1','episode','First','1','Series','1','episode','Second','2','y'])
+    monkeypatch.setattr('builtins.input',lambda prompt:next(answers))
+    edited=Mock(return_value={'ok':True,'count':1,'entries':[],'errors':[]})
+    monkeypatch.setattr(lk,'_media_edit_rows',edited)
+    assert lk._media_edit_prompt(rows,0,None)['count']==2
+    assert [call.args[1]['title'] for call in edited.call_args_list]==['First','Second']
+    assert [call.args[1]['episode'] for call in edited.call_args_list]==[1,2]
+
+
+def test_individual_editor_cancels_before_any_write(lk,monkeypatch):
+    from unittest.mock import Mock
+    monkeypatch.setattr(lk.termios,'tcsetattr',lambda *args:None)
+    monkeypatch.setattr(lk.tty,'setcbreak',lambda *args:None)
+    answers=iter(['i','','','','First','1','','','','Second','2','n'])
+    monkeypatch.setattr('builtins.input',lambda label:next(answers))
+    edited=Mock();monkeypatch.setattr(lk,'_media_edit_rows',edited)
+    rows=[{'id':str(n),'media_type':'video/mp4','title':'Old'} for n in (1,2)]
+    assert lk._media_edit_prompt(rows,0,None)['count']==0
+    edited.assert_not_called()

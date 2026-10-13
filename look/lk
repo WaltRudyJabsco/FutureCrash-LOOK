@@ -17784,6 +17784,9 @@ def _media_detail_lines(row, width=110):
         ("Identity", digest),
         ("Available", "yes" if (row.get("node") and row.get("id")) or Path(path).exists() else "unknown"),
     ]
+    if row.get('series') or row.get('content_kind'):
+        episode=' / '.join(str(row.get(key)) for key in ('season','episode') if row.get(key) is not None) or 'unnumbered'
+        bits[1:3]=[('Series',str(row.get('series') or '—')),('Episode',episode+' · '+str(row.get('content_kind') or 'episode'))]
     lines=[f"{name:<10} {value}"[:max(20,width-2)] for name,value in bits]
     sources=row.get("sources") or []
     if len(sources)>1:
@@ -18101,11 +18104,30 @@ def _media_refresh_rows(rows,discover=True,catalog_meta=None):
     return rows
 
 
+def _media_edit_sources(rows):
+    sources={}
+    for row in rows:
+        for source in row.get('sources') or row.get('locations') or [row]:
+            if not isinstance(source,dict) or not source.get('id'):continue
+            source=dict({key:value for key,value in row.items() if key not in {'sources','locations'}},**source)
+            for key in ('sources','locations','copies'):source.pop(key,None)
+            sources[(str(source.get('node') or 'local'),source['id'])]=source
+    return list(sources.values())
+
+
+def _media_apply_edit_updates(rows,entries):
+    updates={(str(row.get('node') or 'local'),row['id']):row for row in entries}
+    for row in rows:
+        for source in [row,*(row.get('sources') or []),*(row.get('locations') or [])]:
+            update=updates.get((str(source.get('node') or 'local'),source.get('id')))
+            if update:source.update(update)
+
+
 def _media_edit_rows(rows,values):
     import media_metadata
     values=media_metadata.changes(values)
     owners={};results=[];errors=[];local_names=_media_local_node_names()
-    for row in rows:
+    for row in _media_edit_sources(rows):
         owner=str(row.get('node') or 'local')
         owners.setdefault(owner,{})[row['id']]=row
     for owner,selected in owners.items():
@@ -18119,28 +18141,49 @@ def _media_edit_rows(rows,values):
                 results.append(original)
         except (OSError,ValueError,RuntimeError) as exc:errors.append(owner+': '+str(exc))
     (HOME/'.cache/look/fabric-media-catalog.json').unlink(missing_ok=True)
+    _media_apply_edit_updates(rows,results)
     return {'ok':not errors,'count':len(results),'entries':results,'errors':errors}
 
 
 def _media_edit_prompt(rows,fd,old):
     import media_metadata
     termios.tcsetattr(fd,termios.TCSADRAIN,old)
+    result={'ok':True,'count':0,'entries':[],'errors':[]};saving=False
     try:
-        print('\n'+_c('EDIT MEDIA METADATA','1;36')+f' · {len(rows)} selected track(s)')
-        print('Return keeps each current value · corrections are saved beside the media files')
-        values={}
-        fields=['artist','album_artist','album','disc']+(['title','track'] if len(rows)==1 else [])
-        for field in fields:
-            existing={str(row.get(field) or '') for row in rows}
-            display=next(iter(existing)) if len(existing)==1 else 'mixed'
-            value=input(field.replace('_',' ').title()+f' [{display}] › ').strip()
-            if value:values[field]=int(value) if field in {'track','disc'} else value
-        if not values:return {'ok':True,'count':0,'entries':[],'errors':[]}
-        values=media_metadata.changes(values)
-        print('Apply to '+str(len(rows))+' track(s): '+', '.join(key+' = '+str(value) for key,value in values.items()))
+        print('\n'+_c('EDIT MEDIA METADATA','1;36')+f' · {len(rows)} item(s) · {len(_media_edit_sources(rows))} source(s)')
+        print('Return keeps each current value · - clears a TV field · all listed sources receive corrections · media bytes and filenames stay unchanged')
+        video=any(str(row.get('media_type') or '').startswith('video/') or row.get('series') for row in rows)
+        individual=len(rows)==1 or input('s shared fields / i name each item individually [s] › ').strip().lower()=='i'
+        plans=[]
+        groups=[[row] for row in rows] if individual else [rows]
+        for number,group in enumerate(groups,1):
+            if individual:print(f"\n{number}/{len(groups)} · {group[0].get('title') or 'Untitled'} · {group[0].get('path') or ''}")
+            fields=(['series','season','content_kind'] if video else ['artist','album_artist','album','disc'])
+            if individual:fields+=['title','episode' if video else 'track']
+            values={}
+            for field in fields:
+                existing={str(row.get(field) if row.get(field) is not None else '') for row in group}
+                display=next(iter(existing)) if len(existing)==1 else 'mixed'
+                label=field.replace('_',' ').title()+(' (episode / special / extra)' if field=='content_kind' else '')
+                value=input(label+f' [{display}] › ').strip()
+                if value:values[field]=None if video and value=='-' and field in {'series','season','episode','content_kind'} else int(value) if field in {'track','disc','season','episode'} else value
+            if values:plans.append((group,media_metadata.changes(values)))
+        if not plans:return {'ok':True,'count':0,'entries':[],'errors':[]}
+        print('\nREVIEW · corrections to every listed source')
+        for group,values in plans:
+            print(str(len(group))+' item(s) · '+str(group[0].get('title') or '')+' · '+', '.join(key+' = '+str(value) for key,value in values.items()))
         if input('Save changes? [y/N] › ').strip().lower() not in {'y','yes'}:return {'ok':True,'count':0,'entries':[],'errors':[]}
-        return _media_edit_rows(rows,values)
-    except (EOFError,KeyboardInterrupt):return {'ok':True,'count':0,'entries':[],'errors':[]}
+        saving=True
+        for group,values in plans:
+            saved=_media_edit_rows(group,values)
+            result['count']+=saved['count'];result['entries']+=saved['entries'];result['errors']+=saved['errors']
+        result['ok']=not result['errors']
+        _media_apply_edit_updates(rows,result['entries'])
+        return result
+    except (EOFError,KeyboardInterrupt):
+        if saving:
+            result['ok']=False;result['errors'].append('Editing interrupted; refresh to check any in-flight owner request')
+        return result
     except (OSError,ValueError,RuntimeError) as exc:return {'ok':False,'count':0,'entries':[],'errors':[str(exc)]}
     finally:tty.setcbreak(fd)
 
@@ -18226,15 +18269,19 @@ def _media_edit_command(args):
     parser.add_argument('--title',help='Song title for a single track')
     parser.add_argument('--track',type=int,help='Track number for a single track')
     parser.add_argument('--disc',type=int,help='Shared disc number')
+    parser.add_argument('--series',help='TV series name')
+    parser.add_argument('--season',type=int,help='Season number; 0 for specials')
+    parser.add_argument('--episode',type=int,help='Episode number for one item')
+    parser.add_argument('--content-kind',choices=('episode','special','extra'))
     parser.add_argument('--json',action='store_true')
     selected=parser.parse_args(args)
-    values={key:getattr(selected,key) for key in ('artist','album_artist','album','title','track','disc') if getattr(selected,key) is not None}
+    values={key:getattr(selected,key) for key in ('artist','album_artist','album','title','track','disc','series','season','episode','content_kind') if getattr(selected,key) is not None}
     try:
         if not selected.query:raise ValueError('Give a track/album query or use E in the browser')
         rows,_=_media_catalog_entries();rows=media_core.search_entries({'entries':rows},' '.join(selected.query))
         if not rows:raise ValueError('No matching tracks')
         if len(rows)>1 and not selected.all:raise ValueError(f'{len(rows)} matches; use --all for a batch or E on selected tracks')
-        if len(rows)>1 and any(key in values for key in ('title','track')):raise ValueError('Edit title/track on one track; batch edits share artist, album, album artist or disc')
+        if len(rows)>1 and any(key in values for key in ('title','track','episode')):raise ValueError('Edit title/track/episode on one item; use Shift-E individual mode to name several items')
         result=_media_edit_rows(rows,values)
         if selected.json:print(json.dumps(result,ensure_ascii=False,indent=2))
         else:
@@ -18523,11 +18570,8 @@ def _media_selector(rows,title="FABRIC MEDIA",initial_query="",catalog_meta=None
                 continue
             if key=="E" and chosen:
                 result=_media_edit_prompt(chosen,fd,old)
-                updates={(row.get('node'),row.get('id')):row for row in result['entries']}
-                for row in rows:
-                    update=updates.get((row.get('node'),row.get('id')))
-                    if update:row.update(update)
-                notice=f"updated {result['count']} track(s)"+(' · '+' · '.join(result['errors']) if result['errors'] else '')
+                _media_apply_edit_updates(rows,result['entries'])
+                notice=f"updated {result['count']} source(s)"+(' · '+' · '.join(result['errors']) if result['errors'] else '')
                 view_key=None;selected_ids.clear();continue
             if key in {"O","T"} and visible:
                 termios.tcsetattr(fd,termios.TCSADRAIN,old)
@@ -19793,16 +19837,14 @@ def media_mp(initial_query=""):
             if key=="E" and picked:
                 result=_media_edit_prompt(picked,fd,old)
                 updates={(row.get('node'),row.get('id')):row for row in result['entries']}
-                for row in library_rows:
-                    update=updates.get((row.get('node'),row.get('id')))
-                    if update:row.update(update)
+                _media_apply_edit_updates(library_rows,result['entries'])
                 session=_media_session()
                 if session:
                     for row in session.get('queue') or []:
                         update=updates.get((row.get('node'),row.get('id')))
-                        if update:row.update({key:update.get(key) for key in ('artist','album_artist','album','title','track','disc')})
+                        if update:row.update({key:update.get(key) for key in ('artist','album_artist','album','title','track','disc','series','season','episode','content_kind')})
                     _media_save_session(session)
-                notice=f"updated {result['count']} track(s)"+(' · '+' · '.join(result['errors']) if result['errors'] else '')
+                notice=f"updated {result['count']} source(s)"+(' · '+' · '.join(result['errors']) if result['errors'] else '')
                 view_key=None;selected_ids.clear();continue
             if key in {"\r","\n"} and picked:
                 _media_launch_session(media_core.new_session(picked)); notice=f"playing {len(picked)} item(s)"; continue
@@ -20543,7 +20585,7 @@ _COMMANDS = [
     ('lk media shuffle', '[on|off]', 'media', 'Toggle or set shuffle'),
     ('lk media repeat', '[off|all]', 'media', 'Cycle or set repeat'),
     ("lk media storage", "[--pick | --node NODE --root PATH] [--json]", "media", "Remember a library node and map its canonical media root"),
-    ("lk media edit", "<QUERY> --artist NAME [--album NAME] [--album-artist NAME] [--title NAME] [--track N] [--disc N] [--all] [--json]", "media", "Correct metadata for one track or matching batch"),
+    ("lk media edit", "<QUERY> [--artist NAME] [--album NAME] [--album-artist NAME] [--title NAME] [--track N] [--disc N] [--series NAME] [--season N] [--episode N] [--content-kind episode|special|extra] [--all] [--json]", "media", "Correct metadata for one track or matching batch"),
     ("lk media", "[...]", "media", "Media library, queue, playlists, transport", "lk music"),
     ("lk player", "", "media", "Live LOOK miniplayer"),
     ("lk mp", "[QUERY]", "media", "Integrated Fabric media player"),
