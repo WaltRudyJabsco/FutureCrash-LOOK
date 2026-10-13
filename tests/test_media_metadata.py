@@ -109,3 +109,27 @@ def test_external_sidecar_correction_is_not_overwritten(catalog):
     sidecar=next(album.glob('*.flac')).with_suffix('.info.json');sidecar.write_text('{"artist":"New external correction"}')
     with pytest.raises(ValueError,match='sidecar changed'):metadata.edit(path,old)
     assert json.loads(sidecar.read_text())['artist']=='New external correction'
+
+
+def test_tv_corrections_persist_and_can_clear_episode(catalog):
+    path,folder=catalog
+    original={p.name:p.read_bytes() for p in folder.glob('*.flac')}
+    metadata.edit(path,payload(path,{'series':'A series','season':2,'episode':3,'content_kind':'episode','title':'The episode'}))
+    rescanned=media_core.scan_root(folder,json.loads(path.read_text()))
+    assert all(row['series']=='A series' and row['season']==2 and row['episode']==3 for row in rescanned['entries'])
+    metadata.edit(path,payload(path,{'season':0,'episode':None,'content_kind':'special'}))
+    rescanned=media_core.scan_root(folder,json.loads(path.read_text()))
+    assert all(row['season']==0 and row.get('episode') is None and row['content_kind']=='special' for row in rescanned['entries'])
+    assert original=={p.name:p.read_bytes() for p in folder.glob('*.flac')}
+
+
+@pytest.mark.parametrize('value',[{'episode':True},{'season':-1},{'content_kind':'movie'},{'title':None}])
+def test_tv_edit_validation(value):
+    with pytest.raises(ValueError):metadata.changes(value)
+
+
+def test_merge_retains_each_copys_metadata():
+    rows=[{'id':'a','node':'one','digest':'same','title':'First','episode':1},
+          {'id':'b','node':'two','digest':'same','title':'Other','episode':None}]
+    merged=media_core.merge_catalog_entries(rows)
+    assert {row['id']:(row['title'],row['episode']) for row in merged[0]['locations']}=={'a':('First',1),'b':('Other',None)}

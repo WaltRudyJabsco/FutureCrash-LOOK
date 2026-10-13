@@ -178,9 +178,16 @@ metadata review, title selection and background-job progress.
 ## Correct artist, album and track information
 
 In Media Find, album tracks or LKMP, mark tracks with Tab (A selects all shown),
-then press E. Shared fields include artist, album artist, album and disc. One
-selected track also offers title and track number. Return keeps each current
-value; the final review shows the count and changes before saving. R refreshes
+then press Shift-E. Choose `s` for shared corrections or `i` to name each item
+individually. Music fields include artist, album artist, album, disc, title and
+track. Video fields include series, season, episode, title and content kind
+(`episode`, `special`, `extra`). Return keeps each value; `-` clears a TV field.
+Review all proposed changes before saving. Individual mode gives each selected
+episode its own title and number, without leaving the editor between items.
+Corrections apply to every listed source of each item, including remote files.
+Offline or read-only sources report failures; successful sources are counted
+separately. Refresh before retrying a stale selection. Filenames stay unchanged.
+The final review shows the changes before saving. R refreshes
 the view after an import or a correction elsewhere.
 
 For a whole album, open `lk media albums`, open the album, then A and E.
@@ -195,8 +202,8 @@ Corrections live beside the media in .info.json and update the owning catalog.
 They survive rescans and appear across the fabric; embedded audio/video tags
 and media bytes remain unchanged. Keep each sidecar when moving files. Editing
 an artist also updates album artist when it previously matched or was empty;
-explicit compilation album artists remain intact. Each owner validates the
-entire batch before writing, checks for stale metadata, and restores sidecars if
+explicit compilation album artists remain intact. Each owner validates each submitted
+batch before writing, checks for stale metadata, and restores sidecars if
 saving fails. Multiple-owner edits report each failure and the successful count.
 
 ## Imported album artwork

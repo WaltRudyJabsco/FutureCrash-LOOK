@@ -8,18 +8,21 @@ import time
 try: from . import media_core, media_sidecar
 except ImportError: import media_core, media_sidecar
 
-FIELDS=('artist','album_artist','album','title','track','disc')
+FIELDS=('artist','album_artist','album','title','track','disc','series','season','episode','content_kind')
 EXPECTED=(*FIELDS,'bytes','mtime')
 MAX_BATCH=1000
 
 
 def changes(values):
-    if not isinstance(values,dict) or not values or set(values)-set(FIELDS):raise ValueError('Choose artist, album_artist, album, title, track or disc')
+    if not isinstance(values,dict) or not values or set(values)-set(FIELDS):raise ValueError('Choose a music or TV metadata field')
     result={}
     for key,value in values.items():
-        if key in {'track','disc'}:
-            if isinstance(value,bool) or not isinstance(value,int) or not 1<=value<=999:raise ValueError(key+' must be 1–999')
+        if value is None and key in {'series','season','episode','content_kind'}:
+            result[key]=None;continue
+        if key in {'track','disc','season','episode'}:
+            if isinstance(value,bool) or not isinstance(value,int) or not (0 if key=='season' else 1)<=value<=999:raise ValueError(key+' must be '+('0–999' if key=='season' else '1–999'))
         elif not isinstance(value,str) or not value.strip() or len(value)>300 or any(ord(c)<32 for c in value):raise ValueError(key+' must contain 1–300 printable characters')
+        if key=='content_kind' and value not in {'episode','special','extra'}:raise ValueError('Content kind must be episode, special or extra')
         result[key]=value.strip() if isinstance(value,str) else value
     return result
 
@@ -56,7 +59,7 @@ def edit(library_path,payload):
             data=json.loads(original) if original is not None else {}
             if not isinstance(data,dict):raise ValueError('Metadata sidecar must be an object')
             current=media_sidecar.load(path)
-            if any(current.get(key) and current[key]!=row.get(key) for key in FIELDS):raise ValueError('Metadata sidecar changed; rescan before editing')
+            if any(key in current and current[key]!=row.get(key) for key in FIELDS):raise ValueError('Metadata sidecar changed; rescan before editing')
             applied=dict(values)
             if 'artist' in applied and 'album_artist' not in applied and row.get('album_artist') in {None,'',row.get('artist')}:
                 applied['album_artist']=applied['artist']

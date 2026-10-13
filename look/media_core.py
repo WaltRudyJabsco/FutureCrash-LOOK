@@ -454,7 +454,7 @@ def entries_under(library: Any, directory: str | Path) -> list[dict[str, Any]]:
 
 
 def queue_entry(row: dict[str, Any]) -> dict[str, Any]:
-    allowed = ("id", "path", "node", "digest", "artist", "album", "title", "track", "disc", "format", "media_type", "playability", "bytes", "locations", "art")
+    allowed = ("id", "path", "node", "digest", "artist", "album", "title", "track", "disc", "format", "media_type", "playability", "bytes", "locations", "art", "mtime", "album_artist", "series", "season", "episode", "content_kind")
     out = {key: row.get(key) for key in allowed if row.get(key) not in (None, "")}
 
     # Playback normalization must not discard the identity needed for a remote
@@ -510,7 +510,9 @@ def merge_catalog_entries(rows: Iterable[dict[str, Any]], *, local_node: str = "
         primary = dict(copies[0])
         locations = []
         for row in copies:
-            location={k: row.get(k) for k in ("node", "path", "id", "digest", "root", "fabric_hidden_by", "mtime") if row.get(k) is not None}
+            location={k: row.get(k) for k in ("node", "path", "id", "digest", "root", "fabric_hidden_by", "mtime", "bytes", "artist", "album_artist", "album", "title", "track", "disc", "series", "season", "episode", "content_kind") if row.get(k) is not None}
+            # Copies can have different corrections; edits need each owner's values.
+            location.update({key:row.get(key) for key in ('artist','album_artist','album','title','track','disc','series','season','episode','content_kind')})
             location['added_at']=row.get('added_at')
             locations.append(location)
         primary["locations"] = locations

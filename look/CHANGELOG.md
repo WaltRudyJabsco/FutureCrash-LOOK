@@ -1,3 +1,9 @@
+## Edit TV metadata and every listed source
+
+- Extend Shift-E with series, season, episode and special/extra labels.
+- Review individual titles across selected items, or apply shared corrections.
+- Edit every listed physical copy using its own metadata and stale-selection checks.
+
 ## TV disc metadata and CD barcode fallback
 
 - Search series, episodes and known specials; review per-title matches and label extras.
