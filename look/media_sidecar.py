@@ -10,11 +10,11 @@ def load(path):
         if sidecar.stat().st_size>4*1024*1024: return {}
         data=json.loads(sidecar.read_text(encoding='utf-8'))
         if not isinstance(data,dict): return {}
-        result={key:str(data[key])[:4000] for key in ('title','description','channel','uploader','webpage_url','artist','album','album_artist') if isinstance(data.get(key),str)}
-        for key in ('track','disc'):
+        result={key:str(data[key])[:4000] for key in ('title','description','channel','uploader','webpage_url','artist','album','album_artist','series','content_kind') if isinstance(data.get(key),str)}
+        for key in ('track','disc','season','episode'):
             try:
                 value=int(data[key])
-                if 0<value<1000:result[key]=value
+                if 0<=value<1000 and (value>0 or key=='season'):result[key]=value
             except (KeyError,TypeError,ValueError):pass
         result['tags']=[tag[:80] for tag in data.get('tags',[])[:32] if isinstance(tag,str)] if isinstance(data.get('tags'),list) else []
         return result if any(result.values()) else {}

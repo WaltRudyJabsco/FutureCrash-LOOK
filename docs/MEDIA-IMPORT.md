@@ -63,6 +63,28 @@ with the workbench or `--release NUMBER`; supply your own title to override it.
 `--no-metadata` captures with your own labels offline. Unknown tracks keep
 generic names; they are never silently assigned uncertain album metadata.
 
+When CD fingerprint lookup finds no release, you can type the printed UPC/EAN
+barcode digits. MusicBrainz searches that edition; confirm the release and disc.
+Only media with the scanned track count are offered. A barcode is optional and
+cannot guarantee a database match.
+
+## TV box sets
+
+Choose **tv** for the library category. The workbench offers TVmaze series lookup,
+then episodes in airing order and known specials. Confirm the series; choose an
+episode number for each scanned disc title, `x Interview` (or another label) for
+an extra, or `0` to leave it unidentified. Exact episode names suggest a choice;
+generic names and durations alone never establish identity. Review shows the
+mappings before starting, and `m` edits them. `all` keeps unmatched titles too.
+
+Confirmed mappings use MakeMKV's scanned output filenames, not sorted file order.
+Matched files receive readable series/season/episode names, descriptive sidecars
+and catalog fields; extras remain explicitly labelled extras. Specials without an
+episode number keep that distinction rather than receiving invented numbering.
+Disc-only content absent from the provider needs a manual label. This is not an
+automatic edition-specific DVD menu or barcode recognition service. Camera/case
+recognition is not implemented. Metadata attribution: [TVmaze API and licensing](https://www.tvmaze.com/api).
+
 ## DVD and Blu-ray
 
 The workbench selects a sole drive automatically and recognizes mounted CD,
