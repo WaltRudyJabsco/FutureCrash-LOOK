@@ -1,3 +1,8 @@
+## File colors during selection
+
+- Preserve file-type and metadata colors when filter/selection rows are narrowed by previews.
+- Reflow the file list to the actual preview-pane width while keeping the focused highlight.
+
 ## Notes and Web shell panes
 
 - Add Shift-W sibling shells to Notebook lists/previews and the Web reading desk.
