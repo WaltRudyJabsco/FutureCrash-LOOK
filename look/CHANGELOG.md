@@ -1,3 +1,10 @@
+## Shared Fabric upkeep tools
+
+- Add Albert/Lo/Signal tools for installed-release checks and restore-tested backup status.
+- Run existing backup plans and synchronize only from an explicitly named installed release.
+- Preserve configuration and schedules; report queued/incomplete/offline work honestly.
+- Add `lk fabric care` and document scope, authority and verification.
+
 ## Import setup and terminal music playback
 
 - Reuse LOOK path completion and folder picking for import destinations.

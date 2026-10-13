@@ -6860,6 +6860,8 @@ def _lo_cognition_route(prompt,use_openjev=True):
         family="weather"
     elif _lo_requires_live_web(prompt):
         family="web"
+    elif _fabric_care_module().intent(prompt):
+        family="system"
     elif _lo_media_intent_profile(prompt,"workspace"):
         family="media"
     else:
@@ -8273,8 +8275,52 @@ def _run_command_tool(workspace,args,profile):
     except OSError as exc:
         return f"Command tool failed: {exc}"
 
+def _fabric_care_module():
+    for path in (HOME/'.local/share/future-crash-look/core',ROOT.parent/'core'):
+        if (path/'fabric_care.py').exists() and str(path) not in sys.path:sys.path.insert(0,str(path))
+    import fabric_care
+    return fabric_care
+
+
+def _fabric_care_tool(name,args,profile,prompt):
+    care=_fabric_care_module();operation='status' if name=='fabric_status' else args.get('operation','')
+    source=str(args.get('source') or '')
+    if operation!='status':
+        authority=care.intent(prompt)
+        if not _tool_allowed('fabric_maintain',profile):raise PermissionError('This profile allows Fabric inspection only')
+        if not authority or authority['operation']=='status':raise PermissionError('An explicit Fabric upkeep request is required')
+        if operation!=authority['operation'] and not (authority['operation']=='ensure' and operation=='backup'):raise PermissionError('Requested upkeep does not authorize this operation')
+        if source and source.casefold()!=str(authority.get('source') or '').casefold():raise PermissionError('Name the update source in your request')
+    request=urllib.request.Request('http://127.0.0.1:7332/v1/care',data=json.dumps({'operation':operation,'source':source}).encode(),headers={'Content-Type':'application/json'})
+    with urllib.request.urlopen(request,timeout=120) as response:report=json.load(response)
+    return json.dumps(report,ensure_ascii=False)
+
+
+def _fabric_care_direct(prompt,profile,events=None):
+    care=_fabric_care_module();intent=care.intent(prompt)
+    if not intent:return None
+    operation=intent['operation'];name='fabric_status' if operation=='status' else 'fabric_maintain'
+    read_only=not _tool_allowed(name,profile)
+    if read_only:name='fabric_status'
+    try:
+        result=_fabric_care_tool('fabric_status' if read_only else name,intent,profile,prompt)
+        report=json.loads(result);answer=care.describe(report)
+        if read_only:answer+='\nThis profile is read-only; no backups or updates were started.'
+        pending=any(a.get('state') in {'queued','staged','running','restarting'} for a in report.get('actions',[]))
+        status='needs_input' if report.get('next') else 'pending' if pending else 'ok'
+    except (OSError,ValueError,RuntimeError) as exc:
+        answer='Fabric check could not complete: '+str(exc);status='failed'
+    if events:
+        if status!='failed':events.emit('source_receipt',edge='FABRIC',source='Authenticated node and recovery receipts',confidence='OBSERVED',retrieved_at=time.time())
+        events.emit('tool_done',tool=name,status=status,mode='preflight')
+        events.emit('response',text=answer)
+        events.emit('request_done',status=status,rounds=0,tool_calls=1,prompt_tokens=0,output_tokens=0,load_ms=0)
+    print(answer)
+    return answer
+
+
 def _capability_tools():
-    return [
+    return _fabric_care_module().tools()+[
         {"type":"function","function":{
             "name":"generate_image",
             "description":"Generate a local image through configured ComfyUI and save it to LOOK's image output folder. This tool already owns the configured automatic preview; do not follow it with open_path/preview_path unless the user separately asks. Use when the user explicitly asks to create/generate/render/draw an image, make a picture, illustration, artwork, or photo. A Signal/Signal image/Signal scene request belongs to the lightweight Signal canvas instead.",
@@ -8444,6 +8490,7 @@ _TOOL_POLICY = {
     "notebook_search":("all","observation"),
     "notebook_list":("all","observation"),"notebook_read":("all","observation"),
     "notebook_capture":("workspace","mutation"),"notebook_complete":("workspace","mutation"),"notebook_update":("workspace","mutation"),
+    "fabric_status":("all","observation"),"fabric_maintain":("workspace","action"),
     "run_command":("power","command"),
 }
 _PROFILE_RANK={"conservative":0,"workspace":1,"power":2,"unsafe":3}
@@ -10933,6 +10980,9 @@ def ollama_chat(force_search=False, initial_prompt=None, allow_start=True, host_
         print("· cancelled")
         return 0
 
+    if one_shot and initial_prompt and not force_search:
+        if _fabric_care_direct(initial_prompt,profile,events) is not None:return 0
+
     if fabric_mode:
         # Model selection happens on the selected worker. Each node advertises its
         # machine-local preferred model; capability requirements filter first.
@@ -11168,6 +11218,13 @@ def ollama_chat(force_search=False, initial_prompt=None, allow_start=True, host_
 
         if not prompt:
             continue
+
+        if not force_search:
+            care_answer=_fabric_care_direct(prompt,profile,events)
+            if care_answer is not None:
+                _save_recent_exchange(prompt,care_answer)
+                if one_shot:return 0
+                continue
 
         pending_home_candidate=None
 
@@ -12165,6 +12222,9 @@ def ollama_chat(force_search=False, initial_prompt=None, allow_start=True, host_
                             tool_content,_ok,_elapsed=_tool_transaction(
                                 name,args,lambda: _run_system_inspection_tool(name,args))
                         if _ok: turn_successful_tools.add(name)
+                    elif name in {'fabric_status','fabric_maintain'}:
+                        tool_content,_ok,_elapsed=_tool_transaction(name,args,lambda:_fabric_care_tool(name,args,profile,prompt))
+                        if _ok:turn_successful_tools.add(name)
                     elif name in {"generate_image","schedule_prompt","schedule_list","game_action","audio_speak","media_search","media_play","media_queue","media_control"}:
                         if name=="generate_image":
                             label,activity="image","generating"
@@ -20508,6 +20568,7 @@ _COMMANDS = [
     ("lk ttt", "[0p|1p|2p]", "meta", "Tic-Tac-Toe alias"),
     ("lk gtnw", "", "meta", "Global Thermonuclear War alias"),
     # Config/meta
+    ("lk fabric care", "[status|ensure|backup|sync SOURCE] [--yes] [--json]", "fabric", "Check releases and verified essential backups; run configured upkeep"),
     ("lk fabric backup", "[add|configure|drives|status [--json]|inventory|run|restore DIR]", "fabric", "Encrypted essential-state recovery"),
     ("lk settings", "[SEARCH]", "config", "Unified settings"),
     ("lk config", "", "config", "Configuration surface"),
@@ -21441,7 +21502,7 @@ def _fabric_command(args):
         recovery=shutil.which("fcl-recovery") or str(HOME/".local/bin/fcl-recovery")
         return subprocess.call([recovery,*args[1:]]) if args[1:] else subprocess.call([recovery,"menu" if sys.stdin.isatty() and sys.stdout.isatty() else "status"])
     if sub in {"doctor","diagnose","debug"}: return _fabric_doctor()
-    if sub not in {"fabric","doctor","watch","dashboard","dash","beacon","lights","nodes","activity","pulse","models","status","qualify","services","service","jobs","job","submit","packet","cancel","events","http","decisions","decision","answer","ask","decision-shadow","decision-provider","identity","trust","untrust","pair-code","pair","transport","rendezvous","endpoints","endpoint-code","allow","revoke-endpoint","speak","alert","route","release","maintenance","update"}:
+    if sub not in {"fabric","doctor","watch","dashboard","dash","beacon","lights","nodes","activity","pulse","models","status","qualify","services","service","jobs","job","submit","packet","cancel","events","http","decisions","decision","answer","ask","decision-shadow","decision-provider","identity","trust","untrust","pair-code","pair","transport","rendezvous","endpoints","endpoint-code","allow","revoke-endpoint","speak","alert","route","release","maintenance","update","care"}:
         print("usage: lk fabric [doctor|identity|trust|pair-code [URL]|pair NODE CODE|untrust NODE_ID|transport|rendezvous [status|set URL|off|sync]|endpoints|endpoint-code URL [once|trust]|allow CODE [once|trust]|revoke-endpoint ENDPOINT_ID|watch|dashboard|decisions [NODE]|decision [NODE] ID|answer [NODE] ID CHOICE|ask [NODE] QUESTION [CHOICE ...]|decision-shadow [NODE] STATE QUESTION CANDIDATE...|decision-provider [NODE]|beacon|lights|nodes|status|activity|pulse|models|route reflex|balanced|deep|jobs|events|submit|packet|cancel|qualify|services|service|speak [NODE] TEXT|alert [@TARGET] MESSAGE]")
         return 2
     argv=[exe,sub]

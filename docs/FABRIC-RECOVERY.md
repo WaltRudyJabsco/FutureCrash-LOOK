@@ -124,3 +124,5 @@ Exports contain plaintext secrets: use the normal encrypted backup flow rather
 than leaving exported directories around. There is no automatic snapshot pruning.
 An independent offsite destination and selected-document/media protection are
 future work; one attached drive alone is not protection against losing that drive.
+
+Conversational checks and configured backup runs: [Fabric care](FABRIC-CARE.md).

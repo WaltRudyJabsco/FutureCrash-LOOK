@@ -215,6 +215,8 @@ def _trust_evidence(reply):
     return [{"class":edge,"source":str(p.get("source") or "model"),"confidence":str(p.get("confidence") or "INFERRED"),"verified":False}]
 
 TOOLS=[
+ {"name":"fabric.status","does":"Check installed releases and restore-tested essential-state backups","risk":"read"},
+ {"name":"fabric.maintain","does":"Run configured backups or synchronize from an explicitly named installed release","risk":"local_effect"},
  {"name":"media.play","does":"Play or prepare media","risk":"local_effect"},
  {"name":"media.control","does":"Control the selected media output","risk":"local_effect"},
  {"name":"files.search","does":"Find objects across Fabric nodes","risk":"read"},

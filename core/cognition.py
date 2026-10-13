@@ -93,6 +93,8 @@ ACTION_SPECS = (
     ActionSpec("list_processes", "system", "read", "observation", ("processes", "what is running", "pid")),
     ActionSpec("listening_ports", "system", "read", "observation", ("port", "listening", "what uses port")),
     ActionSpec("system_snapshot", "system", "read", "observation", ("system status", "machine status", "host status")),
+    ActionSpec("fabric_status", "system", "read", "observation", ("fabric status", "check our fabric", "backed up", "up to date")),
+    ActionSpec("fabric_maintain", "system", "local_effect", "action", ("update all computers", "back up our fabric", "ensure our fabric")),
     ActionSpec("run_command", "system", "dangerous", "command", ("run command", "shell", "terminal command")),
 )
 ACTION_BY_NAME = {spec.name: spec for spec in ACTION_SPECS}
@@ -110,6 +112,7 @@ ACTION_IDS = {
     "game_action":"games.launch", "generate_image":"image.generate",
     "schedule_prompt":"schedule.create", "schedule_list":"schedule.list",
     "list_processes":"system.processes", "listening_ports":"system.ports",
+    "fabric_status":"fabric.status", "fabric_maintain":"fabric.maintain",
     "system_snapshot":"system.snapshot", "run_command":"system.command",
 }
 

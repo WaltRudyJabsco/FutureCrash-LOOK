@@ -282,7 +282,7 @@ lk media shuffle [on|off]
   [media] Toggle or set shuffle
 lk media repeat [off|all]
   [media] Cycle or set repeat
-lk media storage [--node NODE] [--root PATH] [--json]
+lk media storage [--pick | --node NODE --root PATH] [--json]
   [media] Remember a library node and map its canonical media root
 lk media edit <QUERY> --artist NAME [--album NAME] [--album-artist NAME] [--title NAME] [--track N] [--disc N] [--all] [--json]
   [media] Correct metadata for one track or matching batch
@@ -332,6 +332,8 @@ lk ttt [0p|1p|2p]
   [meta] Tic-Tac-Toe alias
 lk gtnw
   [meta] Global Thermonuclear War alias
+lk fabric care [status|ensure|backup|sync SOURCE] [--yes] [--json]
+  [fabric] Check releases and verified essential backups; run configured upkeep
 lk fabric backup [add|configure|drives|status [--json]|inventory|run|restore DIR]
   [fabric] Encrypted essential-state recovery
 lk settings [SEARCH]
@@ -992,6 +994,7 @@ Parser arguments and recognized option tokens (grouped by handler):
 --list
 --node
 --node — Preferred library node; local keeps new imports here
+--pick — Choose this computer’s home folder or a mounted drive interactively
 --root — Library root on that node (absolute or ~/); existing folders are retained
 --shuffle
 --text
@@ -1070,12 +1073,13 @@ words
 look/disc_ui.py
 
 Parser arguments and recognized option tokens (grouped by handler):
+--category — Library category; CD defaults to music, video to movies
 --destination — Local import folder or @node:library-root; otherwise remembered storage default
 --drive — Drive ID shown by drives
 --json
 --kind
 --no-metadata — Skip the MusicBrainz lookup for CD capture
---node — Paired drive-owner node; defaults to local
+--node — Drive-owner node; watch/jobs default to Fabric, other actions to local
 --release — MusicBrainz release number from scan (starting at 1)
 --title — Album/movie label
 --title-index — Video title index from scan, or all for MakeMKV

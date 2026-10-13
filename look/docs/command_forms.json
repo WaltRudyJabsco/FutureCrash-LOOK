@@ -819,7 +819,7 @@
   ],
   [
     "lk media storage",
-    "[--node NODE] [--root PATH] [--json]",
+    "[--pick | --node NODE --root PATH] [--json]",
     "media",
     "Remember a library node and map its canonical media root"
   ],
@@ -970,6 +970,12 @@
     "",
     "meta",
     "Global Thermonuclear War alias"
+  ],
+  [
+    "lk fabric care",
+    "[status|ensure|backup|sync SOURCE] [--yes] [--json]",
+    "fabric",
+    "Check releases and verified essential backups; run configured upkeep"
   ],
   [
     "lk fabric backup",

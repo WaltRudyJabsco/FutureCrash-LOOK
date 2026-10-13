@@ -551,6 +551,7 @@ def albert_urls():
 def capabilities():
     lk = binary("lk")
     return {
+        "fabric.care": True,
         "filesystem": True,
         "shell": True,
         "look": bool(lk),
@@ -3799,6 +3800,20 @@ class API(BaseHTTPRequestHandler):
         except Exception as exc:
             return self.sendj(400, {"ok": False, "error": str(exc)})
 
+    def _care(self,payload=None):
+        try:
+            try:from . import fabric_care
+            except ImportError:import fabric_care
+            if getattr(self.server,'plane','local')!='local' or self.headers.get('X-Fabric-Node'):
+                raise PermissionError('Fabric-wide care is local-control only')
+            data=payload or {};operation=data.get('operation','status')
+            get=lambda target,path:_target_get('127.0.0.1',7332,target,path)
+            post=lambda target,path,data:_target_post('127.0.0.1',7332,target,path,data)
+            result=fabric_care.operate(operation,data.get('source',''),{'self':node_info(),'peers':PEERS.public()},get,post)
+            return self.sendj(200,result)
+        except PermissionError as exc:return self.sendj(403,{'error':str(exc)})
+        except (OSError,ValueError,RuntimeError) as exc:return self.sendj(409,{'error':str(exc)})
+
     def _files_copy_status(self):
         if getattr(self.server,"plane","local") != "local" or self.headers.get("X-Fabric-Node"):
             return self.sendj(403,{"ok":False,"error":"Copy status is local-control only"})
@@ -4435,6 +4450,13 @@ class API(BaseHTTPRequestHandler):
         if path == '/v1/media/artwork/settings':
             _look_catalog_modules();import media_cover_lookup
             return self.sendj(200,{'enabled':media_cover_lookup.enabled(),'node':identity()['name']})
+        if path == "/v1/care":return self._care()
+        if path == "/v1/recovery/status":
+            try:
+                try:from . import fabric_care
+                except ImportError:import fabric_care
+                return self.sendj(200,fabric_care.backup_status(Path.home()))
+            except (OSError,ValueError) as exc:return self.sendj(409,{'error':str(exc)})
         if path == "/v1/maintenance/release":
             return self.sendj(200,maintenance.release_info())
         if path == "/v1/maintenance/status":
@@ -4928,6 +4950,13 @@ class API(BaseHTTPRequestHandler):
                 result["state"]=load_curator_state()
                 return self.sendj(200 if result.get("ok") else 409,result)
             return self.sendj(200,{"ok":True,"state":state,"plan":curator_plan(profile)})
+        if path == "/v1/care":return self._care(d)
+        if path == "/v1/recovery/run":
+            try:
+                try:from . import fabric_care
+                except ImportError:import fabric_care
+                return self.sendj(202,fabric_care.start_backup(Path.home()))
+            except (OSError,ValueError) as exc:return self.sendj(409,{'error':str(exc)})
         if path == "/v1/maintenance/update":
             try: return self.sendj(202,_maintenance_update(d))
             except PermissionError as exc: return self.sendj(403,{"ok":False,"error":str(exc)})
@@ -6345,7 +6374,7 @@ def _print_jobs(data, target="local"):
 def main():
     ap=argparse.ArgumentParser(description="Future Crash + LOOK unified node")
     ap.add_argument("command",nargs="?",default="serve",
-        choices=["serve","status","nodes","activity","pulse","fabric","watch","dashboard","models","route","qualify","services","service","release","maintenance","update",
+        choices=["serve","status","nodes","activity","pulse","fabric","watch","dashboard","models","route","qualify","services","service","release","maintenance","update","care",
                  "jobs","job","submit","packet","cancel","events","http","beacon","lights","artifact-add","artifact","artifacts","file-catalog","file-find","media-catalog","media-identify",
                  "decisions","decision","answer","ask","decision-shadow","decision-provider","identity","trust","untrust","pair-code","pair","transport","rendezvous","endpoints","endpoint-code","allow","revoke-endpoint","media-outputs","media-state","media-play","media-control","speak","alert","disc-import","media-edit","media-store","notifications"])
     ap.add_argument("args",nargs="*")
@@ -6899,6 +6928,16 @@ def main():
             if a.command=="qualify":
                 if not a.args: ap.error("qualify requires MODEL")
                 print(json.dumps(_target_post(a.host,a.port,a.node,"/v1/models/qualify",{"model":a.args[0]},timeout=45),indent=2)); return 0
+            if a.command=="care":
+                data={'operation':a.args[0] if a.args else 'status','source':a.args[1] if len(a.args)>1 else ''}
+                if data['operation']!='status' and not a.yes:raise ValueError('Use --yes to run configured backups or synchronize releases')
+                result=http_json(_daemon_url(a.host,a.port,'/v1/care'),data,timeout=120)
+                if a.json:print(json.dumps(result,indent=2))
+                else:
+                    try:from . import fabric_care
+                    except ImportError:import fabric_care
+                    print(fabric_care.describe(result))
+                return 0
             if a.command in {"release","maintenance"}:
                 path="/v1/maintenance/release" if a.command=="release" else "/v1/maintenance/status"
                 if a.args and a.command=="maintenance": path+="?job="+urllib.parse.quote(a.args[0])
