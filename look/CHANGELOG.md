@@ -1647,3 +1647,8 @@ No filesystem/browser grammar changed.
 - The first LOOK-initiated Neovim edit teaches `Esc`, `:q`, `Enter` once.
 - README is rewritten around LOOK's present-day mental model rather than release archaeology.
 - Documentation stays deliberately small: `README.md`, `CHANGELOG.md`, and the built-in `lk help`.
+## Editable metadata fields
+
+- Prefill current media metadata for partial edits instead of retyping names.
+- Explain each field with numbered headings and keep unchanged values untouched.
+

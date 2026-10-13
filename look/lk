@@ -18145,27 +18145,54 @@ def _media_edit_rows(rows,values):
     return {'ok':not errors,'count':len(results),'entries':results,'errors':errors}
 
 
+def _media_edit_field(label,initial):
+    if sys.stdin.isatty() and sys.stdout.isatty():
+        import look_renderer
+        sys.stdout.write('\033[?25h');sys.stdout.flush()
+        try:value,cancelled=look_renderer.prompt_line(label+' › ',initial=initial)
+        finally:sys.stdout.write('\033[?25l');sys.stdout.flush()
+        if cancelled:raise KeyboardInterrupt()
+        return value.strip()
+    return input(label+f' [{initial}] › ').strip()
+
+
 def _media_edit_prompt(rows,fd,old):
     import media_metadata
     termios.tcsetattr(fd,termios.TCSADRAIN,old)
     result={'ok':True,'count':0,'entries':[],'errors':[]};saving=False
     try:
         print('\n'+_c('EDIT MEDIA METADATA','1;36')+f' · {len(rows)} item(s) · {len(_media_edit_sources(rows))} source(s)')
-        print('Return keeps each current value · - clears a TV field · all listed sources receive corrections · media bytes and filenames stay unchanged')
+        print('Edit the filled value with arrows/Backspace · Enter accepts · blank keeps the current value · Esc cancels')
+        print('- clears a TV field · corrections apply to all listed sources · media bytes and filenames stay unchanged')
         video=any(str(row.get('media_type') or '').startswith('video/') or row.get('series') for row in rows)
         individual=len(rows)==1 or input('s shared fields / i name each item individually [s] › ').strip().lower()=='i'
         plans=[]
         groups=[[row] for row in rows] if individual else [rows]
+        descriptions={
+            'series':('TV series','Show name shared by its episodes'),
+            'season':('Season number','0 = specials; 1, 2, … = regular seasons'),
+            'content_kind':('Content type','episode / special / extra / unclassified'),
+            'title':('Episode / video title' if video else 'Track title','Name of this individual item'),
+            'episode':('Episode number','Number within the season, such as 1 or 2'),
+            'artist':('Artist','Performer for this track'),
+            'album_artist':('Album artist','Performer used to group the album'),
+            'album':('Album','Album name'),
+            'disc':('Disc number','Number within a multi-disc release'),
+            'track':('Track number','Number within the disc'),
+        }
         for number,group in enumerate(groups,1):
             if individual:print(f"\n{number}/{len(groups)} · {group[0].get('title') or 'Untitled'} · {group[0].get('path') or ''}")
             fields=(['series','season','content_kind'] if video else ['artist','album_artist','album','disc'])
             if individual:fields+=['title','episode' if video else 'track']
             values={}
-            for field in fields:
+            for field_number,field in enumerate(fields,1):
                 existing={str(row.get(field) if row.get(field) is not None else '') for row in group}
-                display=next(iter(existing)) if len(existing)==1 else 'mixed'
-                label=field.replace('_',' ').title()+(' (episode / special / extra / unclassified)' if field=='content_kind' else '')
-                value=input(label+f' [{display}] › ').strip()
+                initial=next(iter(existing)) if len(existing)==1 else ''
+                label,description=descriptions[field]
+                print(_c(f'{field_number}/{len(fields)} · '+label,'1;36')+' · '+description)
+                if len(existing)>1:print('Different current values · blank keeps each item; typing a value replaces all')
+                value=_media_edit_field(label,initial)
+                if value==initial:continue
                 if value:values[field]=None if video and value=='-' and field in {'series','season','episode','content_kind'} else int(value) if field in {'track','disc','season','episode'} else value
             if values:plans.append((group,media_metadata.changes(values)))
         if not plans:return {'ok':True,'count':0,'entries':[],'errors':[]}

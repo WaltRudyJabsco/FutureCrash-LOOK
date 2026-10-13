@@ -699,3 +699,46 @@ def test_individual_editor_cancels_before_any_write(lk,monkeypatch):
     rows=[{'id':str(n),'media_type':'video/mp4','title':'Old'} for n in (1,2)]
     assert lk._media_edit_prompt(rows,0,None)['count']==0
     edited.assert_not_called()
+
+
+def test_metadata_field_prefills_standard_editor_and_escape_cancels(lk,monkeypatch):
+    from unittest.mock import Mock
+    from look import look_renderer
+    monkeypatch.setitem(sys.modules,'look_renderer',look_renderer)
+    monkeypatch.setattr(lk.sys.stdin,'isatty',lambda:True)
+    monkeypatch.setattr(lk.sys.stdout,'isatty',lambda:True)
+    editor=Mock(return_value=('Episode 12',False))
+    monkeypatch.setattr(look_renderer,'prompt_line',editor)
+    assert lk._media_edit_field('Episode / video title','Episode 11')=='Episode 12'
+    editor.assert_called_once_with('Episode / video title › ',initial='Episode 11')
+    editor.return_value=('',True)
+    with pytest.raises(KeyboardInterrupt):lk._media_edit_field('TV series','Show')
+
+
+def test_prefilled_tv_editor_only_saves_changed_fields(lk,monkeypatch,capsys):
+    from unittest.mock import Mock
+    monkeypatch.setattr(lk.termios,'tcsetattr',lambda *args:None)
+    monkeypatch.setattr(lk.tty,'setcbreak',lambda *args:None)
+    rows=[{'id':'one','media_type':'video/mp4','series':'A Show','season':2,
+           'content_kind':'episode','title':'Episode 11','episode':11}]
+    def field(label,initial):
+        return 'Episode 12' if label=='Episode / video title' else initial
+    prompt=Mock(side_effect=field);monkeypatch.setattr(lk,'_media_edit_field',prompt)
+    monkeypatch.setattr('builtins.input',lambda label:'y')
+    edited=Mock(return_value={'ok':True,'count':1,'entries':[],'errors':[]})
+    monkeypatch.setattr(lk,'_media_edit_rows',edited)
+    assert lk._media_edit_prompt(rows,0,None)['count']==1
+    assert [call.args[1] for call in prompt.call_args_list]==['A Show','2','episode','Episode 11','11']
+    assert edited.call_args.args[1]=={'title':'Episode 12'}
+    output=capsys.readouterr().out
+    assert '1/5 · TV series' in output and '5/5 · Episode number' in output
+
+
+def test_accepting_all_prefilled_values_does_not_write(lk,monkeypatch):
+    from unittest.mock import Mock
+    monkeypatch.setattr(lk.termios,'tcsetattr',lambda *args:None)
+    monkeypatch.setattr(lk.tty,'setcbreak',lambda *args:None)
+    monkeypatch.setattr(lk,'_media_edit_field',lambda label,initial:initial)
+    edited=Mock();monkeypatch.setattr(lk,'_media_edit_rows',edited)
+    assert lk._media_edit_prompt([{'title':'Keep me','artist':'Artist'}],0,None)['count']==0
+    edited.assert_not_called()
