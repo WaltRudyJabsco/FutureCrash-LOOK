@@ -33,6 +33,7 @@ DEFAULT_BACKEND_HOST = "127.0.0.1"
 DEFAULT_BACKEND_PORT = 7332
 HEADER_TIMEOUT_SECONDS = 4.0
 CONTROL_TIMEOUT_SECONDS = 12.0
+DISC_SCAN_TIMEOUT_SECONDS = 320.0
 CATALOG_TIMEOUT_SECONDS = 45.0
 STREAM_TIMEOUT_SECONDS = 240.0
 MAX_ACTIVE_REQUESTS = 12
@@ -51,6 +52,20 @@ def _is_stream_path(path: str) -> bool:
         path in {"/v1/infer/stream", "/v1/media/audio", "/v1/media/item", "/v1/media/browser", "/v1/media/cover", "/v1/media/artifact", "/v1/media/catalog", "/v1/media/fabric", "/v1/maintenance/bundle"}
         or path.startswith("/v1/artifacts/")
     )
+
+
+def _request_timeout(path: str, method: str, body: bytes | None, is_stream: bool) -> float:
+    # Disc inspection waits for the physical drive; keep ordinary control calls short.
+    if path == "/v1/media/import" and method == "POST":
+        try:
+            payload = json.loads(body or b"{}")
+            if isinstance(payload, dict) and payload.get("action") == "scan":
+                return DISC_SCAN_TIMEOUT_SECONDS
+        except (ValueError, UnicodeError):
+            pass
+    if path in {"/v1/media/catalog", "/v1/media/fabric"}:
+        return CATALOG_TIMEOUT_SECONDS
+    return STREAM_TIMEOUT_SECONDS if is_stream else CONTROL_TIMEOUT_SECONDS
 
 
 
@@ -251,7 +266,7 @@ class Handler(BaseHTTPRequestHandler):
             elif body is not None:
                 headers["Content-Length"] = str(len(body))
 
-            timeout = CATALOG_TIMEOUT_SECONDS if path in {'/v1/media/catalog','/v1/media/fabric'} else STREAM_TIMEOUT_SECONDS if is_stream else CONTROL_TIMEOUT_SECONDS
+            timeout = _request_timeout(path, self.command, body, is_stream)
             # Header protection ends once a complete authenticated request exists.
             # Large catalog responses need a normal transfer deadline, not the
             # four-second header deadline inherited by the client socket.
@@ -294,7 +309,13 @@ class Handler(BaseHTTPRequestHandler):
                 self.end_headers()
                 if data:
                     self.wfile.write(data)
-        except (BrokenPipeError, ConnectionResetError, socket.timeout):
+        except socket.timeout as exc:
+            METRICS.on_error(exc)
+            try:
+                self._send_json(504, {"ok": False, "error": "Fabric request timed out; check the owner node before retrying"})
+            except (OSError, ValueError):
+                pass
+        except (BrokenPipeError, ConnectionResetError):
             METRICS.on_client_closed()
         except Exception as exc:
             METRICS.on_error(exc)
