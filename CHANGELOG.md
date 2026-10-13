@@ -1,3 +1,8 @@
+## Editable metadata fields
+
+- Prefill current media metadata for partial edits instead of retyping names.
+- Explain each field with numbered headings and keep unchanged values untouched.
+
 ## Bounded disc scanning and explicit retry
 
 - Keep remote scans connected through the ingress gateway and report gateway timeouts.
@@ -1601,8 +1606,3 @@ Signal media output routing is now explicit: browser playback is a local browser
 ## 8.3.20 — PACKAGE REPAIR
 - Fixes 8.3.18 installer omission of `media_art.py`, which caused installed `lk` to fail at startup and post-install verification to report `unavailable`.
 - Adds install-manifest regression coverage for LOOK Python module imports.
-## Editable metadata fields
-
-- Prefill current media metadata for partial edits instead of retyping names.
-- Explain each field with numbered headings and keep unchanged values untouched.
-
