@@ -267,3 +267,19 @@ def test_cd_rejects_video_category_before_creating_job(isolated):
     with pytest.raises(ValueError,match='music for CD'):
         discs.start({'kind':'cd','category':'tv'})
     assert not discs.list_jobs()
+
+
+def test_query_timeout_has_short_readable_error(monkeypatch):
+    import subprocess
+    monkeypatch.setattr(discs.subprocess,'run',Mock(side_effect=subprocess.TimeoutExpired(['/tool/makemkvcon'],300)))
+    with pytest.raises(ValueError,match='makemkvcon did not finish within 300 seconds'):
+        discs.query(['/tool/makemkvcon','info','disc:0'],discs.DISC_SCAN_TIMEOUT_SECONDS)
+
+
+def test_scan_transport_outlasts_owner_scan(monkeypatch,capsys):
+    from core import node
+    routed=Mock(return_value={'ok':True,'titles':[]})
+    monkeypatch.setattr(node,'_target_post',routed)
+    monkeypatch.setattr(node.sys,'argv',['fcl-node','disc-import','scan','{}','--node','owner','--json'])
+    assert node.main()==0
+    assert routed.call_args.kwargs['timeout']>discs.DISC_SCAN_TIMEOUT_SECONDS

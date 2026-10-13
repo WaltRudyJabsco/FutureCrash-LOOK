@@ -288,3 +288,25 @@ def test_destination_escape_returns_to_name_then_accepts_manual_folder(monkeypat
     assert result['destination']=='/Volumes/My Library/tv'
     assert sum(label.startswith('Series') for label in labels)==2
     assert result['preferences'] is None
+
+
+def test_failed_scan_does_not_retry_without_explicit_choice(monkeypatch):
+    inventory={'drives':[{'id':'drive','kind':'dvd'}],'tools':{'makemkvcon':'mk'}}
+    request=Mock(side_effect=RuntimeError('scan timeout'))
+    def prompt(label,default=''):return default
+    assert disc_ui.import_options(request,inventory,'drive',prompt,Mock()) is None
+    assert request.call_count==1
+
+
+def test_failed_scan_retries_only_on_r(monkeypatch):
+    monkeypatch.setattr(media_storage,'settings',lambda:{'node':'local','root':'~/Media'})
+    inventory={'drives':[{'id':'drive','kind':'dvd'}],'tools':{'makemkvcon':'mk'}}
+    request=Mock(side_effect=[RuntimeError('scan timeout'),{'kind':'dvd','engine':'makemkv',
+        'titles':[{'index':'0','duration':'30:00'}],'metadata':{'title':'My disc'}}])
+    def prompt(label,default=''):
+        if label.startswith('r retry'):return 'r'
+        if label.startswith('Library category'):return 'tv'
+        if label.startswith('Search TVmaze'):return 'n'
+        return default
+    result=disc_ui.import_options(request,inventory,'drive',prompt,lambda label,default:default)
+    assert result['title']=='My disc' and request.call_count==2

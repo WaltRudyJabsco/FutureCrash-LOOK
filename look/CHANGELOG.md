@@ -1,3 +1,9 @@
+## Bounded disc scanning and explicit retry
+
+- Stop automatic rescanning after a failed scan; offer retry, back or cancel.
+- Allow five minutes for video disc scans and align Fabric transport timeouts.
+- Report readable tool timeout errors in both local and remote setup.
+
 ## Physical release lookup for TV disc imports
 
 - Accept Discogs release/master links and IDs; confirm edition and disc contents.

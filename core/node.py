@@ -6733,7 +6733,8 @@ def main():
                 body=json.loads(a.args[1]) if len(a.args)>1 else {}
                 if action=='fabric-jobs':
                     print(json.dumps(_fabric_import_jobs(a.host,a.port),indent=2));return 0
-                result=_target_post(a.host,a.port,a.node,"/v1/media/import",{"action":action,"payload":body},timeout=120.0)
+                timeout=330.0 if action=='scan' else 120.0
+                result=_target_post(a.host,a.port,a.node,"/v1/media/import",{"action":action,"payload":body},timeout=timeout)
                 print(json.dumps(result,indent=2));return 0
             if a.command=="notifications":
                 if a.args:
