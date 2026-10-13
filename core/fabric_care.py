@@ -99,7 +99,10 @@ def inspect(snapshot,get):
                 value=get('local' if name==local else name,path)
                 if not isinstance(value,dict):raise ValueError('Invalid status response')
                 row[key]=value
-            except Exception as exc:row.setdefault('errors',[]).append({'check':key,'error':str(exc)})
+            except Exception as exc:
+                row.setdefault('errors',[]).append({'check':key,'error':str(exc)})
+                # An unreachable node cannot answer the other checks either.
+                if key=='release':break
         values=(row.get('backup') or {}).get('receipts') or []
         if isinstance(values,list):receipts.extend(r for r in values if isinstance(r,dict))
         rows.append(row)
@@ -153,16 +156,19 @@ def describe(report):
     lines=['Fabric check · installed releases '+('match' if report.get('releases_match') else 'differ or cannot all be checked')]
     for row in report.get('nodes') or []:
         release=row.get('release') or {};backup=row.get('backup') or {};update=row.get('update') or {}
-        state='restore-tested within 24 hours' if backup.get('verified_recently') else 'no recent restore-tested backup found'
+        state=('restore-tested within 24 hours' if backup.get('verified_recently') else 'no recent restore-tested backup found') if row.get('backup') else 'backup status unavailable'
+        release_label=str(release['commit'])[:7] if release.get('commit') else 'unavailable'
         if backup.get('configured') and not backup.get('connected'):state+=' · drive disconnected'
         if backup.get('job'):state+=' · backup job '+str(backup['job'].get('state'))
-        lines.append(f"{row['node']}: release {str(release.get('commit') or 'unavailable')[:7]} · {state}"+(f" · updater {update['state']}" if update.get('state') else ''))
-        for error in row.get('errors') or []:lines.append('  '+error['check']+': '+error['error'])
+        lines.append(f"{row['node']}: release {release_label} · {state}"+(f" · updater {update['state']}" if update.get('state') else ''))
+        for error in row.get('errors') or []:
+            detail='node unreachable / request timed out' if 'timed out' in error['error'].casefold() else error['error'][:160]
+            lines.append('  '+error['check']+': '+detail)
     for action in report.get('actions') or []:lines.append(f"{action['node']}: {action['action']} {action.get('state','accepted')}"+(' · '+action['error'] if action.get('error') else ''))
     if any(a.get('state') in {'queued','staged','running','restarting'} for a in report.get('actions') or []):lines.append('Work is pending; ask “check our Fabric” again to verify completion.')
     if report.get('next'):lines.append(report['next'])
     lines.append('Backup scope: Fabric identity, Notes and settings—not documents, photos or media.')
-    if any(not (r.get('backup') or {}).get('configured') and not (r.get('backup') or {}).get('verified_recently') for r in report.get('nodes') or []):lines.append('Unprotected nodes need inclusion in a configured backup plan; use lk fabric backup add/configure.')
+    if any(r.get('backup') and not r['backup'].get('configured') and not r['backup'].get('verified_recently') for r in report.get('nodes') or []):lines.append('Unprotected nodes need inclusion in a configured backup plan; use lk fabric backup add/configure.')
     return '\n'.join(lines)
 
 

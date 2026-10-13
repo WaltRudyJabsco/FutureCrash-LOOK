@@ -38,7 +38,7 @@ def test_missing_offline_checks_remain_unknown():
         if target=='away':raise TimeoutError('offline')
         return reader(target,path)
     report=care.inspect(snapshot(),read)
-    assert not report['releases_match'] and len(report['nodes'][1]['errors'])==3
+    assert not report['releases_match'] and len(report['nodes'][1]['errors'])==1
     assert 'offline' in care.describe(report)
 
 
@@ -151,3 +151,16 @@ def test_explicit_backup_runs_even_with_fresh_receipts():
     post=Mock(return_value={'ok':True,'state':'queued'})
     care.operate('backup','',snapshot(),reader,post)
     assert post.call_count==1
+
+
+def test_offline_node_is_probed_once_and_not_called_unprotected():
+    calls=[]
+    def read(target,path):
+        calls.append((target,path))
+        if target=='away':raise TimeoutError('route timed out')
+        return reader(target,path)
+    report=care.inspect(snapshot(),read)
+    assert sum(target=='away' for target,path in calls)==1
+    text=care.describe(report)
+    assert 'backup status unavailable' in text
+    assert 'Unprotected nodes need inclusion' not in text
