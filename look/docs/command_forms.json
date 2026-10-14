@@ -852,7 +852,13 @@
     "lk mp",
     "[QUERY]",
     "media",
-    "Integrated Fabric media player"
+    "Fabric audio library, queue and player"
+  ],
+  [
+    "lk tv",
+    "[QUERY]",
+    "media",
+    "Fabric movies, TV and video player"
   ],
   [
     "lk albert",

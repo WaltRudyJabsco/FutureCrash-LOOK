@@ -19,7 +19,9 @@
 
 `lk media find {{artist_or_title}}`
 
-`lk mp {{query}}`
+`lk mp {{audio_query}}`
+
+`lk tv {{video_query}}`
 
 - Download a video on the storage node:
 

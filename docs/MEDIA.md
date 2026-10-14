@@ -6,6 +6,34 @@ Media is a Fabric capability with endpoint-local presentation.
 
 The Fabric catalog answers *what media exists and on which node*. A queue answers *what this endpoint will play now*. A playlist is a saved queue. Keeping these separate prevents one endpoint's browsing or playback from unexpectedly changing another endpoint.
 
+## Audio and video desks
+
+`lk mp [QUERY]` opens the audio desk: music, podcasts, recordings, audiobooks and
+other cataloged audio. `lk tv [QUERY]` opens the video desk: movies, TV episodes,
+personal videos and cataloged online videos. `lk media mp` and `lk media tv` are
+aliases. Existing downloads such as `lk ytd URL` appear after cataloging; TV does
+not automatically browse or download online services.
+
+Both desks share the existing endpoint player, queue, metadata editor and Fabric
+source selection. Opening either desk never starts playback. The library and
+queue lists show only that desk's media type; the transport shows the actual
+shared player's state, even when another type is playing. Transport actions still
+control that shared player. Starting marked items replaces its current queue;
+adding items appends to it. This is one player, not two independent streams.
+
+Aligned columns distinguish titles from artists/albums or series/episode details.
+The palette retains alternating rows and a full selected-row highlight. The
+header always shows sorting and image/ASCII mode; the selected item's source sits
+below the list. Wide terminals show quiet artwork/video stills beside the list;
+narrow terminals retain the list and selected details. Previews never autoplay.
+
+Use **Shift-F** to cycle sorting, **Shift-G** to reverse, **Shift-M** to toggle
+image/ASCII, **Shift-L/Q** for library/queue, **Shift-E** for metadata, and **Tab**
+to mark. Enter plays; **Shift-B** adds to the queue. `/` edits search; Escape
+finishes search, then clears it, then exits. Lowercase transport shortcuts retain
+space pause, p/n previous/next, arrows seek, s shuffle, r repeat, x stop and v
+visuals. `lk media find` remains the broader catalog/visibility management view.
+
 ## LOOK Media Find
 
 Media Find and LKMP use subtle alternating foreground tones, with distinct

@@ -1654,7 +1654,8 @@ MAKE
 
 MEDIA
   lk player            tiny live miniplayer over LOOK MediaSession
-  lk mp                integrated library + queue + player
+  lk mp                audio library + queue + player
+  lk tv                movies, TV + video player
   lk albert            open Albert quiet Fabric surface
   lk albert url        print the iPad/tailnet URL
   lk albert qr         show QR when qrencode is available
@@ -18338,9 +18339,9 @@ def _media_find_type(row):
     suffix='.'+str(row.get('format') or Path(str(row.get('path') or '')).suffix.lstrip('.')).casefold()
     category=str(row.get('kind') or row.get('category') or '').casefold()
     parts={part.casefold() for part in Path(str(row.get('path') or '')).parts[:-1]}
-    if mime.startswith('audio/') or suffix in media_core.AUDIO_EXTENSIONS:
+    if mime.startswith('audio/') or suffix in media_core.AUDIO_EXTENSIONS or category in {'audio','music','podcast','audiobook'}:
         return 'Podcast' if category=='podcast' or 'podcasts' in parts else 'Audio'
-    if mime.startswith('video/') or suffix in media_core.VIDEO_EXTENSIONS:
+    if mime.startswith('video/') or suffix in media_core.VIDEO_EXTENSIONS or category in {'video','movie','movies','tv','television'}:
         if row.get('series'):return 'TV'
         if category in {'movie','movies'} or 'movies' in parts:return 'Movie'
         if category in {'tv','television'} or parts & {'tv','television'}:return 'TV'
@@ -19568,7 +19569,7 @@ def media_player(initial_visualizer=0):
 
 
 
-def _media_mp_rows(mode, library_rows, query):
+def _media_mp_rows(mode, library_rows, query, media_kind=None):
     """Return MP rows through the same logical visibility model as Media Find."""
     if mode == "queue":
         session=_media_sync_session() or _media_session() or {}
@@ -19579,7 +19580,26 @@ def _media_mp_rows(mode, library_rows, query):
             show_all=False,
             show_hidden=False,
         )
+    if media_kind:
+        types={'audio': {'Audio','Podcast'}, 'video': {'Movie','TV','Video'}}[media_kind]
+        rows=[row for row in rows if _media_find_type(row) in types]
     return _media_filter_rows(rows,query) if query else rows
+
+
+def _media_player_columns(row,width,media_kind,header=False):
+    # Video titles lead; audio retains artist/album grouping. Never use labels as IDs.
+    columns=_media_find_columns(width)
+    if media_kind=='video' and width>=65:
+        columns=[columns[0],columns[2],columns[1],columns[3]]
+    artist,album=_media_display_groups(row)
+    title=str(row.get('title') or Path(str(row.get('path') or 'media')).name)
+    values={'type':_media_find_type(row),'artist':artist,'title':title,'album':album,
+            'compact':' · '.join(str(x) for x in (title,artist,album) if x)}
+    labels={'type':'TYPE','title':'TITLE','artist':'SERIES / CREATOR' if media_kind=='video' else 'ARTIST',
+            'album':'SEASON / EPISODE' if media_kind=='video' else 'ALBUM','compact':'TITLE · DETAILS'}
+    colors={'type':'35','artist':'36','title':'37','album':'2','compact':'37'}
+    return '  '.join(_c(_media_find_cell(labels[key] if header else values[key],size),
+                        '2' if header else colors[key]) for key,size in columns)
 
 
 def _media_native_art(row):
@@ -19592,7 +19612,7 @@ def _media_mp_transport_lines(snap,width):
     snap=snap or {};entry=snap.get('entry') or {};session=snap.get('session') or {}
     position=max(0,float(snap.get('position') or 0));duration=max(0,float(snap.get('duration') or 0))
     state=str(snap.get('state') or 'stopped').upper()
-    title=_media_entry_label(entry) if entry else 'Choose tracks and press Enter to play'
+    title=_media_entry_label(entry) if entry else 'Choose media and press Enter to play'
     clock=f'{_media_time(position)} / {_media_time(duration)}'
     bar_width=max(8,min(48,width-len(clock)-5));filled=int(bar_width*min(1,position/duration)) if duration else 0
     bar='['+'='*filled+'-'*(bar_width-filled)+']'
@@ -19621,22 +19641,32 @@ def _media_mp_now_playing(width):
 
 
 def media_mp(initial_query=""):
+    return _media_player_library(initial_query,media_kind="audio")
+
+
+def media_tv(initial_query=""):
+    return _media_player_library(initial_query,media_kind="video")
+
+
+def _media_player_library(initial_query="",media_kind="audio"):
     """Integrated LOOK Media Player: library, queue, art/info and transport.
 
     This is intentionally a presentation layer over the existing catalog,
     MediaSession, Fabric preview and mpv controls.  It does not create a second
     queue, player or artwork implementation.
     """
+    name="LOOK TV" if media_kind=="video" else "LOOK MP"
+    medium="video" if media_kind=="video" else "audio"
     if sys.stdout.isatty():
-        print("LOOK MP · opening local + Fabric catalogs…",end="\r",flush=True)
+        print(name+" · opening local + Fabric catalogs…",end="\r",flush=True)
     started=time.monotonic()
     library_rows,catalog_meta=_media_catalog_entries()
     if sys.stdout.isatty():
-        print(f"LOOK MP · {len(library_rows):,} locations ready · {time.monotonic()-started:.1f}s"+" "*20)
+        print(f"{name} · {len(library_rows):,} locations ready · {time.monotonic()-started:.1f}s"+" "*20)
     if not (sys.stdin.isatty() and sys.stdout.isatty()):
-        print("LOOK MP · integrated media player")
+        print(name+" · "+medium+" library + queue + player")
         print(_media_mp_now_playing(100))
-        for row in _media_filter_rows(library_rows,initial_query)[:20]:
+        for row in _media_mp_rows("library",library_rows,initial_query,media_kind)[:20]:
             print("  "+_media_row_label(row))
         return 0
 
@@ -19683,16 +19713,19 @@ def media_mp(initial_query=""):
             if dirty:
                 next_key=(mode,query,sort_mode,reverse_sort)
                 if next_key != view_key:
-                    visible=_media_mp_rows(mode,library_rows,query)
+                    visible=_media_mp_rows(mode,library_rows,query,media_kind)
                     if mode=="library":visible=_media_find_order(visible,sort_mode,reverse_sort)
                     view_key=next_key
                     idx=max(0,min(idx,max(0,len(visible)-1)))
                 terminal=shutil.get_terminal_size((120,34))
-                width=max(72,terminal.columns)
-                height=max(20,terminal.lines)
+                width=max(20,terminal.columns)
+                height=max(10,terminal.lines)
                 right_w=min(40,max(28,width//3)) if width>=96 else 0
                 left_w=width-right_w-3 if right_w else width
-                list_rows=max(4,height-16)
+                controls="↑↓ select · Shift-arrows page/ends · Tab mark · A select all · E edit · R refresh · C clear marks · Enter play · B add queue · D hide dir · L library · Q queue"
+                extra="F sort · G reverse · / search · v visuals · M image/ASCII · Esc finish/clear/exit"
+                footer=_media_hints(controls,width)+"\n"+_media_hints(extra,width)
+                list_rows=max(1,height-12-len(footer.splitlines()))
                 top=max(0,min(max(0,len(visible)-list_rows),idx-list_rows+1))
                 page=visible[top:top+list_rows]
                 chosen=visible[idx] if visible else None
@@ -19701,7 +19734,7 @@ def media_mp(initial_query=""):
                 info_h=list_rows
                 art=[]; art_status=""; native_art=None
                 if chosen and right_w:
-                    art_h=min(11,max(6,info_h//2))
+                    art_h=min(11,max(1,info_h//2))
                     art=_media_cover_lines(chosen,right_w,art_h,background_remote=True)
 
                     # NativePreviewController requires a real local image. Resolve
@@ -19722,21 +19755,18 @@ def media_mp(initial_query=""):
                 with redirect_stdout(out):
                     tab="LIBRARY" if mode=="library" else "QUEUE"
                     node_count=len((catalog_meta or {}).get("nodes") or [])
-                    _title("LOOK MP",f"{_c(tab,'1;35')} · {len(visible):,} shown · {node_count} node(s) · {len(selected_ids)} marked")
-                    print(_c("FABRIC VISION", "1;36")+"  "+_c("Fabric library + queue + transport", "2"))
+                    _title(name,f"{_c(tab,'1;35')} · {len(visible):,} {medium} items · {node_count} node(s) · {len(selected_ids)} marked")
+                    print(_ansi_clip(_c("SORT "+MEDIA_FIND_SORTS[sort_mode]+(" ↓" if reverse_sort else " ↑"),"36")+"  ·  "+_c("PREVIEW "+("Auto image" if native_images and native_preview.enabled else "ASCII"),"2"),width))
                     print("─"*min(width,140))
+                    print(_ansi_clip("   "+_media_player_columns({},max(1,left_w-3),media_kind,header=True),left_w))
                     for line_no in range(list_rows):
                         if line_no < len(page):
                             n=top+line_no; row=page[line_no]
                             rid=row_id(row)
                             focus=_c("›","1;36") if n==idx else " "
                             mark=_c("✓","32") if rid in selected_ids else " "
-                            label=_media_row_label(row)
-                            node=str(row.get("node") or "local")
-                            suffix=f" · {node}"
-                            max_label=max(12,left_w-len(suffix)-5)
-                            label=label[:max_label-1]+"…" if len(label)>max_label else label.ljust(max_label)
-                            left=terminal_style.list_row(f"{focus}{mark} "+_media_styled_row_label(row,label)+_c(suffix,"2"),left_w if right_w else width,n,n==idx,_LIST_COLORS)
+                            label=_media_player_columns(row,max(1,left_w-3),media_kind)
+                            left=terminal_style.list_row(f"{focus}{mark} "+label,left_w,n,n==idx,_LIST_COLORS)
                         else:
                             left=""
                         if right_w:
@@ -19752,28 +19782,31 @@ def media_mp(initial_query=""):
                         else:
                             print(_ansi_clip(left,width))
                     print("─"*min(width,140))
+                    if chosen:
+                        source=str(chosen.get('node') or 'local')
+                        print(_ansi_clip(_c('SELECTED ', '36')+_c(_media_row_label(chosen),'37')+_c(' · '+source,'2'),width))
+                    else:
+                        empty="No matching "+medium+" items · Esc clears search" if query else "No "+medium+" items here · lk media import or lk media find"
+                        print(_ansi_clip(_c(empty,'33'),width))
                     playback=_media_status_snapshot()
                     for line in _media_mp_transport_lines(playback,width):print(line)
-                    transport_row=list_rows+5;transport_width=width
+                    transport_row=list_rows+7;transport_width=width
                     if search_mode:
                         filter_text=f"SEARCH /{query}█"
                     else:
-                        filter_text=f"FILTER {query or 'all media'} · / search"
+                        filter_text=f"FILTER {query or ('all '+medium)} · / search"
                     print(_c(filter_text,"1;36"))
-                    controls="↑↓ select · Shift-↑↓ page · Shift-←→ top/bottom · Tab mark · A select all · E edit metadata · R refresh · C clear selection · Enter play · B add queue · D hide dir · L library · Q queue"
-                    print(_media_hints(controls,width))
-                    print(_media_hints("F sort · G reverse · / search · v visuals · M image/ASCII · Esc finish/clear/exit",width),end="")
-                    if notice:
-                        print("  "+_c(notice,"33"),end="")
-                        notice=""
+                    print(footer)
+                    print(_ansi_clip(_c(notice,"33"),width),end="")
+                    notice=""
                 native_preview.frame_cleared()
-                sys.stdout.write(_terminal_frame_payload(out.getvalue()))
+                sys.stdout.write(_terminal_frame_payload("\n".join(_ansi_clip(line,width) for line in out.getvalue().split("\n"))))
                 sys.stdout.flush()
 
-                # Header occupies three terminal rows; the list/art pane begins on
-                # row 4. The right pane begins immediately after " │ ".
+                # Header and column labels occupy four rows; artwork begins on
+                # row 5. The right pane begins immediately after " │ ".
                 if native_images and native_art and right_w:
-                    native_preview.request(native_art,4,left_w+4,art_h,right_w)
+                    native_preview.request(native_art,5,left_w+4,art_h,right_w)
                 else:
                     native_preview.invalidate()
 
@@ -20006,6 +20039,7 @@ def media(args):
     if raw in {"outputs","output"}: return _media_outputs_command()
     if raw=="on": return _media_on_command(args[1:])
     if raw=="mp": return media_mp(" ".join(args[1:]))
+    if raw=="tv": return media_tv(" ".join(args[1:]))
     if raw=="find": return _media_find_command(args[1:])
     if raw=="browse": return _media_browse_command(args[1:])
     if raw=="identify": return _media_identify_command(args[1:])
@@ -20632,7 +20666,8 @@ _COMMANDS = [
     ("lk media edit", "<QUERY> [--artist NAME] [--album NAME] [--album-artist NAME] [--title NAME] [--track N] [--disc N] [--series NAME] [--season N] [--episode N] [--content-kind episode|special|extra|unclassified] [--all] [--json]", "media", "Correct metadata for one track or matching batch"),
     ("lk media", "[...]", "media", "Media library, queue, playlists, transport", "lk music"),
     ("lk player", "", "media", "Live LOOK miniplayer"),
-    ("lk mp", "[QUERY]", "media", "Integrated Fabric media player"),
+    ("lk mp", "[QUERY]", "media", "Fabric audio library, queue and player"),
+    ("lk tv", "[QUERY]", "media", "Fabric movies, TV and video player"),
     ("lk albert", "[url|qr|ipad]", "fabric", "Open/share Albert browser surface"),
     ("mm", "", "media", "Toggle media playback", "lk media toggle"),
     ("mn", "", "media", "Next media item", "lk media next"),
@@ -21991,6 +22026,7 @@ def main():
         return media(["play",*rest]) if rest else media(["play"])
     if cmd=="player": return media_player()
     if cmd=="mp": return media_mp(" ".join(rest))
+    if cmd=="tv": return media_tv(" ".join(rest))
     if cmd=="albert":
         def _albert_tailnet_url():
             ts=shutil.which("tailscale")
