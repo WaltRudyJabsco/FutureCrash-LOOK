@@ -183,10 +183,10 @@ def desk(state, browsers, read_key, styled):
             def ink(text, role):
                 return [colors[role] + line + '\033[0m' for line in textwrap.wrap(text, width=width)]
             header += ink(name + (' · graphical window' if name == 'qutebrowser' else ' · inside this terminal') if name else 'No supported browser installed', 'GREEN')
-            header += ink(GUIDES.get(name, 'Install w3m, Lynx, Links, Chawan or qutebrowser; reopen lk web.'), 'GRAY') + ['']
-            footer = [''] + ink('↑↓ choose · Shift-arrows page/ends · Enter read · b browser · u URL · s search', 'CYAN')
-            footer += ink('W shell pane · a bookmark · y copy Notebook link · h home page · q/Esc exit', 'CYAN')
-            if pane_help:footer += ink(' · '.join(terminal_style.pane_shortcuts()), 'CYAN')
+            header += (terminal_style.command_lines(GUIDES[name],width,colors=colors) if name in GUIDES else ink('Install w3m, Lynx, Links, Chawan or qutebrowser; reopen lk web.','GRAY')) + ['']
+            footer = [''] + terminal_style.command_lines('↑↓ choose · Shift-arrows page/ends · Enter read · b browser · u URL · s search',width,colors=colors)
+            footer += terminal_style.command_lines('W shell pane · a bookmark · y copy Notebook link · h home page · q/Esc exit',width,colors=colors)
+            if pane_help:footer += terminal_style.command_lines(' · '.join(terminal_style.pane_shortcuts()),width,colors=colors)
             footer += ink(clean(notice), 'YELLOW') or ['']
             page_size = max(1, (height - len(header) - len(footer) - 1) // 2)
             top = max(0, index - page_size + 1)

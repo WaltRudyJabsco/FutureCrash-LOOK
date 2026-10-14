@@ -1,3 +1,7 @@
+## Command hint contrast
+
+- Distinguish typed keys/options from descriptions in import setup, review and Web browser guides/footers; preserve key case and plain piped output.
+
 ## Audio and video desks
 
 - Add `lk tv` for movies, TV, personal and cataloged online videos; focus `lk mp` on audio.
