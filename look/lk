@@ -15995,12 +15995,13 @@ def _media_catalog_entries():
     return media_core.merge_catalog_entries(payload.get("entries") or [],local_node=local_node),payload
 
 
-def _media_query_matches(query,match_mode="fuzzy"):
+def _media_query_matches(query,match_mode="fuzzy",catalog_rows=None):
     """Resolve catalog text with one shared literal/fuzzy confidence contract."""
     query=" ".join(str(query or "").split()).strip()
     if not query:
         return "none",[]
-    rows,_=_media_catalog_entries()
+    rows=catalog_rows
+    if rows is None:rows,_=_media_catalog_entries()
     mode=str(match_mode or "fuzzy").casefold()
     if mode=="literal":
         exact=media_core.exact_entries({"entries":rows},query)
@@ -19025,7 +19026,7 @@ def _media_resolve_targets(args):
             # into general cognition.
             typed_query=str(intent.get("query") or "").strip()
             typed_kind=str(intent.get("kind") or "").casefold()
-            typed_match,typed_rows=_media_query_matches(typed_query,match_mode=str(intent.get("match_mode") or "fuzzy"))
+            typed_match,typed_rows=_media_query_matches(typed_query,match_mode=str(intent.get("match_mode") or "fuzzy"),catalog_rows=catalog)
             if typed_kind in {"audio","video"}:
                 typed_rows=[r for r in typed_rows if str(r.get("media_type") or "").casefold().startswith(typed_kind+"/")]
             if typed_rows:
@@ -19044,14 +19045,14 @@ def _media_resolve_targets(args):
                 return [sorted(typed_rows,key=media_core.entry_sort_key)[0]],shuffle
             raise ValueError(f"no Fabric {typed_kind or 'media'} match for {typed_query!r}")
 
-    match_kind,rows=_media_query_matches(text,match_mode="literal" if exact else "fuzzy")
+    match_kind,rows=_media_query_matches(text,match_mode="literal" if exact else "fuzzy",catalog_rows=catalog)
     # Human playback language often uses "some X" to mean "play X". Preserve
     # exact/full-phrase matches first, then retry without the conversational
     # determiner only when the full phrase is unresolved or ambiguous.
     if not exact and text.casefold().startswith("some ") and match_kind in {"none","ambiguous"}:
         repaired=text[5:].strip()
         if repaired:
-            repaired_kind,repaired_rows=_media_query_matches(repaired,match_mode="fuzzy")
+            repaired_kind,repaired_rows=_media_query_matches(repaired,match_mode="fuzzy",catalog_rows=catalog)
             if repaired_kind!="none" and repaired_rows:
                 match_kind,rows=repaired_kind,repaired_rows
     if match_kind=="none" or not rows:

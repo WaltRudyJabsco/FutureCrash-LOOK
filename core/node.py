@@ -3347,6 +3347,9 @@ def _fabric_media_state(target=None):
     return http_json(_remote_url(snapshot, target, "/v1/media/state"), timeout=1.4)
 
 
+MEDIA_ROUTE_REQUEST_TIMEOUT_SECONDS=105.0
+
+
 def _fabric_media_route(target, operation, payload):
     target = str(target or "").strip()
     local_name = identity()["name"]
@@ -3355,7 +3358,7 @@ def _fabric_media_route(target, operation, payload):
     snapshot = {"self": node_info(), "peers": PEERS.public()}
     body = dict(payload or {})
     body["operation"] = operation
-    return http_json(_remote_url(snapshot, target, "/v1/media/route"), body, timeout=50.0)
+    return http_json(_remote_url(snapshot, target, "/v1/media/route"), body, timeout=MEDIA_ROUTE_REQUEST_TIMEOUT_SECONDS if operation in {"prepare","play"} else 50.0)
 
 
 def _fabric_media_full_session(target=None):

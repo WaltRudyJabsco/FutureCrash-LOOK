@@ -1,3 +1,8 @@
+## Browser media preparation reliability
+
+- Reuse one catalog snapshot per media request instead of repeated retrieval/merging.
+- Align remote preparation deadlines and preserve Signal timeout/connection errors.
+
 ## Import workbench readability
 
 - Wrap complete setup questions and prefill editable defaults.

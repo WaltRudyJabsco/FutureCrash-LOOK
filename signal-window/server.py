@@ -17,6 +17,7 @@ import signal
 import subprocess
 import tempfile
 import sys
+import socket
 import threading
 import secrets
 import time
@@ -28,6 +29,7 @@ from urllib.parse import urlparse, urlunparse, quote, parse_qs
 
 ROOT = Path(__file__).resolve().parent
 LO_REQUEST_TIMEOUT = 180.0
+MEDIA_ROUTE_REQUEST_TIMEOUT_SECONDS = 110.0
 CORE_DIR = Path.home()/".local/share/future-crash-look/core"
 if not (CORE_DIR/"endpoint_auth.py").exists(): CORE_DIR = ROOT.parent/"core"
 if str(CORE_DIR) not in sys.path: sys.path.insert(0,str(CORE_DIR))
@@ -769,7 +771,12 @@ def _node_call(path, payload=None, timeout=.6):
         except Exception:
             pass
         return {"ok":False,"status":exc.code,"error":str(exc.reason or exc)}
-    except Exception:
+    except Exception as exc:
+        if path=="/v1/media/route" and isinstance(payload,dict) and payload.get("operation") in {"prepare","play"}:
+            reason=getattr(exc,"reason",exc)
+            if isinstance(reason,(TimeoutError, socket.timeout)):
+                raise RuntimeError("Fabric media preparation timed out before a queue was returned") from exc
+            raise RuntimeError("Signal could not obtain a Fabric media route: "+str(reason)) from exc
         return None
 
 def _node_get(path, timeout=.8):
@@ -872,7 +879,7 @@ def _media_play(query="",node="",prepare=False,intent=None):
             if intent.get(key) not in (None,""): payload[key]=intent.get(key)
     if not payload.get("query") and not any(payload.get(k) for k in ("kind","artist","selection")):
         raise ValueError("media play query or selector required")
-    value=_node_call("/v1/media/route",payload,timeout=55.0)
+    value=_node_call("/v1/media/route",payload,timeout=MEDIA_ROUTE_REQUEST_TIMEOUT_SECONDS)
     if not isinstance(value,dict): raise RuntimeError("Fabric media route unavailable")
     if value.get("error") and not value.get("ok"): raise RuntimeError(str(value.get("error")))
     return value
