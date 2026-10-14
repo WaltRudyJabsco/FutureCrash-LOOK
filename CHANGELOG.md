@@ -1,3 +1,9 @@
+## Audio and video desks
+
+- Add `lk tv` for movies, TV, personal and cataloged online videos; focus `lk mp` on audio.
+- Share the existing player/queue while filtering each desk's library and queue view.
+- Align title/group columns, retain palette highlights, expose sort/preview state and selected source, and fit wrapped controls to terminal height.
+
 ## Browser media preparation reliability
 
 - Reuse one catalog snapshot per media request instead of repeated retrieval/merging.
