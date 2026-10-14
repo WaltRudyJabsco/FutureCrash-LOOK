@@ -69,3 +69,12 @@ The cognition fallback order is deterministic rules, local decision worker when 
 Signal camera capture is an edge concern, not a vision-worker special case. The browser sends the captured image to its Signal server, which materializes it as a local request resource. LO then follows the ordinary image-resource path. Fabric client staging converts image bytes into artifact references before dispatch so the cognitive packet remains small and location-independent.
 
 This preserves the core rule: interfaces may acquire bytes, artifacts own bytes, jobs refer to capabilities and artifact identity.
+
+## Sharing boundary: designed, not implemented
+
+[Item grants and a replaceable front door](FABRIC-SHARING.md) describes how an
+owner could share a memory without granting general Fabric access. Grant policy
+belongs to the Fabric; public reachability belongs to a replaceable provider.
+Signal playback tickets are an existing mechanism, not a guest-sharing feature.
+The design is also included in the installed reference so assistants can retrieve
+it while distinguishing architectural intent from executable capabilities.
