@@ -19,6 +19,17 @@ def interface_colors():
     return terminal_style.list_colors()
 
 
+
+IMPORT_KEYS=('Esc','Enter','Tab','→/↓','Ctrl-U','cd','dvd','bluray','movie','tv','all','y','n','0','x','yes','r','b','c','k','i','m','d')
+
+
+def instruction(text):
+    if not sys.stdout.isatty():return text
+    try:from . import terminal_style
+    except ImportError:import terminal_style
+    width=shutil.get_terminal_size((100,30)).columns
+    return '\n'.join(terminal_style.command_text(line,IMPORT_KEYS) for line in wrapped_lines(text,width))
+
 def workbench_lines(inventory,jobs,index,width,height,show_history,colors):
     def ink(value,role):return colors[role]+str(value)+'\033[0m'
     frame=[ink('FABRIC DISC WORKBENCH','CYAN')+' · '+ink(inventory.get('node') or 'local','WHITE'),'']
@@ -225,7 +236,7 @@ def tv_details(request,prompt,metadata,titles,title_index):
     if not candidates:return title,metadata
     for number,item in enumerate(candidates,1):
         print(f"  {number}. {item.get('position') or ''} {disc_metadata.episode_label(item)} · {item.get('duration') or str(item.get('runtime') or '?')+' min'} · {item.get('heading') or ''}")
-    print('Match disc titles below. Numbers choose listed contents; x NAME labels an extra; 0 keeps unidentified. DVD title order is not episode order.')
+    print(instruction('Match disc titles below. Numbers choose listed contents; x NAME labels an extra; 0 keeps unidentified. DVD title order is not episode order.'))
     mapped={}
     for item in titles:
         index=str(item['index'])
@@ -359,7 +370,7 @@ def import_options(request,inventory,drive,prompt,path_prompt):
     category='music' if kind=='cd' else 'movies'
     scan=None;scan_kind=None;metadata={};title='';title_index='';destination='';preferences=None
     step=0
-    print('NEW IMPORT · Esc back; Esc at Disc kind cancels · nothing starts until review')
+    print(instruction('NEW IMPORT · Esc back; Esc at Disc kind cancels · nothing starts until review'))
     while True:
         try:
             if step==0:
@@ -430,7 +441,7 @@ def import_options(request,inventory,drive,prompt,path_prompt):
                 if not title:raise ValueError('Give this import a name')
             elif step==4:
                 default=media_storage.destination(kind,category)
-                print('DESTINATION · Tab completes; →/↓ opens LOOK picker; Ctrl-U clears; Esc goes back')
+                print(instruction('DESTINATION · Tab completes; →/↓ opens LOOK picker; Ctrl-U clears; Esc goes back'))
                 destination=path_prompt('Destination',destination or default)
                 if not destination:raise ValueError('Choose a destination')
                 target=fabric_files.parse(destination)
@@ -447,7 +458,7 @@ def import_options(request,inventory,drive,prompt,path_prompt):
                 for index,item in (metadata.get('tv_titles') or {}).items():
                     print('  Title '+index+' → '+disc_metadata.episode_label(item))
                 if category=='tv':print('Metadata · '+str(metadata.get('series') or 'series not identified')+' · '+str(len(metadata.get('tv_titles') or {}))+' matched titles · unmatched titles kept')
-                print('y start · k kind · c category · i titles · m name/metadata · d destination · Esc back')
+                print(instruction('y start · k kind · c category · i titles · m name/metadata · d destination · Esc back'))
                 choice=prompt('Start or edit','y').casefold()
                 if choice=='y':return {'drive':drive,'kind':kind,'category':category,'title':title,'destination':destination,'title_index':title_index,'metadata':metadata,'preferences':preferences}
                 edits={'k':0,'c':1,'i':2,'m':3,'d':4}
@@ -470,7 +481,8 @@ def workspace(request,read_key,hints):
             try:from . import look_renderer
             except ImportError:import look_renderer
             from pathlib import Path
-            caption=label+' › '
+            print(instruction(label))
+            caption='› '
             value,cancelled=look_renderer.prompt_line(caption,initial=default,picker_root=Path.cwd() if path else None)
             if cancelled:raise ImportBack()
             return value.strip() or default

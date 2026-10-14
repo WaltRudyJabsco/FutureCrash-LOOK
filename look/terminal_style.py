@@ -476,3 +476,20 @@ def open_pane(path):
 
 
 if __name__=='__main__': raise SystemExit(main())
+
+
+def command_text(text, keys, *, colors=None, body='GRAY'):
+    """Contrast explicit action tokens without changing their wording or case."""
+    import re
+    colors=colors or list_colors()
+    pattern=r'(?<!\w)(?:'+ '|'.join(re.escape(key) for key in sorted(set(keys),key=len,reverse=True))+r')(?!\w)'
+    styled=re.sub(pattern,lambda match:colors['CYAN']+'\033[1m'+match.group()+'\033[22m'+colors[body],text) if keys else text
+    return colors[body]+styled+'\033[0m'
+
+
+def command_lines(text, width, *, colors=None):
+    """Wrap plain instructions first, keeping ANSI sequences out of width math."""
+    import textwrap
+    keys=[part.strip().split(' ',1)[0] for part in text.split(' · ') if part.strip()]
+    keys+=['Enter','Esc']
+    return [command_text(line,keys,colors=colors) for line in textwrap.wrap(text,width=max(1,width))]
