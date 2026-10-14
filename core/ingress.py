@@ -34,6 +34,7 @@ DEFAULT_BACKEND_PORT = 7332
 HEADER_TIMEOUT_SECONDS = 4.0
 CONTROL_TIMEOUT_SECONDS = 12.0
 DISC_SCAN_TIMEOUT_SECONDS = 320.0
+MEDIA_PREPARE_TIMEOUT_SECONDS = 100.0
 CATALOG_TIMEOUT_SECONDS = 45.0
 STREAM_TIMEOUT_SECONDS = 240.0
 MAX_ACTIVE_REQUESTS = 12
@@ -65,6 +66,13 @@ def _request_timeout(path: str, method: str, body: bytes | None, is_stream: bool
             pass
     if path in {"/v1/media/catalog", "/v1/media/fabric"}:
         return CATALOG_TIMEOUT_SECONDS
+    if path == '/v1/media/route' and method == 'POST':
+        try:
+            payload=json.loads(body or b'{}')
+            if isinstance(payload,dict) and payload.get('operation') in {'prepare','play'}:
+                return MEDIA_PREPARE_TIMEOUT_SECONDS
+        except (ValueError,UnicodeError):
+            pass
     return STREAM_TIMEOUT_SECONDS if is_stream else CONTROL_TIMEOUT_SECONDS
 
 

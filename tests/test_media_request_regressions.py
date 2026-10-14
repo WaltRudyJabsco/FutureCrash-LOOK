@@ -768,3 +768,14 @@ def test_tv_type_sort_groups_series_seasons_and_episodes(lk):
     assert [r['title'] for r in lk._media_find_order(rows,4)]==['Unknown','Z first','A second','Later']
     special={'series':'Show','season':0,'episode':2,'content_kind':'special'}
     assert lk._media_display_groups(special)==('Show','Season 0 · Ep 2 · Special')
+
+
+@pytest.mark.parametrize('exact',[False,True])
+def test_prepare_resolver_reuses_one_catalog_snapshot(lk,monkeypatch,exact):
+    from unittest.mock import Mock
+    rows=[{'id':'movie','node':'owner','path':'/movies/Ninja.mkv','title':'Ninja Scroll','media_type':'video/matroska'}]
+    catalog_read=Mock(return_value=(rows,{}))
+    monkeypatch.setattr(lk,'_media_catalog_entries',catalog_read)
+    result,_=lk._media_resolve_targets(['Ninja Scroll','--kind','video']+(['--exact'] if exact else []))
+    assert result[0]['id']=='movie'
+    catalog_read.assert_called_once()

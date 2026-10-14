@@ -376,3 +376,9 @@ CLI example: `lk media import start --drive /dev/sr0 --kind dvd --category tv
 Music playback keeps mpv artwork windows disabled; LOOK owns terminal artwork.
 Video still opens its viewer. Reusing a previously visible player for music clears
 its forced-window setting before loading the audio queue.
+
+Browser queue preparation uses one catalog snapshot per request. Remote
+preparation/play deadlines outlast the node worker; pause/seek and other ordinary
+control calls retain short deadlines. Signal reports preparation timeouts or
+connection failures explicitly. Preparing a queue does not start native playback
+and does not prove that a browser can decode the selected movie.
