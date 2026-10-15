@@ -49,8 +49,9 @@ script-heavy sites; select qutebrowser when you need its graphical web engine.
 w3m and Lynx use terminal-default text/background with ANSI link colors. Links
 uses a light or dark ANSI background according to the selected LOOK palette.
 Color overrides last only for that invocation. `--native-style` keeps the
-browser's appearance; link numbering remains enabled. LOOK does not rewrite
-personal browser configuration or key bindings.
+browser's appearance. LOOK does not rewrite personal browser files. The w3m
+session overlay reserves Esc-h, Esc-j and normal Enter; other personal bindings
+are copied from its configured keymap.
 
 You can run `lk web` in LOOK's adjacent shell pane. Exit the browser to return to
 the desk, then exit the desk to return to that pane's shell. Existing pane focus
@@ -69,3 +70,26 @@ The views redraw to fit the terminal after panes open or close. Shift-W stays
 ordinary text inside note editors and URL/bookmark prompts. In a launched web
 browser, the browser owns its keys; quit back to the desk to use Shift-W.
 Without Kitty or tmux, LOOK explains the requirement and stays in your view.
+
+## Reading without link tags
+
+Numbered browsers start with tags off. Press **t** in the desk to remember tags
+on/off for future launches, or use `lk web --tags on URL` / `--tags off URL` for
+an invocation override. This controls w3m, Lynx and Links/Links2; Chawan and
+qutebrowser retain their native temporary `f` hints, cancelled with Escape.
+
+In w3m, **Esc then h** toggles tags. Type a number, then **Esc then j** to select
+that numbered link; Enter follows it and hides tags again. Tab and Enter continue
+to work. These session bindings use a temporary keymap overlay, retain unrelated
+personal bindings, and never save to the browser config. The default applies only
+to launches through LOOK.
+
+Lynx changes numbering through `o` → Keypad mode. Links/Links2 use Escape → View →
+HTML options → Links are numbered. These are native menu controls: LOOK does not
+claim automatic post-navigation clearing or a shared in-page key for them. The
+desk shows each browser's guide.
+
+Hiding tags removes numeric clutter, not site navigation. Removing menus, cookie
+prompts and repeated headers requires content extraction; this update does not
+implement an article-reader view. Terminal text browsers have different rendering
+capabilities from a graphical browser or a browser-engine-backed terminal viewer.

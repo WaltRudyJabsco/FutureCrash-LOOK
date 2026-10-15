@@ -1,3 +1,8 @@
+## Web reading and link tags
+
+- Start numbered browsers in clean reading mode; add remembered desk `t` preference and `--tags on/off`.
+- Add invocation-only w3m tag toggle/number selection and hide tags after Enter follows a link; show native controls for other browsers.
+
 ## Command hint contrast
 
 - Distinguish typed keys/options from descriptions in import setup, review and Web browser guides/footers; preserve key case and plain piped output.
