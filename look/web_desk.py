@@ -19,10 +19,10 @@ import terminal_style
 
 BROWSERS = ('w3m', 'lynx', 'links', 'links2', 'chawan', 'qutebrowser')
 GUIDES = {
-    'w3m': 'Tab link · Enter open · B back · U address · / find · q quit',
-    'lynx': 'number + Enter open · ← back · g address · / find · q quit',
-    'links': 'number + Enter open · ← back · g address · / find · q quit',
-    'links2': 'number + Enter open · ← back · g address · / find · q quit',
+    'w3m': 'Esc-h tags on/off · number then Esc-j selects · Tab link · Enter open · B back · q quit',
+    'lynx': 'o options → Keypad mode · number + Enter open · ← back · g address · q quit',
+    'links': 'Esc menu → View → HTML options → Links are numbered · number + Enter open · ← back · g address · q quit',
+    'links2': 'Esc menu → View → HTML options → Links are numbered · number + Enter open · ← back · g address · q quit',
     'chawan': 'f letter hints · type letters, Enter open · / find · q quit',
     'qutebrowser': 'f letter hints · o address · j/k scroll · H back · / find · :quit',
 }
@@ -97,7 +97,9 @@ def load_state():
         except (KeyError, TypeError, ValueError):
             continue
     browser = data.get('browser', '')
-    return {'browser': browser if isinstance(browser, str) and browser in BROWSERS else '', 'bookmarks': bookmarks}
+    result={'browser': browser if isinstance(browser, str) and browser in BROWSERS else '', 'bookmarks': bookmarks}
+    if isinstance(data.get('tags'),bool):result['tags']=data['tags']
+    return result
 
 
 def save_state(data):
@@ -128,24 +130,43 @@ def home_page(state):
 <footer><small>Qutebrowser: f → letters opens a link. Chawan: f → letters → Enter.<br>Return to your terminal for lk web and your Notebook links.</small></footer></html>'''
 
 
-def launch(name, executable, url, styled=True):
+def w3m_keymap(directory):
+    """Overlay the effective personal keymap for this invocation; never rewrite it."""
+    root=Path(os.environ.get('W3M_DIR') or Path.home()/'.w3m').expanduser()
+    source=root/'keymap'
+    config=root/'config'
+    if config.is_file():
+        for line in config.read_text().splitlines():
+            parts=line.split(None,1)
+            if len(parts)==2 and parts[0]=='keymap_file':
+                source=Path(parts[1].strip()).expanduser()
+                if not source.is_absolute():source=root/source
+    original=source.read_text() if source.is_file() else ''
+    overlay=Path(directory)/'keymap'
+    # Enter follows normally, then restores clean reading; numbered selection uses w3m prefixes.
+    overlay.write_text(original+'\nkeymap M-h COMMAND "SET_OPTION display_link_number=toggle; RESHAPE"\n'
+                       +'keymap M-j LINK_N\nkeymap C-m COMMAND "GOTO_LINK; SET_OPTION display_link_number=0; RESHAPE"\nkeymap C-j COMMAND "GOTO_LINK; SET_OPTION display_link_number=0; RESHAPE"\n')
+    return overlay
+
+
+def launch(name, executable, url, styled=True, tags=False):
     # Argument lists keep pasted URLs inert. Styles are invocation-only; personal
     # browser configuration and keymaps remain owned by the browser.
     with tempfile.TemporaryDirectory(prefix='look-web-') as directory:
         args = [executable]
         if name == 'w3m':
-            args += ['-o', 'display_link_number=1']
+            args += ['-o', 'display_link_number='+str(int(tags)), '-o', 'keymap_file='+str(w3m_keymap(directory))]
             if styled:
                 for option in ('color=1', 'basic_color=terminal', 'bg_color=terminal', 'anchor_color=blue', 'visited_color=magenta', 'active_style=1', 'active_color=cyan'):
                     args += ['-o', option]
         elif name == 'lynx':
-            args += ['-number_links', '-default_colors']
+            args += ['-number_links='+('on' if tags else 'off'), '-default_colors']
             if styled:
                 style = Path(directory) / 'look.lss'
                 style.write_text('normal:normal:default:default\ndefault:normal:default:default\na:normal:blue:default\nh1:bold:cyan:default\nh2:bold:cyan:default\nalink:reverse:default:default\nstatus:reverse:default:default\nalert:bold:red:default\nwhereis:reverse:magenta:default\n')
                 args += ['-lss=' + str(style)]
         elif name in {'links', 'links2'}:
-            args += ['-html-numbered-links', '1']
+            args += ['-html-numbered-links', str(int(tags))]
             if styled:
                 palette = terminal_style.list_colors()['_palette']
                 light = terminal_style.luminance(palette['background']) > .5
@@ -183,9 +204,10 @@ def desk(state, browsers, read_key, styled):
             def ink(text, role):
                 return [colors[role] + line + '\033[0m' for line in textwrap.wrap(text, width=width)]
             header += ink(name + (' · graphical window' if name == 'qutebrowser' else ' · inside this terminal') if name else 'No supported browser installed', 'GREEN')
+            header += ink('TAGS '+('on' if state.get('tags',False) else 'off')+' · t toggles launch preference' if name not in {'chawan','qutebrowser'} else 'TAGS on demand · f shows, Esc cancels', 'GRAY')
             header += (terminal_style.command_lines(GUIDES[name],width,colors=colors) if name in GUIDES else ink('Install w3m, Lynx, Links, Chawan or qutebrowser; reopen lk web.','GRAY')) + ['']
             footer = [''] + terminal_style.command_lines('↑↓ choose · Shift-arrows page/ends · Enter read · b browser · u URL · s search',width,colors=colors)
-            footer += terminal_style.command_lines('W shell pane · a bookmark · y copy Notebook link · h home page · q/Esc exit',width,colors=colors)
+            footer += terminal_style.command_lines('t tags on/off · W shell pane · a bookmark · y copy Notebook link · h home page · q/Esc exit',width,colors=colors)
             if pane_help:footer += terminal_style.command_lines(' · '.join(terminal_style.pane_shortcuts()),width,colors=colors)
             footer += ink(clean(notice), 'YELLOW') or ['']
             page_size = max(1, (height - len(header) - len(footer) - 1) // 2)
@@ -216,6 +238,10 @@ def desk(state, browsers, read_key, styled):
                 name = names[(names.index(name)+1) % len(names)]
                 state['browser'] = name
                 save_state(state)
+            elif key == 't':
+                state['tags']=not state.get('tags',False)
+                save_state(state)
+                notice='Numbered browsers start with tags '+('on' if state['tags'] else 'off')+' · letter-hint browsers stay on demand'
             elif key == 'y':
                 notice = 'Notebook link copied' if look_renderer.copy_text(note_link(rows[index])) else 'Clipboard unavailable'
             elif key in {'u', 's', 'a', 'h', '\r', '\n'}:
@@ -242,7 +268,7 @@ def desk(state, browsers, read_key, styled):
                         continue
                     termios.tcsetattr(fd, termios.TCSADRAIN, old)
                     sys.stdout.write('\033[?25h');sys.stdout.flush()
-                    code = launch(name, browsers[name], url, styled)
+                    code = launch(name, browsers[name], url, styled, tags=state.get('tags',False))
                     notice = 'Back at your reading desk' if not code else 'Browser exited with status ' + str(code)
                 except (ValueError, OSError) as exc:
                     notice = str(exc)
@@ -257,11 +283,13 @@ def main(args=None, *, read_key=None):
     parser = argparse.ArgumentParser(prog='lk web', description='A keyboard reading desk for installed terminal browsers and qutebrowser.')
     parser.add_argument('target', nargs='*', help='URL, search WORDS, home, or list')
     parser.add_argument('--browser', choices=BROWSERS, help='Select a browser; qutebrowser opens a graphical window')
+    parser.add_argument('--tags', choices=('on','off'), help='Initial numbered-link display; defaults to remembered preference or off')
     parser.add_argument('--native-style', action='store_true', help='Keep the browser appearance instead of LOOK invocation colors')
     options = parser.parse_args(args)
     try:
         browsers = discover()
         state = load_state()
+        if options.tags is not None:state['tags']=options.tags=='on'
         name = options.browser or (state.get('browser') if state.get('browser') in browsers else next(iter(browsers), ''))
         if options.target == ['list']:
             for browser in BROWSERS:
@@ -280,7 +308,7 @@ def main(args=None, *, read_key=None):
             else:raise ValueError('Use lk web search WORDS, or one URL')
             if name != 'qutebrowser' and not (sys.stdin.isatty() and sys.stdout.isatty()):
                 raise ValueError('Terminal browsing needs an interactive terminal')
-            return launch(name, browsers[name], url, not options.native_style)
+            return launch(name, browsers[name], url, not options.native_style, tags=state.get('tags',False))
         if not (sys.stdin.isatty() and sys.stdout.isatty()):
             print('Run lk web in a terminal, or lk web list to inspect installed browsers.')
             return 0

@@ -48,7 +48,7 @@ def test_launch_uses_argument_list_and_leaves_personal_configs_owned(name,monkey
     args=run.call_args.args[0]
     assert args[0]=='/bin/browser' and args[-1]==url
     assert run.call_args.kwargs=={'check':False}
-    if name=='lynx':assert '-number_links' in args
+    if name=='lynx':assert '-number_links=off' in args
     if name in {'links','links2'}:assert '-html-numbered-links' in args
     if name in {'qutebrowser','chawan'}:assert args==['/bin/browser',url]
 
@@ -56,7 +56,9 @@ def test_launch_uses_argument_list_and_leaves_personal_configs_owned(name,monkey
 def test_native_style_does_not_override_appearance(monkeypatch):
     run=Mock(return_value=Mock(returncode=0));monkeypatch.setattr(web.subprocess,'run',run)
     web.launch('w3m','w3m','https://example.org',False)
-    assert run.call_args.args[0]==['w3m','-o','display_link_number=1','https://example.org']
+    args=run.call_args.args[0]
+    assert args[:3]==['w3m','-o','display_link_number=0']
+    assert len(args)==6 and args[-1]=='https://example.org'
 
 
 def test_missing_browser_has_actionable_message(monkeypatch,capsys,tmp_path):
@@ -104,3 +106,41 @@ def test_generated_notebook_link_is_openable_by_notebook_parser():
     row={'title':'A [book]','url':'https://example.org/a(b)'}
     links=notebook_markdown.extract_links(web.note_link(row))
     assert len(links)==1 and links[0][1]=='https://example.org/a%28b%29'
+
+@pytest.mark.parametrize('name',['w3m','lynx','links','links2'])
+@pytest.mark.parametrize('tags',[False,True])
+def test_tag_preference_is_explicit_and_invocation_only(name,tags,monkeypatch,tmp_path):
+    monkeypatch.setenv('W3M_DIR',str(tmp_path))
+    captured=[]
+    def run(args,**kwargs):
+        captured.extend(args)
+        if name=='w3m':
+            path=Path(next(a.split('=',1)[1] for a in args if a.startswith('keymap_file=')))
+            assert 'keymap M-h COMMAND' in path.read_text()
+            assert 'keymap M-j LINK_N' in path.read_text()
+        return Mock(returncode=0)
+    monkeypatch.setattr(web.subprocess,'run',run)
+    web.launch(name,'browser','https://example.org',tags=tags)
+    if name=='w3m':assert 'display_link_number='+str(int(tags)) in captured
+    elif name=='lynx':assert '-number_links='+('on' if tags else 'off') in captured
+    else:assert captured[captured.index('-html-numbered-links')+1]==str(int(tags))
+    assert not list(tmp_path.iterdir())
+
+
+def test_w3m_overlay_preserves_custom_keymap_and_config(tmp_path,monkeypatch):
+    root=tmp_path/'personal';root.mkdir()
+    config=root/'config';config.write_text('keymap_file alternate\n')
+    original=root/'alternate';original.write_text('keymap z NEXT_PAGE\n')
+    monkeypatch.setenv('W3M_DIR',str(root))
+    overlay=web.w3m_keymap(tmp_path)
+    assert overlay.read_text().startswith(original.read_text())
+    assert config.read_text()=='keymap_file alternate\n'
+    assert original.read_text()=='keymap z NEXT_PAGE\n'
+
+
+def test_tags_preference_roundtrips_without_legacy_migration(tmp_path,monkeypatch):
+    monkeypatch.setattr(web,'folder',lambda:tmp_path)
+    assert not web.load_state().get('tags',False)
+    data={'browser':'w3m','bookmarks':[],'tags':True}
+    web.save_state(data)
+    assert web.load_state()==data
