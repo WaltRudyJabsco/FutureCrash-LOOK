@@ -10,6 +10,9 @@ from look.notebook_core import Notebook
 @pytest.fixture
 def terminal(monkeypatch,tmp_path):
     monkeypatch.chdir(tmp_path)
+    import notebook as runtime_notebook
+    monkeypatch.setattr(runtime_notebook,'Notebook',lambda:Notebook(tmp_path/'web-notes'))
+    monkeypatch.setattr(web_desk,'folder',lambda:tmp_path/'web')
     monkeypatch.setattr(notebook.sys,'stdin',SimpleNamespace(fileno=lambda:0))
     monkeypatch.setattr(notebook.termios,'tcgetattr',lambda *args:None)
     monkeypatch.setattr(notebook.termios,'tcsetattr',lambda *args:None)
