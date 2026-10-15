@@ -1,3 +1,8 @@
+## Web Notebook home
+
+- Open an editable Notebook-backed Web home with Markdown headings, links, related notes, bookmark capture and home-note selection. Preserve legacy bookmarks and normal Note revision/conflict handling.
+- Add w3m Shift-arrow page/ends support through a scoped terminal bridge; keep browser hint controls and native input.
+
 ## Web reading and link tags
 
 - Start numbered browsers in clean reading mode; add remembered desk `t` preference and `--tags on/off`.

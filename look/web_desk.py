@@ -19,7 +19,7 @@ import terminal_style
 
 BROWSERS = ('w3m', 'lynx', 'links', 'links2', 'chawan', 'qutebrowser')
 GUIDES = {
-    'w3m': 'Esc-h tags on/off · number then Esc-j selects · Tab link · Enter open · B back · q quit',
+    'w3m': 'Shift-↑↓ page · Shift-←→ top/end · Esc-h tags on/off · number then Esc-j selects · Tab link · Enter open · B back · q quit',
     'lynx': 'o options → Keypad mode · number + Enter open · ← back · g address · q quit',
     'links': 'Esc menu → View → HTML options → Links are numbered · number + Enter open · ← back · g address · q quit',
     'links2': 'Esc menu → View → HTML options → Links are numbered · number + Enter open · ← back · g address · q quit',
@@ -99,6 +99,8 @@ def load_state():
     browser = data.get('browser', '')
     result={'browser': browser if isinstance(browser, str) and browser in BROWSERS else '', 'bookmarks': bookmarks}
     if isinstance(data.get('tags'),bool):result['tags']=data['tags']
+    identity=data.get('home_note')
+    if isinstance(identity,str) and len(identity)==32 and all(c in '0123456789abcdef' for c in identity):result['home_note']=identity
     return result
 
 
@@ -119,14 +121,43 @@ def note_link(row):
     return '[' + title + '](' + url + ')'
 
 
-def home_page(state):
+def note_record(store,identity):
+    rows=[row for row in store.list(include_done=True) if row['id']==identity]
+    return rows[0] if len(rows)==1 and not rows[0]['conflict'] else None
+
+
+def home_note(state,store,replace_missing=False):
+    identity=state.get('home_note')
+    if identity and not replace_missing:return note_record(store,identity)
+    body='Web Home\n\nYour reading desk. Press e to edit; add headings, links and your own notes.\n\n## News\n[Google News](https://news.google.com/)\n\n## Reading\n'
+    rows=state.get('bookmarks',[])
+    body+='\n'.join(note_link(row) for row in rows)
+    body+='\n\n'+ '\n'.join(note_link({'title':title,'url':url}) for title,url,_ in SHELF)
+    identity=store.create(body,project='Web')['note']
+    state['home_note']=identity;save_state(state)
+    return note_record(store,identity)
+
+
+def home_page(state, row=None):
     palette = terminal_style.list_colors()['_palette']
     rows = [(r['title'], r['url'], 'Your bookmark') for r in state['bookmarks']] + list(SHELF)
+    if row is not None:
+        import notebook_markdown
+        rows=[]
+        for label,target in notebook_markdown.extract_links(row['body']):
+            if not target.startswith(('https://','http://')):continue
+            try:rows.append((label,address(target),'From your home note'))
+            except ValueError:continue
+    prose=''
+    if row is not None:
+        import re
+        text='\n'.join(re.sub(r'\x1b\[[0-9;]*m','',line).rstrip() for line in notebook_markdown.render(row['body'],90))
+        prose='<pre style="white-space:pre-wrap">'+html.escape(text)+'</pre>'
     cards = ''.join('<li><a href="' + html.escape(url, quote=True) + '">' + html.escape(title) + '</a><p>' + html.escape(description) + '</p></li>' for title, url, description in rows)
     return f'''<!doctype html><html lang="en"><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>LOOK · Reading Desk</title>
 <style>body{{background:{palette['background']};color:{palette['foreground']};font:18px/1.7 monospace;max-width:850px;margin:8vh auto;padding:0 24px}}a{{color:{palette['color4']};}}a:focus{{background:{palette['selection_background']};color:{palette['selection_foreground']};}}h1{{font-size:2.8em;line-height:1.1}}small,p{{opacity:.8}}ul{{list-style:none;padding:0}}li{{border-top:1px solid {palette['color8']};padding:18px 0}}li p{{margin:4px 0;font-size:.85em}}input,button{{font:inherit;padding:8px;background:{palette['background']};color:{palette['foreground']};border:1px solid {palette['color8']};}}</style>
 <header><small>LOOK / THE READING DESK</small><h1>The web.<br>At your fingertips.</h1><p>One link, then another. Take the scenic route.</p></header>
-<form action="https://html.duckduckgo.com/html/" method="get"><label>Search <input name="q" aria-label="Search the web"></label><button>Go</button></form><ul>{cards}</ul>
+{prose}<form action="https://html.duckduckgo.com/html/" method="get"><label>Search <input name="q" aria-label="Search the web"></label><button>Go</button></form><ul>{cards}</ul>
 <footer><small>Qutebrowser: f → letters opens a link. Chawan: f → letters → Enter.<br>Return to your terminal for lk web and your Notebook links.</small></footer></html>'''
 
 
@@ -145,8 +176,44 @@ def w3m_keymap(directory):
     overlay=Path(directory)/'keymap'
     # Enter follows normally, then restores clean reading; numbered selection uses w3m prefixes.
     overlay.write_text(original+'\nkeymap M-h COMMAND "SET_OPTION display_link_number=toggle; RESHAPE"\n'
-                       +'keymap M-j LINK_N\nkeymap C-m COMMAND "GOTO_LINK; SET_OPTION display_link_number=0; RESHAPE"\nkeymap C-j COMMAND "GOTO_LINK; SET_OPTION display_link_number=0; RESHAPE"\n')
+                       +'keymap M-j LINK_N\nkeymap M-[5~ PREV_PAGE\nkeymap M-[6~ NEXT_PAGE\nkeymap M-[H BEGIN\nkeymap M-[F END\nkeymap C-m COMMAND "GOTO_LINK; SET_OPTION display_link_number=0; RESHAPE"\nkeymap C-j COMMAND "GOTO_LINK; SET_OPTION display_link_number=0; RESHAPE"\n')
     return overlay
+
+
+SHIFT_NAVIGATION={b'\x1b[1;2A':b'\x1b[5~',b'\x1b[1;2B':b'\x1b[6~',
+                  b'\x1b[1;2D':b'\x1b[H',b'\x1b[1;2C':b'\x1b[F'}
+
+
+def navigation_bytes(data):
+    for source,target in SHIFT_NAVIGATION.items():data=data.replace(source,target)
+    return data
+
+
+def run_w3m(args):
+    """Bridge four modified arrows that w3m's legacy key decoder cannot parse."""
+    import pty,select,signal,fcntl,termios
+    master=None
+    def resize(*_):
+        if master is not None:
+            try:fcntl.ioctl(master,termios.TIOCSWINSZ,fcntl.ioctl(sys.stdin.fileno(),termios.TIOCGWINSZ,b'\0'*8))
+            except OSError:pass
+    def output(fd):
+        nonlocal master
+        if master is None:master=fd;resize()
+        return os.read(fd,65536)
+    def input_bytes(fd):
+        data=os.read(fd,4096)
+        # Escape sequences can cross reads. Wait briefly only for an incomplete
+        # modified-arrow prefix; all other browser input passes through unchanged.
+        while data and any(data.endswith(key[:n]) for key in SHIFT_NAVIGATION for n in range(1,len(key))):
+            if not select.select([fd],[],[],.04)[0]:break
+            chunk=os.read(fd,4096)
+            if not chunk:break
+            data+=chunk
+        return navigation_bytes(data)
+    previous=signal.signal(signal.SIGWINCH,resize)
+    try:return os.waitstatus_to_exitcode(pty.spawn(args,master_read=output,stdin_read=input_bytes))
+    finally:signal.signal(signal.SIGWINCH,previous)
 
 
 def launch(name, executable, url, styled=True, tags=False):
@@ -171,112 +238,129 @@ def launch(name, executable, url, styled=True, tags=False):
                 palette = terminal_style.list_colors()['_palette']
                 light = terminal_style.luminance(palette['background']) > .5
                 args += ['-html-ignore-document-color', '1', '-html-text-color', '0' if light else '7', '-html-background-color', '7' if light else '0', '-html-link-color', '4' if light else '6']
+        if name=='w3m' and sys.stdin.isatty() and sys.stdout.isatty():return run_w3m([*args,url])
         result = subprocess.run([*args, url], check=False)
         return result.returncode
 
 
 def desk(state, browsers, read_key, styled):
     import look_renderer
-    fd = sys.stdin.fileno()
-    old = termios.tcgetattr(fd)
-    names = list(browsers)
-    name = state.get('browser') if state.get('browser') in browsers else names[0] if names else ''
-    index = 0
-    notice = ''
-    pane_help = False
-    colors = terminal_style.list_colors()
-    def prompt(label, initial=''):
-        termios.tcsetattr(fd, termios.TCSADRAIN, old)
-        sys.stdout.write('\033[?25h')
+    import notebook
+    store=notebook.Notebook()
+    home=home_note(state,store)
+    current=home;stack=[];index=0;top=0;notice='';help_open=False;pane_help=False
+    fd=sys.stdin.fileno();old=termios.tcgetattr(fd)
+    names=list(browsers)
+    name=state.get('browser') if state.get('browser') in browsers else next(iter(browsers),'')
+    colors=terminal_style.list_colors()
+
+    def prompt(label,initial=''):
+        termios.tcsetattr(fd,termios.TCSADRAIN,old);sys.stdout.write('\033[?25h')
+        try:return look_renderer.prompt_line(label+' › ',initial=initial)
+        finally:tty.setcbreak(fd);sys.stdout.write('\033[?25l')
+
+    def open_target(target):
+        nonlocal current,index,top,notice
+        kind,value=notebook.resolve_link(store,current,target)
+        if kind=='note':
+            stack.append(current['id']);current=value;index=top=0;return
+        if kind=='command' and not notebook.confirm_command(fd,read_key,value):return
+        termios.tcsetattr(fd,termios.TCSADRAIN,old);sys.stdout.write('\033[?25h');sys.stdout.flush()
         try:
-            return look_renderer.prompt_line(label + ' › ', initial=initial)
-        finally:
-            tty.setcbreak(fd)
-            sys.stdout.write('\033[?25l')
+            if kind=='url':
+                if not name:raise ValueError('Install a browser; b selects installed browsers')
+                code=launch(name,browsers[name],address(value),styled,tags=state.get('tags',False))
+                notice='Back at your reading desk' if not code else 'Browser exited with status '+str(code)
+            elif kind=='command':notice='Command exited '+str(notebook.run_note_command(value))
+            else:notebook.open_link(kind,value);notice='Back at your reading desk'
+        finally:tty.setcbreak(fd);sys.stdout.write('\033[?25l')
+
     try:
         tty.setcbreak(fd)
         while True:
-            rows = state['bookmarks'] + [{'title': title, 'url': url, 'description': desc} for title, url, desc in SHELF]
-            width, height = shutil.get_terminal_size((100, 30))
-            width = max(24, width)
-            index = min(index, len(rows) - 1)
-            header = [colors['CYAN'] + 'LOOK / THE READING DESK\033[0m', '  The web. At your fingertips.', '']
-            def ink(text, role):
-                return [colors[role] + line + '\033[0m' for line in textwrap.wrap(text, width=width)]
-            header += ink(name + (' · graphical window' if name == 'qutebrowser' else ' · inside this terminal') if name else 'No supported browser installed', 'GREEN')
-            header += ink('TAGS '+('on' if state.get('tags',False) else 'off')+' · t toggles launch preference' if name not in {'chawan','qutebrowser'} else 'TAGS on demand · f shows, Esc cancels', 'GRAY')
-            header += (terminal_style.command_lines(GUIDES[name],width,colors=colors) if name in GUIDES else ink('Install w3m, Lynx, Links, Chawan or qutebrowser; reopen lk web.','GRAY')) + ['']
-            footer = [''] + terminal_style.command_lines('↑↓ choose · Shift-arrows page/ends · Enter read · b browser · u URL · s search',width,colors=colors)
-            footer += terminal_style.command_lines('t tags on/off · W shell pane · a bookmark · y copy Notebook link · h home page · q/Esc exit',width,colors=colors)
-            if pane_help:footer += terminal_style.command_lines(' · '.join(terminal_style.pane_shortcuts()),width,colors=colors)
-            footer += ink(clean(notice), 'YELLOW') or ['']
-            page_size = max(1, (height - len(header) - len(footer) - 1) // 2)
-            top = max(0, index - page_size + 1)
-            lines = list(header)
-            for number, row in enumerate(rows[top:top + page_size], top):
-                label = ('› ' if number == index else '  ') + clean(row['title'])
-                lines.append(terminal_style.list_row(label, width, number, number == index, colors))
-                lines.append(colors['GRAY'] + '  ' + clean(row['url'])[:width-2] + '\033[0m')
-            lines += footer
-            sys.stdout.write('\033[H\033[2J\033[?25l' + '\n'.join(lines) + '\n')
-            sys.stdout.flush()
-            key = read_key(fd,1)
+            # Notebook owns revisions/conflicts; never cache a second editable copy.
+            if current:current=note_record(store,current['id'])
+            width,height=shutil.get_terminal_size((100,30));width=max(24,width-1)
+            links=[]
+            body=notebook.render_markdown(current['body'],width,links) if current else ['Home note missing or conflicted. Press n to choose a note, or e to create a new home.']
+            body=[line.replace('38;5;117',colors['CYAN'][2:-1]) for line in body]
+            index=max(0,min(index,max(0,len(links)-1)))
+            controls='↑↓ links · Shift-↑↓ read page · Shift-←→ first/last · Enter open · l links'
+            actions='e edit note · n choose home · a bookmark · h home · r related · y copy link'
+            settings='b browser · t tags · u URL · s search · W shell pane · ? help · q/Esc back'
+            footer=[]
+            for text in (controls,actions,settings):footer+=terminal_style.command_lines(text,width,colors=colors)
+            if help_open:footer+=terminal_style.command_lines(GUIDES.get(name,'No browser installed · lk web list'),width,colors=colors)
+            if pane_help:footer+=terminal_style.command_lines(' · '.join(terminal_style.pane_shortcuts()),width,colors=colors)
+            page=max(1,height-len(footer)-6)
+            top=max(0,min(top,max(0,len(body)-page)))
+            title=clean(current['title']) if current else 'Choose your home'
+            header=[colors['CYAN']+'LOOK / THE READING DESK\033[0m · '+title,
+                    colors['GRAY']+(name or 'No browser')+' · '+('graphical' if name=='qutebrowser' else 'terminal')+' · tags '+('on demand' if name in {'chawan','qutebrowser'} else 'on' if state.get('tags',False) else 'off')+' · '+('HOME' if current and current['id']==state.get('home_note') else 'NOTE')+'\033[0m',
+                    '─'*width]
+            lines=header
+            token=' ['+str(index+1)+']'
+            for number,line in enumerate(body[top:top+page],top):
+                focused=bool(links and token in look_renderer.strip_ansi(line))
+                lines.append(terminal_style.list_row(line,width,number,True,colors) if focused else line)
+            lines+=['']*max(0,page-len(body[top:top+page]))
+            selected=(str(index+1)+' / '+str(len(links))+' · '+clean(links[index][0])+' · '+clean(links[index][1] if isinstance(links[index][1],str) else 'command — confirmation required')) if links else 'No links yet · e edits Markdown · a adds a bookmark'
+            lines+=[colors['GRAY']+selected+'\033[0m',*footer,colors['YELLOW']+clean(notice)+'\033[0m']
+            sys.stdout.write('\033[H\033[2J\033[?25l'+'\n'.join(look_renderer.fit(line,width) for line in lines)+'\033[J');sys.stdout.flush()
+            key=read_key(fd,1)
             if not key:continue
-            notice = ''
-            if key in {'q', 'esc', '\x03'}:
-                return 0
-            if key == 'W':
-                notice = terminal_style.open_pane(Path.cwd())
-                if notice.startswith('Shell opened beside LOOK'):pane_help = True
-            elif key == 'up':index = max(0, index-1)
-            elif key == 'down':index = min(len(rows)-1, index+1)
-            elif key in {'shiftup', 'pageup'}:index = max(0, index-page_size)
-            elif key in {'shiftdown', 'pagedown'}:index = min(len(rows)-1, index+page_size)
-            elif key in {'shiftleft', 'home'}:index = 0
-            elif key in {'shiftright', 'end'}:index = len(rows)-1
-            elif key == 'b' and names:
-                name = names[(names.index(name)+1) % len(names)]
-                state['browser'] = name
-                save_state(state)
-            elif key == 't':
-                state['tags']=not state.get('tags',False)
-                save_state(state)
-                notice='Numbered browsers start with tags '+('on' if state['tags'] else 'off')+' · letter-hint browsers stay on demand'
-            elif key == 'y':
-                notice = 'Notebook link copied' if look_renderer.copy_text(note_link(rows[index])) else 'Clipboard unavailable'
-            elif key in {'u', 's', 'a', 'h', '\r', '\n'}:
-                try:
-                    if key in {'u', 's', 'a'}:
-                        value, cancelled = prompt('Search words' if key == 's' else 'Web address')
-                        if cancelled or not value.strip():continue
-                        url = search_url(value) if key == 's' else address(value)
-                        if key == 'a':
-                            title, cancelled = prompt('Bookmark name', urlsplit(url).hostname or '')
-                            if cancelled:continue
-                            state['bookmarks'].append({'title': clean(title) or url, 'url': url})
-                            save_state(state)
-                            index = len(state['bookmarks'])-1
-                            continue
-                    elif key == 'h':
-                        folder().mkdir(parents=True, exist_ok=True)
-                        page = folder() / 'home.html'
-                        page.write_text(home_page(state))
-                        url = page.as_uri()
-                    else:url = rows[index]['url']
-                    if not name:
-                        notice = 'Install a browser first; bookmarks and copying still work'
-                        continue
-                    termios.tcsetattr(fd, termios.TCSADRAIN, old)
-                    sys.stdout.write('\033[?25h');sys.stdout.flush()
-                    code = launch(name, browsers[name], url, styled, tags=state.get('tags',False))
-                    notice = 'Back at your reading desk' if not code else 'Browser exited with status ' + str(code)
-                except (ValueError, OSError) as exc:
-                    notice = str(exc)
-                finally:
-                    tty.setcbreak(fd)
+            notice=''
+            try:
+                if key in {'q','\x03'}:return 0
+                if key=='esc':
+                    if stack:current=note_record(store,stack.pop());index=top=0;continue
+                    return 0
+                if key in {'up','down','\t'}:
+                    index=max(0,min(len(links)-1,index+(-1 if key=='up' else 1)))
+                    token=' ['+str(index+1)+']'
+                    location=next((i for i,line in enumerate(body) if token in look_renderer.strip_ansi(line)),top)
+                    if location<top:top=location
+                    elif location>=top+page:top=location-page+1
+                elif key in {'shiftup','pageup'}:top-=page
+                elif key in {'shiftdown','pagedown',' '}:top+=page
+                elif key in {'shiftleft','home'}:index=top=0
+                elif key in {'shiftright','end'}:index=max(0,len(links)-1);top=max(0,len(body)-page)
+                elif key=='?':help_open=not help_open
+                elif key=='W':notice=terminal_style.open_pane(Path.cwd());pane_help=notice.startswith('Shell opened beside LOOK')
+                elif key=='b' and names:
+                    name=names[(names.index(name)+1)%len(names)];state['browser']=name;save_state(state)
+                elif key=='t':state['tags']=not state.get('tags',False);save_state(state)
+                elif key=='h':current=home_note(state,store);stack=[];index=top=0
+                elif key=='n':
+                    chosen=notebook.choose_note(store,fd,read_key)
+                    if chosen:
+                        state['home_note']=chosen['id'];save_state(state);current=chosen;stack=[];index=top=0
+                elif key=='e':
+                    if current:notice=notebook.quick_edit(store,current,fd,read_key)
+                    else:current=home_note(state,store,replace_missing=True);notice='Created Web Home in Notes'
+                elif key in {'u','s','a'}:
+                    value,cancelled=prompt('Search words' if key=='s' else 'Web address')
+                    if cancelled or not value.strip():continue
+                    url=search_url(value) if key=='s' else address(value)
+                    if key=='a':
+                        title,cancelled=prompt('Bookmark name',urlsplit(url).hostname or '')
+                        if cancelled:continue
+                        home=home_note(state,store)
+                        if not home:raise ValueError('Choose a home note first with n')
+                        store.change(home['id'],{'body':home['body'].rstrip()+'\n\n'+note_link({'title':title or url,'url':url})+'\n'},expected=home['revision'])
+                        notebook.nudge_sync();notice='Bookmark added to home note'
+                    else:open_target(url)
+                elif key=='y' and links:
+                    label,target=links[index]
+                    if not isinstance(target,str):raise ValueError('Edit the note to copy a command block')
+                    notice='Notebook link copied' if look_renderer.copy_text(notebook.make_link(label,target)) else 'Clipboard unavailable'
+                elif key=='r' and not current:notice='Choose a home note first with n'
+                elif key in {'l','r'} or key in {'\r','\n'} and links or len(key)==1 and key in '123456789' and int(key)<=len(links):
+                    target=notebook.choose_link(fd,read_key,notebook.related_notes(store,current) if key=='r' else links,'RELATED NOTES' if key=='r' else 'HOME LINKS') if key in {'l','r'} else links[int(key)-1 if key in '123456789' else index][1]
+                    if target is not None:open_target(target)
+            except (OSError,ValueError,RuntimeError,subprocess.SubprocessError) as exc:notice=clean(str(exc))
     finally:
-        termios.tcsetattr(fd, termios.TCSADRAIN, old)
-        sys.stdout.write('\033[0m\033[?25h\n');sys.stdout.flush()
+        termios.tcsetattr(fd,termios.TCSADRAIN,old);sys.stdout.write('\033[0m\033[?25h\n');sys.stdout.flush()
 
 
 def main(args=None, *, read_key=None):
@@ -301,7 +385,10 @@ def main(args=None, *, read_key=None):
             if options.target == ['home']:
                 folder().mkdir(parents=True, exist_ok=True)
                 page = folder() / 'home.html'
-                page.write_text(home_page(state))
+                from notebook_core import Notebook
+                row=home_note(state,Notebook())
+                if row is None:raise ValueError('Home note missing/conflicted; open lk web and press n to choose a note')
+                page.write_text(home_page(state,row))
                 url = page.as_uri()
             elif options.target[0] == 'search':url = search_url(' '.join(options.target[1:]))
             elif len(options.target) == 1:url = address(options.target[0])
