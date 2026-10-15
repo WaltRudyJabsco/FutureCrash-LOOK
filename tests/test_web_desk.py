@@ -183,34 +183,6 @@ def test_export_does_not_turn_local_or_note_links_into_web_addresses(monkeypatch
     assert 'href="https://example.org/"' in text and '&lt;script&gt;' in text
 
 
-def test_navigation_translation_leaves_unmodified_input_and_utf8_unchanged():
-    original='café'.encode()+b'\x1b[A\x1b[D\x1bh'
-    assert web.navigation_bytes(original)==original
-    assert web.navigation_bytes(b'\x1b[1;2A\x1b[1;2B\x1b[1;2D\x1b[1;2C')==b'\x1b[5~\x1b[6~\x1b[H\x1b[F'
-
-
-def test_w3m_bridge_handles_fragmented_shift_keys_and_restores_terminal(tmp_path):
-    import os,pty,select,time,fcntl,termios,struct
-    child=tmp_path/'child.py';result=tmp_path/'input.bin'
-    child.write_text('import os,tty,sys\nfrom pathlib import Path\ntty.setraw(0)\nprint("READY",flush=True)\ndata=b""\nwhile not data.endswith(b"END"):\n data+=os.read(0,4096)\nPath(sys.argv[1]).write_bytes(data)\n')
-    script='import sys;sys.path.insert(0,'+repr(str(ROOT/'look'))+');import web_desk;raise SystemExit(web_desk.run_w3m([sys.executable,'+repr(str(child))+','+repr(str(result))+']))'
-    master,slave=pty.openpty();fcntl.ioctl(slave,termios.TIOCSWINSZ,struct.pack('HHHH',24,72,0,0))
-    proc=subprocess.Popen([sys.executable,'-c',script],stdin=slave,stdout=slave,stderr=slave)
-    try:
-        output=b'';deadline=time.monotonic()+5
-        while b'READY' not in output and time.monotonic()<deadline:
-            if select.select([master],[],[],.1)[0]:output+=os.read(master,65536)
-        assert b'READY' in output
-        os.write(master,b'\x1b[1;');time.sleep(.01)
-        os.write(master,b'2B\x1b[1;2A\x1b[1;2D\x1b[1;2C'+ 'café'.encode()+b'\x1b[AEND')
-        assert proc.wait(timeout=5)==0
-        assert result.read_bytes()==b'\x1b[6~\x1b[5~\x1b[H\x1b[F'+'café'.encode()+b'\x1b[AEND'
-        assert termios.tcgetattr(slave)[3]&termios.ICANON
-    finally:
-        if proc.poll() is None:proc.kill();proc.wait()
-        os.close(master);os.close(slave)
-
-
 def test_desk_can_choose_edit_and_bookmark_an_existing_note(tmp_path,monkeypatch):
     import io,os
     import notebook
@@ -241,3 +213,17 @@ def test_desk_can_choose_edit_and_bookmark_an_existing_note(tmp_path,monkeypatch
     row=web.note_record(store,other)
     assert state['home_note']==other
     assert 'My annotation' in row['body'] and '[New bookmark](https://example.net)' in row['body']
+
+
+def test_w3m_overlay_preserves_native_and_personal_navigation(tmp_path,monkeypatch):
+    personal=tmp_path/'personal';personal.mkdir()
+    source=personal/'keymap'
+    original='keymap LEFT BACK\nkeymap RIGHT GOTO_LINK\nkeymap M-[H BEGIN\n'
+    source.write_text(original)
+    monkeypatch.setenv('W3M_DIR',str(personal))
+    overlay=web.w3m_keymap(tmp_path).read_text()
+    assert overlay.startswith(original)
+    appended=overlay[len(original):]
+    assert not any(token in appended for token in ('LEFT','RIGHT','PREV_PAGE','NEXT_PAGE','BEGIN','END'))
+    assert 'keymap M-h COMMAND' in appended
+    assert source.read_text()==original

@@ -1,3 +1,8 @@
+## Restore native w3m navigation
+
+- Remove the Shift-arrow terminal bridge and page/Home/End overrides. Pass input directly to w3m and preserve personal arrow/history bindings.
+- Keep the Notebook-backed Web home and link-tag controls. Reopen the browser to use native input again.
+
 ## Web Notebook home
 
 - Open an editable Notebook-backed Web home with Markdown headings, links, related notes, bookmark capture and home-note selection. Preserve legacy bookmarks and normal Note revision/conflict handling.

@@ -19,7 +19,7 @@ import terminal_style
 
 BROWSERS = ('w3m', 'lynx', 'links', 'links2', 'chawan', 'qutebrowser')
 GUIDES = {
-    'w3m': 'Shift-↑↓ page · Shift-←→ top/end · Esc-h tags on/off · number then Esc-j selects · Tab link · Enter open · B back · q quit',
+    'w3m': 'Esc-h tags on/off · number then Esc-j selects · Tab link · Enter open · B back · q quit',
     'lynx': 'o options → Keypad mode · number + Enter open · ← back · g address · q quit',
     'links': 'Esc menu → View → HTML options → Links are numbered · number + Enter open · ← back · g address · q quit',
     'links2': 'Esc menu → View → HTML options → Links are numbered · number + Enter open · ← back · g address · q quit',
@@ -176,44 +176,9 @@ def w3m_keymap(directory):
     overlay=Path(directory)/'keymap'
     # Enter follows normally, then restores clean reading; numbered selection uses w3m prefixes.
     overlay.write_text(original+'\nkeymap M-h COMMAND "SET_OPTION display_link_number=toggle; RESHAPE"\n'
-                       +'keymap M-j LINK_N\nkeymap M-[5~ PREV_PAGE\nkeymap M-[6~ NEXT_PAGE\nkeymap M-[H BEGIN\nkeymap M-[F END\nkeymap C-m COMMAND "GOTO_LINK; SET_OPTION display_link_number=0; RESHAPE"\nkeymap C-j COMMAND "GOTO_LINK; SET_OPTION display_link_number=0; RESHAPE"\n')
+                       +'keymap M-j LINK_N\nkeymap C-m COMMAND "GOTO_LINK; SET_OPTION display_link_number=0; RESHAPE"\nkeymap C-j COMMAND "GOTO_LINK; SET_OPTION display_link_number=0; RESHAPE"\n')
     return overlay
 
-
-SHIFT_NAVIGATION={b'\x1b[1;2A':b'\x1b[5~',b'\x1b[1;2B':b'\x1b[6~',
-                  b'\x1b[1;2D':b'\x1b[H',b'\x1b[1;2C':b'\x1b[F'}
-
-
-def navigation_bytes(data):
-    for source,target in SHIFT_NAVIGATION.items():data=data.replace(source,target)
-    return data
-
-
-def run_w3m(args):
-    """Bridge four modified arrows that w3m's legacy key decoder cannot parse."""
-    import pty,select,signal,fcntl,termios
-    master=None
-    def resize(*_):
-        if master is not None:
-            try:fcntl.ioctl(master,termios.TIOCSWINSZ,fcntl.ioctl(sys.stdin.fileno(),termios.TIOCGWINSZ,b'\0'*8))
-            except OSError:pass
-    def output(fd):
-        nonlocal master
-        if master is None:master=fd;resize()
-        return os.read(fd,65536)
-    def input_bytes(fd):
-        data=os.read(fd,4096)
-        # Escape sequences can cross reads. Wait briefly only for an incomplete
-        # modified-arrow prefix; all other browser input passes through unchanged.
-        while data and any(data.endswith(key[:n]) for key in SHIFT_NAVIGATION for n in range(1,len(key))):
-            if not select.select([fd],[],[],.04)[0]:break
-            chunk=os.read(fd,4096)
-            if not chunk:break
-            data+=chunk
-        return navigation_bytes(data)
-    previous=signal.signal(signal.SIGWINCH,resize)
-    try:return os.waitstatus_to_exitcode(pty.spawn(args,master_read=output,stdin_read=input_bytes))
-    finally:signal.signal(signal.SIGWINCH,previous)
 
 
 def launch(name, executable, url, styled=True, tags=False):
@@ -238,7 +203,6 @@ def launch(name, executable, url, styled=True, tags=False):
                 palette = terminal_style.list_colors()['_palette']
                 light = terminal_style.luminance(palette['background']) > .5
                 args += ['-html-ignore-document-color', '1', '-html-text-color', '0' if light else '7', '-html-background-color', '7' if light else '0', '-html-link-color', '4' if light else '6']
-        if name=='w3m' and sys.stdin.isatty() and sys.stdout.isatty():return run_w3m([*args,url])
         result = subprocess.run([*args, url], check=False)
         return result.returncode
 

@@ -1227,11 +1227,10 @@ capabilities from a graphical browser or a browser-engine-backed terminal viewer
 
 ## w3m navigation keys
 
-When launched through `lk web`, w3m accepts LOOK's Shift-Up/Down for page movement
-and Shift-Left/Right for beginning/end. A small terminal bridge translates those
-four modified-arrow sequences to Page Up/Down and Home/End, preserving ordinary
-arrows, typed input and the terminal's normal settings on exit. Resizes propagate
-to the browser. No Kitty, shell or system key configuration is modified.
+Once a page opens, w3m receives keyboard input directly. LOOK does not translate
+arrow or Shift-arrow sequences or override page/Home/End navigation. Native and
+personal browser bindings remain in effect. The desk itself retains LOOK's
+arrow/Shift-arrow navigation. Link-tag shortcuts remain available in w3m.
 
 ARCHITECTURE DESIGN REFERENCE (NOT EXECUTABLE CAPABILITIES)
 
