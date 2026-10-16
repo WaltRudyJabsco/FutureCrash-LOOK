@@ -27,6 +27,13 @@ header always shows sorting and image/ASCII mode; the selected item's source sit
 below the list. Wide terminals show quiet artwork/video stills beside the list;
 narrow terminals retain the list and selected details. Previews never autoplay.
 
+In `lk tv`, **Shift-O** opens with a local application and **Shift-T** hands the
+focused video to Apple TV on macOS. A remote source uses the existing explicit
+temporary/keep copy review before handoff; no transfer starts from a preview.
+Authorization/playback of protected purchases still belongs to Apple TV. Linux
+reports the Mac requirement without attempting a transfer. These keys remain
+actions while editing TV search, and apply to the focused item.
+
 Use **Shift-F** to cycle sorting, **Shift-G** to reverse, **Shift-M** to toggle
 image/ASCII, **Shift-L/Q** for library/queue, **Shift-E** for metadata, and **Tab**
 to mark. Enter plays; **Shift-B** adds to the queue. `/` edits search; Escape

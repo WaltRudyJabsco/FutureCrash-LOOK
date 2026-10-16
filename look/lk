@@ -1656,6 +1656,8 @@ MEDIA
   lk player            tiny live miniplayer over LOOK MediaSession
   lk mp                audio library + queue + player
   lk tv                movies, TV + video player
+  lk transcribe FILE   offline file transcription (optional setup)
+  lk dictate           microphone to text; Ctrl-C finishes
   lk albert            open Albert quiet Fabric surface
   lk albert url        print the iPad/tailnet URL
   lk albert qr         show QR when qrencode is available
@@ -14363,6 +14365,9 @@ def _settings_rows():
         ("sound","FEEL","Feedback sound",_load_feedback()["sound"],
          "Receipt-driven sounds: subtle confirms meaningful completion/error; expressive also voices lighter accepted events.",
          "sound audio beep feedback quiet subtle expressive receipts"),
+        ("transcription","SPEECH","Local speech input","optional",
+         "Offline Phonon-2 transcription and dictation; setup downloads runtime/model explicitly. Alternate local servers supported.",
+         "transcribe dictation microphone speech input phonon whisper parakeet"),
         ("voice","SPEECH","Default voice",_load_speech_config()["voice"],
          "Shared Fabric speech voice used by LOOK, LO and local speech endpoints unless a personality voice is enabled.",
          "speech voice audio talk albert warm crisp deep max philosopher pirate"),
@@ -14620,6 +14625,9 @@ def _settings_action(key):
     if key=="key": return ollama_key([])
     if key=="share": return _settings_share_menu()
     if key=="sound": return _settings_pick_sound()
+    if key=="transcription":
+        import transcription
+        return _settings_pick_choice("local speech input","status",[("status","inspect optional engine"),("setup","download runtime (~1.3 GB on tested Mac) + English model/cache")],lambda args:transcription.main(args))
     if key=="voice": return _settings_pick_voice()
     if key=="personalityvoices": return _settings_pick_personality_voices()
     if key=="voicepreview": return _voice_command(["preview"])
@@ -19723,7 +19731,7 @@ def _media_player_library(initial_query="",media_kind="audio"):
                 right_w=min(40,max(28,width//3)) if width>=96 else 0
                 left_w=width-right_w-3 if right_w else width
                 controls="↑↓ select · Shift-arrows page/ends · Tab mark · A select all · E edit · R refresh · C clear marks · Enter play · B add queue · D hide dir · L library · Q queue"
-                extra="F sort · G reverse · / search · v visuals · M image/ASCII · Esc finish/clear/exit"
+                extra=("O open with · T Apple TV · " if media_kind=="video" else "")+"F sort · G reverse · / search · v visuals · M image/ASCII · Esc finish/clear/exit"
                 footer=_media_hints(controls,width)+"\n"+_media_hints(extra,width)
                 list_rows=max(1,height-12-len(footer.splitlines()))
                 top=max(0,min(max(0,len(visible)-list_rows),idx-list_rows+1))
@@ -19848,7 +19856,7 @@ def _media_player_library(initial_query="",media_kind="audio"):
                 if key in {"\x7f","\b"}:
                     if query: query=query[:-1]; idx=0; view_key=None
                     continue
-                if len(key)==1 and key.isprintable() and key not in "ABCDLQJKERMFG":
+                if len(key)==1 and key.isprintable() and key not in "ABCDLQJKERMFG"+("OT" if media_kind=="video" else ""):
                     query+=key; idx=0; view_key=None
                     continue
                 # Arrow/Tab/action keys leave editing and operate on this view.
@@ -19863,6 +19871,15 @@ def _media_player_library(initial_query="",media_kind="audio"):
                     if key=="F":sort_mode=(sort_mode+1)%len(MEDIA_FIND_SORTS)
                     else:reverse_sort=not reverse_sort
                     idx=0;notice="Sort: "+MEDIA_FIND_SORTS[sort_mode]+(" · reversed" if reverse_sort else "")
+                continue
+            if key in {"O","T"} and media_kind=="video" and chosen:
+                native_preview.invalidate()
+                termios.tcsetattr(fd,termios.TCSADRAIN,old)
+                try:
+                    opened,message=_media_open_with(chosen,'TV' if key=='T' else None)
+                    notice=message or ('Opened in selected app' if opened else 'Open with cancelled')
+                except (OSError,ValueError,RuntimeError) as exc:notice=str(exc)
+                finally:tty.setcbreak(fd)
                 continue
             if key=="M":
                 native_images=not native_images;notice=("Preview: Auto image" if native_preview.enabled else "Preview: ASCII · native images need Kitty/iTerm and LOOK_NATIVE_PREVIEW enabled") if native_images else "Preview: ASCII";continue
@@ -20668,6 +20685,8 @@ _COMMANDS = [
     ("lk player", "", "media", "Live LOOK miniplayer"),
     ("lk mp", "[QUERY]", "media", "Fabric audio library, queue and player"),
     ("lk tv", "[QUERY]", "media", "Fabric movies, TV and video player"),
+    ("lk transcribe", "[FILE|status|setup|configure] [OPTIONS]", "media", "Optional local speech-to-text"),
+    ("lk dictate", "[OPTIONS]", "media", "Explicit local microphone dictation"),
     ("lk albert", "[url|qr|ipad]", "fabric", "Open/share Albert browser surface"),
     ("mm", "", "media", "Toggle media playback", "lk media toggle"),
     ("mn", "", "media", "Next media item", "lk media next"),
@@ -22025,6 +22044,9 @@ def main():
             return media(rest)
         return media(["play",*rest]) if rest else media(["play"])
     if cmd=="player": return media_player()
+    if cmd in {"transcribe","dictate"}:
+        import transcription
+        return transcription.main(rest,live=cmd=="dictate")
     if cmd=="mp": return media_mp(" ".join(rest))
     if cmd=="tv": return media_tv(" ".join(rest))
     if cmd=="albert":

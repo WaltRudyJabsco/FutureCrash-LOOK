@@ -82,7 +82,10 @@ a sibling shell in the current working directory. Your selection, filter and
 scroll position stay in the original view. In Kitty, **Option-Shift-W** on Mac
 (**Alt-Shift-W** on Linux) switches focus, and **Ctrl-Shift-W** closes the focused
 pane. In tmux, **Ctrl-B then O** switches; `exit` closes the shell. These hints
-remain visible after opening a pane. The terminal owns the sibling shell.
+remain visible after opening a pane. The terminal owns the sibling shell. New panes halve the active pane along
+its longer physical dimension: wide panes split left/right, tall panes top/bottom.
+Reported pixel geometry takes precedence; terminal cell proportions are the
+fallback. Within the existing splits layout, only the selected pane is subdivided.
 
 The views redraw to fit the terminal after panes open or close. Shift-W stays
 ordinary text inside note editors and URL/bookmark prompts. In a launched web

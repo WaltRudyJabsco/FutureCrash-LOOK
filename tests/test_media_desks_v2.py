@@ -97,3 +97,22 @@ def test_empty_fresh_catalog_is_useful_and_does_not_launch(lk,monkeypatch,capsys
     monkeypatch.setattr(lk,'_media_launch_session',lambda *a:pytest.fail('browsing must not play'))
     assert lk._media_player_library(media_kind=kind)==0
     assert kind+' library' in capsys.readouterr().out
+
+
+def test_tv_search_reserves_apple_handoff_key(lk,rows,monkeypatch):
+    out=Terminal();monkeypatch.setattr(sys,'stdout',out);monkeypatch.setattr(sys,'stdin',Terminal())
+    monkeypatch.setattr(lk.termios,'tcgetattr',lambda fd:[])
+    monkeypatch.setattr(lk.termios,'tcsetattr',lambda *a:None)
+    monkeypatch.setattr(lk.tty,'setcbreak',lambda fd:None)
+    monkeypatch.setattr(lk.shutil,'get_terminal_size',lambda *a:os.terminal_size((80,24)))
+    monkeypatch.setattr(lk,'NativePreviewController',Preview)
+    monkeypatch.setattr(lk,'_media_catalog_entries',lambda:(rows,{}))
+    monkeypatch.setattr(lk,'_media_collapse',lambda rows,**kw:list(rows))
+    monkeypatch.setattr(lk,'_media_status_snapshot',lambda:None)
+    keys=iter(['/','T','O','esc'])
+    monkeypatch.setattr(lk,'_read_tty_key',lambda *a:next(keys))
+    opened=[]
+    monkeypatch.setattr(lk,'_media_open_with',lambda row,app:opened.append((row['id'],app)) or (True,'Opened'))
+    assert lk.media_tv()==0
+    assert opened==[('m','TV'),('m',None)]
+    assert 'T Apple TV' in lk._strip_ansi(out.getvalue())
