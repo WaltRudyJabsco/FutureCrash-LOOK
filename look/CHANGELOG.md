@@ -1,3 +1,9 @@
+## Notes dictation and list readability
+
+- Add Ctrl-D dictation inside the Notes quick editor; Ctrl-C finishes and inserts at the caret without saving the draft.
+- Support capture-then-transcribe dictation on Linux/Intel Macs and local speech servers, with private recovery recordings on failure and CPU-first Linux setup.
+- Restore the missing Shift-D delete hint for selected/marked notes, accent wrapped command keys and distinguish titles, types, projects and alerts while retaining alternating rows.
+
 ## Adaptive panes, TV handoff and local speech input
 
 - Split the active pane along its longer physical dimension, with cell-geometry fallback, preserving terminal ownership and shortcuts.

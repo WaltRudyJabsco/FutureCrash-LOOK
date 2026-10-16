@@ -1159,9 +1159,20 @@ Long files use the engine's chunking. No automatic source recording is retained.
 Without either option, transcript text goes to standard output; `--json` returns
 structured text and a note ID when one was created.
 
-`lk dictate` explicitly opens the microphone through Fermion. Ctrl-C finishes
-and returns captured text. macOS may request microphone permission for your
-terminal; Linux needs an available PortAudio input device. This does not select
+`lk dictate --note "Spoken notes"` names the new note before recording.
+Ctrl-C finishes recording and returns captured text. In the Notes quick editor,
+**Ctrl-D** starts dictation; **Ctrl-C** finishes and inserts text at the caret.
+The draft stays editable until Ctrl-S/Shift-Enter saves. Uppercase D remains text.
+
+Apple silicon uses Fermion’s live dictation engine. Linux and Intel Macs record
+locally first, then transcribe after Ctrl-C; Linux setup uses CPU PyTorch wheels
+by default rather than downloading CUDA libraries. A larger model is optional,
+not required. Capture needs the optional speech environment even when a local
+server provides transcription. Successful temporary recordings are removed; if
+capture/transcription fails after audio was recorded, a private WAV is retained
+under `~/.local/share/look/transcription/recovery/` for manual retry.
+
+macOS may request microphone permission for your terminal; Linux needs an available PortAudio input device. This does not select
 speakers, modify Bluetooth pairing or change the system audio output.
 Microphone input has not been exercised by the automated tests.
 
@@ -1181,12 +1192,13 @@ Configure without `--server` returns to the local Fermion CLI backend. Settings
 live in `~/.config/look/transcription.json`. Alternate servers must use a loopback
 HTTP address and expose `/audio/transcriptions`; LOOK does not launch the server,
 install its model, guarantee its offline behavior, or send audio to remote nodes.
-Uploads are limited to 32 MiB; use the file engine for longer recordings. Live
-microphone dictation currently uses Fermion only.
+Uploads are limited to 32 MiB; use the file engine for longer recordings. On this
+backend, microphone dictation records locally and sends the finished file to that
+server.
 
-This update supplies working CLI file/dictation capture and Notes output. It does
-not yet add microphone buttons to Signal/Albert or dictation shortcuts to every
-editor. Those can share this boundary without changing the storage/engine model.
+CLI file/dictation capture, Notes output and Notes quick-editor insertion share
+this interface. Signal/Albert microphone buttons are not included; those can
+share this boundary without changing the storage/engine model.
 
 WEB READING DESK
 

@@ -9,6 +9,7 @@ import signal
 import subprocess
 import sys
 import tempfile
+import time
 import urllib.request
 from urllib.parse import urlsplit
 import wave
@@ -54,7 +55,11 @@ def setup():
         subprocess.run([python,'-m','venv',str(destination)],check=True)
     packages=['fermion-research=='+RUNTIME_VERSION,'soundfile','scipy','zstandard','sounddevice']
     if sys.platform=='darwin' and os.uname().machine=='arm64':packages+=['mlx','mlx-audio','mlx-lm']
-    else:packages+=['torch','safetensors']
+    else:
+        if sys.platform.startswith('linux'):
+            # Avoid pulling CUDA libraries into the default CPU speech setup.
+            subprocess.run([str(destination/'bin/python'),'-m','pip','install','--no-deps','torch','--index-url','https://download.pytorch.org/whl/cpu'],check=True)
+        packages+=['torch','safetensors']
     print('Installing optional local speech runtime: about 1.3 GB on the tested Mac, plus the 164 MB model download.',file=sys.stderr)
     subprocess.run([str(destination/'bin/python'),'-m','pip','install',*packages],check=True)
     with tempfile.TemporaryDirectory(prefix='look-speech-') as temporary:
@@ -102,21 +107,83 @@ def transcribe(path,model=None):
         return safe_text(text.strip())
 
 
-def dictate(model=None):
-    command=executable()
-    if not command:raise ValueError('Run lk transcribe setup before microphone dictation')
-    if settings().get('server'):raise ValueError('Live dictation currently uses the local Fermion engine; file transcription supports alternate servers')
-    print('Microphone dictation · Ctrl-C finishes · no commands are executed',file=sys.stderr)
-    process=subprocess.Popen([command,'listen',str(model or settings().get('model') or MODEL)],stdout=subprocess.PIPE,text=True,env=offline_env(),start_new_session=True)
+# Capture runs in the optional speech environment, keeping audio dependencies out
+# of LOOK's Python process. Samples stream to a temporary file, not system output.
+CAPTURE_PROGRAM = r"""
+import sys, queue
+try:
+    import sounddevice as sd
+    import soundfile as sf
+    from threading import Event
+    pending=queue.Queue(maxsize=128)
+    overflow=Event()
+    def receive(data,frames,timing,status):
+        if status:overflow.set()
+        try:pending.put_nowait(data.copy())
+        except queue.Full:overflow.set()
+    with sf.SoundFile(sys.argv[1],mode='w',samplerate=16000,channels=1,subtype='PCM_16',format='WAV') as output:
+        try:
+            with sd.InputStream(samplerate=16000,channels=1,callback=receive):
+                print('Recording microphone · Ctrl-C finishes',file=sys.stderr,flush=True)
+                while True:
+                    try:output.write(pending.get(timeout=.1))
+                    except queue.Empty:pass
+                    if overflow.is_set():raise RuntimeError('Audio capture could not keep up; recording stopped')
+        except KeyboardInterrupt:
+            while not pending.empty():output.write(pending.get_nowait())
+except Exception as exc:
+    print('Microphone unavailable: '+str(exc)+'; check speech setup, PortAudio and microphone permissions.',file=sys.stderr)
+    raise SystemExit(1)
+"""
+
+
+def speech_process(command):
+    process=subprocess.Popen(command,stdout=subprocess.PIPE,text=True,env=offline_env(),start_new_session=True)
     try:
         try:text,_=process.communicate()
         except KeyboardInterrupt:
             process.send_signal(signal.SIGINT);text,_=process.communicate(timeout=20)
         if process.returncode not in {0,130,-signal.SIGINT}:raise ValueError('Dictation failed; check engine setup and microphone permission')
-        from notebook_markdown import safe_text
-        return safe_text(text.strip())
+        return text
     finally:
-        if process.poll() is None:process.terminate();process.wait(timeout=5)
+        if process.poll() is None:
+            process.terminate()
+            try:process.wait(timeout=5)
+            except subprocess.TimeoutExpired:process.kill();process.wait(timeout=5)
+
+
+def recorded_dictation(model=None):
+    python=root()/'venv/bin/python'
+    if not python.is_file():raise ValueError('Run lk transcribe setup to install microphone capture dependencies')
+    with tempfile.TemporaryDirectory(prefix='look-dictate-') as temporary:
+        path=Path(temporary)/'recording.wav'
+        try:
+            speech_process([str(python),'-c',CAPTURE_PROGRAM,str(path)])
+            with wave.open(str(path),'rb') as audio:
+                if not audio.getnframes():return ''
+            print('Transcribing local recording…',file=sys.stderr)
+            return transcribe(path,model)
+        except (OSError,ValueError,RuntimeError,subprocess.SubprocessError) as exc:
+            if path.is_file() and path.stat().st_size>44:
+                recovery=root()/'recovery';recovery.mkdir(parents=True,exist_ok=True,mode=0o700)
+                saved=recovery/(str(time.time_ns())+'.wav')
+                shutil.copyfile(path,saved);saved.chmod(0o600)
+                raise ValueError('Dictation failed; recording kept at '+str(saved)+' · '+str(exc)) from exc
+            raise
+
+
+
+def dictate(model=None):
+    config=settings()
+    print('Microphone dictation · Ctrl-C finishes · no commands are executed',file=sys.stderr)
+    # The pinned Fermion listen implementation uses MLX. Other platforms and
+    # alternate local servers use capture-then-transcribe through the same API.
+    if sys.platform!='darwin' or os.uname().machine!='arm64' or config.get('server'):
+        return recorded_dictation(model)
+    command=executable()
+    if not command:raise ValueError('Run lk transcribe setup before microphone dictation')
+    from notebook_markdown import safe_text
+    return safe_text(speech_process([command,'listen',str(model or config.get('model') or MODEL)]).strip())
 
 
 def main(argv=None,live=False):
