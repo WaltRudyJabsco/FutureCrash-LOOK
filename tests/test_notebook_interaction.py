@@ -195,3 +195,36 @@ def test_read_and_list_return_saved_bodies_in_lkn_order(tmp_path,monkeypatch):
     assert len(json.loads(notebook.tool('notebook_search',{})))==2
     with pytest.raises(ValueError): notebook.tool('notebook_read',{'position':99})
     assert notebook.read_intent('write a poem about the first note') is None
+
+
+@pytest.mark.parametrize('marked',[False,True])
+@pytest.mark.parametrize('answer',['yes','no'])
+def test_workspace_delete_selected_or_marked_requires_confirmation(tmp_path,terminal,monkeypatch,capsys,marked,answer):
+    store=Notebook(tmp_path);store.create('First');store.create('Second')
+    keys=iter((['A'] if marked else [])+['D','q'])
+    prompts=[]
+    monkeypatch.setattr('builtins.input',lambda label:prompts.append(label) or answer)
+    monkeypatch.setattr(notebook,'nudge_sync',lambda:None)
+    notebook.workspace(store,None,lambda *args:next(keys),lambda text,width:text)
+    expected=(0 if marked else 1) if answer=='yes' else 2
+    assert len(store.list())==expected
+    assert ('2 record(s)' if marked else '1 record(s)') in prompts[0]
+    output=capsys.readouterr().out
+    import re
+    assert 'D delete' in re.sub(r'\033\[[0-9;]*m','',output)
+
+
+def test_wrapped_footer_keys_and_note_roles_keep_contrast(monkeypatch):
+    monkeypatch.setenv('LOOK_TERMINAL_THEME','paper')
+    colors=notebook.terminal_style.list_colors()
+    output=notebook.command_hints('  ↑↓ move · N new\n  F sort · D delete')
+    for key in ('↑↓','F','D'):
+        assert '\033[1m'+colors['CYAN']+key in output
+    row={'title':'My title','kind':'reminder','project':'Work','id':'a'*32,'conflict':True}
+    line=notebook.notebook_row(row,colors)
+    assert colors['WHITE']+'My title' in line
+    assert colors['YELLOW']+'reminder' in line
+    assert colors['RED']+' · CONFLICT' in line
+    selected=notebook.terminal_style.list_row(line,100,0,True,colors)
+    assert colors['SELECT_RED'] in selected
+    assert notebook.terminal_style.list_row(line,100,0,False,colors)!=notebook.terminal_style.list_row(line,100,1,False,colors)

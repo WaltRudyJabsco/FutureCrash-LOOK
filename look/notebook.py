@@ -77,9 +77,20 @@ RESET='\033[0m'
 def command_hints(text):
     """Style after wrapping/clipping so ANSI escapes never affect the layout."""
     plain=re.sub(r'\033\[[0-9;]*m','',text)
-    return '\n'.join(LABEL_DIM+re.sub(r'(^| · )(\S+)',
-        lambda match:match[1]+KEY_CYAN+match[2]+LABEL_DIM,line)+RESET
+    colors=terminal_style.list_colors();key='\033[1m'+colors['CYAN'];label=colors['GRAY']
+    return '\n'.join(label+re.sub(r'(^\s*| · )(\S+)',
+        lambda match:match[1]+key+match[2]+RESET+label,line)+RESET
         for line in plain.split('\n'))
+
+
+
+def notebook_row(row,colors):
+    """Lead with the title; keep type, filing and alerts visually distinct."""
+    kind=colors[{'note':'CYAN','task':'GREEN','reminder':'YELLOW'}[row['kind']]]
+    return ('\033[1m'+colors['WHITE']+safe_text(row['title'])+RESET+
+            colors['GRAY']+' · '+kind+row['kind']+colors['GRAY']+' · '+
+            colors['CYAN']+safe_text(row['project'])+colors['GRAY']+' · '+row['id'][:8]+
+            (colors['RED']+' · CONFLICT' if row['conflict'] else '')+RESET)
 
 
 def metadata(row):
@@ -160,6 +171,10 @@ Shift-Enter/Ctrl-S inserts the block, then save the note as usual.
 W opens a sibling shell from the list or note preview, in the current working directory.
 Kitty: Option/Alt-Shift-W switches panes; Ctrl-Shift-W closes the focused pane.
 tmux uses Ctrl-B then O to switch; exit closes the shell. W stays text in editors.
+
+Editor Ctrl-D starts local dictation; Ctrl-C finishes and inserts at the caret.
+Review/edit the transcript before saving. Shift-D remains an ordinary capital D.
+Run lk transcribe setup once on this computer before microphone dictation.
 '''
 
 
@@ -414,10 +429,35 @@ def insert_link(store,fd,read_key):
             cursor=cursors[active];values[active]=values[active][:cursor]+text+values[active][cursor:];cursors[active]+=len(text)
 
 
+def insert_dictation(text,cursor,spoken):
+    """Insert speech as editable text, separating adjacent words at the caret."""
+    spoken=safe_text(spoken).strip()
+    if not spoken:return text,cursor
+    punctuation=',.;:!?)]}'
+    if cursor and not text[cursor-1].isspace() and spoken[0] not in punctuation:spoken=' '+spoken
+    if cursor<len(text) and not text[cursor].isspace() and text[cursor] not in punctuation:spoken+=' '
+    return text[:cursor]+spoken+text[cursor:],cursor+len(spoken)
+
+
+def dictate_for_editor(fd,previous):
+    """Temporarily leave raw editor input so Ctrl-C finishes speech, not the draft."""
+    try:
+        from . import transcription
+    except ImportError:
+        import transcription
+    sys.stdout.write('\033[?2004l\033[<u\033[2J\033[HNOTE DICTATION · Ctrl-C finishes and returns text to your draft\n')
+    sys.stdout.flush()
+    termios.tcsetattr(fd,termios.TCSADRAIN,previous)
+    try:return transcription.dictate()
+    finally:
+        tty.setraw(fd)
+        sys.stdout.write('\033[>1u\033[?2004h');sys.stdout.flush()
+
+
 def capture_note(fd,read_key,initial_text='',label='NEW NOTE',store=None):
     """Paste and ordinary Enter never submit a draft."""
     previous=termios.tcgetattr(fd)
-    text=safe_text(initial_text); cursor=len(text)
+    text=safe_text(initial_text); cursor=len(text); notice=''
     try:
         tty.setraw(fd)
         sys.stdout.write('\033[>1u\033[?2004h')
@@ -428,13 +468,15 @@ def capture_note(fd,read_key,initial_text='',label='NEW NOTE',store=None):
             rows=(before+'█'+after).split('\n')
             rows=[part for line in rows for part in (textwrap.wrap(line,columns,replace_whitespace=False,drop_whitespace=False) or [''])]
             cursor_row=next((index for index,line in enumerate(rows) if '█' in line),0)
-            page=max(1,height-(6 if boxed else 4))
+            notice_rows=textwrap.wrap(safe_text(notice),max(1,width-1))[:3] if notice else []
+            page=max(1,height-((6 if boxed else 4)+len(notice_rows)))
             top=max(0,cursor_row-page+1)
             visible=rows[top:top+page]
             heading=(label+' · ')[:max(1,width-1)]
             actions='Enter newline · Shift-Enter/Ctrl-S save · Esc cancel'[:max(0,width-1-len(heading))]
             frame=[KEY_CYAN+heading+'\033[0m'+command_hints(actions),
-                   command_hints('Ctrl-K insert link/command · Alt-←→ words · Alt-↑↓ paragraphs · Shift-↑↓/PgUp/PgDn page'[:max(1,width-1)])]
+                   command_hints('Ctrl-D dictate · Ctrl-K insert link/command · Alt-arrows words/paragraphs'[:max(1,width-1)]),
+                   *notice_rows]
             if boxed:
                 frame.extend(['┌'+'─'*columns+'┐',*['│'+line.ljust(columns)+'│' for line in visible],'└'+'─'*columns+'┘'])
             else: frame.extend(visible)
@@ -442,6 +484,14 @@ def capture_note(fd,read_key,initial_text='',label='NEW NOTE',store=None):
             key=read_key(fd,None)
             if key in {'esc','\x03'}: return None
             if key in {'shiftenter','\x13'}: return text
+            if key=='\x04':
+                try:
+                    spoken=dictate_for_editor(fd,previous)
+                    text,cursor=insert_dictation(text,cursor,spoken)
+                    notice='Dictation inserted · edit freely · Ctrl-S saves' if spoken.strip() else 'No speech inserted · draft unchanged'
+                except KeyboardInterrupt:notice='Dictation cancelled · draft unchanged'
+                except (OSError,ValueError,RuntimeError,subprocess.SubprocessError) as exc:notice='Dictation: '+str(exc)
+                continue
             if key=='\x0b':
                 linked=insert_link(store,fd,read_key)
                 if linked: text=text[:cursor]+linked+text[cursor:];cursor+=len(linked)
@@ -713,6 +763,7 @@ def note_view(store,row,read_key):
 def workspace(store,kind,read_key,hints,initial_query=''):
     fd=sys.stdin.fileno(); old=termios.tcgetattr(fd)
     query=initial_query; index=0; marked=set(); notice=''; scope='title'; sort='updated'; focused=None; pane_help=False
+    colors=terminal_style.list_colors()
     def prompt(label):
         termios.tcsetattr(fd,termios.TCSADRAIN,old)
         sys.stdout.write('\033[?25h'); sys.stdout.flush()
@@ -730,7 +781,7 @@ def workspace(store,kind,read_key,hints,initial_query=''):
                 focused=None
             index=max(0,min(index,max(0,len(rows)-1)))
             width,height=shutil.get_terminal_size((100,30))
-            controls='↑↓ move · W shell pane · Tab mark · Enter view · V full editor · Y copy link · N new · P file · C done · R remind · F sort · T type · / full text · H help · Esc clear/exit'
+            controls='↑↓ move · W shell pane · Tab mark · Enter view · V full editor · Y copy link · N new · P file · C done · D delete · R remind · F sort · T type · / full text · H help · Esc clear/exit'
             if pane_help:controls+=' · '+' · '.join(terminal_style.pane_shortcuts())
             control_rows=hints(controls,width).splitlines()
             usable=max(1,(height-5-len(control_rows))//2)
@@ -738,8 +789,10 @@ def workspace(store,kind,read_key,hints,initial_query=''):
             lines=[KEY_CYAN+'LOOK NOTEBOOK'+RESET+' · '+(kind or 'all')+f' · sort {sort} · {len(rows)} shown · {len(marked)} marked','']
             for number,row in enumerate(rows[top:top+usable],top):
                 marker='✓' if row['id'] in marked else ' '
-                lines.append((KEY_CYAN+'›' if number==index else ' ')+marker+' '+display(row)[:max(10,width-5)]+'\033[0m')
-                lines.append('\033[2m   '+metadata(row)[:max(1,width-4)]+'\033[0m')
+                selected=number==index
+                line=colors['YELLOW']+('›' if selected else ' ')+marker+' '+notebook_row(row,colors)
+                lines.append(terminal_style.list_row(line,width,number,selected,colors))
+                lines.append(terminal_style.list_row(colors['GRAY']+'   '+metadata(row),width,number,selected,colors))
             while len(lines)<height-2-len(control_rows): lines.append('')
             lines.extend([('FILTER ' if scope=='title' else 'SEARCH ')+query+'█',command_hints('\n'.join(control_rows)),notice])
             sys.stdout.write('\033[H'+ '\033[K\n'.join(lines)+'\033[K\033[J'); sys.stdout.flush()

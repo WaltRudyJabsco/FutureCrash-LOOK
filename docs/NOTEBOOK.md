@@ -19,7 +19,10 @@ lk reminders list
 ```
 
 Notebook command keys use bold cyan accents, with subdued action labels and
-metadata. The palette is shared by the list, note view, quick editor and help footer.
+metadata. The list leads with bold titles, colored note/task/reminder types,
+project labels and subdued IDs/timestamps. Alternating rows remain subtle; the
+selected record retains contrasting alert and detail colors. Wrapped command
+keys, including arrows and Shift-F, keep their accent color.
 
 Bare `lkn` opens the notebook. Arrow keys move; Shift-arrows page or jump to
 ends; Tab marks; Shift-A selects all filtered records. Type to filter or use `/`.
@@ -35,20 +38,25 @@ lists, task checkboxes, quotes, links and inline/fenced code are rendered.
 Links retain their destination as visible text. Code preserves literal marks.
 This is a lightweight terminal preview; tables and HTML remain plain text.
 E opens a quick body editor with the original Markdown marks;
-Enter saves, Shift-Enter/Ctrl-J inserts a newline, and Escape cancels. The title
+Enter/Ctrl-J inserts a newline, Shift-Enter/Ctrl-S saves, and Escape cancels. The title
 stays stable so named notebooks are easy to reopen. V opens the same document
 in `$VISUAL`, `$EDITOR`, Neovim, or vi. Escape returns to the filtered list.
 If another node changes a note during quick editing, the draft is preserved
 locally under `~/.local/share/look/notebook/drafts/` instead of overwriting it.
-Shift-N opens quick capture: Enter saves; Shift-Enter adds a line break or a
-blank paragraph; Escape cancels. The editor requests modified-key reporting
-while active. If a terminal sends Enter and Shift-Enter identically, use Ctrl-J
-or Alt-Enter for a newline. Cursor keys and Backspace edit the draft.
+Shift-N opens quick capture with the same newline/save controls; Escape cancels. The editor requests modified-key reporting
+while active. If a terminal sends Enter and Shift-Enter identically, use Ctrl-S
+to save. Cursor keys and Backspace edit the draft.
 Shift-Left/Right jumps to the start/end of the note; Home/End moves within
 the current line. Shift-Up/Down and Page Up/Down move a page of lines.
 The read-only view also accepts Shift-arrows to page or jump to its ends.
+After `lk transcribe setup`, Ctrl-D starts dictation inside the quick editor.
+Ctrl-C finishes recording and inserts the transcript at the caret; review it,
+then save normally. Uppercase D remains text inside the editor. See
+[Local speech input](TRANSCRIPTION.md) for platform details and recovery.
+
 Shift-P files under a project, Shift-C completes,
-Shift-R schedules a reminder, and Shift-D deletes after confirmation. Escape
+Shift-R schedules a reminder, and Shift-D deletes selected or marked records
+after typing `yes` at confirmation. Deletion markers synchronize to paired nodes. Escape
 clears a filter, then exits. Ctrl-C exits immediately.
 Press **H** or **?** for an in-app help page. It explains what File, Done,
 Remind, and Delete change, with command examples. Escape closes help and retains
