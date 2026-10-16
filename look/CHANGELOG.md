@@ -1,3 +1,9 @@
+## Adaptive panes, TV handoff and local speech input
+
+- Split the active pane along its longer physical dimension, with cell-geometry fallback, preserving terminal ownership and shortcuts.
+- Add Open With and Apple TV handoff to the video desk, reusing existing confirmed remote-copy behavior.
+- Add optional offline Phonon-2 file transcription, explicit microphone dictation, transcript-to-Notes output, Settings discovery and an alternate loopback speech-server adapter.
+
 ## Restore native w3m navigation
 
 - Remove the Shift-arrow terminal bridge and page/Home/End overrides. Pass input directly to w3m and preserve personal arrow/history bindings.

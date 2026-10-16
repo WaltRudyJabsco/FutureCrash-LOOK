@@ -449,13 +449,35 @@ def pane_shortcuts():
     return [focus+' switch pane','Ctrl-Shift-W close focused pane']
 
 
+# Terminal cells are usually about twice as tall as wide. Prefer reported pixel
+# geometry; use this ratio only when the terminal does not expose pixel sizes.
+FALLBACK_CELL_HEIGHT_RATIO=2
+
+
+def pane_is_wide():
+    size=shutil.get_terminal_size((120,30))
+    try:
+        import fcntl,struct
+        rows,columns,width,height=struct.unpack('HHHH',fcntl.ioctl(sys.stdout.fileno(),termios.TIOCGWINSZ,b'\0'*8))
+        if width and height:return width>=height
+    except (OSError,ValueError,AttributeError):pass
+    return size.columns>=size.lines*FALLBACK_CELL_HEIGHT_RATIO
+
+
 def open_pane(path):
     """Open a sibling shell; the terminal owns its lifetime, never LOOK."""
     cwd=Path(path).expanduser().resolve()
     if not cwd.is_dir(): return 'Pane needs a local directory'
     try:
         if os.environ.get('TMUX') and shutil.which('tmux'):
-            command=['tmux','split-window','-h','-c',str(cwd)]
+            target=['-t',os.environ['TMUX_PANE']] if os.environ.get('TMUX_PANE','').startswith('%') else []
+            geometry=subprocess.run(['tmux','display-message','-p',*target,'#{pane_width} #{pane_height} #{window_cell_width} #{window_cell_height}'],capture_output=True,text=True,timeout=8,check=False)
+            wide=pane_is_wide()
+            try:
+                columns,rows,cell_w,cell_h=map(int,geometry.stdout.split())
+                if columns>0 and rows>0:wide=columns*(cell_w or 1)>=rows*(cell_h or FALLBACK_CELL_HEIGHT_RATIO)
+            except (ValueError,AttributeError):pass
+            command=['tmux','split-window','-h' if wide else '-v',*target,'-c',str(cwd)]
             commands=[command]
         elif os.environ.get('KITTY_WINDOW_ID','').isdecimal():
             window=os.environ['KITTY_WINDOW_ID']
@@ -463,7 +485,7 @@ def open_pane(path):
             base=([client,'@'] if client else [kitty_executable(),'@'])+['--password','look-panes']
             commands=[base+['goto-layout','--match',f'window_id:{window}','splits'],
                       base+['launch','--match',f'window_id:{window}','--next-to',f'id:{window}',
-                            '--source-window',f'id:{window}','--location=vsplit','--cwd',str(cwd)]]
+                            '--source-window',f'id:{window}','--location='+('vsplit' if pane_is_wide() else 'hsplit'),'--cwd',str(cwd)]]
         else:
             return 'Split panes need Kitty or tmux; LOOK still works in this terminal'
         for command in commands:

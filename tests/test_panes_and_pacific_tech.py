@@ -169,3 +169,18 @@ def test_pane_bindings_survive_profile_reset_and_control_is_scoped():
     assert 'map ctrl+shift+enter combine : goto_layout splits : launch' in after
     assert 'remote_control_password look-panes launch goto-layout' in text
     assert 'allow_remote_control yes' not in text and 'listen_on ' not in text
+
+@pytest.mark.parametrize('pixels,expected',[((1200,600),True),((500,900),False),((600,600),True)])
+def test_split_uses_physical_active_pane_geometry(pixels,expected,monkeypatch):
+    import fcntl,struct
+    monkeypatch.setattr(fcntl,'ioctl',lambda *a:struct.pack('HHHH',30,100,*pixels))
+    monkeypatch.setattr(style.sys,'stdout',SimpleNamespace(fileno=lambda:1))
+    assert style.pane_is_wide()==expected
+
+
+def test_tmux_splits_tall_active_pane_vertically(tmp_path,monkeypatch):
+    monkeypatch.setenv('TMUX','session');monkeypatch.setattr(style.shutil,'which',lambda name:'/bin/tmux')
+    run=Mock(side_effect=[SimpleNamespace(returncode=0,stdout='40 60 8 16'),SimpleNamespace(returncode=0)])
+    monkeypatch.setattr(style.subprocess,'run',run)
+    assert style.open_pane(tmp_path).startswith('Shell opened')
+    assert run.call_args.args[0]==['tmux','split-window','-v','-c',str(tmp_path)]
