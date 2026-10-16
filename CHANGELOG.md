@@ -1,3 +1,9 @@
+## Responsive Notebook columns
+
+- Align titles, record types and projects in columns that resize with the terminal, reserving most space for titles and omitting supporting columns in narrow panes.
+- Keep dates, IDs and conflict alerts on the supporting line, with existing palette colors, alternating rows and selection contrast.
+- Clip Unicode text by terminal cell width so long titles and project names cannot displace adjacent columns.
+
 ## Notes dictation and list readability
 
 - Add Ctrl-D dictation inside the Notes quick editor; Ctrl-C finishes and inserts at the caret without saving the draft.

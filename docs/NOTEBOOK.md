@@ -20,7 +20,11 @@ lk reminders list
 
 Notebook command keys use bold cyan accents, with subdued action labels and
 metadata. The list leads with bold titles, colored note/task/reminder types,
-project labels and subdued IDs/timestamps. Alternating rows remain subtle; the
+project labels and subdued IDs/timestamps. Title, Type and Project columns resize
+with the terminal, giving remaining space to the title. Narrow panes drop Project,
+then Type; long values stay within their column with an ellipsis. IDs, dates and
+alerts sit on the supporting line. Enter opens the complete note title and body.
+Alternating rows remain subtle; the
 selected record retains contrasting alert and detail colors. Wrapped command
 keys, including arrows and Shift-F, keep their accent color.
 

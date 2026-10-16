@@ -221,10 +221,11 @@ def test_wrapped_footer_keys_and_note_roles_keep_contrast(monkeypatch):
     for key in ('↑↓','F','D'):
         assert '\033[1m'+colors['CYAN']+key in output
     row={'title':'My title','kind':'reminder','project':'Work','id':'a'*32,'conflict':True}
-    line=notebook.notebook_row(row,colors)
+    line=notebook.notebook_row(row,colors,notebook.notebook_columns(100,[row]))
     assert colors['WHITE']+'My title' in line
     assert colors['YELLOW']+'reminder' in line
-    assert colors['RED']+' · CONFLICT' in line
-    selected=notebook.terminal_style.list_row(line,100,0,True,colors)
+    details=notebook.notebook_details(dict(row,created=1,updated=2),colors)
+    assert colors['RED']+' · CONFLICT' in details
+    selected=notebook.terminal_style.list_row(details,100,0,True,colors)
     assert colors['SELECT_RED'] in selected
     assert notebook.terminal_style.list_row(line,100,0,False,colors)!=notebook.terminal_style.list_row(line,100,1,False,colors)
