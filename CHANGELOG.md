@@ -1,3 +1,9 @@
+## Player audio recovery and launch diagnostics
+
+- Add Shift-O in LKMP/Player and `lk media audio reset` to reopen the LOOK-owned audio output on the system default without changing queue, position, volume or Bluetooth settings.
+- Refresh automatic CoreAudio output when explicitly resuming a paused Mac player; retain explicitly selected outputs.
+- Keep failed LKMP launches visible and retain their receipt for Media Doctor instead of always reporting playback success.
+
 ## Responsive Notebook columns
 
 - Align titles, record types and projects in columns that resize with the terminal, reserving most space for titles and omitting supporting columns in narrow panes.
