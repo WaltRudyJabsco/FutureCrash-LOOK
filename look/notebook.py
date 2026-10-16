@@ -84,12 +84,47 @@ def command_hints(text):
 
 
 
-def notebook_row(row,colors):
-    """Lead with the title; keep type, filing and alerts visually distinct."""
-    kind=colors[{'note':'CYAN','task':'GREEN','reminder':'YELLOW'}[row['kind']]]
-    return ('\033[1m'+colors['WHITE']+safe_text(row['title'])+RESET+
-            colors['GRAY']+' · '+kind+row['kind']+colors['GRAY']+' · '+
-            colors['CYAN']+safe_text(row['project'])+colors['GRAY']+' · '+row['id'][:8]+
+# Keep titles dominant even when a split pane leaves little horizontal room.
+NOTE_TYPE_WIDTH=8
+NOTE_PROJECT_MAX_WIDTH=20
+NOTE_MIN_TITLE_WIDTH=20
+NOTE_COLUMN_GAP=2
+
+
+def column_text(value,width):
+    """Clip/pad by terminal cells, preserving Unicode and reserving an ellipsis."""
+    text=safe_text(str(value)).replace('\n',' ').replace('\t',' ')
+    if sum(map(cell_width,text))<=width:
+        return text+' '*(width-sum(map(cell_width,text)))
+    shown='';used=0
+    for char in text:
+        size=cell_width(char)
+        if used+size>max(0,width-1):break
+        shown+=char;used+=size
+    return shown+('…' if width else '')+' '*max(0,width-used-1)
+
+
+def notebook_columns(width,rows):
+    available=max(1,width-4)  # Caret/mark gutter and the terminal's final column.
+    project=min(NOTE_PROJECT_MAX_WIDTH,max(7,max((sum(map(cell_width,safe_text(row['project']))) for row in rows),default=7)))
+    project=min(project,available//5)
+    if available-NOTE_TYPE_WIDTH-project-2*NOTE_COLUMN_GAP>=NOTE_MIN_TITLE_WIDTH:
+        return [('title',available-NOTE_TYPE_WIDTH-project-2*NOTE_COLUMN_GAP),('kind',NOTE_TYPE_WIDTH),('project',project)]
+    if available-NOTE_TYPE_WIDTH-NOTE_COLUMN_GAP>=NOTE_MIN_TITLE_WIDTH:
+        return [('title',available-NOTE_TYPE_WIDTH-NOTE_COLUMN_GAP),('kind',NOTE_TYPE_WIDTH)]
+    return [('title',available)]
+
+
+def notebook_row(row,colors,columns):
+    """Aligned columns share one layout across every visible record."""
+    roles={'title':'WHITE','kind':{'note':'CYAN','task':'GREEN','reminder':'YELLOW'}[row['kind']],'project':'CYAN'}
+    return (' '*NOTE_COLUMN_GAP).join(
+        ('\033[1m' if field=='title' else '')+colors[roles[field]]+column_text(row[field],width)+RESET
+        for field,width in columns)
+
+
+def notebook_details(row,colors):
+    return (colors['GRAY']+'   '+metadata(row)+' · '+row['id'][:8]+
             (colors['RED']+' · CONFLICT' if row['conflict'] else '')+RESET)
 
 
@@ -786,13 +821,16 @@ def workspace(store,kind,read_key,hints,initial_query=''):
             control_rows=hints(controls,width).splitlines()
             usable=max(1,(height-5-len(control_rows))//2)
             top=max(0,index-usable+1)
-            lines=[KEY_CYAN+'LOOK NOTEBOOK'+RESET+' · '+(kind or 'all')+f' · sort {sort} · {len(rows)} shown · {len(marked)} marked','']
+            columns=notebook_columns(width,rows)
+            headings=' '*NOTE_COLUMN_GAP
+            headings=headings.join(column_text({'title':'Title','kind':'Type','project':'Project'}[field],size) for field,size in columns)
+            lines=[KEY_CYAN+'LOOK NOTEBOOK'+RESET+' · '+(kind or 'all')+f' · sort {sort} · {len(rows)} shown · {len(marked)} marked',colors['GRAY']+'   '+headings+RESET]
             for number,row in enumerate(rows[top:top+usable],top):
                 marker='✓' if row['id'] in marked else ' '
                 selected=number==index
-                line=colors['YELLOW']+('›' if selected else ' ')+marker+' '+notebook_row(row,colors)
+                line=colors['YELLOW']+('›' if selected else ' ')+marker+' '+notebook_row(row,colors,columns)
                 lines.append(terminal_style.list_row(line,width,number,selected,colors))
-                lines.append(terminal_style.list_row(colors['GRAY']+'   '+metadata(row),width,number,selected,colors))
+                lines.append(terminal_style.list_row(notebook_details(row,colors),width,number,selected,colors))
             while len(lines)<height-2-len(control_rows): lines.append('')
             lines.extend([('FILTER ' if scope=='title' else 'SEARCH ')+query+'█',command_hints('\n'.join(control_rows)),notice])
             sys.stdout.write('\033[H'+ '\033[K\n'.join(lines)+'\033[K\033[J'); sys.stdout.flush()
