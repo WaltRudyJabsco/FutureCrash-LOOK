@@ -1279,6 +1279,12 @@
     "See usage details and live glossary below"
   ],
   [
+    "lk media audio",
+    "[reset]",
+    "media",
+    "See usage details and live glossary below"
+  ],
+  [
     "lk media info",
     "[@<NODE>] sha256:<DIGEST>",
     "media",

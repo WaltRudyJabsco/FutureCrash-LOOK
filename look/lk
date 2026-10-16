@@ -79,6 +79,7 @@ _REMOTE_MEDIA_PREVIEW_LATEST=None
 _REMOTE_MEDIA_PREVIEW_WORKER=None
 MEDIA_IPC_FILE=STATE_DIR/"media.sock"
 MEDIA_MPV_LOG=STATE_DIR/"media_mpv.log"
+MEDIA_LAUNCH_LOG=STATE_DIR/"media_launch.log"
 FILE_CATALOG_DB=STATE_DIR/"file_catalog.sqlite3"
 _SESSION_PATH_GRANTS=[]
 _ONCE_PATH_GRANTS=[]
@@ -16884,6 +16885,48 @@ def _media_tail_player_log(limit=12):
     return lines[-max(1,int(limit)):]
 
 
+
+def _media_reset_audio():
+    """Reopen only LOOK's output on the OS default; keep queue/time/pause intact."""
+    if not _media_mpv_alive():return False,"No active LOOK player · start media first"
+    result=_media_mpv_request(["set_property","audio-device","auto"])
+    if not result or result.get("error")!="success":return False,"Could not select system-default audio"
+    result=_media_mpv_request(["ao-reload"])
+    if not result or result.get("error")!="success":return False,"Audio reopen failed · lk media doctor for details"
+    return True,"Audio reopened on system default · playback position and pause retained"
+
+
+def _media_audio_command(args):
+    if args==["reset"]:
+        ok,message=_media_reset_audio();print("LOOK media · "+message);return 0 if ok else 1
+    if args:
+        print("usage: lk media audio [reset]");return 2
+    print("LOOK PLAYER AUDIO")
+    if not _media_mpv_alive():print("  No active LOOK player");return 1
+    for label,key in (("Output","audio-device"),("Backend","current-ao"),("Muted","mute"),("Volume","volume"),("Paused","pause")):
+        value=_media_mpv_property(key)
+        print(f"  {label:<9} {value if value is not None else 'unavailable'}")
+    print("  Recover output: lk media audio reset · follows the system-selected speaker")
+    return 0
+
+
+def _media_launch_from_library(picked):
+    # Capture receipts before the next full-screen frame can erase a launch error.
+    output=io.StringIO()
+    try:
+        with redirect_stdout(output):code=_media_launch_session(media_core.new_session(picked))
+    except (OSError,RuntimeError,ValueError) as exc:
+        code=1;output.write(str(exc))
+    detail=output.getvalue().strip()
+    try:
+        MEDIA_LAUNCH_LOG.parent.mkdir(parents=True,exist_ok=True)
+        descriptor=os.open(MEDIA_LAUNCH_LOG,os.O_WRONLY|os.O_CREAT|os.O_TRUNC,0o600)
+        with os.fdopen(descriptor,"w",encoding="utf-8") as log:log.write(detail+"\n")
+    except OSError:pass
+    if code:return "Playback failed · "+(detail.splitlines()[-1] if detail else "lk media doctor for details")
+    return f"playing {len(picked)} item(s)"
+
+
 def _media_doctor():
     """Small deterministic probe for the player edge and current queue source."""
     mpv=_media_mpv_binary()
@@ -16896,6 +16939,11 @@ def _media_doctor():
             if first: print(f"  version   {first[0]}")
         except Exception as exc:
             print(f"  version   error · {exc}")
+    if _media_mpv_alive():_media_audio_command([])
+    try:
+        launch=MEDIA_LAUNCH_LOG.read_text(encoding="utf-8").strip()
+        if launch:print("  last launch · "+launch)
+    except OSError:pass
     session=_media_session() or {}
     queue=session.get("queue") or []
     print(f"  queue     {len(queue)} item{'s' if len(queue)!=1 else ''}")
@@ -17076,6 +17124,7 @@ def _media_launch_session(session):
         f"--input-ipc-server={MEDIA_IPC_FILE}",
         "--no-terminal",
         "--audio-display=no",
+        "--audio-device=auto",
         "--force-window=no",
         "--idle=yes",
         f"--log-file={MEDIA_MPV_LOG}",
@@ -17135,7 +17184,7 @@ def _media_launch_stream(url,source="",session=None):
         _media_stop_owned_mpvs()
         try: MEDIA_IPC_FILE.unlink(missing_ok=True)
         except OSError: pass
-        cmd=[mpv,"--no-config",f"--input-ipc-server={MEDIA_IPC_FILE}","--no-terminal","--audio-display=no","--force-window=no","--idle=yes",f"--log-file={MEDIA_MPV_LOG}"]
+        cmd=[mpv,"--no-config",f"--input-ipc-server={MEDIA_IPC_FILE}","--no-terminal","--audio-display=no","--audio-device=auto","--force-window=no","--idle=yes",f"--log-file={MEDIA_MPV_LOG}"]
         if stream_video: cmd.append("--force-window=immediate")
         cmd.append(url)
         try:
@@ -19257,6 +19306,8 @@ def _media_control_session(action):
         q=f" · {snap['index']+1}/{snap['count']}" if snap["count"] else ""
         print(f"LOOK media · {snap['state']} · {_media_entry_label(entry)}{timing}{q}")
         return 0
+    if action in {"play","toggle"} and sys.platform=="darwin" and _media_mpv_property("pause") is True and _media_mpv_property("audio-device")=="auto":
+        _media_mpv_request(["ao-reload"])
     command={
         "play":["set_property","pause",False],
         "pause":["set_property","pause",True],
@@ -19441,7 +19492,7 @@ def _media_player_full_visual(snap,mode,visual_elapsed=0):
             _media_entry_label(entry),
             f"{state.upper()} · {_media_time(snap.get('position') or 0)} / {_media_time(snap.get('duration') or 0)} · Queue {snap['index']+1}/{len(queue)}"]
     footer=['v next visual / normal · space pause · p/n previous/next',
-            '←/→ seek · s shuffle · r repeat · x stop · q close']
+            '←/→ seek · s shuffle · r repeat · O reset audio · x stop · q close']
     art_height=max(1,height-len(header)-len(footer))
     elapsed=visual_elapsed%player_visuals.CYCLE_INTERVAL_SECONDS if cycling else visual_elapsed
     phase=elapsed if name in {'Black Hole','Rooftops','Spectrum','Moon Jelly','Firefly Garden','Clockwork Garden'} else time.monotonic()
@@ -19496,7 +19547,7 @@ def _media_player_render(visualizer=0,visual_elapsed=0):
                 f"Shuffle {'on' if snap['session'].get('shuffle') else 'off'}  ·  "
                 f"Repeat {snap['session'].get('repeat','off')}")
         eq=_media_player_visualizer(entry,snap["state"],inner)
-        player_controls="space play/pause · ←/→ seek 10s · p/n previous/next · s shuffle · r repeat · v visuals · x stop · q/Esc close player"
+        player_controls="space play/pause · ←/→ seek 10s · p/n previous/next · s shuffle · r repeat · O reset audio · v visuals · x stop · q/Esc close player"
         raw_body=[
             f"{artist} — {title}" if artist else title, album, eq or "",
             f"{time_text}  {bar}",
@@ -19543,13 +19594,14 @@ def media_player(initial_visualizer=0):
         return 0
     visualizer=initial_visualizer % (len(player_visuals.NAMES)+1)
     visual_started=time.monotonic()
+    notice=""
     fd=sys.stdin.fileno()
     old=termios.tcgetattr(fd)
     try:
         tty.setcbreak(fd)
         sys.stdout.write("\033[2J")
         while True:
-            sys.stdout.write("\033[H"+_media_player_render(visualizer,time.monotonic()-visual_started)+"\033[J")
+            sys.stdout.write("\033[H"+_media_player_render(visualizer,time.monotonic()-visual_started)+(f"\n{_ansi_clip(notice,shutil.get_terminal_size((80,24)).columns-1)}" if notice else "")+"\033[J")
             sys.stdout.flush()
             key=_read_tty_key(fd,.25)
             if not key:
@@ -19558,6 +19610,7 @@ def media_player(initial_visualizer=0):
             if key=="v":
                 visualizer=(visualizer+1) % (len(player_visuals.NAMES)+1)
                 visual_started=time.monotonic()
+            elif key=="O": _,notice=_media_reset_audio()
             elif key==" ": _media_control_session("toggle")
             elif key=="n": _media_control_session("next")
             elif key=="p": _media_control_session("prev")
@@ -19731,7 +19784,7 @@ def _media_player_library(initial_query="",media_kind="audio"):
                 right_w=min(40,max(28,width//3)) if width>=96 else 0
                 left_w=width-right_w-3 if right_w else width
                 controls="↑↓ select · Shift-arrows page/ends · Tab mark · A select all · E edit · R refresh · C clear marks · Enter play · B add queue · D hide dir · L library · Q queue"
-                extra=("O open with · T Apple TV · " if media_kind=="video" else "")+"F sort · G reverse · / search · v visuals · M image/ASCII · Esc finish/clear/exit"
+                extra=("O open with · T Apple TV · " if media_kind=="video" else "O reset audio · ")+"F sort · G reverse · / search · v visuals · M image/ASCII · Esc finish/clear/exit"
                 footer=_media_hints(controls,width)+"\n"+_media_hints(extra,width)
                 list_rows=max(1,height-12-len(footer.splitlines()))
                 top=max(0,min(max(0,len(visible)-list_rows),idx-list_rows+1))
@@ -19856,7 +19909,7 @@ def _media_player_library(initial_query="",media_kind="audio"):
                 if key in {"\x7f","\b"}:
                     if query: query=query[:-1]; idx=0; view_key=None
                     continue
-                if len(key)==1 and key.isprintable() and key not in "ABCDLQJKERMFG"+("OT" if media_kind=="video" else ""):
+                if len(key)==1 and key.isprintable() and key not in "ABCDLQJKERMFG"+("OT" if media_kind=="video" else "O"):
                     query+=key; idx=0; view_key=None
                     continue
                 # Arrow/Tab/action keys leave editing and operate on this view.
@@ -19872,6 +19925,8 @@ def _media_player_library(initial_query="",media_kind="audio"):
                     else:reverse_sort=not reverse_sort
                     idx=0;notice="Sort: "+MEDIA_FIND_SORTS[sort_mode]+(" · reversed" if reverse_sort else "")
                 continue
+            if key=="O" and media_kind=="audio":
+                _,notice=_media_reset_audio();continue
             if key in {"O","T"} and media_kind=="video" and chosen:
                 native_preview.invalidate()
                 termios.tcsetattr(fd,termios.TCSADRAIN,old)
@@ -19940,7 +19995,7 @@ def _media_player_library(initial_query="",media_kind="audio"):
                 notice=f"updated {result['count']} source(s)"+(' · '+' · '.join(result['errors']) if result['errors'] else '')
                 view_key=None;selected_ids.clear();continue
             if key in {"\r","\n"} and picked:
-                _media_launch_session(media_core.new_session(picked)); notice=f"playing {len(picked)} item(s)"; continue
+                notice=_media_launch_from_library(picked); continue
             if key=="B" and picked:
                 notice=_media_queue_notice(_media_queue_append(picked)); view_key=None if mode=="queue" else view_key; continue
             if key==" ": _media_control_session("toggle"); continue
@@ -20066,6 +20121,7 @@ def media(args):
     if raw=="artists": return _media_group_command("artist",args[1:])
     if raw=="albums": return _media_group_command("album",args[1:])
     if raw=="queue": return _media_queue_command()
+    if raw=="audio": return _media_audio_command(args[1:])
     if raw in {"doctor","diagnose","debug"}: return _media_doctor()
     if raw=="clear": return _media_clear_command()
     if raw in {"playlist","playlists"}: return _media_playlist_command(args[1:] if raw=="playlist" else ["list"])

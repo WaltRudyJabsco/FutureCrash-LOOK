@@ -187,7 +187,19 @@ update. A view already open on another endpoint needs reopening to refresh.
 For playback failures, select/play the affected item, then run `lk media doctor`
 on the playback machine. It reports the actual source, decoder probe and recent
 mpv log. A successful probe is evidence of decoding, not proof that rendering
-or sound output works correctly.
+or sound output works correctly. LKMP retains its latest launch receipt and shows
+failed playback instead of reporting “playing” when the player launch fails.
+
+For a silent player after headphones disconnect, press **Shift-O** in `lk mp`
+or `lk player`, or run `lk media audio reset`. This reopens only LOOK’s mpv audio
+output on the current system default, retaining the queue, position, pause state
+and volume. It does not change OS output settings or Bluetooth pairing. A paused
+Mac player also refreshes its automatic output when explicitly resumed. Existing
+video-desk Shift-O continues to mean Open With.
+
+`lk media audio` reports the player’s configured output, backend, mute, volume and
+pause state without changing them. `auto` means follow the system default; it is
+not a speaker’s name. An accepted reset is not proof that sound is audible.
 
 ## Albert
 
