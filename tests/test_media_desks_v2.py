@@ -17,6 +17,7 @@ def lk(monkeypatch):
     module=importlib.util.module_from_spec(spec)
     monkeypatch.setitem(sys.modules,loader.name,module)
     loader.exec_module(module)
+    monkeypatch.setattr(module,'DurationPreview',Durations)
     return module
 
 @pytest.fixture
@@ -52,6 +53,12 @@ def test_top_level_and_media_alias_dispatch(lk,monkeypatch,command,kind):
 class Terminal(io.StringIO):
     def isatty(self):return True
     def fileno(self):return 0
+
+class Durations:
+    def __init__(self,*a):pass
+    def value(self,row):return row.get('duration')
+    def poll(self,rows):return False
+    def close(self):pass
 
 class Preview:
     enabled=False
@@ -116,3 +123,83 @@ def test_tv_search_reserves_apple_handoff_key(lk,rows,monkeypatch):
     assert lk.media_tv()==0
     assert opened==[('m','TV'),('m',None)]
     assert 'T Apple TV' in lk._strip_ansi(out.getvalue())
+
+
+@pytest.fixture
+def desk(lk,rows,monkeypatch):
+    out=Terminal();monkeypatch.setattr(sys,'stdout',out);monkeypatch.setattr(sys,'stdin',Terminal())
+    monkeypatch.setattr(lk.termios,'tcgetattr',lambda fd:[])
+    monkeypatch.setattr(lk.termios,'tcsetattr',lambda *a:None)
+    monkeypatch.setattr(lk.tty,'setcbreak',lambda fd:None)
+    monkeypatch.setattr(lk.shutil,'get_terminal_size',lambda *a:os.terminal_size((180,36)))
+    monkeypatch.setattr(lk,'NativePreviewController',Preview)
+    monkeypatch.setattr(lk,'_media_catalog_entries',lambda:(rows,{}))
+    monkeypatch.setattr(lk,'_media_collapse',lambda rows,**kw:list(rows))
+    monkeypatch.setattr(lk,'_media_status_snapshot',lambda:None)
+    monkeypatch.setattr(lk,'_media_sync_session',lambda:{'queue':[rows[0]]})
+    monkeypatch.setattr(lk,'_media_cover_lines',lambda *a,**kw:[])
+    monkeypatch.setattr(lk,'_media_remote_preview_state',lambda *a:('unavailable',''))
+    monkeypatch.setattr(lk,'_media_detail_lines',lambda *a:[])
+    frames=[];original=lk._terminal_frame_payload
+    monkeypatch.setattr(lk,'_terminal_frame_payload',lambda frame:frames.append(lk._strip_ansi(frame)) or original(frame))
+    return frames
+
+
+@pytest.mark.parametrize('back',['Q','esc'])
+def test_queue_returns_to_library_filter_and_marks(lk,desk,monkeypatch,back):
+    monkeypatch.setattr(sys,'stdout',Terminal());monkeypatch.setattr(sys,'stdin',Terminal())
+    keys=iter(['\t','Q',back,'esc','esc'])
+    monkeypatch.setattr(lk,'_read_tty_key',lambda *a:next(keys))
+    assert lk.media_mp('Music')==0
+    assert 'QUEUE' in desk[2]
+    assert 'LIBRARY' in desk[3] and 'FILTER Music' in desk[3] and '1 marked' in desk[3]
+
+
+@pytest.mark.parametrize('kind',['audio','video'])
+def test_media_desks_open_pane_from_search_without_losing_view(lk,desk,monkeypatch,kind):
+    monkeypatch.setattr(sys,'stdout',Terminal());monkeypatch.setattr(sys,'stdin',Terminal())
+    calls=[]
+    monkeypatch.setattr(lk.terminal_style,'open_pane',lambda path:calls.append(path) or 'Shell opened beside LOOK')
+    keys=iter(['/','W','esc'])
+    monkeypatch.setattr(lk,'_read_tty_key',lambda *a:next(keys))
+    assert lk._media_player_library(media_kind=kind)==0
+    assert calls==[Path.cwd()]
+    assert 'close focused pane' in desk[-1]
+    assert 'SEARCH /W' not in '\n'.join(desk)
+
+
+def test_landscape_columns_include_duration_and_expand_artist_album(lk):
+    row={'title':'Track','artist':'Artist','album':'Album','path':'/song.flac','duration':245}
+    wide=lk._strip_ansi(lk._media_player_columns(row,200,'audio'))
+    header=lk._strip_ansi(lk._media_player_columns({},200,'audio',True))
+    assert len(wide)==200 and '4:05' in wide and 'LENGTH' in header
+    assert wide.index('Track')>35
+    narrow=lk._strip_ansi(lk._media_player_columns(row,60,'audio'))
+    assert len(narrow)==60 and 'Track' in narrow and '4:05' not in narrow
+
+
+def test_media_find_pane_preserves_selection_and_uses_duration_columns(lk,desk,rows,monkeypatch):
+    monkeypatch.setattr(sys,'stdout',Terminal());monkeypatch.setattr(sys,'stdin',Terminal())
+    rows[0]['duration']=245
+    calls=[]
+    monkeypatch.setattr(lk.terminal_style,'open_pane',lambda path:calls.append(path) or 'Shell opened beside LOOK')
+    keys=iter(['\t','/','W','esc'])
+    monkeypatch.setattr(lk,'_read_tty_key',lambda *a:next(keys))
+    assert lk._media_selector(rows)==('none',None)
+    assert calls==[Path.cwd()]
+    assert '1 selected' in desk[-1] and 'close focused pane' in desk[-1]
+    assert 'LENGTH' in desk[-1] and '4:05' in desk[-1]
+    assert 'FILTER W' not in '\n'.join(desk)
+
+
+def test_find_redraws_when_last_duration_completes_before_wait(lk,desk,rows,monkeypatch):
+    monkeypatch.setattr(sys,'stdout',Terminal());monkeypatch.setattr(sys,'stdin',Terminal())
+    preview=Durations();calls=[]
+    def poll(page):
+        calls.append(page)
+        return len(calls)==1
+    preview.poll=poll
+    monkeypatch.setattr(lk,'DurationPreview',lambda *a:preview)
+    monkeypatch.setattr(lk,'_read_tty_key',lambda *a:'esc')
+    assert lk._media_selector(rows)==('none',None)
+    assert len(desk)==2

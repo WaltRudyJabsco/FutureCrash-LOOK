@@ -1,3 +1,10 @@
+## Media desk navigation, panes and landscape layout
+
+- Make Shift-Q toggle Queue/Library and Escape return from Queue while preserving the previous library filter, selection and marks.
+- Add sibling-shell Shift-W to MP, TV and Media Find using the existing Kitty/tmux controls; keep Player focused on playback.
+- Preserve compact media layouts and expand landscape columns with a LENGTH field. Resolve missing visible-row durations in bounded background probes and cache results without scanning the entire library.
+- Extend wide MP/TV rules to the terminal width and add Media Find duration previews.
+
 ## Player audio recovery and launch diagnostics
 
 - Add Shift-O in LKMP/Player and `lk media audio reset` to reopen the LOOK-owned audio output on the system default without changing queue, position, volume or Bluetooth settings.

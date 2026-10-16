@@ -429,3 +429,26 @@ preparation/play deadlines outlast the node worker; pause/seek and other ordinar
 control calls retain short deadlines. Signal reports preparation timeouts or
 connection failures explicitly. Preparing a queue does not start native playback
 and does not prove that a browser can decode the selected movie.
+
+
+## Media desk navigation and landscape layout
+
+In `lk mp` and `lk tv`, Shift-Q toggles Library/Queue. Escape from Queue returns
+to the previous library filter, cursor and marks; Escape in Library clears its
+filter before exiting. Shift-L also returns to Library. No quit confirmation is
+needed for this reversible navigation.
+
+Shift-W opens a sibling shell from MP, TV or Media Find, using the same
+Kitty/tmux helper as LOOK, Notes and Web. Kitty's Option-Shift-W changes focus and
+Ctrl-Shift-W closes the focused pane; the footer shows these controls after a
+successful split. The terminal owns pane focus, borders and inactive-text dimming.
+LK Player remains a playback endpoint without shell-pane creation. Shift-W in
+a text editor remains typed text.
+
+Narrow media desks retain their compact layout. Wider list areas add LENGTH and
+expand artist/title/album columns across the available landscape width. Cached
+catalog durations appear immediately; unknown lengths are probed one at a time
+for visible rows only, using ffprobe and the existing local/Fabric source path.
+No audio is played for this lookup. Results are cached by source identity, size
+and modification time; failures remain `--:--`. Browsing never waits for a whole
+library metadata scan. Lengths can therefore appear progressively.
