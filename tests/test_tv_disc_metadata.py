@@ -90,6 +90,7 @@ def test_cd_barcode_fallback_confirms_release_and_matching_disc(monkeypatch):
                                                   {'title':'Album','disc':2,'tracks':['Other']}]}
         raise AssertionError(action)
     def prompt(label,default=''):
+        if label.startswith('Release number'):return '1'  # Track-count-only matches require review.
         return '012345678905' if label.startswith('CD barcode') else default
     payload=disc_ui.import_options(request,inventory,'drive',prompt,lambda label,default:default)
     assert payload['metadata']['tracks']==['One','Two'] and payload['metadata']['disc']==1

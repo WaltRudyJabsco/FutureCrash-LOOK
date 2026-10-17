@@ -1,3 +1,10 @@
+## Audio CD progress, multi-disc review and import panes
+
+- Measure CD read progress from actual audio bytes against the scanned TOC, showing current track/count and effective read speed; report per-track FLAC encoding progress and retain audio-read elapsed time.
+- Prefer MusicBrainz disc-ID matches over same-track-count sibling discs. Show disc numbers/subtitles and sample track names, require review for count-only matches, and let users edit disc/total numbers before import.
+- Preserve disc/total tags and label multi-disc output directories without changing read verification or lossless encoding.
+- Add Shift-W sibling shells to the import workbench with the existing pane focus/close controls.
+
 ## Media desk navigation, panes and landscape layout
 
 - Make Shift-Q toggle Queue/Library and Escape return from Queue while preserving the previous library filter, selection and marks.

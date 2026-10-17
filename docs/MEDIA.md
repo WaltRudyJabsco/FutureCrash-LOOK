@@ -438,7 +438,7 @@ to the previous library filter, cursor and marks; Escape in Library clears its
 filter before exiting. Shift-L also returns to Library. No quit confirmation is
 needed for this reversible navigation.
 
-Shift-W opens a sibling shell from MP, TV or Media Find, using the same
+Shift-W opens a sibling shell from MP, TV, Media Find or the import workbench, using the same
 Kitty/tmux helper as LOOK, Notes and Web. Kitty's Option-Shift-W changes focus and
 Ctrl-Shift-W closes the focused pane; the footer shows these controls after a
 successful split. The terminal owns pane focus, borders and inactive-text dimming.

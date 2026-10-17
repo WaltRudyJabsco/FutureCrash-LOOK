@@ -164,14 +164,16 @@ def cd_barcode(value):
 def cd_release(identifier):
     import uuid
     identifier=str(uuid.UUID(str(identifier)))
-    data=_music_json('release/'+identifier+'?'+urllib.parse.urlencode({'inc':'artists+recordings','fmt':'json'}))
+    data=_music_json('release/'+identifier+'?'+urllib.parse.urlencode({'inc':'artists+recordings+discids','fmt':'json'}))
     artist=text(''.join(item.get('name','')+item.get('joinphrase','') for item in data.get('artist-credit',[]) if isinstance(item,dict)))
     releases=[]
     for medium in data.get('media') or []:
         tracks=medium.get('tracks') or []
         if not tracks:continue
         releases.append({'title':text(data.get('title')),'artist':artist,'release_id':identifier,
-                         'disc':medium.get('position'),
+                         'disc':medium.get('position') or 1,'disc_count':max(int(data.get('media-count') or 0),len(data.get('media') or []),int(medium.get('position') or 1)),
+                         'disc_title':text(medium.get('title')),
+                         'disc_ids':[disc.get('id') for disc in medium.get('discs') or []],
                          'tracks':[text(track.get('title') or (track.get('recording') or {}).get('title')) for track in tracks]})
     return {'ok':True,'releases':releases,'source':'MusicBrainz'}
 

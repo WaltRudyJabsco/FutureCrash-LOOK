@@ -19,6 +19,7 @@ import threading
 import time
 import urllib.request
 import uuid
+import wave
 
 ROOT=Path.home()/'.local/share/look/imports'
 LIBRARY=Path.home()/'.local/share/look/media_library.json'
@@ -26,6 +27,10 @@ TERMINAL={'complete','failed','cancelled'}
 MIN_FREE_BYTES=1024**3
 COVER_MAX_BYTES=2*1024*1024
 DISC_SCAN_TIMEOUT_SECONDS=300
+CD_SECTOR_BYTES=2352
+CD_SECTORS_PER_SECOND=75
+CD_WAV_HEADER_BYTES=44
+CD_PROGRESS_INTERVAL_SECONDS=1.0
 
 
 def download_cover(folder,release_id):
@@ -176,7 +181,7 @@ def toc_from_query(text):
 def lookup(toc):
     if not toc:return []
     from urllib.parse import urlencode
-    url='https://musicbrainz.org/ws/2/discid/'+toc['disc_id']+'?'+urlencode({'toc':toc['toc'],'inc':'artists+recordings','fmt':'json'})
+    url='https://musicbrainz.org/ws/2/discid/'+toc['disc_id']+'?'+urlencode({'toc':toc['toc'],'inc':'artists+recordings+discids','fmt':'json'})
     request=urllib.request.Request(url,headers={'User-Agent':'FutureCrash-LOOK/8.16.1 (personal disc importer)'})
     try:
         with urllib.request.urlopen(request,timeout=5) as response:data=json.load(response)
@@ -189,8 +194,12 @@ def lookup(toc):
             if len(tracks)!=toc['count']:continue
             releases.append({'title':str(release.get('title') or '')[:200],'artist':artist[:200],
                              'tracks':[str(track.get('title') or (track.get('recording') or {}).get('title') or '')[:200] for track in tracks],
-                             'release_id':release.get('id'),'disc':int(medium.get('position') or 1)})
-    return releases
+                             'release_id':release.get('id'),'disc':int(medium.get('position') or 1),
+                             'disc_count':max(int(release.get('media-count') or 0),len(release.get('media') or []),int(medium.get('position') or 1)),
+                             'disc_title':str(medium.get('title') or '')[:200],
+                             'disc_match':any(item.get('id')==toc['disc_id'] for item in medium.get('discs') or [])})
+    exact=[release for release in releases if release['disc_match']]
+    return exact or releases
 
 
 def toc_from_mount(mount):
@@ -341,6 +350,9 @@ def start(payload):
     tracks=metadata.get('tracks',[])
     if not isinstance(tracks,list) or len(tracks)>99 or any(not isinstance(value,str) or len(value)>300 for value in tracks):raise ValueError('Invalid track metadata')
     if 'disc' in metadata and (not isinstance(metadata['disc'],int) or not 1<=metadata['disc']<=99):raise ValueError('Invalid disc number')
+    if 'disc_count' in metadata and (not isinstance(metadata['disc_count'],int) or not int(metadata.get('disc') or 1)<=metadata['disc_count']<=99):raise ValueError('Invalid total disc count')
+    toc=payload.get('toc') if kind=='cd' else None
+    if toc is not None:cd_layout(toc)
     if 'tv_titles' in metadata:
         try:from . import disc_metadata
         except ImportError:import disc_metadata
@@ -366,7 +378,7 @@ def start(payload):
         fcntl.flock(lock,fcntl.LOCK_EX)
         if any(row['drive']['id']==drive['id'] and row['state'] not in TERMINAL for row in list_jobs()):raise ValueError('This drive already has an import job')
         identifier=uuid.uuid4().hex
-        row={'id':identifier,'kind':kind,'category':category,'drive':drive,'title':title,'metadata':metadata,'title_index':str(payload.get('title_index','')),
+        row={'id':identifier,'kind':kind,'category':category,'drive':drive,'title':title,'metadata':metadata,'title_index':str(payload.get('title_index','')),'toc':toc,
              'destination':str(destination),'library_destination':remote_destination,'state':'queued','created':time.time(),'percent':None,'stage':'queued','cancel_requested':False}
         atomic(job_path(identifier),row)
         log=ROOT/'jobs'/(identifier+'.log')
@@ -390,9 +402,49 @@ def cancel(identifier):
     return {'ok':True,'job':row}
 
 
-def progress(line):
+def cd_layout(toc):
+    try:
+        first,last,leadout,*offsets=map(int,toc['toc'].split())
+        if first!=1 or not 1<=last<=99 or len(offsets)!=last or offsets!=sorted(set(offsets)) or offsets[0]<150 or leadout<=offsets[-1]:raise ValueError()
+        return offsets,leadout
+    except (KeyError,AttributeError,TypeError,ValueError):raise ValueError('Invalid audio CD table of contents')
+
+
+def cd_read_progress(folder,toc,elapsed,track_count=0):
+    """Measure actual PCM written, independent of the ripper's terminal output."""
+    total=None
+    if toc:
+        offsets,leadout=cd_layout(toc);track_count=len(offsets)
+        total=(leadout-offsets[0])*CD_SECTOR_BYTES
+    written=0;track=0
+    for path in folder.glob('*.wav'):
+        try:size=path.stat().st_size
+        except OSError:continue
+        written+=max(0,size-CD_WAV_HEADER_BYTES)
+        match=re.search(r'track(\d+)',path.name,re.I)
+        track=max(track,int(match[1]) if match else track+1)
+    speed=written/(CD_SECTOR_BYTES*CD_SECTORS_PER_SECOND*elapsed) if elapsed>0 else 0
+    label=f'reading audio CD · track {track}/{track_count or "?"}' if track else 'reading audio CD · waiting for drive'
+    if written:label+=f' · {speed:.1f}× average'
+    return {'stage':label,'percent':min(99.9,100*written/total) if total else None,
+            'audio_bytes_read':written,'last_read_update':time.time()}
+
+
+def audio_seconds(path):
+    try:
+        with wave.open(str(path),'rb') as audio:return audio.getnframes()/audio.getframerate()
+    except (OSError,EOFError,wave.Error):
+        try:return float(query([tool('ffprobe'),'-v','error','-show_entries','format=duration','-of','default=noprint_wrappers=1:nokey=1',str(path)],5).strip())
+        except (OSError,ValueError):return None
+
+
+def progress(line,duration=None):
     match=re.search(r'PRGV:(\d+),(\d+),(\d+)',line)
     if match and int(match[3]):return min(100,100*int(match[2])/int(match[3]))
+    if duration and duration>0:
+        match=re.fullmatch(r'out_time_us=(\d+)',line.strip())
+        if match:return min(100,100*int(match[1])/(duration*1000000))
+        if line.strip()=='progress=end':return 100
     match=re.search(r'(\d+(?:\.\d+)?)\s*%',line)
     return min(100,float(match[1])) if match else None
 
@@ -407,12 +459,15 @@ def worker(identifier):
             fcntl.flock(lock,fcntl.LOCK_EX)
             current=json.loads(job_path(identifier).read_text());row['cancel_requested']=current.get('cancel_requested',False)
             row.update(changes);atomic(job_path(identifier),row)
-    def run(command,phase):
+    def run(command,phase,*,tick=None,duration=None):
         save(stage=phase,percent=None,phase_started=time.time())
         process=subprocess.Popen(command,cwd=stage,stdin=subprocess.DEVNULL,stdout=subprocess.PIPE,stderr=subprocess.STDOUT,start_new_session=True)
-        buffer=b''
+        buffer=b'';last_tick=0
         try:
             while True:
+                now=time.monotonic()
+                if tick and now-last_tick>=CD_PROGRESS_INTERVAL_SECONDS:
+                    save(**tick());last_tick=now
                 if json.loads(job_path(identifier).read_text()).get('cancel_requested'):raise InterruptedError('Import cancelled')
                 if select.select([process.stdout],[],[],.5)[0]:
                     chunk=os.read(process.stdout.fileno(),8192)
@@ -427,7 +482,8 @@ def worker(identifier):
                                 # MakeMKV restarts progress when preparation ends.
                                 label=''.join(char for char in fields[2] if ord(char)>=32 and not 127<=ord(char)<160)[:160]
                                 save(stage=label,percent=None,phase_started=time.time())
-                        if progress(line) is not None:save(percent=progress(line))
+                        value=progress(line,duration) if tick is None else None
+                        if value is not None:save(percent=value)
                     buffer=buffer[-65536:]
                 elif process.poll() is not None:break
             if process.wait():raise ValueError('Import tool failed; see '+str(ROOT/'jobs'/(identifier+'.log')))
@@ -443,7 +499,10 @@ def worker(identifier):
         if row['kind']=='cd':
             ripper=tool('cd-paranoia') or tool('cdparanoia')
             if ripper and drive['device']:
-                run([ripper,'-d',drive['device'],'-B'],'reading audio CD')
+                read_started=time.monotonic()
+                run([ripper,'-e','-d',drive['device'],'-B'],'reading audio CD',
+                    tick=lambda:cd_read_progress(stage,row.get('toc'),time.monotonic()-read_started,len(metadata.get('tracks') or [])))
+                save(read_elapsed_seconds=round(time.monotonic()-read_started,1))
                 inputs=sorted(stage.glob('*.wav'))
             else:
                 inputs=audio_tracks(drive['mount'])
@@ -453,9 +512,10 @@ def worker(identifier):
                 title=expected[number-1] if number<=len(expected) else path.stem
                 output=stage/(f'{number:02d} - '+safe_name(title)+'.flac')
                 tags={'title':title,'artist':str(metadata.get('artist') or 'Unknown artist'),'album_artist':str(metadata.get('artist') or 'Unknown artist'),'album':row['title'],'track':str(number),'disc':str(metadata.get('disc') or 1)}
-                command=[tool('ffmpeg'),'-nostdin','-v','error','-n','-i',str(path),'-c:a','flac']
+                if metadata.get('disc_count'):tags['disctotal']=str(metadata['disc_count'])
+                command=[tool('ffmpeg'),'-nostdin','-v','error','-n','-i',str(path),'-c:a','flac','-progress','pipe:1','-nostats']
                 for key,value in tags.items():command+=['-metadata',key+'='+value]
-                run([*command,str(output)],f'encoding track {number}/{len(inputs)}')
+                run([*command,str(output)],f'encoding track {number}/{len(inputs)}',duration=audio_seconds(path))
                 atomic(output.with_suffix('.info.json'),tags);outputs.append(output)
         elif drive.get('makemkv_source'):
             run([tool('makemkvcon'),'-r','--progress=-same','--cache=512','mkv',drive['makemkv_source'],row['title_index'],str(stage)],'reading movie')
@@ -500,7 +560,8 @@ def worker(identifier):
             for path in stage.glob('*.wav'):path.unlink()
             save(stage='fetching album cover')
             save(artwork=download_cover(stage,metadata.get('release_id')))
-        final=Path(row['destination'])/(safe_name(row['title'])+' - '+identifier[:8])
+        disc_label=(' - Disc '+str(metadata.get('disc') or 1)) if row['kind']=='cd' and (metadata.get('disc_count',1)>1 or metadata.get('disc',1)>1) else ''
+        final=Path(row['destination'])/(safe_name(row['title'])+disc_label+' - '+identifier[:8])
         atomic(stage/'import.json',{'job':identifier,'kind':row['kind'],'drive':drive,'metadata':metadata,
                                   'title_index':row['title_index'],'files':[path.name for path in outputs],'created':row['created']})
         save(stage='publishing')

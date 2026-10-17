@@ -311,3 +311,64 @@ def test_dismiss_rejects_active_import_or_delivery(isolated,monkeypatch):
     discs.atomic(discs.job_path(identifier),row)
     monkeypatch.setattr(media_storage,'receipt',lambda identifier:{'state':'running'})
     with pytest.raises(ValueError,match='delivery'):discs.dismiss(identifier)
+
+
+def test_cd_read_progress_measures_pcm_and_reports_track(tmp_path):
+    toc={'toc':'1 2 300 150 225'}  # 150 audio sectors after the lead-in.
+    (tmp_path/'track01.cdda.wav').write_bytes(b'\0'*(44+75*discs.CD_SECTOR_BYTES))
+    result=discs.cd_read_progress(tmp_path,toc,1)
+    assert result['percent']==50
+    assert 'track 1/2' in result['stage'] and '1.0×' in result['stage']
+    (tmp_path/'track02.cdda.wav').write_bytes(b'\0'*(44+75*discs.CD_SECTOR_BYTES))
+    assert discs.cd_read_progress(tmp_path,toc,2)['percent']==99.9
+    with pytest.raises(ValueError):discs.cd_layout({'toc':'1 2 300 225 150'})
+    assert discs.cd_read_progress(tmp_path,None,2,2)['percent'] is None
+    assert discs.progress('out_time_us=2500000',10)==25
+    assert discs.progress('progress=end',10)==100
+
+
+def test_multidisc_lookup_uses_disc_identity_not_just_track_count(monkeypatch):
+    import io
+    data={'releases':[{'id':'release','title':'A box','media-count':2,'media':[
+        {'position':1,'tracks':[{'title':'Wrong one'},{'title':'Wrong two'}],'discs':[{'id':'other'}]},
+        {'position':2,'title':'Second disc','tracks':[{'title':'Right one'},{'title':'Right two'}],'discs':[{'id':'inserted'}]}]}]}
+    monkeypatch.setattr(discs.urllib.request,'urlopen',lambda *a,**k:io.BytesIO(json.dumps(data).encode()))
+    matches=discs.lookup({'disc_id':'inserted','toc':'1 2 300 150 225','count':2})
+    assert len(matches)==1 and matches[0]['disc']==2 and matches[0]['disc_count']==2
+    assert matches[0]['tracks']==['Right one','Right two'] and matches[0]['disc_match'] is True
+    fallback=discs.lookup({'disc_id':'unknown','toc':'1 2 300 150 225','count':2})
+    assert len(fallback)==2 and all(not item['disc_match'] for item in fallback)
+
+
+@pytest.mark.skipif(not shutil.which('ffmpeg') or not shutil.which('ffprobe'),reason='Real media codecs unavailable')
+def test_cd_worker_reports_progress_while_reader_is_quiet_and_retains_disc_tags(isolated,monkeypatch):
+    reader=fake_tool(isolated/'reader-progress','''import wave,time
+for number in (1,2):
+ with wave.open('track%02d.cdda.wav'%number,'wb') as out:
+  out.setnchannels(2);out.setsampwidth(2);out.setframerate(44100);out.writeframes(b'\\0'*176400)
+ time.sleep(1.3)
+''')
+    original=discs.tool;monkeypatch.setattr(discs,'tool',lambda name:reader if name in {'cd-paranoia','cdparanoia'} else original(name))
+    identifier=seed(isolated);row=json.loads(discs.job_path(identifier).read_text())
+    row.update(toc={'toc':'1 2 300 150 225'});row['metadata'].update(disc=2,disc_count=4)
+    discs.atomic(discs.job_path(identifier),row)
+    thread=threading.Thread(target=discs.worker,args=(identifier,));thread.start()
+    deadline=time.monotonic()+5;saw_progress=False
+    while time.monotonic()<deadline and thread.is_alive():
+        receipt=discs.read_job(identifier)
+        if receipt.get('percent')==50 and 'track 1/2' in receipt['stage']:
+            saw_progress=True;break
+        time.sleep(.05)
+    thread.join(timeout=8)
+    assert saw_progress and not thread.is_alive()
+    receipt=discs.read_job(identifier)
+    assert receipt['state']=='complete',receipt
+    assert receipt['read_elapsed_seconds']>=2
+    folder=Path(receipt['output']);assert 'Disc 2' in folder.name
+    tags=json.loads(next(folder.glob('*.info.json')).read_text())
+    assert tags['disc']=='2' and tags['disctotal']=='4'
+
+    import subprocess
+    embedded=json.loads(subprocess.check_output([original('ffprobe'),'-v','error','-show_entries','format_tags','-of','json',str(next(folder.glob('*.flac')))]))['format']['tags']
+    embedded={key.casefold():value for key,value in embedded.items()}
+    assert embedded['disc']=='2' and embedded['disctotal']=='4'
