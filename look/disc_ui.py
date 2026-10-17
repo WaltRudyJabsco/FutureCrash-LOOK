@@ -418,7 +418,11 @@ def import_options(request,inventory,drive,prompt,path_prompt):
                 if kind=='cd':
                     releases=scan.get('releases') or []
                     if not releases:
-                        print('No automatic album match. Optional barcode lookup sends the digits to MusicBrainz.')
+                        lookup_status=scan.get('metadata_lookup') or {}
+                        if lookup_status.get('state')=='unavailable':
+                            print('MusicBrainz lookup unavailable · '+str(lookup_status.get('error') or 'request failed')+' · this is not a confirmed missing album')
+                        else:print('No automatic album match.')
+                        print('Optional barcode lookup sends the digits to MusicBrainz.')
                         barcode=prompt('CD barcode digits (blank keeps disc labels)','')
                         if barcode:
                             found=request('cd-barcode',{'barcode':barcode}).get('releases') or []

@@ -341,3 +341,8 @@ remain shared across the set; FLAC files retain disc and total-disc tags.
 Shift-W at the import workbench opens a sibling shell through the standard
 Kitty/tmux pane helper. The footer then shows focus/close controls. It does not
 start, stop or cancel imports. Inside setup text fields, uppercase W stays text.
+
+Metadata service errors (HTTP failures, timeouts or malformed responses) are shown
+as lookup unavailable, rather than being described as a missing album. MusicBrainz
+remains the CD provider. A new import/rescan retries identification without
+changing existing media or completed imports.
