@@ -1,3 +1,9 @@
+## Restore audio-CD album lookup
+
+- Restore the valid MusicBrainz disc-ID include parameters; the extra discids option caused HTTP 400 and suppressed otherwise-correct album matches.
+- Preserve exact disc/medium matching from the returned records.
+- Distinguish a failed metadata request from a confirmed no-match result in CD setup, retaining detected labels and the optional barcode path.
+
 ## Audio CD progress, multi-disc review and import panes
 
 - Measure CD read progress from actual audio bytes against the scanned TOC, showing current track/count and effective read speed; report per-track FLAC encoding progress and retain audio-read elapsed time.

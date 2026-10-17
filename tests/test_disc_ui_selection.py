@@ -360,3 +360,17 @@ def test_cd_review_carries_toc_and_manual_disc_number(monkeypatch,capsys):
     assert result['metadata']['disc']==2 and result['metadata']['disc_count']==4
     text=capsys.readouterr().out
     assert 'Disc 2 of 4' in text and 'disc ID matched' in text and 'One / Two' in text
+
+
+def test_cd_service_failure_is_not_presented_as_missing_album(monkeypatch,capsys):
+    monkeypatch.setattr(media_storage,'settings',lambda:{'node':'local','root':'~/Media'})
+    inventory={'drives':[{'id':'drive','kind':'cd'}],'tools':{}}
+    def request(action,payload):
+        assert action=='scan'
+        return {'kind':'cd','tracks':2,'metadata':{'title':'Disc labels'},'releases':[],
+                'metadata_lookup':{'state':'unavailable','error':'HTTP 400 · Bad Request'}}
+    result=disc_ui.import_options(request,inventory,'drive',lambda label,default='':default,lambda label,default:default)
+    assert result['title']=='Disc labels'
+    text=capsys.readouterr().out
+    assert 'MusicBrainz lookup unavailable' in text and 'HTTP 400' in text
+    assert 'No automatic album match.' not in text

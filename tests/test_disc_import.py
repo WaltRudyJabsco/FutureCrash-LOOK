@@ -372,3 +372,23 @@ for number in (1,2):
     embedded=json.loads(subprocess.check_output([original('ffprobe'),'-v','error','-show_entries','format_tags','-of','json',str(next(folder.glob('*.flac')))]))['format']['tags']
     embedded={key.casefold():value for key,value in embedded.items()}
     assert embedded['disc']=='2' and embedded['disctotal']=='4'
+
+
+def test_discid_query_keeps_valid_includes_and_reports_service_errors(monkeypatch):
+    import io
+    from urllib.parse import urlsplit,parse_qs
+    from urllib.error import HTTPError
+    seen=[]
+    def response(request,**kwargs):
+        query=parse_qs(urlsplit(request.full_url).query)
+        assert query['inc']==['artists+recordings']
+        seen.append(query)
+        return io.BytesIO(b'{"releases":[]}')
+    monkeypatch.setattr(discs.urllib.request,'urlopen',response)
+    toc={'disc_id':'test-disc','toc':'1 1 225 150','count':1};status={}
+    assert discs.lookup(toc,status)==[]
+    assert status['state']=='no-match' and seen
+    def fail(request,**kwargs):raise HTTPError(request.full_url,400,'Bad Request',{},None)
+    monkeypatch.setattr(discs.urllib.request,'urlopen',fail)
+    status={};assert discs.lookup(toc,status)==[]
+    assert status['state']=='unavailable' and 'HTTP 400' in status['error']

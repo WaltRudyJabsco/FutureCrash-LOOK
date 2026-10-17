@@ -18,6 +18,7 @@ import tempfile
 import threading
 import time
 import urllib.request
+import urllib.error
 import uuid
 import wave
 
@@ -178,14 +179,20 @@ def toc_from_query(text):
     return {'disc_id':disc_id,'toc':' '.join(map(str,[first,last,leadout,*offsets])),'count':last}
 
 
-def lookup(toc):
+def lookup(toc,status=None):
     if not toc:return []
     from urllib.parse import urlencode
-    url='https://musicbrainz.org/ws/2/discid/'+toc['disc_id']+'?'+urlencode({'toc':toc['toc'],'inc':'artists+recordings+discids','fmt':'json'})
+    # Disc-ID replies already include medium disc IDs. Adding inc=discids here
+    # requires a different query shape and makes the service reject this request.
+    url='https://musicbrainz.org/ws/2/discid/'+toc['disc_id']+'?'+urlencode({'toc':toc['toc'],'inc':'artists+recordings','fmt':'json'})
     request=urllib.request.Request(url,headers={'User-Agent':'FutureCrash-LOOK/8.16.1 (personal disc importer)'})
     try:
         with urllib.request.urlopen(request,timeout=5) as response:data=json.load(response)
-    except (OSError,ValueError):return []
+    except (OSError,ValueError) as exc:
+        if status is not None:
+            detail=('HTTP '+str(exc.code)+' · '+str(exc.reason)) if isinstance(exc,urllib.error.HTTPError) else str(exc)
+            status.update(source='MusicBrainz',state='unavailable',error=''.join(c for c in detail if c.isprintable())[:300])
+        return []
     releases=[]
     for release in data.get('releases',[])[:20]:
         artist=''.join(str(item.get('name') or '')+str(item.get('joinphrase') or '') for item in release.get('artist-credit',[]) if isinstance(item,dict))
@@ -199,7 +206,9 @@ def lookup(toc):
                              'disc_title':str(medium.get('title') or '')[:200],
                              'disc_match':any(item.get('id')==toc['disc_id'] for item in medium.get('discs') or [])})
     exact=[release for release in releases if release['disc_match']]
-    return exact or releases
+    matches=exact or releases
+    if status is not None:status.update(source='MusicBrainz',state='matched' if matches else 'no-match',count=len(matches))
+    return matches
 
 
 def toc_from_mount(mount):
@@ -264,7 +273,8 @@ def inspect(identifier,kind='cd'):
         if native and not toc:toc=toc_from_mount(drive['mount'])
         if not toc and not native:raise ValueError('Audio CD not readable; insert a CD and check drive permissions / cd-paranoia')
         metadata={'title':drive.get('disc') or '', 'tracks':[re.sub(r'^\d+\s*[-.]?\s*','',path.stem) for path in native]}
-        return {'ok':True,'kind':kind,'drive':drive,'engine':'cd-paranoia' if ripper and drive['device'] else 'macOS audio volume','toc':toc,'releases':lookup(toc),'metadata':metadata,'tracks':len(native) if not toc else toc['count']}
+        lookup_status={};releases=lookup(toc,lookup_status)
+        return {'ok':True,'kind':kind,'drive':drive,'engine':'cd-paranoia' if ripper and drive['device'] else 'macOS audio volume','toc':toc,'releases':releases,'metadata_lookup':lookup_status,'metadata':metadata,'tracks':len(native) if not toc else toc['count']}
     if drive.get('makemkv_source'):
         text=query([tool('makemkvcon'),'-r','--cache=128','info',drive['makemkv_source']],DISC_SCAN_TIMEOUT_SECONDS)
         titles={}
