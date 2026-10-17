@@ -328,3 +328,35 @@ def test_zero_elapsed_does_not_restart_failed_clock(monkeypatch):
     monkeypatch.setattr(disc_ui.time,'time',lambda:100000)
     assert disc_ui.elapsed_seconds(row)==0
     assert 'ETA' not in disc_ui.summary(row)
+
+
+def test_import_workbench_pane_keeps_jobs_untouched(monkeypatch,capsys):
+    import textwrap
+    from pathlib import Path
+    monkeypatch.setattr(disc_ui.sys,'stdin',Mock(fileno=lambda:0))
+    monkeypatch.setattr(disc_ui.termios,'tcgetattr',lambda *a:[])
+    monkeypatch.setattr(disc_ui.termios,'tcsetattr',lambda *a:None)
+    monkeypatch.setattr(disc_ui.tty,'setcbreak',lambda *a:None)
+    pane=Mock(return_value='Shell opened beside LOOK');monkeypatch.setattr(disc_ui.terminal_style,'open_pane',pane)
+    def request(action,payload):
+        assert action in {'drives','jobs'}
+        return {'drives':[],'tools':{}} if action=='drives' else {'jobs':[]}
+    keys=iter(['W','esc'])
+    assert disc_ui.workspace(request,lambda *a:next(keys),lambda text,width:'\n'.join(textwrap.wrap(text,width-1)))==0
+    pane.assert_called_once_with(Path.cwd())
+    assert 'close focused pane' in ' '.join(capsys.readouterr().out.split())
+
+
+def test_cd_review_carries_toc_and_manual_disc_number(monkeypatch,capsys):
+    monkeypatch.setattr(media_storage,'settings',lambda:{'node':'local','root':'~/Media'})
+    toc={'disc_id':'inserted','toc':'1 2 300 150 225','count':2}
+    inventory={'drives':[{'id':'drive','kind':'cd'}],'tools':{}}
+    release={'title':'Box set','artist':'Band','disc':2,'disc_count':4,'disc_match':True,'tracks':['One','Two']}
+    def request(action,payload):
+        assert action=='scan'
+        return {'kind':'cd','tracks':2,'toc':toc,'metadata':{},'releases':[release]}
+    result=disc_ui.import_options(request,inventory,'drive',lambda label,default='':default,lambda label,default:default)
+    assert result['toc']==toc
+    assert result['metadata']['disc']==2 and result['metadata']['disc_count']==4
+    text=capsys.readouterr().out
+    assert 'Disc 2 of 4' in text and 'disc ID matched' in text and 'One / Two' in text

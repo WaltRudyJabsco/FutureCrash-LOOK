@@ -9,6 +9,9 @@ import time
 import tty
 import os
 import unicodedata
+from pathlib import Path
+try:from . import terminal_style
+except ImportError:import terminal_style
 
 PROGRESS_HINTS='Esc return · ↑↓ scroll · Shift-↑↓ page'
 
@@ -60,6 +63,8 @@ def workbench_lines(inventory,jobs,index,width,height,show_history,colors):
         details=wrapped_lines('SELECTED · '+chosen['title'],width)
         detail='PHASE · '+str(chosen.get('stage') or chosen['state'])
         if chosen.get('error'):detail+=' · '+str(chosen['error'])
+        if isinstance(chosen.get('read_elapsed_seconds'),(int,float)):
+            seconds=int(chosen['read_elapsed_seconds']);detail+=f' · audio read {seconds//60}:{seconds%60:02d}'
         if chosen.get('estimated_remaining_seconds') is not None and active(chosen):detail+=' · ETA ~'+str(chosen['estimated_remaining_seconds']//60)+' min'
         details+=wrapped_lines(detail,width)
         details=details[:max(1,min(5,height//4))]
@@ -329,11 +334,12 @@ def capture(request,drive,kind,title='',destination='',title_index='',release=No
     if category:payload['category']=category
     if kind=='cd' and metadata:
         scan=request('scan',{'drive':drive,'kind':kind});releases=scan.get('releases') or []
+        if scan.get('toc'):payload['toc']=scan['toc']
         if scan.get('metadata'):payload['metadata']=scan['metadata']
         if release is not None:
             if not 1<=release<=len(releases):raise ValueError('Release choice is out of range; scan first')
             payload['metadata']=releases[release-1]
-        elif len(releases)==1:payload['metadata']=releases[0]
+        elif len(releases)==1 and releases[0].get('disc_match'):payload['metadata']=releases[0]
     return request('start',payload)
 
 
@@ -358,6 +364,12 @@ def watch(identifier,request,read_key,hints):
 
 class ImportBack(Exception):
     """Escape is navigation during setup, before any import is submitted."""
+
+
+def cd_release_label(release):
+    disc=f"Disc {release.get('disc') or 1} of {release.get('disc_count') or '?'}"
+    certainty='disc ID matched' if release.get('disc_match') else 'track count only · check track names'
+    return ' · '.join(str(value) for value in (release['title'],release.get('artist'),disc,release.get('disc_title'),certainty) if value)
 
 
 def import_options(request,inventory,drive,prompt,path_prompt):
@@ -419,10 +431,16 @@ def import_options(request,inventory,drive,prompt,path_prompt):
                                     time.sleep(1)  # MusicBrainz asks for at most one request per second.
                                     releases=request('cd-release',{'id':found[int(choice)-1]['release_id']}).get('releases') or []
                                     releases=[item for item in releases if len(item.get('tracks') or [])==scan.get('tracks')]
+                                    disc_id=(scan.get('toc') or {}).get('disc_id')
+                                    for item in releases:item['disc_match']=bool(disc_id and disc_id in item.get('disc_ids',[]))
+                                    exact=[item for item in releases if item['disc_match']]
+                                    releases=exact or releases
                                     if not releases:print('Release track count does not match this disc; keeping disc labels.')
                             else:print('Barcode not found; keeping disc labels.')
-                    for n,release in enumerate(releases,1):print(f"  {n}. {release['title']} · {release.get('artist') or ''}")
-                    choice=prompt('Release number (blank keeps detected labels)','1' if len(releases)==1 else '') if releases else ''
+                    for n,release in enumerate(releases,1):
+                        print(f"  {n}. {cd_release_label(release)}")
+                        print('     '+ ' / '.join((release.get('tracks') or [])[:3]))
+                    choice=prompt('Release number (blank keeps detected labels)','1' if len(releases)==1 and releases[0].get('disc_match') else '') if releases else ''
                     if choice:
                         if not choice.isdigit() or not 1<=int(choice)<=len(releases):raise ValueError('Release choice out of range')
                         metadata=dict(releases[int(choice)-1])
@@ -435,6 +453,11 @@ def import_options(request,inventory,drive,prompt,path_prompt):
                 if kind=='cd':
                     title=prompt('Album title',title or metadata.get('title') or '')
                     metadata['artist']=prompt('Artist (optional)',metadata.get('artist') or '')
+                    disc=prompt('Disc number',str(metadata.get('disc') or 1))
+                    if not disc.isdigit() or not 1<=int(disc)<=99:raise ValueError('Use a disc number from 1 to 99')
+                    total=prompt('Total discs in set',str(max(int(disc),int(metadata.get('disc_count') or 1))))
+                    if not disc.isdigit() or not total.isdigit() or not 1<=int(disc)<=int(total)<=99:raise ValueError('Use disc numbers from 1 to 99; total must include this disc')
+                    metadata.update(disc=int(disc),disc_count=int(total))
                 elif category=='tv':
                     title,metadata=tv_details(request,prompt,dict(metadata,title=title or metadata.get('title') or hint.get('title') or ''),scan.get('titles') or [],title_index)
                 else:title,metadata=movie_details(request,prompt,dict(metadata,title=title or metadata.get('title') or ''))
@@ -455,12 +478,13 @@ def import_options(request,inventory,drive,prompt,path_prompt):
                 target=fabric_files.parse(destination)
                 actual=str(target)+('/'+category if target else '') if target else destination
                 print(f"REVIEW · {title} · {kind.upper()} · {category} · title {title_index or 'audio tracks'}\nSave to {actual}")
+                if kind=='cd':print(f"CD · Disc {metadata.get('disc') or 1} of {metadata.get('disc_count') or '?'} · {len(metadata.get('tracks') or [])} named tracks")
                 for index,item in (metadata.get('tv_titles') or {}).items():
                     print('  Title '+index+' → '+disc_metadata.episode_label(item))
                 if category=='tv':print('Metadata · '+str(metadata.get('series') or 'series not identified')+' · '+str(len(metadata.get('tv_titles') or {}))+' matched titles · unmatched titles kept')
                 print(instruction('y start · k kind · c category · i titles · m name/metadata · d destination · Esc back'))
                 choice=prompt('Start or edit','y').casefold()
-                if choice=='y':return {'drive':drive,'kind':kind,'category':category,'title':title,'destination':destination,'title_index':title_index,'metadata':metadata,'preferences':preferences}
+                if choice=='y':return {'drive':drive,'kind':kind,'category':category,'title':title,'destination':destination,'title_index':title_index,'metadata':metadata,'preferences':preferences,**({'toc':scan.get('toc')} if kind=='cd' and scan.get('toc') else {})}
                 edits={'k':0,'c':1,'i':2,'m':3,'d':4}
                 if choice in edits:step=edits[choice];continue
                 if choice in {'n','cancel'}:return None
@@ -474,7 +498,7 @@ def import_options(request,inventory,drive,prompt,path_prompt):
 
 
 def workspace(request,read_key,hints):
-    fd=sys.stdin.fileno();old=termios.tcgetattr(fd);index=0;notice='';inventory=request('drives',{});show_history=True;colors=interface_colors()
+    fd=sys.stdin.fileno();old=termios.tcgetattr(fd);index=0;notice='';inventory=request('drives',{});show_history=True;colors=interface_colors();pane_help=False
     def prompt(label,default='',path=False):
         termios.tcsetattr(fd,termios.TCSADRAIN,old);sys.stdout.write('\033[?25h');sys.stdout.flush()
         try:
@@ -494,15 +518,20 @@ def workspace(request,read_key,hints):
             if not show_history:jobs=[job for job in jobs if active(job)]
             index=max(0,min(index,max(0,len(jobs)-1)))
             width,height=shutil.get_terminal_size((100,30))
-            controls=hints('n new import · d discover · h history · ↑↓ jobs · Enter progress · l send to library · c cancel · x dismiss finished · Esc exit',width)
+            actions='n new import · d discover · h history · ↑↓ jobs · Enter progress · W shell pane · l send to library · c cancel · x dismiss finished · Esc exit'
+            if pane_help:actions+=' · '+' · '.join(terminal_style.pane_shortcuts())
+            controls=hints(actions,width)
             frame=workbench_lines(inventory,jobs,index,width,height-max(0,len(controls.splitlines())-2),show_history,colors)
-            frame.extend(['',controls,notice])
+            frame.extend(['',*controls.splitlines(),notice])
             sys.stdout.write('\033[2J\033[H'+'\n'.join(line[:width-1] if '\033' not in line else line for line in frame)+'\033[J');sys.stdout.flush()
             key=read_key(fd,1)
             if key in {'n','d','h','l','c','x'}:key=key.upper()
             if key in {'esc','q','\x03'}:return 0
             try:
-                if key=='D':inventory=request('drives',{});notice='Discovery refreshed'
+                if key=='W':
+                    notice=terminal_style.open_pane(Path.cwd())
+                    if notice.startswith('Shell opened beside LOOK'):pane_help=True
+                elif key=='D':inventory=request('drives',{});notice='Discovery refreshed'
                 elif key=='H':show_history=not show_history;notice='History '+('shown' if show_history else 'hidden; receipts and files kept')
                 elif key=='up':index-=1
                 elif key=='down':index+=1

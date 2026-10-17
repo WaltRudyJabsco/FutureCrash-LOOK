@@ -316,3 +316,28 @@ receipts still contribute confirmed disc-metadata suggestions.
 Finished jobs have a frozen elapsed time and no import ETA. For older failed
 receipts without a finish timestamp, LOOK uses the last saved receipt update;
 this is an estimate of the stop time rather than a clock that keeps growing.
+
+
+### Audio CD feedback and multi-disc sets
+
+The CD read phase measures PCM bytes written against the scanned table of
+contents. It shows read percentage, current track/count and average effective
+read speed, including time spent verifying or retrying. A quiet ripper no longer
+means an empty progress display. Older jobs without a saved table of contents
+can show track activity without inventing a percentage.
+
+After reading, each FLAC track has its own encoding percentage. Percentages are
+for the named phase and reset for the next phase/track. Completed job details
+retain audio read time separately from total import time. Verification settings
+and lossless output are unchanged.
+
+Album choices show Disc N of M, any disc subtitle and the first few track names.
+A matching MusicBrainz disc ID takes priority over a sibling disc with the same
+number of tracks. Track-count-only suggestions require explicit selection.
+Review/edit Disc number and Total discs before starting; the review repeats the
+numbers. Multi-disc output directories include the disc number, while album tags
+remain shared across the set; FLAC files retain disc and total-disc tags.
+
+Shift-W at the import workbench opens a sibling shell through the standard
+Kitty/tmux pane helper. The footer then shows focus/close controls. It does not
+start, stop or cancel imports. Inside setup text fields, uppercase W stays text.
