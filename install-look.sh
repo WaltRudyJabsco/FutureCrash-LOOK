@@ -361,6 +361,7 @@ install_file "$ROOT/look/media_protection.py" "$HOME/.local/share/look/media_pro
 install_file "$ROOT/look/destination_history.py" "$HOME/.local/share/look/destination_history.py"
 install_file "$ROOT/look/ytd.py" "$HOME/.local/share/look/ytd.py"
 install_file "$ROOT/look/notebook.py" "$HOME/.local/share/look/notebook.py"
+install_file "$ROOT/look/clipboard_shelf.py" "$HOME/.local/share/look/clipboard_shelf.py"
 install_file "$ROOT/look/notebook_markdown.py" "$HOME/.local/share/look/notebook_markdown.py"
 install_file "$ROOT/look/command_help.py" "$HOME/.local/share/look/command_help.py"
 install_file "$ROOT/look/web_desk.py" "$HOME/.local/share/look/web_desk.py"

@@ -309,3 +309,16 @@ def test_clockwork_garden_is_in_cycle_and_pauses_deterministically():
     assert visuals.frame(mode,80,24,2,True,3)!=visuals.frame(mode,80,24,7,True,3)
     assert visuals.frame(mode,80,24,2,False,3)==visuals.frame(mode,80,24,7,False,3)
     assert mode in {visuals.active_mode(visuals.CYCLE_MODE,i*visuals.CYCLE_INTERVAL_SECONDS) for i in range(visuals.CYCLE_MODE-1)}
+
+
+@pytest.mark.parametrize('name',['Rain on Glass','Neon Reef'])
+def test_new_ambient_visuals_are_bounded_deterministic_and_in_cycle(name):
+    mode=player_visuals.NAMES.index(name)+1
+    for width,height in [(1,1),(3,2),(20,8),(80,24),(240,80)]:
+        art=player_visuals.frame(mode,width,height,3,True,4)
+        assert len(art)==height and all(len(row)==width for row in art)
+        assert art==player_visuals.frame(mode,width,height,3,True,4)
+        assert all(char==' ' or 32<=ord(char)<127 for row in art for char in row)
+    assert player_visuals.frame(mode,80,24,3,True,4)!=player_visuals.frame(mode,80,24,7,True,4)
+    assert player_visuals.frame(mode,80,24,3,False,4)==player_visuals.frame(mode,80,24,7,False,4)
+    assert mode in {player_visuals.active_mode(player_visuals.CYCLE_MODE,i*10) for i in range(player_visuals.CYCLE_MODE-1)}

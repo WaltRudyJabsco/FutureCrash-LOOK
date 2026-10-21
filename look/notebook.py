@@ -17,9 +17,9 @@ import tty
 import unicodedata
 import urllib.request
 try:
-    from . import terminal_style
+    from . import terminal_style, clipboard_shelf
 except ImportError:
-    import terminal_style
+    import terminal_style, clipboard_shelf
 
 try:
     from .notebook_core import Notebook, timestamp
@@ -204,6 +204,10 @@ Command mode: Tab selects text/label/directory; Enter adds a line in the text.
 Shift-Enter/Ctrl-S inserts the block, then save the note as usual.
 
 W opens a sibling shell from the list or note preview, in the current working directory.
+Z opens the clipboard shelf from the list or note preview. Editor Ctrl-Y inserts a clip.
+Run lk clip on to enable ten-item local text history; lk clip off stops capture.
+The shelf numbers are 1–9,0; Shift-number removes (US: !@#$%^&*()), or use x.
+Only s explicitly saves a clip as a note for normal Fabric Notebook sync.
 Kitty: Option/Alt-Shift-W switches panes; Ctrl-Shift-W closes the focused pane.
 tmux uses Ctrl-B then O to switch; exit closes the shell. W stays text in editors.
 
@@ -510,7 +514,7 @@ def capture_note(fd,read_key,initial_text='',label='NEW NOTE',store=None):
             heading=(label+' · ')[:max(1,width-1)]
             actions='Enter newline · Shift-Enter/Ctrl-S save · Esc cancel'[:max(0,width-1-len(heading))]
             frame=[KEY_CYAN+heading+'\033[0m'+command_hints(actions),
-                   command_hints('Ctrl-D dictate · Ctrl-K insert link/command · Alt-arrows words/paragraphs'[:max(1,width-1)]),
+                   command_hints('Ctrl-Y clipboard · Ctrl-D dictate · Ctrl-K insert link/command · Alt-arrows words/paragraphs'[:max(1,width-1)]),
                    *notice_rows]
             if boxed:
                 frame.extend(['┌'+'─'*columns+'┐',*['│'+line.ljust(columns)+'│' for line in visible],'└'+'─'*columns+'┘'])
@@ -519,6 +523,14 @@ def capture_note(fd,read_key,initial_text='',label='NEW NOTE',store=None):
             key=read_key(fd,None)
             if key in {'esc','\x03'}: return None
             if key in {'shiftenter','\x13'}: return text
+            if key=='\x19':
+                try:
+                    pasted=clipboard_shelf.show(insert=True,fd=fd)
+                    if pasted is not None:
+                        text=text[:cursor]+pasted+text[cursor:];cursor+=len(pasted)
+                finally:
+                    sys.stdout.write('\033[?2004h')
+                continue
             if key=='\x04':
                 try:
                     spoken=dictate_for_editor(fd,previous)
@@ -725,7 +737,7 @@ def note_view(store,row,read_key):
         tty.setcbreak(fd); sys.stdout.write('\033[?25l')
         while True:
             width,height=shutil.get_terminal_size((100,30))
-            controls='↑↓/Space scroll · W shell pane · L links · Y copy link · B related · E edit · V editor · H help · Esc back'
+            controls='↑↓/Space scroll · W shell pane · Z clipboard · L links · Y copy link · B related · E edit · V editor · H help · Esc back'
             if pane_help:controls+=' · '+' · '.join(terminal_style.pane_shortcuts())
             control_rows=textwrap.wrap(controls,max(1,width-1))
             inner=max(1,min(96,width-4)); page=max(1,height-5-len(control_rows))
@@ -754,6 +766,9 @@ def note_view(store,row,read_key):
             elif key=='W':
                 notice=terminal_style.open_pane(Path.cwd())
                 if notice.startswith('Shell opened beside LOOK'):pane_help=True
+            elif key=='Z':
+                clipboard_shelf.show(fd=fd)
+                sys.stdout.write('\033[?25l')
             elif key in {'H','?'}: show_help(fd,read_key)
             elif key=='Y':
                 notice='Copied note link · paste into another note' if copy_note_link(row) else 'Clipboard unavailable'
@@ -816,7 +831,7 @@ def workspace(store,kind,read_key,hints,initial_query=''):
                 focused=None
             index=max(0,min(index,max(0,len(rows)-1)))
             width,height=shutil.get_terminal_size((100,30))
-            controls='↑↓ move · W shell pane · Tab mark · Enter view · V full editor · Y copy link · N new · P file · C done · D delete · R remind · F sort · T type · / full text · H help · Esc clear/exit'
+            controls='↑↓ move · W shell pane · Z clipboard · Tab mark · Enter view · V full editor · Y copy link · N new · P file · C done · D delete · R remind · F sort · T type · / full text · H help · Esc clear/exit'
             if pane_help:controls+=' · '+' · '.join(terminal_style.pane_shortcuts())
             control_rows=hints(controls,width).splitlines()
             usable=max(1,(height-5-len(control_rows))//2)
@@ -844,6 +859,10 @@ def workspace(store,kind,read_key,hints,initial_query=''):
             if key=='W':
                 notice=terminal_style.open_pane(Path.cwd())
                 if notice.startswith('Shell opened beside LOOK'):pane_help=True
+                continue
+            if key=='Z':
+                clipboard_shelf.show(fd=fd)
+                sys.stdout.write('\033[?25l')
                 continue
             if key in {'H','?'}:
                 show_help(fd,read_key); continue

@@ -383,6 +383,41 @@ Fabric is an extension of a machine, not a dependency of it. Local files, local 
 lk doctor island
 ```
 
+## Clipboard shelf
+
+`lk clip` opens ten numbered text slots, newest first: **1–9,0**. Press a
+number to copy that item and close; normal Command-V/Ctrl-V then pastes it.
+Shift-number removes that entry (US keyboards: `!@#$%^&*()`); arrows and `x`
+provide a keyboard-layout-independent removal alternative. Enter expands the
+selected text, Escape returns to the list, and Escape again closes the shelf.
+Numbers stay fixed while the shelf is open, so new copies cannot move a target.
+
+Capture starts **off**. Press `e` in the shelf or run `lk clip on` to enable
+background text capture on this computer. This includes any text copied by
+other applications, potentially passwords. The helper samples once per second;
+very short-lived clipboard changes may be missed. It restarts when LOOK next
+runs after login. `lk clip off` stops capture but retains saved entries;
+`lk clip clear` clears the saved history without changing the system clipboard.
+`lk clip status` reports the setting and saved count. Text is limited to 256,000
+characters per entry and stored in an owner-only local directory. File objects,
+images and rich clipboard formats are outside this first text shelf.
+
+**Shift-Z** opens the shelf from LOOK browse/filter and the Notes list/preview.
+**Ctrl-Y** opens it inside the Notes quick editor and inserts the chosen text at
+the cursor; uppercase Z remains ordinary editor text. Neither action executes
+clipboard content. Existing Shift-P file paste/project filing stays unchanged.
+
+History stays local. Press `s` to explicitly save just the selected item as a
+note in the **Clipboard** project, using normal trusted Fabric Notebook sync.
+Other computers can open that note without receiving your private clip history.
+macOS uses its system clipboard tools; Linux needs `wl-clipboard` on Wayland or
+`xclip` on X11. Missing clipboard tools leave the rest of LOOK working.
+
+The player rotation also includes **Rain on Glass**, falling droplets above
+city-light reflections, and **Neon Reef**, fish, seaweed and bubbles. Both use
+palette-aware foreground colors and join Cycle's ten-second steps. Like the
+other ambient modes, these are animations rather than audio spectrum analysis.
+
 ## Fabric identity and accountless pairing
 
 Every node now owns a local **Ed25519 Fabric identity**. The stable node ID and human-readable fingerprint are derived from its public key; the private key stays on that machine. Tailscale names and IP addresses are transport hints, not identity.

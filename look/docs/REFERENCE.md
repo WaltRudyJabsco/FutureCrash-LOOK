@@ -49,6 +49,8 @@ lkn [TEXT|ACTION] [OPTIONS]
   [files] Offline notebook, tasks and reminders · alias: lk notes
 lk notes [TEXT|ACTION] [OPTIONS]
   [files] Capture, search, edit and file notes
+lk clip [on|off|status|clear]
+  [files] Ten-slot local text clipboard shelf; opt-in capture
 lk tasks [TEXT|ACTION] [OPTIONS]
   [files] Notebook task view
 lk reminders [TEXT|ACTION] [OPTIONS]
@@ -876,6 +878,7 @@ LIVE FILTER / SELECTION
   X          clear persistent working set
   Y          copy absolute path(s) as text
   T / P      cut / paste file objects
+  Z          clipboard text history (lk clip; opt-in capture)
   G          exit LOOK and make this the shell's directory
   Esc        clear / back / cancel
   q          quit

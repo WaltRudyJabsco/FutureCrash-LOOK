@@ -249,6 +249,7 @@ def command_help_pages(root,forms,usages):
             pending=next_level
         if flags and name!='settings': parts.extend(['','RECOGNIZED FLAGS',', '.join(sorted(flags))])
         surface_help={
+            'clip':'Local ten-slot text shelf: 1–9,0 recalls; Shift-number removes (US !@#$%^&*()), or x removes the highlighted item. Enter previews; Esc returns. Run lk clip on to enable background capture, off to stop, status to inspect, clear to empty history. Capture restarts on the next LOOK command after login. Shift-Z opens from LOOK or Notes; Ctrl-Y inserts at the note editor cursor. s explicitly saves one item as a Clipboard-project note using normal Fabric sync; local history never syncs automatically.',
             'settings':'Settings opens a searchable picker. Supply a word to start filtered, e.g. lk settings voice. Arrows choose; Enter opens the setting.',
             'models':'Models opens the local model chooser. Supply an installed model name to select it. Use lk ollama models for model management and lk fabric models for Fabric inventory.',
             'mp':'LK MP: / search; arrows choose; Tab marks; A marks all shown; E edits metadata for selected tracks; R refreshes metadata; Enter plays; B adds to queue; L library; Q queue; Space pause; Esc clears filter, then exits.',

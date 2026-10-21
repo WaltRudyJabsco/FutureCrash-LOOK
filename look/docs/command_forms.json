@@ -121,6 +121,12 @@
     "Capture, search, edit and file notes"
   ],
   [
+    "lk clip",
+    "[on|off|status|clear]",
+    "files",
+    "Ten-slot local text clipboard shelf; opt-in capture"
+  ],
+  [
     "lk tasks",
     "[TEXT|ACTION] [OPTIONS]",
     "files",
