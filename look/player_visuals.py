@@ -4,7 +4,7 @@ import math
 import hashlib
 import json
 
-NAMES = ('Bars', 'Waves', 'Orbit', 'Tunnel', 'Stars', 'Plasma', 'Album Art', 'Black Hole', 'Rooftops', 'Spectrum', 'Moon Jelly', 'Firefly Garden', 'Clockwork Garden', 'Cycle')
+NAMES = ('Bars', 'Waves', 'Orbit', 'Tunnel', 'Stars', 'Plasma', 'Album Art', 'Black Hole', 'Rooftops', 'Spectrum', 'Moon Jelly', 'Firefly Garden', 'Clockwork Garden', 'Rain on Glass', 'Neon Reef', 'Cycle')
 CYCLE_MODE = len(NAMES)
 CYCLE_INTERVAL_SECONDS = 10.0
 
@@ -53,6 +53,10 @@ def frame(mode, width, height, phase, playing=True, seed=0):
             depth=(i*.618034+t*.18)%1
             point((width-1)/2+math.cos(angle)*depth*width*.65,
                   (height-1)/2+math.sin(angle)*depth*height*.65,'.+*'[min(2,int(depth*3))])
+    elif mode==14:
+        return neon_reef_frame(width,height,t,seed)
+    elif mode==13:
+        return rain_on_glass_frame(width,height,t,seed)
     elif mode==12:
         return clockwork_garden_frame(width,height,t,seed)
     elif mode==11:
@@ -331,4 +335,50 @@ def clockwork_garden_frame(width,height,phase,seed=0):
             angle=tooth*math.tau/12-turn
             dot(cx+math.cos(angle)*radius*.35*1.6,cy+math.sin(angle)*radius*.35,':')
         dot(cx,cy,'@')
+    return [''.join(row) for row in canvas]
+
+
+RAIN_COLOR='34'
+RAIN_TRAIL_LENGTH=4
+REEF_COLOR='36'
+REEF_FISH=('><>','<><')
+
+
+def rain_on_glass_frame(width,height,phase,seed=0):
+    """Windowpane droplets leave soft trails above reflected city lights."""
+    canvas=[[' ']*width for _ in range(height)]
+    reflection=max(0,height-3)
+    for x in range(width):
+        if (x*7+seed)%13<3:
+            for y in range(reflection,height):
+                if math.sin(x*.4+y+phase*.7)>.1:canvas[y][x]='.:+'[(x+y)%3]
+    for drop in range(max(1,min(72,width//2))):
+        x=(drop*17+seed*11)%width
+        speed=1.5+(drop%5)*.45
+        y=int((phase*speed+drop*7)%(height+RAIN_TRAIL_LENGTH))
+        for tail in range(RAIN_TRAIL_LENGTH):
+            row=y-tail
+            if 0<=row<height:canvas[row][x]='o|:.'[tail]
+    return [''.join(row) for row in canvas]
+
+
+def neon_reef_frame(width,height,phase,seed=0):
+    """A quiet ASCII fish tank with swaying seaweed and ascending bubbles."""
+    canvas=[[' ']*width for _ in range(height)]
+    def put(x,y,char):
+        x=round(x);y=round(y)
+        if 0<=x<width and 0<=y<height:canvas[y][x]=char
+    for plant in range(0,width,9):
+        length=1+(plant+seed)%max(1,height//3)
+        for stem in range(length):
+            sway=math.sin(phase*.6+stem*.4+plant)*stem*.22
+            put(plant+sway,height-1-stem,'/' if sway>=0 else '\\')
+    for bubble in range(max(1,width//16)):
+        put((bubble*19+seed)%width+math.sin(phase*.5+bubble),
+            height-1-(phase*.8+bubble*5)%height,'o' if bubble%3==0 else '.')
+    for fish in range(max(1,min(8,width//15))):
+        direction=1 if fish%2==0 else -1
+        x=(fish*23+seed+phase*(2+fish%3)*direction)%(width+6)-3
+        y=height*(.2+.13*(fish%4))+math.sin(phase*.55+fish)*height*.07
+        for dx,char in enumerate(REEF_FISH[fish%2]):put(x+dx,y,char)
     return [''.join(row) for row in canvas]

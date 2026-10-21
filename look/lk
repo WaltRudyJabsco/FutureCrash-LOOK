@@ -1842,6 +1842,7 @@ LIVE FILTER / SELECTION
   X          clear persistent working set
   Y          copy absolute path(s) as text
   T / P      cut / paste file objects
+  Z          clipboard text history (lk clip; opt-in capture)
   G          exit LOOK and make this the shell's directory
   Esc        clear / back / cancel
   q          quit
@@ -12752,7 +12753,7 @@ def _read_tty_key(fd, timeout=None):
         b"\x1bb":"wordleft", b"\x1bf":"wordright",
         b"\x1b[107;5u":"\x0b", b"\x1b[110;5u":"\x0e",
         b"\x1b[116;5u":"\x14", b"\x1b[115;5u":"\x13", b"\x1b[106;5u":"\n",
-        b"\x1b[99;5u":"\x03",
+        b"\x1b[99;5u":"\x03", b"\x1b[121;5u":"\x19",
         b"\x1b[13;2u":"shiftenter", b"\x1b[27;2;13~":"shiftenter",
         b"\x1b\r":"shiftenter", b"\x1b\n":"shiftenter",
         b"\x1b[13u":"enter", b"\x1b[13;1u":"enter",
@@ -19514,7 +19515,7 @@ def _media_player_full_visual(snap,mode,visual_elapsed=0):
             '←/→ seek · s shuffle · r repeat · O reset audio · x stop · q close']
     art_height=max(1,height-len(header)-len(footer))
     elapsed=visual_elapsed%player_visuals.CYCLE_INTERVAL_SECONDS if cycling else visual_elapsed
-    phase=elapsed if name in {'Black Hole','Rooftops','Spectrum','Moon Jelly','Firefly Garden','Clockwork Garden'} else time.monotonic()
+    phase=elapsed if name in {'Black Hole','Rooftops','Spectrum','Moon Jelly','Firefly Garden','Clockwork Garden','Rain on Glass','Neon Reef'} else time.monotonic()
     art=_media_player_large_art(entry,width,art_height) if album_art else player_visuals.frame(mode,width,art_height,phase,state in {'play','playing'},seed)
     lines=header+art+footer
     color=player_visuals.album_color(snap) if album_art else ("1;32","1;36","1;35","1;34","1;37","1;33")[(mode-1)%6]
@@ -19523,6 +19524,8 @@ def _media_player_full_visual(snap,mode,visual_elapsed=0):
     if name=='Moon Jelly': color='36'
     if name=='Firefly Garden': color=player_visuals.FIREFLY_COLOR
     if name=='Clockwork Garden': color=player_visuals.CLOCKWORK_COLOR
+    if name=='Rain on Glass': color=player_visuals.RAIN_COLOR
+    if name=='Neon Reef': color=player_visuals.REEF_COLOR
     shimmer=album_art and state in {'play','playing'} and not any(
         status in line for line in art for status in ('Loading album art','Album art unavailable'))
     rendered=[]
@@ -20662,6 +20665,7 @@ _COMMANDS = [
     # Files / navigation
     ("lkn", "[TEXT|ACTION] [OPTIONS]", "files", "Offline notebook, tasks and reminders", "lk notes"),
     ("lk notes", "[TEXT|ACTION] [OPTIONS]", "files", "Capture, search, edit and file notes"),
+    ("lk clip", "[on|off|status|clear]", "files", "Ten-slot local text clipboard shelf; opt-in capture"),
     ("lk tasks", "[TEXT|ACTION] [OPTIONS]", "files", "Notebook task view"),
     ("lk reminders", "[TEXT|ACTION] [OPTIONS]", "files", "Notebook reminder view"),
     ("lk", "", "files", "Open interactive LOOK in the current directory"),
@@ -21989,6 +21993,11 @@ def capability_command(args):
 
 def main():
     _safe_cwd(repair=True)
+    import clipboard_shelf
+    try: clipboard_shelf.ensure_watcher()
+    except (OSError,clipboard_shelf.sqlite3.Error): pass
+    if len(sys.argv)>=2 and sys.argv[1]=='clip':
+        return clipboard_shelf.main(sys.argv[2:])
     if len(sys.argv)>2 and sys.argv[1]=='help' and sys.argv[2]!='all':
         import command_help
         return command_help.show(sys.argv[2:])

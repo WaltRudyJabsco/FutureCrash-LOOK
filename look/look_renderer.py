@@ -1658,6 +1658,7 @@ def pager(rows:list[str],height:int,width:int,rebuild=None,browse_rebuild=None,f
                 back_hint='Esc back' if on_back else 'Esc exit'
                 action_parts=['H hidden','F sort','Enter/→ filter','Space/PgDn next','b/PgUp back',
                               'g ends','G go','W shell pane','⇧↑/↓ page','⇧←/→ ends','←/< parent',back_hint,'Q quit']
+            action_parts.append('Z clipboard')
             if pane_help:action_parts.extend(terminal_style.pane_shortcuts())
             footer=action_footer(action_parts,width)
             # A wrapped command bar owns real rows; leave one spare row to avoid
@@ -1777,6 +1778,15 @@ def pager(rows:list[str],height:int,width:int,rebuild=None,browse_rebuild=None,f
 
             if key==RESIZE_KEY:continue
             if not key and live_revision: continue
+            if key=='Z':
+                try:
+                    from . import clipboard_shelf
+                except ImportError:
+                    import clipboard_shelf
+                native_preview.frame_cleared()
+                clipboard_shelf.show()
+                sys.stdout.write('\033[?25l')
+                continue
             if key=='H' and on_hidden:
                 previous=selected_path()
                 notice=on_hidden()
@@ -2086,6 +2096,12 @@ def _catalog_view(paths:list[Path],root:Path,width:int,query:str='',highlight_pa
 
 
 def main():
+    try:
+        from . import clipboard_shelf
+    except ImportError:
+        import clipboard_shelf
+    try: clipboard_shelf.ensure_watcher()
+    except (OSError,clipboard_shelf.sqlite3.Error): pass
     ap=argparse.ArgumentParser(add_help=False)
     ap.add_argument('path',nargs='?',default='.')
     ap.add_argument('--mode',choices=['smart','detail','dirs','files','tree','recent','size','kind','added'],default='smart')
