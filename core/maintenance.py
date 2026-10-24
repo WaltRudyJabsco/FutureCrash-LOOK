@@ -47,8 +47,8 @@ def allowed(relative):
     if parent == '.local/share/look': return p.suffix == '.py' or p.name == 'lk'
     if parent == '.local/share/look/docs': return p.name in {'REFERENCE.md','command_forms.json','command_help.json'}
     if parent == '.local/share/signal-window':
-        return p.name in {'server.py', 'app.js', 'media-session.js', 'media-art.js', 'index.html', 'style.css'}
-    if parent == '.local/share/albert': return p.name in {'server.py','index.html','VERSION'}
+        return p.name in {'server.py', 'app.js', 'media-session.js', 'media-art.js', 'index.html', 'style.css','browser-views.js','fabric.html','fabric-dashboard.js'}
+    if parent == '.local/share/albert': return p.name in {'server.py','index.html','VERSION','browser-views.js','fabric.html','fabric-dashboard.js'}
     if parent == '.local/share/future-crash': return p.name in {'future_crash.py','lo_worker.py'}
     if parent == '.local/bin':
         return p.name in {'fcl-recovery', 'fcl-node', 'fcl-ingress', 'fcl-tailcat', 'fcl-rendezvous', 'fcl-openjev-worker', 'future-crash'}
@@ -78,9 +78,10 @@ def register_install(source, *, include_albert=True):
                  for name in ('REFERENCE.md','command_forms.json','command_help.json')]
     mappings.append((source / 'VERSION', '.local/share/future-crash-look/RELEASE'))
     mappings += [(source / 'signal-window' / n, '.local/share/signal-window/' + n)
-                 for n in ('server.py', 'app.js', 'media-session.js', 'media-art.js', 'index.html', 'style.css')]
+                 for n in ('server.py', 'app.js', 'media-session.js', 'media-art.js', 'index.html', 'style.css','browser-views.js','fabric.html','fabric-dashboard.js')]
     if include_albert:
         mappings += [(source/'albert'/name,'.local/share/albert/'+name) for name in ('server.py','index.html','VERSION')]
+        mappings += [(source/'signal-window'/name,'.local/share/albert/'+name) for name in ('browser-views.js','fabric.html','fabric-dashboard.js')]
     mappings += [(source / 'future-crash' / n, target) for n, target in
                  [('future_crash.py', '.local/share/future-crash/future_crash.py'), ('lo_worker.py','.local/share/future-crash/lo_worker.py'), ('future-crash', '.local/bin/future-crash')]]
     files = []
