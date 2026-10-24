@@ -1,0 +1,10 @@
+<!doctype html><html lang="en"><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
+<title>Fabric dashboard</title><style>
+:root{color-scheme:light dark;font:16px/1.5 system-ui,sans-serif;background:#101713;color:#e3eee6}*{box-sizing:border-box}body{max-width:1100px;margin:auto;padding:24px}header{display:flex;align-items:center;justify-content:space-between;gap:16px}h1{font-size:1.7rem;margin:0}h2{font-size:1.15rem;margin:0 0 8px}p{margin:6px 0}.muted{color:#a8b6ac}.grid{display:grid;grid-template-columns:repeat(auto-fit,minmax(min(100%,290px),1fr));gap:16px;margin:22px 0}article{border:1px solid #46564a;border-radius:12px;padding:18px;background:#18231c;overflow-wrap:anywhere}.good{color:#a1dfb6}.warn{color:#f3ca83}.unknown{color:#bdc5c0}dl{display:grid;grid-template-columns:auto 1fr;gap:6px 16px}dt{color:#a8b6ac}dd{margin:0}button,a{color:inherit}button{padding:8px 16px;background:transparent;border:1px solid #718777;border-radius:8px;cursor:pointer}details{margin-top:12px}pre{white-space:pre-wrap;font:13px/1.4 ui-monospace,monospace}.note{border-left:3px solid #8eac96;padding-left:14px}a{color:#a6d2ff}
+@media(prefers-color-scheme:light){:root{background:#f7f4e9;color:#21342b}.muted,dt{color:#52665a}article{background:#fffdf6;border-color:#c2c9b8}.good{color:#236141}.warn{color:#875512}.unknown{color:#52665a}a{color:#1f5585}}
+</style><header><div><h1>Fabric</h1><p class="muted">Your computers · installed updates · essential backups</p></div><button id="refresh">Refresh</button></header>
+<p id="status" role="status">Connecting to this browser’s Fabric host…</p>
+<section class="grid" id="nodes" aria-label="Fabric computers"></section>
+<p id="careStatus" class="muted" role="status">Checking backup and update receipts…</p><section class="grid" id="care" aria-label="Updates and backups"></section>
+<p class="note">Read-only. Backup checks cover Fabric identity, Notes and settings; documents, photos and media are excluded. Matching installed releases do not mean the latest GitHub release. An unreachable computer’s state is unknown.</p>
+<script src="fabric-dashboard.js"></script></html>

@@ -14,6 +14,11 @@ CORE_DIR=Path.home()/".local/share/future-crash-look/core"
 if not (CORE_DIR/"endpoint_auth.py").exists():
     CORE_DIR=ROOT.parent/"core"
 if str(CORE_DIR) not in sys.path: sys.path.insert(0,str(CORE_DIR))
+try:
+    from core.browser_presentations import Presentations, candidates as presentation_candidates
+except ImportError:
+    from browser_presentations import Presentations, candidates as presentation_candidates
+PRESENTATIONS=Presentations()
 from endpoint_auth import EndpointAuth
 ENDPOINT_AUTH=EndpointAuth()
 ENDPOINT_COOKIE="fcl_endpoint"
@@ -283,7 +288,8 @@ def cognition_json(text, session="", selected_paths=None):
         interface_context=(
             "INTERFACE: Albert quiet paper browser surface. Answer normally and truthfully in concise prose suitable for a fold. "
             "Albert owns presentation; do not claim a UI action happened unless the tool result says it happened. "
-            "Effects are local by default and compute may float across Fabric."
+            "Effects are local by default and compute may float across Fabric. "
+            "Generated images are browser artifacts; preserve their exact saved paths in the answer so Albert can display them."
         ),
     )
     answer=str(result.get("text") or "").strip()
@@ -460,6 +466,7 @@ def action(text, session="", context=None):
             "evidence":evidence,
             "signal":{"mode":"response","seed":hashlib.sha256(text.encode()).hexdigest()[:24]},
             "pipeline":pipeline,
+            "artifacts":[PRESENTATIONS.present(path) for path in presentation_candidates(text,events)],
         }
     except Exception as exc:
         detail=" ".join(str(exc).split())[:360]
@@ -570,6 +577,16 @@ class Handler(BaseHTTPRequestHandler):
             if not self._require_endpoint('lo.use'): return
             try: return self.send_json(200,{"ok":True,"nodes":node_json('/v1/nodes'),"capabilities":node_json('/v1/capabilities')})
             except Exception as exc: return self.send_json(503,{"ok":False,"error":str(exc)})
+        if path=='/api/fabric/care':
+            if not self._require_endpoint('lo.use'): return
+            try: return self.send_json(200,node_json('/v1/care',timeout=90))
+            except Exception as exc: return self.send_json(503,{'error':str(exc)})
+        if path.startswith('/api/present/'):
+            if not self._require_endpoint('lo.use'): return
+            target=PRESENTATIONS.get(path.rsplit('/',1)[-1])
+            if not target: return self.send_error(404)
+            data=target.read_bytes()
+            self.send_response(200);self.send_header('Content-Type',mimetypes.guess_type(target.name)[0] or 'application/octet-stream');self.send_header('Content-Security-Policy','sandbox');self.send_header('X-Content-Type-Options','nosniff');self.send_header('Cache-Control','no-store');self.send_header('Content-Length',str(len(data)));self.end_headers();self.wfile.write(data);return
         if path=='/v1/lights':
             if not self._require_endpoint('lo.use'): return
             try: return self.send_json(200,node_json('/v1/lights'))

@@ -4,6 +4,7 @@ SRC="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 DST="$HOME/.local/share/albert"
 mkdir -p "$DST"
 install -m 0644 "$SRC/index.html" "$SRC/VERSION" "$DST/"
+install -m 0644 "$SRC/../signal-window/browser-views.js" "$SRC/../signal-window/fabric.html" "$SRC/../signal-window/fabric-dashboard.js" "$DST/"
 install -m 0755 "$SRC/server.py" "$DST/server.py"
 OS="$(uname -s)"
 if [[ "$OS" == Linux ]] && command -v systemctl >/dev/null 2>&1; then

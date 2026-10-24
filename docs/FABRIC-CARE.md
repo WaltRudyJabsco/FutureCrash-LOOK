@@ -1,5 +1,30 @@
 # Conversational Fabric upkeep
 
+## Browser dashboard
+
+In Signal or Albert, type **`/fabric`** or **“show fabric”** to open the same
+read-only web dashboard in a new tab. This command bypasses inference. A link
+remains in the conversation if the browser blocks the tab. The dashboard uses
+the current surface's authenticated origin; it does not open a window on a
+remote compute node or require another login beyond normal endpoint approval.
+
+Node advertisements appear first, including their last successful contact and
+advertised inference/activity. Update and essential-backup receipts load
+separately; unreachable nodes stay unknown. Refresh checks both again, and the
+visible page checks once a minute, with overlapping checks prevented.
+The dashboard never starts maintenance or chooses an update source.
+
+Explicit image-generation requests also reserve a browser tab on submission.
+Completed images appear there while the image and an **Open image** link remain
+in the conversation. A failed/no-image request closes its waiting tab. If a
+browser blocks automatic opening, the link still works. Multiple outputs keep
+separate links; only the first image uses the reserved tab. Presentation links
+are authenticated, expire after one hour, and may expire on service restart;
+the generated source files remain saved. Ordinary Signal canvas drawing and
+media playback do not open image tabs.
+
+## Conversational checks and upkeep
+
 Albert, Lo and Signal share two bounded tools: `fabric_status` and
 `fabric_maintain`. They use the same trusted-node API and persistent receipts.
 Clear requests run before model inference, so ordinary upkeep does not require a
