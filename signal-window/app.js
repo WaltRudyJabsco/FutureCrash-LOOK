@@ -131,12 +131,14 @@ cameraButton?.addEventListener('click',()=>cameraInput?.click());
 cameraInput?.addEventListener('change',async()=>{const f=cameraInput.files?.[0];if(!f)return;try{const obj=await fileObj(f,f.name||`signal-camera-${Date.now()}.jpg`);files.push(obj);files=files.slice(-20);chips();event('CAMERA · PHOTO ATTACHED');if(!input.value.trim()){input.value='what am I looking at?';input.focus();input.select()}else input.focus()}catch(err){event('CAMERA ERROR · '+err.message)}finally{cameraInput.value=''}});
 addEventListener('dragover',e=>{e.preventDefault();document.body.classList.add('drag')});addEventListener('dragleave',()=>document.body.classList.remove('drag'));addEventListener('drop',async e=>{e.preventDefault();document.body.classList.remove('drag');const out=[];for(const item of e.dataTransfer.items||[]){const en=item.webkitGetAsEntry?.();if(en)out.push(...await walk(en));else{const f=item.getAsFile?.();if(f)out.push(await fileObj(f))}}files=out.slice(0,20);chips();input.focus()});
 form.addEventListener('submit',async e=>{e.preventDefault();if(!endpointAuthorized)return;const text=input.value.trim();if(!text&&!files.length)return;line('user','› '+(text||`[${files.length} dropped item${files.length===1?'':'s'}]`));input.value='';input.placeholder='say something · drop files';const sent=files;files=[];chips();
- if(/^\/(help|lk)$/i.test(text)){line('assistant','Signal commands: /help · /clear · /status · /gallery · /player · /art ascii|image|off. Media output lives on the active player card; This Device streams to the current browser. CAM attaches an iPhone/rear-camera photo; Return accepts the prefilled vision prompt or typing replaces it. Everything else goes to LO.');return}
+ if(/^\/(help|lk)$/i.test(text)){line('assistant','Signal commands: /help · /clear · /status · /gallery · /player · /fabric (or show fabric) · /art ascii|image|off. Media output lives on the active player card; This Device streams to the current browser. CAM attaches an iPhone/rear-camera photo; Return accepts the prefilled vision prompt or typing replaces it. Everything else goes to LO.');return}
+ if(FabricBrowserViews.fabricCommand(text)){const url=FabricBrowserViews.openFabric();const link=document.createElement('a');link.href=url;link.target='_blank';link.rel='noopener';link.textContent='↗ Open Fabric dashboard';link.className='artifact';log.append(link);event('FABRIC DASHBOARD · READ ONLY');return}
  if(/^\/clear$/i.test(text)){log.innerHTML='';c.clearRect(0,0,N,N);art.born=0;fetch('/api/session/clear',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({session:signalSession})}).catch(()=>{});event('CLEARED');return}
  if(/^\/status$/i.test(text)){status();line('system',statusEl.title||statusEl.textContent);return}
  if(/^\/gallery$/i.test(text)){try{const d=await(await fetch('/api/status')).json();line('system','Gallery: '+(d.gallery||'disabled'))}catch{line('system','Gallery unavailable')}return}
  if(/^\/art(?:\s+(ascii|image|high-res|off))?$/i.test(text)){const mode=(text.split(/\s+/)[1]||'ascii').toLowerCase();signalArtwork.setMode(mode==='high-res'?'image':mode);mediaDismissed=false;await pollMedia(true);line('system','Album art: '+signalArtwork.mode);return}
  if(/^\/player$/i.test(text)){mediaDismissed=false;await pollMedia(true);return}
+ const imageView=FabricBrowserViews.beginImage(text);
  energy=.65;event('LO REQUEST',true);
  if(/^\s*(?:please\s+)?(?:play|put on|start)\b/i.test(text))event('MEDIA · SEARCHING',true);
  try{const r=await fetch('/api/chat',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({text,files:sent,visual:false,session:signalSession,media_node:mediaNode,media_endpoint:selectedMediaOutput})});const d=await r.json();if(!r.ok||d.error)throw Error(d.error||r.statusText);
@@ -163,6 +165,8 @@ form.addEventListener('submit',async e=>{e.preventDefault();if(!endpointAuthoriz
  if(Array.isArray(d.artifacts))for(const x of d.artifacts){
    if(String(x.type||'').startsWith('image/')){const img=document.createElement('img');img.src=x.url;img.alt=x.name;img.className='artifact-image';log.append(img)}
    const a=document.createElement('a');a.href=x.url;a.target='_blank';a.rel='noopener';a.textContent='↗ '+x.name;a.className='artifact';log.append(a);event('ARTIFACT READY · '+x.name)}
+ const imageResult=imageView.finish(d);
+ if(imageResult.images.length&&!imageResult.opened)line('system','Image ready · use its ↗ link to open a new tab if your browser blocked automatic opening.');
  const myTurn=++visualTurn;
  if(text||d.text){event('SIGNAL COMPOSE',true);fetch('/api/visual',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({text,answer:d.text||'',events:d.lo_events||[]})}).then(r=>r.json()).then(vd=>{
    if(myTurn!==visualTurn)return;const vk=vd?.visual?.kind;
@@ -170,7 +174,7 @@ form.addEventListener('submit',async e=>{e.preventDefault();if(!endpointAuthoriz
    else if(vk==='error')event('SIGNAL ERROR · '+(vd.visual.error||'UNKNOWN'));
  }).catch(err=>event('SIGNAL ERROR · '+err.message))}
  event('READY');pollMedia(true);energy=Math.max(.25,energy*.65)}
- catch(err){event('ERROR · '+err.message);line('error','! '+err.message);energy=.15}});
+ catch(err){imageView.cancel();event('ERROR · '+err.message);line('error','! '+err.message);energy=.15}});
 
 let mediaNode='',mediaOutputs=[],lastMediaState=null,nodeMediaState=null;
 const browserAudio=new Audio();browserAudio.preload='metadata';

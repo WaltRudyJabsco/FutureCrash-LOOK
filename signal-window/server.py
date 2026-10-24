@@ -33,6 +33,10 @@ MEDIA_ROUTE_REQUEST_TIMEOUT_SECONDS = 110.0
 CORE_DIR = Path.home()/".local/share/future-crash-look/core"
 if not (CORE_DIR/"endpoint_auth.py").exists(): CORE_DIR = ROOT.parent/"core"
 if str(CORE_DIR) not in sys.path: sys.path.insert(0,str(CORE_DIR))
+try:
+    from core.browser_presentations import Presentations, candidates as _presentation_candidates
+except ImportError:
+    from browser_presentations import Presentations, candidates as _presentation_candidates
 from endpoint_auth import EndpointAuth
 from intent_normalizer import resolve as resolve_intent
 ENDPOINT_AUTH = EndpointAuth()
@@ -974,39 +978,9 @@ def _proxy_media_audio(handler,node,index=0,*,item_id="",head=False,browser=Fals
             handler.json(502,{"error":str(exc)})
 
 
-_PRESENTED = {}
-_PRESENT_LOCK = threading.Lock()
-_PRESENT_TTL = 3600
-
-def _presentation_candidates(text, events):
-    """Only publish files explicitly surfaced by LO output/events; never expose arbitrary paths."""
-    hay = str(text or "") + "\n" + "\n".join(json.dumps(e, ensure_ascii=False) for e in (events or []) if isinstance(e,dict))
-    # Tool receipts use absolute/home paths. Restrict to useful browser-displayable types.
-    exts = r"(?:png|jpe?g|webp|gif|pdf|txt|md|html?)"
-    found=[]
-    for raw in re.findall(r"(?:~|/)[^\\n\\r\\t\"'<>]*?\."+exts, hay, flags=re.I):
-        path=Path(os.path.expanduser(raw.strip().rstrip('.,;:)'))) 
-        try:
-            path=path.resolve()
-            if path.is_file() and path.suffix.lower().lstrip('.') in {'png','jpg','jpeg','webp','gif','pdf','txt','md','html','htm'}:
-                if path not in found: found.append(path)
-        except OSError: pass
-    return found[:8]
-
-def _present(path):
-    token=secrets.token_urlsafe(18)
-    with _PRESENT_LOCK:
-        _PRESENTED[token]=(time.time()+_PRESENT_TTL, Path(path))
-    return {"name":Path(path).name,"type":mimetypes.guess_type(str(path))[0] or "application/octet-stream","url":"/api/present/"+token}
-
-def _present_get(token):
-    with _PRESENT_LOCK:
-        item=_PRESENTED.get(token)
-        if not item: return None
-        expires,path=item
-        if expires < time.time():
-            _PRESENTED.pop(token,None); return None
-    return path if path.is_file() else None
+_PRESENTATIONS = Presentations()
+_present = _PRESENTATIONS.present
+_present_get = _PRESENTATIONS.get
 
 _SESSIONS={}
 _SESSION_LOCK=threading.Lock()
@@ -1156,13 +1130,19 @@ class App(BaseHTTPRequestHandler):
                 self.send_response(303); self.send_header("Location","/"); self.send_header(*self._set_cookie(ENDPOINT_COOKIE,issued["token"],31536000 if issued.get("mode")=="trust" else 43200)); self.end_headers(); return
         if path.startswith("/api/"):
             scope="media.output" if path.startswith("/api/media") else "signal.view"
+            if path in {'/api/fabric','/api/fabric/care'}: scope='lo.use'
             if not self._media_ticket_allows(parsed) and not self._require_endpoint(scope): return
+        if path in {'/api/fabric','/api/fabric/care'}:
+            target='/v1/care' if path.endswith('/care') else '/v1/nodes'
+            value=_node_get(target,timeout=90 if target=='/v1/care' else 10)
+            if not isinstance(value,dict): return self.json(503,{'error':'Fabric host unavailable'})
+            return self.json(200,value if target=='/v1/care' else {'ok':True,'nodes':value})
         if self.path.startswith("/api/present/"):
             token=self.path.split("/api/present/",1)[1].split("?",1)[0]
             p=_present_get(token)
             if not p: return self.json(404,{"error":"presentation expired or missing"})
             data=p.read_bytes()
-            return self.send_bytes(200,data,mimetypes.guess_type(p.name)[0] or "application/octet-stream")
+            return self.send_bytes(200,data,mimetypes.guess_type(p.name)[0] or "application/octet-stream",headers=[('Content-Security-Policy','sandbox'),('X-Content-Type-Options','nosniff'),('Cache-Control','no-store')])
         if self.path=="/api/fabric/lights":
             try:
                 value=_node_get("/v1/lights")
@@ -1202,7 +1182,7 @@ class App(BaseHTTPRequestHandler):
                 "lo_timeout":self.lo_timeout,"gallery":str(self.gallery_dir) if self.gallery_enabled else None,
                 **(probe_ollama(self.backend) if self.mode=="ollama" else {"ok":lo_ok})})
         path="index.html" if self.path in ("/","") else self.path.lstrip("/")
-        if path not in ("index.html","app.js","media-session.js","media-art.js","style.css"): return self.json(404,{"error":"not found"})
+        if path not in ("index.html","app.js","media-session.js","media-art.js","style.css","browser-views.js","fabric.html","fabric-dashboard.js"): return self.json(404,{"error":"not found"})
         p=ROOT/path; self.send_bytes(200,p.read_bytes(),mimetypes.guess_type(p.name)[0] or "application/octet-stream")
     def do_POST(self):
         if self.path.startswith("/api/"):

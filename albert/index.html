@@ -98,7 +98,7 @@ body.media-fullscreen-open{overflow:hidden}
     <div class="attachment-tray" id="attachmentTray"></div>
     <div class="composer">
       <span class="prompt">›</span>
-      <input class="ask" id="ask" autocomplete="off" placeholder="ask, act, paste, or drop…" />
+      <input class="ask" id="ask" autocomplete="off" placeholder="ask, act, paste, or drop… · /fabric" />
       <button class="icon" id="cameraButton" title="Take photo">CAM</button>
       <input id="cameraInput" type="file" accept="image/*" capture="environment" hidden />
       <button class="icon" id="mic" title="Speak">◉</button>
@@ -124,6 +124,7 @@ body.media-fullscreen-open{overflow:hidden}
   <div class="actions"><button class="action primary" onclick="setTheme('paper')">Paper</button><button class="action" onclick="setTheme('dark')">Dark</button><button class="action" onclick="setTheme('terminal')">Terminal</button></div>
 </div>
 
+<script src="browser-views.js"></script>
 <script>
 const FABRIC_ENDPOINT = '/v1/actions'; // Same-origin Albert action endpoint.
 const ALBERT_SESSION = localStorage.getItem('albert-session')||'main'; localStorage.setItem('albert-session',ALBERT_SESSION);
@@ -189,7 +190,8 @@ function renderBody(f){
     const player=(media.id||f.src)?`<video controls autoplay playsinline${attrs}></video>`:`${scaledPage(f.embed||CLASSIC_ARTS,f.id)}`;
     return `<div class="media-grid" id="media-grid-${f.id}"><div class="media"><div class="media-viewport" id="media-view-${f.id}"><button class="media-fullscreen-button" data-media-fullscreen onclick="toggleMediaFullscreen(this,event)">Full screen</button><button class="media-expand" onclick="toggleMediaExpand('${f.id}',event)">expand</button>${player}</div>${media.id?'<div class="prose media-preparation" role="status">Preparing / loading video · first playback may take a few minutes</div>':''}${transport}</div><div class="side"><div class="prose">${esc(f.text||f.note||'')}</div>${f.external?`<div class="actions"><button class="action primary" onclick="window.open('${esc(f.external)}','_blank','noopener')">open official feed</button></div>`:''}</div></div>`;
   }
-  if(f.type==='image') return `<div class="media"><img src="${esc(f.src)}" alt="${esc(f.title||'image')}" /></div>${f.text?`<div class="prose">${esc(f.text)}</div>`:''}`;
+  if(f.type==='fabric') return `<div class="prose">Read-only nodes, installed updates and essential backup receipts.</div><a class="action primary" href="/fabric.html" target="_blank" rel="noopener">Open Fabric dashboard ↗</a>`;
+  if(f.type==='image') return `<div class="media"><a href="${esc(f.src)}" target="_blank" rel="noopener"><img src="${esc(f.src)}" alt="${esc(f.title||'image')}" /></a></div><a class="action" href="${esc(f.src)}" target="_blank" rel="noopener">Open image ↗</a>${f.text?`<div class="prose">${esc(f.text)}</div>`:''}`;
   if(f.type==='file') return `<div class="object"><div class="object-label">${esc(f.mime||'object')}</div>${esc(f.name||f.title)}${f.detail?`<div class="meta">${esc(f.detail)}</div>`:''}</div>`;
   if(f.type==='watch') return `<div class="pillbar"><span class="pill live">quiet watch</span>${(f.pills||[]).map(x=>`<span class="pill">${esc(x)}</span>`).join('')}</div><div class="prose">${esc(f.text||'')}</div>${renderPipeline(f.pipeline)}`;
   if(f.type==='places') return `${renderPlaceMap(f)}${f.text?`<div class="prose">${esc(f.text)}</div>`:''}${renderTrust(f.evidence)}${renderSources(f.sources)}`;
@@ -356,6 +358,8 @@ async function removeSaved(id){await savedRequest({op:'delete',id});state.saved=
 function addProgress(text='Understanding…'){state.busy=true;statusLine('thinking');const id=addFold({type:'progress',title:'Albert',meta:'cognition',badge:'working',text,kind:'progress'});return id}
 function finishProgress(id){state.folds=state.folds.filter(x=>x.id!==id);state.busy=false;statusLine('local surface · ready');render()}
 async function askFabric(query,context={},targetFold=null){
+  if(FabricBrowserViews.fabricCommand(query)){FabricBrowserViews.openFabric();addFold({type:'fabric',title:'Fabric',badge:'read-only'});return}
+  const imageView=FabricBrowserViews.beginImage(query);
   const progress=addProgress('Understanding what you mean…');
   const attachmentIds=state.attachments.map(a=>a.id).filter(Boolean);
   const attachmentSnapshot=state.attachments.map(a=>({id:a.id,name:a.name,mime:a.mime,preview:a.preview}));
@@ -365,9 +369,11 @@ async function askFabric(query,context={},targetFold=null){
     const session=context.session||ALBERT_SESSION;
     const r=await fetch(FABRIC_ENDPOINT,{method:'POST',headers:{'content-type':'application/json'},body:JSON.stringify({surface:'albert',origin:'browser',session,input:{text:query},context:{...context,session,artifacts:attachmentIds}}),signal:ctl.signal});clearTimeout(t);
     if(!r.ok)throw new Error('Fabric unavailable');const payload=await r.json();finishProgress(progress);
+    const imageResult=imageView.finish(payload);
+    for(const image of imageResult.images)addFold({type:'image',title:image.name,src:image.url,meta:'Image artifact',text:imageResult.opened?'Opened in a new tab.':'Image ready · Open image opens a new tab.'});
     if(targetFold){const fold=state.folds.find(x=>x.id===targetFold);const normalized=normalizeResult(payload);if(fold&&normalized.type==='answer'){fold.turns=fold.turns||[];fold.turns.push({role:'user',text:query},{role:'assistant',text:normalized.text||''});if(attachmentSnapshot.length)fold.attachments=[...(fold.attachments||[]),...attachmentSnapshot];render();return}}
     consumeFabric(payload,{query,attachments:attachmentSnapshot});clearAttachments();return;
-  }catch(e){replaceFold(progress,{text:'Fabric cognition is unavailable. I will not invent a result.'});await sleep(450);finishProgress(progress);consumeFabric({type:'answer',title:'Albert',meta:'Fabric cognition unavailable',badge:'offline',text:'The shared cognition/tool plane did not answer this request. Nothing was executed.'},{query,attachments:attachmentSnapshot});}
+  }catch(e){imageView.cancel();replaceFold(progress,{text:'Fabric cognition is unavailable. I will not invent a result.'});await sleep(450);finishProgress(progress);consumeFabric({type:'answer',title:'Albert',meta:'Fabric cognition unavailable',badge:'offline',text:'The shared cognition/tool plane did not answer this request. Nothing was executed.'},{query,attachments:attachmentSnapshot});}
 }
 function consumeFabric(payload,context={}){const items=Array.isArray(payload)?payload:(payload.items||[payload]);items.filter(Boolean).forEach(x=>{const f=normalizeResult(x);if(f.type==='audio'){state.folds.forEach(old=>{if(old.type==='audio'&&!old.dismissed)old.dismissed=true})}if(context.query&&f.type==='answer'){f.prompt=context.query;f.turns=[{role:'user',text:context.query},{role:'assistant',text:f.text||''}];f.text='';if(!f.title||f.title==='Albert')f.title=topicTitle(context.query)}if(context.attachments?.length)f.attachments=context.attachments;addFold(f)})}
 function topicTitle(q){const t=String(q||'').trim().replace(/[?!.]+$/,'');if(!t)return 'Thought';return t.length>48?t.slice(0,47)+'…':t[0].toUpperCase()+t.slice(1)}
