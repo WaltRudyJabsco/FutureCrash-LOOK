@@ -365,15 +365,15 @@ async function askFabric(query,context={},targetFold=null){
   const attachmentSnapshot=state.attachments.map(a=>({id:a.id,name:a.name,mime:a.mime,preview:a.preview}));
   try{
     await sleep(180);replaceFold(progress,{text:'Discovering available capabilities…'});
-    const ctl=new AbortController();const t=setTimeout(()=>ctl.abort(),185000);
+    const ctl=new AbortController();const t=setTimeout(()=>ctl.abort(),imageView.timeoutMs);
     const session=context.session||ALBERT_SESSION;
-    const r=await fetch(FABRIC_ENDPOINT,{method:'POST',headers:{'content-type':'application/json'},body:JSON.stringify({surface:'albert',origin:'browser',session,input:{text:query},context:{...context,session,artifacts:attachmentIds}}),signal:ctl.signal});clearTimeout(t);
-    if(!r.ok)throw new Error('Fabric unavailable');const payload=await r.json();finishProgress(progress);
+    let payload;try{const r=await fetch(FABRIC_ENDPOINT,{method:'POST',headers:{'content-type':'application/json'},body:JSON.stringify({surface:'albert',origin:'browser',session,input:{text:query},context:{...context,session,artifacts:attachmentIds}}),signal:ctl.signal});if(!r.ok)throw new Error('Fabric unavailable');payload=await r.json()}finally{clearTimeout(t)}finishProgress(progress);
     const imageResult=imageView.finish(payload);
+    if(imageResult.error)addFold({type:'answer',title:'Image not delivered',badge:'not confirmed',text:imageResult.error});
     for(const image of imageResult.images)addFold({type:'image',title:image.name,src:image.url,meta:'Image artifact',text:imageResult.opened?'Opened in a new tab.':'Image ready · Open image opens a new tab.'});
     if(targetFold){const fold=state.folds.find(x=>x.id===targetFold);const normalized=normalizeResult(payload);if(fold&&normalized.type==='answer'){fold.turns=fold.turns||[];fold.turns.push({role:'user',text:query},{role:'assistant',text:normalized.text||''});if(attachmentSnapshot.length)fold.attachments=[...(fold.attachments||[]),...attachmentSnapshot];render();return}}
     consumeFabric(payload,{query,attachments:attachmentSnapshot});clearAttachments();return;
-  }catch(e){imageView.cancel();replaceFold(progress,{text:'Fabric cognition is unavailable. I will not invent a result.'});await sleep(450);finishProgress(progress);consumeFabric({type:'answer',title:'Albert',meta:'Fabric cognition unavailable',badge:'offline',text:'The shared cognition/tool plane did not answer this request. Nothing was executed.'},{query,attachments:attachmentSnapshot});}
+  }catch(e){imageView.fail('No image result was confirmed. The worker may still be running; return to Albert for details.');replaceFold(progress,{text:'Fabric cognition is unavailable. I will not invent a result.'});await sleep(450);finishProgress(progress);consumeFabric({type:'answer',title:'Albert',meta:'Fabric cognition unavailable',badge:'offline',text:imageView.wanted?'The image request did not return a verified image. The worker may still be running; the waiting tab retains this notice.':'The shared cognition/tool plane did not answer this request. Nothing was executed.'},{query,attachments:attachmentSnapshot});}
 }
 function consumeFabric(payload,context={}){const items=Array.isArray(payload)?payload:(payload.items||[payload]);items.filter(Boolean).forEach(x=>{const f=normalizeResult(x);if(f.type==='audio'){state.folds.forEach(old=>{if(old.type==='audio'&&!old.dismissed)old.dismissed=true})}if(context.query&&f.type==='answer'){f.prompt=context.query;f.turns=[{role:'user',text:context.query},{role:'assistant',text:f.text||''}];f.text='';if(!f.title||f.title==='Albert')f.title=topicTitle(context.query)}if(context.attachments?.length)f.attachments=context.attachments;addFold(f)})}
 function topicTitle(q){const t=String(q||'').trim().replace(/[?!.]+$/,'');if(!t)return 'Thought';return t.length>48?t.slice(0,47)+'…':t[0].toUpperCase()+t.slice(1)}

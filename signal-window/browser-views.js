@@ -1,5 +1,6 @@
 /* Shared by Signal and Albert: browser-local views, never compute-worker windows. */
 (function(root){
+  const IMAGE_WAIT_MS=15*60*1000,CHAT_WAIT_MS=185000;
   function imageRequest(text){
     const value=String(text||'');
     return ((/\b(generate|draw|render|paint|illustrate|create|make)\b/i.test(value)&&
@@ -34,12 +35,17 @@
     // otherwise blocked by Safari and other browsers' transient activation rules.
     if(wanted){try{tab=root.open('about:blank','_blank');if(tab){tab.opener=null;tab.document.title='Generating image';tab.document.body.textContent='Generating your image… This tab will display it when it is ready.'}}catch{}}
     return {
+      wanted,
+      // Scope long waits to image work; ordinary requests keep their own budget.
+      timeoutMs:wanted?IMAGE_WAIT_MS:CHAT_WAIT_MS,
       finish(payload){
         const images=imageArtifacts(payload);
-        if(!wanted||!images.length){this.cancel();return {images,opened:false}}
+        if(!wanted)return {images,opened:false};
+        if(!images.length){const error='No image file was received. Generation is not confirmed; check the response in Signal or Albert for the worker error.';this.fail(error);return {images,opened:false,error}}
         try{if(tab&&!tab.closed){tab.location.replace(images[0].url);tab=null;return {images,opened:true}}}catch{}
         return {images,opened:false};
       },
+      fail(message){try{if(tab&&!tab.closed){tab.document.title='Image result not confirmed';tab.document.body.textContent=String(message||'No image result was confirmed. The worker may still be running. Return to Signal or Albert for details.')}}catch{}},
       cancel(){try{if(tab&&!tab.closed)tab.close()}catch{}tab=null}
     };
   }
