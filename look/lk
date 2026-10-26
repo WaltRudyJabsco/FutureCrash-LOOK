@@ -7965,6 +7965,17 @@ def _jev_image_intent(prompt):
     return {"tool":"generate_image","args":{"prompt":str(decision["prompt"])},"jev":decision}
 
 
+def _lo_image_turn(args,workspace,profile,events=None):
+    """Return the actual tool receipt, including output paths, to every surface."""
+    if events: events.emit("tool_start",tool="generate_image",mode="preflight")
+    with _activity("generating"):
+        result,ok,elapsed=_tool_transaction(
+            "generate_image",args,lambda: _run_capability_tool("generate_image",args,workspace,profile))
+    if events:
+        events.emit("tool_done",tool="generate_image",status="ok" if ok else "failed",result=str(result),elapsed_tool_ms=elapsed)
+    return str(result),ok,elapsed
+
+
 def _jev_state_query(prompt):
     return _jev_module().state_query(prompt)
 
@@ -10606,6 +10617,10 @@ def _default_result(message):
 def _normalize_tool_result(name,result):
     """Typed truth is chosen by tool family, never inferred from arbitrary English."""
     if isinstance(result,_ToolResult): return result
+    if name=="generate_image":
+        text=str(result or "")
+        ok=text.startswith("IMAGE OK · ")
+        return _ToolResult(ok,"effect_ok" if ok else "failed",text)
     if name in {"list_files","inspect_directory","read_file","search_files","search_content",
                 "write_file","create_text_files","copy_path","move_path","remove_path",
                 "make_directory","reveal_path","open_path","preview_path"}:
@@ -11402,11 +11417,11 @@ def ollama_chat(force_search=False, initial_prompt=None, allow_start=True, host_
         if image_action:
             args=dict(image_action["args"])
             print(f"{_lo_label('image','35')}  {args.get('prompt','')}")
-            with _activity("generating"):
-                image_result,image_ok,_elapsed=_tool_transaction(
-                    "generate_image",args,lambda: _run_capability_tool("generate_image",args,workspace,profile))
+            image_result,image_ok,_elapsed=_lo_image_turn(args,workspace,profile,events)
             _lo_receipt("result",str(image_result).splitlines()[0],ok=image_ok,color="33")
-            reply=("Generated the image." if image_ok else str(image_result))
+            # The saved path is delivery evidence for browser surfaces, not just
+            # terminal decoration. Keep it even when no model turn is needed.
+            reply=str(image_result)
             print("\n"+_lo_label("lo","35")+"\n"+_ollama_markup(reply)+"\n")
             _save_recent_exchange(prompt,reply)
             if events:
@@ -12283,7 +12298,8 @@ def ollama_chat(force_search=False, initial_prompt=None, allow_start=True, host_
                         if events:
                             events.emit("source_receipt", **info_receipt)
                     if events:
-                        events.emit("tool_done", tool=name, elapsed_tool_ms=int((time.monotonic()-tool_event_started)*1000))
+                        fields={"result":str(tool_content)} if name=="generate_image" else {}
+                        events.emit("tool_done", tool=name, elapsed_tool_ms=int((time.monotonic()-tool_event_started)*1000),**fields)
                     messages.append({
                         "role": "tool",
                         "tool_name": name,

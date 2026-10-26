@@ -16,7 +16,11 @@ The dashboard never starts maintenance or chooses an update source.
 
 Explicit image-generation requests also reserve a browser tab on submission.
 Completed images appear there while the image and an **Open image** link remain
-in the conversation. A failed/no-image request closes its waiting tab. If a
+in the conversation. Image requests have a scoped 15-minute browser wait budget,
+covering Comfy's ten-minute queue/render budget and file transfer; ordinary
+Albert requests retain their existing shorter budget. A failed/no-image request
+keeps its tab open with an explicit “not confirmed” notice. A browser timeout
+does not mean the GPU job was canceled or that nothing happened. If a
 browser blocks automatic opening, the link still works. Multiple outputs keep
 separate links; only the first image uses the reserved tab. Presentation links
 are authenticated, expire after one hour, and may expire on service restart;

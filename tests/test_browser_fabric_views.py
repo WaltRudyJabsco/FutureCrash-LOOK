@@ -112,7 +112,9 @@ const ref={artifacts:[{type:'image/png',name:'reef.png',url:'/api/present/secret
 const request=view.beginImage('generate a picture of a reef');assert.equal(tabs.length,2);assert.equal(tabs[1].opener,null);
 assert.equal(request.finish(ref).opened,true);assert.equal(navigations[0],'https://fabric.example/api/present/secret');assert.ok(!tabs[1].closed);
 const failed=view.beginImage('draw a cat');failed.cancel();assert.ok(tabs[2].closed);
-const empty=view.beginImage('generate an image');empty.finish({text:'service failed'});assert.ok(tabs[3].closed);
+const empty=view.beginImage('generate an image');assert.ok(empty.finish({text:'service failed'}).error);assert.ok(!tabs[3].closed);assert.ok(tabs[3].document.body.textContent.includes('not confirmed'));
+const timeout=view.beginImage('generate an image');assert.equal(timeout.timeoutMs,900000);timeout.fail('Worker response timed out');assert.ok(!tabs[4].closed);assert.equal(tabs[4].document.body.textContent,'Worker response timed out');
+assert.equal(view.beginImage('play classical').timeoutMs,185000);
 const before=tabs.length;view.beginImage('play classical').finish({media:{}});assert.equal(tabs.length,before);
 assert.equal(view.imageRequest('do not generate an image'),false);assert.equal(view.imageRequest('generate a report'),false);
 scope.open=()=>null;const blocked=view.beginImage('generate an image');assert.equal(blocked.finish(ref).opened,false);

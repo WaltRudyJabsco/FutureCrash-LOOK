@@ -139,9 +139,11 @@ form.addEventListener('submit',async e=>{e.preventDefault();if(!endpointAuthoriz
  if(/^\/art(?:\s+(ascii|image|high-res|off))?$/i.test(text)){const mode=(text.split(/\s+/)[1]||'ascii').toLowerCase();signalArtwork.setMode(mode==='high-res'?'image':mode);mediaDismissed=false;await pollMedia(true);line('system','Album art: '+signalArtwork.mode);return}
  if(/^\/player$/i.test(text)){mediaDismissed=false;await pollMedia(true);return}
  const imageView=FabricBrowserViews.beginImage(text);
+ const imageController=imageView.wanted?new AbortController():null;
+ const imageTimer=imageController?setTimeout(()=>imageController.abort(),imageView.timeoutMs):null;
  energy=.65;event('LO REQUEST',true);
  if(/^\s*(?:please\s+)?(?:play|put on|start)\b/i.test(text))event('MEDIA · SEARCHING',true);
- try{const r=await fetch('/api/chat',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({text,files:sent,visual:false,session:signalSession,media_node:mediaNode,media_endpoint:selectedMediaOutput})});const d=await r.json();if(!r.ok||d.error)throw Error(d.error||r.statusText);
+ try{const r=await fetch('/api/chat',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({text,files:sent,visual:false,session:signalSession,media_node:mediaNode,media_endpoint:selectedMediaOutput}),signal:imageController?.signal});const d=await r.json();if(!r.ok||d.error)throw Error(d.error||r.statusText);
  if(d.media){const routeTarget=selectedMediaOutput==='browser'?thisDeviceLabel():(targetNode(selectedMediaOutput)||String(d.media.node||mediaNode||'native'));const routePlayer=selectedMediaOutput==='browser'?'browser':String(d.media.player||'mpv');event(`MEDIA ROUTE · ${routeTarget} · ${routePlayer}`)}
  if(d.media&&selectedMediaOutput==='browser'&&Array.isArray(d.media.queue)&&d.media.queue.length){
    const source=String(d.media.node||mediaNode||'');
@@ -166,6 +168,7 @@ form.addEventListener('submit',async e=>{e.preventDefault();if(!endpointAuthoriz
    if(String(x.type||'').startsWith('image/')){const img=document.createElement('img');img.src=x.url;img.alt=x.name;img.className='artifact-image';log.append(img)}
    const a=document.createElement('a');a.href=x.url;a.target='_blank';a.rel='noopener';a.textContent='↗ '+x.name;a.className='artifact';log.append(a);event('ARTIFACT READY · '+x.name)}
  const imageResult=imageView.finish(d);
+ if(imageResult.error)line('error',imageResult.error);
  if(imageResult.images.length&&!imageResult.opened)line('system','Image ready · use its ↗ link to open a new tab if your browser blocked automatic opening.');
  const myTurn=++visualTurn;
  if(text||d.text){event('SIGNAL COMPOSE',true);fetch('/api/visual',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({text,answer:d.text||'',events:d.lo_events||[]})}).then(r=>r.json()).then(vd=>{
@@ -174,7 +177,7 @@ form.addEventListener('submit',async e=>{e.preventDefault();if(!endpointAuthoriz
    else if(vk==='error')event('SIGNAL ERROR · '+(vd.visual.error||'UNKNOWN'));
  }).catch(err=>event('SIGNAL ERROR · '+err.message))}
  event('READY');pollMedia(true);energy=Math.max(.25,energy*.65)}
- catch(err){imageView.cancel();event('ERROR · '+err.message);line('error','! '+err.message);energy=.15}});
+ catch(err){imageView.fail('No image result was confirmed. The worker may still be running. Signal reported: '+err.message);event('ERROR · '+err.message);line('error','! '+err.message);energy=.15}finally{if(imageTimer!==null)clearTimeout(imageTimer)}});
 
 let mediaNode='',mediaOutputs=[],lastMediaState=null,nodeMediaState=null;
 const browserAudio=new Audio();browserAudio.preload='metadata';
