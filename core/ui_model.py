@@ -10,6 +10,7 @@ from typing import Any
 
 DASH_ACTIONS = (
     {"id": "quit", "label": "quit", "key": "q"},
+    {"id": "ticker", "label": "pause tickers", "key": "t"},
     {"id": "mini", "label": "mini", "key": "m"},
     {"id": "beacon", "label": "beacon", "key": "b"},
     {"id": "lights", "label": "lights", "key": "l"},

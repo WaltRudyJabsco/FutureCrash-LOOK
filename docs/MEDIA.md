@@ -452,3 +452,15 @@ for visible rows only, using ffprobe and the existing local/Fabric source path.
 No audio is played for this lookup. Results are cached by source identity, size
 and modification time; failures remain `--:--`. Browsing never waits for a whole
 library metadata scan. Lengths can therefore appear progressively.
+
+
+### Album-title variations in cover lookup
+
+The online cover fallback searches the original album title first. If there is
+no match, it may retry without one trailing parenthetical/bracketed qualifier.
+That retry requires the same artist, an exact base title, a 100% provider search
+score and one unique release group. Ambiguous matches remain unresolved.
+Live, acoustic, remix, demo, instrumental, tribute and part/volume qualifiers
+remain distinct. Covers stay under the original album cache identity; file names,
+audio bytes and tags are unchanged. Older negative title-match results are
+retried after this matcher update. Provider failures retain their retry backoff.
