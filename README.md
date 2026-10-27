@@ -72,6 +72,7 @@ Download videos directly on a chosen Fabric node with `lk ytd URL --node 3090`. 
 - `lk media find QUERY`: Fabric media selector with local or owner-rendered remote terminal artwork; navigation repaints without clear-to-blank flashes.
 - `lk player`: live queue/player with terminal artwork, EQ activity view, transport controls, `s` shuffle, and `r` repeat.
 - `lk mp`: integrated Fabric media workspace: searchable library, queue, art/info, now playing, and transport in one terminal surface.
+- `lk media offline QUERY` / `--queue`, or **Shift-Y** in MP, TV and Media Find: verified local travel copies. [Offline travel and Oracle cancellation](docs/OFFLINE-TRAVEL.md).
 - Remote Fabric previews follow the same owner/id routing already proven by playback; the owning node renders Chafa and returns only the terminal preview rows.
 
 ---

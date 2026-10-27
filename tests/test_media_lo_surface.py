@@ -35,7 +35,8 @@ class MediaLOSurfaceTests(unittest.TestCase):
 
     def test_media_selector_uses_look_multiselect_semantics(self):
         self.assertIn('if key=="\\t" and visible:', self.source)
-        self.assertIn('Tab select · A select all · E edit metadata · R refresh · Enter/P play · Q queue', self.source)
+        for hint in ('Tab select', 'A select all', 'E edit metadata', 'R refresh', 'Enter/P play', 'Q queue', 'Y keep offline'):
+            self.assertTrue(hint in self.source, hint)
         self.assertIn('if key=="C":', self.source)
         self.assertIn('if key=="S" and chosen:', self.source)
         self.assertNotIn('Space queue · A play matches', self.source)

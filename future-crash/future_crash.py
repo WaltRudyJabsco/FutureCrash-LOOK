@@ -2103,7 +2103,7 @@ def _shared_access_profile():
     return "workspace"
 
 
-def _shared_lo_chat(prompt, history=None, mode="ask"):
+def _shared_lo_chat(prompt, history=None, mode="ask", cancel_event=None):
     """Run Oracle through LOOK's canonical LO/Fabric engine.
 
     Future Crash owns presentation. The shared engine owns trusted time, tools,
@@ -2139,11 +2139,25 @@ def _shared_lo_chat(prompt, history=None, mode="ask"):
     worker=Path(__file__).with_name('lo_worker.py')
     payload=dict(prompt=str(prompt),profile=_shared_access_profile(),history=clean,
                  interface_context=interface,persona="oracle")
-    result=subprocess.run([sys.executable,str(worker)],input=json.dumps(payload),
-                          capture_output=True,text=True,timeout=90)
-    if result.returncode:
-        raise RuntimeError(result.stderr.strip() or 'Shared LO worker failed')
-    value=json.loads(result.stdout)
+    with subprocess.Popen([sys.executable,str(worker)],stdin=subprocess.PIPE,
+                          stdout=subprocess.PIPE,stderr=subprocess.PIPE,text=True) as process:
+        deadline=time.monotonic()+90
+        first=True
+        try:
+            while True:
+                if cancel_event is not None and cancel_event.is_set():raise InterruptedError('Oracle cancelled')
+                if time.monotonic()>=deadline:raise TimeoutError('Shared LO worker timed out')
+                try:
+                    stdout,stderr=process.communicate(json.dumps(payload) if first else None,timeout=.1)
+                    break
+                except subprocess.TimeoutExpired:first=False
+        finally:
+            if process.poll() is None:
+                process.terminate()
+                try:process.wait(timeout=2)
+                except subprocess.TimeoutExpired:process.kill();process.wait()
+        if process.returncode:raise RuntimeError(stderr.strip() or 'Shared LO worker failed')
+    value=json.loads(stdout)
     if not isinstance(value,dict): raise RuntimeError('Shared LO worker returned invalid data')
     return value
 
@@ -2160,26 +2174,49 @@ class Oracle(threading.Thread):
         self.requests = queue.Queue()
         self.responses = queue.Queue()
         self.stop = threading.Event()
+        self.cancel_event = threading.Event()
+        self.generation = 0
+        self.lock = threading.Lock()
 
     def ask(self, kind, prompt, history=None):
-        self.requests.put((kind, prompt, history or []))
+        with self.lock:
+            self.requests.put((kind, prompt, history or [],self.generation,self.cancel_event))
+
+    def cancel(self):
+        # Generations suppress late results, including a request dequeued while
+        # cancellation races the worker. The next request gets a fresh token.
+        with self.lock:
+            self.cancel_event.set()
+            self.generation += 1
+            self.cancel_event = threading.Event()
+            for items in (self.requests,self.responses):
+                while True:
+                    try:items.get_nowait()
+                    except queue.Empty:break
+
+    def _respond(self, generation, value):
+        with self.lock:
+            if generation==self.generation:self.responses.put(value)
 
     def run(self):
         while not self.stop.is_set():
             try:
-                kind, prompt, history = self.requests.get(timeout=.2)
+                kind, prompt, history, generation, cancelled = self.requests.get(timeout=.2)
             except queue.Empty:
                 continue
 
+            if cancelled.is_set():continue
             try:
                 if kind in {"ask","work"}:
                     try:
-                        result=_shared_lo_chat(prompt, history, mode=kind)
+                        result=_shared_lo_chat(prompt, history, mode=kind, cancel_event=cancelled)
                         text=str(result.get("text") or "").strip()
                         if not text:
                             raise RuntimeError("shared LO returned no visible response")
                         provenance=dict(result.get("provenance") or {})
-                        self.responses.put((kind, text, None, provenance))
+                        self._respond(generation,(kind, text, None, provenance))
+                        continue
+                    except InterruptedError:
                         continue
                     except Exception as shared_exc:
                         # Standalone Future Crash remains usable if LOOK is not installed,
@@ -2274,7 +2311,7 @@ class Oracle(threading.Thread):
                                       latency=background_kind,
                                       priority="background" if background_kind else "interactive",
                                       think=bool(payload.get("think")), options=payload.get("options") or {},
-                                      timeout=request_timeout, owner="future-crash."+kind.split(":",1)[0])
+                                      timeout=request_timeout, owner="future-crash."+kind.split(":",1)[0],cancel_event=cancelled)
                     message=dict(fout.get("message") or {})
                     if not str(message.get("content") or "").strip():
                         for field in ("text", "response", "content"):
@@ -2283,7 +2320,10 @@ class Oracle(threading.Thread):
                                 message["content"]=candidate
                                 break
                     response={"message":message}
+                except InterruptedError:
+                    continue
                 except Exception:
+                    if cancelled.is_set():continue
                     data = json.dumps(payload).encode()
                     req = urllib.request.Request(self.url + "/api/chat", data=data,
                                                  headers={"Content-Type": "application/json"})
@@ -2302,16 +2342,23 @@ class Oracle(threading.Thread):
                     text=_final_only(message)
                     if not text:
                         text="(model returned no visible response)"
-                self.responses.put((kind, text, None, {}))
+                self._respond(generation,(kind, text, None, {}))
             except Exception as exc:
-                self.responses.put((kind, "", str(exc), {}))
+                self._respond(generation,(kind, "", str(exc), {}))
 
     def online(self):
+        # Local capability survives a lost network or a remote host preference.
         try:
-            with urllib.request.urlopen(self.url + "/api/version", timeout=.7):
-                return True
+            from fabric_client import _nodes, _choose_from_snapshot
+            _choose_from_snapshot(_nodes('http://127.0.0.1:7332'),requires=['text'],tier='reflex')
+            return True
         except Exception:
-            return False
+            pass
+        for base in dict.fromkeys(('http://127.0.0.1:11434',self.url)):
+            try:
+                with urllib.request.urlopen(base + "/api/version",timeout=.7):return True
+            except Exception:pass
+        return False
 
 # ---------- Terminal ----------
 
@@ -2821,6 +2868,9 @@ class FutureCrash:
         self.telemetry.start()
         self.oracle.start()
         self.term.enter()
+        old_interrupt=signal.getsignal(signal.SIGINT)
+        self.cancel_requested=False
+        signal.signal(signal.SIGINT,lambda *_:setattr(self,'cancel_requested',True))
         try:
             while self.running:
                 started = time.time()
@@ -2837,12 +2887,17 @@ class FutureCrash:
                 delay = max(0, (1 / self.args.fps) - (time.time() - started))
                 time.sleep(delay)
         finally:
+            signal.signal(signal.SIGINT,old_interrupt)
+            self.oracle.cancel()
             self.inference.end()
             self.telemetry.stop.set()
             self.oracle.stop.set()
             self.term.leave()
 
     def poll(self):
+        if getattr(self,'cancel_requested',False):
+            self.cancel_requested=False
+            self.handle_key('\x03')
         key = self.term.key()
         while key is not None:
             self.handle_key(key)
@@ -3157,6 +3212,19 @@ class FutureCrash:
             pass
 
     def handle_key(self, key):
+        if key=="\x03" and (self.busy or self.deferred_submit):
+            self.oracle.cancel()
+            self.deferred_submit=None
+            self._clear_activity()
+            self.inference.end()
+            self.work_pending_user=None
+            self.work_notice="ORACLE CANCELLED // running and queued requests stopped"
+            self.work_notice_until=time.time()+4
+            self.last_frame=""
+            return
+        if key=="\x03":
+            self.request_quit()
+            return
         if self.mode == "ambient":
             if key in ("q", "Q"):
                 self.request_quit()
@@ -3410,7 +3478,7 @@ class FutureCrash:
             self.deferred_submit = (self.mode, text)
             self.input = ""
             self.cursor = 0
-            self.work_notice = "INTERACTIVE QUEUED // waiting for current Oracle call"
+            self.work_notice = "INTERACTIVE QUEUED // Ctrl-C cancels running and queued calls"
             self.work_notice_until = time.time() + 6.0
             self.last_frame = ""
             return
@@ -3746,7 +3814,7 @@ class FutureCrash:
         lines.append(CYAN + "┌" + "─" * (usable + 2) + "┐" + RESET)
         lines.append(CYAN + "│ " + RESET + shown + CYAN + " │" + RESET)
         lines.append(CYAN + "└" + "─" * (usable + 2) + "┘" + RESET)
-        lines += ["", command_footer("[enter] send   [ctrl-u] clear   [esc] return")]
+        lines += ["", command_footer("[enter] send   [ctrl-c] cancel   [ctrl-u] clear   [esc] return")]
         pad_top = max(1, (h - len(lines)) // 3)
         frame = [""] * pad_top + ["   " + x for x in lines]
         while len(frame) < h:
@@ -3879,7 +3947,7 @@ class FutureCrash:
         if self.deferred_submit:
             frame.append(AMBER + "INTERACTIVE QUEUED // current Oracle call will finish first" + RESET)
         else:
-            frame.append(command_footer("[enter] send   [ctrl-t] threads   [ctrl-u] clear conversation   [ctrl-k] erase memory   [esc] return"))
+            frame.append(command_footer("[enter] send   [ctrl-c] cancel   [ctrl-t] threads   [ctrl-u] clear conversation   [ctrl-k] erase memory   [esc] return"))
         while len(frame) < h:
             frame.append("")
         return "\n".join(safe_row(row, w) for row in frame[:h])

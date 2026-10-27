@@ -1,10 +1,13 @@
 """One isolated LO turn. Pipes carry JSON; the worker never inherits the TUI input."""
 import json
+import signal
 from pathlib import Path
 import sys
 
 
 def main():
+    def interrupted(*_):raise KeyboardInterrupt
+    signal.signal(signal.SIGTERM,interrupted)
     for folder in (Path(__file__).resolve().parents[1]/'look',Path.home()/'.local/share/look'):
         if (folder/'lo_engine.py').is_file():
             sys.path.insert(0,str(folder))

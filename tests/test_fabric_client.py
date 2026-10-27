@@ -32,6 +32,7 @@ class FabricClientPlacementTests(unittest.TestCase):
             calls.append(url)
             if url.endswith('/v1/nodes'):
                 return {"self":{"name":"origin","inference":{"available":True,"models":[]}},"peers":[{"dns":"worker.example","node":{"identity":{"name":"worker"},"inference":{"available":True,"preferred_model":"m","models":[{"name":"m","size":2,"features":{"text":True}}]},"supervisor":{"active":None}}}]}
+            if url.endswith('/health'):return {'ok':True}
             if url.endswith('/v1/jobs'):
                 return {"job":{"id":"j1"}}
             if url.endswith('/v1/jobs/j1'):
