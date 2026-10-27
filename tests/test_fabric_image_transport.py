@@ -8,6 +8,7 @@ from core import fabric_client as client
 
 
 def setup_workers(monkeypatch, names=('bad', 'good')):
+    monkeypatch.setattr(client, '_probe_worker', lambda *args: None)
     snap = {'self': {'name': 'origin'}, 'peers': [
         {'name': name, 'url': f'https://{name}.example:7443',
          'node': {'identity': {'name': name}, 'inference': {

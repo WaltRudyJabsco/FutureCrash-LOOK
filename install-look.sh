@@ -371,6 +371,7 @@ install_file "$ROOT/look/notebook_core.py" "$HOME/.local/share/look/notebook_cor
 install_file "$ROOT/look/weather_forecast.py" "$HOME/.local/share/look/weather_forecast.py"
 install_file "$ROOT/look/media_core.py" "$HOME/.local/share/look/media_core.py"
 install_file "$ROOT/look/media_storage.py" "$HOME/.local/share/look/media_storage.py"
+install_file "$ROOT/look/media_offline.py" "$HOME/.local/share/look/media_offline.py"
 install_file "$ROOT/look/media_metadata.py" "$HOME/.local/share/look/media_metadata.py"
 install_file "$ROOT/look/media_library_ui.py" "$HOME/.local/share/look/media_library_ui.py"
 install_file "$ROOT/look/disc_import.py" "$HOME/.local/share/look/disc_import.py"

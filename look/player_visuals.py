@@ -4,7 +4,7 @@ import math
 import hashlib
 import json
 
-NAMES = ('Bars', 'Waves', 'Orbit', 'Tunnel', 'Stars', 'Plasma', 'Album Art', 'Black Hole', 'Rooftops', 'Spectrum', 'Moon Jelly', 'Firefly Garden', 'Clockwork Garden', 'Rain on Glass', 'Neon Reef', 'Cycle')
+NAMES = ('Bars', 'Waves', 'Orbit', 'Tunnel', 'Stars', 'Plasma', 'Album Art', 'Black Hole', 'Rooftops', 'Spectrum', 'Moon Jelly', 'Firefly Garden', 'Clockwork Garden', 'Rain on Glass', 'Neon Reef', 'Aurora Loom', 'Paper Lanterns', 'Cycle')
 CYCLE_MODE = len(NAMES)
 CYCLE_INTERVAL_SECONDS = 10.0
 
@@ -53,6 +53,10 @@ def frame(mode, width, height, phase, playing=True, seed=0):
             depth=(i*.618034+t*.18)%1
             point((width-1)/2+math.cos(angle)*depth*width*.65,
                   (height-1)/2+math.sin(angle)*depth*height*.65,'.+*'[min(2,int(depth*3))])
+    elif mode==16:
+        return paper_lanterns_frame(width,height,t,seed)
+    elif mode==15:
+        return aurora_loom_frame(width,height,t,seed)
     elif mode==14:
         return neon_reef_frame(width,height,t,seed)
     elif mode==13:
@@ -381,4 +385,46 @@ def neon_reef_frame(width,height,phase,seed=0):
         x=(fish*23+seed+phase*(2+fish%3)*direction)%(width+6)-3
         y=height*(.2+.13*(fish%4))+math.sin(phase*.55+fish)*height*.07
         for dx,char in enumerate(REEF_FISH[fish%2]):put(x+dx,y,char)
+    return [''.join(row) for row in canvas]
+
+
+AURORA_COLOR = '36'
+LANTERN_COLOR = '33'
+AURORA_RIBBONS = 4
+LANTERN_SPACING = 17
+
+
+def aurora_loom_frame(width,height,phase,seed=0):
+    """Slow ribbons of light weave above a stationary mountain silhouette."""
+    canvas=[[' ']*width for _ in range(height)]
+    def put(x,y,c):
+        y=round(y)
+        if 0<=x<width and 0<=y<height:canvas[y][x]=c
+    for x in range(width):
+        for ribbon in range(AURORA_RIBBONS):
+            crest=height*(.18+ribbon*.105)+math.sin(x*.075+phase*.27+ribbon*.8+seed)*height*.13
+            depth=1+int((math.sin(x*.09-phase*.38+ribbon)+1)*height*.06)
+            for tail in range(depth):put(x,crest+tail,':|.'[(tail+ribbon)%3])
+        ridge=height*.83+math.sin(x*.12+seed)*height*.06+math.sin(x*.031)*height*.05
+        put(x,ridge,'/\\'[int(math.cos(x*.12+seed)>0)])
+    return [''.join(row) for row in canvas]
+
+
+def paper_lanterns_frame(width,height,phase,seed=0):
+    """Tiny lanterns drift into a night sky; their reflections ripple below."""
+    canvas=[[' ']*width for _ in range(height)]
+    def put(x,y,c):
+        x=round(x);y=round(y)
+        if 0<=x<width and 0<=y<height:canvas[y][x]=c
+    horizon=max(0,int(height*.78))
+    for i in range(max(2,width//LANTERN_SPACING)):
+        x=(i*LANTERN_SPACING+seed+math.sin(phase*.3+i)*3)%width
+        y=horizon-(phase*(.35+i%3*.12)+i*5)%(max(1,horizon)+4)
+        sprite=('._.','|o|',"'-'")
+        for dy,line in enumerate(sprite):
+            for dx,c in enumerate(line):put(x+dx,y+dy,c)
+        if height-horizon>1:
+            put(x+1+math.sin(phase+i)*2,horizon+1+(i%(height-horizon-1)),'~')
+    for x in range(width):
+        if (x+int(phase*2))%11<4:put(x,horizon,'~')
     return [''.join(row) for row in canvas]

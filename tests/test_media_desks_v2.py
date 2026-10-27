@@ -18,6 +18,9 @@ def lk(monkeypatch):
     monkeypatch.setitem(sys.modules,loader.name,module)
     loader.exec_module(module)
     monkeypatch.setattr(module,'DurationPreview',Durations)
+    import media_offline
+    monkeypatch.setattr(media_offline.Availability,'poll',lambda *a:False)
+    monkeypatch.setattr(module,'_media_local_node_names',lambda:{'local'})
     return module
 
 @pytest.fixture

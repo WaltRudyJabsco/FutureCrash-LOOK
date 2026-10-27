@@ -16,6 +16,37 @@ except ImportError:
 FABRIC_IDENTITY = FabricIdentity()
 
 DEFAULT_NODE = "http://127.0.0.1:7332"
+PEER_PROBE_SECONDS = .8
+PEER_FRESH_SECONDS = 90.0
+LOCAL_FALLBACK_MODEL_LIMIT = 4
+FAILED_PEER_SECONDS = 5.0
+_failed_peers = {}
+
+
+def _peer_unavailable(peer):
+    if peer.get("node_error"): return True
+    seen = peer.get("node_seen_at")
+    try:
+        return seen is not None and time.time()-float(seen) > PEER_FRESH_SECONDS
+    except (TypeError, ValueError):
+        return True
+
+
+def _probe_worker(endpoint, base):
+    # Probe transport separately from model startup: cold models may take much
+    # longer than a network connection, and deserve the inference time budget.
+    if endpoint.rstrip('/') != base.rstrip('/'):
+        _json(endpoint+"/health", timeout=PEER_PROBE_SECONDS)
+
+
+def _cancel_job(endpoint, job_id):
+    if not job_id: return
+    try:
+        _json(endpoint+f"/v1/jobs/{job_id}/control",
+              {"operation":"cancel", "reason":"request ended before completion"}, timeout=.7)
+    except Exception:
+        pass
+
 
 def _open(req, *, url, timeout=5.0):
     """Open a Fabric URL with the authorization and TLS pin for that peer.
@@ -40,7 +71,29 @@ def _json(url, payload=None, timeout=5.0):
         return json.loads(r.read().decode("utf-8","replace"))
 
 def _nodes(base):
-    return _json(base.rstrip('/')+"/v1/nodes", timeout=4.0)
+    try:
+        return _json(base.rstrip('/')+"/v1/nodes", timeout=.8)
+    except (OSError, ValueError):
+        if urllib.parse.urlparse(base).hostname not in {'localhost','127.0.0.1','::1'}:raise
+        # A standalone laptop can still use its own installed Ollama-compatible
+        # runtime if the Fabric service has stopped. No remote URL is guessed.
+        endpoint='http://127.0.0.1:11434'
+        tags=_json(endpoint+'/api/tags',timeout=.8).get('models') or []
+        try:warm={m.get('name') for m in _json(endpoint+'/api/ps',timeout=.5).get('models') or []}
+        except (OSError,ValueError):warm=set()
+        models=[]
+        for row in sorted(tags,key=lambda m:m.get('name') not in warm)[:LOCAL_FALLBACK_MODEL_LIMIT]:
+            name=row.get('name') or row.get('model')
+            if not name:continue
+            try:info=_json(endpoint+'/api/show',{'model':name},timeout=.5)
+            except (OSError,ValueError):info={}
+            caps=info.get('capabilities') or []
+            models.append(dict(name=name,size=row.get('size'),resident=name in warm,
+                               features=dict(text=True,tools='tools' in caps,vision='vision' in caps,
+                                             thinking='thinking' in caps)))
+        if not models:raise RuntimeError('Offline: no local inference model installed; connect a worker or install a local model')
+        return {'self':{'name':'local','direct_ollama':endpoint,
+                        'inference':{'available':True,'models':models}},'peers':[]}
 
 def _candidates(snapshot):
     rows=[]
@@ -49,8 +102,9 @@ def _candidates(snapshot):
     rows.append((me_name, None, me))
     for p in snapshot.get("peers") or []:
         ad=p.get("node")
-        if not ad: continue
+        if not ad or _peer_unavailable(p): continue
         name=((ad.get("identity") or {}).get("name") or p.get("name"))
+        if _failed_peers.get(str(name),0)>time.monotonic(): continue
         rows.append((name,p.get("dns"),ad))
     return rows
 
@@ -210,11 +264,25 @@ def _ad_for_target(base, target, snapshot=None):
     snap=snapshot if snapshot is not None else _nodes(base)
     return _find_target(snap,target)[1]
 
-def infer(messages, *, model=None, requires=None, latency=False, priority="interactive",
-          think=False, options=None, timeout=90, base=DEFAULT_NODE, owner="app"):
-    snap=_nodes(base)
+def _direct_stream(endpoint, payload, timeout, cancel_event=None):
+    url=endpoint+'/api/chat'
+    req=urllib.request.Request(url,data=json.dumps(dict(payload,stream=True)).encode(),
+                               headers={'Content-Type':'application/json'})
+    with _open(req,url=url,timeout=timeout) as response:
+        for raw in response:
+            if cancel_event is not None and cancel_event.is_set():raise InterruptedError('Inference cancelled')
+            if not raw.strip():continue
+            event=json.loads(raw)
+            if event.get('error'):raise RuntimeError(event['error'])
+            event['_fabric_node']='local'
+            yield event
+
+
+def _infer_on_target(messages, *, model=None, requires=None, latency=False, priority="interactive",
+          think=False, options=None, timeout=90, base=DEFAULT_NODE, owner="app", cancel_event=None, snapshot=None, placement=None):
+    snap=snapshot if snapshot is not None else _nodes(base)
     tier="reflex" if latency else "balanced"
-    score,target,dns,eligible=_choose_from_snapshot(snap,model=model,requires=requires,latency=latency,tier=tier)
+    score,target,dns,eligible=placement or _choose_from_snapshot(snap,model=model,requires=requires,latency=latency,tier=tier)
     ad=_ad_for_target(base,target,snapshot=snap)
     chosen=model
     if not chosen:
@@ -225,8 +293,16 @@ def infer(messages, *, model=None, requires=None, latency=False, priority="inter
         else:
             pool=sorted(eligible,key=lambda m:int(m.get("size") or 0))
             chosen=(pool[0] if latency else pool[-1]).get("name")
+    direct=(ad or {}).get('direct_ollama')
+    if direct:
+        content=[];thinking=[];message={}
+        for event in _direct_stream(direct,dict(model=chosen,messages=messages,think=think,options=options or {}),timeout,cancel_event):
+            message=event.get('message') or {}
+            content.append(message.get('content') or '')
+            thinking.append(message.get('thinking') or '')
+        return {'message':dict(message,content=''.join(content),thinking=''.join(thinking)),'fabric_node':target}
     packet={
-      "fabric":"fwp/1","kind":"task","origin":owner,
+      "id":str(uuid.uuid4()),"fabric":"fwp/1","kind":"task","origin":owner,
       "relationships":{},
       "work":{"operation":"model.infer","objective":"model inference",
               "input":{"model":chosen,"messages":messages,"think":think,
@@ -241,20 +317,56 @@ def infer(messages, *, model=None, requires=None, latency=False, priority="inter
     # transport placement must be real rather than relying on the origin node to
     # interpret a remote target later.
     pollbase=_endpoint_base(snap,target,dns,base)
-    submit=_json(pollbase+"/v1/jobs",{"packet":packet},timeout=6.0)
-    job=(submit.get("job") or {}); jid=job.get("id") or packet.get("id")
-    deadline=time.monotonic()+timeout+8
-    while time.monotonic()<deadline:
-        state=_json(pollbase+f"/v1/jobs/{jid}",timeout=4.0)
-        status=state.get("status")
-        if status in {"ok","failed","denied","cancelled"}:
-            if status!="ok": raise RuntimeError(state.get("error") or f"Fabric inference {status}")
-            result=state.get("result") or {}
-            out=((result.get("work") or {}).get("output") or {})
-            out["fabric_node"]=target
-            return out
-        time.sleep(.25)
-    raise TimeoutError(f"Fabric inference timed out on {target}")
+    _probe_worker(pollbase,base)
+    jid=packet['id']; finished=False
+    try:
+        if cancel_event is not None and cancel_event.is_set():raise InterruptedError('Inference cancelled')
+        submit=_json(pollbase+"/v1/jobs",{"packet":packet},timeout=3.0)
+        job=(submit.get("job") or {}); jid=job.get("id") or jid
+        deadline=time.monotonic()+timeout
+        while time.monotonic()<deadline:
+            if cancel_event is not None and cancel_event.is_set():raise InterruptedError('Inference cancelled')
+            state=_json(pollbase+f"/v1/jobs/{jid}",timeout=1.0)
+            status=state.get("status")
+            if status in {"ok","failed","denied","cancelled"}:
+                finished=True
+                if status!="ok":raise RuntimeError(state.get("error") or f"Fabric inference {status}")
+                result=state.get("result") or {}
+                out=((result.get("work") or {}).get("output") or {})
+                out["fabric_node"]=target
+                return out
+            if cancel_event is not None:cancel_event.wait(.25)
+            else:time.sleep(.25)
+        raise TimeoutError(f"Fabric inference timed out on {target}")
+    finally:
+        if not finished:_cancel_job(pollbase,jid)
+
+
+def infer(messages, *, model=None, requires=None, latency=False, priority="interactive",
+          think=False, options=None, timeout=90, base=DEFAULT_NODE, owner="app", cancel_event=None):
+    snapshot=_nodes(base)
+    excluded=set()
+    last_error=None
+    deadline=time.monotonic()+timeout
+    for _ in range(3):
+        if cancel_event is not None and cancel_event.is_set():raise InterruptedError('Inference cancelled')
+        try:
+            placement=_choose_from_snapshot(snapshot,model=model,requires=requires,latency=latency,
+                                            tier="reflex" if latency else "balanced",exclude=excluded)
+        except RuntimeError:
+            if last_error:raise RuntimeError(f'No reachable capable worker: {last_error}') from None
+            raise
+        try:
+            return _infer_on_target(messages,model=model,requires=requires,latency=latency,priority=priority,
+                                    think=think,options=options,timeout=max(.1,deadline-time.monotonic()),
+                                    base=base,owner=owner,cancel_event=cancel_event,snapshot=snapshot,placement=placement)
+        except InterruptedError:
+            raise
+        except (urllib.error.URLError, TimeoutError, OSError) as exc:
+            last_error=exc;excluded.add(placement[1])
+            _failed_peers[placement[1]]=time.monotonic()+FAILED_PEER_SECONDS
+            if time.monotonic()>=deadline:raise
+    raise RuntimeError(f'No reachable capable worker: {last_error}')
 
 def _stage_image_artifacts(payload, endpoint):
     """Move Ollama image blobs out of the work packet and into Fabric artifacts.
@@ -393,11 +505,18 @@ def stream_infer(payload, *, requires=None, priority="interactive", timeout=180,
         # routing time from prompt-evaluation/TTFT in LO telemetry instead of
         # making the first model frame look like a ten-second routing decision.
         yield {"_fabric_meta":"route", "_fabric_node":target, "_fabric_model":chosen}
+        direct=(_find_target(snap,target)[1] or {}).get('direct_ollama')
+        if direct:
+            yield from _direct_stream(direct,dict(payload,model=chosen),timeout)
+            return
         endpoint_base=_endpoint_base(snap,target,dns,base)
         emitted=False
-        stage="image upload"
+        completed=False;job_id=None
+        stage="worker connection"
         endpoint=endpoint_base+"/v1/artifacts"
         try:
+            _probe_worker(endpoint_base,base)
+            stage="image upload"
             staged_messages,_staged=_stage_image_artifacts(payload, endpoint_base) if any(
                 bool(m.get("images")) for m in payload.get("messages",[]) if isinstance(m,dict)
             ) else (payload.get("messages") or [],[])
@@ -406,7 +525,7 @@ def stream_infer(payload, *, requires=None, priority="interactive", timeout=180,
             if "think" in payload: inp["think"]=payload.get("think")
             if isinstance(payload.get("tools"),list): inp["tools"]=payload["tools"]
             packet={
-              "fabric":"fwp/1","kind":"task","origin":owner,"relationships":{},
+              "id":str(uuid.uuid4()),"fabric":"fwp/1","kind":"task","origin":owner,"relationships":{},
               "work":{"operation":"model.infer","objective":"stream conversational inference","input":inp},
               "capabilities":{"requires":list(reqs),"prefers":{"latency":"low" if tier=="reflex" else "normal","work_class":tier}},
               "context":{},"execution":{"priority":priority,"cancellable":True,
@@ -414,6 +533,7 @@ def stream_infer(payload, *, requires=None, priority="interactive", timeout=180,
               "authority":{"principal":"user","grants":["model.infer"],"confirmed_operations":[]},
               "delivery":{"target":target},"provenance":{},"extensions":{"futurecrash":{"owner":owner,"work_class":tier}},
             }
+            job_id=packet["id"]
             stage="inference stream"
             endpoint=endpoint_base+"/v1/infer/stream"
             headers={"Content-Type":"application/json"}
@@ -433,6 +553,7 @@ def stream_infer(payload, *, requires=None, priority="interactive", timeout=180,
                     if event.get("_fabric_error"):
                         raise RuntimeError(f"Fabric inference failed on {node}: {event.get('error') or 'stream failed'}")
                     emitted=True
+                    if event.get("done"):completed=True
                     event["_fabric_node"]=node
                     yield event
             return
@@ -449,9 +570,12 @@ def stream_infer(payload, *, requires=None, priority="interactive", timeout=180,
             if busy_grace_seconds and busy_grace_deadline is None:
                 busy_grace_deadline=time.monotonic()+busy_grace_seconds
         except (urllib.error.URLError, TimeoutError, socket.timeout, ssl.SSLError) as exc:
+            _failed_peers[target]=time.monotonic()+FAILED_PEER_SECONDS
             last_error=_transport_failure(exc,target=target,endpoint=endpoint,stage=stage)
             if emitted:
                 raise last_error from exc
+        finally:
+            if job_id and not completed:_cancel_job(endpoint_base,job_id)
         tried.add(target)
         attempt_no += 1
         if isinstance(route,dict):

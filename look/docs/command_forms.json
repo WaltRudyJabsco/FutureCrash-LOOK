@@ -752,6 +752,12 @@
     "Configure native reminder delivery"
   ],
   [
+    "lk media offline",
+    "QUERY | --queue",
+    "media",
+    "Keep verified local copies for travel; prompts for destination and confirmation"
+  ],
+  [
     "lk media find",
     "[QUERY]",
     "media",

@@ -15954,7 +15954,7 @@ def _media_fabric_catalog():
             "http://127.0.0.1:7332/v1/media/fabric",
             headers={"Accept":"application/json","Accept-Encoding":"gzip"},
         )
-        with urllib.request.urlopen(request,timeout=45.0) as response:
+        with urllib.request.urlopen(request,timeout=3.0) as response:
             body=response.read()
             if getattr(response,'headers',{}).get('Content-Encoding','').casefold()=='gzip':body=gzip.decompress(body)
             payload=json.loads(body.decode("utf-8"))
@@ -15990,7 +15990,7 @@ def _media_fabric_catalog():
         local_node=str((nodes[0] or {}).get('node') or platform.node() or 'local') if nodes else (platform.node() or 'local')
         local=_media_library()
         fresh=[dict(row,node=local_node,identified=bool(row.get('digest'))) for row in local.get('entries') or []]
-        cached['entries']=[row for row in cached.get('entries') or [] if row.get('node')!=local_node]+fresh
+        cached['entries']=[dict(row,offline=True) for row in cached.get('entries') or [] if row.get('node')!=local_node]+fresh
         cached['locations']=len(cached['entries'])
         if nodes:nodes[0]=dict(nodes[0],count=len(fresh))
         cached["stale"]=True
@@ -16704,7 +16704,7 @@ def _media_pin_playable_entry(entry, timeout=1.5):
     ordered.sort(key=lambda loc: bool(str(loc.get("node") or row.get("node") or "").strip()) and
                  str(loc.get("node") or row.get("node") or "").strip().casefold() not in local_names)
 
-    errors=[]; optimistic=[]
+    errors=[]
     for loc in ordered:
         node=str(loc.get("node") or row.get("node") or "").strip()
         entry_id=str(loc.get("id") or row.get("id") or "").strip()
@@ -16739,34 +16739,10 @@ def _media_pin_playable_entry(entry, timeout=1.5):
                 # unavailable; keep looking for another location.
                 errors.append(f"{node}: protected media requires an authorized provider app" if exc.headers and exc.headers.get("X-LOOK-Media-Playback")=="requires-provider-app" else f"{node}: HTTP {exc.code}")
                 continue
-            except (TimeoutError, socket.timeout) as exc:
-                # Sleeping disks and cross-Fabric startup routinely exceed a tiny
-                # HEAD budget. A timeout is not proof that the media is absent:
-                # hand the canonical URL to the real player and let GET/open wake it.
-                pinned=dict(row); pinned.update({"node":node,"id":entry_id})
-                if path: pinned["path"]=path
-                pinned["reachability"]="optimistic"
-                optimistic.append(pinned)
-                continue
-            except urllib.error.URLError as exc:
-                # urllib wraps socket timeouts on some Python/platform versions.
-                reason=getattr(exc,"reason",None)
-                if isinstance(reason,(TimeoutError,socket.timeout)):
-                    pinned=dict(row); pinned.update({"node":node,"id":entry_id})
-                    if path: pinned["path"]=path
-                    pinned["reachability"]="optimistic"
-                    pinned["art"]={k:pinned.get(k) for k in ("node","id","path","mtime")}
-                    optimistic.append(pinned)
-                    continue
-                errors.append(f"{node}: {exc}")
+            except (TimeoutError, socket.timeout, urllib.error.URLError) as exc:
+                errors.append(f"{node}: unavailable or still waking; refresh and retry")
             except Exception as exc:
                 errors.append(f"{node}: {exc}")
-
-    # A slow primary copy must not prevent a healthy duplicate being checked.
-    if optimistic:
-        pinned=optimistic[0]
-        pinned["art"]={k:pinned.get(k) for k in ("node","id","path","mtime")}
-        return pinned
 
     # Digest-backed artifacts remain valid when no ordinary location envelope is
     # available; _media_entry_source knows how to route these through Fabric.
@@ -18037,7 +18013,7 @@ def _media_collapse(rows, show_all=False, show_hidden=False):
     out=[]
     for bucket in groups.values():
         # Catalog collapse must be pure metadata work. Playback resolves reachability.
-        bucket.sort(key=lambda r:(bool(r.get("hidden")), str(r.get("path") or "").casefold()))
+        bucket.sort(key=lambda r:(bool(r.get("hidden")), bool(r.get("offline")), str(r.get("path") or "").casefold()))
         row=dict(bucket[0])
         # A logical media row carries every physical copy in the canonical
         # locations envelope. `sources` remains the selector/UI representation,
@@ -18527,6 +18503,8 @@ def _media_selector(rows,title="FABRIC MEDIA",initial_query="",catalog_meta=None
     show_hidden=False
     sort_mode=0;reverse_sort=False
     native_preview=NativePreviewController();native_images=True
+    import media_offline
+    availability=media_offline.Availability(_media_local_node_names())
     duration_preview=DurationPreview(_media_entry_source);pane_help=False
     action=("none",None)
     view_key=None; visible=[]
@@ -18584,10 +18562,12 @@ def _media_selector(rows,title="FABRIC MEDIA",initial_query="",catalog_meta=None
                     node=str(row.get("node") or "local")
                     identity="◆" if row.get("digest") else "·"
                     count=int(row.get("source_count") or 1)
-                    right=f"{identity} {node}"+(f" · {count} SOURCES" if count>1 else "")
+                    right=f"{identity} {availability.state(row)} {node}"+(f" · {count} SOURCES" if count>1 else "")
                     source_label=_media_find_cell(right,source_width)
                     metadata=_c(source_label[:1],'32' if row.get('digest') else '2')+_c(source_label[1:],'2')
-                    print(terminal_style.list_row(f"{focus}{mark} {_media_find_row(dict(row,duration=duration_preview.value(row)),table_width)}  {metadata}",width,n,n==idx,_LIST_COLORS))
+                    line=f"{focus}{mark} {_media_find_row(dict(row,duration=duration_preview.value(row)),table_width)}  {metadata}"
+                    if availability.state(row)=="offline":line=_c(_strip_ansi(line),"2")
+                    print(terminal_style.list_row(line,width,n,n==idx,_LIST_COLORS))
                 if not visible:
                     print("  no matches")
                 art_pending=False
@@ -18617,7 +18597,7 @@ def _media_selector(rows,title="FABRIC MEDIA",initial_query="",catalog_meta=None
                             print(left)
 
                 filter_text=f"{_c('FILTER','1;36')} {query}█" if query else f"{_c('FILTER','1;36')} █"
-                action_text="I info · M image/ASCII · F sort · G reverse · / search · ↑↓/J/K move · Shift-arrows page/ends · Tab select · A select all · C clear selection · Enter/P play · O open with · T Apple TV · Q queue · S save playlist · V sources · R refresh · E edit metadata · H hidden · X hide · D hide by directory · U unhide · W shell pane · Esc finish/clear/exit"
+                action_text="I info · M image/ASCII · F sort · G reverse · / search · ↑↓/J/K move · Shift-arrows page/ends · Tab select · A select all · C clear selection · Enter/P play · O open with · T Apple TV · Q queue · S save playlist · V sources · R refresh · Y keep offline · E edit metadata · H hidden · X hide · D hide by directory · U unhide · W shell pane · Esc finish/clear/exit"
                 if pane_help:action_text+=" · "+" · ".join(terminal_style.pane_shortcuts())
                 actions=_media_hints(action_text,width)
                 footer=f"{filter_text}  "+_c("◆ SHA · · scanned","2")+"\n"+actions
@@ -18633,11 +18613,11 @@ def _media_selector(rows,title="FABRIC MEDIA",initial_query="",catalog_meta=None
             # Wake for background artwork/duration results and pane resizes;
             # redraw only when those results or user input actually change the view.
             if native_art and art_geometry:native_preview.request(native_art,*art_geometry)
-            if duration_preview.poll(([visible[idx]] if visible else [])+page):continue
+            if availability.poll(page) or duration_preview.poll(([visible[idx]] if visible else [])+page):continue
             while True:
                 key=_read_tty_key(fd,.08 if art_pending else .25)
                 native_preview.paint_ready()
-                if key or art_pending or duration_preview.poll(page):break
+                if key or art_pending or availability.poll(page) or duration_preview.poll(page):break
                 if native_images and art_geometry and not native_art and visible:
                     candidate=_media_remote_cover_path(visible[idx],fetch=False)
                     if candidate:
@@ -18704,6 +18684,8 @@ def _media_selector(rows,title="FABRIC MEDIA",initial_query="",catalog_meta=None
                 try:_media_refresh_rows(rows,discover=discover,catalog_meta=catalog_meta);notice="catalog refreshed";view_key=None
                 except (OSError,RuntimeError) as exc:notice=str(exc)
                 continue
+            if key=="Y" and chosen:
+                notice=_media_keep_offline(chosen,fd,old);continue
             if key=="E" and chosen:
                 result=_media_edit_prompt(chosen,fd,old)
                 _media_apply_edit_updates(rows,result['entries'])
@@ -18759,6 +18741,7 @@ def _media_selector(rows,title="FABRIC MEDIA",initial_query="",catalog_meta=None
                 query+=key; idx=0
                 continue
     finally:
+        availability.close()
         duration_preview.close()
         native_preview.invalidate()
         termios.tcsetattr(fd,termios.TCSADRAIN,old)
@@ -18793,6 +18776,71 @@ def _media_selector_finish(action,payload):
         print(f"  {path}")
         return 0
     return None
+
+def _media_keep_offline(rows, fd=None, old=None):
+    import media_offline
+    local=_media_local_node_names()
+    kept=0; errors=[]
+    if fd is not None:termios.tcsetattr(fd,termios.TCSADRAIN,old)
+    try:
+        config=_media_read_json(HOME/'.config/look/media_library.json',{})
+        root=Path(config.get('root') or '~/Media').expanduser()
+        print('\nKEEP OFFLINE · copies original media into this device’s library')
+        override=input('Destination root ['+str(root)+']: ').strip()
+        if override:
+            root=Path(override).expanduser()
+            if not root.is_absolute() or not root.is_dir():raise ValueError('Choose an existing absolute directory; mount your travel drive first')
+        print('Destination: '+str(root))
+        existing=root
+        while not existing.exists():existing=existing.parent
+        print(f'{shutil.disk_usage(existing).free/1024**3:.2f} GiB free')
+        total=sum(int(row.get('bytes') or 0) for row in rows)
+        print(f'{len(rows)} item(s) · catalog size {total/1024**3:.2f} GiB · originals remain on their owners')
+        if input('Keep these items here? [y/N] ').strip().casefold()!='y':return 'Keep offline cancelled'
+        availability=media_offline.Availability(local)
+        try:
+            for row in rows:
+                if availability.local(row):kept+=1;continue
+                sources=[x for x in media_offline.locations(row) if x.get('node') and x.get('id') and str(x['node']).casefold() not in local]
+                if not sources:errors.append('No downloadable source: '+_media_entry_label(row));continue
+                category='music' if _media_find_type(row) in {'Audio','Podcast'} else ('tv' if _media_find_type(row)=='TV' else 'movies')
+                print(_media_entry_label(row))
+                def progress(done,total):
+                    print(f'\r  {done/total:.0%} · {done/1024**3:.2f}/{total/1024**3:.2f} GiB',end='',flush=True)
+                for source in sources:
+                    try:
+                        source=dict(source,digest=source.get('digest') or row.get('digest'))
+                        target=media_offline.keep(source,root/category,progress=progress)
+                        def index_copy(library):
+                            library=media_core.scan_root(target.parent,library)
+                            for saved in library['entries']:
+                                if saved['path']==str(target):
+                                    for key in ('artist','album_artist','album','title','track','disc','series','season','episode','content_kind'):
+                                        if row.get(key) is not None:saved[key]=row[key]
+                                    expected=str(source.get('digest') or '').removeprefix('sha256:')
+                                    if len(expected)==64:saved['digest']='sha256:'+expected
+                            return library
+                        indexed=media_core.update_library(MEDIA_LIBRARY_FILE,index_copy)
+                        saved=next(item for item in indexed['entries'] if item['path']==str(target))
+                        loc=dict(saved,node=platform.node() or 'local',offline=False)
+                        row.setdefault('locations',[]).append(loc)
+                        session=_media_session()
+                        if session:
+                            for queued in session.get('queue') or []:
+                                if (row.get('digest') and queued.get('digest')==row['digest']) or (queued.get('node'),queued.get('id'))==(row.get('node'),row.get('id')):
+                                    queued.setdefault('locations',[]).append(loc)
+                            _media_save_session(session)
+                        kept+=1;print(' · verified locally');break
+                    except (OSError,ValueError) as exc:last_error=str(exc)
+                else:errors.append(last_error)
+        finally:availability.close()
+        (HOME/'.cache/look/fabric-media-catalog.json').unlink(missing_ok=True)
+    except KeyboardInterrupt:return f'Copy cancelled · {kept} completed copies retained'
+    except (OSError,ValueError) as exc:errors.append(str(exc))
+    finally:
+        if fd is not None:tty.setcbreak(fd)
+    return f'{kept} available offline'+(' · '+'; '.join(errors[:3]) if errors else '')
+
 
 def _media_copy_for_app(row):
     """Copy original bytes through the trusted Fabric proxy, then publish locally."""
@@ -19531,7 +19579,7 @@ def _media_player_full_visual(snap,mode,visual_elapsed=0):
             '←/→ seek · s shuffle · r repeat · O reset audio · x stop · q close']
     art_height=max(1,height-len(header)-len(footer))
     elapsed=visual_elapsed%player_visuals.CYCLE_INTERVAL_SECONDS if cycling else visual_elapsed
-    phase=elapsed if name in {'Black Hole','Rooftops','Spectrum','Moon Jelly','Firefly Garden','Clockwork Garden','Rain on Glass','Neon Reef'} else time.monotonic()
+    phase=elapsed if name in {'Black Hole','Rooftops','Spectrum','Moon Jelly','Firefly Garden','Clockwork Garden','Rain on Glass','Neon Reef','Aurora Loom','Paper Lanterns'} else time.monotonic()
     art=_media_player_large_art(entry,width,art_height) if album_art else player_visuals.frame(mode,width,art_height,phase,state in {'play','playing'},seed)
     lines=header+art+footer
     color=player_visuals.album_color(snap) if album_art else ("1;32","1;36","1;35","1;34","1;37","1;33")[(mode-1)%6]
@@ -19542,6 +19590,8 @@ def _media_player_full_visual(snap,mode,visual_elapsed=0):
     if name=='Clockwork Garden': color=player_visuals.CLOCKWORK_COLOR
     if name=='Rain on Glass': color=player_visuals.RAIN_COLOR
     if name=='Neon Reef': color=player_visuals.REEF_COLOR
+    if name=='Aurora Loom': color=player_visuals.AURORA_COLOR
+    if name=='Paper Lanterns': color=player_visuals.LANTERN_COLOR
     shimmer=album_art and state in {'play','playing'} and not any(
         status in line for line in art for status in ('Loading album art','Album art unavailable'))
     rendered=[]
@@ -19784,6 +19834,8 @@ def _media_player_library(initial_query="",media_kind="audio"):
     old=termios.tcgetattr(fd)
     mode="library"
     library_view=None;pane_help=False
+    import media_offline
+    availability=media_offline.Availability(_media_local_node_names())
     duration_preview=DurationPreview(_media_entry_source)
     sort_mode=0;reverse_sort=False
     query=str(initial_query or "")
@@ -19834,7 +19886,7 @@ def _media_player_library(initial_query="",media_kind="audio"):
                 height=max(10,terminal.lines)
                 right_w=min(40,max(28,width//3)) if width>=96 else 0
                 left_w=width-right_w-3 if right_w else width
-                controls="↑↓ select · Shift-arrows page/ends · Tab mark · A select all · E edit · R refresh · C clear marks · Enter play · B add queue · D hide dir · W shell pane · L library · Q queue/back"
+                controls="↑↓ select · Shift-arrows page/ends · Tab mark · A select all · Y keep offline · E edit · R refresh · C clear marks · Enter play · B add queue · D hide dir · W shell pane · L library · Q queue/back"
                 extra=("O open with · T Apple TV · " if media_kind=="video" else "O reset audio · ")+"F sort · G reverse · / search · v visuals · M image/ASCII · Esc back/clear/exit"
                 if pane_help:extra+=" · "+" · ".join(terminal_style.pane_shortcuts())
                 footer=_media_hints(controls,width)+"\n"+_media_hints(extra,width)
@@ -19879,6 +19931,7 @@ def _media_player_library(initial_query="",media_kind="audio"):
                             focus=_c("›","1;36") if n==idx else " "
                             mark=_c("✓","32") if rid in selected_ids else " "
                             label=_media_player_columns(dict(row,duration=duration_preview.value(row)),max(1,left_w-3),media_kind)
+                            if availability.state(row)=="offline":label=_c(_strip_ansi(label),"2")
                             left=terminal_style.list_row(f"{focus}{mark} "+label,left_w,n,n==idx,_LIST_COLORS)
                         else:
                             left=""
@@ -19896,7 +19949,7 @@ def _media_player_library(initial_query="",media_kind="audio"):
                             print(_ansi_clip(left,width))
                     print("─"*max(1,width-1))
                     if chosen:
-                        source=str(chosen.get('node') or 'local')
+                        source=availability.state(chosen)+' · '+str(chosen.get('node') or 'local')
                         print(_ansi_clip(_c('SELECTED ', '36')+_c(_media_row_label(chosen),'37')+_c(' · '+source,'2'),width))
                     else:
                         empty="No matching "+medium+" items · Esc clears search" if query else "No "+medium+" items here · lk media import or lk media find"
@@ -19936,7 +19989,7 @@ def _media_player_library(initial_query="",media_kind="audio"):
                     transport_signature=signature
                     payload='\x1b7'+''.join(f'\x1b[{transport_row+i};1H\x1b[2K'+line for i,line in enumerate(lines))+'\x1b8'
                     sys.stdout.write(payload);sys.stdout.flush()
-            if duration_preview.poll(([chosen] if chosen else [])+page):dirty=True
+            if availability.poll(page) or duration_preview.poll(([chosen] if chosen else [])+page):dirty=True
             key=_read_tty_key(fd,.10 if pending else .25)
             native_preview.paint_ready()
             if not key:
@@ -20045,6 +20098,8 @@ def _media_player_library(initial_query="",media_kind="audio"):
             picked=selected or ([chosen] if chosen else [])
             if key=="R":
                 _media_refresh_rows(library_rows,catalog_meta=catalog_meta);notice="catalog refreshed";view_key=None;continue
+            if key=="Y" and picked:
+                notice=_media_keep_offline(picked,fd,old);continue
             if key=="E" and picked:
                 result=_media_edit_prompt(picked,fd,old)
                 updates={(row.get('node'),row.get('id')):row for row in result['entries']}
@@ -20072,6 +20127,7 @@ def _media_player_library(initial_query="",media_kind="audio"):
     except KeyboardInterrupt:
         return 0
     finally:
+        availability.close()
         duration_preview.close()
         native_preview.invalidate()
         try: termios.tcsetattr(fd,termios.TCSADRAIN,old)
@@ -20126,6 +20182,11 @@ def _media_on_command(args):
 
 def media(args):
     raw=(args[0].lower() if args else "status")
+    if raw=='offline':
+        if args[1:]==['--queue']:rows=(_media_session() or {}).get('queue') or []
+        else:rows,_=_media_resolve_targets(args[1:])
+        if not rows:print('No matches; use lk media offline QUERY or --queue');return 1
+        print(_media_keep_offline(rows));return 0
     if raw in {"archive","archive-tv"}:return _media_archive_command(args[1:])
     if raw in {"classics","classical"}:
         url="https://allclassical.streamguys1.com/ac128kmp3"
@@ -20787,6 +20848,7 @@ _COMMANDS = [
     ('lk media albums', '[QUERY] [--list|--json]', 'media', 'Browse albums and their ordered tracks'),
     ('lk media artists', '[QUERY] [--list|--json]', 'media', 'Browse artists, albums and tracks'),
     ('lk notifications', '[desktop|sound|voice on|off] [--node NODE]', 'fabric', 'Configure native reminder delivery'),
+    ('lk media offline', 'QUERY | --queue', 'media', 'Keep verified local copies for travel; prompts for destination and confirmation'),
     ('lk media find', '[QUERY]', 'media', 'Search and select logical Fabric media'),
     ('lk media browse', '[QUERY]', 'media', 'Browse the Fabric media catalog'),
     ('lk media play', '<TARGET> [--shuffle] [--exact] [--kind KIND] [--artist ARTIST] [--selection SELECTION] [--limit N]', 'media', 'Create or resume a LOOK queue'),

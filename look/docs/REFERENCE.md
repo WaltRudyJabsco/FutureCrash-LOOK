@@ -255,6 +255,8 @@ lk media artists [QUERY] [--list|--json]
   [media] Browse artists, albums and tracks
 lk notifications [desktop|sound|voice on|off] [--node NODE]
   [fabric] Configure native reminder delivery
+lk media offline QUERY | --queue
+  [media] Keep verified local copies for travel; prompts for destination and confirmation
 lk media find [QUERY]
   [media] Search and select logical Fabric media
 lk media browse [QUERY]
@@ -1036,7 +1038,7 @@ _vision_screen_command: --all, --ask, --display, --displays, --every, --help, --
 action
 channel
 main: --, --all, --events-json, --help, --hidden, --json, --no-hidden, --no-start, --parents, --resident-set, --version
-media: --shuffle
+media: --queue, --shuffle
 ollama_curate: --apply
 path
 query
