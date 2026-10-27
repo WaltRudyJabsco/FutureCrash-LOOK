@@ -71,6 +71,7 @@ MEDIA_LIBRARY_FILE=STATE_DIR/"media_library.json"
 MEDIA_PLAYLIST_DIR=STATE_DIR/"media_playlists"
 MEDIA_QUEUE_FILE=STATE_DIR/"media_queue.m3u8"
 REMOTE_ART_RETRY_SECONDS=20.0
+MEDIA_SOURCE_STARTUP_SECONDS=12.0
 _REMOTE_MEDIA_ART_MISS={}
 _REMOTE_MEDIA_PREVIEW_CACHE={}
 _REMOTE_MEDIA_PREVIEW_LOADING=set()
@@ -16496,10 +16497,15 @@ def _media_mpv_loaded():
     if not _media_mpv_alive():
         return False
     idle=_media_mpv_property("idle-active")
-    return idle is False
+    if idle is not False:return False
+    # mpv leaves idle as soon as it opens a source, before demux/decoder setup.
+    # A dead or stalled URL can stay in that state with no media clock at all.
+    position=_media_mpv_property("time-pos")
+    decoded=_media_mpv_property("audio-params") or _media_mpv_property("video-params")
+    return isinstance(position,(int,float)) and isinstance(decoded,dict) and bool(decoded)
 
 
-def _media_wait_for_mpv_loaded(timeout=3.0):
+def _media_wait_for_mpv_loaded(timeout=MEDIA_SOURCE_STARTUP_SECONDS):
     deadline=time.monotonic()+max(.2,float(timeout))
     while time.monotonic()<deadline:
         if _media_mpv_loaded():
@@ -16508,7 +16514,7 @@ def _media_wait_for_mpv_loaded(timeout=3.0):
     return _media_mpv_loaded()
 
 
-def _media_wait_for_mpv_start(proc, timeout=3.0):
+def _media_wait_for_mpv_start(proc, timeout=MEDIA_SOURCE_STARTUP_SECONDS):
     """Confirm our freshly spawned mpv actually became controllable.
 
     Popen only proves exec was attempted. A real playback receipt requires the
@@ -16565,12 +16571,12 @@ def _media_sync_session(session=None):
                 session["current_index"]=max(0,min(pos,len(session["queue"])-1))
         idle=bool(_media_mpv_property("idle-active"))
         paused=bool(_media_mpv_property("pause"))
-        session["state"]="stopped" if idle else ("paused" if paused else "playing")
+        session["state"]="stopped" if idle else ("loading" if not _media_mpv_loaded() else ("paused" if paused else "playing"))
         session["position"]=_media_mpv_property("time-pos")
         session["duration"]=_media_mpv_property("duration")
         session["volume"]=_media_mpv_property("volume")
         return _media_save_session(session)
-    if session.get("state") in {"playing","paused"}:
+    if session.get("state") in {"playing","paused","loading"}:
         session["state"]="stopped"
         session.pop("pid",None)
         return _media_save_session(session)
@@ -19622,8 +19628,8 @@ def _media_player_render(visualizer=0,visual_elapsed=0):
         artist=str(entry.get("artist") or "").strip()
         title=str(entry.get("title") or _media_entry_label(entry)).strip()
         album=str(entry.get("album") or "").strip()
-        pos=snap["position"] if isinstance(snap["position"],(int,float)) else 0
-        duration=snap["duration"] if isinstance(snap["duration"],(int,float)) else 0
+        pos=snap["position"]
+        duration=snap["duration"]
         time_text=f"{_media_time(pos)} / {_media_time(duration)}"
         bar_width=max(4,inner-len(time_text)-2)
         ratio=max(0.0,min(1.0,(pos/duration) if duration else 0.0))
@@ -19773,7 +19779,7 @@ def _media_mp_transport_lines(snap,width):
     position=max(0,float(snap.get('position') or 0));duration=max(0,float(snap.get('duration') or 0))
     state=str(snap.get('state') or 'stopped').upper()
     title=_media_entry_label(entry) if entry else 'Choose media and press Enter to play'
-    clock=f'{_media_time(position)} / {_media_time(duration)}'
+    clock=f"{_media_time(snap.get('position'))} / {_media_time(snap.get('duration'))}"
     bar_width=max(8,min(48,width-len(clock)-5));filled=int(bar_width*min(1,position/duration)) if duration else 0
     bar='['+'='*filled+'-'*(bar_width-filled)+']'
     queue=session.get('queue') or [];index=int(snap.get('index') or 0)

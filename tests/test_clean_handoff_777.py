@@ -20,7 +20,7 @@ def test_mpv_ipc_liveness_is_not_idle_value_truthiness():
     assert 'result.get("error")=="success"' in block
     assert 'bool(_media_mpv_request' not in block
     loaded=LK.split('def _media_mpv_loaded():',1)[1].split('def _media_wait_for_mpv_loaded',1)[0]
-    assert 'idle is False' in loaded
+    assert 'if idle is not False:return False' in loaded
 
 
 def test_saved_queue_cannot_steal_transport():
@@ -36,7 +36,7 @@ def test_saved_queue_cannot_steal_transport():
 
 def test_loaded_receipt_required_before_claiming_look_owner():
     assert LK.count('if not _media_wait_for_mpv_loaded():') >= 2
-    assert '_media_wait_for_mpv_start(proc, timeout=3.0)' in LK
+    assert '_media_wait_for_mpv_start(proc, timeout=MEDIA_SOURCE_STARTUP_SECONDS)' in LK
     assert '_media_pause_playing_system()' in LK
 
 
