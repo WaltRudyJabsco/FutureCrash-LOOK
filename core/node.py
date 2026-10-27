@@ -28,11 +28,13 @@ import socket
 import subprocess
 import threading
 import time
+import textwrap
 import concurrent.futures
 import tempfile
 import urllib.error
 import urllib.request
 import uuid
+import unicodedata
 from dataclasses import asdict, dataclass, field
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
@@ -5640,14 +5642,83 @@ def _dash_recent_events(events, limit=5):
     return visible[-max(0, int(limit)):]
 
 
+DASH_TICKER_HOLD_SECONDS = 3.0
+DASH_TICKER_CELLS_PER_SECOND = 2.0
+DASH_TICKER_CACHE_LIMIT = 128
+_DASH_TICKER_STARTS = {}
+_DASH_TICKER_PAUSED_AT = None
+
+
+def _dash_text_clusters(text):
+    # Remote names/details are plain text, never terminal instructions.
+    text=re.sub(r"\x1b\[[0-9;]*m", "", str(text))
+    clusters=[]
+    for char in text:
+        if ord(char)<32 or 127<=ord(char)<160:char=' '
+        if unicodedata.combining(char) and clusters:
+            clusters[-1]=(clusters[-1][0]+char,clusters[-1][1])
+        else:clusters.append((char,2 if unicodedata.east_asian_width(char) in {'W','F'} else 1))
+    return clusters
+
+
+def _dash_ticker(text,width,ansi=False,*,elapsed=None,identity=None):
+    """Fixed-cell viewport: dwell at both ends, then return to the beginning.
+
+    Noninteractive snapshots remain static. A changed value/width starts at its
+    beginning, so a new event never inherits the previous event's scroll offset.
+    """
+    width=max(0,int(width));clusters=_dash_text_clusters(text)
+    cells=sum(size for _,size in clusters);overflow=max(0,cells-width)
+    offset=0
+    if ansi and overflow:
+        if elapsed is None:
+            stamp=_DASH_TICKER_PAUSED_AT if _DASH_TICKER_PAUSED_AT is not None else time.monotonic()
+            key=(str(text) if identity is None else identity,width)
+            elapsed=stamp-_DASH_TICKER_STARTS.setdefault(key,stamp)
+            while len(_DASH_TICKER_STARTS)>DASH_TICKER_CACHE_LIMIT:_DASH_TICKER_STARTS.pop(next(iter(_DASH_TICKER_STARTS)))
+        travel=overflow/DASH_TICKER_CELLS_PER_SECOND
+        phase=max(0,float(elapsed))%(2*DASH_TICKER_HOLD_SECONDS+travel)
+        offset=min(overflow,max(0,int((phase-DASH_TICKER_HOLD_SECONDS)*DASH_TICKER_CELLS_PER_SECOND)))
+    result=[];position=0;used=0
+    for cluster,size in clusters:
+        end=position+size
+        if end>offset and position<offset+width:
+            if position>=offset and end<=offset+width:result.append(cluster);used+=size
+            else:
+                visible=min(end,offset+width)-max(position,offset)
+                result.append(' '*visible);used+=visible
+        position=end
+        if position>=offset+width:break
+    return ''.join(result)+' '*max(0,width-used)
+
+
+
+def _dash_model_ticker(name,node,width,ansi=False):
+    text=_dash_model(node)
+    inf=node.get('inference') or {}
+    # Qualification age changes every minute; it must not restart a long name.
+    identity=('model',str(name),text.split(' · ',1)[0],tuple(inf.get('resident') or []))
+    return _dash_ticker(text,width,ansi,identity=identity)
+
+def _dash_toggle_tickers():
+    global _DASH_TICKER_PAUSED_AT
+    stamp=time.monotonic()
+    if _DASH_TICKER_PAUSED_AT is None:_DASH_TICKER_PAUSED_AT=stamp
+    else:
+        delay=stamp-_DASH_TICKER_PAUSED_AT
+        for key in _DASH_TICKER_STARTS:_DASH_TICKER_STARTS[key]+=delay
+        _DASH_TICKER_PAUSED_AT=None
+
+
 def _dash_recent_line(event, local_name, width, ansi=False):
     stamp = _dash_event_stamp(event.get("ts"))
     scope = _dash_event_scope(event, local_name)
-    phase = str(event.get("phase") or event.get("type") or "event")[:12]
-    detail = str(event.get("detail") or "")[: max(12, width - 38)]
+    phase = _dash_ticker(event.get("phase") or event.get("type") or "event",12)
+    detail = str(event.get("detail") or "")
     _, fg = _dash_event_color(event)
     dot = "●" if fg else "·"
-    row = f"{dot} {stamp:<9} {scope:<6} {phase:<12} {detail}"
+    prefix=f"{dot} {stamp:<9} {scope:<6} {phase:<12} "
+    row=prefix+_dash_ticker(detail,max(0,width-1-_dash_visible_len(prefix)),ansi)
     return f"\033[{fg}m{row}\033[0m" if ansi and fg else row
 
 
@@ -5659,8 +5730,10 @@ def _dash_controls(width, mini=False):
     """
     width=max(20,int(width or 80))
     items=[a for a in ui_actions(mini=mini) if not a.get("hidden")]
+    for item in items:
+        if item["id"]=="ticker":item["label"]="resume tickers" if _DASH_TICKER_PAUSED_AT is not None else "pause tickers"
     # Least important actions disappear first; their hotkeys continue to work.
-    drop_order=("restart","doctor","watch","settings","lights","beacon")
+    drop_order=("restart","doctor","watch","settings","lights","beacon","ticker")
     def render(rows):
         return "   ".join(f"[{a['key']}] {a['label']}" for a in rows)
     text=render(items)
@@ -5673,7 +5746,7 @@ def _dash_controls(width, mini=False):
 
 
 def _dash_visible_len(text):
-    return len(re.sub(r"\x1b\[[0-9;]*m", "", str(text)))
+    return sum(size for _,size in _dash_text_clusters(text))
 
 
 def _dash_visual_rows(text, width):
@@ -5690,7 +5763,7 @@ def _dash_render_mini(data, width=44, ansi=False):
     rows=_dash_summary_rows(data); health=data.get("health") or {}
     lines=[f"FUTURE CRASH · {time.strftime('%I:%M %p')}", time.strftime("%a %b %d").upper(), rule,
            f"{name[:18]} ● · {len(rows)} NODE{'S' if len(rows)!=1 else ''} · {'OK' if health.get('ok') else 'DEGRADED'}",
-           _dash_media_line()[:width], _dash_signal(data,min(width,36)), "", "RECENT"]
+           _dash_ticker(_dash_media_line(),width,ansi), _dash_signal(data,min(width,36)), "", "RECENT"]
     if events:
         for e in _dash_recent_events(events,2): lines.append(_dash_recent_line(e,name,width,ansi=ansi))
     else: lines.append("· no recent Fabric events")
@@ -5839,7 +5912,7 @@ def _dash_render_full(data, width=92, ansi=False):
         if peer and peer.get("node_seen_at"):
             age = _dash_age(now() - float(peer.get("node_seen_at") or now()))
             state = f"{state} · seen {age}"
-        lines.append(f"{str(name):<{node_w}.{node_w}} {state:<{state_w}.{state_w}} {_dash_model(node):<{model_w}.{model_w}} {pulse:>8.8}")
+        lines.append(f"{_dash_ticker(name,node_w)} {_dash_ticker(state,state_w)} {_dash_model_ticker(name,node,model_w,ansi)} {pulse:>8.8}")
 
     lines += ["", "CAPABILITIES", rule, _dash_capability_summary(data, width)]
     ds=_dash_decision_summary(data)
@@ -5859,7 +5932,7 @@ def _dash_render_full(data, width=92, ansi=False):
                   f"filesystem {'● local' if caps.get('filesystem') else '○ unavailable'}",
                   f"fabric ● {live}/{live} advertising",
                   "provenance ● host-rendered receipts"]
-    lines.append("   ".join(trust_bits))
+    lines.extend(textwrap.wrap("   ".join(trust_bits),width=width))
 
     active_jobs = [j for j in jobs if str(j.get("status") or "") not in {"ok", "done", "failed", "cancelled", "canceled"}]
     lines += ["", "JOBS", rule]
@@ -5867,7 +5940,7 @@ def _dash_render_full(data, width=92, ansi=False):
         for j in active_jobs[:5]:
             packet = j.get("packet") or {}
             op = packet.get("operation") or ((packet.get("work") or {}).get("operation")) or "?"
-            lines.append(f"{str(j.get('id') or '?')[:12]:<12} {str(j.get('status') or '?'):<10.10} {str(op):<24.24} {str(j.get('worker') or '—'):<20.20}")
+            lines.append(f"{str(j.get('id') or '?')[:12]:<12} {str(j.get('status') or '?'):<10.10} {_dash_ticker(op,24,ansi)} {str(j.get('worker') or '—'):<20.20}")
     else:
         lines.append("none active")
 
@@ -5907,7 +5980,7 @@ def _dash_render_full(data, width=92, ansi=False):
     else:
         lines.append("service status pending…")
 
-    lines += ["", "MEDIA / SIGNAL", rule, _dash_media_line(), _dash_signal(data,min(32,width-10))]
+    lines += ["", "MEDIA / SIGNAL", rule, _dash_ticker(_dash_media_line(),width,ansi), _dash_signal(data,min(32,width-10))]
 
     lines += ["", "RECENT · OBSERVED BY THIS NODE", rule]
     if events:
@@ -5935,14 +6008,18 @@ def _dash_render_compact(data, width=92, height=20, ansi=False):
     pending_decisions=_dash_pending_decisions(data)
     lines=[f"FABRIC · {local.get('name','local')} · {len(rows)} node{'s' if len(rows)!=1 else ''} · {time.strftime('%H:%M:%S')}",rule]
     max_nodes=2 if height<18 else 3
+    node_w,state_w=(12,8) if width<50 else (20,13)
     for name,node in rows[:max_nodes]:
-        lines.append(f"{str(name):<20.20} {_dash_state(node):<13.13} {_dash_model(node)[:max(12,width-36)]}")
+        model_w=max(0,width-node_w-state_w-3)
+        lines.append(f"{_dash_ticker(name,node_w)} {_dash_ticker(_dash_state(node),state_w)} {_dash_model_ticker(name,node,model_w,ansi)}")
     if len(rows)>max_nodes:
         lines.append(f"+ {len(rows)-max_nodes} more node{'s' if len(rows)-max_nodes!=1 else ''}")
     http=data.get("http") or {}; hm=((http.get("listeners") or {}).get("local") or {})
     services=(data.get("services") or {}).get("services") or {}
     svc_ok=sum(1 for st in services.values() if str(st.get("state") or "") in {"active","running","unmanaged"})
-    lines += [f"jobs {len(active)} · input {len(pending_decisions)} · ctl active {int(hm.get('active') or 0)} err {int(hm.get('errors') or 0)} · services {svc_ok}/{len(services) if services else 0}","RECENT",rule]
+    telemetry=(f"jobs {len(active)} · input {len(pending_decisions)} · svc {svc_ok}/{len(services) if services else 0}" if width<60 else
+               f"jobs {len(active)} · input {len(pending_decisions)} · ctl active {int(hm.get('active') or 0)} err {int(hm.get('errors') or 0)} · services {svc_ok}/{len(services) if services else 0}")
+    lines += [telemetry,"RECENT",rule]
     # Reserve the footer and show as much recent activity as the rectangle allows.
     recent_slots=max(1,min(5,int(height)-len(lines)-2))
     if events:
@@ -5998,7 +6075,7 @@ def _dash_render_wide(data, width=120, height=28, ansi=False):
     state_w=15 if width>=124 else 12
     for name,node in rows:
         model_width=max(24,width-node_w-state_w-3)
-        lines.append(f"{str(name):<{node_w}.{node_w}} {_dash_state(node):<{state_w}.{state_w}} {_dash_model(node)[:model_width]}")
+        lines.append(f"{_dash_ticker(name,node_w)} {_dash_ticker(_dash_state(node),state_w)} {_dash_model_ticker(name,node,model_width,ansi)}")
 
     # Landscape terminals often have plenty of columns and very few rows.  Fold
     # secondary telemetry into two compact columns rather than throwing it away.
@@ -6014,7 +6091,8 @@ def _dash_render_wide(data, width=120, height=28, ansi=False):
     for left,right in ops:
         lines.append(f"{left[:left_w]:<{left_w}}{gap}{right[:right_w]}")
 
-    lines += ["", (_dash_media_line()+"   "+_dash_signal(data,min(28,width//3)))[:width]]
+    signal_line=_dash_signal(data,min(28,width//3))
+    lines += ["", _dash_ticker(_dash_media_line(),max(1,width-1-len(signal_line)-3),ansi)+"   "+signal_line]
     lines += ["", "RECENT · OBSERVED BY THIS NODE", rule]
     # Fill the rectangle instead of using a fixed six-row ceiling.  RECENT is the
     # most useful spare-space consumer because every extra row carries real state.
@@ -6041,7 +6119,7 @@ def _dash_render_condensed(data, width=92, height=30, ansi=False):
            f"FABRIC  {local.get('name','local')} · node {local.get('version','?')} · {local.get('release_name','')} · {len(rows)} node{'s' if len(rows)!=1 else ''} · health {'ok' if health.get('ok') else 'degraded'}","",
            "NODES / MODELS",rule]
     for name,node in rows:
-        lines.append(f"{str(name):<22.22} {_dash_state(node):<14.14} {_dash_model(node)[:max(16,width-39)]}")
+        lines.append(f"{_dash_ticker(name,22)} {_dash_ticker(_dash_state(node),14)} {_dash_model_ticker(name,node,max(0,width-39),ansi)}")
     curation=data.get("curation") or {}; cstate=curation.get("state") or {}; cplan=curation.get("plan") or {}
     target=", ".join(cplan.get("target") or []) or "none"
     lines.append(f"CURATOR · {str(cstate.get('mode') or 'observe').upper()} · {str(cstate.get('profile') or 'balanced').upper()} · target {target}")
@@ -6069,7 +6147,8 @@ def _dash_render_condensed(data, width=92, height=30, ansi=False):
         spare-=1
 
     if spare>0:
-        lines.append((_dash_media_line()+"   "+_dash_signal(data,min(24,width//3)))[:width])
+        signal_line=_dash_signal(data,min(24,width//3))
+        lines.append(_dash_ticker(_dash_media_line(),max(1,width-1-len(signal_line)-3),ansi)+"   "+signal_line)
         spare-=1
 
     lines += ["","RECENT · OBSERVED BY THIS NODE",rule]
@@ -6189,6 +6268,9 @@ def _dash_read_key(fd):
 
 
 def _dashboard(host, port, interval=0.25):
+    global _DASH_TICKER_PAUSED_AT
+    _DASH_TICKER_STARTS.clear()
+    _DASH_TICKER_PAUSED_AT=None
     cache = {"_next": {}, "_errors": {}}
     if not (sys.stdin.isatty() and sys.stdout.isatty()):
         _dash_fetch(host, port, cache, force=True)
@@ -6246,14 +6328,14 @@ def _dashboard(host, port, interval=0.25):
             if activity_flash and t >= activity_flash_until:
                 activity_flash = None
                 dirty = True
-            if dirty or t - last_draw >= 1.0:
+            if dirty or t - last_draw >= .5:
                 size = shutil.get_terminal_size((92, 30))
                 body = _dash_render(cache, size.columns, height=size.lines, ansi=True, mini=mini)
                 beacon = _active_beacon(((cache.get("events") or {}).get("events") or []))
                 beacon_bg = {"red":"41;97", "green":"42;30", "blue":"44;97", "white":"47;30"}.get((beacon or {}).get("color"))
                 bg = beacon_bg or activity_flash
-                prefix = (f"\033[{bg}m" if bg else "\033[0m") + "\033[2J\033[H"
-                sys.stdout.write(prefix + body)
+                prefix = (f"\033[{bg}m" if bg else "\033[0m") + "\033[H"
+                sys.stdout.write(prefix + "\033[K\n".join(body.split("\n")) + "\033[K\033[J")
                 errors = cache.get("_errors") or {}
                 if errors:
                     sys.stdout.write("\n" + " · ".join(f"{k}: {v}" for k, v in list(errors.items())[:2]))
@@ -6270,6 +6352,9 @@ def _dashboard(host, port, interval=0.25):
                 return 0
             if ch == " ":
                 dirty = True
+            elif ch in {"t", "T"}:
+                _dash_toggle_tickers()
+                dirty=True
             elif ch in {"m", "M"}:
                 mini = not mini
                 dirty = True

@@ -20,7 +20,7 @@ MAX_METADATA_BYTES=512*1024
 MISS_SECONDS=6*60*60
 ERROR_SECONDS=5*60
 RATE_SECONDS=1.1
-MATCHER_VERSION=2
+MATCHER_VERSION=3
 # Exact title and credited artist are still required; collaborations score lower.
 MIN_MATCH_SCORE=80
 USER_AGENT='FutureCrash-LOOK/8.16.1 (https://github.com/WaltRudyJabsco/FutureCrash-LOOK)'
@@ -59,6 +59,24 @@ def lookup_album(value):
     # Disc numbering identifies a copy within an album, not a different cover.
     return re.sub(r'(?:\s*[-–:]\s*|\s*\()(?:disc|cd)\s*\d+\)?\s*$', '', album, flags=re.I).strip() or album
 
+
+
+def album_search_titles(value):
+    """Try the original title first, then a conservative trailing qualifier fallback.
+
+    Live/remix/part labels identify different recordings. They must never collapse
+    to a studio album just because the artist and a shorter title happen to match.
+    """
+    original=lookup_album(value)
+    titles=[original]
+    match=re.fullmatch(r'(.+?)\s+(?:\(([^()]*)\)|\[([^\[\]]*)\])',original)
+    if match:
+        qualifier=normalized(match[2] or match[3])
+        distinct=r'\b(live|remix(?:es|ed)?|acoustic|instrumental|demo(?:s)?|karaoke|tribute|rerecorded|re recorded|part|volume|vol)\b'
+        if not re.search(distinct,qualifier):
+            base=match[1].strip()
+            if normalized(base) and normalized(base)!=normalized(original):titles.append(base)
+    return titles
 
 def album_key(row):
     artist=str(row.get('album_artist') or row.get('artist') or '').strip()
@@ -144,7 +162,7 @@ def rate_limit():
         lock.seek(0);lock.truncate();lock.write(str(time.time()));lock.flush()
 
 
-def choose_group(data,artist,album):
+def choose_group(data,artist,album,*,min_score=MIN_MATCH_SCORE):
     matches={}
     for item in data.get('release-groups',[]):
         credit=''.join(str(c.get('name') or (c.get('artist') or {}).get('name') or '')+str(c.get('joinphrase') or '') for c in item.get('artist-credit',[]) if isinstance(c,dict))
@@ -152,7 +170,7 @@ def choose_group(data,artist,album):
         credited.update(normalized((c.get('artist') or {}).get('name') or '') for c in item.get('artist-credit',[]) if isinstance(c,dict))
         if normalized(item.get('title'))!=normalized(album):continue
         if normalized(credit)!=normalized(artist) and normalized(artist) not in credited:continue
-        if int(item.get('score') or 0)<MIN_MATCH_SCORE:continue
+        if int(item.get('score') or 0)<min_score:continue
         try:group=str(uuid.UUID(str(item.get('id'))))
         except ValueError:continue
         matches[group]=item
@@ -161,7 +179,7 @@ def choose_group(data,artist,album):
 
 
 def lookup(token,artist,album):
-    """One exact artist/album match; provider ambiguity never chooses a random cover."""
+    """Match the original title first; fallback still requires a unique exact title/artist."""
     root().mkdir(parents=True,exist_ok=True)
     # LOOK and the node may request the same album in different processes.
     with (root()/(token+'.lock')).open('a') as lock:
@@ -170,11 +188,19 @@ def lookup(token,artist,album):
         if retry_after(token)>time.time():return record(token)
         result={'artist':artist,'album':album,'checked_at':time.time(),'matcher_version':MATCHER_VERSION}
         try:
-            rate_limit()
+            group=None;state='missing'
             quoted=lambda text:'"'+str(text).replace('\\','\\\\').replace('"','\\"')+'"'
-            query='releasegroup:'+quoted(album)+' AND artist:'+quoted(artist)
-            url='https://musicbrainz.org/ws/2/release-group/?'+urllib.parse.urlencode({'query':query,'fmt':'json','limit':10})
-            group,state=choose_group(json.loads(read_url(url,MAX_METADATA_BYTES)),artist,album)
+            for index,title in enumerate(album_search_titles(album)):
+                rate_limit()
+                query='releasegroup:'+quoted(title)+' AND artist:'+quoted(artist)
+                url='https://musicbrainz.org/ws/2/release-group/?'+urllib.parse.urlencode({'query':query,'fmt':'json','limit':10})
+                group,state=choose_group(json.loads(read_url(url,MAX_METADATA_BYTES)),artist,title,
+                                         min_score=100 if index else MIN_MATCH_SCORE)
+                if group:
+                    result['matched_album']=title
+                    result['match_method']='exact' if not index else 'trailing-qualifier'
+                    break
+                if state=='ambiguous':break
             result.update(state=state,retry_at=time.time()+MISS_SECONDS)
             if group:
                 source='https://coverartarchive.org/release-group/'+group+'/front-500'

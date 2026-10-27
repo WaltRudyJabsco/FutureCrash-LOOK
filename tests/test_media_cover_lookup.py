@@ -107,3 +107,50 @@ def test_old_negative_match_is_retried_after_matcher_fix(tmp_path,monkeypatch):
     assert covers.retry_after(token)==0
     covers.atomic(tmp_path/(token+'.json'),json.dumps({'state':'missing','matcher_version':covers.MATCHER_VERSION,'retry_at':9999999999}).encode())
     assert covers.retry_after(token)==9999999999
+
+
+def test_qualified_title_falls_back_only_after_original_fails(tmp_path,monkeypatch):
+    monkeypatch.setattr(covers,'root',lambda:tmp_path)
+    monkeypatch.setattr(covers,'rate_limit',lambda:None)
+    original='The Cactus Album (The Cactus Cee_D)'
+    calls=[]
+    def read(url,limit):
+        from urllib.parse import parse_qs,urlparse
+        calls.append(url)
+        if 'musicbrainz.org' not in url:return b'\xff\xd8\xffcover'
+        query=parse_qs(urlparse(url).query)['query'][0]
+        matches=[] if original in query else [match(artist='3rd Bass',album='The Cactus Album')]
+        return json.dumps({'release-groups':matches}).encode()
+    monkeypatch.setattr(covers,'read_url',read)
+    token,artist,album=covers.album_key({'artist':'3rd Bass','album':original})
+    result=covers.lookup(token,artist,album)
+    assert result['state']=='ready' and result['album']==original
+    assert result['matched_album']=='The Cactus Album' and result['match_method']=='trailing-qualifier'
+    assert covers.cached(token).read_bytes()==b'\xff\xd8\xffcover' and len(calls)==3
+
+
+def test_parenthetical_live_remix_and_part_titles_are_distinct():
+    for title in ('Album (Live at Home)','Album [Remixes]','Album (Part Two)','Album (Acoustic)',
+                  'Album (Re-recorded)','Album (Volume 2)'):
+        assert covers.album_search_titles(title)==[title]
+    assert covers.album_search_titles('(What’s the Story) Morning Glory?')==['(What’s the Story) Morning Glory?']
+    assert covers.album_search_titles('Album (Deluxe Edition)')==['Album (Deluxe Edition)','Album']
+    assert covers.album_search_titles('Album [Expanded]')==['Album [Expanded]','Album']
+    assert covers.album_search_titles('Album (Malformed]')==['Album (Malformed]']
+
+
+def test_fallback_requires_perfect_provider_score_and_same_artist():
+    data={'release-groups':[match(score=99)]}
+    assert covers.choose_group(data,'Talking Heads','Remain in Light',min_score=100)==(None,'missing')
+    assert covers.choose_group({'release-groups':[match(artist='Tribute Band')]},'Talking Heads','Remain in Light',min_score=100)==(None,'missing')
+
+
+def test_ambiguous_original_never_tries_shorter_title(tmp_path,monkeypatch):
+    monkeypatch.setattr(covers,'root',lambda:tmp_path);monkeypatch.setattr(covers,'rate_limit',lambda:None)
+    album='Album (Deluxe)';calls=[]
+    def read(url,limit):
+        calls.append(url)
+        return json.dumps({'release-groups':[match(album=album),match(group='11111111-1111-1111-1111-111111111111',album=album)]}).encode()
+    monkeypatch.setattr(covers,'read_url',read)
+    result=covers.lookup('test','Talking Heads',album)
+    assert result['state']=='ambiguous' and len(calls)==1

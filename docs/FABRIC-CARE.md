@@ -98,3 +98,18 @@ Per-node `GET /v1/recovery/status` reports redacted status and receipts;
 `POST /v1/recovery/run` starts an existing backup plan asynchronously. Jobs survive
 service restart in the account's recovery state directory. These APIs never accept
 arbitrary commands, destination paths, firmware operations or account credentials.
+
+
+## Terminal dashboard tickers
+
+`lk dash` keeps its responsive full, wide, compact and mini layouts. Overflowing
+model summaries, job operations, recent-event details and media summaries scroll
+inside fixed-width fields. Labels, node states, timestamps, pulse counts and
+controls stay in place. Text pauses for three seconds at each end and moves at
+two terminal cells per second. New content or a resized field starts at the
+beginning; changing qualification age does not restart a long model summary.
+
+Press **t** to pause/resume the tickers. Short values stay still. Noninteractive
+snapshots stay static. Tickers use the existing data and polling schedules;
+redrawing them does not make extra Fabric requests. The frame repaints without
+clearing to a blank screen between steps.
