@@ -6,7 +6,10 @@ visible rows in the background: **local** means an existing local file,
 **remote** means a source answered a recent check, **checking** means unverified,
 and **offline** means no copy answered. Offline rows are muted but remain
 selectable for management. Checks expire after ten seconds; playback verifies
-its chosen physical copy again. Streams keep their own streaming behavior.
+its chosen physical copy again. Streams keep their own streaming behavior. A player opening a source reports
+**loading**, with unknown times shown as `--:--`, until its decoder and media clock
+are ready. Source startup has a twelve-second budget; a stalled source does not
+receive a successful playing receipt.
 
 Before leaving, mark items in **lk mp**, **lk tv** or **lk media find**, then press
 **Shift-Y — keep offline**. Choose this computer's library or a mounted travel
