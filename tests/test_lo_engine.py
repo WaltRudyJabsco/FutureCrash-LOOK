@@ -102,3 +102,28 @@ def test_conservative_profile_cannot_take_download_shortcut(monkeypatch):
     monkeypatch.setattr(lo_engine,'_load_web_key',lambda:None)
     lo_engine.chat_once('download https://youtu.be/abc',profile='conservative')
     assert fake.kwargs['access_profile']=='conservative'
+
+
+def test_browser_cold_start_imports_tools_without_pythonpath(tmp_path):
+    import subprocess
+    import sys
+    engine=Path(__file__).resolve().parents[1]/'look/lo_engine.py'
+    script=r'''
+import importlib.util,sys,json
+assert importlib.util.find_spec('ytd') is None
+spec=importlib.util.spec_from_file_location('fresh_browser_engine',sys.argv[1])
+engine=importlib.util.module_from_spec(spec);spec.loader.exec_module(engine)
+import ytd
+calls=[]
+def request(action,**args):
+    calls.append((action,args))
+    return {'ok':True,'node':args['node'],'job':{'id':'cold-start-job','stage':'queued'}}
+ytd.request=request
+engine._load_core=lambda: (_ for _ in ()).throw(AssertionError('must not call inference'))
+result=engine.chat_once("Let's download this one to the 3090 as well. https://youtu.be/example?si=share")
+assert calls==[('download',{'node':'3090','url':'https://youtu.be/example?si=share'})]
+assert 'cold-start-job' in result['text']
+print('cold browser download verified')
+'''
+    result=subprocess.run([sys.executable,'-I','-c',script,str(engine)],cwd=tmp_path,capture_output=True,text=True,check=True)
+    assert 'cold browser download verified' in result.stdout

@@ -14,9 +14,10 @@ def explicit_download(prompt):
     from urllib.parse import urlparse
     if urlparse(url).hostname not in {'youtube.com','www.youtube.com','m.youtube.com','music.youtube.com','youtu.be'}:return None
     words=text.replace(urls[0],' ').strip(' \n\t:.,!')
-    words=re.sub(r'^(?:please\s+|can you\s+|could you\s+|would you\s+)', '', words, flags=re.I)
+    words=re.sub(r"^(?:please\s+|can you\s+|could you\s+|would you\s+|let['’]?s\s+)", '', words, flags=re.I)
+    words=re.sub(r'\s+as well$', '', words, flags=re.I)
     match=re.fullmatch(
-        r'(?:download|save)\s*(?:(?:this|the|a|youtube|video|link)\s*)*'
+        r'(?:download|save)\s*(?:(?:this|the|a|one|youtube|video|link)\s*)*'
         r'(?:(?:to|on)\s+(?:the\s+)?(?:node\s+)?(?P<node>[\w.-]+))?'
         r'(?:\s+and add it to (?:my |the )?(?:fabric |media )?library)?',words,re.I)
     if not match:return None
