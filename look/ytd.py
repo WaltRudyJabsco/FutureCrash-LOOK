@@ -1,8 +1,43 @@
 """LOOK download client. Media bytes remain on the selected Fabric node."""
 from __future__ import annotations
-import argparse, json, sys, time
+import argparse, json, re, sys, time
 import urllib.parse, urllib.request, urllib.error
 import fabric_files
+
+
+def explicit_download(prompt):
+    """Recognize one direct share-link request, leaving richer requests to LO."""
+    text=str(prompt).strip()
+    urls=re.findall(r'https?://[^\s<>]+',text)
+    if len(urls)!=1:return None
+    url=urls[0].rstrip('.,;!')
+    from urllib.parse import urlparse
+    if urlparse(url).hostname not in {'youtube.com','www.youtube.com','m.youtube.com','music.youtube.com','youtu.be'}:return None
+    words=text.replace(urls[0],' ').strip(' \n\t:.,!')
+    words=re.sub(r'^(?:please\s+|can you\s+|could you\s+|would you\s+)', '', words, flags=re.I)
+    match=re.fullmatch(
+        r'(?:download|save)\s*(?:(?:this|the|a|youtube|video|link)\s*)*'
+        r'(?:(?:to|on)\s+(?:the\s+)?(?:node\s+)?(?P<node>[\w.-]+))?'
+        r'(?:\s+and add it to (?:my |the )?(?:fabric |media )?library)?',words,re.I)
+    if not match:return None
+    return {'url':url,'node':match.group('node') or 'local'}
+
+
+def download_summary(result):
+    """A queued receipt proves acceptance, never completed media publication."""
+    job=result.get('job') or {}
+    owner=str(result.get('node') or 'local')
+    job_id=str(job.get('id') or '')
+    if not result.get('ok') or not job_id:
+        return 'Download was not accepted: '+str(result.get('error') or 'no job receipt returned')
+    stage=job.get('stage') or 'queued'
+    if stage=='complete':
+        text=f'Download complete on {owner} · job {job_id}.'
+        text+=' Added to the media catalog.' if job.get('indexed') else ' Catalog registration is not confirmed.'
+    elif stage in {'failed','cancelled','expired'}:
+        text=f'Download {stage} on {owner} · job {job_id}: '+str(job.get('error') or stage)
+    else:text=f'Download {stage} on {owner} · job {job_id}. It continues after you close this page; it is not ready to play yet.'
+    return text+f'\nCheck progress: lk ytd status {job_id} --node {owner}'
 
 
 def request(action=None,node='local',job=None,**payload):

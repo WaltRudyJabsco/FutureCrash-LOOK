@@ -214,3 +214,22 @@ def test_cancel_during_progress_does_not_revive_job(tmp_path,monkeypatch):
     manager.cancel(job); resume.set(); thread.join(3)
     assert not thread.is_alive() and manager.get(job)['stage']=='cancelled'
     assert not list(root.iterdir())
+
+
+def test_explicit_share_link_requests_are_narrow():
+    assert ytd.explicit_download('please download https://youtu.be/abc on node tower')['node']=='tower'
+    assert ytd.explicit_download('save https://www.youtube.com/watch?v=abc')['node']=='local'
+    for prompt in ('Do not download https://youtu.be/abc',
+                   'Can you explain how to download https://youtu.be/abc?',
+                   'download https://youtu.be/abc and https://youtu.be/def',
+                   'download https://example.com/video',
+                   'download https://youtu.be/abc to /custom/folder',
+                   'download https://youtu.be/abc temporarily'):
+        assert ytd.explicit_download(prompt) is None
+
+
+def test_complete_download_receipt_separates_indexing():
+    result={'ok':True,'node':'tower','job':{'id':'job','stage':'complete','indexed':False}}
+    assert 'not confirmed' in ytd.download_summary(result)
+    result['job']['indexed']=True
+    assert 'Added to the media catalog' in ytd.download_summary(result)
