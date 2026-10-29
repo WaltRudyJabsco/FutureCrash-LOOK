@@ -464,7 +464,7 @@ def test_media_find_orders_and_types_use_metadata_not_filesystem(lk):
     (['F','G','\r'],['old']),
     (['f','\r'],['old']),
     (['F','\t','G','\r'],['new']),
-    (['/','F','F','\r'],['new']),
+    (['/','enter','F','F','\r'],['new']),
 ])
 def test_media_find_sort_filter_keys_and_selection(lk,monkeypatch,keys,expected):
     import io
@@ -588,7 +588,7 @@ def test_mp_sort_actions_preserve_queue_order(lk,monkeypatch):
     monkeypatch.setattr(lk,'_media_session',lambda:{'queue':rows})
     plan=lk._MediaQueryPlan([])
     assert [r['id'] for r in plan.player('queue','','audio',1,True)]==['second','first']
-    assert 'key not in "ABCDLQJKERMFG"' in source
+    assert 'key not in "ABCDLQJKERMFG"' not in source
     assert 'Queue order follows playback' in source
 
 

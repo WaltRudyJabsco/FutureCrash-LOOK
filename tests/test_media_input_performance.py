@@ -75,7 +75,13 @@ def test_background_transport_snapshot_does_not_rewrite_queue(lk,monkeypatch):
 
 
 @pytest.mark.parametrize('surface',['audio','video','find'])
-def test_real_terminal_keeps_typing_while_art_and_ipc_are_slow(surface,tmp_path):
+@pytest.mark.parametrize('typed,expected',[
+    (b'/beastix\x7fe bj\xc3\xb6rk','beastie björk'),
+    (b'/Cairo','Cairo'),
+    (b'/\x1b[99;2u\x1b[99;2:3u\x1b[97u\x1b[105u\x1b[114u\x1b[111u','Cairo'),
+    (b'/\x1b[200~Cairo\nBj\xc3\xb6rk QWERTY\x1b[201~','Cairo Björk QWERTY'),
+])
+def test_real_terminal_keeps_typing_while_art_and_ipc_are_slow(surface,typed,expected,tmp_path):
     root=Path(__file__).resolve().parents[1]
     script=r'''
 import importlib.machinery,importlib.util,os,sys,time
@@ -86,6 +92,10 @@ rows=[{'node':'local','id':str(i),'path':'/missing/'+str(i)+('.mkv' if kind=='vi
 m._media_catalog_entries=lambda:(rows,{'nodes':[{'node':'local'}]})
 m._media_visibility=lambda:{'hidden_paths':[]}
 m._media_session=lambda:None
+def unexpected(*a,**kw):raise AssertionError('search text invoked a command')
+for name in ('_media_queue_append','_media_launch_from_library','_media_choose_hide_directory','_media_reset_audio','_media_open_with','media_player','_media_control_session','_media_shuffle_command','_media_repeat_command','_media_keep_offline','_media_edit_prompt','_media_refresh_rows'):
+ setattr(m,name,unexpected)
+m.terminal_style.open_pane=unexpected
 m._media_status_snapshot=lambda **kw:time.sleep(2)
 m._media_cover_lines=lambda *a,**kw:time.sleep(2) or []
 m._media_native_art=lambda *a:None
@@ -126,8 +136,8 @@ else:m._media_player_library(media_kind=kind)
         if surface=='find':
             os.write(master,b'I');assert until(b'MEDIA INFO',1)
         captured=b''
-        os.write(master,b'/beastix\x7fe bj\xc3\xb6rk')
-        needle=('FILTER ' if surface=='find' else 'SEARCH /').encode()+ 'beastie björk'.encode()
+        os.write(master,b'\x1b[?1;2c\x1b_Gi=42;OK\x1b\\'+typed)
+        needle=('FILTER ' if surface=='find' else 'SEARCH /').encode()+expected.encode()
         assert until(needle,1.2),captured[-1000:]
         attrs=termios.tcgetattr(master);attrs[3]&=~termios.ISIG
         termios.tcsetattr(master,termios.TCSANOW,attrs)

@@ -109,7 +109,7 @@ def test_empty_fresh_catalog_is_useful_and_does_not_launch(lk,monkeypatch,capsys
     assert kind+' library' in capsys.readouterr().out
 
 
-def test_tv_search_reserves_apple_handoff_key(lk,rows,monkeypatch):
+def test_tv_handoff_keys_work_after_leaving_search(lk,rows,monkeypatch):
     out=Terminal();monkeypatch.setattr(sys,'stdout',out);monkeypatch.setattr(sys,'stdin',Terminal())
     monkeypatch.setattr(lk.termios,'tcgetattr',lambda fd:[])
     monkeypatch.setattr(lk.termios,'tcsetattr',lambda *a:None)
@@ -119,7 +119,7 @@ def test_tv_search_reserves_apple_handoff_key(lk,rows,monkeypatch):
     monkeypatch.setattr(lk,'_media_catalog_entries',lambda:(rows,{}))
     monkeypatch.setattr(lk,'_media_collapse',lambda rows,**kw:list(rows))
     monkeypatch.setattr(lk,'_media_status_snapshot',lambda:None)
-    keys=iter(['/','T','O','esc'])
+    keys=iter(['/','enter','T','O','esc'])
     monkeypatch.setattr(lk,'_read_tty_key',lambda *a:next(keys))
     opened=[]
     monkeypatch.setattr(lk,'_media_open_with',lambda row,app:opened.append((row['id'],app)) or (True,'Opened'))
@@ -159,11 +159,11 @@ def test_queue_returns_to_library_filter_and_marks(lk,desk,monkeypatch,back):
 
 
 @pytest.mark.parametrize('kind',['audio','video'])
-def test_media_desks_open_pane_from_search_without_losing_view(lk,desk,monkeypatch,kind):
+def test_media_desks_open_pane_after_search_without_losing_view(lk,desk,monkeypatch,kind):
     monkeypatch.setattr(sys,'stdout',Terminal());monkeypatch.setattr(sys,'stdin',Terminal())
     calls=[]
     monkeypatch.setattr(lk.terminal_style,'open_pane',lambda path:calls.append(path) or 'Shell opened beside LOOK')
-    keys=iter(['/','W','esc'])
+    keys=iter(['/','enter','W','esc'])
     monkeypatch.setattr(lk,'_read_tty_key',lambda *a:next(keys))
     assert lk._media_player_library(media_kind=kind)==0
     assert calls==[Path.cwd()]
@@ -186,7 +186,7 @@ def test_media_find_pane_preserves_selection_and_uses_duration_columns(lk,desk,r
     rows[0]['duration']=245
     calls=[]
     monkeypatch.setattr(lk.terminal_style,'open_pane',lambda path:calls.append(path) or 'Shell opened beside LOOK')
-    keys=iter(['\t','/','W','esc'])
+    keys=iter(['\t','/','enter','W','esc'])
     monkeypatch.setattr(lk,'_read_tty_key',lambda *a:next(keys))
     assert lk._media_selector(rows)==('none',None)
     assert calls==[Path.cwd()]
