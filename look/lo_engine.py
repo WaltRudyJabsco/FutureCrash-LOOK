@@ -18,6 +18,12 @@ import sys
 import threading
 from pathlib import Path
 
+# Browser services load this file by absolute path rather than as a package.
+# Sibling tools must be importable before any shortcut bypasses _load_core().
+_LOOK_MODULE_DIR=Path(__file__).resolve().parent
+if str(_LOOK_MODULE_DIR) not in sys.path:
+    sys.path.insert(0,str(_LOOK_MODULE_DIR))
+
 _CORE = None
 _CORE_LOCK = threading.Lock()
 _CHAT_LOCK = threading.Lock()
