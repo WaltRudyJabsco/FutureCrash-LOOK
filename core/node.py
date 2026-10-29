@@ -201,6 +201,8 @@ ADVERTISEMENT_CACHE = {}
 BEACON_LOCK = threading.RLock()
 MEDIA_LIBRARY_LOCK = threading.RLock()
 MEDIA_CATALOG_LOCK = threading.RLock()
+AUDIO_DELIVERY_LOCK = threading.Lock()
+AUDIO_DELIVERY_BITRATE = '192k'
 MEDIA_CATALOG_CACHE = {"at": 0.0, "data": None, "local_mtime_ns": -1}
 LOCAL_MEDIA_CATALOG_LOCK = threading.RLock()
 LOCAL_MEDIA_CATALOG_CACHE = {"at": 0.0, "data": None, "stamp": None}
@@ -3932,18 +3934,20 @@ class API(BaseHTTPRequestHandler):
                 if not chunk: break
                 self.wfile.write(chunk); remaining-=len(chunk)
 
-    def _browser_media_source(self, entry_id, path_hint=""):
+    def _browser_media_source(self, entry_id, path_hint="", *, audio_delivery=False):
         """Return a browser-safe local representation; never mutate the source.
 
-        Native players get original bytes. Browser output gets a conservative
-        representation chosen by the owning node: H.264/AAC MP4 for video and
-        AAC/M4A for audio codecs/containers that browsers do not reliably share.
+        Browser output gets H.264/AAC MP4 video and compatible audio. Standard
+        terminal audio shares the AAC cache for lossless sources; existing lossy
+        audio passes through. Local terminal playback keeps original bytes.
         """
         row,source=_local_media_entry(entry_id,path_hint)
         media_type=str(row.get("media_type") or mimetypes.guess_type(str(source))[0] or "application/octet-stream")
         video_exts={".mov",".avi",".mkv",".wmv",".flv",".mts",".m2ts",".vob",".ts",".mp4",".m4v",".webm"}
         is_video=media_type.startswith("video/") or source.suffix.casefold() in video_exts
-        is_audio=media_type.startswith("audio/") and not is_video
+        lossless_exts={'.flac','.wav','.aif','.aiff','.aifc','.alac'}
+        is_audio=(media_type.startswith("audio/") or source.suffix.casefold() in lossless_exts) and not is_video
+        if audio_delivery and not is_audio:return source,media_type
         if not (is_video or is_audio): return source,media_type
 
         def media_tool(name):
@@ -3958,8 +3962,14 @@ class API(BaseHTTPRequestHandler):
         # Formats deliberately kept original only when support is broadly reliable.
         # Everything else is converted by the owner so browser endpoints never need
         # to understand the source library's codec mix.
-        if is_audio and source.suffix.casefold() in {".mp3",".m4a",".aac",".wav"}:
-            return source, ("audio/mp4" if source.suffix.casefold()==".m4a" else media_type)
+        suffix=source.suffix.casefold()
+        lossless=suffix in lossless_exts
+        if is_audio and suffix in {'.m4a','.m4b'} and ffprobe:
+            # M4A is a container: AAC can pass through, ALAC needs a smaller copy.
+            probe=subprocess.run([ffprobe,'-v','error','-select_streams','a:0','-show_entries','stream=codec_name','-of','json',str(source)],capture_output=True,text=True,timeout=12,check=True)
+            lossless=any(x.get('codec_name')=='alac' for x in json.loads(probe.stdout or '{}').get('streams',[]))
+        if is_audio and not lossless and (audio_delivery or suffix in {'.mp3','.m4a','.m4b','.aac'}):
+            return source, ('audio/mp4' if suffix in {'.m4a','.m4b'} else media_type)
         if not ffmpeg:
             raise RuntimeError("browser media conversion needs ffmpeg on the source node")
 
@@ -4009,18 +4019,25 @@ class API(BaseHTTPRequestHandler):
             return target,"video/mp4"
 
         cache=Path.home()/".cache"/"future-crash-look"/"browser-media"; cache.mkdir(parents=True,exist_ok=True)
-        stat=source.stat(); key=hashlib.sha256(f"audio:{source}:{stat.st_size}:{stat.st_mtime_ns}".encode()).hexdigest()[:24]
+        stat=source.stat(); key=hashlib.sha256(f"audio:stereo-v2:{AUDIO_DELIVERY_BITRATE}:{source}:{stat.st_size}:{stat.st_mtime_ns}".encode()).hexdigest()[:24]
         target=cache/(key+".m4a")
+        if target.is_file() and target.stat().st_size:return target,'audio/mp4'
+        # Browsers and terminal players share this cache. Serialize publication
+        # so simultaneous requests never encode or replace the same copy twice.
+        with AUDIO_DELIVERY_LOCK:
+            return self._cached_aac_source(source,target,key,ffmpeg)
+
+    def _cached_aac_source(self,source,target,key,ffmpeg):
         if not target.exists() or target.stat().st_size==0:
             tmp=target.with_name(key+f".{os.getpid()}.{threading.get_ident()}.tmp.m4a")
-            cmd=[ffmpeg,"-nostdin","-v","error","-y","-i",str(source),"-vn","-c:a","aac","-b:a","192k","-movflags","+faststart",str(tmp)]
-            cp=subprocess.run(cmd,capture_output=True,text=True,timeout=900)
-            if cp.returncode!=0 or not tmp.exists() or tmp.stat().st_size==0:
-                detail=(cp.stderr or cp.stdout or f"ffmpeg exit {cp.returncode}").strip()[-800:]
-                try: tmp.unlink(missing_ok=True)
-                except OSError: pass
-                raise RuntimeError("browser audio conversion failed"+(f": {detail}" if detail else ""))
-            os.replace(tmp,target)
+            cmd=[ffmpeg,"-nostdin","-v","error","-y","-i",str(source),"-vn","-c:a","aac","-ac","2","-b:a",AUDIO_DELIVERY_BITRATE,"-movflags","+faststart",str(tmp)]
+            try:
+                cp=subprocess.run(cmd,capture_output=True,text=True,timeout=900)
+                if cp.returncode!=0 or not tmp.exists() or tmp.stat().st_size==0:
+                    detail=(cp.stderr or cp.stdout or f"ffmpeg exit {cp.returncode}").strip()[-800:]
+                    raise RuntimeError("audio conversion failed"+(f": {detail}" if detail else ""))
+                os.replace(tmp,target)
+            finally:tmp.unlink(missing_ok=True)
         return target,"audio/mp4"
 
     def _serve_media_browser(self,target,entry_id,path_hint="",*,head=False):
@@ -4041,14 +4058,15 @@ class API(BaseHTTPRequestHandler):
         target=str(target or "").strip(); entry_id=str(entry_id or "").strip(); local=identity()["name"]
         representation=str(representation or "original").strip().casefold()
         browser=representation=="browser"
+        audio_delivery=representation=="audio"
         if not entry_id:
             if head:
                 self.send_response(400); self.send_header("Content-Length","0"); self.end_headers(); return
             return self.sendj(400,{"error":"media entry id required"})
         if not target or target==local:
             try:
-                if browser:
-                    source,ctype=self._browser_media_source(entry_id,path_hint)
+                if browser or audio_delivery:
+                    source,ctype=self._browser_media_source(entry_id,path_hint,**({'audio_delivery':True} if audio_delivery else {}))
                 else:
                     row,source=_local_media_entry(entry_id,path_hint)
                     ctype=str(row.get("media_type") or mimetypes.guess_type(str(source))[0] or "application/octet-stream")
@@ -4073,14 +4091,14 @@ class API(BaseHTTPRequestHandler):
             live,_ident=_file_race(peer,"/v1/identity")
             for base in [live]+[b for b in _peer_bases(peer) if b!=live]:
                 params={"id":entry_id,"path":path_hint}
-                if representation in {"browser","download"}: params["representation"]=representation
+                if representation in {"browser","audio","download"}: params["representation"]=representation
                 url=base+"/v1/media/item?"+urllib.parse.urlencode(params)
                 headers=FABRIC_IDENTITY.auth_headers_for_url(url)
                 if self.headers.get("Range"): headers["Range"]=self.headers.get("Range")
                 req=urllib.request.Request(url,headers=headers,method="HEAD" if head else "GET")
                 context=FABRIC_IDENTITY.ssl_context_for_url(url) if url.lower().startswith("https://") else None
                 try:
-                    kwargs={"timeout":1800.0 if browser else 8.0}
+                    kwargs={"timeout":1800.0 if browser or audio_delivery else 8.0}
                     if context is not None: kwargs["context"]=context
                     with urllib.request.urlopen(req,**kwargs) as r:
                         self.send_response(getattr(r,"status",200))
