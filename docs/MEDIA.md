@@ -464,3 +464,30 @@ Live, acoustic, remix, demo, instrumental, tribute and part/volume qualifiers
 remain distinct. Covers stay under the original album cache identity; file names,
 audio bytes and tags are unchanged. Older negative title-match results are
 retried after this matcher update. Provider failures retain their retry backoff.
+
+## Standard audio delivery
+
+Remote audio in LK Player, LKMP and LKTV uses the owning node's **Standard**
+representation by default. FLAC, WAV, AIFF and ALAC become cached **192 kbps
+AAC in M4A**. Existing compressed audio (including MP3, AAC and Ogg) passes
+through directly in terminal players; M4A containers are checked for ALAC.
+Local playback keeps the original. Video delivery is unchanged.
+
+Signal and Albert share the same owner-side AAC cache. A cache miss encodes on
+first request; subsequent playback and seeking use the complete cached file and
+normal HTTP byte ranges. A changed source invalidates its cached rendition.
+Only the cache is written: masters, tags, catalog IDs, queues and artwork stay
+associated with the original song. Availability and duration previews use the
+original path and never request an AAC conversion just to draw a list.
+
+The first terminal request allows up to 90 seconds for source preparation and
+still requires an actual decoded media clock before reporting playback. Ordinary
+sources retain their existing startup deadline. To explicitly stream originals
+from a terminal, launch with `LOOK_MEDIA_AUDIO_QUALITY=original lk mp` (also
+works with `lk player`). This is a delivery choice, not a CD import setting.
+CD imports remain lossless FLAC. Keep Offline continues to copy and verify the
+original file; it does not silently substitute different bytes.
+
+**Magnetic Field** and **Comet Trails** join the ambient visualizers and the
+10-second Cycle rotation. They use the terminal palette's foreground inks and
+remain still while paused.

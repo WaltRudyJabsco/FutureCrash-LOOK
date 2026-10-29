@@ -21,7 +21,7 @@ def test_sticky_header_focus_follows_real_viewport():
     assert 'list_view_h=max(3,list_usable-preview_h-1)' in RENDER
 
 def test_fabric_browser_video_representation_is_cached_and_source_safe():
-    assert 'def _browser_media_source(self, entry_id, path_hint=""):' in NODE
+    assert 'def _browser_media_source(self, entry_id, path_hint="", *, audio_delivery=False):' in NODE
     assert 'browser-media' in NODE and 'libx264' in NODE and 'yuv420p' in NODE and 'aac' in NODE
     assert 'os.replace(tmp,target)' in NODE and '"/v1/media/browser"' in NODE and '"/v1/media/browser"' in INGRESS
 

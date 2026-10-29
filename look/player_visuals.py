@@ -4,7 +4,7 @@ import math
 import hashlib
 import json
 
-NAMES = ('Bars', 'Waves', 'Orbit', 'Tunnel', 'Stars', 'Plasma', 'Album Art', 'Black Hole', 'Rooftops', 'Spectrum', 'Moon Jelly', 'Firefly Garden', 'Clockwork Garden', 'Rain on Glass', 'Neon Reef', 'Aurora Loom', 'Paper Lanterns', 'Cycle')
+NAMES = ('Bars', 'Waves', 'Orbit', 'Tunnel', 'Stars', 'Plasma', 'Album Art', 'Black Hole', 'Rooftops', 'Spectrum', 'Moon Jelly', 'Firefly Garden', 'Clockwork Garden', 'Rain on Glass', 'Neon Reef', 'Aurora Loom', 'Paper Lanterns', 'Magnetic Field', 'Comet Trails', 'Cycle')
 CYCLE_MODE = len(NAMES)
 CYCLE_INTERVAL_SECONDS = 10.0
 
@@ -53,6 +53,10 @@ def frame(mode, width, height, phase, playing=True, seed=0):
             depth=(i*.618034+t*.18)%1
             point((width-1)/2+math.cos(angle)*depth*width*.65,
                   (height-1)/2+math.sin(angle)*depth*height*.65,'.+*'[min(2,int(depth*3))])
+    elif mode==18:
+        return comet_trails_frame(width,height,t,seed)
+    elif mode==17:
+        return magnetic_field_frame(width,height,t,seed)
     elif mode==16:
         return paper_lanterns_frame(width,height,t,seed)
     elif mode==15:
@@ -427,4 +431,53 @@ def paper_lanterns_frame(width,height,phase,seed=0):
             put(x+1+math.sin(phase+i)*2,horizon+1+(i%(height-horizon-1)),'~')
     for x in range(width):
         if (x+int(phase*2))%11<4:put(x,horizon,'~')
+    return [''.join(row) for row in canvas]
+
+
+MAGNETIC_COLOR = '36'
+COMET_COLOR = '35'
+FIELD_LINES = 16
+FIELD_STEPS = 100
+FIELD_STEP_SIZE = .055
+COMET_COUNT = 5
+
+
+def magnetic_field_frame(width,height,phase,seed=0):
+    """Particles follow bounded dipole streamlines between two moving poles."""
+    canvas=[[' ']*width for _ in range(height)]
+    def put(x,y,char):
+        x=round((x/4+.5)*(width-1));y=round((y/2+.5)*(height-1))
+        if 0<=x<width and 0<=y<height:canvas[y][x]=char
+    drift=math.sin(phase*.22+seed)*.12
+    for line in range(FIELD_LINES):
+        angle=(line+.5)*math.tau/FIELD_LINES
+        x=-.8+math.cos(angle)*.1;y=drift+math.sin(angle)*.1
+        for step in range(FIELD_STEPS):
+            left=max(.035,math.hypot(x+.8,y-drift))
+            right=max(.035,math.hypot(x-.8,y+drift))
+            if right<.08:break
+            dx=(x+.8)/left**3-(x-.8)/right**3
+            dy=(y-drift)/left**3-(y+drift)/right**3
+            norm=max(.001,math.hypot(dx,dy))
+            x+=FIELD_STEP_SIZE*dx/norm;y+=FIELD_STEP_SIZE*dy/norm
+            if (step-int(phase*9)-line)%15<3:put(x,y,'+' if step%15==0 else '.')
+    put(-.8,drift,'+');put(.8,-drift,'o')
+    return [''.join(row) for row in canvas]
+
+
+def comet_trails_frame(width,height,phase,seed=0):
+    """Small comets sweep a quiet star field, with gently curving dotted tails."""
+    canvas=[[' ']*width for _ in range(height)]
+    def put(x,y,char):
+        x=round(x);y=round(y)
+        if 0<=x<width and 0<=y<height:canvas[y][x]=char
+    for i in range(max(1,width*height//85)):
+        put((i*37+seed*11)%width,(i*17+seed*3)%height,'.')
+    tail=max(3,min(16,width//8));span=width+tail*2
+    for i in range(COMET_COUNT):
+        head=(phase*(3+i*.65)+i*span/COMET_COUNT+seed)%span-tail
+        base=(i*7+seed)%height
+        for age in range(tail,0,-1):
+            put(head-age,base+math.sin((head-age)*.035+i)*height*.12,'..:--'[min(4,(tail-age)*5//tail)])
+        put(head,base+math.sin(head*.035+i)*height*.12,'*')
     return [''.join(row) for row in canvas]
