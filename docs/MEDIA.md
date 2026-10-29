@@ -491,3 +491,16 @@ original file; it does not silently substitute different bytes.
 **Magnetic Field** and **Comet Trails** join the ambient visualizers and the
 10-second Cycle rotation. They use the terminal palette's foreground inks and
 remain still while paused.
+
+## Responsive catalog filtering
+
+MP, TV and Media Find prepare visibility and duplicate grouping once per catalog
+view, instead of repeating the whole Fabric scan for every typed letter. Search
+terms retain the existing include/exclude syntax, Unicode matching, physical-source
+matching and queue order. Refresh, metadata edits and visibility changes rebuild
+the prepared view; ordinary typing reuses it.
+
+Artwork extraction and player-status IPC run outside the input thread. Only the
+latest preview request is retained while one is running, so fast typing cannot
+create a queue of obsolete cover jobs. Background status snapshots are read-only
+and cannot overwrite queue changes. Layouts and key bindings stay the same.
