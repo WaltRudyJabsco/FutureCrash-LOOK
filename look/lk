@@ -7570,6 +7570,9 @@ def _truthful_dispatch_summary(answer):
 
 def _lo_requires_filesystem_action(prompt):
     """Detect an actual request to mutate local files, not discussion of prior work."""
+    import ytd
+    if ytd.explicit_download(prompt) is not None:
+        return False  # Download jobs have their own owner-side receipts.
     text=" ".join(str(prompt or "").split()).strip().casefold()
     if not text:
         return False
@@ -10981,6 +10984,20 @@ def _lo_action_from_tool(name,args,result):
     return {"tool":name,"args":dict(args),"path":path} if path else None
 
 @lo_history.session
+def _lo_download_direct(prompt,profile,events=None):
+    import ytd
+    result=ytd.direct_download(prompt,profile)
+    if result is None:return None
+    text=result['text']
+    print('\n'+_lo_label('download','36')+'\n'+text+'\n')
+    if events:
+        events.emit('tool_start',tool='video_download')
+        events.emit('tool_done',tool='video_download',result=result['result'],status=result['status'])
+        events.emit('response',text=text)
+        events.emit('request_done',status=result['status'],rounds=0,tool_calls=1,prompt_tokens=0,output_tokens=0,load_ms=0)
+    return text
+
+
 def ollama_chat(force_search=False, initial_prompt=None, allow_start=True, host_override=None, host_name=None, access_profile=None, selected_paths=None, workspace_override=None, one_shot=False, confirm_unsafe_override=False, events=None, conversation_history=None, interface_context=None):
     """Minimal local chat; optional first prompt and web-search mode."""
     import json
@@ -11002,6 +11019,13 @@ def ollama_chat(force_search=False, initial_prompt=None, allow_start=True, host_
     if profile=="unsafe" and confirm_unsafe_override and not _confirm_unsafe_session():
         print("· cancelled")
         return 0
+
+    if initial_prompt and not force_search and not selected_paths:
+        download_answer=_lo_download_direct(initial_prompt,profile,events)
+        if download_answer is not None:
+            _save_recent_exchange(initial_prompt,download_answer)
+            if one_shot:return 0
+            initial_prompt=None
 
     if one_shot and initial_prompt and not force_search:
         if _fabric_care_direct(initial_prompt,profile,events) is not None:return 0
@@ -11243,6 +11267,12 @@ def ollama_chat(force_search=False, initial_prompt=None, allow_start=True, host_
             continue
 
         if not force_search:
+            download_answer=_lo_download_direct(prompt,profile,events)
+            if download_answer is not None:
+                _save_recent_exchange(prompt,download_answer)
+                messages.extend([{'role':'user','content':prompt},{'role':'assistant','content':download_answer}])
+                if one_shot:return 0
+                continue
             care_answer=_fabric_care_direct(prompt,profile,events)
             if care_answer is not None:
                 _save_recent_exchange(prompt,care_answer)

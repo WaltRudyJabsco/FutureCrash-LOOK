@@ -16,8 +16,9 @@ def explicit_download(prompt):
     words=text.replace(urls[0],' ').strip(' \n\t:.,!')
     words=re.sub(r"^(?:please\s+|can you\s+|could you\s+|would you\s+|let['’]?s\s+)", '', words, flags=re.I)
     words=re.sub(r'\s+as well$', '', words, flags=re.I)
+    words=re.sub(r'\s+--\s*$', '', words)
     match=re.fullmatch(
-        r'(?:download|save)\s*(?:(?:this|the|a|one|youtube|video|link)\s*)*'
+        r'(?:download|donwload|downlaod|save)\s*(?:(?:this|the|a|one|youtube|video|link)\s*)*'
         r'(?:(?:to|on)\s+(?:the\s+)?(?:node\s+)?(?P<node>[\w.-]+))?'
         r'(?:\s+and add it to (?:my |the )?(?:fabric |media )?library)?',words,re.I)
     if not match:return None
@@ -39,6 +40,19 @@ def download_summary(result):
         text=f'Download {stage} on {owner} · job {job_id}: '+str(job.get('error') or stage)
     else:text=f'Download {stage} on {owner} · job {job_id}. It continues after you close this page; it is not ready to play yet.'
     return text+f'\nCheck progress: lk ytd status {job_id} --node {owner}'
+
+
+def direct_download(prompt,profile='workspace'):
+    """One receipt-producing edge shared by browser and terminal front doors."""
+    args=explicit_download(prompt)
+    if args is None:return None
+    if profile not in {'workspace','power','unsafe'}:return None
+    try:
+        receipt=request('download',**args)
+        return {'text':download_summary(receipt),'result':receipt,'status':'ok' if receipt.get('ok') else 'failed'}
+    except (ValueError,RuntimeError,OSError) as exc:
+        return {'text':'Download was not confirmed: '+str(exc)+'. No completed download has been verified. Check the destination node name and download jobs before retrying.',
+                'result':str(exc),'status':'failed'}
 
 
 def request(action=None,node='local',job=None,**payload):

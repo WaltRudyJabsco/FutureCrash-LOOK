@@ -83,3 +83,10 @@ Media Find, MP and TV reuse their catalog's local owner identity for local-file
 checks. A busy identity endpoint therefore cannot label the machine's own files
 as remote. Remote availability rechecks retain the last observed appearance
 until the result changes, rather than repeatedly brightening unavailable rows.
+
+Terminal LO uses the same direct single-link download handler as Signal and
+Albert, including within an already-open conversation. Common `donwload` /
+`downlaod` typos and a `--` separator before the URL are accepted. These requests
+produce download-job receipts, not local filesystem mutation receipts. Include
+`to NODE` to choose the storage computer; an omitted node still means the host
+running the interface, not whichever computer provides inference.
