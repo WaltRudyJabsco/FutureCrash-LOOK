@@ -139,17 +139,12 @@ def chat_once(prompt: str, *, profile='workspace', workspace=None, selected_path
               history=None, interface_context=None, persona=None, force_search=False):
     """Run one LO operator turn and return structured machine data."""
     import ytd
-    download=ytd.explicit_download(prompt) if not selected_paths else None
-    if download and profile in {'workspace','power','unsafe'}:
+    download=ytd.direct_download(prompt,profile) if not selected_paths else None
+    if download is not None:
         events=EventCollector()
         events.emit('tool_start',tool='video_download')
-        try:
-            receipt=ytd.request('download',**download)
-            response=ytd.download_summary(receipt)
-            events.emit('tool_done',tool='video_download',result=receipt)
-        except (ValueError,RuntimeError,OSError) as exc:
-            response='Download was not confirmed: '+str(exc)+'. No completed download has been verified. Check the destination node name and download jobs before retrying.'
-            events.emit('tool_done',tool='video_download',status='failed',result=str(exc))
+        response=download['text']
+        events.emit('tool_done',tool='video_download',result=download['result'],status=download['status'])
         events.emit('response',text=response)
         return {'text':response,'events':events.rows,'returncode':0,'receipts':[],
                 'provenance':{'edge':'FABRIC','source':'download job receipt','confidence':'OBSERVED'}}

@@ -233,3 +233,10 @@ def test_complete_download_receipt_separates_indexing():
     assert 'not confirmed' in ytd.download_summary(result)
     result['job']['indexed']=True
     assert 'Added to the media catalog' in ytd.download_summary(result)
+
+
+def test_reported_download_typo_and_link_separator():
+    prompt='donwload this youtube video -- https://www.youtube.com/watch?v=IquUIgyZ3Fo'
+    assert ytd.explicit_download(prompt)=={'node':'local','url':'https://www.youtube.com/watch?v=IquUIgyZ3Fo'}
+    assert ytd.explicit_download('download this to the 3090 https://youtu.be/example')['node']=='3090'
+    assert ytd.explicit_download('do not donwload this -- https://youtu.be/example') is None
