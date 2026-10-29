@@ -504,3 +504,10 @@ Artwork extraction and player-status IPC run outside the input thread. Only the
 latest preview request is retained while one is running, so fast typing cannot
 create a queue of obsolete cover jobs. Background status snapshots are read-only
 and cannot overwrite queue changes. Layouts and key bindings stay the same.
+
+While `/` search is active, every printable character—including capital shortcut
+letters—is search text. Paste is literal text too; embedded newlines become
+spaces. Arrows can move through results without ending text entry. Enter or
+Escape returns to browsing, where the normal letter shortcuts remain available.
+Unknown terminal replies and keyboard key-release packets are ignored rather
+than interpreted as Escape. Enhanced CSI-u text keys are decoded as text.

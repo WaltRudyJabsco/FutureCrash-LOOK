@@ -12767,11 +12767,22 @@ def _read_tty_key(fd, timeout=None):
                 ch+=os.read(fd,1)
         return ch.decode("utf-8","ignore")
     seq=bytearray(ch)
-    while len(seq)<16:
+    while len(seq)<4096:
         ready,_,_=select.select([fd],[],[],0.035)
         if not ready:
             break
         seq.extend(os.read(fd,1))
+        if len(seq)==2 and seq[1] in b']_P^':
+            # OSC/APC/DCS terminal replies (including image acknowledgments)
+            # are input packets, never navigation or shell commands.
+            while len(seq)<65536:
+                ready,_,_=select.select([fd],[],[],.035)
+                if not ready:break
+                chunk=os.read(fd,1)
+                if not chunk:break
+                seq.extend(chunk)
+                if seq.endswith((b'\x07',b'\x1b\\')):break
+            return ''
         if seq[-1:] in b"~ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz\r\n":
             break
     if bytes(seq)==b"\x1b[200~":
@@ -12794,7 +12805,7 @@ def _read_tty_key(fd, timeout=None):
                     tail=(tail+chunk)[-len(end):]
                 return "paste:"
         return "paste:"+bytes(payload[:-len(end)] if payload.endswith(end) else payload).decode("utf-8","replace")
-    return {
+    mapped={
         # Enhanced keyboards distinguish Ctrl-letter keys from their legacy bytes.
         b"\x1b[1;3D":"wordleft", b"\x1b[1;3C":"wordright",
         b"\x1b[1;5D":"wordleft", b"\x1b[1;5C":"wordright",
@@ -12818,7 +12829,29 @@ def _read_tty_key(fd, timeout=None):
         b"\x1b[1;2D":"shiftleft",
         b"\x1b[H":"home", b"\x1b[1~":"home",
         b"\x1b[F":"end", b"\x1b[4~":"end",
-    }.get(bytes(seq),"esc")
+    }.get(bytes(seq))
+    if mapped is not None:return mapped
+    if bytes(seq)==b'\x1b':return 'esc'
+    if re.fullmatch(rb'\x1b\[[0-9:;]+u',bytes(seq)):
+        try:
+            fields=bytes(seq)[2:-1].decode('ascii').split(';')
+            codes=fields[0].split(':');key=int(codes[0])
+            modifiers=(fields[1] if len(fields)>1 else '1').split(':')
+            mods=int(modifiers[0] or '1')-1
+            event=int(modifiers[1]) if len(modifiers)>1 else 1
+            if event==3:return ''
+            if len(fields)>2 and fields[2]:
+                text=''.join(chr(int(code)) for code in fields[2].split(':'))
+                text=''.join(c for c in text if c.isprintable())
+                return text if len(text)==1 else 'paste:'+text if text else ''
+            if mods&4 and 97<=key<=122:return chr(key-96)
+            if mods&~(1|64|128):return ''
+            if key in {9,13,27,127}:return {9:'\t',13:'enter',27:'esc',127:'\x7f'}[key]
+            text=chr(int(codes[1])) if mods&1 and len(codes)>1 and codes[1] else chr(key)
+            if mods&1 and len(codes)==1:text=text.upper()
+            return text if text.isprintable() else ''
+        except (ValueError,OverflowError):return ''
+    return ''
 
 
 def _select_values(title, rows):
@@ -18156,10 +18189,11 @@ class _MediaQueryPlan:
             return _media_collapse([source for _,source in selected.values()],show_all=show_all,show_hidden=self.show_hidden,prepared=True)
         out=[]
         for row in self.find_cache[show_all]:
-            matches=[selected[self.locator(source)] for source in row['sources'] if self.locator(source) in selected]
+            row_sources=row.get('sources') or [row]
+            matches=[selected[self.locator(source)] for source in row_sources if self.locator(source) in selected]
             if not matches:continue
             first=min(index for index,_ in matches)
-            if len(matches)==len(row['sources']):result=row
+            if len(matches)==len(row_sources):result=row
             else:result=_media_collapse([source for _,source in matches],show_hidden=self.show_hidden,prepared=True)[0]
             out.append((first,result))
         out.sort(key=lambda item:item[0])
@@ -18789,15 +18823,18 @@ def _media_selector(rows,title="FABRIC MEDIA",initial_query="",catalog_meta=None
             if not key:continue
             if key=="\x03":
                 break
+            if key.startswith('paste:'):
+                pasted=re.sub(r'[\r\n\t]+',' ',key[6:])
+                query+=''.join(c for c in pasted if c.isprintable())
+                search_mode=True;idx=0;continue
             if search_mode:
-                if key in {"esc","\r","\n"}:
+                if key in {"esc","enter","\r","\n"}:
                     search_mode=False; continue
                 if key in {"\x7f","\b"}:
                     query=query[:-1]; idx=0; continue
-                if len(key)==1 and key.isprintable() and key not in "APQCSIVHXDUJKEROTGFM"+"W":
+                if len(key)==1 and key.isprintable():
                     query+=key; idx=0; continue
-                # Navigation and selection act on the filtered results immediately.
-                search_mode=False
+                # Navigation can move the result cursor without ending text entry.
             if key=="W":
                 native_preview.invalidate()
                 notice=terminal_style.open_pane(Path.cwd())
@@ -18859,7 +18896,7 @@ def _media_selector(rows,title="FABRIC MEDIA",initial_query="",catalog_meta=None
                 finally:tty.setcbreak(fd)
                 notice=message or ('Opened in selected app' if opened else 'Open with cancelled')
                 continue
-            if key in {"\r","\n","P"} and chosen:
+            if key in {"enter","\r","\n","P"} and chosen:
                 action=("play",chosen); break
             if key=="Q" and chosen:
                 count=_media_queue_append(chosen)
@@ -20125,7 +20162,7 @@ def _media_player_library(initial_query="",media_kind="audio"):
                     for line in _media_mp_transport_lines(playback,width):print(line)
                     transport_row=list_rows+7;transport_width=width
                     if search_mode:
-                        filter_text=f"SEARCH /{query}█"
+                        filter_text=f"SEARCH /{query}█ · Enter/Esc browse"
                     else:
                         filter_text=f"FILTER {query or ('all '+medium)} · / search"
                     print(_c(filter_text,"1;36"))
@@ -20173,19 +20210,22 @@ def _media_player_library(initial_query="",media_kind="audio"):
             dirty=True
             if key=="\x03":
                 return 0
+            if key.startswith('paste:'):
+                pasted=re.sub(r'[\r\n\t]+',' ',key[6:])
+                query+=''.join(c for c in pasted if c.isprintable())
+                search_mode=True;idx=0;continue
             if search_mode:
                 if key=="esc":
                     search_mode=False; continue
-                if key in {"\r","\n"}:
+                if key in {"enter","\r","\n"}:
                     search_mode=False; continue
                 if key in {"\x7f","\b"}:
                     if query: query=query[:-1]; idx=0
                     continue
-                if len(key)==1 and key.isprintable() and key not in "ABCDLQJKERMFG"+"W"+("OT" if media_kind=="video" else "O"):
+                if len(key)==1 and key.isprintable():
                     query+=key; idx=0
                     continue
-                # Arrow/Tab/action keys leave editing and operate on this view.
-                search_mode=False
+                # Navigation can move the result cursor without ending text entry.
             if key=="esc":
                 if mode=="queue":
                     mode="library";query,idx,selected_ids=library_view or ("",0,set());view_key=None;continue
@@ -20278,7 +20318,7 @@ def _media_player_library(initial_query="",media_kind="audio"):
                     _media_save_session(session)
                 notice=f"updated {result['count']} source(s)"+(' · '+' · '.join(result['errors']) if result['errors'] else '')
                 view_key=None;selected_ids.clear();continue
-            if key in {"\r","\n"} and picked:
+            if key in {"enter","\r","\n"} and picked:
                 notice=_media_launch_from_library(picked); continue
             if key=="B" and picked:
                 notice=_media_queue_notice(_media_queue_append(picked)); view_key=None if mode=="queue" else view_key; continue
