@@ -2947,8 +2947,8 @@ def _local_media_terminal_preview(entry_id, path_hint="", width=22, height=11):
     chafa=_service_media_tool("chafa")
     if not chafa:
         raise RuntimeError("chafa unavailable on media owner")
-    proc=subprocess.run([chafa,"--format=symbols","--colors","full","--color-space","rgb","--size",f"{width}x{height}",str(art)],
-                        capture_output=True,text=True,timeout=1.5)
+    proc=subprocess.run([chafa,"--format=symbols","--probe=off","--polite=on","--animate=off","--colors","full","--color-space","rgb","--size",f"{width}x{height}",str(art)],
+                        stdin=subprocess.DEVNULL,start_new_session=True,capture_output=True,text=True,timeout=1.5)
     if proc.returncode:
         raise RuntimeError((proc.stderr or "chafa preview failed").strip()[:300])
     lines=proc.stdout.rstrip("\n").splitlines()[:height]
