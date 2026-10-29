@@ -65,3 +65,21 @@ Every node's `~/Downloads/LOOK`, `~/Downloads/LOOK-Holding`, and `~/Pictures/LOO
 Normal media and file rescans import a neighboring `BASENAME.info.json` for supported media. Moving an MP4 and its sidecar together therefore restores its title, channel, source URL, description, and tags in its new location. The video plays without the sidecar, but moving only that video still leaves the descriptive information behind. Original files and existing manually entered catalog descriptions are preserved.
 
 LOOK's Mac browser and file cards now honor the configured video/audio preference, as do explicit open/preview actions. `lk apps video VLC` selects VLC; `lk apps video mpv` can use the Homebrew executable without requiring an mpv app bundle. `system` retains the ordinary Mac default. These changes do not alter Apple media authorization or infer DRM from an `.m4v` extension.
+
+## Share links from Signal and Albert
+
+Paste a single YouTube share link and ask **Download this video to NODE: URL**.
+Both browser interfaces send this explicit request directly to the download job
+service and return its job ID and execution node, without depending on a model
+for the final acknowledgment. Closing the page does not cancel an accepted job.
+A queued receipt is not completion; check `lk ytd status JOB --node NODE`.
+Unknown node names and service failures are reported without claiming success.
+Richer requests still use LO's tools; their download receipts remain available
+if the model finishes without a final reply. The destination is the execution
+node's normal `~/Downloads/LOOK` folder unless a directory is explicitly chosen.
+Downloaded videos appear in `lk tv` and `lk media find`; `lk mp` lists audio.
+
+Media Find, MP and TV reuse their catalog's local owner identity for local-file
+checks. A busy identity endpoint therefore cannot label the machine's own files
+as remote. Remote availability rechecks retain the last observed appearance
+until the result changes, rather than repeatedly brightening unavailable rows.

@@ -47,3 +47,58 @@ class NativeLoEngineTests(unittest.TestCase):
 
 
 if __name__=='__main__': unittest.main()
+
+
+def test_direct_youtube_download_returns_receipt_without_inference(monkeypatch):
+    import ytd
+    calls=[]
+    def request(action,**args):
+        calls.append((action,args))
+        return {'ok':True,'node':args['node'],'job':{'id':'job123','stage':'queued'}}
+    monkeypatch.setattr(ytd,'request',request)
+    monkeypatch.setattr(lo_engine,'_load_core',lambda:(_ for _ in ()).throw(AssertionError('must not need inference')))
+    result=lo_engine.chat_once('Download this YouTube video to tower and add it to my media library: https://youtu.be/abc?si=share')
+    assert calls==[('download',{'node':'tower','url':'https://youtu.be/abc?si=share'})]
+    assert 'job123' in result['text'] and 'not ready to play' in result['text']
+    assert result['events'][-1]['event']=='response'
+
+
+def test_download_failure_has_actionable_response(monkeypatch):
+    import ytd
+    def fail(*a,**kw):raise RuntimeError('Unknown node 390')
+    monkeypatch.setattr(ytd,'request',fail)
+    result=lo_engine.chat_once('Download https://youtu.be/abc to 390')
+    assert 'Unknown node 390' in result['text'] and 'not confirmed' in result['text']
+
+
+def test_receipt_survives_model_missing_final_response(monkeypatch):
+    class Core:
+        def ollama_chat(self,**kwargs):
+            kwargs['events'].emit('tool_done',tool='video_download',result='{"ok":true,"node":"tower","job":{"id":"saved-job","stage":"queued"}}')
+            return 0
+    monkeypatch.setattr(lo_engine,'_load_core',lambda:Core())
+    monkeypatch.setattr(lo_engine,'_load_web_key',lambda:None)
+    assert 'saved-job' in lo_engine.chat_once('a richer request')['text']
+
+
+def test_accepted_download_survives_subsequent_inference_error(monkeypatch):
+    class Core:
+        def ollama_chat(self,**kwargs):
+            kwargs['events'].emit('tool_done',tool='video_download',result='{"ok":true,"node":"tower","job":{"id":"durable-job","stage":"queued"}}')
+            kwargs['events'].emit('error',error='inference timed out after tool')
+            return 1
+    monkeypatch.setattr(lo_engine,'_load_core',lambda:Core())
+    monkeypatch.setattr(lo_engine,'_load_web_key',lambda:None)
+    result=lo_engine.chat_once('a richer request')
+    assert 'durable-job' in result['text'] and result['provenance']['edge']=='FABRIC'
+    assert result['events'][-1]['event']=='response'
+
+
+def test_conservative_profile_cannot_take_download_shortcut(monkeypatch):
+    import ytd
+    monkeypatch.setattr(ytd,'request',lambda *a,**kw:(_ for _ in ()).throw(AssertionError('unauthorized write')))
+    fake=FakeCore()
+    monkeypatch.setattr(lo_engine,'_load_core',lambda:fake)
+    monkeypatch.setattr(lo_engine,'_load_web_key',lambda:None)
+    lo_engine.chat_once('download https://youtu.be/abc',profile='conservative')
+    assert fake.kwargs['access_profile']=='conservative'

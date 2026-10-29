@@ -10,6 +10,7 @@ import contextlib
 import importlib.machinery
 import importlib.util
 import io
+import json
 import os
 import re
 import shlex
@@ -131,6 +132,21 @@ def available() -> bool:
 def chat_once(prompt: str, *, profile='workspace', workspace=None, selected_paths=None,
               history=None, interface_context=None, persona=None, force_search=False):
     """Run one LO operator turn and return structured machine data."""
+    import ytd
+    download=ytd.explicit_download(prompt) if not selected_paths else None
+    if download and profile in {'workspace','power','unsafe'}:
+        events=EventCollector()
+        events.emit('tool_start',tool='video_download')
+        try:
+            receipt=ytd.request('download',**download)
+            response=ytd.download_summary(receipt)
+            events.emit('tool_done',tool='video_download',result=receipt)
+        except (ValueError,RuntimeError,OSError) as exc:
+            response='Download was not confirmed: '+str(exc)+'. No completed download has been verified. Check the destination node name and download jobs before retrying.'
+            events.emit('tool_done',tool='video_download',status='failed',result=str(exc))
+        events.emit('response',text=response)
+        return {'text':response,'events':events.rows,'returncode':0,'receipts':[],
+                'provenance':{'edge':'FABRIC','source':'download job receipt','confidence':'OBSERVED'}}
     core=_load_core()
     _load_web_key()
     events=EventCollector()
@@ -187,16 +203,31 @@ def chat_once(prompt: str, *, profile='workspace', workspace=None, selected_path
             satisfaction={k:v for k,v in row.items() if k not in {'event','seq'}}
         elif row.get('event')=='error':
             error=str(row.get('error') or row.get('message') or 'LO request failed')
+    download_response=False
+    if not response:
+        # A tool may have queued a durable job even if inference ends without
+        # prose. Preserve the actual receipt instead of inviting duplicate work.
+        for row in reversed(events.rows):
+            if row.get('event')=='tool_done' and row.get('tool')=='video_download' and row.get('result'):
+                result=row['result']
+                try:
+                    response=ytd.download_summary(result if isinstance(result,dict) else json.loads(result))
+                except (ValueError,TypeError):response='Download was not confirmed: '+str(result)
+                download_response=True
+                break
     if int(rc or 0) != 0 and not error:
         error=(err.getvalue() or out.getvalue() or f'LO exited {rc}').strip().splitlines()[-1]
-    if error:
+    if error and not download_response:
         raise RuntimeError(error)
     if not response:
         raise RuntimeError('LO completed without a final response')
+    if download_response:
+        events.emit('response',text=response)
     # Provenance is evidence, not a confidence score. If no deterministic/search
     # receipt backed the turn, callers can truthfully label the prose MODEL rather
     # than accidentally presenting model synthesis as sourced fact.
     provenance = receipts[-1] if receipts else {'edge':'MODEL','source':'model','confidence':'INFERRED'}
+    if download_response:provenance={'edge':'FABRIC','source':'download job receipt','confidence':'OBSERVED'}
     return {'text':response,'events':events.rows,'returncode':int(rc or 0),
             'persona':str(persona or ''),'receipts':receipts,'provenance':provenance,
             'route':route,'goal':goal,'plan':plan,'satisfaction':satisfaction}

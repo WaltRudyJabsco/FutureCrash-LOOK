@@ -259,3 +259,35 @@ def test_unmounted_travel_destination_is_not_created(lk,monkeypatch,tmp_path):
     monkeypatch.setattr('builtins.input',lambda *_:str(missing))
     message=lk._media_keep_offline([source(b'audio')])
     assert 'mount your travel drive first' in message and not missing.exists()
+
+
+def test_catalog_identity_survives_busy_local_daemon(lk,monkeypatch,tmp_path):
+    song=tmp_path/'song.mp3';song.write_bytes(b'audio')
+    monkeypatch.setattr(lk.urllib.request,'urlopen',Mock(side_effect=TimeoutError('busy')))
+    names=lk._media_catalog_local_names({'nodes':[{'node':'media-tower'},{'node':'other'}]})
+    assert 'media-tower' in names and 'other' not in names
+    assert 'media-tower' in lk._media_local_node_names()
+    availability=media_offline.Availability(names)
+    try:
+        row={'node':'media-tower','id':'song','path':str(song)}
+        assert availability.state(row)=='local'
+        availability.poll([row])
+        assert not availability.pending
+    finally:availability.close()
+
+
+def test_expired_offline_probe_keeps_row_dim_until_success(monkeypatch):
+    gate=threading.Event()
+    availability=media_offline.Availability({'local'})
+    row={'node':'remote','id':'song','path':'/remote/song.mp3'}
+    key=availability.key(row)
+    availability.checked[key]=(time.monotonic()-media_offline.RECHECK_SECONDS-1,'offline')
+    monkeypatch.setattr(availability,'_probe',lambda _:gate.wait(2) and 'remote')
+    try:
+        assert availability.state(row)=='offline'
+        availability.poll([row])
+        assert key in availability.pending and availability.state(row)=='offline'
+        gate.set();availability.pending[key].result(timeout=2)
+        availability.poll([])
+        assert availability.state(row)=='remote'
+    finally:gate.set();availability.close()

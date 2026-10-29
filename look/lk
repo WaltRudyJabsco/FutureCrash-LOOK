@@ -12299,7 +12299,7 @@ def ollama_chat(force_search=False, initial_prompt=None, allow_start=True, host_
                         if events:
                             events.emit("source_receipt", **info_receipt)
                     if events:
-                        fields={"result":str(tool_content)} if name=="generate_image" else {}
+                        fields={"result":str(tool_content)} if name in {"generate_image","video_download"} else {}
                         events.emit("tool_done", tool=name, elapsed_tool_ms=int((time.monotonic()-tool_event_started)*1000),**fields)
                     messages.append({
                         "role": "tool",
@@ -16602,9 +16602,26 @@ def _media_status_snapshot():
     }
 
 
+_MEDIA_CATALOG_LOCAL_NAMES=set()
+
+
+def _media_catalog_local_names(catalog_meta):
+    """The unified catalog's first owner is always the requesting local node."""
+    nodes=(catalog_meta or {}).get('nodes') or []
+    if nodes and isinstance(nodes[0],dict) and nodes[0].get('node'):
+        names={str(name).strip().casefold() for name in
+                ('local','localhost','127.0.0.1',platform.node(),socket.gethostname(),nodes[0]['node'])
+                if str(name).strip()}
+        _MEDIA_CATALOG_LOCAL_NAMES.update(names)
+        return names
+    return _media_local_node_names()
+
+
 def _media_local_node_names():
     """Names that unambiguously refer to this machine for media routing."""
     names={"local","localhost","127.0.0.1",platform.node(),socket.gethostname()}
+    if _MEDIA_CATALOG_LOCAL_NAMES:
+        return {str(name).strip().casefold() for name in names if str(name).strip()} | _MEDIA_CATALOG_LOCAL_NAMES
 
     # Catalog ownership uses the Unified Node's advertised Fabric name, which
     # need not equal the operating-system hostname. Ask the local node for its
@@ -18510,7 +18527,7 @@ def _media_selector(rows,title="FABRIC MEDIA",initial_query="",catalog_meta=None
     sort_mode=0;reverse_sort=False
     native_preview=NativePreviewController();native_images=True
     import media_offline
-    availability=media_offline.Availability(_media_local_node_names())
+    availability=media_offline.Availability(_media_catalog_local_names(catalog_meta))
     duration_preview=DurationPreview(_media_entry_source);pane_help=False
     action=("none",None)
     view_key=None; visible=[]
@@ -19841,7 +19858,7 @@ def _media_player_library(initial_query="",media_kind="audio"):
     mode="library"
     library_view=None;pane_help=False
     import media_offline
-    availability=media_offline.Availability(_media_local_node_names())
+    availability=media_offline.Availability(_media_catalog_local_names(catalog_meta))
     duration_preview=DurationPreview(_media_entry_source)
     sort_mode=0;reverse_sort=False
     query=str(initial_query or "")

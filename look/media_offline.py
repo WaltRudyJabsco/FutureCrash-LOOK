@@ -52,7 +52,9 @@ class Availability:
         if self.local(row): return 'local'
         if str(row.get('path', '')).startswith(('http://', 'https://')): return 'stream'
         cached = self.checked.get(self.key(row))
-        return cached[1] if cached and time.monotonic()-cached[0] < RECHECK_SECONDS else 'checking'
+        # Expiration schedules a background check; it must not brighten an
+        # offline row until a successful probe actually changes its state.
+        return cached[1] if cached else 'checking'
 
     def _probe(self, row):
         deadline=time.monotonic()+ROW_PROBE_SECONDS
@@ -78,7 +80,9 @@ class Availability:
                 changed = True
         for row in rows:
             key = self.key(row)
-            if self.state(row) == 'checking' and key not in self.pending and len(self.pending) < 2:
+            cached = self.checked.get(key)
+            due = not cached or time.monotonic()-cached[0] >= RECHECK_SECONDS
+            if self.state(row) not in {'local','stream'} and due and key not in self.pending and len(self.pending) < 2:
                 self.pending[key] = self.pool.submit(self._probe, dict(row))
         return changed
 
