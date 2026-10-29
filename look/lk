@@ -15,6 +15,7 @@ if str(_LOOK_MODULE_DIR) not in sys.path:
 import media_core
 import media_art
 from media_duration import DurationPreview
+from media_ui_work import LatestWork
 import player_visuals
 import terminal_style
 _LIST_COLORS=terminal_style.list_colors()
@@ -16595,7 +16596,7 @@ def _media_entry_label(entry):
     return f"{artist} — {title}" if artist else title
 
 
-def _media_sync_session(session=None):
+def _media_sync_session(session=None, *, persist=True):
     """Reconcile runtime position into LOOK's canonical queue state."""
     session=session or _media_session()
     if not session:
@@ -16614,16 +16615,16 @@ def _media_sync_session(session=None):
         session["position"]=_media_mpv_property("time-pos")
         session["duration"]=_media_mpv_property("duration")
         session["volume"]=_media_mpv_property("volume")
-        return _media_save_session(session)
+        return _media_save_session(session) if persist else session
     if session.get("state") in {"playing","paused","loading"}:
         session["state"]="stopped"
         session.pop("pid",None)
-        return _media_save_session(session)
+        return _media_save_session(session) if persist else session
     return session
 
 
-def _media_status_snapshot():
-    session=_media_sync_session()
+def _media_status_snapshot(*,read_only=False):
+    session=_media_sync_session(persist=False) if read_only else _media_sync_session()
     if not session:
         return None
     queue=session.get("queue") or []
@@ -18062,10 +18063,12 @@ def _media_logical_key(row):
     return "meta:"+"|".join(parts)
 
 
-def _media_collapse(rows, show_all=False, show_hidden=False):
-    rules=_media_visibility(); groups={}
+def _media_collapse(rows, show_all=False, show_hidden=False, *, prepared=False):
+    rules={} if prepared else _media_visibility(); groups={}
     sources=[]
     for row in rows:
+        if prepared:
+            sources.append(row);continue
         locations=row.get('locations') or []
         if locations:
             base={key:value for key,value in row.items() if key not in {'locations','sources','copies'}}
@@ -18076,7 +18079,7 @@ def _media_collapse(rows, show_all=False, show_hidden=False):
         locator=(str(row.get('node') or ''),str(row.get('path') or row.get('id') or ''))
         if locator in seen:continue
         seen.add(locator)
-        r=dict(row); r["hidden"]=_media_is_hidden(r,rules)
+        r=dict(row); r["hidden"]=bool(row.get("hidden")) if prepared else _media_is_hidden(r,rules)
         if r["hidden"] and not show_hidden: continue
         if show_all:
             r["source_count"]=1; r["sources"]=[r]; groups[f"src:{r.get('node')}:{r.get('id')}:{r.get('path')}"]=r; continue
@@ -18095,6 +18098,91 @@ def _media_collapse(rows, show_all=False, show_hidden=False):
         row["source_count"]=len(bucket)
         out.append(row)
     return out
+
+
+class _MediaQueryPlan:
+    """Prepare visibility once; retain pre-collapse matching for Media Find."""
+    def __init__(self,rows,show_hidden=False):
+        self.show_hidden=show_hidden;self.records=[];self.player_cache={};self.find_cache={};self.first_source={}
+        self.location_count=sum(int(row.get("copies") or 1) for row in rows)
+        rules=_media_visibility()
+        # Conflicting duplicate discoveries must retain first-match hiding rules.
+        # Keep hidden records only for those shared locators, not the hidden library.
+        seen=set();duplicates=set()
+        if not show_hidden:
+            for row in rows:
+                for source in ([dict(row,**loc) for loc in row.get('locations') or [] if isinstance(loc,dict)] or [row]):
+                    locator=self.locator(source)
+                    if locator in seen:duplicates.add(locator)
+                    seen.add(locator)
+        for row in rows:
+            locations=row.get('locations') or []
+            base={k:v for k,v in row.items() if k not in {'locations','sources','copies'}}
+            sources=[dict(base,**loc) for loc in locations if isinstance(loc,dict)] if locations else [base]
+            allowed=[]
+            for source in sources:
+                source['hidden']=_media_is_hidden(source,rules)
+                if show_hidden or not source['hidden'] or self.locator(source) in duplicates:allowed.append(source)
+            if allowed:
+                self.records.append((media_core._haystack(row),allowed))
+                for source in allowed:self.first_source.setdefault(self.locator(source),source)
+
+    @staticmethod
+    def matches(hay,terms):
+        return all(term[1:] not in hay if term.startswith('\\') and len(term)>1 else term in hay
+                   for term in terms if term!='\\')
+
+    @staticmethod
+    def locator(row):
+        return str(row.get('node') or ''),str(row.get('path') or row.get('id') or '')
+
+    def find(self,query,show_all=False):
+        if show_all not in self.find_cache:
+            sources=[source for _,group in self.records for source in group]
+            self.find_cache[show_all]=_media_collapse(sources,show_all=show_all,show_hidden=self.show_hidden,prepared=True)
+        terms=str(query or '').casefold().split()
+        if not terms or terms==['\\']:return list(self.find_cache[show_all])
+        selected={};ordinal=0;changed_duplicate=False
+        for hay,group in self.records:
+            if not self.matches(hay,terms):continue
+            for source in group:
+                locator=self.locator(source)
+                if locator not in selected:
+                    selected[locator]=(ordinal,source);ordinal+=1
+                    if source is not self.first_source[locator]:changed_duplicate=True
+        if changed_duplicate:
+            # Conflicting duplicate discoveries retain the original first-match
+            # behavior; ordinary groups reuse already prepared logical rows.
+            return _media_collapse([source for _,source in selected.values()],show_all=show_all,show_hidden=self.show_hidden,prepared=True)
+        out=[]
+        for row in self.find_cache[show_all]:
+            matches=[selected[self.locator(source)] for source in row['sources'] if self.locator(source) in selected]
+            if not matches:continue
+            first=min(index for index,_ in matches)
+            if len(matches)==len(row['sources']):result=row
+            else:result=_media_collapse([source for _,source in matches],show_hidden=self.show_hidden,prepared=True)[0]
+            out.append((first,result))
+        out.sort(key=lambda item:item[0])
+        return [row for _,row in out]
+
+    def player(self,mode,query,kind,sort_mode=0,reverse=False):
+        key=(mode,kind,sort_mode,reverse)
+        if key not in self.player_cache:
+            rows=list((_media_session() or {}).get('queue') or []) if mode=='queue' else self.find('')
+            if kind:
+                types={'audio':{'Audio','Podcast'},'video':{'Movie','TV','Video'}}[kind]
+                rows=[row for row in rows if _media_find_type(row) in types]
+            if mode=='library':rows=_media_find_order(rows,sort_mode,reverse)
+            self.player_cache[key]=[(media_core._haystack(row),row) for row in rows]
+        terms=str(query or '').casefold().split()
+        return [row for hay,row in self.player_cache[key] if self.matches(hay,terms)]
+
+
+def _media_ui_preview(row,width,height,native=True):
+    art=_media_cover_lines(row,width,height,background_remote=True)
+    state,owner=_media_remote_preview_state(row,width,height)
+    image=_media_native_art(row) if native else None
+    return art,state,owner,image
 
 
 def _media_tree_candidates(row, rows):
@@ -18579,19 +18667,21 @@ def _media_selector(rows,title="FABRIC MEDIA",initial_query="",catalog_meta=None
     availability=media_offline.Availability(_media_catalog_local_names(catalog_meta))
     duration_preview=DurationPreview(lambda row:_media_entry_source(row,standard_audio=False));pane_help=False
     action=("none",None)
-    view_key=None; visible=[]
+    view_key=None; visible=[];query_plan=None
+    art_work=LatestWork()
     try:
         tty.setcbreak(fd)
         while True:
             # A 100k-row catalog view changes on query/mode changes, not cursor moves.
             next_view_key=(query,show_all,show_hidden,sort_mode,reverse_sort)
             if next_view_key != view_key:
-                base_rows=_media_filter_rows(rows,query)
-                visible=_media_collapse(base_rows,show_all=show_all,show_hidden=show_hidden)
+                if view_key is None or query_plan is None or query_plan.show_hidden!=show_hidden:
+                    query_plan=_MediaQueryPlan(rows,show_hidden)
+                visible=query_plan.find(query,show_all)
                 visible=_media_find_order(visible,sort_mode,reverse_sort)
                 view_key=next_view_key
             idx=max(0,min(idx,max(0,len(visible)-1)))
-            selected_rows=[row for row in visible if row_id(row) in selected_ids]
+            selected_rows=[row for row in visible if row_id(row) in selected_ids] if selected_ids else []
             terminal=shutil.get_terminal_size((110,32))
             height=max(10,terminal.lines)
             width=max(56,terminal.columns)
@@ -18650,13 +18740,15 @@ def _media_selector(rows,title="FABRIC MEDIA",initial_query="",catalog_meta=None
                     art_w=min(22,max(14,width//5)) if width>=78 else 0
                     detail_w=max(32,width-art_w-4) if art_w else width
                     details=_media_detail_lines(visible[idx],detail_w)[:info_height]
-                    art=_media_cover_lines(visible[idx],art_w,info_height,background_remote=True) if art_w else []
-                    art_state,art_owner=_media_remote_preview_state(visible[idx],art_w,info_height) if art_w else ("local","")
+                    preview_row=visible[idx]
+                    preview_key=(row_id(preview_row),art_w,info_height,native_images)
+                    preview=art_work.get(preview_key,lambda row=dict(preview_row),w=art_w,n=native_images:_media_ui_preview(row,w,11,n),([],"loading","",None)) if art_w else None
+                    art,art_state,art_owner,image=preview or ([],"unavailable","",None)
                     art_pending=bool(art_w and not art and art_state=="loading")
                     status=(f"ART… requesting {art_owner}" if art_state in {"loading","idle"} and art_owner else
                             "ART unavailable" if art_state=="unavailable" else "")
                     if art_w and native_images and native_preview.enabled:
-                        native_art=_media_native_art(visible[idx]);art_geometry=(frame_io.getvalue().count('\n')+1,detail_w+3,info_height,art_w)
+                        native_art=image;art_geometry=(frame_io.getvalue().count('\n')+1,detail_w+3,info_height,art_w)
                     for line_no in range(max(len(details),len(art),1 if status else 0)):
                         left=details[line_no] if line_no<len(details) else ""
                         if art:
@@ -18685,15 +18777,13 @@ def _media_selector(rows,title="FABRIC MEDIA",initial_query="",catalog_meta=None
             # Wake for background artwork/duration results and pane resizes;
             # redraw only when those results or user input actually change the view.
             if native_art and art_geometry:native_preview.request(native_art,*art_geometry)
-            if availability.poll(page) or duration_preview.poll(([visible[idx]] if visible else [])+page):continue
+            if art_work.changed() or availability.poll(page) or duration_preview.poll(([visible[idx]] if visible else [])+page):continue
             while True:
                 key=_read_tty_key(fd,.08 if art_pending else .25)
                 native_preview.paint_ready()
-                if key or art_pending or availability.poll(page) or duration_preview.poll(page):break
+                if key or art_pending or art_work.changed() or availability.poll(page) or duration_preview.poll(page):break
                 if native_images and art_geometry and not native_art and visible:
-                    candidate=_media_remote_cover_path(visible[idx],fetch=False)
-                    if candidate:
-                        native_art=Path(candidate);native_preview.request(native_art,*art_geometry)
+                    art_work.get(preview_key,lambda row=dict(visible[idx]),w=art_w,n=native_images:_media_ui_preview(row,w,11,n),([],"loading","",None))
                 current=shutil.get_terminal_size((110,32))
                 if (max(56,current.columns),max(10,current.lines))!=(width,height):break
             if not key:continue
@@ -18813,6 +18903,7 @@ def _media_selector(rows,title="FABRIC MEDIA",initial_query="",catalog_meta=None
                 query+=key; idx=0
                 continue
     finally:
+        art_work.close()
         availability.close()
         duration_preview.close()
         native_preview.invalidate()
@@ -19917,7 +20008,8 @@ def _media_player_library(initial_query="",media_kind="audio"):
     selected_ids=set()
     notice=""
     view_key=None
-    visible=[]
+    visible=[];query_plan=None
+    art_work=LatestWork();transport_work=LatestWork()
     # Search state must exist before the first frame is rendered.  The initial
     # frame reads this flag before any key event has had a chance to create it.
     search_mode=False
@@ -19951,8 +20043,8 @@ def _media_player_library(initial_query="",media_kind="audio"):
             if dirty:
                 next_key=(mode,query,sort_mode,reverse_sort)
                 if next_key != view_key:
-                    visible=_media_mp_rows(mode,library_rows,query,media_kind)
-                    if mode=="library":visible=_media_find_order(visible,sort_mode,reverse_sort)
+                    if view_key is None or query_plan is None:query_plan=_MediaQueryPlan(library_rows)
+                    visible=query_plan.player(mode,query,media_kind,sort_mode,reverse_sort)
                     view_key=next_key
                     idx=max(0,min(idx,max(0,len(visible)-1)))
                 terminal=shutil.get_terminal_size((120,34))
@@ -19968,20 +20060,21 @@ def _media_player_library(initial_query="",media_kind="audio"):
                 top=max(0,min(max(0,len(visible)-list_rows),idx-list_rows+1))
                 page=visible[top:top+list_rows]
                 chosen=visible[idx] if visible else None
-                selected=[row for row in visible if row_id(row) in selected_ids]
+                selected=[row for row in visible if row_id(row) in selected_ids] if selected_ids else []
 
                 info_h=list_rows
                 art=[]; art_status=""; native_art=None
                 if chosen and right_w:
                     art_h=min(11,max(1,info_h//2))
-                    art=_media_cover_lines(chosen,right_w,art_h,background_remote=True)
+                    preview_key=(row_id(chosen),right_w,art_h,native_images)
+                    preview=art_work.get(preview_key,lambda row=dict(chosen),w=right_w,h=art_h,n=native_images:_media_ui_preview(row,w,h,n),([],"loading","",None))
+                    art,state,owner,image=preview or ([],"unavailable","",None)
 
                     # NativePreviewController requires a real local image. Resolve
                     # local media artwork immediately; for remote rows use only an
                     # already-cached cover here so cursor movement never waits on
                     # Fabric/network I/O.
-                    if native_images and native_preview.enabled:native_art=_media_native_art(chosen)
-                    state,owner=_media_remote_preview_state(chosen,right_w,art_h)
+                    if native_images and native_preview.enabled:native_art=image
                     if not art and state in {"loading","idle"}:
                         art_status=f"ART… requesting {owner}" if owner else "ART… loading"
                     elif not art and state=="unavailable":
@@ -20028,7 +20121,7 @@ def _media_player_library(initial_query="",media_kind="audio"):
                     else:
                         empty="No matching "+medium+" items · Esc clears search" if query else "No "+medium+" items here · lk media import or lk media find"
                         print(_ansi_clip(_c(empty,'33'),width))
-                    playback=_media_status_snapshot()
+                    playback=transport_work.get('transport',lambda:_media_status_snapshot(read_only=True),ttl=.8)
                     for line in _media_mp_transport_lines(playback,width):print(line)
                     transport_row=list_rows+7;transport_width=width
                     if search_mode:
@@ -20057,21 +20150,20 @@ def _media_player_library(initial_query="",media_kind="audio"):
             now=time.monotonic()
             if now>=next_transport_poll and transport_row:
                 next_transport_poll=now+.8
-                playback=_media_status_snapshot();lines=_media_mp_transport_lines(playback,transport_width)
+                playback=transport_work.get('transport',lambda:_media_status_snapshot(read_only=True),ttl=.8);lines=_media_mp_transport_lines(playback,transport_width)
                 signature=tuple(lines)
                 if signature!=transport_signature:
                     transport_signature=signature
                     payload='\x1b7'+''.join(f'\x1b[{transport_row+i};1H\x1b[2K'+line for i,line in enumerate(lines))+'\x1b8'
                     sys.stdout.write(payload);sys.stdout.flush()
-            if availability.poll(page) or duration_preview.poll(([chosen] if chosen else [])+page):dirty=True
+            if art_work.changed() or availability.poll(page) or duration_preview.poll(([chosen] if chosen else [])+page):dirty=True
             key=_read_tty_key(fd,.10 if pending else .25)
             native_preview.paint_ready()
             if not key:
                 # Remote artwork may become available while idle. Keep checking
                 # only while that asynchronous request is genuinely pending.
                 if native_images and native_preview.enabled and chosen and right_w and not native_art:
-                    candidate=_media_remote_cover_path(chosen,fetch=False)
-                    if candidate:dirty=True
+                    art_work.get(preview_key,lambda row=dict(chosen),w=right_w,h=art_h,n=native_images:_media_ui_preview(row,w,h,n),([],"loading","",None))
                 if pending or (art_retry_at is not None and time.monotonic()>=art_retry_at):
                     dirty=True
                 continue
@@ -20087,10 +20179,10 @@ def _media_player_library(initial_query="",media_kind="audio"):
                 if key in {"\r","\n"}:
                     search_mode=False; continue
                 if key in {"\x7f","\b"}:
-                    if query: query=query[:-1]; idx=0; view_key=None
+                    if query: query=query[:-1]; idx=0
                     continue
                 if len(key)==1 and key.isprintable() and key not in "ABCDLQJKERMFG"+"W"+("OT" if media_kind=="video" else "O"):
-                    query+=key; idx=0; view_key=None
+                    query+=key; idx=0
                     continue
                 # Arrow/Tab/action keys leave editing and operate on this view.
                 search_mode=False
@@ -20098,7 +20190,7 @@ def _media_player_library(initial_query="",media_kind="audio"):
                 if mode=="queue":
                     mode="library";query,idx,selected_ids=library_view or ("",0,set());view_key=None;continue
                 if query:
-                    query=""; idx=0; view_key=None; continue
+                    query=""; idx=0; continue
                 return 0
             if key=="W":
                 native_preview.invalidate()
@@ -20201,6 +20293,7 @@ def _media_player_library(initial_query="",media_kind="audio"):
     except KeyboardInterrupt:
         return 0
     finally:
+        art_work.close();transport_work.close()
         availability.close()
         duration_preview.close()
         native_preview.invalidate()

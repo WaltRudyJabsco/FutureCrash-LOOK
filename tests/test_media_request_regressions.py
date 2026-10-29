@@ -581,10 +581,13 @@ def test_remote_app_copy_rejects_truncation(lk,monkeypatch,tmp_path):
     assert not list(tmp_path.rglob('*.m4v')) and not list(tmp_path.rglob('.copy-*'))
 
 
-def test_mp_sort_actions_preserve_queue_order():
+def test_mp_sort_actions_preserve_queue_order(lk,monkeypatch):
     source=(ROOT/'look/lk').read_text().split('def media_mp(initial_query=""):',1)[1]
     assert 'next_key=(mode,query,sort_mode,reverse_sort)' in source
-    assert 'if mode=="library":visible=_media_find_order' in source
+    rows=[{'id':'second','node':'local','path':'/z.mp3','title':'z'}, {'id':'first','node':'local','path':'/a.mp3','title':'a'}]
+    monkeypatch.setattr(lk,'_media_session',lambda:{'queue':rows})
+    plan=lk._MediaQueryPlan([])
+    assert [r['id'] for r in plan.player('queue','','audio',1,True)]==['second','first']
     assert 'key not in "ABCDLQJKERMFG"' in source
     assert 'Queue order follows playback' in source
 
