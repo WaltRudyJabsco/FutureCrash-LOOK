@@ -506,8 +506,8 @@ def _chafa_render(path:Path, width:int, height:int)->list[str]:
         return []
     try:
         proc=subprocess.run(
-            [chafa,'--format=symbols','--size',f'{max(8,width)}x{max(2,height)}',str(path)],
-            capture_output=True,text=True,timeout=3
+            [chafa,'--format=symbols','--probe=off','--polite=on','--animate=off','--size',f'{max(8,width)}x{max(2,height)}',str(path)],
+            stdin=subprocess.DEVNULL,start_new_session=True,capture_output=True,text=True,timeout=3
         )
         if proc.returncode==0 and proc.stdout.strip():
             return proc.stdout.rstrip('\n').splitlines()[:height]
@@ -599,7 +599,7 @@ class NativePreviewController:
                     ql=shutil.which('qlmanage')
                     if not ql: return None
                     with tempfile.TemporaryDirectory(prefix='look-native-pdf-') as td:
-                        proc=subprocess.run([ql,'-t','-s',str(pixel_edge),'-o',td,str(path)],stdout=subprocess.DEVNULL,stderr=subprocess.DEVNULL,timeout=8)
+                        proc=subprocess.run([ql,'-t','-s',str(pixel_edge),'-o',td,str(path)],stdin=subprocess.DEVNULL,start_new_session=True,stdout=subprocess.DEVNULL,stderr=subprocess.DEVNULL,timeout=8)
                         candidates=list(Path(td).glob('*.png'))
                         if proc.returncode or not candidates: return None
                         shutil.copy2(candidates[0],temp)
@@ -607,7 +607,7 @@ class NativePreviewController:
                     pdftoppm=shutil.which('pdftoppm')
                     if not pdftoppm: return None
                     base=temp.with_suffix('')
-                    proc=subprocess.run([pdftoppm,'-f','1','-singlefile','-scale-to',str(pixel_edge),'-png',str(path),str(base)],stdout=subprocess.DEVNULL,stderr=subprocess.DEVNULL,timeout=8)
+                    proc=subprocess.run([pdftoppm,'-f','1','-singlefile','-scale-to',str(pixel_edge),'-png',str(path),str(base)],stdin=subprocess.DEVNULL,start_new_session=True,stdout=subprocess.DEVNULL,stderr=subprocess.DEVNULL,timeout=8)
                     made=Path(str(base)+'.png')
                     if proc.returncode or not made.exists(): return None
                     made.replace(temp)
@@ -617,7 +617,7 @@ class NativePreviewController:
                 if sys.platform=='darwin':
                     sips=shutil.which('sips')
                     if not sips: return None
-                    proc=subprocess.run([sips,'-s','format','png','-Z',str(pixel_edge),str(path),'--out',str(temp)],stdout=subprocess.DEVNULL,stderr=subprocess.DEVNULL,timeout=8)
+                    proc=subprocess.run([sips,'-s','format','png','-Z',str(pixel_edge),str(path),'--out',str(temp)],stdin=subprocess.DEVNULL,start_new_session=True,stdout=subprocess.DEVNULL,stderr=subprocess.DEVNULL,timeout=8)
                 else:
                     convert=shutil.which('magick') or shutil.which('convert')
                     if not convert: return None
@@ -625,7 +625,7 @@ class NativePreviewController:
                     # command. `magick convert ...` is legacy/installation-sensitive
                     # and was silently dropping JPEG native previews on Linux.
                     cmd=[convert,str(path)+'[0]','-thumbnail',f'{pixel_edge}x{pixel_edge}>',str(temp)]
-                    proc=subprocess.run(cmd,stdout=subprocess.DEVNULL,stderr=subprocess.DEVNULL,timeout=8)
+                    proc=subprocess.run(cmd,stdin=subprocess.DEVNULL,start_new_session=True,stdout=subprocess.DEVNULL,stderr=subprocess.DEVNULL,timeout=8)
                 if proc.returncode or not temp.exists(): return None
             temp.replace(out); return out
         except (OSError,subprocess.SubprocessError):

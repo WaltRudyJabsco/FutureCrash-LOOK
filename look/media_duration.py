@@ -49,7 +49,7 @@ class DurationPreview:
         source=self.resolve(row)
         result=subprocess.run([self.ffprobe,'-v','error','-analyzeduration','0','-probesize','65536',
             '-show_entries','format=duration','-of','default=noprint_wrappers=1:nokey=1',str(source)],
-            capture_output=True,text=True,timeout=PROBE_TIMEOUT_SECONDS,check=True)
+            stdin=subprocess.DEVNULL,start_new_session=True,capture_output=True,text=True,timeout=PROBE_TIMEOUT_SECONDS,check=True)
         return seconds(result.stdout.strip())
 
     def submit(self,row):

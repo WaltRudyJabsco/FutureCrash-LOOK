@@ -9,7 +9,7 @@ LK=(ROOT/'look/lk').read_text()
 
 def test_owner_exposes_source_local_terminal_preview_route():
     assert 'def _local_media_terminal_preview(entry_id, path_hint="", width=22, height=11):' in NODE
-    assert '[chafa,"--format=symbols","--colors","full","--color-space","rgb","--size",f"{width}x{height}",str(art)]' in NODE
+    assert '[chafa,"--format=symbols","--probe=off","--polite=on","--animate=off","--colors","full","--color-space","rgb","--size",f"{width}x{height}",str(art)]' in NODE
     assert 'def _serve_media_terminal_preview(self,target,entry_id,path_hint="",width=22,height=11):' in NODE
     assert 'base+"/v1/preview/terminal?"' in NODE
     get_block=NODE[NODE.index('    def do_GET(self):'):]

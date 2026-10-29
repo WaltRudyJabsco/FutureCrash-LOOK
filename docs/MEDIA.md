@@ -511,3 +511,9 @@ spaces. Arrows can move through results without ending text entry. Enter or
 Escape returns to browsing, where the normal letter shortcuts remain available.
 Unknown terminal replies and keyboard key-release packets are ignored rather
 than interpreted as Escape. Enhanced CSI-u text keys are decoded as text.
+
+Artwork and duration helper processes are detached from the interactive terminal:
+their stdin is closed and they have no controlling TTY. Chafa runs with terminal
+probing disabled, polite output and animation disabled. Native image placement
+still happens on the UI thread. Completing a cover render must never read user
+keystrokes or restore a different terminal input mode while search is active.

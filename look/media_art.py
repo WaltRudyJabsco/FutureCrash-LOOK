@@ -35,14 +35,14 @@ def video_frame(path,ffmpeg=None,ffprobe=None,timeout=3.0):
     duration=None
     if ffprobe:
         try:
-            probe=subprocess.run([ffprobe,'-v','error','-show_entries','format=duration','-of','default=noprint_wrappers=1:nokey=1',str(path)],capture_output=True,text=True,timeout=2,check=True)
+            probe=subprocess.run([ffprobe,'-v','error','-show_entries','format=duration','-of','default=noprint_wrappers=1:nokey=1',str(path)],stdin=subprocess.DEVNULL,start_new_session=True,capture_output=True,text=True,timeout=2,check=True)
             duration=probe.stdout.strip()
         except (OSError,subprocess.SubprocessError):pass
     folder.mkdir(parents=True,exist_ok=True);tmp=folder/f'.{token}.{os.getpid()}.{time.time_ns()}.jpg'
     try:
         for second in (video_preview_second(duration),0):
             command=[ffmpeg,'-nostdin','-loglevel','error','-ss',str(second),'-i',str(path),'-map','0:v:0','-frames:v','1','-q:v','3','-y',str(tmp)]
-            proc=subprocess.run(command,stdout=subprocess.DEVNULL,stderr=subprocess.DEVNULL,timeout=timeout)
+            proc=subprocess.run(command,stdin=subprocess.DEVNULL,start_new_session=True,stdout=subprocess.DEVNULL,stderr=subprocess.DEVNULL,timeout=timeout)
             if proc.returncode==0 and tmp.is_file() and tmp.stat().st_size:
                 tmp.replace(out);return out
     except (OSError,subprocess.SubprocessError):pass
@@ -91,7 +91,7 @@ def _embedded(path:Path,timeout:float=2.5)->Path|None:
     tmp=out.parent/f'.{token}.{os.getpid()}.jpg'
     try:
         proc=subprocess.run([ffmpeg,'-nostdin','-loglevel','error','-i',str(path),'-map','0:v:0','-frames:v','1','-q:v','3','-y',str(tmp)],
-                            stdout=subprocess.DEVNULL,stderr=subprocess.DEVNULL,timeout=timeout)
+                            stdin=subprocess.DEVNULL,start_new_session=True,stdout=subprocess.DEVNULL,stderr=subprocess.DEVNULL,timeout=timeout)
         if proc.returncode==0 and tmp.exists() and tmp.stat().st_size>0:
             tmp.replace(out); return out
     except (OSError,subprocess.SubprocessError):
@@ -161,10 +161,11 @@ def symbol_lines(pathlike:str|Path,width:int,height:int)->list[str]:
     if not art or width<12 or height<3: return []
     if not chafa: return _ascii_via_ffmpeg(art,width,height)
     try:
-        proc=subprocess.run([chafa,'--format=symbols','--colors','full','--color-space','rgb','--size',f'{width}x{height}',str(art)],capture_output=True,text=True,timeout=.4)
+        # A background renderer must never probe, read or reconfigure the TUI's tty.
+        proc=subprocess.run([chafa,'--format=symbols','--probe=off','--polite=on','--animate=off','--colors','full','--color-space','rgb','--size',f'{width}x{height}',str(art)],stdin=subprocess.DEVNULL,start_new_session=True,capture_output=True,text=True,timeout=.4)
         if proc.returncode==0: return proc.stdout.rstrip('\n').splitlines()[:height]
     except (OSError,subprocess.SubprocessError): pass
-    return []
+    return _ascii_via_ffmpeg(art,width,height)
 
 
 def _ascii_via_ffmpeg(art:Path,width:int,height:int)->list[str]:
@@ -180,7 +181,7 @@ def _ascii_via_ffmpeg(art:Path,width:int,height:int)->list[str]:
         proc=subprocess.run([ffmpeg,'-nostdin','-loglevel','error','-i',str(art),
                              '-vf',f'scale={width}:{sample_h*2}:force_original_aspect_ratio=decrease,pad={width}:{sample_h*2}:(ow-iw)/2:(oh-ih)/2,scale={width}:{sample_h}',
                              '-f','rawvideo','-pix_fmt','gray','-'],
-                            capture_output=True,timeout=1.0)
+                            stdin=subprocess.DEVNULL,start_new_session=True,capture_output=True,timeout=1.0)
         if proc.returncode!=0 or not proc.stdout: return []
         raw=proc.stdout; pixels=len(raw)
         # ffmpeg may preserve a smaller dimension; infer a conservative row width.
