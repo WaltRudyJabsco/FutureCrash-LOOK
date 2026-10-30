@@ -782,3 +782,45 @@ def test_prepare_resolver_reuses_one_catalog_snapshot(lk,monkeypatch,exact):
     result,_=lk._media_resolve_targets(['Ninja Scroll','--kind','video']+(['--exact'] if exact else []))
     assert result[0]['id']=='movie'
     catalog_read.assert_called_once()
+
+
+def song(artist, title, index=0):
+    return {'id': str(index), 'path': f'/music/{index}.mp3', 'artist': artist,
+            'title': title, 'media_type': 'audio/mpeg'}
+
+
+@pytest.mark.parametrize('apostrophe', ["'", '’'])
+def test_counted_artist_and_song_uses_exact_catalog_evidence(lk, monkeypatch, apostrophe):
+    title=f"Please Don{apostrophe}t Make Me Cry"
+    rows=[song('UB40', 'Red Red Wine'), song('UB40', "Please Don't Make Me Cry", 1)]
+    monkeypatch.setattr(lk, '_media_catalog_entries', lambda: (rows, {}))
+    intent=intent_normalizer.normalize(f'Play some UB40, {title}')
+    selected,_=lk._media_resolve_targets(['--artist', intent['artist'], '--kind', intent['kind'],
+                                         '--selection', intent['selection'], '--limit', str(intent['limit'])])
+    assert len(selected)==1 and selected[0]['title']=="Please Don't Make Me Cry"
+
+
+def test_compound_artist_selector_preserves_real_comma_artist(lk):
+    rows=[song('Earth, Wind & Fire', 'September'), song('Earth', 'Wind & Fire', 1)]
+    selected=lk.media_core.select_entries({'entries': rows}, artist='Earth, Wind & Fire', limit=8)
+    assert [r['title'] for r in selected]==['September']
+    rows=[song('Earth, Wind & Fire', 'September, Again')]
+    assert len(lk.media_core.select_entries({'entries': rows}, artist='Earth, Wind & Fire, September, Again'))==1
+
+
+def test_compound_selector_refuses_missing_or_ambiguous_song(lk):
+    rows=[song('UB40', 'Red Red Wine')]
+    assert lk.media_core.select_entries({'entries': rows}, artist='UB40, Missing Song')==[]
+    rows=[song('Alpha', 'Beta, Gamma'), song('Alpha, Beta', 'Gamma', 1)]
+    assert lk.media_core.select_entries({'entries': rows}, artist='Alpha, Beta, Gamma')==[]
+
+
+@pytest.mark.parametrize('query', ["UB40, Please Don't Make Me Cry", "Please Don't Make Me Cry by UB40"])
+def test_artist_title_combination_outranks_other_artist_tracks(lk, query):
+    rows=[song('UB40', 'Red Red Wine'), song('UB40', "Please Don't Make Me Cry", 1)]
+    ranked=lk.media_core.rank_entries({'entries': rows}, query)
+    assert ranked[0][0]['title']=="Please Don't Make Me Cry"
+    assert ranked[0][1]==1.0 and ranked[0][1]>ranked[1][1]
+    match,selected=lk._media_query_matches(query,catalog_rows=rows)
+    assert match=='item' and len(selected)==1
+    assert selected[0]['title']=="Please Don't Make Me Cry"

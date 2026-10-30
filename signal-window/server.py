@@ -873,6 +873,18 @@ def _media_control(action, index=None, node=""):
     if cp.returncode: raise RuntimeError((cp.stderr or cp.stdout or f"media {action} failed").strip()[:500])
     return _media_state(node)
 
+def _media_failure_message(error):
+    text=str(error or 'Fabric media route unavailable')
+    for _ in range(2):
+        try:value=json.loads(text)
+        except (ValueError,TypeError):break
+        if not isinstance(value,dict) or not value.get('error'):break
+        text=str(value['error'])
+    if re.search(r'\bno fabric (?:media |audio |video )?match\b',text,re.I):
+        return "I couldn’t find that music or video in the catalog available to this Signal host. Try the song title alone, or use /fabric to check which computers are available."
+    return text
+
+
 def _media_play(query="",node="",prepare=False,intent=None):
     query=" ".join(str(query or "").split()).strip()
     operation="prepare" if prepare else "play"
@@ -885,7 +897,7 @@ def _media_play(query="",node="",prepare=False,intent=None):
         raise ValueError("media play query or selector required")
     value=_node_call("/v1/media/route",payload,timeout=MEDIA_ROUTE_REQUEST_TIMEOUT_SECONDS)
     if not isinstance(value,dict): raise RuntimeError("Fabric media route unavailable")
-    if value.get("error") and not value.get("ok"): raise RuntimeError(str(value.get("error")))
+    if value.get("error") and not value.get("ok"): raise RuntimeError(_media_failure_message(value.get("error")))
     return value
 
 def _media_move(source,target,index=None):
@@ -1381,7 +1393,9 @@ class App(BaseHTTPRequestHandler):
                 queue=state.get("queue") or []
                 if queue:
                     first=queue[0] or {}
-                    if normalized.get("artist") and first.get("artist"):
+                    if len(queue)==1 and first.get('title'):
+                        label=str(first['title'])+(' — '+str(first['artist']) if first.get('artist') else '')
+                    elif normalized.get("artist") and first.get("artist"):
                         label=str(first.get("artist"))
                     elif normalized.get("kind")=="video" and first.get("title"):
                         label=str(first.get("title"))

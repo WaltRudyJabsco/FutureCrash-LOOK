@@ -1,3 +1,11 @@
+## 8.17.0 — Consolidated Fabric release (LOOK 4.64.0)
+
+- Include both media UI helper modules in fresh installations.
+- Align current version labels, installers, HTTP clients and generated reference pages; preserve historical release notes.
+- Resolve “some Artist, Song Title” using exact catalog evidence and rank combined artist/title requests above partial artist matches.
+- Explain Signal media lookup failures in plain language with browser-accessible next steps instead of nested JSON and terminal-only commands.
+- Consolidate the intervening media, notebook, browser and offline work in a numbered release; see `docs/RELEASE_8.17.0.md`.
+
 ## Restore audio-CD album lookup
 
 - Restore the valid MusicBrainz disc-ID include parameters; the extra discids option caused HTTP 400 and suppressed otherwise-correct album matches.
