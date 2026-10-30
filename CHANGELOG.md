@@ -1,3 +1,10 @@
+## 8.17.1 — Catalog refresh and stable native previews (LOOK 4.64.1)
+
+- Serve the last Fabric snapshot immediately while one background refresh checks peers, preventing repeated three-second terminal timeouts from hiding remote media.
+- Publish opaque node catalog revisions covering metadata and curation changes; reuse unchanged peer catalogs and fall back to full transfer for older nodes.
+- Recheck refreshing terminal snapshots promptly and preserve manual refresh.
+- Reuse the latest prepared native image across text redraws, painting it before the next keyboard wait; obsolete results cannot paint another selection.
+
 ## 8.17.0 — Consolidated Fabric release (LOOK 4.64.0)
 
 - Include both media UI helper modules in fresh installations.

@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Future Crash + LOOK Unified Node 8.17.0.
+"""Future Crash + LOOK Unified Node 8.17.1.
 
 A small distributed supervisor for trusted personal machines. Immediate events stay
 asynchronous; a one-second fabric pulse reconciles presence, leases and stale work.
@@ -155,7 +155,7 @@ def _file_peer_json(peer,path):
     return _file_race(peer,path)[1]
 
 
-VERSION = "8.17.0"
+VERSION = "8.17.1"
 RELEASE_NAME = "FABRIC VISION"
 DEFAULT_HOST = "127.0.0.1"
 DEFAULT_PORT = 7332
@@ -2657,7 +2657,7 @@ def _local_web_search(query, limit=8):
     base=os.environ.get("FCL_SEARXNG_URL","http://127.0.0.1:8888").rstrip("/")
     request=urllib.request.Request(base+"/search?"+params,headers={
         "Accept":"application/json",
-        "User-Agent":"Future-Crash-Fabric/8.17.0",
+        "User-Agent":"Future-Crash-Fabric/8.17.1",
     })
     try:
         with urllib.request.urlopen(request,timeout=8) as response:
@@ -2786,18 +2786,30 @@ def _local_media_visibility(payload):
     return {"ok": True, "rules": rules, "node": identity()["name"]}
 
 
+def _local_media_catalog_stamp():
+    stamp=[identity()['name']]
+    for path in (LOOK_MEDIA_LIBRARY, LOOK_MEDIA_LIBRARY.parent/'media_owner_visibility.json'):
+        try:
+            stat=path.stat();stamp.append((str(path),stat.st_mtime_ns,stat.st_size))
+        except OSError:stamp.append((str(path),None))
+    return stamp
+
+
+def _local_media_catalog_revision():
+    # An opaque equality token, not an item ID or a globally ordered counter.
+    return hashlib.sha256(json.dumps(_local_media_catalog_stamp()).encode()).hexdigest()
+
+
 def _local_media_catalog():
     """Concurrent readers share one recent publication; catalog edits invalidate it."""
     with LOCAL_MEDIA_CATALOG_LOCK:
-        stamp=[identity()['name']]
-        for path in (LOOK_MEDIA_LIBRARY, LOOK_MEDIA_LIBRARY.parent/'media_owner_visibility.json'):
-            try:
-                stat=path.stat();stamp.append((str(path),stat.st_mtime_ns,stat.st_size))
-            except OSError:stamp.append((str(path),None))
+        stamp=_local_media_catalog_stamp()
         cached=LOCAL_MEDIA_CATALOG_CACHE
         if cached['data'] is not None and cached['stamp']==stamp and now()-cached['at']<LOCAL_MEDIA_CATALOG_TTL_SECONDS:
             return cached['data']
         result=_build_local_media_catalog()
+        if stamp==_local_media_catalog_stamp():
+            result=dict(result,revision=hashlib.sha256(json.dumps(stamp).encode()).hexdigest())
         cached.update(at=now(),data=result,stamp=stamp)
         return result
 
@@ -2988,6 +3000,11 @@ MEDIA_PEER_REFRESH_LOCK = threading.Lock()
 MEDIA_CATALOG_ROUTE_LOCK = threading.Lock()
 MEDIA_CATALOG_ROUTES = {}
 MEDIA_CATALOG_ROUTE_TTL_SECONDS = 90.0
+MEDIA_CATALOG_FRESH_SECONDS = 3.0
+MEDIA_CATALOG_BUILD_LOCK = threading.Lock()
+MEDIA_PEER_CATALOGS = {}
+MEDIA_REVISION_TIMEOUT_SECONDS = 2.0
+MEDIA_REVISION_BUDGET_SECONDS = 3.0
 
 
 def _refresh_media_peers_background():
@@ -3004,6 +3021,31 @@ def _refresh_media_peers_background():
 
 
 def _fabric_media_catalog(force=False):
+    """Serve the last complete snapshot while one worker refreshes remote peers."""
+    try: stamp=int(LOOK_MEDIA_LIBRARY.stat().st_mtime_ns)
+    except OSError: stamp=-1
+    with MEDIA_CATALOG_LOCK:
+        cached=MEDIA_CATALOG_CACHE.get('data')
+        age=now()-float(MEDIA_CATALOG_CACHE.get('at') or 0.0)
+        same_local=int(MEDIA_CATALOG_CACHE.get('local_mtime_ns') or -1)==stamp
+    if cached is not None and same_local and not force:
+        if age<MEDIA_CATALOG_FRESH_SECONDS:return cached
+        # A slow remote catalog must not repeatedly exceed the terminal loader's
+        # deadline and erase remote results in favour of a local-only fallback.
+        if MEDIA_CATALOG_BUILD_LOCK.acquire(blocking=False):
+            def refresh():
+                try:_build_fabric_media_catalog(force=True)
+                finally:MEDIA_CATALOG_BUILD_LOCK.release()
+            try:threading.Thread(target=refresh,name='media-catalog-refresh',daemon=True).start()
+            except Exception:
+                MEDIA_CATALOG_BUILD_LOCK.release()
+                raise
+        return dict(cached,refreshing=True)
+    with MEDIA_CATALOG_BUILD_LOCK:
+        return _build_fabric_media_catalog(force=force)
+
+
+def _build_fabric_media_catalog(force=False):
     """Union media discoveries from currently reachable trusted Fabric nodes."""
     try:
         local_mtime_ns = int(LOOK_MEDIA_LIBRARY.stat().st_mtime_ns)
@@ -3013,7 +3055,7 @@ def _fabric_media_catalog(force=False):
         cached = MEDIA_CATALOG_CACHE.get("data")
         age = now() - float(MEDIA_CATALOG_CACHE.get("at") or 0.0)
         same_local = int(MEDIA_CATALOG_CACHE.get("local_mtime_ns") or -1) == local_mtime_ns
-        if cached is not None and not force and age < 3.0 and same_local:
+        if cached is not None and not force and age < MEDIA_CATALOG_FRESH_SECONDS and same_local:
             return cached
 
     # A catalog request is an explicit user action: refresh discovery now instead
@@ -3058,13 +3100,24 @@ def _fabric_media_catalog(force=False):
     def fetch_peer_media_catalog(item):
         name, peer = item
         try:
-            remote = _peer_json(
-                peer,
-                "/v1/media/catalog",
-                timeout=MEDIA_CATALOG_PEER_TIMEOUT,
-                total_timeout=MEDIA_CATALOG_ROUTE_BUDGET,
-            )
-            remote_rows = [
+            previous=MEDIA_PEER_CATALOGS.get(name)
+            revision=None
+            if previous:
+                try:
+                    revision=_peer_json(peer,'/v1/media/catalog/revision',
+                        timeout=MEDIA_REVISION_TIMEOUT_SECONDS,total_timeout=MEDIA_REVISION_BUDGET_SECONDS).get('revision')
+                except Exception:pass  # Older nodes still support full catalog refresh.
+            unchanged=bool(revision and revision==previous.get('revision'))
+            if unchanged:
+                remote=previous
+            else:
+                remote = _peer_json(
+                    peer,
+                    "/v1/media/catalog",
+                    timeout=MEDIA_CATALOG_PEER_TIMEOUT,
+                    total_timeout=MEDIA_CATALOG_ROUTE_BUDGET,
+                )
+            remote_rows = remote['entries'] if unchanged else [
                 dict(row)
                 for row in (remote.get("entries") or [])
                 if isinstance(row, dict)
@@ -3074,6 +3127,9 @@ def _fabric_media_catalog(force=False):
             # mutable Tailscale hostname returned by the remote machine.
             for row in remote_rows:
                 row["node"] = name
+            # Share immutable published rows with the aggregate snapshot rather
+            # than retaining a second raw copy of every remote library.
+            MEDIA_PEER_CATALOGS[name]={'revision':remote.get('revision'),'entries':remote_rows}
 
             return {
                 "name": name,
@@ -4635,6 +4691,8 @@ class API(BaseHTTPRequestHandler):
             return self._serve_vision_screen(target,previous_hash,max_width,quality,display)
         if path == "/v1/media/catalog":
             return self.sendj(200, _local_media_catalog())
+        if path == "/v1/media/catalog/revision":
+            return self.sendj(200, {"node":identity()["name"],"revision":_local_media_catalog_revision()})
         if path == "/v1/media/fabric":
             return self.sendj(200, _fabric_media_catalog())
         if path == "/v1/media/item":

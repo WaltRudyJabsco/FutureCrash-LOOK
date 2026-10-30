@@ -527,3 +527,13 @@ random batch. Existing artist names containing commas keep their normal meaning;
 ambiguous or missing combinations are not silently broadened to another song.
 Signal reports missing matches in plain language and offers `/fabric` to inspect
 available computers from the browser. No rescan is needed for a phrasing error.
+
+### Catalog revisions and background refresh
+
+An expired Fabric snapshot remains usable while one background job checks peers.
+Owners provide `/v1/media/catalog/revision`, an opaque equality token covering
+library metadata and owner visibility rules. An unchanged revision reuses that
+owner's catalog; a changed revision fetches it again. This does not replace item
+IDs or imply that cataloged files are currently reachable. Older peers retain
+full-transfer compatibility. Shift-R refreshes an open media desk; a cold startup
+may show local-only results while the first Fabric snapshot is being built.
