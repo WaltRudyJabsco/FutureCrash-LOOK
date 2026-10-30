@@ -120,6 +120,11 @@ def test_books_api_catalog_range_and_unknown_id(tmp_path,monkeypatch):
     try:
         with urllib.request.urlopen(base+'/v1/books') as response:value=json.load(response)
         assert value['entries'][0]['title']=='A Book' and value['entries'][0]['node']=='owner'
+        for payload in ({'action':'scan'},{'action':'update','id':row['id'],'fields':{'status':'Reading','title':'Edited title'}}):
+            request=urllib.request.Request(base+'/v1/books',data=json.dumps(payload).encode())
+            with urllib.request.urlopen(request) as response:assert json.load(response)['ok']
+        assert shelf.catalog()['entries'][0]['title']=='Edited title'
+        assert Path(row['path']).read_bytes()==(tmp_path/'seed.epub').read_bytes()
         request=urllib.request.Request(base+'/v1/books/item?id='+row['id'],headers={'Range':'bytes=0-3'})
         with urllib.request.urlopen(request) as response:
             assert response.status==206 and response.read()==b'PK\x03\x04'

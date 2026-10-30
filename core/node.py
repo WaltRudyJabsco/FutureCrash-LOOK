@@ -4829,9 +4829,9 @@ class API(BaseHTTPRequestHandler):
     def do_POST(self):
         path = urlparse(self.path).path
         if not self._authorized_ingress(path): return
-        if path == "/v1/books": return self._books_request(d)
         if path == "/v1/files/copy": return self._files_copy()
         d = self.body()
+        if path == "/v1/books": return self._books_request(d)
         if path == '/v1/media/artwork/settings':
             try:
                 if not isinstance(d,dict) or not isinstance(d.get('enabled'),bool):raise ValueError('enabled must be a boolean')
