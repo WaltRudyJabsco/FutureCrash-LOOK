@@ -517,3 +517,13 @@ their stdin is closed and they have no controlling TTY. Chafa runs with terminal
 probing disabled, polite output and animation disabled. Native image placement
 still happens on the UI thread. Completing a cover render must never read user
 keystrokes or restore a different terminal input mode while search is active.
+
+### Asking for an artist and song
+
+Signal, Albert and LO can resolve a combined request such as “Play some Artist,
+Song Title” against the catalog. An exact artist-and-title match selects that
+song, rather than interpreting the whole phrase as an artist or selecting a
+random batch. Existing artist names containing commas keep their normal meaning;
+ambiguous or missing combinations are not silently broadened to another song.
+Signal reports missing matches in plain language and offers `/fabric` to inspect
+available computers from the browser. No rescan is needed for a phrasing error.

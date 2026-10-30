@@ -324,6 +324,8 @@ def _row_match_surfaces(row: dict[str, Any]) -> list[str]:
         str(row.get("title") or ""), str(row.get("album") or ""),
         str(row.get("artist") or ""), Path(str(row.get("path") or "")).name,
     ]
+    artist=str(row.get('artist') or '').strip();title=str(row.get('title') or '').strip()
+    if artist and title:values.extend((f'{artist} {title}',f'{title} by {artist}'))
     out=[]
     for value in values:
         norm=normalize_match_text(value)
@@ -422,6 +424,18 @@ def select_entries(library: Any, *, kind: str = "", artist: str = "", selection:
         if exact:
             rows = exact
         else:
+            # "some Artist, Song" can arrive as a counted artist selector. Repair
+            # only from exact catalog evidence; real comma-bearing artists win above.
+            compound={}
+            for comma in re.finditer(',',str(artist)):
+                left=normalize_match_text(str(artist)[:comma.start()])
+                right=normalize_match_text(str(artist)[comma.end():])
+                if not left or not right:continue
+                matched=[r for r in rows if _artist_key(normalize_match_text(r.get('artist','')))==_artist_key(left)
+                         and normalize_match_text(r.get('title',''))==right]
+                if matched:compound[(left,right)]=matched
+            if len(compound)==1:
+                return sorted(next(iter(compound.values())),key=entry_sort_key)[:1]
             # Human shorthand is useful only when it identifies exactly one
             # canonical artist. This admits "Stones" -> "The Rolling Stones"
             # and refuses ambiguous fragments rather than guessing.

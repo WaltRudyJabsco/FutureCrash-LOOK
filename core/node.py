@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Future Crash + LOOK Unified Node 8.16.1.
+"""Future Crash + LOOK Unified Node 8.17.0.
 
 A small distributed supervisor for trusted personal machines. Immediate events stay
 asynchronous; a one-second fabric pulse reconciles presence, leases and stale work.
@@ -155,7 +155,7 @@ def _file_peer_json(peer,path):
     return _file_race(peer,path)[1]
 
 
-VERSION = "8.16.1"
+VERSION = "8.17.0"
 RELEASE_NAME = "FABRIC VISION"
 DEFAULT_HOST = "127.0.0.1"
 DEFAULT_PORT = 7332
@@ -2657,7 +2657,7 @@ def _local_web_search(query, limit=8):
     base=os.environ.get("FCL_SEARXNG_URL","http://127.0.0.1:8888").rstrip("/")
     request=urllib.request.Request(base+"/search?"+params,headers={
         "Accept":"application/json",
-        "User-Agent":"Future-Crash-Fabric/8.16.1",
+        "User-Agent":"Future-Crash-Fabric/8.17.0",
     })
     try:
         with urllib.request.urlopen(request,timeout=8) as response:
@@ -3304,7 +3304,12 @@ def _local_media_route(operation, payload):
         raise ValueError("invalid media operation")
     cp = subprocess.run(argv, input=(json.dumps(session) if operation=="adopt" else None), capture_output=True, text=True, timeout=90.0, env={**os.environ, "NO_COLOR": "1"})
     if cp.returncode:
-        raise RuntimeError((cp.stderr or cp.stdout or f"media {operation} failed").strip()[:1000])
+        detail=(cp.stderr or cp.stdout or f"media {operation} failed").strip()[:1000]
+        try:
+            failure=json.loads(detail)
+            if isinstance(failure,dict) and failure.get('error'):detail=str(failure['error'])
+        except (ValueError,TypeError):pass
+        raise RuntimeError(detail)
     if operation == "prepare":
         try:
             prepared=json.loads((cp.stdout or "{}").strip() or "{}")

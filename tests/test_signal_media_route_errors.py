@@ -39,3 +39,30 @@ def test_only_queue_preparation_and_play_get_long_gateway_deadline():
         body=('{"operation":"'+operation+'"}').encode()
         assert ingress._request_timeout('/v1/media/route','POST',body,False)==100
     assert ingress._request_timeout('/v1/media/route','POST',b'{"operation":"control"}',False)==12
+
+
+@pytest.mark.parametrize('depth', [0, 1, 2])
+def test_no_match_error_is_readable_and_actionable_on_phone(signal_server, monkeypatch, depth):
+    import json
+    error="no Fabric media match for UB40, Please Don't Make Me Cry; run lk media find or lk media scan"
+    for _ in range(depth):error=json.dumps({'ok':False,'error':error})
+    monkeypatch.setattr(signal_server, '_node_call', lambda *a, **kw: {'ok':False,'error':error})
+    with pytest.raises(RuntimeError) as caught:
+        signal_server._media_play('missing', prepare=True)
+    message=str(caught.value)
+    assert '/fabric' in message and 'song title alone' in message
+    assert 'lk media scan' not in message and '"ok"' not in message
+
+
+def test_other_media_errors_keep_their_detail(signal_server):
+    assert signal_server._media_failure_message('source drive disconnected')=='source drive disconnected'
+
+
+def test_node_unwraps_failed_cli_receipt(monkeypatch):
+    from core import node
+    from types import SimpleNamespace
+    monkeypatch.setattr(node, '_look_command', lambda: '/test/lk')
+    monkeypatch.setattr(node.subprocess, 'run', lambda *a, **kw: SimpleNamespace(
+        returncode=1, stderr='', stdout='{"ok":false,"error":"no Fabric media match for missing"}'))
+    with pytest.raises(RuntimeError, match='^no Fabric media match for missing$'):
+        node._local_media_route('prepare', {'query':'missing'})

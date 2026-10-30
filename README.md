@@ -1,4 +1,8 @@
-# Future Crash + LOOK 8.16.1 — FABRIC MEDIA
+# Future Crash + LOOK 8.17.0 — FABRIC MEDIA
+
+8.17.0 consolidates the media, notebook, browser and offline improvements into a
+numbered release, including responsive media search and reliable artist-and-song
+requests. LOOK is 4.64.0; see [release notes](docs/RELEASE_8.17.0.md).
 
 Connect a backup drive and open **`lk settings` → Recovery backup**, or run
 `lk fabric backup add`. The guided setup works for a fresh macOS/Linux account;

@@ -37,7 +37,7 @@ try:
 except Exception:
     readline = None
 
-VERSION="4.63.1"
+VERSION="4.64.0"
 
 LOOK_WORDMARK = r"""       ██╗      ██╗  ██╗
        ██║      ██║ ██╔╝
@@ -10076,7 +10076,7 @@ def _direct_searxng_search(query, limit=8):
     params=urllib.parse.urlencode({"q":query,"format":"json"})
     request=urllib.request.Request(base+"/search?"+params,headers={
         "Accept":"application/json",
-        "User-Agent":"Future-Crash-Fabric/8.16.1",
+        "User-Agent":"Future-Crash-Fabric/8.17.0",
     })
     with urllib.request.urlopen(request,timeout=12) as response:
         data=json.load(response)
@@ -16119,6 +16119,10 @@ def _media_query_matches(query,match_mode="fuzzy",catalog_rows=None):
     if not ranked:
         return "none",[]
     fuzzy=[row for row,_score in ranked]
+    # An exact combined artist/title surface is a song request, even when all
+    # weaker candidates happen to belong to that same artist.
+    if ranked[0][1]==1.0:
+        return "item",[ranked[0][0]]
     artists={str(r.get("artist") or "").strip() for r in fuzzy if str(r.get("artist") or "").strip()}
     if len(artists)==1:
         artist=next(iter(artists))
