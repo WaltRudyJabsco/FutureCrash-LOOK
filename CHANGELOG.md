@@ -1,3 +1,11 @@
+## 8.18.0 — Bookshelf (LOOK 4.65.0)
+
+- Add lk books / lk bk over a separate owner-scoped EPUB/PDF catalog, using existing configured books directories, paired Fabric routes, system readers and Notes link conventions.
+- Add copy-based imports, EPUB/PDF metadata, reading states, custom shelves, manual reading-position labels, metadata edits, verified remote cache copies and explicit local offline copies.
+- Add Project Gutenberg OPDS search and reviewed EPUB acquisition, with bounded metadata/downloads and compatibility with its navigation/acquisition feeds.
+- Add Orrery and Phosphor Rain to player visuals and Cycle.
+- Ship new modules, shell completion, generated help/man references and Books documentation.
+
 ## 8.17.1 — Catalog refresh and stable native previews (LOOK 4.64.1)
 
 - Serve the last Fabric snapshot immediately while one background refresh checks peers, preventing repeated three-second terminal timeouts from hiding remote media.

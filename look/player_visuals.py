@@ -4,7 +4,7 @@ import math
 import hashlib
 import json
 
-NAMES = ('Bars', 'Waves', 'Orbit', 'Tunnel', 'Stars', 'Plasma', 'Album Art', 'Black Hole', 'Rooftops', 'Spectrum', 'Moon Jelly', 'Firefly Garden', 'Clockwork Garden', 'Rain on Glass', 'Neon Reef', 'Aurora Loom', 'Paper Lanterns', 'Magnetic Field', 'Comet Trails', 'Cycle')
+NAMES = ('Bars', 'Waves', 'Orbit', 'Tunnel', 'Stars', 'Plasma', 'Album Art', 'Black Hole', 'Rooftops', 'Spectrum', 'Moon Jelly', 'Firefly Garden', 'Clockwork Garden', 'Rain on Glass', 'Neon Reef', 'Aurora Loom', 'Paper Lanterns', 'Magnetic Field', 'Comet Trails', 'Orrery', 'Phosphor Rain', 'Cycle')
 CYCLE_MODE = len(NAMES)
 CYCLE_INTERVAL_SECONDS = 10.0
 
@@ -53,6 +53,10 @@ def frame(mode, width, height, phase, playing=True, seed=0):
             depth=(i*.618034+t*.18)%1
             point((width-1)/2+math.cos(angle)*depth*width*.65,
                   (height-1)/2+math.sin(angle)*depth*height*.65,'.+*'[min(2,int(depth*3))])
+    elif mode==20:
+        return phosphor_rain_frame(width,height,t,seed)
+    elif mode==19:
+        return orrery_frame(width,height,t,seed)
     elif mode==18:
         return comet_trails_frame(width,height,t,seed)
     elif mode==17:
@@ -480,4 +484,46 @@ def comet_trails_frame(width,height,phase,seed=0):
         for age in range(tail,0,-1):
             put(head-age,base+math.sin((head-age)*.035+i)*height*.12,'..:--'[min(4,(tail-age)*5//tail)])
         put(head,base+math.sin(head*.035+i)*height*.12,'*')
+    return [''.join(row) for row in canvas]
+
+
+ORRERY_ORBITS=4
+ORRERY_COLOR='33'
+PHOSPHOR_STREAMS=14
+PHOSPHOR_COLOR='36'
+
+
+def orrery_frame(width,height,phase,seed=0):
+    """An inclined clockwork solar system; small planets cross dotted orbits."""
+    canvas=[[' ']*width for _ in range(height)]
+    def put(x,y,char):
+        x=round(x);y=round(y)
+        if 0<=x<width and 0<=y<height:canvas[y][x]=char
+    cx=(width-1)/2;cy=(height-1)/2
+    for orbit in range(1,ORRERY_ORBITS+1):
+        rx=width*.45*orbit/ORRERY_ORBITS;ry=height*.4*orbit/ORRERY_ORBITS
+        for step in range(max(12,width)):
+            angle=step*math.tau/max(12,width)
+            put(cx+rx*math.cos(angle),cy+ry*math.sin(angle),'.')
+        angle=phase*(1.2/orbit**.8)+seed+orbit
+        put(cx+rx*math.cos(angle),cy+ry*math.sin(angle),'oO*@'[orbit-1])
+    put(cx,cy,'*')
+    return [''.join(row) for row in canvas]
+
+
+def phosphor_rain_frame(width,height,phase,seed=0):
+    """Fine falling phosphor trails land in a pool of expanding ripples."""
+    canvas=[[' ']*width for _ in range(height)]
+    floor=max(1,height-3)
+    def put(x,y,char):
+        x=int(x);y=int(y)
+        if 0<=x<width and 0<=y<height:canvas[y][x]=char
+    for stream in range(PHOSPHOR_STREAMS):
+        x=(stream*37+seed*11)%width
+        age=(phase*(2+stream%3)+stream*3.7)%(floor+5)
+        if age<floor:
+            for tail in range(4):put(x,age-tail,'|:..'[tail])
+        else:
+            radius=int((age-floor)*1.8)
+            for side in (-1,1):put(x+side*radius,floor+(radius%2),'~' if radius%2 else '-')
     return [''.join(row) for row in canvas]
