@@ -37,7 +37,7 @@ try:
 except Exception:
     readline = None
 
-VERSION="4.64.1"
+VERSION="4.65.0"
 
 LOOK_WORDMARK = r"""       ██╗      ██╗  ██╗
        ██║      ██║ ██╔╝
@@ -1661,6 +1661,7 @@ MEDIA
   lk player            tiny live miniplayer over LOOK MediaSession
   lk mp                audio library + queue + player
   lk tv                movies, TV + video player
+  lk books / lk bk     EPUB + PDF shelf; import, reading state and Notes links
   lk transcribe FILE   offline file transcription (optional setup)
   lk dictate           microphone to text; Ctrl-C finishes
   lk albert            open Albert quiet Fabric surface
@@ -10076,7 +10077,7 @@ def _direct_searxng_search(query, limit=8):
     params=urllib.parse.urlencode({"q":query,"format":"json"})
     request=urllib.request.Request(base+"/search?"+params,headers={
         "Accept":"application/json",
-        "User-Agent":"Future-Crash-Fabric/8.17.1",
+        "User-Agent":"Future-Crash-Fabric/8.18.0",
     })
     with urllib.request.urlopen(request,timeout=12) as response:
         data=json.load(response)
@@ -19783,7 +19784,7 @@ def _media_player_full_visual(snap,mode,visual_elapsed=0):
             '←/→ seek · s shuffle · r repeat · O reset audio · x stop · q close']
     art_height=max(1,height-len(header)-len(footer))
     elapsed=visual_elapsed%player_visuals.CYCLE_INTERVAL_SECONDS if cycling else visual_elapsed
-    phase=elapsed if name in {'Black Hole','Rooftops','Spectrum','Moon Jelly','Firefly Garden','Clockwork Garden','Rain on Glass','Neon Reef','Aurora Loom','Paper Lanterns','Magnetic Field','Comet Trails'} else time.monotonic()
+    phase=elapsed if name in {'Black Hole','Rooftops','Spectrum','Moon Jelly','Firefly Garden','Clockwork Garden','Rain on Glass','Neon Reef','Aurora Loom','Paper Lanterns','Magnetic Field','Comet Trails','Orrery','Phosphor Rain'} else time.monotonic()
     art=_media_player_large_art(entry,width,art_height) if album_art else player_visuals.frame(mode,width,art_height,phase,state in {'play','playing'},seed)
     lines=header+art+footer
     color=player_visuals.album_color(snap) if album_art else ("1;32","1;36","1;35","1;34","1;37","1;33")[(mode-1)%6]
@@ -19798,6 +19799,8 @@ def _media_player_full_visual(snap,mode,visual_elapsed=0):
     if name=='Paper Lanterns': color=player_visuals.LANTERN_COLOR
     if name=='Magnetic Field': color=player_visuals.MAGNETIC_COLOR
     if name=='Comet Trails': color=player_visuals.COMET_COLOR
+    if name=='Orrery': color=player_visuals.ORRERY_COLOR
+    if name=='Phosphor Rain': color=player_visuals.PHOSPHOR_COLOR
     shimmer=album_art and state in {'play','playing'} and not any(
         status in line for line in art for status in ('Loading album art','Album art unavailable'))
     rendered=[]
@@ -21079,6 +21082,8 @@ _COMMANDS = [
     ("lk player", "", "media", "Live LOOK miniplayer"),
     ("lk mp", "[QUERY]", "media", "Fabric audio library, queue and player"),
     ("lk tv", "[QUERY]", "media", "Fabric movies, TV and video player"),
+    ("lk bk", "[ARGS]", "media", "Alias for lk books; Fabric EPUB/PDF shelf"),
+    ("lk books", "[shelf|list|scan|import FILE...|search QUERY|fetch URL] [--node NODE] [--json]", "media", "Fabric EPUB/PDF shelf; bk alias, reading state and Notes links"),
     ("lk transcribe", "[FILE|status|setup|configure] [OPTIONS]", "media", "Optional local speech-to-text"),
     ("lk dictate", "[OPTIONS]", "media", "Explicit local microphone dictation"),
     ("lk albert", "[url|qr|ipad]", "fabric", "Open/share Albert browser surface"),
@@ -22448,6 +22453,9 @@ def main():
         return transcription.main(rest,live=cmd=="dictate")
     if cmd=="mp": return media_mp(" ".join(rest))
     if cmd=="tv": return media_tv(" ".join(rest))
+    if cmd in {"books","bk"}:
+        import books
+        return books.main(rest,sys.modules[__name__])
     if cmd=="albert":
         def _albert_tailnet_url():
             ts=shutil.which("tailscale")

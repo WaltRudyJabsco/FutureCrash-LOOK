@@ -1,0 +1,224 @@
+"""Terminal bookshelf and public-book acquisition over the existing Fabric transport."""
+from __future__ import annotations
+import argparse
+import json
+import os
+from pathlib import Path
+import sys
+import tempfile
+import termios
+import tty
+import urllib.parse
+import urllib.request
+
+import book_core
+import fabric_files
+import media_storage
+import terminal_style
+import look_renderer
+from notebook_markdown import safe_text
+from notebook import make_link
+
+BASE='http://127.0.0.1:7332'
+
+
+def request(action=None,node='local',**payload):
+    route='/v1/books'+('/fabric' if action is None and node=='all' else '')
+    value=fabric_files.request(route,{'target':node} if node!='all' else None,
+        json.dumps(dict(payload,action=action)).encode() if action else None,timeout=45 if action in {'scan','fetch'} else 15)
+    return value
+
+
+def catalog():
+    cache=Path.home()/'.cache/look/books-fabric.json'
+    try:
+        value=request(node='all')
+        try:
+            previous=json.loads(cache.read_text())
+            missing={row['node'] for row in value.get('errors',[])}
+            value['entries'] += [dict(row,offline=True) for row in previous.get('entries',[]) if row.get('node') in missing]
+        except (OSError,ValueError):pass
+        cache.parent.mkdir(parents=True,exist_ok=True);media_storage.atomic(cache,value)
+        return value
+    except (OSError,RuntimeError,ValueError) as exc:
+        try:value=json.loads(cache.read_text())
+        except (OSError,ValueError):value={'entries':book_core.Shelf().catalog()['entries']}
+        return dict(value,warning='Fabric unavailable: '+str(exc))
+
+
+def rows_for(value,query='',shelf='All'):
+    groups={}
+    for row in value.get('entries',[]):
+        key=row['id']
+        if key not in groups or (groups[key].get('offline') and not row.get('offline')):groups[key]=row
+    rows=[r for r in groups.values() if shelf=='All' or shelf in {r.get('status'),r.get('shelf')}]
+    terms=query.casefold().split()
+    return sorted((r for r in rows if all(t in ' '.join(str(r.get(k,'')) for k in ('title','author','shelf','format')).casefold() for t in terms)),key=lambda r:(r.get('author','').casefold(),r.get('title','').casefold()))
+
+
+def local_copy(row):
+    # A remote absolute path can also exist on this computer. Ownership wins.
+    node=row.get('node') or 'local'
+    if node=='local':return Path(row['path'])
+    try:
+        identity=fabric_files.request('/v1/identity')['identity']['name']
+        if node==identity and Path(row['path']).is_file():return Path(row['path'])
+    except (OSError,ValueError,KeyError,RuntimeError):pass
+    ident=str(row['id'])
+    if len(ident)!=64 or any(c not in '0123456789abcdef' for c in ident):raise ValueError('Invalid book identity')
+    suffix=Path(row['path']).suffix.casefold()
+    if suffix not in book_core.FORMATS:raise ValueError('Unsupported book format')
+    folder=Path.home()/'.cache/look/books';folder.mkdir(parents=True,exist_ok=True);target=folder/(ident+suffix)
+    if target.exists() and book_core.digest(target)==ident:return target
+    url=BASE+'/v1/books/item?'+urllib.parse.urlencode({'target':node,'id':ident})
+    fd,temp=tempfile.mkstemp(dir=folder,prefix='.book-');os.close(fd)
+    try:
+        with urllib.request.urlopen(url,timeout=30) as response,open(temp,'wb') as stream:
+            total=0
+            while block:=response.read(65536):
+                total+=len(block)
+                if total>book_core.MAX_DOWNLOAD_BYTES:raise ValueError('Book transfer exceeds 100 MiB')
+                stream.write(block)
+        if book_core.digest(temp)!=ident:raise ValueError('Book changed during transfer; refresh and try again')
+        os.replace(temp,target)
+    finally:Path(temp).unlink(missing_ok=True)
+    return target
+
+
+def import_files(paths,node):
+    paths=[Path(p).expanduser().resolve(strict=True) for p in paths]
+    for path in paths:book_core.metadata(path)
+    if node=='local':
+        shelf=book_core.Shelf()
+        return [shelf.import_file(path) for path in paths]
+    owner=request(node=node)
+    fabric_files.copy(paths,f'@{node}:'+owner['root'])
+    return request('scan',node=node)['entries']
+
+
+def desk(ui,query=''):
+    fd=sys.stdin.fileno();old=termios.tcgetattr(fd);index=0;shelf='All';search=False;notice='';results=None
+    value=catalog();owner=media_storage.settings()['node'];sort_reverse=False;help_visible=False
+    def ask(label,initial='',path=False):
+        termios.tcsetattr(fd,termios.TCSADRAIN,old)
+        try:
+            print('\n'+ui._c(label,'1;36'))
+            result,cancelled=look_renderer.prompt_line('› ',initial=initial,picker_root=Path.cwd() if path else None)
+            return None if cancelled else result.strip()
+        finally:tty.setcbreak(fd)
+    try:
+        tty.setcbreak(fd)
+        while True:
+            width,height=ui.shutil.get_terminal_size((100,30));width=max(20,width);height=max(10,height)
+            visible=results if results is not None else rows_for(value,query,shelf)
+            if sort_reverse:visible=list(reversed(visible))
+            index=max(0,min(index,max(0,len(visible)-1)));chosen=visible[index] if visible else None
+            controls='↑↓ move · Shift-arrows page/ends · Enter '+('import book' if results is not None else 'open reader')+' · / search · s shelves · m reading state · e edit · i import · g Gutenberg · k keep offline · y copy link · R scan/refresh · G reverse · W shell pane · Esc back'
+            if width<80 and not help_visible:controls='↑↓ select · Enter open · / search · ? help · Esc back'
+            else:controls+=' · ? help'
+            hints='\n'.join(ui._media_hints(controls,width).splitlines()[:max(1,height-8)]);page=max(1,height-8-len(hints.splitlines()));top=max(0,index-page+1)
+            colors=terminal_style.list_colors();colors=dict(colors)
+            # The same palette and selected-row contrast as the media desks.
+            title_w=max(12,(width-8)*55//100);author_w=max(8,width-title_w-21)
+            frame=[ui._c('LOOK BOOKS','1;36')+' · '+('PROJECT GUTENBERG' if results is not None else shelf)+f' · {len(visible)} books',
+                   ui._c('TITLE'.ljust(title_w)+'  '+'AUTHOR'.ljust(author_w)+'  FORMAT','2')]
+            for pos,row in enumerate(visible[top:top+page],top):
+                text=ui._media_find_cell(safe_text(row.get('title','')),title_w)+'  '+ui._media_find_cell(safe_text(row.get('author','')),author_w)+'  '+safe_text(row.get('format','EPUB'))
+                frame.append(terminal_style.list_row(('› ' if pos==index else '  ')+text,width,pos,pos==index,colors))
+            frame+=['']*max(0,page-len(visible[top:top+page]))
+            if chosen:
+                detail=' · '.join(str(chosen.get(k) or '') for k in ('status','shelf','position','node'))
+                frame.append(ui._c(ui._media_find_cell(safe_text(detail),width),'2'))
+            else:frame.append(ui._c('No books here · R scans your configured books folder · i imports a file · g searches Gutenberg','33'))
+            if value.get('errors'):frame.append(ui._c('Some owners unavailable · cached books may need an offline copy','33'))
+            frame.extend([ui._c(('SEARCH /' if search else 'FILTER ')+safe_text(query),'1;36'),hints,ui._c(ui._media_find_cell(safe_text(notice),width),'33')])
+            sys.stdout.write(ui._terminal_frame_payload('\n'.join(ui._ansi_clip(line,width) for line in frame)));sys.stdout.flush()
+            key=ui._read_tty_key(fd,.25)
+            if not key:continue
+            if key=='\x03':return 0
+            if search:
+                if key in {'esc','\r','\n'}:search=False
+                elif key in {'\x7f','\b'}:query=query[:-1];index=0
+                elif key.isprintable():query+=key;index=0
+                continue
+            if key=='esc':
+                if results is not None:results=None;index=0;continue
+                if query:query='';index=0;continue
+                return 0
+            if key=='?':help_visible=not help_visible;continue
+            if key=='/':search=True;results=None;continue
+            if key in {'up','down','shiftup','shiftdown','pageup','pagedown','shiftleft','shiftright','home','end'}:
+                if key=='up':index-=1
+                elif key=='down':index+=1
+                elif key in {'shiftup','pageup'}:index-=page
+                elif key in {'shiftdown','pagedown'}:index+=page
+                elif key in {'home','shiftleft'}:index=0
+                else:index=len(visible)-1
+                continue
+            try:
+                if key=='R':request('scan',node=owner);value=catalog();notice='Books folder scanned; shelf refreshed'
+                elif key=='G':sort_reverse=not sort_reverse
+                elif key=='W':notice=terminal_style.open_pane(Path.cwd())[1]
+                elif key=='s':
+                    shelves=['All',*book_core.STATUSES]+sorted({r.get('shelf') for r in value.get('entries',[]) if r.get('shelf')})
+                    shelf=shelves[((shelves.index(shelf) if shelf in shelves else -1)+1)%len(shelves)];results=None;index=0
+                elif key=='g':
+                    text=ask('Search Project Gutenberg')
+                    if text:results=book_core.gutenberg(text);index=0;notice='Enter imports the selected EPUB to '+owner+'; Esc returns to your shelf'
+                elif key=='i':
+                    path=ask('Import EPUB or PDF · Tab completes · arrows open the path picker',path=True)
+                    if path:import_files([path],owner);value=catalog();notice='Imported; source retained'
+                elif key in {'\r','\n'} and chosen:
+                    if results is not None:
+                        answer=ask('Download “'+chosen['title']+'” to '+owner+'? y/N')
+                        if answer and answer.casefold()=='y':request('fetch',node=owner,url=chosen['url']);value=catalog();results=None;notice='Book imported'
+                    else:
+                        print('\nOpening reader; copying a remote book locally if needed…',flush=True)
+                        result=ui._desktop_launch(local_copy(chosen))
+                        if not result.startswith('OPEN OK'):raise RuntimeError(result)
+                        notice='Opened in your configured/system reader'
+                elif chosen and results is None:
+                    if key=='y':
+                        target='@'+chosen['node']+':'+chosen['path'] if chosen.get('node') else chosen['path']
+                        look_renderer.copy_text(make_link(chosen['title'],target));notice='Copied a Notes-compatible file/Fabric link'
+                    elif key=='k':book_core.Shelf().import_file(local_copy(chosen));value=catalog();notice='Saved in this computer’s books folder for offline reading'
+                    elif key=='m':
+                        state=chosen.get('status','To Read');request('update',node=chosen.get('node','local'),id=chosen['id'],fields={'status':book_core.STATUSES[(book_core.STATUSES.index(state)+1)%len(book_core.STATUSES)]});value=catalog()
+                    elif key=='e':
+                        fields={}
+                        for field in ('title','author','shelf','position'):
+                            answer=ask(field.title(),chosen.get(field,''))
+                            if answer is None:fields={};break
+                            fields[field]=answer
+                        if fields:request('update',node=chosen.get('node','local'),id=chosen['id'],fields=fields);value=catalog();notice='Metadata saved; document bytes unchanged'
+            except (OSError,ValueError,RuntimeError,KeyError) as exc:notice=str(exc)
+    finally:termios.tcsetattr(fd,termios.TCSADRAIN,old);sys.stdout.write('\033[0m\n')
+
+
+def main(args,ui):
+    parser=argparse.ArgumentParser(prog='lk books',description='Fabric EPUB/PDF shelf; bk is an alias. Files stay on their owner; opening remote books makes a verified local cache copy.')
+    parser.add_argument('action',nargs='?',default='shelf',choices=['shelf','list','scan','import','search','fetch'])
+    parser.add_argument('values',nargs='*')
+    parser.add_argument('--node',default=None,help='Library owner; defaults to configured media destination')
+    parser.add_argument('--json',action='store_true')
+    selected=parser.parse_args(args);owner=selected.node or media_storage.settings()['node']
+    try:
+        if selected.action=='shelf' and sys.stdin.isatty() and sys.stdout.isatty():return desk(ui,' '.join(selected.values))
+        if selected.action in {'list','shelf'}:
+            value=catalog();value=dict(value,entries=rows_for(value,' '.join(selected.values)))
+        elif selected.action=='scan':value=request('scan',node=owner)
+        elif selected.action=='import':
+            if not selected.values:raise ValueError('Choose one or more EPUB/PDF files')
+            value={'entries':import_files(selected.values,owner)}
+        elif selected.action=='search':value={'entries':book_core.gutenberg(' '.join(selected.values))}
+        else:
+            if len(selected.values)!=1:raise ValueError('Choose one direct HTTPS EPUB/PDF URL')
+            value=request('fetch',node=owner,url=selected.values[0])
+        if value.get('book'):value=dict(value,entries=[value['book']])
+        if selected.json:print(json.dumps(value,ensure_ascii=False))
+        else:
+            for row in value.get('entries',[]):print(book_core.clean(row.get('title'))+' · '+book_core.clean(row.get('author'))+(' · '+row['url'] if row.get('url') else ''))
+            if not value.get('entries'):print('No books yet · lk books scan · lk books import FILE · lk books search QUERY')
+            for warning in value.get('warnings',[]):print('Warning: '+book_core.clean(warning))
+        return 0
+    except (OSError,ValueError,RuntimeError) as exc:print('LOOK Books: '+book_core.clean(exc));return 1

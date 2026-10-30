@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Future Crash + LOOK Unified Node 8.17.1.
+"""Future Crash + LOOK Unified Node 8.18.0.
 
 A small distributed supervisor for trusted personal machines. Immediate events stay
 asynchronous; a one-second fabric pulse reconciles presence, leases and stale work.
@@ -155,7 +155,7 @@ def _file_peer_json(peer,path):
     return _file_race(peer,path)[1]
 
 
-VERSION = "8.17.1"
+VERSION = "8.18.0"
 RELEASE_NAME = "FABRIC VISION"
 DEFAULT_HOST = "127.0.0.1"
 DEFAULT_PORT = 7332
@@ -2657,7 +2657,7 @@ def _local_web_search(query, limit=8):
     base=os.environ.get("FCL_SEARXNG_URL","http://127.0.0.1:8888").rstrip("/")
     request=urllib.request.Request(base+"/search?"+params,headers={
         "Accept":"application/json",
-        "User-Agent":"Future-Crash-Fabric/8.17.1",
+        "User-Agent":"Future-Crash-Fabric/8.18.0",
     })
     try:
         with urllib.request.urlopen(request,timeout=8) as response:
@@ -3830,6 +3830,62 @@ class API(BaseHTTPRequestHandler):
             raise PermissionError("Destination node is not paired and advertising")
         return peer, value
 
+    def _books_shelf(self):
+        _look_catalog_modules()
+        import book_core
+        return book_core.Shelf()
+
+    def _books_request(self, payload=None, fabric=False):
+        try:
+            if fabric:
+                local=self._books_shelf().catalog();name=identity()['name']
+                entries=[dict(row,node=name) for row in local['entries']];errors=[]
+                peers=[p for p in PEERS.public() if p.get('trusted') and _peer_bases(p)]
+                def read(peer):
+                    owner=peer.get('name')
+                    try:
+                        value=_peer_json(peer,'/v1/books',timeout=3,total_timeout=6)
+                        return [dict(row,node=owner) for row in value.get('entries',[])],None
+                    except Exception as exc:return [],{'node':owner,'error':str(exc)}
+                with concurrent.futures.ThreadPoolExecutor(max_workers=4) as pool:
+                    for rows,error in pool.map(read,peers):
+                        entries.extend(rows)
+                        if error:errors.append(error)
+                return self.sendj(200,{'ok':True,'entries':entries,'errors':errors})
+            peer,_=self._file_target()
+            if peer is not None:
+                value=_file_peer_json(peer,'/v1/books') if payload is None else http_json(_copy_route(peer)+'/v1/books',data=payload,timeout=45)
+                return self.sendj(200,value)
+            shelf=self._books_shelf()
+            if payload is None:value=shelf.catalog()
+            elif payload.get('action')=='scan':value=shelf.scan()
+            elif payload.get('action')=='fetch':value={'book':shelf.fetch(payload.get('url',''))}
+            elif payload.get('action')=='update':value={'book':shelf.update(payload.get('id'),payload.get('fields'))}
+            else:raise ValueError('Choose scan, fetch or update')
+            if 'entries' in value:value['entries']=[dict(row,node=identity()['name']) for row in value['entries']]
+            return self.sendj(200,dict(value,ok=True,node=identity()['name']))
+        except Exception as exc:return self.sendj(400,{'ok':False,'error':str(exc)})
+
+    def _serve_book_item(self):
+        try:
+            peer,_=self._file_target();params=parse_qs(urlparse(self.path).query)
+            ident=(params.get('id') or [''])[0]
+            if peer is None:row,path=self._books_shelf().item(ident)
+            else:
+                url=_copy_route(peer)+'/v1/books/item?'+urllib.parse.urlencode({'id':ident})
+                headers=FABRIC_IDENTITY.auth_headers_for_url(url)
+                if self.headers.get('Range'):headers['Range']=self.headers['Range']
+                request=urllib.request.Request(url,headers=headers)
+                response=urllib.request.urlopen(request,timeout=30,context=FABRIC_IDENTITY.ssl_context_for_url(url))
+        except Exception as exc:return self.sendj(404,{'ok':False,'error':str(exc)})
+        if peer is None:return self._serve_file_range(path,'application/pdf' if path.suffix.casefold()=='.pdf' else 'application/epub+zip')
+        with response:
+            self.send_response(response.status)
+            for key in ('Content-Type','Content-Length','Content-Range','Accept-Ranges'):
+                if response.headers.get(key):self.send_header(key,response.headers[key])
+            self.end_headers()
+            shutil.copyfileobj(response,self.wfile,1024*1024)
+
     def _downloads_request(self, payload=None):
         try:
             peer,_value=self._file_target()
@@ -4517,6 +4573,9 @@ class API(BaseHTTPRequestHandler):
             except ImportError: import notifications
             return self.sendj(200,{'ok':True,'settings':notifications.settings()})
         if path == "/v1/downloads" or path.startswith("/v1/downloads/"): return self._downloads_request()
+        if path == "/v1/books": return self._books_request()
+        if path == "/v1/books/fabric": return self._books_request(fabric=True)
+        if path == "/v1/books/item": return self._serve_book_item()
         if path == "/v1/files/browse": return self._files_browse()
         if path == "/v1/files/copy/status": return self._files_copy_status()
         if path in ("/health", "/v1/health"):
@@ -4770,6 +4829,7 @@ class API(BaseHTTPRequestHandler):
     def do_POST(self):
         path = urlparse(self.path).path
         if not self._authorized_ingress(path): return
+        if path == "/v1/books": return self._books_request(d)
         if path == "/v1/files/copy": return self._files_copy()
         d = self.body()
         if path == '/v1/media/artwork/settings':

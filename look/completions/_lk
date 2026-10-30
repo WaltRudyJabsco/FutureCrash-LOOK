@@ -26,6 +26,8 @@ _lk() {
     'doc:full offline command and keyboard reference'
     'tldr:short offline command examples'
     'mp:integrated Fabric media player'
+    'books:Fabric EPUB/PDF shelf'
+    'bk:alias for books'
     'ytd:download videos on a Fabric node'
     'describe:searchable catalog description'
     'hidden:LOOK with hidden files shown'
@@ -166,6 +168,14 @@ _lk() {
           return
           ;;
       esac
+      ;;
+    books|bk)
+      if (( CURRENT == 3 )); then
+        _values 'books command' shelf list scan import search fetch --node --json
+      else
+        _files -g '*.epub|*.pdf|*(-/)'
+      fi
+      return
       ;;
     personality)
       (( CURRENT == 3 )) && _values 'personality' lo robot max philosopher

@@ -873,6 +873,18 @@
     "Fabric movies, TV and video player"
   ],
   [
+    "lk bk",
+    "[ARGS]",
+    "media",
+    "Alias for lk books; Fabric EPUB/PDF shelf"
+  ],
+  [
+    "lk books",
+    "[shelf|list|scan|import FILE...|search QUERY|fetch URL] [--node NODE] [--json]",
+    "media",
+    "Fabric EPUB/PDF shelf; bk alias, reading state and Notes links"
+  ],
+  [
     "lk transcribe",
     "[FILE|status|setup|configure] [OPTIONS]",
     "media",
