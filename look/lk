@@ -37,7 +37,7 @@ try:
 except Exception:
     readline = None
 
-VERSION="4.64.0"
+VERSION="4.64.1"
 
 LOOK_WORDMARK = r"""       ██╗      ██╗  ██╗
        ██║      ██║ ██╔╝
@@ -10076,7 +10076,7 @@ def _direct_searxng_search(query, limit=8):
     params=urllib.parse.urlencode({"q":query,"format":"json"})
     request=urllib.request.Request(base+"/search?"+params,headers={
         "Accept":"application/json",
-        "User-Agent":"Future-Crash-Fabric/8.17.0",
+        "User-Agent":"Future-Crash-Fabric/8.17.1",
     })
     with urllib.request.urlopen(request,timeout=12) as response:
         data=json.load(response)
@@ -16004,7 +16004,7 @@ def _media_fabric_catalog():
         if cache_path.is_file():
             cached=json.loads(cache_path.read_text(encoding="utf-8"))
             cached_at=float(cached.get("_look_cached_at") or cache_path.stat().st_mtime)
-            effective_ttl=min(ttl,3.0) if cached.get('errors') or cached.get('fallback') or cached.get('stale') else ttl
+            effective_ttl=min(ttl,3.0) if cached.get('errors') or cached.get('fallback') or cached.get('stale') or cached.get('refreshing') else ttl
             if now-cached_at <= effective_ttl and cached.get('_look_local_mtime_ns')==local_stamp:
                 cached.pop("_look_cached_at",None)
                 cached.pop('_look_local_mtime_ns',None)

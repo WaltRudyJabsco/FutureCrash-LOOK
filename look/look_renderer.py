@@ -533,6 +533,7 @@ class NativePreviewController:
         self.enabled=not disabled and self.driver is not None
         self._jobs=queue.Queue(maxsize=1)
         self._ready=None
+        self._prepared=None
         self._generation=0
         self._last_key=None
         self._rfd=self._wfd=None
@@ -554,6 +555,14 @@ class NativePreviewController:
         key=(str(path.resolve()),stamp,row,col,rows,cols)
         if key==self._last_key: return
         self._last_key=key; self._generation+=1
+        # Full text redraws erase the graphics placement, not its prepared image.
+        # Restore the same preview before input waits rather than flashing ASCII
+        # for another worker round trip and keyboard-poll interval.
+        prepared=self._prepared
+        if prepared and prepared[0]==key and prepared[1].is_file():
+            self._ready=(self._generation,prepared[1],row,col,rows,cols)
+            self.paint_ready()
+            return
         job=(self._generation,path.resolve(),stamp,row,col,rows,cols)
         # Latest selection wins. Never build a backlog while the user arrows quickly.
         try:
@@ -581,7 +590,9 @@ class NativePreviewController:
             job=self._jobs.get()
             generation,path,stamp,row,col,rows,cols=job
             prepared=self._prepare(path,stamp,rows,cols)
-            if prepared is None or generation!=self._generation: continue
+            if prepared is None: continue
+            self._prepared=((str(path),stamp,row,col,rows,cols),prepared)
+            if generation!=self._generation: continue
             self._ready=(generation,prepared,row,col,rows,cols)
             try: os.write(self._wfd,b'1')
             except (OSError,BlockingIOError): pass

@@ -1,4 +1,8 @@
-# Future Crash + LOOK 8.17.0 — FABRIC MEDIA
+# Future Crash + LOOK 8.17.1 — FABRIC MEDIA
+
+8.17.1 keeps Fabric catalog snapshots available during remote refresh, checks
+node revisions before transferring unchanged catalogs, and restores native
+previews immediately after text redraws.
 
 8.17.0 consolidates the media, notebook, browser and offline improvements into a
 numbered release, including responsive media search and reliable artist-and-song
