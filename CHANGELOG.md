@@ -1,3 +1,9 @@
+## 8.26.1 — A word with every launch (LOOK 4.73.1)
+
+- `lk wd` is an alias for the complete `lk words` command.
+- Blank local word desks offer a real offline word, short definition and source from a shuffled learning selection. The card disappears when typing or submitting a search; direct lookups stay focused.
+- The learning pool avoids repeats until it cycles through and retains local progress across launches. No data is downloaded automatically; fresh accounts without a dictionary keep the setup guidance.
+
 ## 8.26.0 — Curated visuals and Haunted Hollow (LOOK 4.73.0)
 
 - `V` opens a shared checkbox picker in player, MP and TV. Space toggles, Enter saves and Escape cancels; `lk visualizers` and Settings offer the same picker.
