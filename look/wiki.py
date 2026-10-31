@@ -20,6 +20,7 @@ import book_reader
 import book_speech
 import fabric_files
 import media_storage
+import look_renderer
 from notebook_markdown import safe_text
 
 CATALOG='https://library.kiwix.org/catalog/v2/entries'
@@ -311,7 +312,7 @@ def desk(ui,owner):
         termios.tcsetattr(fd,termios.TCSADRAIN,old)
         try:
             print('\n'+ui._c(label,'1;36'))
-            value,cancelled=ui.look_renderer.prompt_line('› ')
+            value,cancelled=look_renderer.prompt_line('› ')
             return None if cancelled else value.strip()
         finally:tty.setcbreak(fd)
     def refresh():return request(node=owner)
@@ -336,7 +337,7 @@ def desk(ui,owner):
                 elif key in {'shiftdown','pagedown',' '}:top+=page
                 elif key in {'shiftleft','home'}:top=0
                 elif key in {'shiftright','end'}:top=len(lines)
-                elif key=='y':ui.look_renderer.copy_text('\n'.join(lines[top:top+page]))
+                elif key=='y':look_renderer.copy_text('\n'.join(lines[top:top+page]))
                 elif key=='b' and history:path,top=history.pop();break
                 elif key=='l':
                     listing='\n'.join(str(i+1)+'. '+safe_text(link['title']) for i,link in enumerate(article['links']))
