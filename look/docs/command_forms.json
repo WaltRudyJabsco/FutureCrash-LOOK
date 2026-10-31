@@ -888,7 +888,7 @@
     "lk wiki",
     "[shelf|status|setup|catalog QUERY|fetch ID|jobs|cancel ID|configure|search QUERY|article PATH] [--online|--offline] [--open-link URI] [--node NODE] [--archive FILE] [--root PATH] [--confirm] [--json]",
     "web",
-    "Live Wikipedia and saved Kiwix references; colored links, hints and images"
+    "Live/saved Wikipedia; colored links, inline images, hints and W shell panes"
   ],
   [
     "lk books discover",
@@ -924,7 +924,7 @@
     "lk books",
     "[shelf|list|scan|import FILE...|search QUERY|discover [popular|new|subjects|surprise]|fetch URL|reader MODE|listen FILE|voices|speech-setup] [--node NODE] [--json]",
     "media",
-    "Fabric EPUB/PDF shelf; bk alias, reading state and Notes links"
+    "Fabric EPUB/PDF shelf; bk alias, reading state, Notes links and W shell panes"
   ],
   [
     "lk transcribe",

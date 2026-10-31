@@ -40,7 +40,7 @@ def test_live_images_use_wikimedia_hosts_and_archive_images_never_use_urls():
     assert value['images'][0]['source']=='https://commons.wikimedia.org/wiki/File:Photo.jpg'
     assert '?' not in value['images'][0]['url']
     saved=wiki.article_payload('<img src="../I/picture.png" width="100"><img src="https://evil.example/image.jpg">','A/Test','Test')
-    assert saved['images']==[{'path':'I/picture.png','title':'picture.png'}]
+    assert saved['images']==[{'path':'I/picture.png','title':'picture.png','before':0,'width':100}]
 
 
 @pytest.mark.parametrize('url',['http://en.wikipedia.org/wiki/Test','https://evil.example/image.png','https://en.wikipedia.org:8443/','https://u@en.wikipedia.org/'])

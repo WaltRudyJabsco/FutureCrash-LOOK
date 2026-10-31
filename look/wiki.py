@@ -22,6 +22,7 @@ import book_speech
 import fabric_files
 import media_storage
 import look_renderer
+import terminal_style
 from notebook_markdown import safe_text, cell_width
 
 CATALOG='https://library.kiwix.org/catalog/v2/entries'
@@ -252,6 +253,10 @@ class ArticleParser(book_speech.PassageParser):
                 path=archive_reference(self.path,src)
                 if not path:return
                 image={'path':path,'title':values.get('alt') or Path(path).name}
+            self.flush()
+            image['before']=len(self.parts)
+            for key in ('width','height'):
+                if values.get(key,'').isdigit():image[key]=min(10000,int(values[key]))
             self.images.append(image)
     def handle_data(self,data):
         super().handle_data(data)
@@ -273,7 +278,7 @@ class ArticleParser(book_speech.PassageParser):
                 path=posixpath.normpath(target)
                 if not path.startswith('../') and not path.startswith('/'):
                     self.links.append({'title':' '.join(''.join(self.label).split()) or path,'path':path})
-                    if path in self.hints and not self.skip:
+                    if path in self.hints and not self.skip and ''.join(self.label).strip() and ''.join(self.current[self.link_start:]).strip():
                         if self.decorate:
                             self.current.insert(min(self.link_start,len(self.current)),'\ue000'+self.hints[path]+'\ue001')
                             self.current.append('\ue002')
@@ -389,10 +394,10 @@ def topic_hints(paragraphs,links):
 def choose_links(ui,fd,rows,title='Links'):
     """One bounded screen: navigation, number+Enter or immediate two-letter hints."""
     if not rows:return None
-    index=0;typed=''
+    index=0;typed='';notice=''
     while True:
         width,height=ui.shutil.get_terminal_size((100,30));width=max(20,width)
-        controls=ui._media_hints('↑↓ move · Shift-arrows page/ends · Enter open · number then Enter · two letters open · Esc back',width).splitlines()
+        controls=ui._media_hints('↑↓ move · Shift-arrows page/ends · Enter open · number then Enter · two letters open · W shell pane · Esc back',width).splitlines()
         page=max(1,height-len(controls)-4)
         index=max(0,min(index,len(rows)-1));top=(index//page)*page
         frame=[ui._c(title,'1;36')+f' · {top+1}–{min(top+page,len(rows))} / {len(rows)}', '']
@@ -401,11 +406,12 @@ def choose_links(ui,fd,rows,title='Links'):
             label=('› ' if pos==index else '  ')+f'{pos+1:>3}  [{hint_code(pos)}] '+safe_text(row['title'])
             frame.append(ui.terminal_style.list_row(label,width,pos,pos==index,colors))
         frame+=['']*max(0,page+2-len(frame))
-        frame += controls+[ui._c('Choose: '+typed,'1;33')]
+        frame += controls+[ui._c('Choose: '+typed+(' · '+notice if notice else ''),'1;33')]
         sys.stdout.write(ui._terminal_frame_payload('\n'.join(ui._ansi_clip(line,width) for line in frame)));sys.stdout.flush()
         key=ui._read_tty_key(fd,.25)
         if not key:continue
         if key in {'esc','\x03'}:return None
+        if key=='W':notice=terminal_style.open_pane(Path.cwd());continue
         if key in {'enter','\r','\n'}:
             if typed.isdigit() and not 1<=int(typed)<=len(rows):continue
             return rows[index]
@@ -540,7 +546,7 @@ def desk(ui,owner,live=False,reference=None):
     import termios,tty
     if not ui or not sys.stdin.isatty():raise ValueError('Use lk wiki status --json outside a terminal')
     fd=sys.stdin.fileno();old=termios.tcgetattr(fd);mode='archives';index=0;notice='d finds downloadable collections · i sets up the offline reader'
-    archive=None;rows=[];status={};saved_status=None
+    archive=None;rows=[];status={};saved_status=None;pane_help=False
     def ask(label):
         termios.tcsetattr(fd,termios.TCSADRAIN,old)
         try:
@@ -569,84 +575,99 @@ def desk(ui,owner,live=False,reference=None):
     def article_view(path):
         history=[];top=0;hinting=False;typed='';layout=None;lines=[];article_notice=''
         anchors=[];view_anchor=None;anchor_row=0;restore=None
-        while True:
-            article=fetch_article('article',query=path);layout=None;anchors=[]
-            view_anchor,anchor_row=restore if restore else (None,0);restore=None
+        show_images=True;native_images=True;last_frame=None;blocks=[]
+        import wiki_inline
+        painter=wiki_inline.InlineImages(ui,live=live,archive=archive or '',owner=owner)
+        try:
             while True:
-                width,height=ui.shutil.get_terminal_size((100,30));width=max(20,width)
-                controls=ui._media_hints('↑↓ scroll · Shift-arrows page/ends · / search archive · l links ('+str(len(article['links']))+') · f link hints · i images · v live/saved · b back · c copy Wiki link · y copy passage · Esc shelf',width).splitlines()
-                if hinting:
-                    active=ui._media_hints('LINK HINTS '+typed+' · two letters open · arrows scroll · Esc cancels',width).splitlines()
-                    controls=active[:len(controls)]+['']*max(0,len(controls)-len(active))
-                page=max(1,height-len(controls)-2)
-                if layout!=(width,hinting):
-                    anchors=[];lines=article_lines(ui,article,width,hinting,anchors);layout=(width,hinting)
-                    if view_anchor is not None:top=anchored_top(anchors,view_anchor,anchor_row)
-                top=max(0,min(top,max(0,len(lines)-page)))
-                if view_anchor is None and anchors:
-                    anchor_row=min(page//2,len(anchors)-1-top)
-                    view_anchor=anchors[top+anchor_row]
-                frame=[ui._c(safe_text(article['title']),'1;36')+' · '+(('STALE CACHED WIKIPEDIA' if article.get('stale') else 'CACHED WIKIPEDIA' if article.get('cached') else 'LIVE WIKIPEDIA') if live else 'SAVED ARCHIVE · owner '+safe_text(owner)),*lines[top:top+page]]
-                frame+=['']*max(0,page+1-len(frame))
-                frame+=controls
-                if article_notice:frame[-1]=ui._c(safe_text(article_notice),'33')+' · '+frame[-1]
-                if live and not hinting:frame[-1]=ui._c('Wikipedia contributors · CC BY-SA 4.0 · ','2')+frame[-1]
-                if hinting:
-                    frame[-len(controls)]=ui._c(frame[-len(controls)],'1;33')
-                    codes={hint_code(i) for i in range(len(article['links']))}
-                    frame=[re.sub(r'\[([a-z]{2})\]',lambda m:ui._c(m[0],'1;33') if m[1] in codes else m[0],line) for line in frame]
-                sys.stdout.write(ui._terminal_frame_payload('\n'.join(ui._ansi_clip(line,width) for line in frame)));sys.stdout.flush()
-                key=ui._read_tty_key(fd,.25)
-                if hinting:
-                    if key=='esc':hinting=False;typed='';continue
-                    if len(key)==1 and key in HINT_ALPHABET:
-                        typed+=key
-                        if len(typed)==2:
-                            match=next((r for i,r in enumerate(article['links']) if hint_code(i)==typed),None)
-                            typed=''
-                            if match:history.append((path,view_anchor,anchor_row));path=match['path'];top=0;hinting=False;break
-                        continue
-                    if key in {'\b','\x7f'}:typed=typed[:-1];continue
+                article=fetch_article('article',query=path);layout=None;anchors=[];last_frame=None
+                painter.reset(article)
+                view_anchor,anchor_row=restore if restore else (None,0);restore=None
+                while True:
+                    width,height=ui.shutil.get_terminal_size((100,30));width=max(20,width)
+                    controls=ui._media_hints('↑↓ scroll · Shift-arrows page/ends · / search archive · l links ('+str(len(article['links']))+') · f link hints · i gallery · I inline images · M image/ASCII · W shell pane · v live/saved · b back · c copy Wiki link · y copy passage · Esc shelf',width).splitlines()
+                    if hinting:
+                        active=ui._media_hints('LINK HINTS '+typed+' · two letters open · arrows scroll · Esc cancels',width).splitlines()
+                        controls=active[:len(controls)]+['']*max(0,len(controls)-len(active))
+                    page=max(1,height-len(controls)-2)
+                    if layout!=(width,hinting,page,show_images):
+                        lines,anchors,blocks=wiki_inline.layout(ui,article,width,page,hinting,show_images);layout=(width,hinting,page,show_images)
+                        if view_anchor is not None:top=anchored_top(anchors,view_anchor,min(anchor_row,page-1))
+                    top=max(0,min(top,max(0,len(lines)-page)))
+                    if view_anchor is None and anchors:
+                        anchor_row=min(page//2,len(anchors)-1-top)
+                        view_anchor=anchors[top+anchor_row]
+                    visible=painter.compose(lines,blocks,top,page,native_images)
+                    frame=[ui._c(safe_text(article['title']),'1;36')+' · '+(('STALE CACHED WIKIPEDIA' if article.get('stale') else 'CACHED WIKIPEDIA' if article.get('cached') else 'LIVE WIKIPEDIA') if live else 'SAVED ARCHIVE · owner '+safe_text(owner)),*visible]
+                    frame+=['']*max(0,page+1-len(frame))
+                    frame+=controls
+                    if article_notice:frame[-1]=ui._c(safe_text(article_notice),'33')+' · '+frame[-1]
+                    if live and not hinting:frame[-1]=ui._c('Wikipedia contributors · CC BY-SA 4.0 · ','2')+frame[-1]
+                    if hinting:
+                        frame[-len(controls)]=ui._c(frame[-len(controls)],'1;33')
+                        codes={hint_code(i) for i in range(len(article['links']))}
+                        frame=[re.sub(r'\[([a-z]{2})\]',lambda m:ui._c(m[0],'1;33') if m[1] in codes else m[0],line) for line in frame]
+                    rendered=ui._terminal_frame_payload('\n'.join(ui._ansi_clip(line,width) for line in frame))
+                    identity=(width,height,rendered)
+                    if identity!=last_frame:
+                        painter.clear();sys.stdout.write(rendered);sys.stdout.flush();last_frame=identity
+                    painter.paint()
+                    key=ui._read_tty_key(fd,.15)
+                    if key:last_frame=None
+                    if hinting:
+                        if key=='esc':hinting=False;typed='';continue
+                        if len(key)==1 and key in HINT_ALPHABET:
+                            typed+=key
+                            if len(typed)==2:
+                                match=next((r for i,r in enumerate(article['links']) if hint_code(i)==typed),None)
+                                typed=''
+                                if match:history.append((path,view_anchor,anchor_row));path=match['path'];top=0;hinting=False;break
+                            continue
+                        if key in {'\b','\x7f'}:typed=typed[:-1];continue
 
-                if key in {'esc','q','\x03'}:return
-                if key in {'up','down','shiftup','shiftdown','pageup','pagedown',' ','shiftleft','shiftright','home','end'}:view_anchor=None
-                if key=='up':top-=1
-                elif key=='down':top+=1
-                elif key in {'shiftup','pageup'}:top-=page
-                elif key in {'shiftdown','pagedown',' '}:top+=page
-                elif key in {'shiftleft','home'}:top=0
-                elif key in {'shiftright','end'}:top=len(lines)
-                elif key=='y':look_renderer.copy_text(ui._strip_ansi('\n'.join(lines[top:top+page]))+('\n'+article.get('attribution','')+'\n'+article.get('source_url','') if live else ''))
-                elif key=='f':hinting=True;typed=''
-                elif key=='v':return 'switch'
-                elif key=='c':
-                    import wiki_links
-                    from notebook import make_link
-                    copy_owner=owner
-                    if not live and owner=='local':
-                        try:copy_owner=fabric_files.request('/v1/identity',timeout=.8)['identity']['name']
-                        except (OSError,ValueError,RuntimeError,KeyError):pass
-                    target=wiki_links.target(article['path'],live=live,node=copy_owner,archive=archive)
-                    copied=look_renderer.copy_text(make_link(article['title'],target))
-                    article_notice='Copied Wiki link · paste into Notes' if copied else 'Clipboard unavailable'
-                elif key=='i':
-                    import wiki_images
-                    article_notice=wiki_images.gallery(ui,fd,article,live=live,archive=archive or '',owner=owner)
-                elif key=='b' and history:
-                    path,position,row=history.pop();restore=(position,row);top=0;break
-                elif key=='/':
-                    query=ask('Search this saved archive · Enter cancels')
-                    if query:
-                        found=fetch_article('search',query=query)['entries']
-                        if found:
-                            chosen=choose_links(ui,fd,found,'Search: '+query)
-                            if chosen:history.append((path,view_anchor,anchor_row));path=chosen['path'];top=0;break
-                        else:ask('No matching articles · Enter returns')
-                elif key=='l':
-                    if not article['links']:
-                        ask('This page has no internal links · / searches the archive · Enter returns');continue
-                    chosen=choose_links(ui,fd,article['links'])
-                    if chosen:history.append((path,view_anchor,anchor_row));path=chosen['path'];top=0;break
+                    if key in {'esc','q','\x03'}:return
+                    if key in {'up','down','shiftup','shiftdown','pageup','pagedown',' ','shiftleft','shiftright','home','end'}:view_anchor=None
+                    if key=='up':top-=1
+                    elif key=='down':top+=1
+                    elif key in {'shiftup','pageup'}:top-=page
+                    elif key in {'shiftdown','pagedown',' '}:top+=page
+                    elif key in {'shiftleft','home'}:top=0
+                    elif key in {'shiftright','end'}:top=len(lines)
+                    elif key=='y':look_renderer.copy_text(ui._strip_ansi('\n'.join(lines[top:top+page]))+('\n'+article.get('attribution','')+'\n'+article.get('source_url','') if live else ''))
+                    elif key=='f':hinting=True;typed=''
+                    elif key=='I':show_images=not show_images
+                    elif key=='M':native_images=not native_images
+                    elif key=='W':article_notice=terminal_style.open_pane(Path.cwd())
+                    elif key=='v':return 'switch'
+                    elif key=='c':
+                        import wiki_links
+                        from notebook import make_link
+                        copy_owner=owner
+                        if not live and owner=='local':
+                            try:copy_owner=fabric_files.request('/v1/identity',timeout=.8)['identity']['name']
+                            except (OSError,ValueError,RuntimeError,KeyError):pass
+                        target=wiki_links.target(article['path'],live=live,node=copy_owner,archive=archive)
+                        copied=look_renderer.copy_text(make_link(article['title'],target))
+                        article_notice='Copied Wiki link · paste into Notes' if copied else 'Clipboard unavailable'
+                    elif key=='i':
+                        import wiki_images
+                        article_notice=wiki_images.gallery(ui,fd,article,live=live,archive=archive or '',owner=owner)
+                    elif key=='b' and history:
+                        path,position,row=history.pop();restore=(position,row);top=0;break
+                    elif key=='/':
+                        query=ask('Search this saved archive · Enter cancels')
+                        if query:
+                            found=fetch_article('search',query=query)['entries']
+                            if found:
+                                chosen=choose_links(ui,fd,found,'Search: '+query)
+                                if chosen:history.append((path,view_anchor,anchor_row));path=chosen['path'];top=0;break
+                            else:ask('No matching articles · Enter returns')
+                    elif key=='l':
+                        if not article['links']:
+                            ask('This page has no internal links · / searches the archive · Enter returns');continue
+                        chosen=choose_links(ui,fd,article['links'])
+                        if chosen:history.append((path,view_anchor,anchor_row));path=chosen['path'];top=0;break
+        finally:painter.close()
     try:
         tty.setcbreak(fd)
         if os.environ.get('KITTY_WINDOW_ID') or os.environ.get('TERM')=='xterm-kitty':sys.stdout.write('\x1b_Ga=d,d=a,q=2\x1b\\')
@@ -683,7 +704,8 @@ def desk(ui,owner,live=False,reference=None):
             if status.get('jobs'):
                 latest=status['jobs'][0];total=latest.get('total',0);progress=f' · {100*latest.get("bytes",0)/total:.1f}%' if total else ''
                 frame.append(ui._c('Job: ','1;36')+safe_text(latest['state']+progress+' · '+str(latest.get('error') or latest['kind'])))
-            frame += [ui._media_hints('↑↓ select · Shift-arrows page/ends · Enter open/download · / search · v live/saved · o owner · d download catalog · i reader setup · r refresh · x cancel download · Esc back',width),safe_text(notice)]
+            if pane_help:notice=' · '.join(terminal_style.pane_shortcuts())
+            frame += [ui._media_hints('↑↓ select · Shift-arrows page/ends · Enter open/download · / search · W shell pane · v live/saved · o owner · d download catalog · i reader setup · r refresh · x cancel download · Esc back',width),safe_text(notice)]
             sys.stdout.write(ui._terminal_frame_payload('\n'.join(ui._ansi_clip(line,width) for line in frame)));sys.stdout.flush()
             key=ui._read_tty_key(fd,.25)
             if not key:continue
@@ -698,6 +720,8 @@ def desk(ui,owner,live=False,reference=None):
             if key in {'shiftright','end'}:index=len(rows)-1;continue
             try:
                 if key=='r':status=refresh();rows=shelf_rows(status);mode='archives';notice='Refreshed'
+                elif key=='W':
+                    notice=terminal_style.open_pane(Path.cwd());pane_help=notice.startswith('Shell opened beside LOOK')
                 elif key=='v':notice=switch_source()
                 elif live and key in {'o','d','i','x'}:notice='Saved-archive controls · v selects the saved Fabric archive'
                 elif key=='o':

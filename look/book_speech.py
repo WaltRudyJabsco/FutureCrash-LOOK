@@ -15,6 +15,7 @@ from html.parser import HTMLParser
 from urllib.parse import unquote,urlsplit
 import book_core
 import book_reader
+import terminal_style
 from notebook_markdown import safe_text
 
 MAX_TEXT_BYTES=16*1024*1024
@@ -184,7 +185,7 @@ def desk(ui,path,title='',chapter=None,paragraph=None,reading=None,save_reading=
                 frame.append(ui.terminal_style.list_row(('› ' if index==pi else '  ')+str(index+1)+' '+safe_text(text),width,index,index==pi,colors))
             frame+=['']*max(0,height-7-len(frame))
             frame+=textwrap.wrap(safe_text(rows[ci]['paragraphs'][pi]),width)[:3]
-            frame += [ui._media_hints('↑↓ paragraph · ←→ chapter · Shift-arrows page/ends · Enter read · Space pause/resume · s stop · v voice · P clipboard · Esc return',width),safe_text(notice)]
+            frame += [ui._media_hints('↑↓ paragraph · ←→ chapter · Shift-arrows page/ends · Enter read · Space pause/resume · s stop · v voice · W shell pane · P clipboard · Esc return',width),safe_text(notice)]
             sysout='\n'.join(ui._ansi_clip(line,width) for line in frame)
             sys.stdout.write(ui._terminal_frame_payload(sysout));sys.stdout.flush()
             key=ui._read_tty_key(sys.stdin.fileno(),.15)
@@ -193,6 +194,7 @@ def desk(ui,path,title='',chapter=None,paragraph=None,reading=None,save_reading=
             if key in {'enter','\r','\n'}:speech.start(rows[ci]['paragraphs'][pi]);save();continue
             if key==' ':speech.pause();continue
             if key=='s':speech.stop();save();continue
+            if key=='W':notice=terminal_style.open_pane(Path.cwd());continue
             if key=='P':
                 import clipboard_shelf
                 clipboard_shelf.show(fd=sys.stdin.fileno());continue

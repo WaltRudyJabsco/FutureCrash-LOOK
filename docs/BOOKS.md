@@ -307,3 +307,27 @@ row, even when codes add wrapped lines above it. Cancelling hints restores the
 normal position without cumulative drift. Normal and hint controls reserve the
 same footer height. Manual scrolling updates the anchor; article back history
 also keeps a source-text position. Viewport edges can still clamp the view.
+
+
+## Inline Wiki pictures and reading panes (8.24.0)
+
+Wiki articles place available raster pictures between the surrounding paragraphs.
+Only visible pictures load, and their reserved height stays fixed while loading.
+`I` hides/shows inline pictures; `M` switches auto-image/ASCII. `i` opens the
+existing gallery. Normal links retain their accent color; `f` shows hint codes
+without losing the source-text reading anchor.
+
+Kitty clips native pictures to the article viewport when scrolling. iTerm uses
+native pictures when fully visible and sliced ASCII at viewport edges. Other
+terminals keep ASCII. A saved no-pictures archive has no pictures to display;
+choose Live Wikipedia explicitly for online pictures. No saved view silently
+switches to the web.
+
+`W` opens a shell pane in the current working directory from the Wiki shelf,
+article, link selector or image gallery, and the Books shelf or read-aloud view.
+The existing terminal bindings remain: **Option/Alt-Shift-W** switches focus,
+**Ctrl-Shift-W** closes the focused pane, and **Ctrl-Shift-Enter** creates a pane
+globally in the Look Kitty profile. With tmux, use **Ctrl-B, O** for focus and
+`exit` to close the shell. Without either backend, the status explains setup.
+Bookokrat's own typing/reader bindings are unchanged; the terminal-wide pane
+shortcuts still apply there.

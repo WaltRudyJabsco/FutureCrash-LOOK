@@ -557,10 +557,14 @@ class NativePreviewController:
         self._generation=0
         self._last_key=None
         self._rfd=self._wfd=None
+        self.clip_rows=None
+        self._io_lock=threading.Lock()
+        self._thread=None
         if self.enabled:
             self._rfd,self._wfd=os.pipe()
             os.set_blocking(self._rfd,False); os.set_blocking(self._wfd,False)
-            threading.Thread(target=self._worker,name='look-native-preview',daemon=True).start()
+            self._thread=threading.Thread(target=self._worker,name='look-native-preview',daemon=True)
+            self._thread.start()
 
     @property
     def wakeup_fd(self):
@@ -605,17 +609,35 @@ class NativePreviewController:
                 pass
         self.invalidate()
 
+    def close(self)->None:
+        """Release short-lived inline previews without leaving idle worker threads."""
+        self.invalidate();self.enabled=False
+        try:
+            while True:self._jobs.get_nowait()
+        except queue.Empty:pass
+        try:self._jobs.put_nowait(None)
+        except queue.Full:pass
+        with self._io_lock:
+            for fd in (self._rfd,self._wfd):
+                if fd is not None:
+                    try:os.close(fd)
+                    except OSError:pass
+            self._rfd=self._wfd=None
+
     def _worker(self)->None:
         while True:
             job=self._jobs.get()
+            if job is None:return
             generation,path,stamp,row,col,rows,cols=job
             prepared=self._prepare(path,stamp,rows,cols)
             if prepared is None: continue
             self._prepared=((str(path),stamp,row,col,rows,cols),prepared)
             if generation!=self._generation: continue
             self._ready=(generation,prepared,row,col,rows,cols)
-            try: os.write(self._wfd,b'1')
-            except (OSError,BlockingIOError): pass
+            with self._io_lock:
+                try:
+                    if self._wfd is not None:os.write(self._wfd,b'1')
+                except (OSError,BlockingIOError):pass
 
     def _prepare(self,path:Path,stamp:int,rows:int,cols:int)->Path|None:
         cache=Path.home()/'.cache'/'look'/'previews'; cache.mkdir(parents=True,exist_ok=True)
@@ -709,11 +731,27 @@ class NativePreviewController:
         if generation!=self._generation: return
         if not self._png_dimensions(image): return
         draw_row,draw_col,draw_rows,draw_cols=self._contained_rect(image,row,col,rows,cols)
+        crop='';blank_row=row;blank_rows=rows
+        if self.clip_rows is not None:
+            first,last=self.clip_rows
+            blank_row=max(row,first);blank_rows=max(0,min(row+rows,last)-blank_row)
+            visible_top=max(draw_row,first);visible_bottom=min(draw_row+draw_rows,last)
+            if visible_top>=visible_bottom:return
+            if visible_top!=draw_row or visible_bottom!=draw_row+draw_rows:
+                # Kitty crops source pixels. iTerm keeps the sliced ASCII fallback
+                # at viewport edges rather than stretching or painting over text.
+                if self.driver!='kitty':return
+                image_w,image_h=self._png_dimensions(image)
+                y=max(0,round((visible_top-draw_row)*image_h/draw_rows))
+                end=min(image_h,round((visible_bottom-draw_row)*image_h/draw_rows))
+                crop=f'x=0,y={y},w={image_w},h={max(1,end-y)},'
+                draw_row=visible_top;draw_rows=visible_bottom-visible_top
+
         try:
             # ASCII remains the immediate fallback. Once native pixels are ready,
             # blank only its art rectangle so letterboxing is clean rather than a
             # native image floating over residual Chafa symbols.
-            blank=''.join(f'\x1b[{row+i};{col}H'+(' '*cols) for i in range(rows))
+            blank=''.join(f'\x1b[{blank_row+i};{col}H'+(' '*cols) for i in range(blank_rows))
             if self.driver=='iterm':
                 raw=image.read_bytes()
                 payload=base64.b64encode(raw).decode('ascii')
@@ -723,7 +761,7 @@ class NativePreviewController:
                 # Kitty can consume a local PNG by filename; only the tiny filename
                 # payload crosses the terminal. Placement is contained and centered.
                 payload=base64.b64encode(str(image).encode()).decode('ascii')
-                seq=(f'\x1b7{blank}\x1b[{draw_row};{draw_col}H\x1b_Ga=T,t=f,f=100,c={draw_cols},r={draw_rows},C=1,q=2;'
+                seq=(f'\x1b7{blank}\x1b[{draw_row};{draw_col}H\x1b_Ga=T,t=f,f=100,{crop}c={draw_cols},r={draw_rows},C=1,q=2;'
                      f'{payload}\x1b\\\x1b8')
             else:
                 return

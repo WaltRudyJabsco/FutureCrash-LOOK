@@ -9,7 +9,7 @@ import urllib.error
 import book_reader
 
 HOST='https://en.wikipedia.org'
-USER_AGENT='FutureCrash-LOOK/8.23.2 (https://github.com/WaltRudyJabsco/FutureCrash-LOOK)'
+USER_AGENT='FutureCrash-LOOK/8.24.0 (https://github.com/WaltRudyJabsco/FutureCrash-LOOK)'
 MAX_HTML_BYTES=4*1024*1024
 MAX_IMAGE_BYTES=8*1024*1024
 CACHE_SECONDS=900
@@ -67,7 +67,7 @@ def article(title=''):
         value=wiki.article_payload(raw.decode('utf-8','replace'),title,title.replace('_',' '),wiki_host='en.wikipedia.org',live=True)
         value.update(source_url=HOST+'/wiki/'+urllib.parse.quote(title,safe=''),attribution='Wikipedia contributors · CC BY-SA 4.0')
         return value
-    return cached('article-rich-v1',title,fetch)
+    return cached('article-inline-v1',title,fetch)
 
 
 def search(query):
