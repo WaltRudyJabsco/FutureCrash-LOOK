@@ -178,3 +178,12 @@ def test_same_book_rename_preserves_reading_state_and_duplicates_edit_together(t
     shutil.copyfile(shelf.root/'two.epub',shelf.root/'three.epub');shelf.scan()
     shelf.update(row['id'],{'title':'Renamed title'})
     assert all(r['title']=='Renamed title' for r in shelf.catalog()['entries'])
+
+
+def test_interactive_owner_override_reaches_shelf(monkeypatch):
+    class Terminal:
+        def isatty(self):return True
+    monkeypatch.setattr(books.sys,'stdin',Terminal());monkeypatch.setattr(books.sys,'stdout',Terminal())
+    seen=[];monkeypatch.setattr(books,'desk',lambda ui,query,owner:seen.append(owner) or 0)
+    assert books.main(['--node','chosen-owner'],object())==0
+    assert seen==['chosen-owner']
