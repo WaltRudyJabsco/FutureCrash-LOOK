@@ -886,9 +886,9 @@
   ],
   [
     "lk words",
-    "[status|setup|lookup WORD|spell TEXT|find PATTERN|add WORD] [--language en_US|en_GB] [--node NODE] [--json]",
+    "[desk|status|setup|lookup WORD|spell TEXT|find PATTERN|add WORD] [--language en_US|en_GB] [--node NODE] [--json]",
     "web",
-    "Offline dictionary, thesaurus, word finder and system spelling fallbacks"
+    "Persistent offline word desk, thesaurus, spelling, clipboard and W shell panes"
   ],
   [
     "lk wiki",

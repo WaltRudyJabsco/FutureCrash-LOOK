@@ -43,7 +43,38 @@ Synonyms and antonyms stay attached to their meanings; broader, more specific
 and similar concepts are labelled separately. Recorded irregular forms resolve
 to their lemmas. This is not a complete historical, slang or names dictionary.
 
-The terminal view uses LOOK's pager and standard navigation. Machine-readable
+## Word desk
+
+Bare `lk words` opens its own persistent terminal interface. Direct `lookup`,
+`spell` and `find` commands also open that desk in a terminal with the requested
+query ready. Outside a terminal, the bare command prints status; explicit queries
+and `--json` remain script-friendly.
+
+- The bare desk starts with its input active: type a word and Enter.
+  From results, `/` edits the current query; Ctrl-U clears it. Enter submits it.
+  Queries run in the background so typing and Escape remain responsive.
+- **1** Meaning, **2** Synonyms, **3** Antonyms, **4** Spelling, **5** Patterns.
+  Tab cycles views. While editing, digits and uppercase letters remain text.
+- Arrow keys scroll; Shift-Up/Down page and Shift-Left/Right jump to ends.
+  Enter on a thesaurus/pattern word opens its meaning; `b` returns to the previous
+  query. Similar related words are labelled separately from direct synonyms.
+- `p` pastes the system clipboard; `Z` or editor Ctrl-Y inserts from LK Clip.
+  Bracketed paste is literal text. Longer pasted text selects Spelling.
+- `y` copies the selected word/entry to both the system clipboard and LK Clip.
+  `c` copies the working query/text. These actions do not enable background
+  clipboard capture or share clipboard history over Fabric.
+- Spelling shows only flagged/unknown words and suggestions. Select a suggestion
+  and Enter to replace that exact word throughout the working text; `c` copies
+  the result. Source documents are never changed. `a` accepts a flagged word in
+  local personal vocabulary. No suggestions are applied automatically.
+- `W` opens an adjacent shell pane from results (Esc leaves input first). Existing Option/Alt-Shift-W focus and
+  Ctrl-Shift-W close controls remain terminal-owned. In tmux use Ctrl-B, O for
+  focus and `exit` to close the shell. Editing `W` is always literal text.
+- `S` presents optional setup with its download/storage summary; `?` shows help.
+  Escape cancels input back to results, then closes the desk from results.
+  Narrow panes use a shorter footer; `?` shows the additional controls.
+
+Machine-readable
 `--json` output serves scripts. The word finder accepts `*` and `?`; quote the
 pattern so the shell does not expand it first. Results are bounded to 40 entries.
 Spelling accepts up to 4,000 characters / 50 distinct words per check.

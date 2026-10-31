@@ -1,3 +1,9 @@
+## 8.25.1 — Persistent Words desk (LOOK 4.72.1)
+
+- Bare `lk words` opens a dedicated persistent desk, replacing the generic file pager. Meaning, synonyms, antonyms, spelling and patterns have explicit selectable views.
+- Search, Unicode/bracketed paste, LK Clip copy/insert, suggested spelling corrections and `W` shell panes stay in the desk. Queries run asynchronously after Enter; ordinary recognized words are omitted from spelling results.
+- Related alternatives are labelled separately from direct synonyms. Cited WordNet examples now retain text and author without crashing the display.
+
 ## 8.25.0 — Offline words and Kinetic Mobile (LOOK 4.72.0)
 
 - `lk words` adds optional local definitions, examples, synonyms/antonyms, word patterns, personal vocabulary and spelling. Setup downloads about 12 MB; the installed baseline is about 60 MB.

@@ -165,11 +165,26 @@ def test_system_wordnet_fallback_does_not_claim_missing_entries(home,monkeypatch
     assert not words.lookup('unlisted')['found']
 
 
-def test_words_cli_json_and_pager_dimensions(lk,installed,monkeypatch,capsys):
+def test_words_cli_json_and_persistent_desk_dispatch(lk,installed,monkeypatch,capsys):
     assert words.main(['lookup','good','--json'])==0
     assert json.loads(capsys.readouterr().out)['found']
+    import words_desk
     monkeypatch.setattr(words.sys.stdout,'isatty',lambda:True)
-    import look_renderer
-    pager=Mock();monkeypatch.setattr(look_renderer,'pager',pager)
+    monkeypatch.setattr(words.sys.stdin,'isatty',lambda:True)
+    desk=Mock(return_value=0);monkeypatch.setattr(words_desk,'desk',desk)
+    assert words.main([],lk)==0
+    desk.assert_called_with(lk,node=None,language='en_US',initial='',view=0)
     assert words.main(['lookup','good'],lk)==0
-    assert len(pager.call_args.args)==3 and all(isinstance(n,int) for n in pager.call_args.args[1:])
+    desk.assert_called_with(lk,node=None,language='en_US',initial='good',view=0)
+    assert words.main(['spell','good text'],lk)==0
+    assert desk.call_args.kwargs['view']==3
+
+
+def test_cited_examples_keep_text_and_author_without_crashing(installed):
+    with sqlite3.connect(words.database()) as db:
+        payload=json.loads(db.execute("SELECT payload FROM synsets WHERE id='good-s'").fetchone()[0])
+        payload['example']=[{'text':'A good example.','source':'An author'}]
+        db.execute("UPDATE synsets SET payload=? WHERE id='good-s'",(json.dumps(payload),))
+    value=words.lookup('good')
+    assert value['results'][0]['examples']==['A good example. — An author']
+    assert 'A good example. — An author' in words.display(value)
