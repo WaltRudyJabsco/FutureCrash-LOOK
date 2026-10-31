@@ -28,6 +28,7 @@ _lk() {
     'mp:integrated Fabric media player'
     'books:Fabric EPUB/PDF shelf'
     'wiki:offline Kiwix references'
+    'latin:offline Latin classroom'
     'bk:alias for books'
     'ytd:download videos on a Fabric node'
     'describe:searchable catalog description'
@@ -169,6 +170,10 @@ _lk() {
           return
           ;;
       esac
+      ;;
+    latin)
+      _values 'Latin command' home list lesson practice review words grammar read progress about export --lesson --strict-macrons --json
+      return
       ;;
     wiki)
       _values 'reference command' shelf status setup catalog fetch jobs cancel configure search article --node --archive --root --confirm --json

@@ -879,6 +879,12 @@
     "Alias for lk books; Fabric EPUB/PDF shelf"
   ],
   [
+    "lk latin",
+    "[home|list|lesson N|practice|review|words QUERY|grammar QUERY|read|progress|about|export FILE] [--lesson N] [--strict-macrons on|off] [--json]",
+    "learn",
+    "Offline Latin classroom: complete course, vocabulary, checked forms and spaced review"
+  ],
+  [
     "lk wiki",
     "[shelf|status|setup|catalog QUERY|fetch ID|jobs|cancel ID|configure|search QUERY|article PATH] [--node NODE] [--archive FILE] [--root PATH] [--confirm] [--json]",
     "web",
