@@ -1,4 +1,6 @@
-# Future Crash + LOOK 8.23.1 — FABRIC MEDIA
+# Future Crash + LOOK 8.23.2 — FABRIC MEDIA
+
+8.23.2 preserves the Wiki reading position when link hints rewrap an article.
 
 8.23.1 adds Wiki research links in Notes. Press c in an article to copy a Markdown
 link, then paste it into a note. Opening it returns to the note when you exit.

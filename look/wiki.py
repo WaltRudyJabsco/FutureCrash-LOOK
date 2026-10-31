@@ -1,6 +1,7 @@
 """Offline Kiwix references: explicit owner, fixed setup, verified ZIM downloads."""
 from __future__ import annotations
 import argparse
+import bisect
 import fcntl
 import hashlib
 import json
@@ -317,45 +318,65 @@ def article_payload(html,path,title,wiki_host=None,live=False,fallback=None):
     return {'title':title,'path':path,'paragraphs':parser.parts,'rich_paragraphs':runs,'hinted_paragraphs':hinted,'links':links,'images':parser.images}
 
 
-def article_lines(ui,article,width,hints=False):
+def article_lines(ui,article,width,hints=False,anchors=None):
     """Wrap visible cells before applying palette colors; escape source controls."""
     rich=article.get('rich_paragraphs')
     if rich is None:
         import textwrap
         values=article.get('hinted_paragraphs',article['paragraphs']) if hints else article['paragraphs']
-        return [line for text in values for line in [*textwrap.wrap(safe_text(text),width),'']]
+        lines=[]
+        for pi,text in enumerate(values):
+            text=safe_text(text);cursor=0
+            for line in textwrap.wrap(text,width):
+                start=text.find(line,cursor);cursor=start+len(line)
+                offset=len(re.sub(r' \[[a-z]{2}\]','',text[:start])) if hints else start
+                lines.append(line)
+                if anchors is not None:anchors.append((pi,offset))
+            lines.append('')
+            if anchors is not None:anchors.append((pi,len(article['paragraphs'][pi])))
+        return lines
     lines=[]
     def paint(row):
         out=[];group='';prior=None
-        for char,style in row:
+        for char,style,_ in row:
             if style!=prior and group:
                 out.append(ui._c(group,prior) if prior else group);group=''
             group+=char;prior=style
         if group:out.append(ui._c(group,prior) if prior else group)
         return ''.join(out)
-    for runs in rich:
-        chars=[]
+    def emit(row,pi,end):
+        lines.append(paint(row))
+        if anchors is not None:anchors.append((pi,row[0][2] if row else end))
+    for pi,runs in enumerate(rich):
+        chars=[];source_offset=0
         for run in runs:
             style='1;34' if run.get('code') else None
-            chars.extend((c,style) for c in safe_text(run['text']))
-            if hints and run.get('code'):chars.extend((c,'1;33') for c in ' ['+run['code']+']')
-        plain=''.join(c for c,_ in chars);row=[];used=0
+            text=safe_text(run['text'])
+            chars.extend((c,style,source_offset+i) for i,c in enumerate(text));source_offset+=len(text)
+            if hints and run.get('code'):chars.extend((c,'1;33',max(0,source_offset-1)) for c in ' ['+run['code']+']')
+        plain=''.join(c for c,_,_ in chars);row=[];used=0
         for token in re.finditer(r'\S+\s*',plain):
             word=chars[token.start():token.end()]
-            size=sum(cell_width(c) for c,_ in word if not c.isspace())
+            size=sum(cell_width(c) for c,_,_ in word if not c.isspace())
             if row and used+size>width:
                 while row and row[-1][0].isspace():row.pop()
-                lines.append(paint(row));row=[];used=0
-            for char,style in word:
+                emit(row,pi,source_offset);row=[];used=0
+            for char,style,offset in word:
                 cells=cell_width(char)
                 if used+cells>width:
-                    lines.append(paint(row));row=[];used=0
+                    emit(row,pi,source_offset);row=[];used=0
                 if not row and char.isspace():continue
-                row.append((char,style));used+=cells
+                row.append((char,style,offset));used+=cells
         while row and row[-1][0].isspace():row.pop()
-        if row:lines.append(paint(row))
+        if row:emit(row,pi,source_offset)
         lines.append('')
+        if anchors is not None:anchors.append((pi,source_offset))
     return lines
+
+
+def anchored_top(anchors,position,row):
+    """Find the wrapped line containing a source-text position, excluding hints."""
+    return max(0,bisect.bisect_right(anchors,position)-1-row) if anchors else 0
 
 
 def topic_hints(paragraphs,links):
@@ -547,22 +568,31 @@ def desk(ui,owner,live=False,reference=None):
         return request(action,node=owner,archive=archive,**payload)
     def article_view(path):
         history=[];top=0;hinting=False;typed='';layout=None;lines=[];article_notice=''
+        anchors=[];view_anchor=None;anchor_row=0;restore=None
         while True:
-            article=fetch_article('article',query=path);layout=None
+            article=fetch_article('article',query=path);layout=None;anchors=[]
+            view_anchor,anchor_row=restore if restore else (None,0);restore=None
             while True:
                 width,height=ui.shutil.get_terminal_size((100,30));width=max(20,width)
                 controls=ui._media_hints('↑↓ scroll · Shift-arrows page/ends · / search archive · l links ('+str(len(article['links']))+') · f link hints · i images · v live/saved · b back · c copy Wiki link · y copy passage · Esc shelf',width).splitlines()
-                if hinting:controls=['LINK HINTS '+typed+' · two letters open · arrows scroll · Esc cancels']
+                if hinting:
+                    active=ui._media_hints('LINK HINTS '+typed+' · two letters open · arrows scroll · Esc cancels',width).splitlines()
+                    controls=active[:len(controls)]+['']*max(0,len(controls)-len(active))
                 page=max(1,height-len(controls)-2)
-                if layout!=(width,hinting):lines=article_lines(ui,article,width,hinting);layout=(width,hinting)
+                if layout!=(width,hinting):
+                    anchors=[];lines=article_lines(ui,article,width,hinting,anchors);layout=(width,hinting)
+                    if view_anchor is not None:top=anchored_top(anchors,view_anchor,anchor_row)
                 top=max(0,min(top,max(0,len(lines)-page)))
+                if view_anchor is None and anchors:
+                    anchor_row=min(page//2,len(anchors)-1-top)
+                    view_anchor=anchors[top+anchor_row]
                 frame=[ui._c(safe_text(article['title']),'1;36')+' · '+(('STALE CACHED WIKIPEDIA' if article.get('stale') else 'CACHED WIKIPEDIA' if article.get('cached') else 'LIVE WIKIPEDIA') if live else 'SAVED ARCHIVE · owner '+safe_text(owner)),*lines[top:top+page]]
                 frame+=['']*max(0,page+1-len(frame))
                 frame+=controls
                 if article_notice:frame[-1]=ui._c(safe_text(article_notice),'33')+' · '+frame[-1]
                 if live and not hinting:frame[-1]=ui._c('Wikipedia contributors · CC BY-SA 4.0 · ','2')+frame[-1]
                 if hinting:
-                    frame[-1]=ui._c(frame[-1],'1;33')
+                    frame[-len(controls)]=ui._c(frame[-len(controls)],'1;33')
                     codes={hint_code(i) for i in range(len(article['links']))}
                     frame=[re.sub(r'\[([a-z]{2})\]',lambda m:ui._c(m[0],'1;33') if m[1] in codes else m[0],line) for line in frame]
                 sys.stdout.write(ui._terminal_frame_payload('\n'.join(ui._ansi_clip(line,width) for line in frame)));sys.stdout.flush()
@@ -574,11 +604,12 @@ def desk(ui,owner,live=False,reference=None):
                         if len(typed)==2:
                             match=next((r for i,r in enumerate(article['links']) if hint_code(i)==typed),None)
                             typed=''
-                            if match:history.append((path,top));path=match['path'];top=0;hinting=False;break
+                            if match:history.append((path,view_anchor,anchor_row));path=match['path'];top=0;hinting=False;break
                         continue
                     if key in {'\b','\x7f'}:typed=typed[:-1];continue
 
                 if key in {'esc','q','\x03'}:return
+                if key in {'up','down','shiftup','shiftdown','pageup','pagedown',' ','shiftleft','shiftright','home','end'}:view_anchor=None
                 if key=='up':top-=1
                 elif key=='down':top+=1
                 elif key in {'shiftup','pageup'}:top-=page
@@ -601,20 +632,21 @@ def desk(ui,owner,live=False,reference=None):
                 elif key=='i':
                     import wiki_images
                     article_notice=wiki_images.gallery(ui,fd,article,live=live,archive=archive or '',owner=owner)
-                elif key=='b' and history:path,top=history.pop();break
+                elif key=='b' and history:
+                    path,position,row=history.pop();restore=(position,row);top=0;break
                 elif key=='/':
                     query=ask('Search this saved archive · Enter cancels')
                     if query:
                         found=fetch_article('search',query=query)['entries']
                         if found:
                             chosen=choose_links(ui,fd,found,'Search: '+query)
-                            if chosen:history.append((path,top));path=chosen['path'];top=0;break
+                            if chosen:history.append((path,view_anchor,anchor_row));path=chosen['path'];top=0;break
                         else:ask('No matching articles · Enter returns')
                 elif key=='l':
                     if not article['links']:
                         ask('This page has no internal links · / searches the archive · Enter returns');continue
                     chosen=choose_links(ui,fd,article['links'])
-                    if chosen:history.append((path,top));path=chosen['path'];top=0;break
+                    if chosen:history.append((path,view_anchor,anchor_row));path=chosen['path'];top=0;break
     try:
         tty.setcbreak(fd)
         if os.environ.get('KITTY_WINDOW_ID') or os.environ.get('TERM')=='xterm-kitty':sys.stdout.write('\x1b_Ga=d,d=a,q=2\x1b\\')

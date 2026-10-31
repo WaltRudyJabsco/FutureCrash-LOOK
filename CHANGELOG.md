@@ -1,3 +1,9 @@
+## 8.23.2 — Stable Wiki reading position (LOOK 4.70.2)
+
+- Anchor the viewport center to original paragraph/character positions when hint codes change wrapping.
+- Keep normal/hint footer height consistent and preserve the original position across repeated toggles.
+- Use the same source anchors when returning through article history or changing width.
+
 ## 8.23.1 — Wiki research links in Notes (LOOK 4.70.1)
 
 - Support wiki: article references through normal Notes Markdown links and Ctrl-K insertion.
