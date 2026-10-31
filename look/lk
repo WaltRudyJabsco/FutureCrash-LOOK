@@ -37,7 +37,7 @@ try:
 except Exception:
     readline = None
 
-VERSION="4.70.0"
+VERSION="4.70.1"
 
 LOOK_WORDMARK = r"""       ██╗      ██╗  ██╗
        ██║      ██║ ██╔╝
@@ -10077,7 +10077,7 @@ def _direct_searxng_search(query, limit=8):
     params=urllib.parse.urlencode({"q":query,"format":"json"})
     request=urllib.request.Request(base+"/search?"+params,headers={
         "Accept":"application/json",
-        "User-Agent":"Future-Crash-Fabric/8.23.0",
+        "User-Agent":"Future-Crash-Fabric/8.23.1",
     })
     with urllib.request.urlopen(request,timeout=12) as response:
         data=json.load(response)
@@ -21088,7 +21088,7 @@ _COMMANDS = [
     ("lk tv", "[QUERY]", "media", "Fabric movies, TV and video player"),
     ("lk bk", "[ARGS]", "media", "Alias for lk books; Fabric EPUB/PDF shelf"),
     ("lk latin", "[home|list|lesson N|practice|review|words QUERY|grammar QUERY|read|progress|about|export FILE] [--lesson N] [--strict-macrons on|off] [--json]", "learn", "Offline Latin classroom: complete course, vocabulary, checked forms and spaced review"),
-    ("lk wiki", "[shelf|status|setup|catalog QUERY|fetch ID|jobs|cancel ID|configure|search QUERY|article PATH] [--online|--offline] [--node NODE] [--archive FILE] [--root PATH] [--confirm] [--json]", "web", "Live Wikipedia and saved Kiwix references; colored links, hints and images"),
+    ("lk wiki", "[shelf|status|setup|catalog QUERY|fetch ID|jobs|cancel ID|configure|search QUERY|article PATH] [--online|--offline] [--open-link URI] [--node NODE] [--archive FILE] [--root PATH] [--confirm] [--json]", "web", "Live Wikipedia and saved Kiwix references; colored links, hints and images"),
     ("lk books discover", "[popular|new|subjects|surprise|subject NAME] [--json]", "media", "Browse Project Gutenberg without downloading books"),
     ("lk books listen", "FILE [--chapter N] [--paragraph N]", "media", "Read aloud from a chapter/paragraph using a local voice"),
     ("lk books voices", "", "media", "List available local book-reading voices"),

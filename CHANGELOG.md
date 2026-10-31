@@ -1,3 +1,9 @@
+## 8.23.1 — Wiki research links in Notes (LOOK 4.70.1)
+
+- Support wiki: article references through normal Notes Markdown links and Ctrl-K insertion.
+- Add c in the Wiki article reader to copy a labelled link retaining live or saved owner/archive context.
+- Open Wiki links in the terminal reader and return directly to Notes on Escape; reject ambiguous or unsafe context without silently changing sources.
+
 ## 8.23.0 — Live Wiki, link ink and images (LOOK 4.70.0)
 
 - Keep followable article anchors visibly accented in normal reading; show two-letter codes only in hint mode.

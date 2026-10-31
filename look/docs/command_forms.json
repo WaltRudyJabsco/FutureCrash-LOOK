@@ -886,7 +886,7 @@
   ],
   [
     "lk wiki",
-    "[shelf|status|setup|catalog QUERY|fetch ID|jobs|cancel ID|configure|search QUERY|article PATH] [--online|--offline] [--node NODE] [--archive FILE] [--root PATH] [--confirm] [--json]",
+    "[shelf|status|setup|catalog QUERY|fetch ID|jobs|cancel ID|configure|search QUERY|article PATH] [--online|--offline] [--open-link URI] [--node NODE] [--archive FILE] [--root PATH] [--confirm] [--json]",
     "web",
     "Live Wikipedia and saved Kiwix references; colored links, hints and images"
   ],
