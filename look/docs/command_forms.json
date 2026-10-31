@@ -891,6 +891,12 @@
     "Shared visualizer checklist; Space toggle, Enter save, Esc cancel"
   ],
   [
+    "lk wd",
+    "[ARGS]",
+    "web",
+    "Alias for lk words; offline word desk"
+  ],
+  [
     "lk words",
     "[desk|status|setup|lookup WORD|spell TEXT|find PATTERN|add WORD] [--language en_US|en_GB] [--node NODE] [--json]",
     "web",

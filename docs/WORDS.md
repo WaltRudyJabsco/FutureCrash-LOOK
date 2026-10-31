@@ -45,7 +45,19 @@ to their lemmas. This is not a complete historical, slang or names dictionary.
 
 ## Word desk
 
-Bare `lk words` opens its own persistent terminal interface. Direct `lookup`,
+Bare `lk words` or **`lk wd`** opens its own persistent terminal interface.
+The alias accepts all the same arguments, for example `lk wd lookup obtuse`.
+
+On a blank local desk, **Word of this launch** offers a short, sourced definition
+from the installed offline WordNet. A small curated learning pool is shuffled
+without repeats until it cycles through, and avoids an immediate repeat at the
+cycle boundary. Its progress stays local to this OS account. The card disappears
+on the first typed/pasted text or submitted search and does not return after
+cancelling that input. Explicit lookup/spelling/pattern queries have no card.
+Missing reference data simply keeps the setup guidance; this feature never starts
+a download or inference request.
+
+ Direct `lookup`,
 `spell` and `find` commands also open that desk in a terminal with the requested
 query ready. Outside a terminal, the bare command prints status; explicit queries
 and `--json` remain script-friendly.

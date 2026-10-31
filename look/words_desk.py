@@ -82,21 +82,27 @@ def desk(ui,*,node=None,language='en_US',initial='',view=0):
     work=LatestWork();text=initial;cursor=len(text);committed=text;editing=not bool(initial)
     view=max(0,min(len(VIEWS)-1,view));selected=0;top=0;notice='Type a word or paste text · / edits the current query'
     operation=ACTIONS[view] if text else 'status';revision=0;last=None;help_visible=False;pane_help=False
-    request_key=None;value={'loading':True};history=[]
+    request_key=None;value={'loading':True};history=[];welcome=not bool(initial)
     def run(action,query):
         try:
             if node:
                 import fabric_files,json
                 return fabric_files.request('/v1/words',{'target':node},json.dumps({'action':action,'query':query,'language':language,'confirm':action=='setup'}).encode(),timeout=60)
-            return words.setup() if action=='setup' else words.tool(action,query,language)
+            value=words.setup() if action=='setup' else words.tool(action,query,language)
+            if action=='status' and welcome:
+                card=words.launch_word()
+                if card:value=dict(value,launch_word=card)
+            return value
         except Exception as exc:return {'error':str(exc)}
     def submit():
-        nonlocal operation,committed,revision,selected,top,editing
+        nonlocal operation,committed,revision,selected,top,editing,welcome
+        welcome=False
         operation=ACTIONS[view] if text.strip() else 'status';committed=text
         revision+=1;selected=top=0;editing=False
     def insert(pasted):
-        nonlocal text,cursor,editing,notice
+        nonlocal text,cursor,editing,notice,welcome
         pasted=safe_text(pasted)
+        if pasted:welcome=False
         limit=words.MAX_TEXT_CHARS if view==3 else words.MAX_QUERY_CHARS
         room=max(0,limit-len(text));chunk=pasted[:room]
         text=text[:cursor]+chunk+text[cursor:];cursor+=len(chunk);editing=True
@@ -116,6 +122,11 @@ def desk(ui,*,node=None,language='en_US',initial='',view=0):
             value=work.get(key,lambda action=operation,query=committed:run(action,query),{'loading':True},ttl=float('inf')) or {'error':'Reference operation failed'}
             if key!=request_key:request_key=key;selected=top=0
             items=entries(value,view);flat=[]
+            card=value.get('launch_word') if welcome else None
+            if card:
+                items.insert(0,{'title':'WORD OF THIS LAUNCH · '+card['word'],
+                    'detail':card['part_of_speech']+' · '+card['definition']+'\n'+card['source'],
+                    'target':card['word'],'copy':card['word']+' — '+card['definition']})
             for index,item in enumerate(items):
                 for number,line in enumerate([item['title'],*item.get('detail','').splitlines()]):
                     for wrapped in clipboard_shelf.wrap_cells(safe_text(line),max(1,width-4)):

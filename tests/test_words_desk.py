@@ -20,6 +20,7 @@ class Work:
 
 
 def terminal(monkeypatch,lk,size=(80,28)):
+    monkeypatch.setattr(words,'launch_word',lambda:None)
     monkeypatch.setattr(desk.sys,'stdin',Mock(isatty=lambda:True,fileno=lambda:0))
     monkeypatch.setattr(desk.sys.stdout,'isatty',lambda:True)
     monkeypatch.setattr(desk.termios,'tcgetattr',lambda fd:['original'])
@@ -167,3 +168,27 @@ def test_initial_search_treats_command_letters_as_text(lk,monkeypatch):
     assert desk.desk(lk)==0
     assert tool.call_args.args==('lookup','cat','en_US')
     copy.assert_not_called()
+
+
+def test_launch_card_appears_once_and_disappears_on_first_character(lk,monkeypatch):
+    terminal(monkeypatch,lk,size=(40,16))
+    card=Mock(return_value={'word':'pellucid','definition':'Transparently clear.','part_of_speech':'adjective','source':'Local WordNet'})
+    monkeypatch.setattr(words,'launch_word',card)
+    monkeypatch.setattr(words,'tool',lambda *args:{'installed':True})
+    frames=[]
+    monkeypatch.setattr(lk,'_terminal_frame_payload',lambda text:frames.append(lk._strip_ansi(text)) or '')
+    keys(monkeypatch,lk,['c','esc','esc'])
+    assert desk.desk(lk)==0
+    assert 'WORD OF THIS LAUNCH' in frames[0] and 'pellucid' in frames[0]
+    assert all('WORD OF THIS LAUNCH' not in frame for frame in frames[1:])
+    card.assert_called_once()
+    assert all(len(frame.splitlines())<=16 for frame in frames)
+
+
+def test_explicit_query_has_no_launch_card(lk,monkeypatch):
+    terminal(monkeypatch,lk)
+    card=Mock();monkeypatch.setattr(words,'launch_word',card)
+    monkeypatch.setattr(words,'tool',lambda *args:result())
+    keys(monkeypatch,lk,['esc'])
+    assert desk.desk(lk,initial='obtuse')==0
+    card.assert_not_called()

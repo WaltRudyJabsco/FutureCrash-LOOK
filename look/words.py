@@ -4,6 +4,8 @@ import argparse
 import contextlib
 import difflib
 import fnmatch
+import fcntl
+import secrets
 import functools
 import io
 import hashlib
@@ -200,6 +202,44 @@ def lookup(word):
     return {'query':word,'found':bool(results or fallback),'source':EDITION if results else 'System WordNet' if fallback else None,
         'source_url':SOURCE if results else None,'attribution':ATTRIBUTION if results else None,
         'results':results,'system_text':fallback,'hint':'' if results or fallback else 'No entry found. lk words setup installs the portable dictionary; spelling and personal words are separate.'}
+
+
+# A readable learning selection avoids abbreviations and specialist taxonomic names.
+LAUNCH_WORDS=('serendipity','pellucid','susurrus','perspicacious','obdurate','halcyon',
+              'sagacious','lucent','taciturn','ebullient','equanimity','resplendent',
+              'ephemeral','ineffable','palimpsest','sanguine','laconic','verdant',
+              'mellifluous','liminal','luminous','quixotic','redolent','assiduous',
+              'insouciant','numinous','salubrious','tenacious','mercurial','capacious')
+
+
+def launch_word():
+    """A real local entry from a shuffled learning pool; never download data."""
+    with connection() as db:
+        if db is None:return None
+        placeholders=','.join('?' for _ in LAUNCH_WORDS)
+        candidates=[r[0] for r in db.execute('SELECT DISTINCT word FROM senses WHERE word IN ('+placeholders+')',LAUNCH_WORDS)]
+    if not candidates:return None
+    selected=secrets.choice(candidates)
+    try:
+        with (root()/'launch-word.lock').open('a') as lock:
+            fcntl.flock(lock,fcntl.LOCK_EX)
+            try:state=json.loads((root()/'launch-word.json').read_text())
+            except (OSError,ValueError):state={}
+            if not isinstance(state,dict):state={}
+            last=state.get('word');remaining=state.get('remaining',[])
+            if not isinstance(remaining,list):remaining=[]
+            pool=list(dict.fromkeys(word for word in remaining if isinstance(word,str) and word in candidates)) or candidates[:]
+            selected=secrets.choice([word for word in pool if word!=last] or pool)
+            pool.remove(selected)
+            import book_reader
+            book_reader.write_json(root()/'launch-word.json',{'word':selected,'remaining':pool})
+    except OSError:pass  # A read-only reference can still offer a launch word.
+    value=lookup(selected)
+    for sense in value['results']:
+        if sense['definitions']:
+            return {'word':sense['lemma'],'definition':sense['definitions'][0],
+                    'part_of_speech':sense['part_of_speech'],'source':value['source']}
+    return None
 
 
 def system_wordlists():return [Path('/usr/share/dict/words'),Path('/usr/share/dict/american-english'),Path('/usr/share/dict/british-english')]

@@ -1,6 +1,6 @@
-# Future Crash + LOOK 8.26.0 — FABRIC MEDIA
+# Future Crash + LOOK 8.26.1 — FABRIC MEDIA
 
-8.26.0 adds a shared `V` visualizer checklist and the Halloween **Haunted Hollow** scene. Choose the visuals used by both manual stepping and timed rotation; see [Player visuals](docs/MEDIA.md#player-visuals).
+8.26.1 adds `lk wd` as a shortcut for Words, plus a fresh offline word and definition on each blank desk launch. See [Offline words](docs/WORDS.md).
 
 8.23.1 adds Wiki research links in Notes. Press c in an article to copy a Markdown
 link, then paste it into a note. Opening it returns to the note when you exit.

@@ -188,3 +188,27 @@ def test_cited_examples_keep_text_and_author_without_crashing(installed):
     value=words.lookup('good')
     assert value['results'][0]['examples']==['A good example. — An author']
     assert 'A good example. — An author' in words.display(value)
+
+
+def test_launch_words_use_real_entries_without_repeats_until_pool_recycles(installed,monkeypatch):
+    monkeypatch.setattr(words,'LAUNCH_WORDS',('good','bad','benefit'))
+    before=words.database().read_bytes()
+    values=[words.launch_word() for _ in range(6)]
+    assert len({v['word'] for v in values[:3]})==3
+    assert len({v['word'] for v in values[3:]})==3
+    assert values[2]['word']!=values[3]['word']
+    assert all(v['definition'] and v['source']==words.EDITION for v in values)
+    assert words.database().read_bytes()==before
+
+
+def test_launch_word_without_installed_data_does_not_create_state(home):
+    assert words.launch_word() is None
+    assert not words.root().exists()
+
+
+def test_wd_alias_dispatches_to_words_and_preserves_arguments(lk,monkeypatch):
+    import sys
+    main=Mock(return_value=0);monkeypatch.setattr(words,'main',main)
+    monkeypatch.setattr(sys,'argv',['lk','wd','lookup','obtuse'])
+    assert lk.main()==0
+    assert main.call_args.args[0]==['lookup','obtuse']
