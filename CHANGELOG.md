@@ -1,3 +1,8 @@
+## 8.19.1 — Reader setup upgrade compatibility (LOOK 4.66.1)
+
+- Allow the new maintenance helper to drain older nodes that do not yet expose reader setup status. Treat only a missing endpoint as legacy support; retain other HTTP failures.
+- Preserve disc-import and reader-setup protection during updates.
+
 ## 8.19.0 — Terminal book reader and stable media frames (LOOK 4.66.0)
 
 - Integrate optional Bookokrat in the same terminal, starting in its reading view and returning to the Books shelf on quit. Retain explicit system-reader access and auto/bookokrat/system preferences.

@@ -1,6 +1,6 @@
-# Future Crash + LOOK 8.19.0 — FABRIC MEDIA
+# Future Crash + LOOK 8.19.1 — FABRIC MEDIA
 
-8.19.0 integrates optional Bookokrat terminal reading with return to the shelf,
+8.19.1 integrates optional Bookokrat terminal reading with return to the shelf,
 keeps the system reader available, and stabilizes native media previews with
 synchronized redraws and fewer unnecessary refreshes.
 

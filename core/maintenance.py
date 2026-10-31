@@ -19,6 +19,7 @@ import time
 import uuid
 import zipfile
 import urllib.request
+import urllib.error
 
 MAX_BUNDLE = 32 * 1024 * 1024
 PROTOCOL = 1
@@ -288,7 +289,11 @@ def imports_active():
     imports = local_json('/v1/media/import?action=jobs')
     # Detached import workers still belong to the node's systemd service;
     # restarting that service can kill them along with the node.
-    reader_setup=local_json('/v1/books/reader').get('setup') or {}
+    try:reader_setup=local_json('/v1/books/reader').get('setup') or {}
+    except urllib.error.HTTPError as exc:
+        # The old node keeps serving during the new helper's drain phase.
+        if exc.code != 404:raise
+        reader_setup={}
     return reader_setup.get('state')=='installing' or any(job.get('state') not in {'complete', 'failed', 'cancelled'}
                for job in imports.get('jobs', []))
 
