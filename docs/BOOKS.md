@@ -119,8 +119,10 @@ without replacing it. Bookokrat themes and bookmarks remain reader-owned.
 
 **Copy:** v selects characters, Shift-V selects lines, c copies the selection;
 Space then c copies the chapter. These use the regular system clipboard. When
-LK Clip capture is enabled, its watcher captures reader copies and LOOK checks
-once more on return to catch the last copy. History remains local, limited to ten
+LK Clip capture is enabled, its watcher captures reader copies on supported
+desktops. macOS/native X11 also check once on return. Wayland uses change events
+only; desktops without data-control support require explicit `lk clip add`
+(or a in the shelf) after copying. History remains local, limited to ten
 text items, and disabled capture stays disabled. Run `lk clip on` or open Shift-P
 from the Books shelf to enable it; `lk clip off` stops capture.
 

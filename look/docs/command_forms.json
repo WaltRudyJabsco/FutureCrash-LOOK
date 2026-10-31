@@ -122,7 +122,7 @@
   ],
   [
     "lk clip",
-    "[on|off|status|clear]",
+    "[on|off|status|clear|add]",
     "files",
     "Ten-slot local text clipboard shelf; opt-in capture"
   ],
