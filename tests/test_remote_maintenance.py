@@ -369,3 +369,16 @@ def test_restart_waits_for_reader_setup(monkeypatch):
     monkeypatch.setattr(m.time, 'sleep', lambda s: None)
     m.wait_imports(1)
     assert len(reads)==2
+
+
+def test_reader_setup_check_supports_older_nodes_but_preserves_errors(monkeypatch):
+    import urllib.error
+    code=404
+    def local(path, payload=None):
+        if path == '/v1/media/import?action=jobs':return {'jobs': []}
+        assert path == '/v1/books/reader'
+        raise urllib.error.HTTPError(path,code,'status',{},None)
+    monkeypatch.setattr(m,'local_json',local)
+    assert m.imports_active() is False
+    code=503
+    with pytest.raises(urllib.error.HTTPError):m.imports_active()

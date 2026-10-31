@@ -23,7 +23,7 @@ RATE_SECONDS=1.1
 MATCHER_VERSION=3
 # Exact title and credited artist are still required; collaborations score lower.
 MIN_MATCH_SCORE=80
-USER_AGENT='FutureCrash-LOOK/8.19.0 (https://github.com/WaltRudyJabsco/FutureCrash-LOOK)'
+USER_AGENT='FutureCrash-LOOK/8.19.1 (https://github.com/WaltRudyJabsco/FutureCrash-LOOK)'
 _AUDIO={'.mp3','.m4a','.flac','.ogg','.opus','.wav','.aif','.aiff','.alac','.aac'}
 _JOBS=queue.Queue(maxsize=64)
 _LOCK=threading.Lock()
