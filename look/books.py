@@ -137,7 +137,8 @@ def desk(ui,query='',owner=None):
             if not key:continue
             if key=='\x03':return 0
             if key.startswith('paste:'):
-                query+=' '.join(safe_text(key[6:]).split());search=True;results=None;index=0;continue
+                pasted=safe_text(key[6:])
+                query+=(' ' if query and pasted[:1].isspace() else '')+' '.join(pasted.split());search=True;results=None;index=0;continue
             if search:
                 if key in {'esc','enter','\r','\n'}:search=False;continue
                 if key in {'\x7f','\b'}:query=query[:-1];index=0;continue
