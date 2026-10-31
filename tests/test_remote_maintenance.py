@@ -200,6 +200,7 @@ def test_idle_update_reserves_worker_and_respects_active_media_stream(home, monk
         if path == '/v1/activity': return {'active': None}
         if path == '/v1/media/state': return {'active': False}
         if path == '/v1/media/import?action=jobs': return {'jobs': []}
+        if path == '/v1/books/reader': return {}
         if path == '/v1/http':
             return stream if rounds.count(path) == 1 else {'listeners': {}}
         assert path == '/v1/lease/acquire'
@@ -219,6 +220,7 @@ def test_idle_update_waits_for_disc_import(home, monkeypatch):
         if path == '/v1/activity': return {'active': None}
         if path == '/v1/media/state': return {'active': False}
         if path == '/v1/http': return {'listeners': {}}
+        if path == '/v1/books/reader': return {}
         if path == '/v1/media/import?action=jobs':
             return {'jobs': [{'state': 'running' if reads.count(path) == 1 else 'complete'}]}
         assert path == '/v1/lease/acquire'
@@ -233,6 +235,7 @@ def test_idle_update_waits_for_disc_import(home, monkeypatch):
 def test_restart_waits_for_import_without_requiring_worker_lease(home, monkeypatch):
     calls = []
     def local(path, payload=None):
+        if path == '/v1/books/reader': return {}
         assert path == '/v1/media/import?action=jobs'
         calls.append(path)
         return {'jobs': [{'state': 'queued' if len(calls) == 1 else 'failed'}]}
@@ -353,3 +356,16 @@ def test_linux_isolation_failure_has_no_unsafe_detached_fallback(home,monkeypatc
     popen=Mock();monkeypatch.setattr(m.subprocess,'Popen',popen)
     with pytest.raises(RuntimeError,match='Cannot isolate'):m.launch_runner(home,'a'*32)
     popen.assert_not_called()
+
+
+def test_restart_waits_for_reader_setup(monkeypatch):
+    reads=[]
+    def local(path, payload=None):
+        if path == '/v1/media/import?action=jobs': return {'jobs': []}
+        assert path == '/v1/books/reader'
+        reads.append(path)
+        return {'setup': {'state': 'installing' if len(reads)==1 else 'ready'}}
+    monkeypatch.setattr(m, 'local_json', local)
+    monkeypatch.setattr(m.time, 'sleep', lambda s: None)
+    m.wait_imports(1)
+    assert len(reads)==2

@@ -12,6 +12,7 @@ import urllib.parse
 import urllib.request
 
 import book_core
+import book_reader
 import fabric_files
 import media_storage
 import terminal_style
@@ -119,7 +120,7 @@ def desk(ui,query='',owner=None):
             visible=results if results is not None else rows_for(value,query,shelf)
             if sort_reverse:visible=list(reversed(visible))
             index=max(0,min(index,max(0,len(visible)-1)));chosen=visible[index] if visible else None
-            controls='↑↓ move · Shift-arrows page/ends · Enter '+('import book' if results is not None else 'open reader')+' · / search · s shelves · m reading state · e edit · i import · g Gutenberg · k keep offline · y copy link · R scan/refresh · G reverse · W shell pane · Esc back'
+            controls='↑↓ move · Shift-arrows page/ends · Enter '+('import book' if results is not None else 'read')+' · o system reader · / search · s shelves · m reading state · e edit · i import · g Gutenberg · k keep offline · y copy link · R scan/refresh · G reverse · W shell pane · Esc back'
             if width<80 and not help_visible:controls='↑↓ select · Enter open · / search · ? help · Esc back'
             else:controls+=' · ? help'
             hints='\n'.join(ui._media_hints(controls,width).splitlines()[:max(1,height-8)]);page=max(1,height-8-len(hints.splitlines()));top=max(0,index-page+1)
@@ -183,11 +184,24 @@ def desk(ui,query='',owner=None):
                         if answer and answer.casefold()=='y':request('fetch',node=owner,url=chosen['url']);value=catalog();results=None;notice='Book imported'
                     else:
                         print('\nOpening reader; copying a remote book locally if needed…',flush=True)
-                        result=ui._desktop_launch(local_copy(chosen))
-                        if not result.startswith('OPEN OK'):raise RuntimeError(result)
-                        notice='Opened in your configured/system reader'
+                        path=local_copy(chosen)
+                        if book_reader.preference()!='system' and not book_reader.binary('bookokrat'):
+                            choice=ask('Terminal reader not installed · i installs Bookokrat · s system reader · Esc cancels')
+                            if choice and choice.casefold()=='i':
+                                book_reader.install(confirmed=True);notice='Bookokrat setup started; Enter retries when ready · o opens system reader';continue
+                            if not choice or choice.casefold()!='s':continue
+                            mode='system'
+                        else:mode=None
+                        termios.tcsetattr(fd,termios.TCSADRAIN,old)
+                        try:notice=book_reader.open_book(path,ui._desktop_launch,mode=mode)
+                        finally:
+                            tty.setcbreak(fd)
+                            if os.environ.get('KITTY_WINDOW_ID') or os.environ.get('TERM')=='xterm-kitty':sys.stdout.write('\x1b_Ga=d,d=a,q=2\x1b\\')
+                            sys.stdout.write('\x1b[0m\x1b[2J\x1b[H');sys.stdout.flush()
                 elif chosen and results is None:
-                    if key=='y':
+                    if key=='o':
+                        notice=book_reader.open_book(local_copy(chosen),ui._desktop_launch,mode='system')
+                    elif key=='y':
                         target='@'+chosen['node']+':'+chosen['path'] if chosen.get('node') else chosen['path']
                         look_renderer.copy_text(make_link(chosen['title'],target));notice='Copied a Notes-compatible file/Fabric link'
                     elif key=='k':book_core.Shelf().import_file(local_copy(chosen));value=catalog();notice='Saved in this computer’s books folder for offline reading'
@@ -206,12 +220,21 @@ def desk(ui,query='',owner=None):
 
 def main(args,ui):
     parser=argparse.ArgumentParser(prog='lk books',description='Fabric EPUB/PDF shelf; bk is an alias. Files stay on their owner; opening remote books makes a verified local cache copy.')
-    parser.add_argument('action',nargs='?',default='shelf',choices=['shelf','list','scan','import','search','fetch'])
+    parser.add_argument('action',nargs='?',default='shelf',choices=['shelf','list','scan','import','search','fetch','reader'])
     parser.add_argument('values',nargs='*')
     parser.add_argument('--node',default=None,help='Library owner; defaults to configured media destination')
     parser.add_argument('--json',action='store_true')
     selected=parser.parse_args(args);owner=selected.node or media_storage.settings()['node']
     try:
+        if selected.action=='reader':
+            choice=selected.values[0] if selected.values else 'status'
+            if len(selected.values)>1:raise ValueError('Choose reader status, install, auto, bookokrat or system')
+            if choice=='install':value=book_reader.install(confirmed=True)
+            elif choice in book_reader.MODES:book_reader.preference(choice);value=book_reader.status()
+            elif choice=='status':value=book_reader.status()
+            else:raise ValueError('Choose reader status, install, auto, bookokrat or system')
+            print(json.dumps(value,ensure_ascii=False) if selected.json else 'Reader: '+value['reader']+' · '+(value['version'] or 'Bookokrat not installed')+' · setup '+value['setup']['state'])
+            return 0
         if selected.action=='shelf' and sys.stdin.isatty() and sys.stdout.isatty():return desk(ui,' '.join(selected.values),owner=owner)
         if selected.action in {'list','shelf'}:
             value=catalog();value=dict(value,entries=rows_for(value,' '.join(selected.values)))

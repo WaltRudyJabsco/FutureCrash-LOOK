@@ -170,8 +170,12 @@ _lk() {
       esac
       ;;
     books|bk)
+      if [[ "$words[3]" == reader ]]; then
+        _values 'reader mode' status install auto bookokrat system
+        return
+      fi
       if (( CURRENT == 3 )); then
-        _values 'books command' shelf list scan import search fetch --node --json
+        _values 'books command' shelf list scan import search fetch reader --node --json
       else
         _files -g '*.epub|*.pdf|*(-/)'
       fi

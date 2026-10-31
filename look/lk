@@ -23,7 +23,7 @@ import lo_stream
 import lo_history
 import file_catalog
 import games as look_games
-from look_renderer import NativePreviewController, action_footer, _APP_COLORS
+from look_renderer import NativePreviewController, action_footer, _APP_COLORS, synchronized_update
 
 try:
     import readline
@@ -37,7 +37,7 @@ try:
 except Exception:
     readline = None
 
-VERSION="4.65.1"
+VERSION="4.66.0"
 
 LOOK_WORDMARK = r"""       ██╗      ██╗  ██╗
        ██║      ██║ ██╔╝
@@ -10077,7 +10077,7 @@ def _direct_searxng_search(query, limit=8):
     params=urllib.parse.urlencode({"q":query,"format":"json"})
     request=urllib.request.Request(base+"/search?"+params,headers={
         "Accept":"application/json",
-        "User-Agent":"Future-Crash-Fabric/8.18.1",
+        "User-Agent":"Future-Crash-Fabric/8.19.0",
     })
     with urllib.request.urlopen(request,timeout=12) as response:
         data=json.load(response)
@@ -18809,13 +18809,15 @@ def _media_selector(rows,title="FABRIC MEDIA",initial_query="",catalog_meta=None
                     notice=""
                 print("\n"+footer,end="")
             frame=frame_io.getvalue()
-            native_preview.frame_cleared()
-            sys.stdout.write(_terminal_frame_payload(frame))
-            sys.stdout.flush()
+            with synchronized_update():
+                native_preview.frame_cleared()
+                sys.stdout.write(_terminal_frame_payload(frame))
+                sys.stdout.flush()
 
-            # Wake for background artwork/duration results and pane resizes;
-            # redraw only when those results or user input actually change the view.
-            if native_art and art_geometry:native_preview.request(native_art,*art_geometry)
+                # Wake for background artwork/duration results and pane resizes;
+                # redraw only when those results or user input actually change the view.
+                if native_art and art_geometry:native_preview.request(native_art,*art_geometry)
+                native_preview.paint_ready()
             if art_work.changed() or availability.poll(page) or duration_preview.poll(([visible[idx]] if visible else [])+page):continue
             while True:
                 key=_read_tty_key(fd,.08 if art_pending else .25)
@@ -20176,17 +20178,19 @@ def _media_player_library(initial_query="",media_kind="audio"):
                     print(footer)
                     print(_ansi_clip(_c(notice,"33"),width),end="")
                     notice=""
-                native_preview.frame_cleared()
-                sys.stdout.write(_terminal_frame_payload("\n".join(_ansi_clip(line,width) for line in out.getvalue().split("\n"))))
-                sys.stdout.flush()
+                with synchronized_update():
+                    native_preview.frame_cleared()
+                    sys.stdout.write(_terminal_frame_payload("\n".join(_ansi_clip(line,width) for line in out.getvalue().split("\n"))))
+                    sys.stdout.flush()
 
-                # Header and column labels occupy four rows; artwork begins on
-                # row 5. The right pane begins immediately after " │ ".
-                if native_images and native_art and right_w:
-                    native_preview.request(native_art,5,left_w+4,art_h,right_w)
-                else:
-                    native_preview.invalidate()
+                    # Header and column labels occupy four rows; artwork begins on
+                    # row 5. The right pane begins immediately after " │ ".
+                    if native_images and native_art and right_w:
+                        native_preview.request(native_art,5,left_w+4,art_h,right_w)
+                    else:
+                        native_preview.invalidate()
 
+                    native_preview.paint_ready()
                 pending=bool(chosen and right_w and not art and art_status.startswith("ART…"))
                 art_retry_at=time.monotonic()+REMOTE_ART_RETRY_SECONDS if chosen and right_w and not art and art_status=="ART unavailable" else None
                 dirty=False
@@ -21083,7 +21087,8 @@ _COMMANDS = [
     ("lk mp", "[QUERY]", "media", "Fabric audio library, queue and player"),
     ("lk tv", "[QUERY]", "media", "Fabric movies, TV and video player"),
     ("lk bk", "[ARGS]", "media", "Alias for lk books; Fabric EPUB/PDF shelf"),
-    ("lk books", "[shelf|list|scan|import FILE...|search QUERY|fetch URL] [--node NODE] [--json]", "media", "Fabric EPUB/PDF shelf; bk alias, reading state and Notes links"),
+    ("lk books reader", "[status|install|auto|bookokrat|system]", "media", "Choose the local book reader or install optional Bookokrat"),
+    ("lk books", "[shelf|list|scan|import FILE...|search QUERY|fetch URL|reader MODE] [--node NODE] [--json]", "media", "Fabric EPUB/PDF shelf; bk alias, reading state and Notes links"),
     ("lk transcribe", "[FILE|status|setup|configure] [OPTIONS]", "media", "Optional local speech-to-text"),
     ("lk dictate", "[OPTIONS]", "media", "Explicit local microphone dictation"),
     ("lk albert", "[url|qr|ipad]", "fabric", "Open/share Albert browser surface"),

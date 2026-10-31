@@ -288,7 +288,8 @@ def imports_active():
     imports = local_json('/v1/media/import?action=jobs')
     # Detached import workers still belong to the node's systemd service;
     # restarting that service can kill them along with the node.
-    return any(job.get('state') not in {'complete', 'failed', 'cancelled'}
+    reader_setup=local_json('/v1/books/reader').get('setup') or {}
+    return reader_setup.get('state')=='installing' or any(job.get('state') not in {'complete', 'failed', 'cancelled'}
                for job in imports.get('jobs', []))
 
 
@@ -297,7 +298,7 @@ def wait_imports(seconds=300):
     while time.monotonic() < deadline:
         if not imports_active(): return
         time.sleep(.5)
-    raise TimeoutError('disc import still running; finish importing and retry maintenance')
+    raise TimeoutError('import or reader setup still running; finish setup and retry maintenance')
 
 
 def wait_idle(seconds=300):

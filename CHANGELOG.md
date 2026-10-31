@@ -1,3 +1,10 @@
+## 8.19.0 — Terminal book reader and stable media frames (LOOK 4.66.0)
+
+- Integrate optional Bookokrat in the same terminal, starting in its reading view and returning to the Books shelf on quit. Retain explicit system-reader access and auto/bookokrat/system preferences.
+- Add self-service optional reader setup on the reading computer, with one fixed Homebrew/Linuxbrew package, explicit confirmation, durable setup status and maintenance protection while setup runs.
+- Stop unchanged availability checks from redrawing media lists. Present Kitty text/image redraws in one synchronized frame so cached native artwork does not expose an intermediate ASCII frame.
+- Preserve reader-owned bookmarks/preferences and LOOK shelf state; no Fabric-wide reader-position synchronization is claimed.
+
 ## 8.18.1 — Clean Books startup (LOOK 4.65.1)
 
 - Clear previous terminal text and Kitty image placements before Books loads its catalog, removing stale media previews.
