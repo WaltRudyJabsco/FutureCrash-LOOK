@@ -161,6 +161,13 @@ def system_definition(word):
     return result.stdout[:16000].strip() if result.returncode>=0 and 'Overview of ' in result.stdout else ''
 
 
+def example_text(value):
+    if isinstance(value,str):return value
+    if isinstance(value,dict) and isinstance(value.get('text'),str):
+        return value['text']+(' — '+value['source'] if isinstance(value.get('source'),str) else '')
+    return ''
+
+
 def lookup(word):
     word=query_text(word);key=normalize(word);results=[]
     with connection() as db:
@@ -184,7 +191,7 @@ def lookup(word):
                             if row:values+=json.loads(row[0]).get('members',[])[:3]
                         if values:related[relation]=list(dict.fromkeys(values))[:12]
                     results.append({'id':synset,'lemma':label,'part_of_speech':POS.get(sense.get('partOfSpeech'),'word'),
-                        'definitions':sense.get('definition',[]),'examples':sense.get('example',[])[:3],
+                        'definitions':sense.get('definition',[]),'examples':[text for item in sense.get('example',[])[:3] if (text:=example_text(item))],
                         'synonyms':[w for w in sense.get('members',[]) if normalize(w)!=lemma],
                         'antonyms':list(dict.fromkeys(opposites)),'related':related})
                     if len(results)>=20:break
@@ -333,10 +340,14 @@ def display(value):
 
 def main(argv=None,ui=None):
     parser=argparse.ArgumentParser(prog='lk words',description=__doc__)
-    parser.add_argument('action',nargs='?',default='status',choices=['status','setup','lookup','spell','find','add'])
+    parser.add_argument('action',nargs='?',default='desk',choices=['desk','status','setup','lookup','spell','find','add'])
     parser.add_argument('--node',help='Use an explicitly chosen paired Fabric node');parser.add_argument('text',nargs='*');parser.add_argument('--language',choices=['en_US','en_GB'],default='en_US');parser.add_argument('--json',action='store_true')
     args=parser.parse_args(argv)
     try:
+        if not args.json and ui and sys.stdin.isatty() and sys.stdout.isatty() and args.action in {'desk','lookup','spell','find'}:
+            import words_desk
+            return words_desk.desk(ui,node=args.node,language=args.language,initial=' '.join(args.text),view={'spell':3,'find':4}.get(args.action,0))
+        if args.action=='desk':args.action='status'
         if args.node:
             if args.action=='add':raise ValueError('Personal words are local; add them on the intended computer')
             import fabric_files
@@ -347,22 +358,7 @@ def main(argv=None,ui=None):
         elif args.action=='add':value=add_personal(' '.join(args.text))
         else:value=tool(args.action,' '.join(args.text),args.language)
         text=json.dumps(value,ensure_ascii=False,indent=2) if args.json else display(value)
-        if ui and sys.stdout.isatty() and not args.json:
-            from notebook_markdown import safe_text
-            import look_renderer
-            width=shutil.get_terminal_size((90,30)).columns
-            lines=[]
-            for line in text.splitlines():
-                import textwrap
-                lines+=textwrap.wrap(safe_text(line),max(20,width-2)) or ['']
-            colored=[]
-            for i,line in enumerate(lines):
-                if i==0 or re.match(r'\d+\.',line):line=ui._c(line,'1;36')
-                elif ': ' in line:
-                    label,detail=line.split(': ',1);line=ui._c(label+':','33')+' '+detail
-                colored.append(line)
-            look_renderer.pager(colored,shutil.get_terminal_size((90,30)).lines,width,force_interactive=True)
-        else:print(text)
+        print(text)
         return 0
     except (OSError,ValueError,RuntimeError,sqlite3.Error,zipfile.BadZipFile,subprocess.SubprocessError) as exc:
         print('LOOK Words: '+str(exc),file=sys.stderr);return 1
