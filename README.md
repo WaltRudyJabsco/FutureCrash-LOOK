@@ -1,6 +1,7 @@
-# Future Crash + LOOK 8.22.2 — FABRIC MEDIA
+# Future Crash + LOOK 8.22.3 — FABRIC MEDIA
 
-8.22.2 repairs Wiki navigation and makes the archive owner/reader state clear.
+8.22.3 adds paged Wiki link/search selectors and f-mode inline two-letter hints.
+It also repairs Wiki navigation and makes the archive owner/reader state clear.
 Use `/` to search from an article, `l` to follow links and `o` to choose the owner.
 
 8.22.0 adds Books discovery, cover previews and browser read-aloud in Signal and

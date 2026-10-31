@@ -114,6 +114,7 @@ with Creator(sys.argv[1]).config_indexing(True,'eng') as writer:
     article=wiki.zim_call('article',path,'Home')
     assert article['title']=='Knowledge' and 'Café coral reef research.' in article['paragraphs']
     assert article['links']==[{'title':'Other article','path':'Other'}]
+    assert any('[aa]' in text for text in article['hinted_paragraphs'])
 
 
 from test_media_request_regressions import lk
@@ -158,7 +159,7 @@ def test_wiki_can_search_from_linkless_landing_and_does_not_reinstall_reader(lk,
     monkeypatch.setattr(termios,'tcgetattr',lambda fd:[])
     monkeypatch.setattr(termios,'tcsetattr',lambda *a:None)
     monkeypatch.setattr(tty,'setcbreak',lambda fd:None)
-    prompts=iter([('Latin',False),('',False)])
+    prompts=iter([('Latin',False)])
     monkeypatch.setattr(wiki.look_renderer,'prompt_line',lambda *a,**kw:next(prompts))
     calls=[]
     def request(action='status',**kwargs):
@@ -167,7 +168,7 @@ def test_wiki_can_search_from_linkless_landing_and_does_not_reinstall_reader(lk,
         if action=='search':return {'entries':[{'title':'Latin','path':'Latin'}]}
         return {'root':str(tmp_path),'reader_installed':True,'archives':[{'id':'test.zim','title':'Wikipedia','bytes':1}],'jobs':[]}
     monkeypatch.setattr(wiki,'request',request)
-    keys=iter(['i','enter','/','esc','esc']);monkeypatch.setattr(lk,'_read_tty_key',lambda *a:next(keys))
+    keys=iter(['i','enter','/','enter','esc','esc']);monkeypatch.setattr(lk,'_read_tty_key',lambda *a:next(keys))
     assert wiki.desk(lk,'owner')==0
     assert not any(action=='setup' for action,_ in calls)
     assert any(action=='article' and args['query']=='Latin' for action,args in calls)
@@ -204,3 +205,51 @@ def test_linkless_landing_uses_only_verified_topic_entries():
     archive.get_entry_by_path.side_effect=entry
     assert wiki.landing_links(archive,['Unlinked heading','Arts • Missing • Ancient Rome • Arts'])==[
         {'title':'Arts','path':'Arts'},{'title':'Ancient Rome','path':'Ancient_Rome'}]
+
+
+
+def test_paged_links_support_all_pages_numbers_and_two_letter_codes(lk,monkeypatch,capsys):
+    import os
+    monkeypatch.setattr(lk.shutil,'get_terminal_size',lambda *a:os.terminal_size((80,18)))
+    rows=[{'title':'Topic '+str(i+1),'path':str(i+1)} for i in range(119)]
+    keys=iter(['shiftright','enter']);monkeypatch.setattr(lk,'_read_tty_key',lambda *a:next(keys))
+    assert wiki.choose_links(lk,0,rows)==rows[-1]
+    output=capsys.readouterr().out
+    assert '119' in output and 'Topic 1' in output and 'Topic 119' in output
+    for sequence,expected in [(['4','7','enter'],46),([*wiki.hint_code(91)],91),(['esc'],None)]:
+        keys=iter(sequence);monkeypatch.setattr(lk,'_read_tty_key',lambda *a:next(keys))
+        assert wiki.choose_links(lk,0,rows)==(rows[expected] if expected is not None else None)
+    assert len({wiki.hint_code(i) for i in range(wiki.MAX_LINKS)})==wiki.MAX_LINKS
+
+
+def test_inline_hints_preserve_plain_text_and_duplicate_destinations():
+    html='<p>Read <a href="Latin">Latin</a> and <a href="Latin">the language</a>.</p>'
+    plain=wiki.ArticleParser('Home');plain.feed(html);plain.flush()
+    hints=wiki.ArticleParser('Home',hints={'Latin':'aa'});hints.feed(html);hints.flush()
+    assert plain.parts==['Read Latin and the language.']
+    assert hints.parts==['Read Latin [aa] and the language [aa].']
+    assert wiki.topic_hints(['Arts • Ancient Rome'],[{'title':'Arts','path':'Arts'},{'title':'Ancient Rome','path':'Ancient_Rome'}])==['Arts [aa] • Ancient Rome [as]']
+
+
+def test_hint_mode_follows_two_letter_code_and_escape_cancels(lk,tmp_path,monkeypatch,capsys):
+    import termios,tty
+    class Terminal:
+        def fileno(self):return 0
+        def isatty(self):return True
+    monkeypatch.setattr(wiki.sys,'stdin',Terminal())
+    monkeypatch.setattr(termios,'tcgetattr',lambda fd:[])
+    monkeypatch.setattr(termios,'tcsetattr',lambda *a:None)
+    monkeypatch.setattr(tty,'setcbreak',lambda fd:None)
+    visits=[]
+    def request(action='status',**kw):
+        if action=='article':
+            visits.append(kw['query'])
+            return {'title':'Home','paragraphs':['Latin'],'hinted_paragraphs':['Latin [aa]'],'links':[{'title':'Latin','path':'Latin'}]}
+        return {'root':str(tmp_path),'archives':[{'id':'test.zim','title':'Wikipedia'}],'jobs':[],'reader_installed':True}
+    monkeypatch.setattr(wiki,'request',request)
+    keys=iter(['enter','f','esc','f','a','a','b','esc','esc'])
+    monkeypatch.setattr(lk,'_read_tty_key',lambda *a:next(keys))
+    assert wiki.desk(lk,'local')==0
+    assert visits==['','Latin','']
+    output=capsys.readouterr().out
+    assert '[aa]' in output and 'LINK HINTS' in output

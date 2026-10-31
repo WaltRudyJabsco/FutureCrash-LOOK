@@ -1,3 +1,9 @@
+## 8.22.3 — Wiki link paging and hints (LOOK 4.69.3)
+
+- Replace scrolling prompts for links and in-article search results with bounded paged selectors.
+- Support arrows/Shift-arrows, numbers plus Enter and stable two-letter hint selection.
+- Add f-mode inline link codes, with Escape cancelling hints and clean text retained in reading mode.
+
 ## 8.22.2 — Linkless Wikipedia contents pages (LOOK 4.69.2)
 
 - Rebuild a linkless landing page’s listed topic links only from entries verified inside that archive.

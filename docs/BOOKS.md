@@ -231,3 +231,19 @@ Esc returns to the archive shelf. The header says **SAVED ARCHIVE · owner NAME*
 that describes the content source, not a disconnected owner. English Wikipedia
 source links in an English Wikipedia archive resolve inside the archive without
 contacting the public website. Exact article paths precede full-text matches.
+
+
+## Wiki link hints and paging (8.22.3)
+
+In an article, **l** opens a paged links list. In-article search results use the
+same selector. **↑/↓** moves, **Shift-↑/↓** or Page Up/Down changes page,
+**Shift-←/→** or Home/End goes to the beginning/end. Enter opens the highlighted
+row. Type a link number then Enter, or its displayed two-letter code to open
+immediately. Escape cancels and restores your article position.
+
+**f** enables inline hints: links gain stable home-row-first codes such as
+`[aa]`, `[as]`, `[ad]`. Type both letters to follow the destination. Arrows still
+scroll; Escape cancels hints without leaving the article. Selecting a link turns
+hints off; **b** returns to your previous position. Reading mode stays clean.
+Repeated links to the same destination share a code. Hints cover the reader's
+bounded set of up to 200 internal links. They never open external websites.

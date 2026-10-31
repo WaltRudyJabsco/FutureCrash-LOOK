@@ -27,6 +27,12 @@ CATALOG='https://library.kiwix.org/catalog/v2/entries'
 MAX_ARTICLE_BYTES=4*1024*1024
 RESERVE_BYTES=256*1024*1024
 TERMINAL={'complete','failed','cancelled'}
+HINT_ALPHABET='asdfghjklqwertyuiopzxcvbnm'
+MAX_LINKS=200
+
+
+def hint_code(index):
+    return HINT_ALPHABET[index//len(HINT_ALPHABET)]+HINT_ALPHABET[index%len(HINT_ALPHABET)]
 
 
 def state_root():return Path.home()/'.local/share/look/wiki'
@@ -221,7 +227,7 @@ def zim_call(action,path,query=''):
 
 
 class ArticleParser(book_speech.PassageParser):
-    def __init__(self,path,wiki_host=None):super().__init__();self.links=[];self.path=path;self.wiki_host=wiki_host;self.link=None;self.label=[]
+    def __init__(self,path,wiki_host=None,hints=None):super().__init__();self.links=[];self.path=path;self.wiki_host=wiki_host;self.link=None;self.label=[];self.hints=hints or {}
     def handle_starttag(self,tag,attrs):
         super().handle_starttag(tag,attrs)
         if tag=='a':self.link=dict(attrs).get('href');self.label=[]
@@ -245,8 +251,61 @@ class ArticleParser(book_speech.PassageParser):
                 path=posixpath.normpath(target)
                 if not path.startswith('../') and not path.startswith('/'):
                     self.links.append({'title':' '.join(''.join(self.label).split()) or path,'path':path})
+                    if path in self.hints and not self.skip:self.current.append(' ['+self.hints[path]+']')
             self.link=None
         super().handle_endtag(tag)
+
+
+def topic_hints(paragraphs,links):
+    codes={row['path'].replace('_',' '):hint_code(i) for i,row in enumerate(links)}
+    if not codes:return list(paragraphs)
+    pattern=re.compile(r'(?<!\w)(?:'+'|'.join(re.escape(k) for k in sorted(codes,key=len,reverse=True))+r')(?!\w)')
+    return [pattern.sub(lambda m:m[0]+' ['+codes[m[0]]+']',text) if '•' in text else text for text in paragraphs]
+
+
+def choose_links(ui,fd,rows,title='Links'):
+    """One bounded screen: navigation, number+Enter or immediate two-letter hints."""
+    if not rows:return None
+    index=0;typed=''
+    while True:
+        width,height=ui.shutil.get_terminal_size((100,30));width=max(20,width)
+        controls=ui._media_hints('↑↓ move · Shift-arrows page/ends · Enter open · number then Enter · two letters open · Esc back',width).splitlines()
+        page=max(1,height-len(controls)-4)
+        index=max(0,min(index,len(rows)-1));top=(index//page)*page
+        frame=[ui._c(title,'1;36')+f' · {top+1}–{min(top+page,len(rows))} / {len(rows)}', '']
+        colors=ui.terminal_style.list_colors()
+        for pos,row in enumerate(rows[top:top+page],top):
+            label=('› ' if pos==index else '  ')+f'{pos+1:>3}  [{hint_code(pos)}] '+safe_text(row['title'])
+            frame.append(ui.terminal_style.list_row(label,width,pos,pos==index,colors))
+        frame+=['']*max(0,page+2-len(frame))
+        frame += controls+[ui._c('Choose: '+typed,'1;33')]
+        sys.stdout.write(ui._terminal_frame_payload('\n'.join(ui._ansi_clip(line,width) for line in frame)));sys.stdout.flush()
+        key=ui._read_tty_key(fd,.25)
+        if not key:continue
+        if key in {'esc','\x03'}:return None
+        if key in {'enter','\r','\n'}:
+            if typed.isdigit() and not 1<=int(typed)<=len(rows):continue
+            return rows[index]
+        if key in {'up','down','shiftup','shiftdown','pageup','pagedown','shiftleft','shiftright','home','end'}:
+            typed=''
+            if key=='up':index-=1
+            elif key=='down':index+=1
+            elif key in {'shiftup','pageup'}:index-=page
+            elif key in {'shiftdown','pagedown'}:index+=page
+            elif key in {'shiftleft','home'}:index=0
+            else:index=len(rows)-1
+            continue
+        if key in {'\b','\x7f'}:typed=typed[:-1];continue
+        if len(key)==1 and key.isdigit():
+            typed=(typed+key) if typed.isdigit() else key
+            if len(typed)>len(str(len(rows))):typed=key
+            if 1<=int(typed)<=len(rows):index=int(typed)-1
+        elif len(key)==1 and key in HINT_ALPHABET:
+            typed=(typed+key) if typed and not typed.isdigit() else key
+            if len(typed)==2:
+                match=next((r for i,r in enumerate(rows) if hint_code(i)==typed),None)
+                if match:return match
+                typed=''
 
 
 def landing_links(archive,paragraphs):
@@ -260,7 +319,7 @@ def landing_links(archive,paragraphs):
             try:entry=archive.get_entry_by_path(path)
             except KeyError:continue
             links.append({'title':entry.title,'path':entry.path})
-            if len(links)>=200:return links
+            if len(links)>=MAX_LINKS:return links
     return links
 
 
@@ -286,13 +345,18 @@ def zim_worker(action,path,query):
     item=entry.get_item()
     if item.size>MAX_ARTICLE_BYTES:raise ValueError('Article exceeds 4 MiB')
     host='en.wikipedia.org' if Path(path).name.startswith('wikipedia_en_') else None
-    parser=ArticleParser(entry.path,wiki_host=host);parser.feed(bytes(item.content).decode('utf-8',errors='replace'));parser.flush()
+    html=bytes(item.content).decode('utf-8',errors='replace')
+    parser=ArticleParser(entry.path,wiki_host=host);parser.feed(html);parser.flush()
     if not query and not parser.links:
         # Some ZIM landing pages retain a topic list but strip all anchor hrefs.
         # Link only names actually present in this archive; never guess a URL.
         parser.links=landing_links(archive,parser.parts)
     unique={r['path']:r for r in parser.links}
-    return {'title':entry.title,'path':entry.path,'paragraphs':parser.parts,'links':list(unique.values())[:200]}
+    links=list(unique.values())[:MAX_LINKS]
+    hinted=ArticleParser(entry.path,wiki_host=host,hints={r['path']:hint_code(i) for i,r in enumerate(links)})
+    hinted.feed(html);hinted.flush()
+    if not hinted.links:hinted.parts=topic_hints(parser.parts,links)
+    return {'title':entry.title,'path':entry.path,'paragraphs':parser.parts,'hinted_paragraphs':hinted.parts,'links':links}
 
 
 def local(action='status',**payload):
@@ -355,19 +419,37 @@ def desk(ui,owner):
         finally:tty.setcbreak(fd)
     def refresh():return request(node=owner)
     def article_view(path):
-        history=[];top=0
+        history=[];top=0;hinting=False;typed=''
         while True:
             article=request('article',node=owner,archive=archive,query=path)
             while True:
-                width,height=ui.shutil.get_terminal_size((100,30));width=max(20,width);page=max(1,height-6)
+                width,height=ui.shutil.get_terminal_size((100,30));width=max(20,width)
+                controls=ui._media_hints('↑↓ scroll · Shift-arrows page/ends · / search archive · l links ('+str(len(article['links']))+') · f link hints · b back · y copy passage · Esc shelf',width).splitlines()
+                if hinting:controls=['LINK HINTS '+typed+' · two letters open · arrows scroll · Esc cancels']
+                page=max(1,height-len(controls)-2)
                 lines=[]
-                for text in article['paragraphs']:lines.extend(textwrap.wrap(safe_text(text),width) or ['']);lines.append('')
+                for text in article.get('hinted_paragraphs',article['paragraphs']) if hinting else article['paragraphs']:lines.extend(textwrap.wrap(safe_text(text),width) or ['']);lines.append('')
                 top=max(0,min(top,max(0,len(lines)-page)))
                 frame=[ui._c(safe_text(article['title']),'1;36')+' · SAVED ARCHIVE · owner '+safe_text(owner),*lines[top:top+page]]
                 frame+=['']*max(0,page+1-len(frame))
-                frame+=[ui._media_hints('↑↓ scroll · Shift-arrows page/ends · / search archive · l links ('+str(len(article['links']))+') · b back · y copy passage · Esc shelf',width)]
+                frame+=controls
+                if hinting:
+                    frame[-1]=ui._c(frame[-1],'1;33')
+                    codes={hint_code(i) for i in range(len(article['links']))}
+                    frame=[re.sub(r'\[([a-z]{2})\]',lambda m:ui._c(m[0],'1;33') if m[1] in codes else m[0],line) for line in frame]
                 sys.stdout.write(ui._terminal_frame_payload('\n'.join(ui._ansi_clip(line,width) for line in frame)));sys.stdout.flush()
                 key=ui._read_tty_key(fd,.25)
+                if hinting:
+                    if key=='esc':hinting=False;typed='';continue
+                    if len(key)==1 and key in HINT_ALPHABET:
+                        typed+=key
+                        if len(typed)==2:
+                            match=next((r for i,r in enumerate(article['links']) if hint_code(i)==typed),None)
+                            typed=''
+                            if match:history.append((path,top));path=match['path'];top=0;hinting=False;break
+                        continue
+                    if key in {'\b','\x7f'}:typed=typed[:-1];continue
+
                 if key in {'esc','q','\x03'}:return
                 if key=='up':top-=1
                 elif key=='down':top+=1
@@ -376,23 +458,21 @@ def desk(ui,owner):
                 elif key in {'shiftleft','home'}:top=0
                 elif key in {'shiftright','end'}:top=len(lines)
                 elif key=='y':look_renderer.copy_text('\n'.join(lines[top:top+page]))
+                elif key=='f':hinting=True;typed=''
                 elif key=='b' and history:path,top=history.pop();break
                 elif key=='/':
                     query=ask('Search this saved archive · Enter cancels')
                     if query:
                         found=request('search',node=owner,archive=archive,query=query)['entries']
                         if found:
-                            answer=ask('\n'.join(str(i+1)+'. '+safe_text(row['title']) for i,row in enumerate(found))+'\nResult number · Enter chooses 1')
-                            choice=int(answer or '1') if answer is not None and (not answer or answer.isdigit()) else 0
-                            if 0<choice<=len(found):history.append((path,top));path=found[choice-1]['path'];top=0;break
+                            chosen=choose_links(ui,fd,found,'Search: '+query)
+                            if chosen:history.append((path,top));path=chosen['path'];top=0;break
                         else:ask('No matching articles · Enter returns')
                 elif key=='l':
                     if not article['links']:
                         ask('This page has no internal links · / searches the archive · Enter returns');continue
-                    listing='\n'.join(str(i+1)+'. '+safe_text(link['title']) for i,link in enumerate(article['links']))
-                    answer=ask(listing+'\nLink number · Enter cancels')
-                    if answer and answer.isdigit() and 0<int(answer)<=len(article['links']):
-                        history.append((path,top));path=article['links'][int(answer)-1]['path'];top=0;break
+                    chosen=choose_links(ui,fd,article['links'])
+                    if chosen:history.append((path,top));path=chosen['path'];top=0;break
     try:
         tty.setcbreak(fd)
         if os.environ.get('KITTY_WINDOW_ID') or os.environ.get('TERM')=='xterm-kitty':sys.stdout.write('\x1b_Ga=d,d=a,q=2\x1b\\')
