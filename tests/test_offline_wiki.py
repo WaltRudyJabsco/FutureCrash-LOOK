@@ -113,3 +113,27 @@ with Creator(sys.argv[1]).config_indexing(True,'eng') as writer:
     article=wiki.zim_call('article',path,'Home')
     assert article['title']=='Knowledge' and 'Café coral reef research.' in article['paragraphs']
     assert article['links']==[{'title':'Other article','path':'Other'}]
+
+
+from test_media_request_regressions import lk
+
+
+def test_wiki_prompt_and_copy_use_renderer_without_lk_module_attribute(lk,tmp_path,monkeypatch):
+    import termios,tty
+    assert not hasattr(lk,'look_renderer')
+    class Terminal:
+        def fileno(self):return 0
+        def isatty(self):return True
+    monkeypatch.setattr(wiki.sys,'stdin',Terminal())
+    monkeypatch.setattr(termios,'tcgetattr',lambda fd:[])
+    monkeypatch.setattr(termios,'tcsetattr',lambda *a:None)
+    monkeypatch.setattr(tty,'setcbreak',lambda fd:None)
+    prompt=Mock(return_value=('n',False));monkeypatch.setattr(wiki.look_renderer,'prompt_line',prompt)
+    copied=[];monkeypatch.setattr(wiki.look_renderer,'copy_text',lambda text:copied.append(text))
+    def request(action='status',**kwargs):
+        if action=='article':return {'title':'Test','paragraphs':['Offline text'],'links':[]}
+        return {'root':str(tmp_path),'archives':[{'id':'test.zim','title':'Test','bytes':1}],'jobs':[]}
+    monkeypatch.setattr(wiki,'request',request)
+    keys=iter(['i','enter','y','esc','esc']);monkeypatch.setattr(lk,'_read_tty_key',lambda *a:next(keys))
+    assert wiki.desk(lk,'local')==0
+    assert prompt.call_count==1 and any('Offline text' in text for text in copied)

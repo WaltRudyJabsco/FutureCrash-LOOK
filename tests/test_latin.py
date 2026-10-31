@@ -184,6 +184,11 @@ print('LATIN_TERMINAL_RESTORED')
         assert until(b'LATIN'),output[-1000:]
         output=b'';os.write(master,b'\x1b[1;2C')
         assert until(b'Project Gutenberg'),output[-1000:]
+        output=b'';os.write(master,b'/')
+        assert until(b'Find in this text'),output[-1000:]
+        assert until('› '.encode()),output[-1000:]
+        output=b'';os.write(master,b'\x1b')
+        assert until(b'Project Gutenberg'),output[-1000:]
         output=b'';os.write(master,b'm')
         assert until(b'Marked studied'),output[-1000:]
         output=b'';os.write(master,b'\x1b')
@@ -217,3 +222,27 @@ def test_course_uses_existing_bundle_rules_and_keeps_progress_out():
     assert not maintenance.allowed('.local/share/look/latin/progress.sqlite3')
     installer=(Path(__file__).resolve().parents[1]/'install-look.sh').read_text()
     for name in ('latin.py','latin_core.py','latin_data.py','latin_course.py'):assert '$ROOT/look/'+name in installer
+
+
+def test_words_search_and_practice_prompts_use_renderer_directly(lk,tmp_path,monkeypatch):
+    # The real LK module imports selected renderer symbols, not a module attribute.
+    assert not hasattr(lk,'look_renderer')
+    state=core.Progress(tmp_path/'progress.sqlite3')
+    monkeypatch.setattr(latin.termios,'tcgetattr',lambda fd:[])
+    restored=Mock();monkeypatch.setattr(latin.termios,'tcsetattr',restored)
+    monkeypatch.setattr(latin.tty,'setcbreak',lambda fd:None)
+    class Input:
+        def fileno(self):return 0
+    monkeypatch.setattr(latin.sys,'stdin',Input())
+    prompt=Mock(return_value=('',False));monkeypatch.setattr(latin.look_renderer,'prompt_line',prompt)
+    room=latin.Classroom(lk,state)
+    room.words(lesson=0)  # No supplied vocabulary: show a return prompt.
+    assert prompt.call_count==1
+    keys=iter(['/','esc']);monkeypatch.setattr(lk,'_read_tty_key',lambda *a:next(keys))
+    room.choose('Words',[{'title':'Test'}],lambda r:r['title'])
+    assert prompt.call_count==2
+    prompt.return_value=('',True)
+    room.practice(0,exact=True)
+    assert prompt.call_count==3 and state.summary()['attempts']==0
+    assert restored.call_count==3
+    state.close()

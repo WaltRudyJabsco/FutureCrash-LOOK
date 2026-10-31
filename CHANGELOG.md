@@ -1,3 +1,9 @@
+## 8.21.1 — Classroom prompt repair (LOOK 4.68.1)
+
+- Fix Latin Words, practice, search and settings prompts by accessing the renderer module directly instead of through LK's main module.
+- Repair the same dependency mistake in Wiki prompts and article copying.
+- Add real-main-module regressions and a real-terminal search/cancel check. Course content, learner state and spaced-review history are preserved.
+
 ## 8.21.0 — Offline Latin classroom (LOOK 4.68.0)
 
 - Add lk latin with the complete attributed D'Ooge course: pronunciation, 79 lessons, connected readings, grammar appendices and both vocabularies.

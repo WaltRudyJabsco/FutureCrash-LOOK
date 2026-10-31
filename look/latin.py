@@ -12,6 +12,7 @@ import termios
 import textwrap
 import tty
 import latin_core as core
+import look_renderer
 from notebook_markdown import safe_text,cell_width
 
 SOURCE_NOTE="D'Ooge · Latin for Beginners (1911) · Project Gutenberg #18251"
@@ -52,7 +53,7 @@ class Classroom:
         termios.tcsetattr(self.fd,termios.TCSADRAIN,self.old)
         try:
             print('\n'+self.ui._c(label,'1;36'))
-            value,cancelled=self.ui.look_renderer.prompt_line('› ',initial=initial)
+            value,cancelled=look_renderer.prompt_line('› ',initial=initial)
             return None if cancelled else value.strip()
         finally:tty.setcbreak(self.fd)
     def choose(self,title,rows,label,initial=0,extra=''):
