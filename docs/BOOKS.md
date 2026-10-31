@@ -298,3 +298,12 @@ Press **c** inside an article to copy its Markdown Wiki link. Paste into Notes o
 Ctrl-K's link helper. Notes renders the label and opens the terminal article when
 selected; Escape returns to the note. Live/saved source, and saved owner/archive
 edition, are retained. See [Notes links](../look/docs/NOTEBOOK_LINKS.md).
+
+
+## Wiki reading anchors (8.23.2)
+
+Hint toggling keeps the original text near the viewport center at the same screen
+row, even when codes add wrapped lines above it. Cancelling hints restores the
+normal position without cumulative drift. Normal and hint controls reserve the
+same footer height. Manual scrolling updates the anchor; article back history
+also keeps a source-text position. Viewport edges can still clamp the view.
