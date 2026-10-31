@@ -1,3 +1,8 @@
+## 8.22.2 — Linkless Wikipedia contents pages (LOOK 4.69.2)
+
+- Rebuild a linkless landing page’s listed topic links only from entries verified inside that archive.
+- Retain in-article search, exact-title matches and explicit reader/owner status from 8.22.1.
+
 ## 8.22.1 — Wiki archive navigation (LOOK 4.69.1)
 
 - Add archive search inside article/landing views, preserving back history.
