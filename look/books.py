@@ -18,6 +18,9 @@ import fabric_files
 import media_storage
 import terminal_style
 import look_renderer
+import book_preview
+from media_ui_work import LatestWork
+from notebook_markdown import cell_width
 from notebook_markdown import safe_text
 from notebook import make_link
 
@@ -52,7 +55,7 @@ def rows_for(value,query='',shelf='All'):
     groups={}
     for row in value.get('entries',[]):
         key=row['id']
-        if key not in groups or (groups[key].get('offline') and not row.get('offline')):groups[key]=row
+        if key not in groups or (groups[key].get('offline') and not row.get('offline')) or (bool(groups[key].get('offline'))==bool(row.get('offline')) and row.get('reading',{}).get('updated',0)>groups[key].get('reading',{}).get('updated',0)):groups[key]=row
     rows=[r for r in groups.values() if shelf=='All' or shelf in {r.get('status'),r.get('shelf')}]
     terms=query.casefold().split()
     return sorted((r for r in rows if all(t in ' '.join(str(r.get(k,'')) for k in ('title','author','shelf','format')).casefold() for t in terms)),key=lambda r:(r.get('author','').casefold(),r.get('title','').casefold()))
@@ -101,6 +104,7 @@ def import_files(paths,node):
 def desk(ui,query='',owner=None):
     fd=sys.stdin.fileno();old=termios.tcgetattr(fd);index=0;shelf='All';search=False;notice='';results=None
     owner=owner or media_storage.settings()['node'];sort_reverse=False;help_visible=False
+    previews=LatestWork();native=look_renderer.NativePreviewController();native_images=True;show_preview=True;last_frame=None
     def ask(label,initial='',path=False):
         termios.tcsetattr(fd,termios.TCSADRAIN,old)
         try:
@@ -121,26 +125,44 @@ def desk(ui,query='',owner=None):
             visible=results if results is not None else rows_for(value,query,shelf)
             if sort_reverse:visible=list(reversed(visible))
             index=max(0,min(index,max(0,len(visible)-1)));chosen=visible[index] if visible else None
-            controls='↑↓ move · Shift-arrows page/ends · Enter '+('import book' if results is not None else 'read')+' · a read aloud · o system reader · / search · s shelves · m reading state · e edit · i import · g Gutenberg · k keep offline · y copy link · R scan/refresh · G reverse · P clipboard · W shell pane · Esc back'
+            controls='↑↓ move · Shift-arrows page/ends · Enter '+('import book' if results is not None else 'read')+' · a read aloud · o system reader · / search · s shelves · m reading state · e edit · i import · g Gutenberg · d discover · I preview · M image/ASCII · k keep offline · y copy link · R scan/refresh · G reverse · P clipboard · W shell pane · Esc back'
             if width<80 and not help_visible:controls='↑↓ select · Enter open · / search · ? help · Esc back'
             else:controls+=' · ? help'
             hints='\n'.join(ui._media_hints(controls,width).splitlines()[:max(1,height-8)]);page=max(1,height-8-len(hints.splitlines()));top=max(0,index-page+1)
+            art_width=min(36,width//3) if show_preview and width>=90 else 0
+            list_width=width-art_width-3 if art_width else width
+            art_height=min(16,page)
+            preview=([],None)
+            if chosen and art_width:
+                key_id=chosen.get('id') or chosen.get('url')
+                preview=previews.get((key_id,art_width,art_height),lambda row=dict(chosen),w=art_width,h=art_height:book_preview.preview(row,w,h),([],None),ttl=60) or ([],None)
+            art,image=preview
             colors=terminal_style.list_colors();colors=dict(colors)
             # The same palette and selected-row contrast as the media desks.
-            title_w=max(12,(width-8)*55//100);author_w=max(8,width-title_w-21)
+            title_w=max(12,(list_width-8)*55//100);author_w=max(8,list_width-title_w-21)
             frame=[ui._c('LOOK BOOKS','1;36')+' · '+('PROJECT GUTENBERG' if results is not None else shelf)+f' · {len(visible)} books · import to '+safe_text(owner),
                    ui._c('TITLE'.ljust(title_w)+'  '+'AUTHOR'.ljust(author_w)+'  FORMAT','2')]
             for pos,row in enumerate(visible[top:top+page],top):
                 text=ui._media_find_cell(safe_text(row.get('title','')),title_w)+'  '+ui._media_find_cell(safe_text(row.get('author','')),author_w)+'  '+safe_text(row.get('format','EPUB'))
-                frame.append(terminal_style.list_row(('› ' if pos==index else '  ')+text,width,pos,pos==index,colors))
+                frame.append(terminal_style.list_row(('› ' if pos==index else '  ')+text,list_width,pos,pos==index,colors))
             frame+=['']*max(0,page-len(visible[top:top+page]))
+            if art_width:
+                for offset in range(min(page,len(art) or 1)):
+                    left=ui._ansi_clip(frame[offset+2],list_width)
+                    cells=sum(cell_width(c) for c in ui._strip_ansi(left))
+                    right=art[offset] if offset<len(art) else 'Cover unavailable'
+                    frame[offset+2]=left+' '*max(0,list_width-cells)+'   '+right
             if chosen:
                 detail=' · '.join(str(chosen.get(k) or '') for k in ('status','shelf','position','node'))
                 frame.append(ui._c(ui._media_find_cell(safe_text(detail),width),'2'))
             else:frame.append(ui._c('No books here · R scans your configured books folder · i imports a file · g searches Gutenberg','33'))
             if value.get('errors'):frame.append(ui._c('Some owners unavailable · cached books may need an offline copy','33'))
             frame.extend([ui._c(('SEARCH /' if search else 'FILTER ')+safe_text(query),'1;36'),hints,ui._c(ui._media_find_cell(safe_text(notice),width),'33')])
-            sys.stdout.write(ui._terminal_frame_payload('\n'.join(ui._ansi_clip(line,width) for line in frame)));sys.stdout.flush()
+            rendered=ui._terminal_frame_payload('\n'.join(ui._ansi_clip(line,width) for line in frame))
+            if rendered!=last_frame:
+                native.frame_cleared();sys.stdout.write(rendered);sys.stdout.flush();last_frame=rendered
+            if image and art_width and native_images:native.request(image,3,list_width+4,art_height,art_width)
+            native.paint_ready()
             key=ui._read_tty_key(fd,.25)
             if not key:continue
             if key=='\x03':return 0
@@ -169,13 +191,21 @@ def desk(ui,query='',owner=None):
             try:
                 if key=='R':request('scan',node=owner);value=catalog();notice='Books folder scanned; shelf refreshed'
                 elif key=='G':sort_reverse=not sort_reverse
+                elif key=='I':show_preview=not show_preview;native.frame_cleared();last_frame=None
+                elif key=='M':native_images=not native_images;native.frame_cleared();last_frame=None;notice='Auto image' if native_images and native.enabled else 'ASCII previews'
                 elif key=='W':notice=terminal_style.open_pane(Path.cwd())[1]
                 elif key=='P':
                     import clipboard_shelf
-                    clipboard_shelf.show(fd=fd)
+                    clipboard_shelf.show(fd=fd);last_frame=None
                 elif key=='s':
                     shelves=['All',*book_core.STATUSES]+sorted({r.get('shelf') for r in value.get('entries',[]) if r.get('shelf')})
                     shelf=shelves[((shelves.index(shelf) if shelf in shelves else -1)+1)%len(shelves)];results=None;index=0
+                elif key=='d':
+                    mode=ask('Discover · p popular · n new arrivals · s subjects · r surprise me','p')
+                    if mode:
+                        selected={'p':'popular','n':'new','s':'subjects','r':'surprise'}.get(mode,mode)
+                        results=book_core.discover(selected);index=0
+                        if selected=='surprise':notice='LOOK surprise selection from Gutenberg’s popular list'
                 elif key=='g':
                     text=ask('Search Project Gutenberg')
                     if text:results=book_core.gutenberg(text);index=0;notice='Enter imports the selected EPUB to '+owner+'; Esc returns to your shelf'
@@ -184,6 +214,7 @@ def desk(ui,query='',owner=None):
                     if path:import_files([path],owner);value=catalog();notice='Imported; source retained'
                 elif key in {'enter','\r','\n'} and chosen:
                     if results is not None:
+                        if chosen.get('kind')=='subject':results=book_core.discover('subject',chosen['subject']);index=0;continue
                         answer=ask('Download “'+chosen['title']+'” to '+owner+'? y/N')
                         if answer and answer.casefold()=='y':request('fetch',node=owner,url=chosen['url']);value=catalog();results=None;notice='Book imported'
                     else:
@@ -199,13 +230,14 @@ def desk(ui,query='',owner=None):
                         termios.tcsetattr(fd,termios.TCSADRAIN,old)
                         try:notice=book_reader.open_book(path,ui._desktop_launch,mode=mode)
                         finally:
-                            tty.setcbreak(fd)
+                            tty.setcbreak(fd);last_frame=None
                             if os.environ.get('KITTY_WINDOW_ID') or os.environ.get('TERM')=='xterm-kitty':sys.stdout.write('\x1b_Ga=d,d=a,q=2\x1b\\')
                             sys.stdout.write('\x1b[0m\x1b[2J\x1b[H');sys.stdout.flush()
                 elif chosen and results is None:
                     if key=='a':
                         import book_speech
-                        notice=book_speech.desk(ui,local_copy(chosen),chosen['title'])
+                        notice=book_speech.desk(ui,local_copy(chosen),chosen['title'],reading=chosen.get('reading'),save_reading=lambda fields:request('progress',node=chosen.get('node','local'),id=chosen['id'],fields=fields))
+                        value=catalog();last_frame=None
                     elif key=='o':
                         notice=book_reader.open_book(local_copy(chosen),ui._desktop_launch,mode='system')
                     elif key=='y':
@@ -222,12 +254,14 @@ def desk(ui,query='',owner=None):
                             fields[field]=answer
                         if fields:request('update',node=chosen.get('node','local'),id=chosen['id'],fields=fields);value=catalog();notice='Metadata saved; document bytes unchanged'
             except (OSError,ValueError,RuntimeError,KeyError,subprocess.SubprocessError) as exc:notice=str(exc)
-    finally:termios.tcsetattr(fd,termios.TCSADRAIN,old);sys.stdout.write('\033[0m\n')
+    finally:
+        previews.close();native.frame_cleared()
+        termios.tcsetattr(fd,termios.TCSADRAIN,old);sys.stdout.write('\033[0m\n')
 
 
 def main(args,ui):
     parser=argparse.ArgumentParser(prog='lk books',description='Fabric EPUB/PDF shelf; bk is an alias. Files stay on their owner; opening remote books makes a verified local cache copy.')
-    parser.add_argument('action',nargs='?',default='shelf',choices=['shelf','list','scan','import','search','fetch','reader','listen','voices','speech-setup'])
+    parser.add_argument('action',nargs='?',default='shelf',choices=['shelf','list','scan','import','search','discover','fetch','reader','listen','voices','speech-setup'])
     parser.add_argument('values',nargs='*')
     parser.add_argument('--node',default=None,help='Library owner; defaults to configured media destination')
     parser.add_argument('--json',action='store_true')
@@ -266,6 +300,7 @@ def main(args,ui):
             if not selected.values:raise ValueError('Choose one or more EPUB/PDF files')
             value={'entries':import_files(selected.values,owner)}
         elif selected.action=='search':value={'entries':book_core.gutenberg(' '.join(selected.values))}
+        elif selected.action=='discover':value={'entries':book_core.discover(selected.values[0] if selected.values else 'popular',' '.join(selected.values[1:]))}
         else:
             if len(selected.values)!=1:raise ValueError('Choose one direct HTTPS EPUB/PDF URL')
             value=request('fetch',node=owner,url=selected.values[0])

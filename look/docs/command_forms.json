@@ -891,6 +891,12 @@
     "Offline Kiwix reference library, verified downloads and Fabric search"
   ],
   [
+    "lk books discover",
+    "[popular|new|subjects|surprise|subject NAME] [--json]",
+    "media",
+    "Browse Project Gutenberg without downloading books"
+  ],
+  [
     "lk books listen",
     "FILE [--chapter N] [--paragraph N]",
     "media",
@@ -916,7 +922,7 @@
   ],
   [
     "lk books",
-    "[shelf|list|scan|import FILE...|search QUERY|fetch URL|reader MODE|listen FILE|voices|speech-setup] [--node NODE] [--json]",
+    "[shelf|list|scan|import FILE...|search QUERY|discover [popular|new|subjects|surprise]|fetch URL|reader MODE|listen FILE|voices|speech-setup] [--node NODE] [--json]",
     "media",
     "Fabric EPUB/PDF shelf; bk alias, reading state and Notes links"
   ],

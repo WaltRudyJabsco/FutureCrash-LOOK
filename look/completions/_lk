@@ -189,7 +189,7 @@ _lk() {
         return
       fi
       if (( CURRENT == 3 )); then
-        _values 'books command' shelf list scan import search fetch reader listen voices speech-setup --node --chapter --paragraph --json
+        _values 'books command' shelf list scan import search discover fetch reader listen voices speech-setup --node --chapter --paragraph --json
       else
         _files -g '*.epub|*.pdf|*(-/)'
       fi

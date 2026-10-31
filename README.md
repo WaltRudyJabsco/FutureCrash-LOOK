@@ -1,4 +1,8 @@
-# Future Crash + LOOK 8.21.2 — FABRIC MEDIA
+# Future Crash + LOOK 8.22.0 — FABRIC MEDIA
+
+8.22.0 adds Books discovery, cover previews and browser read-aloud in Signal and
+Albert. Use `/books`, “read TITLE” or “continue reading”; narration and progress
+stay with your book's owner. See [Books](docs/BOOKS.md).
 
 8.21.2 removes focus-stealing clipboard polling on Wayland. Supported desktops
 use clipboard change events; others offer explicit `lk clip add`. Existing

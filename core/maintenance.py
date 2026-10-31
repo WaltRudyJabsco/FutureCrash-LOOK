@@ -296,6 +296,7 @@ def imports_active():
     # restarting that service can kill them along with the node.
     try:
         reader_status=local_json('/v1/books/reader')
+        if reader_status.get('narration_busy'):return True
         reader_setup=reader_status.get('setup') or {}
         if (reader_status.get('speech_setup') or {}).get('state')=='installing':return True
     except urllib.error.HTTPError as exc:

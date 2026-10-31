@@ -98,7 +98,7 @@ body.media-fullscreen-open{overflow:hidden}
     <div class="attachment-tray" id="attachmentTray"></div>
     <div class="composer">
       <span class="prompt">›</span>
-      <input class="ask" id="ask" autocomplete="off" placeholder="ask, act, paste, or drop… · /fabric" />
+      <input class="ask" id="ask" autocomplete="off" placeholder="ask, act, paste, or drop… · /books · /fabric" />
       <button class="icon" id="cameraButton" title="Take photo">CAM</button>
       <input id="cameraInput" type="file" accept="image/*" capture="environment" hidden />
       <button class="icon" id="mic" title="Speak">◉</button>
@@ -190,6 +190,7 @@ function renderBody(f){
     const player=(media.id||f.src)?`<video controls autoplay playsinline${attrs}></video>`:`${scaledPage(f.embed||CLASSIC_ARTS,f.id)}`;
     return `<div class="media-grid" id="media-grid-${f.id}"><div class="media"><div class="media-viewport" id="media-view-${f.id}"><button class="media-fullscreen-button" data-media-fullscreen onclick="toggleMediaFullscreen(this,event)">Full screen</button><button class="media-expand" onclick="toggleMediaExpand('${f.id}',event)">expand</button>${player}</div>${media.id?'<div class="prose media-preparation" role="status">Preparing / loading video · first playback may take a few minutes</div>':''}${transport}</div><div class="side"><div class="prose">${esc(f.text||f.note||'')}</div>${f.external?`<div class="actions"><button class="action primary" onclick="window.open('${esc(f.external)}','_blank','noopener')">open official feed</button></div>`:''}</div></div>`;
   }
+  if(f.type==='books') return `<div class="prose">Read or listen on this device; continue from your saved book position.</div><a class="action primary" href="/books?${esc(new URLSearchParams({query:f.query||'',...(f.resume?{resume:'1'}:{})}).toString())}" target="_blank" rel="noopener">Open Books ↗</a>`;
   if(f.type==='fabric') return `<div class="prose">Read-only nodes, installed updates and essential backup receipts.</div><a class="action primary" href="/fabric.html" target="_blank" rel="noopener">Open Fabric dashboard ↗</a>`;
   if(f.type==='image') return `<div class="media"><a href="${esc(f.src)}" target="_blank" rel="noopener"><img src="${esc(f.src)}" alt="${esc(f.title||'image')}" /></a></div><a class="action" href="${esc(f.src)}" target="_blank" rel="noopener">Open image ↗</a>${f.text?`<div class="prose">${esc(f.text)}</div>`:''}`;
   if(f.type==='file') return `<div class="object"><div class="object-label">${esc(f.mime||'object')}</div>${esc(f.name||f.title)}${f.detail?`<div class="meta">${esc(f.detail)}</div>`:''}</div>`;
@@ -358,6 +359,7 @@ async function removeSaved(id){await savedRequest({op:'delete',id});state.saved=
 function addProgress(text='Understanding…'){state.busy=true;statusLine('thinking');const id=addFold({type:'progress',title:'Albert',meta:'cognition',badge:'working',text,kind:'progress'});return id}
 function finishProgress(id){state.folds=state.folds.filter(x=>x.id!==id);state.busy=false;statusLine('local surface · ready');render()}
 async function askFabric(query,context={},targetFold=null){
+  if(FabricBrowserViews.booksCommand(query)){const command=FabricBrowserViews.booksCommand(query);FabricBrowserViews.openBooks(command);addFold({type:'books',title:'Books',...command});return}
   if(FabricBrowserViews.fabricCommand(query)){FabricBrowserViews.openFabric();addFold({type:'fabric',title:'Fabric',badge:'read-only'});return}
   const imageView=FabricBrowserViews.beginImage(query);
   const progress=addProgress('Understanding what you mean…');

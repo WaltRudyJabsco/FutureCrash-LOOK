@@ -20,6 +20,7 @@ from notebook_markdown import safe_text
 MAX_TEXT_BYTES=16*1024*1024
 MAX_CHAPTER_BYTES=2*1024*1024
 DEFAULT_RATE=155
+MAX_PASSAGE_CHARS=6000
 
 
 class PassageParser(HTMLParser):
@@ -77,6 +78,8 @@ def chapters(path):
                 parser=PassageParser();parser.feed(data.decode('utf-8',errors='replace'));parser.flush()
                 rows.append({'title':parser.title or 'Chapter '+str(len(rows)+1),'paragraphs':parser.parts})
     rows=[r for r in rows if r['paragraphs']]
+    for row in rows:
+        row['paragraphs']=[text[i:i+MAX_PASSAGE_CHARS] for text in row['paragraphs'] for i in range(0,len(text),MAX_PASSAGE_CHARS)]
     if not rows:raise ValueError('No readable text found; scanned PDFs need OCR first')
     return rows
 
@@ -149,17 +152,22 @@ class Speech:
     def close(self):self.stop();self.folder.cleanup()
 
 
-def desk(ui,path,title='',chapter=None,paragraph=None):
+def desk(ui,path,title='',chapter=None,paragraph=None,reading=None,save_reading=None):
     rows=chapters(path);available=voices();voice=preferred_voice(available)
     if not voice:raise ValueError('No local voice. Install a macOS voice or run lk books speech-setup for the offline British neural voice')
     ident=book_core.digest(path);state_path=Path.home()/'.local/share/look/book-speech/positions.json'
     try:positions=json.loads(state_path.read_text());saved=positions.get(ident,{})
     except (OSError,ValueError):positions={};saved={}
+    if reading:saved=reading
     ci=max(0,min(len(rows)-1,(chapter-1) if chapter else saved.get('chapter',0)))
     pi=max(0,min(len(rows[ci]['paragraphs'])-1,(paragraph-1) if paragraph else saved.get('paragraph',0)))
     speech=Speech(voice);notice='Enter reads from selected paragraph · speech stays on this computer'
     def save():
+        nonlocal notice
         positions[ident]={'chapter':ci,'paragraph':pi};book_reader.write_json(state_path,positions)
+        if save_reading:
+            try:save_reading(dict(positions[ident],offset=0,finished=False))
+            except (OSError,ValueError,RuntimeError):notice='Position saved locally; book owner unavailable'
     try:
         while True:
             width,height=ui.shutil.get_terminal_size((100,30));width=max(20,width);height=max(12,height)

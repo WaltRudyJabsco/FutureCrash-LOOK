@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Future Crash + LOOK Unified Node 8.21.2.
+"""Future Crash + LOOK Unified Node 8.22.0.
 
 A small distributed supervisor for trusted personal machines. Immediate events stay
 asynchronous; a one-second fabric pulse reconciles presence, leases and stale work.
@@ -155,7 +155,7 @@ def _file_peer_json(peer,path):
     return _file_race(peer,path)[1]
 
 
-VERSION = "8.21.2"
+VERSION = "8.22.0"
 RELEASE_NAME = "FABRIC VISION"
 DEFAULT_HOST = "127.0.0.1"
 DEFAULT_PORT = 7332
@@ -2657,7 +2657,7 @@ def _local_web_search(query, limit=8):
     base=os.environ.get("FCL_SEARXNG_URL","http://127.0.0.1:8888").rstrip("/")
     request=urllib.request.Request(base+"/search?"+params,headers={
         "Accept":"application/json",
-        "User-Agent":"Future-Crash-Fabric/8.21.2",
+        "User-Agent":"Future-Crash-Fabric/8.22.0",
     })
     try:
         with urllib.request.urlopen(request,timeout=8) as response:
@@ -3845,7 +3845,9 @@ class API(BaseHTTPRequestHandler):
     def _book_reader_request(self, payload=None):
         try:
             _look_catalog_modules();import book_reader
-            if payload is None:value=book_reader.status()
+            if payload is None:
+                import book_audio
+                value=dict(book_reader.status(),narration_busy=book_audio._LOCK.locked())
             elif payload.get('action')=='install':value=book_reader.install(confirmed=payload.get('confirm'))
             elif payload.get('action')=='speech-setup':
                 import book_speech
@@ -3885,9 +3887,63 @@ class API(BaseHTTPRequestHandler):
             elif payload.get('action')=='scan':value=shelf.scan()
             elif payload.get('action')=='fetch':value={'book':shelf.fetch(payload.get('url',''))}
             elif payload.get('action')=='update':value={'book':shelf.update(payload.get('id'),payload.get('fields'))}
+            elif payload.get('action')=='progress':
+                import book_audio
+                row,path=shelf.item(payload.get('id'));fields=payload.get('fields')
+                if fields is not None:
+                    prior=shelf.progress(row['id'])
+                    book_audio.passage(book_audio.document(path),fields.get('chapter',prior.get('chapter',0)),fields.get('paragraph',prior.get('paragraph',0)))
+                value={'reading':shelf.progress(row['id'],fields)}
             else:raise ValueError('Choose scan, fetch or update')
             if 'entries' in value:value['entries']=[dict(row,node=identity()['name']) for row in value['entries']]
             return self.sendj(200,dict(value,ok=True,node=identity()['name']))
+        except Exception as exc:return self.sendj(400,{'ok':False,'error':str(exc)})
+
+    def _book_content(self):
+        try:
+            _look_catalog_modules()
+            import book_audio,book_cover
+            params=parse_qs(urlparse(self.path).query)
+            action=urlparse(self.path).path.rsplit('/',1)[-1]
+            if action=='discovery-cover':
+                ident=(params.get('id') or [''])[0]
+                if not re.fullmatch(r'[0-9]{1,9}',ident):raise ValueError('Invalid Gutenberg book number')
+                image=book_cover.catalog_cover('https://www.gutenberg.org/ebooks/'+ident+'.opds')
+                if image is None:return self.sendj(404,{'error':'No cover available'})
+                import mimetypes
+                return self._serve_file_range(image,mimetypes.guess_type(image.name)[0] or 'image/jpeg')
+            if action=='discover':
+                import book_core
+                return self.sendj(200,{'ok':True,'entries':book_core.discover((params.get('mode') or ['popular'])[0],(params.get('subject') or [''])[0])})
+            peer,_=self._file_target()
+            if peer is not None:
+                query={k:v[0] for k,v in params.items() if k!='target'}
+                url=_copy_route(peer)+'/v1/books/'+action+'?'+urllib.parse.urlencode(query)
+                headers=FABRIC_IDENTITY.auth_headers_for_url(url)
+                if self.headers.get('Range'):headers['Range']=self.headers['Range']
+                request=urllib.request.Request(url,headers=headers)
+                with urllib.request.urlopen(request,timeout=180,context=FABRIC_IDENTITY.ssl_context_for_url(url)) as response:
+                    self.send_response(response.status)
+                    for key in ('Content-Type','Content-Length','Content-Range','Accept-Ranges'):
+                        if response.headers.get(key):self.send_header(key,response.headers[key])
+                    self.end_headers();shutil.copyfileobj(response,self.wfile)
+                return
+            ident=(params.get('id') or [''])[0]
+            shelf=self._books_shelf();row,path=shelf.item(ident)
+            if action=='cover':
+                image=book_cover.cover(path,ident)
+                if image is None:return self.sendj(404,{'error':'No cover available'})
+                import mimetypes
+                return self._serve_file_range(image,mimetypes.guess_type(image.name)[0] or 'image/png')
+            reading=shelf.progress(ident)
+            rows=book_audio.document(path)
+            chapter=int((params.get('chapter') or [reading.get('chapter',0)])[0])
+            paragraph=int((params.get('paragraph') or [reading.get('paragraph',0)])[0])
+            text=book_audio.passage(rows,chapter,paragraph)
+            if action=='read':
+                return self.sendj(200,{'ok':True,'book':row,'reading':reading,'chapter':chapter,'paragraph':paragraph,'text':text,
+                    'chapters':[{'title':r['title'],'paragraphs':len(r['paragraphs'])} for r in rows]})
+            return self._serve_file_range(book_audio.render(text,ident,chapter,paragraph),'audio/mp4')
         except Exception as exc:return self.sendj(400,{'ok':False,'error':str(exc)})
 
     def _serve_book_item(self):
@@ -4598,6 +4654,7 @@ class API(BaseHTTPRequestHandler):
             return self.sendj(200,{'ok':True,'settings':notifications.settings()})
         if path == "/v1/downloads" or path.startswith("/v1/downloads/"): return self._downloads_request()
         if path == "/v1/wiki": return self._wiki_request()
+        if path in {"/v1/books/read","/v1/books/audio","/v1/books/cover","/v1/books/discover","/v1/books/discovery-cover"}: return self._book_content()
         if path == "/v1/books/reader": return self._book_reader_request()
         if path == "/v1/books": return self._books_request()
         if path == "/v1/books/fabric": return self._books_request(fabric=True)

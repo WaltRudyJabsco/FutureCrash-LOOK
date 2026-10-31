@@ -159,3 +159,59 @@ labelled fallback when present. No book text is sent to an online speech service
 PDF speech needs text extraction (`pdftotext`); image-only scans need OCR first.
 Temporary Piper audio is removed on exit. Controls affect only processes launched
 by this read-aloud view; music queues and system audio routing are untouched.
+
+
+## Discovery and cover previews (8.22.0)
+
+Press **d** in `lk books`: **p** popular, **n** new arrivals, **s** subjects,
+**r** surprise me. Enter on a subject browses its books. Enter on a title asks
+before downloading it to the displayed library owner; Esc returns to your shelf.
+Search with **g** remains available. These are online Project Gutenberg OPDS
+queries. “Surprise me” samples the popular results; it is a LOOK selection,
+not a Gutenberg editorial recommendation.
+
+```
+lk books discover popular
+lk books discover new
+lk books discover subjects
+lk books discover subject Poetry --json
+```
+
+Wide terminals show an asynchronous cover preview beside the list. **I** toggles
+the preview and **M** toggles auto image / ASCII. Auto uses the existing Kitty or
+iTerm renderer and leaves ASCII as the fallback. Chafa or ffmpeg renders ASCII;
+no optional image tools means a clear unavailable state. EPUB covers come from
+embedded metadata; PDF first pages need pdftoppm. Gutenberg discovery requests
+only cover images/metadata until you explicitly download the book. Narrow panes
+keep their title space rather than squeezing in a cover. Preview work never owns
+keyboard input or probes the terminal from a worker.
+
+## Signal and Albert read-aloud
+
+Use **/books**, **read The Great Gatsby**, **continue reading**, or
+**continue reading TITLE**. A Books tab opens on the browser you are using, with
+a link fallback in chat if popups are blocked. Tap Play to prepare and listen;
+Safari may require that initial gesture. The browser player has pause, seek,
+previous/next paragraph, chapter selection and automatic continuation across
+paragraphs and chapters. It does not start audio through the host's speakers.
+
+The book owner extracts text and generates bounded, cached AAC passages using
+its installed local voice and ffmpeg. Install a voice on the owner with
+`lk books speech-setup` if necessary; packages are never installed silently.
+The voice may differ from a terminal reader on another computer. PDF scans
+still require OCR before narration. No text is sent to a cloud speech service.
+
+Narration position is keyed by the existing content ID and stored with the
+owner's bookshelf. Browsers save paragraph and audio offset periodically and
+when paused; another authorized device can continue there. Terminal Books
+read-aloud reads/writes the same owner position at paragraph precision. If the
+owner becomes unreachable, terminal speech keeps its local bookmark. It needs
+the owner online to publish shared progress. Identical copies on separate owners
+retain separate records; Continue chooses the most recently updated available
+record. Simultaneous listeners use the last saved position.
+
+These are speech bookmarks, separate from Bookokrat's private visual reading
+cursor. Existing local speech bookmarks are retained and published when you next
+use read-aloud from the Books shelf. Simply opening an ebook in Bookokrat does
+not create a shared narration bookmark. Browser access uses existing lo.use
+endpoint authorization; cover/audio endpoints do not accept arbitrary paths.

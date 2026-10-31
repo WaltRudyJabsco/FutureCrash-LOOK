@@ -1132,6 +1132,17 @@ class App(BaseHTTPRequestHandler):
 
     def do_GET(self):
         parsed=urlparse(self.path); path=parsed.path
+
+        if path=='/books':
+            if not self._require_endpoint('lo.use'):return
+            import book_web
+            data=book_web.PAGE.encode()
+            self.send_response(200);self.send_header('Content-Type','text/html; charset=utf-8');self.send_header('Content-Length',str(len(data)));self.end_headers();self.wfile.write(data);return
+        if path.startswith('/api/books'):
+            if not self._require_endpoint('lo.use'):return
+            import book_web
+            try:return book_web.handle(self,NODE_URL)
+            except Exception as exc:return self.json(502,{'error':str(exc)})
         if path=="/api/auth/status": return self._auth_status()
         if path=="/api/media/ticket": return self._media_ticket_request(parsed)
         if path in ("/",""):
@@ -1197,6 +1208,17 @@ class App(BaseHTTPRequestHandler):
         if path not in ("index.html","app.js","media-session.js","media-art.js","style.css","browser-views.js","fabric.html","fabric-dashboard.js"): return self.json(404,{"error":"not found"})
         p=ROOT/path; self.send_bytes(200,p.read_bytes(),mimetypes.guess_type(p.name)[0] or "application/octet-stream")
     def do_POST(self):
+
+        if urlparse(self.path).path.startswith('/api/books'):
+            if not self._require_endpoint('lo.use'):return
+            import book_web
+            try:
+                size=int(self.headers.get('Content-Length') or 0)
+                if not 0<size<=65536:raise ValueError('Invalid Books request size')
+                payload=json.loads(self.rfile.read(size))
+                if not isinstance(payload,dict):raise ValueError('Invalid Books request')
+                return book_web.handle(self,NODE_URL,payload)
+            except Exception as exc:return self.json(400,{'error':str(exc)})
         if self.path.startswith("/api/"):
             if self.path.startswith("/api/media"): scope="media.output"
             elif self.path=="/api/fabric/decisions/answer": scope="decisions.answer"

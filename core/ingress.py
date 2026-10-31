@@ -26,7 +26,7 @@ try:
 except ImportError:
     from fabric_identity import FabricIdentity
 
-VERSION = "8.21.2"
+VERSION = "8.22.0"
 DEFAULT_HOST = "127.0.0.1"
 DEFAULT_PORT = 7333
 DEFAULT_BACKEND_HOST = "127.0.0.1"
@@ -51,12 +51,14 @@ HOP_HEADERS = {
 def _is_stream_path(path: str) -> bool:
     """Routes whose response bytes must never be buffered by the guard."""
     return (
-        path in {"/v1/infer/stream", "/v1/media/audio", "/v1/books/item", "/v1/media/item", "/v1/media/browser", "/v1/media/cover", "/v1/media/artifact", "/v1/media/catalog", "/v1/media/fabric", "/v1/maintenance/bundle"}
+        path in {"/v1/infer/stream", "/v1/media/audio", "/v1/books/item", "/v1/books/audio", "/v1/books/cover", "/v1/media/item", "/v1/media/browser", "/v1/media/cover", "/v1/media/artifact", "/v1/media/catalog", "/v1/media/fabric", "/v1/maintenance/bundle"}
         or path.startswith("/v1/artifacts/")
     )
 
 
 def _request_timeout(path: str, method: str, body: bytes | None, is_stream: bool) -> float:
+    if path == '/v1/books/audio':return 180.0
+    if path in {'/v1/books/read','/v1/books/discover'}:return BOOKS_REQUEST_TIMEOUT_SECONDS
     if path == '/v1/books' and method == 'POST':return BOOKS_REQUEST_TIMEOUT_SECONDS
     if path == '/v1/books/fabric':return CATALOG_TIMEOUT_SECONDS
     # Disc inspection waits for the physical drive; keep ordinary control calls short.

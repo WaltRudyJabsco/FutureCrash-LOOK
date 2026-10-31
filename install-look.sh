@@ -12,7 +12,7 @@ if [[ "${FCL_UNIFIED_INSTALL_CHILD:-0}" != "1" && -x "$ROOT/install.sh" ]]; then
 fi
 
 PRODUCT_VERSION="$(tr -d '[:space:]' < "$ROOT/VERSION")"
-LOOK_VERSION="4.68.2"
+LOOK_VERSION="4.69.0"
 FUTURE_CRASH_VERSION="1.3.0"
 
 DRY=0
@@ -382,6 +382,9 @@ install_file "$ROOT/look/latin_core.py" "$HOME/.local/share/look/latin_core.py"
 install_file "$ROOT/look/latin_data.py" "$HOME/.local/share/look/latin_data.py"
 install_file "$ROOT/look/latin_course.py" "$HOME/.local/share/look/latin_course.py"
 install_file "$ROOT/look/wiki.py" "$HOME/.local/share/look/wiki.py"
+install_file "$ROOT/look/book_audio.py" "$HOME/.local/share/look/book_audio.py"
+install_file "$ROOT/look/book_cover.py" "$HOME/.local/share/look/book_cover.py"
+install_file "$ROOT/look/book_preview.py" "$HOME/.local/share/look/book_preview.py"
 install_file "$ROOT/look/book_speech.py" "$HOME/.local/share/look/book_speech.py"
 install_file "$ROOT/look/book_reader.py" "$HOME/.local/share/look/book_reader.py"
 install_file "$ROOT/look/books.py" "$HOME/.local/share/look/books.py"
