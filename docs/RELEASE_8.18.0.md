@@ -26,3 +26,8 @@ and release/installer regressions passed. A real Gutenberg acquisition into an
 isolated temporary shelf returned Pride and Prejudice by Jane Austen, verified
 its EPUB bytes and registered one document. Generated command-reference checks,
 shell-completion syntax and the unified installer dry run passed.
+
+Trusted nodes retry advertisement discovery at the known-node interval after a
+restart, instead of entering the initial unknown-device backoff. Unknown/unpaired
+devices retain the slower discovery interval. This reduces temporary missing-peer
+states during coordinated updates without changing trust or authorization.
