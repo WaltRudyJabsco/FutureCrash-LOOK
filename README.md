@@ -1,9 +1,8 @@
-# Future Crash + LOOK 8.20.0 — FABRIC MEDIA
+# Future Crash + LOOK 8.21.0 — FABRIC MEDIA
 
-8.20.0 adds LOOK Shift-arrow controls and clipboard integration to terminal book
-reading, local chapter/paragraph read-aloud controls, and a Fabric-aware offline
-Kiwix reference library with verified archive downloads. See [Books](docs/BOOKS.md)
-and [Offline references](docs/OFFLINE-REFERENCES.md).
+8.21.0 adds `lk latin`, a complete offline Latin classroom: pronunciation,
+79 lessons, readings, grammar/dictionaries, checked practice and local spaced
+review. No speech or AI dependency. See [Latin](docs/LATIN.md).
 
 8.18.0 adds **`lk books`** / **`lk bk`**: a Fabric EPUB/PDF shelf with local imports,
 Gutenberg search, reading states and Notes links. Orrery and Phosphor Rain join

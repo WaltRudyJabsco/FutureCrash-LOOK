@@ -37,7 +37,7 @@ try:
 except Exception:
     readline = None
 
-VERSION="4.67.0"
+VERSION="4.68.0"
 
 LOOK_WORDMARK = r"""       ██╗      ██╗  ██╗
        ██║      ██║ ██╔╝
@@ -10077,7 +10077,7 @@ def _direct_searxng_search(query, limit=8):
     params=urllib.parse.urlencode({"q":query,"format":"json"})
     request=urllib.request.Request(base+"/search?"+params,headers={
         "Accept":"application/json",
-        "User-Agent":"Future-Crash-Fabric/8.20.0",
+        "User-Agent":"Future-Crash-Fabric/8.21.0",
     })
     with urllib.request.urlopen(request,timeout=12) as response:
         data=json.load(response)
@@ -21087,6 +21087,7 @@ _COMMANDS = [
     ("lk mp", "[QUERY]", "media", "Fabric audio library, queue and player"),
     ("lk tv", "[QUERY]", "media", "Fabric movies, TV and video player"),
     ("lk bk", "[ARGS]", "media", "Alias for lk books; Fabric EPUB/PDF shelf"),
+    ("lk latin", "[home|list|lesson N|practice|review|words QUERY|grammar QUERY|read|progress|about|export FILE] [--lesson N] [--strict-macrons on|off] [--json]", "learn", "Offline Latin classroom: complete course, vocabulary, checked forms and spaced review"),
     ("lk wiki", "[shelf|status|setup|catalog QUERY|fetch ID|jobs|cancel ID|configure|search QUERY|article PATH] [--node NODE] [--archive FILE] [--root PATH] [--confirm] [--json]", "web", "Offline Kiwix reference library, verified downloads and Fabric search"),
     ("lk books listen", "FILE [--chapter N] [--paragraph N]", "media", "Read aloud from a chapter/paragraph using a local voice"),
     ("lk books voices", "", "media", "List available local book-reading voices"),
@@ -22462,6 +22463,9 @@ def main():
         return transcription.main(rest,live=cmd=="dictate")
     if cmd=="mp": return media_mp(" ".join(rest))
     if cmd=="tv": return media_tv(" ".join(rest))
+    if cmd=="latin":
+        import latin
+        return latin.main(rest,sys.modules[__name__])
     if cmd=="wiki":
         import wiki
         return wiki.main(rest,sys.modules[__name__])

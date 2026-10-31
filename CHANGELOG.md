@@ -1,3 +1,11 @@
+## 8.21.0 — Offline Latin classroom (LOOK 4.68.0)
+
+- Add lk latin with the complete attributed D'Ooge course: pronunciation, 79 lessons, connected readings, grammar appendices and both vocabularies.
+- Add 80 original concept checks, 474 typed-form cards and 481 lesson-vocabulary recall cards, with optional macrons, checked alternatives and spaced review.
+- Keep open-ended translations self-assessed; retain the source edition, licence, historical context and clear assessment limits.
+- Add palette-aware terminal navigation, search, study marks, local reading/review state and explicit progress export. No text-to-speech, network or AI dependency.
+- Update installer, completion, help, reference and man page. Source data travels in the existing verified runtime bundle.
+
 ## 8.20.0 — Reading and offline knowledge (LOOK 4.67.0)
 
 - Add missing Bookokrat Shift-arrow page/end bindings while retaining custom bindings, comments and a backup. Space remains a tap-then-letter sequence.
