@@ -1,3 +1,10 @@
+## 8.22.1 — Wiki archive navigation (LOOK 4.69.1)
+
+- Add archive search inside article/landing views, preserving back history.
+- Resolve links to the English Wikipedia source locally for English Wikipedia archives; keep unrelated external links excluded.
+- Prefer an exact article path before full-text results, and show saved-archive/owner wording instead of a misleading OFFLINE header.
+- Show reader readiness, avoid redundant setup, and offer an explicit Fabric owner picker.
+
 ## 8.22.0 — Books discovery and browser narration (LOOK 4.69.0)
 
 - Add Gutenberg Popular, New arrivals, Subjects and Surprise discovery with explicit acquisition.
