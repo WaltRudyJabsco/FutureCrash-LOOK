@@ -484,12 +484,16 @@ def request(action='status',node='local',**payload):
 def main(argv=None,ui=None):
     parser=argparse.ArgumentParser(prog='lk wiki',description=__doc__)
     parser.add_argument('action',nargs='?',default='shelf',choices=['shelf','status','setup','catalog','fetch','jobs','cancel','configure','search','article'])
-    parser.add_argument('values',nargs='*');parser.add_argument('--node');parser.add_argument('--root');parser.add_argument('--archive');parser.add_argument('--confirm',action='store_true');parser.add_argument('--json',action='store_true')
+    parser.add_argument('values',nargs='*');parser.add_argument('--open-link',help='Open a validated wiki: reference from Notes');parser.add_argument('--node');parser.add_argument('--root');parser.add_argument('--archive');parser.add_argument('--confirm',action='store_true');parser.add_argument('--json',action='store_true')
     source=parser.add_mutually_exclusive_group()
     source.add_argument('--online',action='store_true',help='Use live English Wikipedia on this computer')
     source.add_argument('--offline',action='store_true',help='Force the saved local/Fabric archive; no live requests')
     args=parser.parse_args(argv);owner=args.node or media_storage.settings()['node']
     try:
+        if args.open_link:
+            import wiki_links
+            reference=wiki_links.parse(args.open_link)
+            return desk(ui,reference['node'] or owner,live=reference['source']=='live',reference=reference)
         if args.action=='shelf':return desk(ui,owner,live=args.online)
         action='status' if args.action=='jobs' else args.action
         fields={'query':' '.join(args.values),'id':' '.join(args.values),'archive':args.archive,'root':args.root,'confirm':args.confirm}
@@ -511,7 +515,7 @@ def main(argv=None,ui=None):
 def format_bytes(value):return f'{value/(1024**3):.1f} GiB' if value>=1024**3 else f'{value/(1024**2):.1f} MiB'
 
 
-def desk(ui,owner,live=False):
+def desk(ui,owner,live=False,reference=None):
     import termios,tty
     if not ui or not sys.stdin.isatty():raise ValueError('Use lk wiki status --json outside a terminal')
     fd=sys.stdin.fileno();old=termios.tcgetattr(fd);mode='archives';index=0;notice='d finds downloadable collections · i sets up the offline reader'
@@ -547,7 +551,7 @@ def desk(ui,owner,live=False):
             article=fetch_article('article',query=path);layout=None
             while True:
                 width,height=ui.shutil.get_terminal_size((100,30));width=max(20,width)
-                controls=ui._media_hints('↑↓ scroll · Shift-arrows page/ends · / search archive · l links ('+str(len(article['links']))+') · f link hints · i images · v live/saved · b back · y copy passage · Esc shelf',width).splitlines()
+                controls=ui._media_hints('↑↓ scroll · Shift-arrows page/ends · / search archive · l links ('+str(len(article['links']))+') · f link hints · i images · v live/saved · b back · c copy Wiki link · y copy passage · Esc shelf',width).splitlines()
                 if hinting:controls=['LINK HINTS '+typed+' · two letters open · arrows scroll · Esc cancels']
                 page=max(1,height-len(controls)-2)
                 if layout!=(width,hinting):lines=article_lines(ui,article,width,hinting);layout=(width,hinting)
@@ -584,6 +588,16 @@ def desk(ui,owner,live=False):
                 elif key=='y':look_renderer.copy_text(ui._strip_ansi('\n'.join(lines[top:top+page]))+('\n'+article.get('attribution','')+'\n'+article.get('source_url','') if live else ''))
                 elif key=='f':hinting=True;typed=''
                 elif key=='v':return 'switch'
+                elif key=='c':
+                    import wiki_links
+                    from notebook import make_link
+                    copy_owner=owner
+                    if not live and owner=='local':
+                        try:copy_owner=fabric_files.request('/v1/identity',timeout=.8)['identity']['name']
+                        except (OSError,ValueError,RuntimeError,KeyError):pass
+                    target=wiki_links.target(article['path'],live=live,node=copy_owner,archive=archive)
+                    copied=look_renderer.copy_text(make_link(article['title'],target))
+                    article_notice='Copied Wiki link · paste into Notes' if copied else 'Clipboard unavailable'
                 elif key=='i':
                     import wiki_images
                     article_notice=wiki_images.gallery(ui,fd,article,live=live,archive=archive or '',owner=owner)
@@ -608,6 +622,19 @@ def desk(ui,owner,live=False):
         try:status=refresh()
         except (OSError,ValueError,RuntimeError) as exc:status={'root':'Owner unavailable: '+str(exc),'archives':[],'jobs':[],'reader_installed':False}
         rows=shelf_rows(status)
+        if reference:
+            if not live:
+                choices=status.get('archives',[])
+                if reference.get('archive'):
+                    chosen=next((r for r in choices if r['id']==reference['archive']),None)
+                    if chosen is None:raise ValueError('Linked Wiki archive is unavailable on '+owner+'; the link will not switch sources silently')
+                elif len(choices)==1:chosen=choices[0]
+                elif choices:chosen=choose_links(ui,fd,choices,'Choose a saved archive for this Wiki link')
+                else:raise ValueError('No saved Wiki archive on '+owner+'; use a live Wiki link or choose another owner')
+                if chosen is None:return 0
+                archive=chosen['id']
+            if article_view(reference['title'])!='switch':return 0
+            switch_source()
         notice=('Live Wikipedia · / searches · Enter opens the main page' if live else '/ searches the selected saved archive · Enter opens its landing page') if rows else 'No archives on this owner · o chooses another owner · d finds downloads'
         while True:
             width,height=ui.shutil.get_terminal_size((100,30));width=max(20,width);page=max(1,height-9)

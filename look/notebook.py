@@ -158,7 +158,7 @@ Ordinary code fences stay inert; commands never run during preview or sync.
 Y copies this note's complete Markdown link from the list or preview.
 Editor Ctrl-K opens Insert Link; Ctrl-T switches to a multiline Command block.
 Ctrl-N inside that dialog finds notes by title/project and inserts their ID.
-Use [label](note:FULL_ID), [label](<file path>), [label](https://example.com),
+Use [label](note:FULL_ID), [label](wiki:Article_title), [label](<file path>), [label](https://example.com),
 or [label](<@3090:/path with spaces>). Relative paths start beside the note.
 E shows the original Markdown marks; saving returns to the rendered preview.
 In the view: arrows/Space scroll, E edits the body, V opens your full editor.
@@ -252,6 +252,9 @@ def link_target(text):
         raise ValueError('Use one path, URL, or note link without controls or angle brackets')
     if text.startswith('note:'):
         if not re.fullmatch(r'note:[a-f0-9]{32}',text): raise ValueError('Choose a note with Ctrl-N, or paste its copied link')
+    elif text.startswith('wiki:'):
+        import wiki_links
+        wiki_links.parse(text)
     elif text.startswith('@'):
         try:
             from .fabric_files import parse
@@ -264,7 +267,7 @@ def link_target(text):
             if not parts.hostname: raise ValueError('URL needs a hostname')
         elif parts.scheme=='file':
             if parts.netloc not in {'','localhost'}: raise ValueError('Use @node:/path for a remote file')
-        elif parts.scheme: raise ValueError('Use a path, https:// URL, @node:/path, or note link')
+        elif parts.scheme: raise ValueError('Use a path, https:// URL, @node:/path, or note/Wiki link')
     return text
 
 
@@ -287,6 +290,9 @@ def link_fields(text):
     name=(parts.path if parts and parts.scheme in {'http','https','file'} else target).rstrip('/').rsplit('/',1)[-1]
     if parts and parts.scheme in {'http','https'} and not parts.path.strip('/'): name=parts.hostname
     if target.startswith('note:'): name='Note'
+    if target.startswith('wiki:'):
+        import wiki_links
+        name=wiki_links.parse(target)['title'].replace('_',' ')
     return target,unquote(name) or target
 
 
@@ -667,6 +673,10 @@ def resolve_link(store,row,target):
         if not matches: raise ValueError('Linked note is missing or deleted')
         if len(matches)!=1: raise ValueError('Linked note has a conflict; resolve it from the list')
         return 'note',matches[0]
+    if target.startswith('wiki:'):
+        import wiki_links
+        wiki_links.parse(target)
+        return 'wiki',target
     if target.startswith('@'):
         return 'fabric',fabric_files.parse(target)
     parsed=urlsplit(target)
@@ -677,7 +687,7 @@ def resolve_link(store,row,target):
         if parsed.netloc not in {'','localhost'}: raise ValueError('Use @node:/path for remote files')
         target=unquote(parsed.path)
     elif parsed.scheme:
-        raise ValueError('Supported links: http(s), file, note:ID, and @node:/path')
+        raise ValueError('Supported links: http(s), file, note:ID, wiki:TITLE, and @node:/path')
     path=Path(target).expanduser()
     if not path.is_absolute(): path=Path(row['path']).parent/path
     path=path.resolve()
@@ -723,7 +733,9 @@ def open_link(kind,target):
             from look_renderer import browse_fabric
         browse_fabric(target)
         return
-    if kind=='path':
+    if kind=='wiki':
+        args=[sys.executable,str(Path(__file__).with_name('lk')),'wiki','--open-link',str(target)]
+    elif kind=='path':
         args=[sys.executable,str(Path(__file__).with_name('look_renderer.py')),
               str(target if target.is_dir() else target.parent),'--interactive','--select',str(target)]
     else:

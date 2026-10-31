@@ -290,3 +290,11 @@ explicitly if pictures are wanted. No second full Wikipedia download is needed.
 
 API references: [MediaWiki REST API](https://www.mediawiki.org/wiki/API:REST_API/Reference),
 [Wikimedia access policy](https://www.mediawiki.org/wiki/Wikimedia_APIs/Access_policy).
+
+
+## Wiki links back to Notes (8.23.1)
+
+Press **c** inside an article to copy its Markdown Wiki link. Paste into Notes or
+Ctrl-K's link helper. Notes renders the label and opens the terminal article when
+selected; Escape returns to the note. Live/saved source, and saved owner/archive
+edition, are retained. See [Notes links](../look/docs/NOTEBOOK_LINKS.md).

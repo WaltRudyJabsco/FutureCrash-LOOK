@@ -96,3 +96,27 @@ Option/Alt-Up/Down jumps between blank-line-separated paragraphs.
 Shift-Up/Down remains page movement, along with Page Up/Down.
 The link insertion form also supports word jumps in its fields.
 See docs/TERMINAL-STYLES.md for Kitty palette and keyboard configuration.
+
+
+## Wiki research references
+
+Notes accepts `[Architecture](wiki:Architecture)` as an internal LK Wiki article
+link. Bare wiki: references use the configured saved library owner and let you
+choose an archive if needed. To explicitly use live Wikipedia:
+
+```
+[Architecture](wiki:Architecture?source=live)
+```
+
+You do not need to type or memorize these fields. While reading in LK Wiki,
+press **c** to copy a complete labelled Markdown link. A saved-archive link keeps
+its Fabric owner and archive filename; a live link keeps its live source. Paste
+it into the note or the existing Ctrl-K helper. Select the rendered note link as
+usual; it opens the terminal Wiki reader. Escape returns directly to the note.
+
+Saved links identify the archive edition by filename, not a physical mount path.
+Moving the owner's reference folder therefore does not change the link. A missing
+pinned archive reports unavailable instead of silently opening a different edition
+or live page. A bare title does not pin a revision; live titles follow Wikipedia's
+current page/redirect behavior. This wiki: scheme is internal to LOOK, not an OS
+or browser protocol registration. It never executes a shell command.

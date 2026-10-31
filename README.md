@@ -1,4 +1,7 @@
-# Future Crash + LOOK 8.23.0 — FABRIC MEDIA
+# Future Crash + LOOK 8.23.1 — FABRIC MEDIA
+
+8.23.1 adds Wiki research links in Notes. Press c in an article to copy a Markdown
+link, then paste it into a note. Opening it returns to the note when you exit.
 
 8.23.0 adds a Live Wikipedia entry above saved references, persistent link accents,
 and ASCII/native article images. Saved mode stays separate from live web access.
