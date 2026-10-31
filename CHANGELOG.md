@@ -1,3 +1,10 @@
+## 8.23.0 — Live Wiki, link ink and images (LOOK 4.70.0)
+
+- Keep followable article anchors visibly accented in normal reading; show two-letter codes only in hint mode.
+- Put Live Wikipedia above downloaded archives; add explicit live/saved switching and CLI source flags without requiring Fabric or libzim for live reads.
+- Use bounded official Wikimedia API reads, labelled fresh/stale caches, source attribution and no implicit web requests from saved article/image views.
+- Add an asynchronous article image gallery with ASCII/native rendering, image source links and archive-only image retrieval when saved mode is selected.
+
 ## 8.22.3 — Wiki link paging and hints (LOOK 4.69.3)
 
 - Replace scrolling prompts for links and in-article search results with bounded paged selectors.
