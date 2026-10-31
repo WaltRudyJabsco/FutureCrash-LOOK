@@ -9,7 +9,7 @@ import urllib.error
 import book_reader
 
 HOST='https://en.wikipedia.org'
-USER_AGENT='FutureCrash-LOOK/8.24.0 (https://github.com/WaltRudyJabsco/FutureCrash-LOOK)'
+USER_AGENT='FutureCrash-LOOK/8.25.0 (https://github.com/WaltRudyJabsco/FutureCrash-LOOK)'
 MAX_HTML_BYTES=4*1024*1024
 MAX_IMAGE_BYTES=8*1024*1024
 CACHE_SECONDS=900

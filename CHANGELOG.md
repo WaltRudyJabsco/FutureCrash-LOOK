@@ -1,3 +1,10 @@
+## 8.25.0 — Offline words and Kinetic Mobile (LOOK 4.72.0)
+
+- `lk words` adds optional local definitions, examples, synonyms/antonyms, word patterns, personal vocabulary and spelling. Setup downloads about 12 MB; the installed baseline is about 60 MB.
+- Installed Hunspell/Aspell, local Hunspell dictionaries, system WordNet and word lists remain available as named sources/fallbacks. Missing vocabulary is not treated as a proven error.
+- A read-only `word_reference` tool exposes the same entries to LO, Signal and Albert. Setup is discoverable in Settings; paired nodes support explicit setup/query requests.
+- Kinetic Mobile adds a gently swaying hanging sculpture to the ambient visualizer rotation.
+
 ## 8.24.0 — Inline Wiki images and reading panes (LOOK 4.71.0)
 
 - Wiki pictures appear at their article positions, with fixed-height loading, ASCII fallback and clipped native Kitty images. `I` toggles inline pictures; `M` toggles image/ASCII; `i` keeps the gallery.

@@ -57,6 +57,7 @@ ACTION_SPECS = (
     ActionSpec("video_download_status", "web", "read", "observation", ("download status",)),
     ActionSpec("weather", "weather", "read", "observation", ("weather", "forecast", "temperature", "rain", "snow", "wind")),
     ActionSpec("place_lookup", "places", "read", "observation", ("place", "location", "geocode", "where is")),
+    ActionSpec("word_reference", "knowledge", "read", "observation", ("dictionary", "thesaurus", "synonym", "antonym", "spellcheck", "spelling", "word meaning")),
     ActionSpec("wikipedia", "knowledge", "read", "observation", ("wikipedia", "encyclopedia", "background article")),
     ActionSpec("wikidata", "knowledge", "read", "observation", ("wikidata", "structured facts")),
     ActionSpec("papers", "research", "read", "observation", ("papers", "research paper", "doi", "journal")),
@@ -100,7 +101,7 @@ ACTION_SPECS = (
 ACTION_BY_NAME = {spec.name: spec for spec in ACTION_SPECS}
 ACTION_IDS = {
     "web_search":"web.search", "weather":"weather.get", "place_lookup":"places.lookup",
-    "wikipedia":"knowledge.wikipedia", "wikidata":"knowledge.wikidata",
+    "word_reference":"knowledge.words", "wikipedia":"knowledge.wikipedia", "wikidata":"knowledge.wikidata",
     "papers":"research.papers", "archive":"research.archive",
     "list_files":"files.list", "inspect_directory":"files.inspect", "read_file":"files.read",
     "search_files":"files.search", "search_content":"files.search_content", "write_file":"files.write",
@@ -224,6 +225,7 @@ def _rule_scores(text: str) -> dict[str, float]:
         scores[family]=max(scores.get(family,0.0),value)
 
     patterns=(
+        ("knowledge", r"\b(dictionary|thesaurus|synonyms?|antonyms?|spellcheck|spelling|define|definition|word meaning)\b", .97),
         ("games", r"\b(gtnw|chess|checkers|draughts|backgammon|tic tac toe|ttt|play a game|games?)\b", .995),
         ("weather", r"\b(weather|forecast|temperature|temp|rain(?:ing)?|snow(?:ing)?|wind(?:y)?|humidity|precipitation)\b", .995),
         ("web", r"\b(youtube|yt-dlp|download (?:a |the )?video)\b", .995),
