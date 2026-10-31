@@ -247,3 +247,46 @@ scroll; Escape cancels hints without leaving the article. Selecting a link turns
 hints off; **b** returns to your previous position. Reading mode stays clean.
 Repeated links to the same destination share a code. Hints cover the reader's
 bounded set of up to 200 internal links. They never open external websites.
+
+
+## Wiki live sources, link colors and pictures (8.23.0)
+
+**Live Wikipedia · web (internet required)** is always the first shelf entry,
+with downloaded references below it. Opening the shelf does not contact live
+Wikipedia. Selecting that entry explicitly opens the live English Wikipedia
+main page—even if the saved archive owner is unavailable. **v** switches between
+live and saved sources on the shelf or in an article.
+
+```
+lk wiki --online
+lk wiki search Architecture --online --json
+lk wiki --offline --node YOUR_LIBRARY_OWNER
+```
+
+The default remains the saved local/Fabric source. `--offline` starts in saved
+mode; selecting Live or pressing v is an explicit source change. Saved reading
+and saved image views never fetch live Wikipedia content. Download-catalog and
+archive-download commands remain explicit online operations of their own.
+Live search and articles use Wikimedia's documented REST API on this computer,
+with an identifying User-Agent, eight-second request timeout and bounded cache.
+Live mode does not require libzim or a running Fabric owner. The article header
+labels cached and stale cached pages; uncached network failures are reported
+rather than silently substituting an archive page. Article text retains
+Wikipedia contributor/CC BY-SA attribution, including when copied.
+
+Followable links are accented in blue ink in normal reading. **f** adds the
+existing two-letter hints; Escape cancels them. Only actual anchor text is styled,
+not matching ordinary words. Palette mapping is shared with the other LOOK desks.
+
+**i** inside an article opens its pictures. **←/→** selects images,
+**Shift-←/→** goes first/last, **M** toggles native image / ASCII, **y** copies the
+image's source, and Escape returns to the article. Loading/rendering runs outside
+the input loop. Up to twelve raster images are listed per article; SVGs and tiny
+icons are skipped. Optional Chafa/ffmpeg provide ASCII and existing Kitty/iTerm
+support provides native rendering. Live thumbnails retain their file-page source
+for image-specific credits/licensing. Saved images must exist inside the selected
+ZIM; the downloaded no-pictures Wikipedia cannot supply photos. Choose Live
+explicitly if pictures are wanted. No second full Wikipedia download is needed.
+
+API references: [MediaWiki REST API](https://www.mediawiki.org/wiki/API:REST_API/Reference),
+[Wikimedia access policy](https://www.mediawiki.org/wiki/Wikimedia_APIs/Access_policy).

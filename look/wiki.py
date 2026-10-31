@@ -21,7 +21,7 @@ import book_speech
 import fabric_files
 import media_storage
 import look_renderer
-from notebook_markdown import safe_text
+from notebook_markdown import safe_text, cell_width
 
 CATALOG='https://library.kiwix.org/catalog/v2/entries'
 MAX_ARTICLE_BYTES=4*1024*1024
@@ -227,10 +227,31 @@ def zim_call(action,path,query=''):
 
 
 class ArticleParser(book_speech.PassageParser):
-    def __init__(self,path,wiki_host=None,hints=None):super().__init__();self.links=[];self.path=path;self.wiki_host=wiki_host;self.link=None;self.label=[];self.hints=hints or {}
+    def __init__(self,path,wiki_host=None,hints=None,decorate=False,live=False):
+        super().__init__();self.links=[];self.path=path;self.wiki_host=wiki_host;self.link=None;self.label=[];self.hints=hints or {};self.decorate=decorate;self.live=live;self.link_start=0;self.images=[]
     def handle_starttag(self,tag,attrs):
         super().handle_starttag(tag,attrs)
-        if tag=='a':self.link=dict(attrs).get('href');self.label=[]
+        if tag=='a':self.link=dict(attrs).get('href');self.label=[];self.link_start=len(self.current)
+        if tag=='img' and not self.skip and len(self.images)<12:
+            values=dict(attrs);src=values.get('src','')
+            if values.get('width','').isdigit() and int(values['width'])<60:return
+            if values.get('height','').isdigit() and int(values['height'])<40:return
+            if urllib.parse.urlsplit(src).path.casefold().endswith('.svg'):return
+            if self.live:
+                candidates=[src]+[part.strip().split()[0] for part in values.get('srcset','').split(',') if part.strip()]
+                src=urllib.parse.urljoin('https://en.wikipedia.org/',candidates[-1])
+                url=urllib.parse.urlsplit(src)
+                if url.scheme!='https' or url.hostname not in {'upload.wikimedia.org','thumb.wikimedia.org'}:return
+                src=urllib.parse.urlunsplit(url._replace(query='',fragment=''))
+                resource=values.get('resource') or self.link or ''
+                file_title=urllib.parse.unquote(resource.removeprefix('./'))
+                source=('https://commons.wikimedia.org/wiki/' if '/commons/' in url.path else 'https://en.wikipedia.org/wiki/')+urllib.parse.quote(file_title,safe=':') if file_title.startswith('File:') else src
+                image={'url':src,'title':values.get('alt') or file_title or 'Article image','source':source}
+            else:
+                path=archive_reference(self.path,src)
+                if not path:return
+                image={'path':path,'title':values.get('alt') or Path(path).name}
+            self.images.append(image)
     def handle_data(self,data):
         super().handle_data(data)
         if self.link:self.label.append(data)
@@ -251,9 +272,90 @@ class ArticleParser(book_speech.PassageParser):
                 path=posixpath.normpath(target)
                 if not path.startswith('../') and not path.startswith('/'):
                     self.links.append({'title':' '.join(''.join(self.label).split()) or path,'path':path})
-                    if path in self.hints and not self.skip:self.current.append(' ['+self.hints[path]+']')
+                    if path in self.hints and not self.skip:
+                        if self.decorate:
+                            self.current.insert(min(self.link_start,len(self.current)),'\ue000'+self.hints[path]+'\ue001')
+                            self.current.append('\ue002')
+                        else:self.current.append(' ['+self.hints[path]+']')
             self.link=None
         super().handle_endtag(tag)
+
+
+def archive_reference(base,href):
+    url=urllib.parse.urlsplit(href)
+    if url.scheme or url.netloc or not url.path:return None
+    path=posixpath.normpath(posixpath.join(posixpath.dirname(base),urllib.parse.unquote(url.path)))
+    return path if not path.startswith(('../','/')) else None
+
+
+def marked_runs(text):
+    parts=re.split(r'\ue000([a-z]{2})\ue001(.*?)\ue002',text)
+    runs=[{'text':parts[0]}] if parts[0] else []
+    for i in range(1,len(parts),3):
+        runs.append({'text':parts[i+1],'code':parts[i]})
+        if parts[i+2]:runs.append({'text':parts[i+2]})
+    return runs
+
+
+def topic_runs(paragraphs,links):
+    codes={row['path'].replace('_',' '):hint_code(i) for i,row in enumerate(links)}
+    if not codes:return [[{'text':text}] for text in paragraphs]
+    pattern=re.compile(r'(?<!\w)(?:'+'|'.join(re.escape(k) for k in sorted(codes,key=len,reverse=True))+r')(?!\w)')
+    return [marked_runs(pattern.sub(lambda m:'\ue000'+codes[m[0]]+'\ue001'+m[0]+'\ue002',text)) if '•' in text else [{'text':text}] for text in paragraphs]
+
+
+def article_payload(html,path,title,wiki_host=None,live=False,fallback=None):
+    # Private markers are internal to the parser, never accepted from source HTML.
+    html=html.replace('\ue000','').replace('\ue001','').replace('\ue002','')
+    parser=ArticleParser(path,wiki_host=wiki_host,live=live);parser.feed(html);parser.flush()
+    if not parser.links and fallback:parser.links=fallback(parser.parts)
+    links=list({r['path']:r for r in parser.links}.values())[:MAX_LINKS]
+    marked=ArticleParser(path,wiki_host=wiki_host,hints={r['path']:hint_code(i) for i,r in enumerate(links)},decorate=True,live=live)
+    marked.feed(html);marked.flush()
+    runs=[marked_runs(text) for text in marked.parts] if marked.links else topic_runs(parser.parts,links)
+    hinted=[''.join(r['text']+(' ['+r['code']+']' if r.get('code') else '') for r in row) for row in runs]
+    return {'title':title,'path':path,'paragraphs':parser.parts,'rich_paragraphs':runs,'hinted_paragraphs':hinted,'links':links,'images':parser.images}
+
+
+def article_lines(ui,article,width,hints=False):
+    """Wrap visible cells before applying palette colors; escape source controls."""
+    rich=article.get('rich_paragraphs')
+    if rich is None:
+        import textwrap
+        values=article.get('hinted_paragraphs',article['paragraphs']) if hints else article['paragraphs']
+        return [line for text in values for line in [*textwrap.wrap(safe_text(text),width),'']]
+    lines=[]
+    def paint(row):
+        out=[];group='';prior=None
+        for char,style in row:
+            if style!=prior and group:
+                out.append(ui._c(group,prior) if prior else group);group=''
+            group+=char;prior=style
+        if group:out.append(ui._c(group,prior) if prior else group)
+        return ''.join(out)
+    for runs in rich:
+        chars=[]
+        for run in runs:
+            style='1;34' if run.get('code') else None
+            chars.extend((c,style) for c in safe_text(run['text']))
+            if hints and run.get('code'):chars.extend((c,'1;33') for c in ' ['+run['code']+']')
+        plain=''.join(c for c,_ in chars);row=[];used=0
+        for token in re.finditer(r'\S+\s*',plain):
+            word=chars[token.start():token.end()]
+            size=sum(cell_width(c) for c,_ in word if not c.isspace())
+            if row and used+size>width:
+                while row and row[-1][0].isspace():row.pop()
+                lines.append(paint(row));row=[];used=0
+            for char,style in word:
+                cells=cell_width(char)
+                if used+cells>width:
+                    lines.append(paint(row));row=[];used=0
+                if not row and char.isspace():continue
+                row.append((char,style));used+=cells
+        while row and row[-1][0].isspace():row.pop()
+        if row:lines.append(paint(row))
+        lines.append('')
+    return lines
 
 
 def topic_hints(paragraphs,links):
@@ -329,6 +431,11 @@ def zim_worker(action,path,query):
     if action=='version':return {'ok':True}
     archive=Archive(path)
     if action=='verify':return {'ok':True,'articles':archive.article_count}
+    if action=='image':
+        import base64
+        item=archive.get_entry_by_path(query).get_item()
+        if item.mimetype not in {'image/jpeg','image/png','image/webp'} or item.size>2*1024*1024:raise ValueError('Archive image unsupported or exceeds 2 MiB')
+        return {'mime':item.mimetype,'data':base64.b64encode(bytes(item.content)).decode('ascii')}
     if action=='search':
         from libzim.search import Query,Searcher
         exact=[]
@@ -346,17 +453,7 @@ def zim_worker(action,path,query):
     if item.size>MAX_ARTICLE_BYTES:raise ValueError('Article exceeds 4 MiB')
     host='en.wikipedia.org' if Path(path).name.startswith('wikipedia_en_') else None
     html=bytes(item.content).decode('utf-8',errors='replace')
-    parser=ArticleParser(entry.path,wiki_host=host);parser.feed(html);parser.flush()
-    if not query and not parser.links:
-        # Some ZIM landing pages retain a topic list but strip all anchor hrefs.
-        # Link only names actually present in this archive; never guess a URL.
-        parser.links=landing_links(archive,parser.parts)
-    unique={r['path']:r for r in parser.links}
-    links=list(unique.values())[:MAX_LINKS]
-    hinted=ArticleParser(entry.path,wiki_host=host,hints={r['path']:hint_code(i) for i,r in enumerate(links)})
-    hinted.feed(html);hinted.flush()
-    if not hinted.links:hinted.parts=topic_hints(parser.parts,links)
-    return {'title':entry.title,'path':entry.path,'paragraphs':parser.parts,'hinted_paragraphs':hinted.parts,'links':links}
+    return article_payload(html,entry.path,entry.title,wiki_host=host,fallback=(lambda parts:landing_links(archive,parts)) if not query else None)
 
 
 def local(action='status',**payload):
@@ -375,7 +472,7 @@ def local(action='status',**payload):
         if value['kind']=='setup':raise ValueError('Let package setup finish before updating; download cancellation is available')
         if value['state'] not in TERMINAL:return update(value['id'],state='cancelled')
         return value
-    if action in {'search','article'}:return zim_call(action,archive_path(payload.get('archive')),str(payload.get('query') or ''))
+    if action in {'search','article','image'}:return zim_call(action,archive_path(payload.get('archive')),str(payload.get('query') or ''))
     raise ValueError('Unknown reference action')
 
 
@@ -388,28 +485,37 @@ def main(argv=None,ui=None):
     parser=argparse.ArgumentParser(prog='lk wiki',description=__doc__)
     parser.add_argument('action',nargs='?',default='shelf',choices=['shelf','status','setup','catalog','fetch','jobs','cancel','configure','search','article'])
     parser.add_argument('values',nargs='*');parser.add_argument('--node');parser.add_argument('--root');parser.add_argument('--archive');parser.add_argument('--confirm',action='store_true');parser.add_argument('--json',action='store_true')
+    source=parser.add_mutually_exclusive_group()
+    source.add_argument('--online',action='store_true',help='Use live English Wikipedia on this computer')
+    source.add_argument('--offline',action='store_true',help='Force the saved local/Fabric archive; no live requests')
     args=parser.parse_args(argv);owner=args.node or media_storage.settings()['node']
     try:
-        if args.action=='shelf':return desk(ui,owner)
+        if args.action=='shelf':return desk(ui,owner,live=args.online)
         action='status' if args.action=='jobs' else args.action
         fields={'query':' '.join(args.values),'id':' '.join(args.values),'archive':args.archive,'root':args.root,'confirm':args.confirm}
-        value=request(action,node=owner,**fields)
+        if args.online:
+            import wiki_online
+            if action=='article':value=wiki_online.article(fields['query'])
+            elif action=='search':value=wiki_online.search(fields['query'])
+            elif action=='status':value={'source':'live English Wikipedia','url':wiki_online.HOST,'reader_required':False}
+            else:raise ValueError('Live mode supports shelf, search, article and status; --offline selects archive tools')
+        else:value=request(action,node=owner,**fields)
         if args.json:print(json.dumps(value,ensure_ascii=False,indent=2))
         elif action=='catalog':
             for row in value['entries']:print(row['id']+' · '+row['title']+' · '+row['flavour']+' · '+format_bytes(row['bytes']))
         else:print(json.dumps(value,ensure_ascii=False,indent=2))
         return 0
-    except (OSError,ValueError,RuntimeError,subprocess.SubprocessError) as exc:print('Offline reference: '+safe_text(str(exc)));return 1
+    except (OSError,ValueError,RuntimeError,subprocess.SubprocessError) as exc:print('LOOK Wiki: '+safe_text(str(exc)));return 1
 
 
 def format_bytes(value):return f'{value/(1024**3):.1f} GiB' if value>=1024**3 else f'{value/(1024**2):.1f} MiB'
 
 
-def desk(ui,owner):
-    import termios,tty,textwrap
+def desk(ui,owner,live=False):
+    import termios,tty
     if not ui or not sys.stdin.isatty():raise ValueError('Use lk wiki status --json outside a terminal')
     fd=sys.stdin.fileno();old=termios.tcgetattr(fd);mode='archives';index=0;notice='d finds downloadable collections · i sets up the offline reader'
-    archive=None;rows=[];status={}
+    archive=None;rows=[];status={};saved_status=None
     def ask(label):
         termios.tcsetattr(fd,termios.TCSADRAIN,old)
         try:
@@ -417,22 +523,40 @@ def desk(ui,owner):
             value,cancelled=look_renderer.prompt_line('› ')
             return None if cancelled else value.strip()
         finally:tty.setcbreak(fd)
-    def refresh():return request(node=owner)
+    def shelf_rows(value):
+        return [{'id':'live','kind':'live','title':'Live Wikipedia · web (internet required)'},*value.get('archives',[])]
+    def refresh():
+        nonlocal saved_status
+        if live:return saved_status or {'root':'Saved owner not loaded','reader_installed':False,'archives':[],'jobs':[]}
+        value=request(node=owner);saved_status=value;return value
+    def switch_source():
+        nonlocal live,status,rows,mode,index,archive,saved_status
+        if live:
+            replacement=request(node=owner);saved_status=replacement
+        else:replacement=saved_status or {'root':'Saved owner not loaded','reader_installed':False,'archives':[],'jobs':[]}
+        live=not live;status=replacement;rows=shelf_rows(status);mode='archives';index=0;archive=None
+        return 'Live Wikipedia selected' if live else 'Saved Fabric archive selected · no live Wikipedia requests'
+    def fetch_article(action,**payload):
+        if live:
+            import wiki_online
+            return wiki_online.article(payload.get('query','')) if action=='article' else wiki_online.search(payload.get('query',''))
+        return request(action,node=owner,archive=archive,**payload)
     def article_view(path):
-        history=[];top=0;hinting=False;typed=''
+        history=[];top=0;hinting=False;typed='';layout=None;lines=[];article_notice=''
         while True:
-            article=request('article',node=owner,archive=archive,query=path)
+            article=fetch_article('article',query=path);layout=None
             while True:
                 width,height=ui.shutil.get_terminal_size((100,30));width=max(20,width)
-                controls=ui._media_hints('↑↓ scroll · Shift-arrows page/ends · / search archive · l links ('+str(len(article['links']))+') · f link hints · b back · y copy passage · Esc shelf',width).splitlines()
+                controls=ui._media_hints('↑↓ scroll · Shift-arrows page/ends · / search archive · l links ('+str(len(article['links']))+') · f link hints · i images · v live/saved · b back · y copy passage · Esc shelf',width).splitlines()
                 if hinting:controls=['LINK HINTS '+typed+' · two letters open · arrows scroll · Esc cancels']
                 page=max(1,height-len(controls)-2)
-                lines=[]
-                for text in article.get('hinted_paragraphs',article['paragraphs']) if hinting else article['paragraphs']:lines.extend(textwrap.wrap(safe_text(text),width) or ['']);lines.append('')
+                if layout!=(width,hinting):lines=article_lines(ui,article,width,hinting);layout=(width,hinting)
                 top=max(0,min(top,max(0,len(lines)-page)))
-                frame=[ui._c(safe_text(article['title']),'1;36')+' · SAVED ARCHIVE · owner '+safe_text(owner),*lines[top:top+page]]
+                frame=[ui._c(safe_text(article['title']),'1;36')+' · '+(('STALE CACHED WIKIPEDIA' if article.get('stale') else 'CACHED WIKIPEDIA' if article.get('cached') else 'LIVE WIKIPEDIA') if live else 'SAVED ARCHIVE · owner '+safe_text(owner)),*lines[top:top+page]]
                 frame+=['']*max(0,page+1-len(frame))
                 frame+=controls
+                if article_notice:frame[-1]=ui._c(safe_text(article_notice),'33')+' · '+frame[-1]
+                if live and not hinting:frame[-1]=ui._c('Wikipedia contributors · CC BY-SA 4.0 · ','2')+frame[-1]
                 if hinting:
                     frame[-1]=ui._c(frame[-1],'1;33')
                     codes={hint_code(i) for i in range(len(article['links']))}
@@ -457,13 +581,17 @@ def desk(ui,owner):
                 elif key in {'shiftdown','pagedown',' '}:top+=page
                 elif key in {'shiftleft','home'}:top=0
                 elif key in {'shiftright','end'}:top=len(lines)
-                elif key=='y':look_renderer.copy_text('\n'.join(lines[top:top+page]))
+                elif key=='y':look_renderer.copy_text(ui._strip_ansi('\n'.join(lines[top:top+page]))+('\n'+article.get('attribution','')+'\n'+article.get('source_url','') if live else ''))
                 elif key=='f':hinting=True;typed=''
+                elif key=='v':return 'switch'
+                elif key=='i':
+                    import wiki_images
+                    article_notice=wiki_images.gallery(ui,fd,article,live=live,archive=archive or '',owner=owner)
                 elif key=='b' and history:path,top=history.pop();break
                 elif key=='/':
                     query=ask('Search this saved archive · Enter cancels')
                     if query:
-                        found=request('search',node=owner,archive=archive,query=query)['entries']
+                        found=fetch_article('search',query=query)['entries']
                         if found:
                             chosen=choose_links(ui,fd,found,'Search: '+query)
                             if chosen:history.append((path,top));path=chosen['path'];top=0;break
@@ -477,13 +605,15 @@ def desk(ui,owner):
         tty.setcbreak(fd)
         if os.environ.get('KITTY_WINDOW_ID') or os.environ.get('TERM')=='xterm-kitty':sys.stdout.write('\x1b_Ga=d,d=a,q=2\x1b\\')
         sys.stdout.write('\x1b[0m\x1b[2J\x1b[HOFFLINE REFERENCES · opening…');sys.stdout.flush()
-        status=refresh();rows=status['archives']
-        notice='/ searches the selected saved archive · Enter opens its landing page' if rows else 'No archives on this owner · o chooses another owner · d finds downloads'
+        try:status=refresh()
+        except (OSError,ValueError,RuntimeError) as exc:status={'root':'Owner unavailable: '+str(exc),'archives':[],'jobs':[],'reader_installed':False}
+        rows=shelf_rows(status)
+        notice=('Live Wikipedia · / searches · Enter opens the main page' if live else '/ searches the selected saved archive · Enter opens its landing page') if rows else 'No archives on this owner · o chooses another owner · d finds downloads'
         while True:
             width,height=ui.shutil.get_terminal_size((100,30));width=max(20,width);page=max(1,height-9)
             index=max(0,min(index,max(0,len(rows)-1)));selected=rows[index] if rows else None;top=max(0,index-page+1)
-            frame=[ui._c('OFFLINE REFERENCES','1;36')+' · '+safe_text(owner)+' · '+mode,
-                   ui._c('Archive folder: ','2')+safe_text(status['root'])+' · '+ui._c('reader ready' if status.get('reader_installed') else 'reader not installed','32' if status.get('reader_installed') else '33')]
+            frame=[ui._c('LOOK WIKI','1;36')+' · '+('LIVE WIKIPEDIA' if live else 'SAVED · '+safe_text(owner))+' · '+mode,
+                   ui._c('Source: ' if live else 'Archive folder: ','2')+safe_text('https://en.wikipedia.org' if live else status['root'])+' · '+ui._c('no ZIM reader needed' if live else 'reader ready' if status.get('reader_installed') else 'reader not installed','32' if status.get('reader_installed') else '33')]
             colors=ui.terminal_style.list_colors()
             for i,row in enumerate(rows[top:top+page],top):
                 text=('› ' if i==index else '  ')+safe_text(row['title'])
@@ -494,12 +624,12 @@ def desk(ui,owner):
             if status.get('jobs'):
                 latest=status['jobs'][0];total=latest.get('total',0);progress=f' · {100*latest.get("bytes",0)/total:.1f}%' if total else ''
                 frame.append(ui._c('Job: ','1;36')+safe_text(latest['state']+progress+' · '+str(latest.get('error') or latest['kind'])))
-            frame += [ui._media_hints('↑↓ select · Shift-arrows page/ends · Enter open/download · / search · o owner · d download catalog · i reader setup · r refresh · x cancel download · Esc back',width),safe_text(notice)]
+            frame += [ui._media_hints('↑↓ select · Shift-arrows page/ends · Enter open/download · / search · v live/saved · o owner · d download catalog · i reader setup · r refresh · x cancel download · Esc back',width),safe_text(notice)]
             sys.stdout.write(ui._terminal_frame_payload('\n'.join(ui._ansi_clip(line,width) for line in frame)));sys.stdout.flush()
             key=ui._read_tty_key(fd,.25)
             if not key:continue
             if key in {'esc','q','\x03'}:
-                if mode!='archives':mode='archives';rows=status['archives'];index=0;continue
+                if mode!='archives':mode='archives';rows=shelf_rows(status);index=0;continue
                 return 0
             if key=='up':index-=1;continue
             if key=='down':index+=1;continue
@@ -508,14 +638,16 @@ def desk(ui,owner):
             if key in {'shiftleft','home'}:index=0;continue
             if key in {'shiftright','end'}:index=len(rows)-1;continue
             try:
-                if key=='r':status=refresh();rows=status['archives'];mode='archives';notice='Refreshed'
+                if key=='r':status=refresh();rows=shelf_rows(status);mode='archives';notice='Refreshed'
+                elif key=='v':notice=switch_source()
+                elif live and key in {'o','d','i','x'}:notice='Saved-archive controls · v selects the saved Fabric archive'
                 elif key=='o':
                     choices=['local',*[n.node for n in fabric_files.nodes()]]
                     answer=ask('Reference owner · '+', '.join(choices)+' · Enter cancels')
                     if answer:
                         if answer not in choices:raise ValueError('Choose one of the listed Fabric owners')
                         replacement=request(node=answer)
-                        owner=answer;status=replacement;rows=status['archives'];mode='archives';archive=None;index=0
+                        owner=answer;status=replacement;rows=shelf_rows(status);mode='archives';archive=None;index=0
                         notice='Selected owner '+owner
                 elif key=='d':rows=request('catalog',node=owner,query='wikipedia')['entries'];mode='catalog';index=0
                 elif key=='/':
@@ -524,7 +656,7 @@ def desk(ui,owner):
                         if mode=='catalog':rows=request('catalog',node=owner,query=text)['entries']
                         elif archive or selected:
                             if mode=='archives':archive=selected['id']
-                            rows=request('search',node=owner,archive=archive,query=text)['entries'];mode='articles'
+                            rows=fetch_article('search',query=text)['entries'];mode='articles'
                         index=0
                 elif key=='i':
                     if status.get('reader_installed'):notice='Reader already installed on '+owner+' · / searches the selected archive';continue
@@ -537,8 +669,13 @@ def desk(ui,owner):
                     if mode=='catalog':
                         answer=ask('Download '+selected['title']+' · '+selected['flavour']+' · '+format_bytes(selected['bytes'])+' to '+owner+':'+status['root']+'? y/N')
                         if answer and answer.casefold()=='y':request('fetch',node=owner,id=selected['id'],confirm=True);status=refresh();notice='Download started · r refreshes progress'
-                    elif mode=='archives':archive=selected['id'];article_view('')
-                    else:article_view(selected['path'])
+                    elif mode=='archives':
+                        if selected.get('kind')=='live':live=True
+                        elif live:
+                            status=request(node=owner);saved_status=status;live=False
+                        archive=selected['id']
+                        if article_view('')=='switch':notice=switch_source()
+                    elif article_view(selected['path'])=='switch':notice=switch_source()
             except (OSError,ValueError,RuntimeError,subprocess.SubprocessError) as exc:notice=safe_text(str(exc))
     finally:termios.tcsetattr(fd,termios.TCSADRAIN,old)
 

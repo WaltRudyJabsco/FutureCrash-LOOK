@@ -1,4 +1,7 @@
-# Future Crash + LOOK 8.22.3 — FABRIC MEDIA
+# Future Crash + LOOK 8.23.0 — FABRIC MEDIA
+
+8.23.0 adds a Live Wikipedia entry above saved references, persistent link accents,
+and ASCII/native article images. Saved mode stays separate from live web access.
 
 8.22.3 adds paged Wiki link/search selectors and f-mode inline two-letter hints.
 It also repairs Wiki navigation and makes the archive owner/reader state clear.

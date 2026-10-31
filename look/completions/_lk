@@ -180,7 +180,7 @@ _lk() {
       return
       ;;
     wiki)
-      _values 'reference command' shelf status setup catalog fetch jobs cancel configure search article --node --archive --root --confirm --json
+      _values 'reference command' shelf status setup catalog fetch jobs cancel configure search article --online --offline --node --archive --root --confirm --json
       return
       ;;
     books|bk)

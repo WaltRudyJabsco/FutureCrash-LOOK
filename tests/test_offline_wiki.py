@@ -102,10 +102,14 @@ class Page(Item):
  def get_mimetype(self):return 'text/html'
  def get_contentprovider(self):return StringProvider(self.text)
  def get_hints(self):return {Hint.FRONT_ARTICLE:True}
+class Picture(Page):
+ def get_mimetype(self):return 'image/png'
+ def get_hints(self):return {}
 with Creator(sys.argv[1]).config_indexing(True,'eng') as writer:
  writer.set_mainpath('Home')
- writer.add_item(Page('Home','Knowledge','<h1>Knowledge</h1><p>Café coral reef research.</p><a href="Other">Other article</a>'))
+ writer.add_item(Page('Home','Knowledge','<h1>Knowledge</h1><p>Café coral reef research.</p><a href="Other">Other article</a><img src="picture.png" width="120" alt="Local photo">'))
  writer.add_item(Page('Other','Other article','<h1>Other</h1><p>More reef knowledge.</p>'))
+ writer.add_item(Picture('picture.png','Local photo','bounded image bytes'))
 '''
     subprocess.run([str(python),'-c',script,str(path)],check=True,capture_output=True,timeout=20)
     assert wiki.zim_call('verify',path)['articles']==2
@@ -115,6 +119,10 @@ with Creator(sys.argv[1]).config_indexing(True,'eng') as writer:
     assert article['title']=='Knowledge' and 'Café coral reef research.' in article['paragraphs']
     assert article['links']==[{'title':'Other article','path':'Other'}]
     assert any('[aa]' in text for text in article['hinted_paragraphs'])
+    assert article['images']==[{'path':'picture.png','title':'Local photo'}]
+    image=wiki.zim_call('image',path,'picture.png')
+    import base64
+    assert image['mime']=='image/png' and base64.b64decode(image['data'])==b'bounded image bytes'
 
 
 from test_media_request_regressions import lk
@@ -136,7 +144,7 @@ def test_wiki_prompt_and_copy_use_renderer_without_lk_module_attribute(lk,tmp_pa
         if action=='article':return {'title':'Test','paragraphs':['Offline text'],'links':[]}
         return {'root':str(tmp_path),'archives':[{'id':'test.zim','title':'Test','bytes':1}],'jobs':[]}
     monkeypatch.setattr(wiki,'request',request)
-    keys=iter(['i','enter','y','esc','esc']);monkeypatch.setattr(lk,'_read_tty_key',lambda *a:next(keys))
+    keys=iter(['i','down','enter','y','esc','esc']);monkeypatch.setattr(lk,'_read_tty_key',lambda *a:next(keys))
     assert wiki.desk(lk,'local')==0
     assert prompt.call_count==1 and any('Offline text' in text for text in copied)
 
@@ -168,7 +176,7 @@ def test_wiki_can_search_from_linkless_landing_and_does_not_reinstall_reader(lk,
         if action=='search':return {'entries':[{'title':'Latin','path':'Latin'}]}
         return {'root':str(tmp_path),'reader_installed':True,'archives':[{'id':'test.zim','title':'Wikipedia','bytes':1}],'jobs':[]}
     monkeypatch.setattr(wiki,'request',request)
-    keys=iter(['i','enter','/','enter','esc','esc']);monkeypatch.setattr(lk,'_read_tty_key',lambda *a:next(keys))
+    keys=iter(['i','down','enter','/','enter','esc','esc']);monkeypatch.setattr(lk,'_read_tty_key',lambda *a:next(keys))
     assert wiki.desk(lk,'owner')==0
     assert not any(action=='setup' for action,_ in calls)
     assert any(action=='article' and args['query']=='Latin' for action,args in calls)
@@ -247,7 +255,7 @@ def test_hint_mode_follows_two_letter_code_and_escape_cancels(lk,tmp_path,monkey
             return {'title':'Home','paragraphs':['Latin'],'hinted_paragraphs':['Latin [aa]'],'links':[{'title':'Latin','path':'Latin'}]}
         return {'root':str(tmp_path),'archives':[{'id':'test.zim','title':'Wikipedia'}],'jobs':[],'reader_installed':True}
     monkeypatch.setattr(wiki,'request',request)
-    keys=iter(['enter','f','esc','f','a','a','b','esc','esc'])
+    keys=iter(['down','enter','f','esc','f','a','a','b','esc','esc'])
     monkeypatch.setattr(lk,'_read_tty_key',lambda *a:next(keys))
     assert wiki.desk(lk,'local')==0
     assert visits==['','Latin','']
