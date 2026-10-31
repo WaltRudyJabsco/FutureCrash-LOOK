@@ -17,6 +17,7 @@ import media_art
 from media_duration import DurationPreview
 from media_ui_work import LatestWork
 import player_visuals
+import visualizer_settings
 import terminal_style
 _LIST_COLORS=terminal_style.list_colors()
 import lo_stream
@@ -37,7 +38,7 @@ try:
 except Exception:
     readline = None
 
-VERSION="4.72.1"
+VERSION="4.73.0"
 
 LOOK_WORDMARK = r"""       ██╗      ██╗  ██╗
        ██║      ██║ ██╔╝
@@ -10084,7 +10085,7 @@ def _direct_searxng_search(query, limit=8):
     params=urllib.parse.urlencode({"q":query,"format":"json"})
     request=urllib.request.Request(base+"/search?"+params,headers={
         "Accept":"application/json",
-        "User-Agent":"Future-Crash-Fabric/8.25.1",
+        "User-Agent":"Future-Crash-Fabric/8.26.0",
     })
     with urllib.request.urlopen(request,timeout=12) as response:
         data=json.load(response)
@@ -14448,6 +14449,9 @@ def _settings_rows():
         ("comfy","MEDIA","Image generation",_settings_comfy_state(),
          "Configure optional ComfyUI generation, discover older installs/models, choose workflow/output folder, and auto-preview results.",
          "comfy stable diffusion image generation render workflow checkpoint model media"),
+        ("visualizers","MEDIA","Visualizer selection","shared players",
+         "Choose which ambient visuals appear in v stepping and the ten-second Cycle. Normal view stays available.",
+         "visualizers visual animation cycle rotation player mp tv"),
         ("medialibrary","MEDIA","Media library location","choose folder",
          "Choose this computer's home folder or a mounted drive for future imports. Existing media stays where it is; backup storage is separate.",
          "media library storage drive disk folder destination movies music import home"),
@@ -14744,6 +14748,7 @@ def _settings_action(key):
         print("LOOK vision · include an image path in LO, or run `lk vision IMAGE [QUESTION]`")
         return 0
     if key=="comfy": return comfy_command([])
+    if key=="visualizers":visualizer_settings.picker(sys.modules[__name__]);return 0
     if key=="medialibrary": return _media_storage_command(['--pick'])
     if key=="schedule": return schedule_command([])
     if key=="doctor": return doctor()
@@ -19791,18 +19796,19 @@ def _media_player_full_visual(snap,mode,visual_elapsed=0):
     entry=snap['entry']; state=str(snap['state']).lower()
     queue=snap['session'].get('queue') or []
     cycling=mode==player_visuals.CYCLE_MODE
-    mode=player_visuals.active_mode(mode,visual_elapsed)
+    mode=player_visuals.active_mode(mode,visual_elapsed,visualizer_settings.enabled_modes())
+    if not mode:return _media_player_render()
     name=player_visuals.NAMES[(mode-1)%len(player_visuals.NAMES)]
     seed=int(hashlib.sha256(_media_entry_label(entry).encode()).hexdigest()[:4],16)%23
     album_art=name=='Album Art'
     header=[f"LOOK PLAYER · "+('Cycle · ' if cycling else '')+name+('' if album_art else ' · ambient animation'),
             _media_entry_label(entry),
             f"{state.upper()} · {_media_time(snap.get('position') or 0)} / {_media_time(snap.get('duration') or 0)} · Queue {snap['index']+1}/{len(queue)}"]
-    footer=['v next visual / normal · space pause · p/n previous/next',
-            '←/→ seek · s shuffle · r repeat · O reset audio · x stop · q close']
+    import textwrap
+    footer=textwrap.wrap('v next visual / normal · V choose visuals · space pause · p/n previous/next · ←/→ seek · s shuffle · r repeat · O reset audio · x stop · q close',width)
     art_height=max(1,height-len(header)-len(footer))
     elapsed=visual_elapsed%player_visuals.CYCLE_INTERVAL_SECONDS if cycling else visual_elapsed
-    phase=elapsed if name in {'Black Hole','Rooftops','Spectrum','Moon Jelly','Firefly Garden','Clockwork Garden','Rain on Glass','Neon Reef','Aurora Loom','Paper Lanterns','Magnetic Field','Comet Trails','Orrery','Phosphor Rain','Kinetic Mobile'} else time.monotonic()
+    phase=elapsed if name in {'Black Hole','Rooftops','Spectrum','Moon Jelly','Firefly Garden','Clockwork Garden','Rain on Glass','Neon Reef','Aurora Loom','Paper Lanterns','Magnetic Field','Comet Trails','Orrery','Phosphor Rain','Kinetic Mobile','Haunted Hollow'} else time.monotonic()
     art=_media_player_large_art(entry,width,art_height) if album_art else player_visuals.frame(mode,width,art_height,phase,state in {'play','playing'},seed)
     lines=header+art+footer
     color=player_visuals.album_color(snap) if album_art else ("1;32","1;36","1;35","1;34","1;37","1;33")[(mode-1)%6]
@@ -19820,6 +19826,7 @@ def _media_player_full_visual(snap,mode,visual_elapsed=0):
     if name=='Orrery': color=player_visuals.ORRERY_COLOR
     if name=='Phosphor Rain': color=player_visuals.PHOSPHOR_COLOR
     if name=='Kinetic Mobile': color=player_visuals.MOBILE_COLOR
+    if name=='Haunted Hollow': color=player_visuals.HALLOWEEN_COLOR
     shimmer=album_art and state in {'play','playing'} and not any(
         status in line for line in art for status in ('Loading album art','Album art unavailable'))
     rendered=[]
@@ -19827,7 +19834,7 @@ def _media_player_full_visual(snap,mode,visual_elapsed=0):
         plain=_media_player_line(line,width)
         if len(header)<=i<len(header)+len(art):
             y=i-len(header)
-            row_color=player_visuals.spectrum_color(y,len(art)) if name=='Spectrum' else color
+            row_color=player_visuals.spectrum_color(y,len(art)) if name=='Spectrum' else ('33' if y>=len(art)*.6 else color) if name=='Haunted Hollow' else color
             spans=player_visuals.shimmer_spans(plain,y,width,len(art),elapsed,shimmer)
             rendered.append(''.join(_c(text,('1;' if bright else '')+row_color) for text,bright in spans))
         else:
@@ -19836,6 +19843,7 @@ def _media_player_full_visual(snap,mode,visual_elapsed=0):
 
 
 def _media_player_render(visualizer=0,visual_elapsed=0):
+    visualizer=player_visuals.available_mode(visualizer,visualizer_settings.enabled_modes())
     snap=_media_status_snapshot()
     if snap: player_visuals.album_color(snap)
     if visualizer and snap:
@@ -19863,7 +19871,7 @@ def _media_player_render(visualizer=0,visual_elapsed=0):
                 f"Shuffle {'on' if snap['session'].get('shuffle') else 'off'}  ·  "
                 f"Repeat {snap['session'].get('repeat','off')}")
         eq=_media_player_visualizer(entry,snap["state"],inner)
-        player_controls="space play/pause · ←/→ seek 10s · p/n previous/next · s shuffle · r repeat · O reset audio · v visuals · x stop · q/Esc close player"
+        player_controls="space play/pause · ←/→ seek 10s · p/n previous/next · s shuffle · r repeat · O reset audio · v visuals · V choose visuals · x stop · q/Esc close player"
         raw_body=[
             f"{artist} — {title}" if artist else title, album, eq or "",
             f"{time_text}  {bar}",
@@ -19908,15 +19916,18 @@ def media_player(initial_visualizer=0):
     if not (sys.stdin.isatty() and sys.stdout.isatty()):
         print(_media_player_render())
         return 0
-    visualizer=initial_visualizer % (len(player_visuals.NAMES)+1)
+    visualizer=player_visuals.available_mode(initial_visualizer % (len(player_visuals.NAMES)+1),visualizer_settings.enabled_modes(refresh=True))
     visual_started=time.monotonic()
-    notice=""
+    notice=visualizer_settings.warning()
     fd=sys.stdin.fileno()
     old=termios.tcgetattr(fd)
     try:
         tty.setcbreak(fd)
         sys.stdout.write("\033[2J")
         while True:
+            allowed=visualizer_settings.enabled_modes()
+            available=player_visuals.available_mode(visualizer,allowed)
+            if available!=visualizer:visualizer=available;visual_started=time.monotonic()
             sys.stdout.write("\033[H"+_media_player_render(visualizer,time.monotonic()-visual_started)+(f"\n{_ansi_clip(notice,shutil.get_terminal_size((80,24)).columns-1)}" if notice else "")+"\033[J")
             sys.stdout.flush()
             key=_read_tty_key(fd,.25)
@@ -19924,8 +19935,16 @@ def media_player(initial_visualizer=0):
                 continue
             if key in {"q","esc"}: return 0
             if key=="v":
-                visualizer=(visualizer+1) % (len(player_visuals.NAMES)+1)
+                visualizer=player_visuals.next_mode(visualizer,visualizer_settings.enabled_modes())
                 visual_started=time.monotonic()
+            elif key=="V":
+                opened=time.monotonic();saved=visualizer_settings.picker(sys.modules[__name__],fd)
+                tty.setcbreak(fd)
+                if saved:
+                    visualizer=player_visuals.available_mode(visualizer,visualizer_settings.enabled_modes(refresh=True))
+                    visual_started=time.monotonic();notice="Visualizer selection saved"
+                else:visual_started+=time.monotonic()-opened
+                sys.stdout.write("\033[2J")
             elif key=="O": _,notice=_media_reset_audio()
             elif key==" ": _media_control_session("toggle")
             elif key=="n": _media_control_session("next")
@@ -20116,7 +20135,7 @@ def _media_player_library(initial_query="",media_kind="audio"):
                 right_w=min(40,max(28,width//3)) if width>=96 else 0
                 left_w=width-right_w-3 if right_w else width
                 controls="↑↓ select · Shift-arrows page/ends · Tab mark · A select all · Y keep offline · E edit · R refresh · C clear marks · Enter play · B add queue · D hide dir · W shell pane · L library · Q queue/back"
-                extra=("O open with · T Apple TV · " if media_kind=="video" else "O reset audio · ")+"F sort · G reverse · / search · v visuals · M image/ASCII · Esc back/clear/exit"
+                extra=("O open with · T Apple TV · " if media_kind=="video" else "O reset audio · ")+"F sort · G reverse · / search · v visuals · V choose visuals · M image/ASCII · Esc back/clear/exit"
                 if pane_help:extra+=" · "+" · ".join(terminal_style.pane_shortcuts())
                 footer=_media_hints(controls,width)+"\n"+_media_hints(extra,width)
                 list_rows=max(1,height-12-len(footer.splitlines()))
@@ -20285,6 +20304,12 @@ def _media_player_library(initial_query="",media_kind="audio"):
                 continue
             if key=="M":
                 native_images=not native_images;notice=("Preview: Auto image" if native_preview.enabled else "Preview: ASCII · native images need Kitty/iTerm and LOOK_NATIVE_PREVIEW enabled") if native_images else "Preview: ASCII";continue
+            if key=="V":
+                native_preview.frame_cleared()
+                saved=visualizer_settings.picker(sys.modules[__name__],fd)
+                tty.setcbreak(fd);native_preview.frame_cleared()
+                notice="Visualizer selection saved" if saved else "Visualizer selection unchanged"
+                continue
             if key=="v":
                 native_preview.invalidate()
                 termios.tcsetattr(fd,termios.TCSADRAIN,old)
@@ -21105,6 +21130,7 @@ _COMMANDS = [
     ("lk tv", "[QUERY]", "media", "Fabric movies, TV and video player"),
     ("lk bk", "[ARGS]", "media", "Alias for lk books; Fabric EPUB/PDF shelf"),
     ("lk latin", "[home|list|lesson N|practice|review|words QUERY|grammar QUERY|read|progress|about|export FILE] [--lesson N] [--strict-macrons on|off] [--json]", "learn", "Offline Latin classroom: complete course, vocabulary, checked forms and spaced review"),
+    ("lk visualizers", "[--json]", "media", "Shared visualizer checklist; Space toggle, Enter save, Esc cancel"),
     ("lk words", "[desk|status|setup|lookup WORD|spell TEXT|find PATTERN|add WORD] [--language en_US|en_GB] [--node NODE] [--json]", "web", "Persistent offline word desk, thesaurus, spelling, clipboard and W shell panes"),
     ("lk wiki", "[shelf|status|setup|catalog QUERY|fetch ID|jobs|cancel ID|configure|search QUERY|article PATH] [--online|--offline] [--open-link URI] [--node NODE] [--archive FILE] [--root PATH] [--confirm] [--json]", "web", "Live/saved Wikipedia; colored links, inline images, hints and W shell panes"),
     ("lk books discover", "[popular|new|subjects|surprise|subject NAME] [--json]", "media", "Browse Project Gutenberg without downloading books"),
@@ -22476,6 +22502,12 @@ def main():
         if rest and rest[0].casefold() in {"classical","classics","arts"}:
             return media(rest)
         return media(["play",*rest]) if rest else media(["play"])
+    if cmd=="visualizers":
+        if "--json" in rest:
+            enabled=set(visualizer_settings.enabled_modes(refresh=True))
+            print(json.dumps({"visualizers":[{"name":name,"enabled":i in enabled} for i,name in enumerate(player_visuals.NAMES[:-1],1)]},indent=2))
+        else:visualizer_settings.picker(sys.modules[__name__])
+        return 0
     if cmd=="player": return media_player()
     if cmd in {"transcribe","dictate"}:
         import transcription

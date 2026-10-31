@@ -18,7 +18,7 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import Iterable, Sequence
 
-VERSION = "8.25.1"
+VERSION = "8.26.0"
 
 
 @dataclass(frozen=True)

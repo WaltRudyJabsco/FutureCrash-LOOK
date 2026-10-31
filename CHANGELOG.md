@@ -1,3 +1,9 @@
+## 8.26.0 — Curated visuals and Haunted Hollow (LOOK 4.73.0)
+
+- `V` opens a shared checkbox picker in player, MP and TV. Space toggles, Enter saves and Escape cancels; `lk visualizers` and Settings offer the same picker.
+- Lowercase `v` and ten-second Cycle skip disabled visuals. Normal view remains available, even with everything disabled. Stable names preserve selections as new visuals arrive; other open players refresh the preference within a second.
+- Haunted Hollow adds moonlit bats, gravestones and quietly flickering jack-o'-lanterns. The ambient scene respects pause and joins the rotation.
+
 ## 8.25.1 — Persistent Words desk (LOOK 4.72.1)
 
 - Bare `lk words` opens a dedicated persistent desk, replacing the generic file pager. Meaning, synonyms, antonyms, spelling and patterns have explicit selectable views.
