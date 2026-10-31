@@ -171,6 +171,10 @@ _lk() {
           ;;
       esac
       ;;
+    clip)
+      _values 'clipboard action' on off status clear add
+      return
+      ;;
     latin)
       _values 'Latin command' home list lesson practice review words grammar read progress about export --lesson --strict-macrons --json
       return

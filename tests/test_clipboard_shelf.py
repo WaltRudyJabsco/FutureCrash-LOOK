@@ -266,3 +266,101 @@ def test_share_is_a_normal_note_and_unicode_controls_are_safe(tmp_path,monkeypat
     assert '\033' not in row['body'] and '\\x1b' in row['body']
     assert len(store.list()) == 1
     nudge.assert_called_once()
+
+
+def wayland(monkeypatch):
+    monkeypatch.setattr(clip.sys,'platform','linux')
+    monkeypatch.setenv('WAYLAND_DISPLAY','wayland-test')
+    monkeypatch.setenv('XDG_SESSION_TYPE','wayland')
+    monkeypatch.setattr(clip.shutil,'which',lambda name:'/tools/'+name)
+
+
+def test_wayland_watch_is_event_driven_and_never_polls(shelf,monkeypatch):
+    import io
+    wayland(monkeypatch);monkeypatch.setattr(clip,'directory',lambda:shelf.root);shelf.set('enabled','1')
+    read=Mock(side_effect=AssertionError('Wayland must not poll'));monkeypatch.setattr(clip,'read_clipboard',read)
+    process=Mock(pid=123456);process.poll.side_effect=[None,1]
+    launch=Mock(return_value=process);monkeypatch.setattr(clip.subprocess,'Popen',launch)
+    def event(_):
+        monkeypatch.setattr(clip.sys,'stdin',io.StringIO('Café 日本語\nSecond line'))
+        monkeypatch.setenv('CLIPBOARD_STATE','data');clip.capture_stdin();shelf.set('enabled','0')
+    monkeypatch.setattr(clip.time,'sleep',event)
+    clip.watch()
+    args=launch.call_args.args[0]
+    assert '--watch' in args and args[-1]=='--capture-stdin'
+    assert launch.call_args.kwargs['stdin']==clip.subprocess.DEVNULL
+    assert launch.call_args.kwargs['start_new_session']
+    assert shelf.rows()[0][1]=='Café 日本語\nSecond line'
+    read.assert_not_called()
+
+
+def test_unsupported_wayland_watch_does_not_retry_or_fall_back(shelf,monkeypatch):
+    wayland(monkeypatch);monkeypatch.setattr(clip,'directory',lambda:shelf.root);shelf.set('enabled','1')
+    process=Mock();process.poll.return_value=1
+    launch=Mock(return_value=process);monkeypatch.setattr(clip.subprocess,'Popen',launch)
+    read=Mock(side_effect=AssertionError('No polling fallback'));monkeypatch.setattr(clip,'read_clipboard',read)
+    clip.watch();clip.ensure_watcher();clip.watch();clip.sample_automatic(shelf)
+    assert launch.call_count==1 and 'unavailable' in clip.capture_description(shelf)
+    assert shelf.enabled and shelf.rows()==[]
+    read.assert_not_called()
+
+
+@pytest.mark.parametrize('state',['sensitive','nil','clear','future-unknown'])
+def test_wayland_callback_ignores_non_data_states(shelf,monkeypatch,state):
+    import io
+    monkeypatch.setattr(clip,'directory',lambda:shelf.root);shelf.set('enabled','1')
+    monkeypatch.setenv('CLIPBOARD_STATE',state);monkeypatch.setattr(clip.sys,'stdin',io.StringIO('not stored'))
+    clip.capture_stdin();assert shelf.rows()==[]
+
+
+def test_wayland_enable_and_popup_do_not_read_clipboard(shelf,terminal,monkeypatch):
+    wayland(monkeypatch);monkeypatch.setattr(clip,'directory',lambda:shelf.root)
+    read=Mock(side_effect=AssertionError('No unsolicited Wayland read'));monkeypatch.setattr(clip,'read_clipboard',read)
+    assert clip.main(['on'])==0
+    clip.show(fd=0,reader=lambda *a:'esc',shelf=shelf)
+    read.assert_not_called()
+
+
+def test_explicit_add_works_with_capture_off(shelf,monkeypatch):
+    wayland(monkeypatch);monkeypatch.setattr(clip,'directory',lambda:shelf.root)
+    monkeypatch.setattr(clip,'read_clipboard',lambda:'Explicit clip')
+    assert clip.main(['add'])==0
+    assert not shelf.enabled and shelf.rows()[0][1]=='Explicit clip'
+
+
+def test_wayland_failed_spawn_is_not_retried(shelf, monkeypatch):
+    wayland(monkeypatch)
+    monkeypatch.setattr(clip, 'directory', lambda: shelf.root)
+    shelf.set('enabled', '1')
+    launch = Mock(side_effect=OSError('helper removed'))
+    monkeypatch.setattr(clip.subprocess, 'Popen', launch)
+    clip.watch()
+    clip.ensure_watcher()
+    launch.assert_called_once()
+    assert 'unavailable' in clip.capture_description(shelf)
+
+
+def test_wayland_opt_out_stops_owned_event_process(shelf, monkeypatch):
+    wayland(monkeypatch)
+    monkeypatch.setattr(clip, 'directory', lambda: shelf.root)
+    shelf.set('enabled', '1')
+    process = Mock(pid=123456)
+    process.poll.return_value = None
+    monkeypatch.setattr(clip.subprocess, 'Popen', Mock(return_value=process))
+    monkeypatch.setattr(clip.time, 'sleep', lambda _: shelf.set('enabled', '0'))
+    terminate = Mock()
+    monkeypatch.setattr(clip.os, 'killpg', terminate)
+    clip.watch()
+    terminate.assert_called_once_with(process.pid, clip.signal.SIGTERM)
+    process.wait.assert_called_once_with(timeout=2)
+    assert not shelf.enabled
+
+
+def test_wayland_without_display_does_not_poll_xwayland(shelf, monkeypatch):
+    wayland(monkeypatch)
+    monkeypatch.delenv('WAYLAND_DISPLAY')
+    shelf.set('enabled', '1')
+    read = Mock(side_effect=AssertionError('No XWayland fallback'))
+    monkeypatch.setattr(clip, 'read_clipboard', read)
+    clip.sample_automatic(shelf)
+    read.assert_not_called()

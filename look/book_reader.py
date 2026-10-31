@@ -115,7 +115,7 @@ def capture_reader_clipboard():
     if not (clipboard_shelf.directory()/'history.sqlite3').is_file():return
     shelf=clipboard_shelf.Shelf()
     try:
-        if shelf.enabled:shelf.observe(clipboard_shelf.read_clipboard())
+        clipboard_shelf.sample_automatic(shelf)
     finally:shelf.close()
 
 

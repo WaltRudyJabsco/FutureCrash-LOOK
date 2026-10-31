@@ -1,3 +1,9 @@
+## 8.21.2 — Quiet Wayland clipboard capture (LOOK 4.68.2)
+
+- Replace automatic Wayland clipboard reads with wl-paste change events. Never fall back to focus-stealing periodic reads, including on return from the book reader.
+- Stop retrying unsupported capture for the current desktop session; report its status and offer explicit lk clip add / a in the shelf.
+- Preserve capture preferences, private saved history and ordinary clipboard behavior. macOS and native X11 capture retain their existing behavior.
+
 ## 8.21.1 — Classroom prompt repair (LOOK 4.68.1)
 
 - Fix Latin Words, practice, search and settings prompts by accessing the renderer module directly instead of through LK's main module.

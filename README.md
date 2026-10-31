@@ -1,6 +1,10 @@
-# Future Crash + LOOK 8.21.1 — FABRIC MEDIA
+# Future Crash + LOOK 8.21.2 — FABRIC MEDIA
 
-8.21.1 adds `lk latin`, a complete offline Latin classroom: pronunciation,
+8.21.2 removes focus-stealing clipboard polling on Wayland. Supported desktops
+use clipboard change events; others offer explicit `lk clip add`. Existing
+history and capture preferences are preserved. See [Clipboard](docs/CLIPBOARD.md).
+
+8.21.0 adds `lk latin`, a complete offline Latin classroom: pronunciation,
 79 lessons, readings, grammar/dictionaries, checked practice and local spaced
 review. No speech or AI dependency. See [Latin](docs/LATIN.md).
 

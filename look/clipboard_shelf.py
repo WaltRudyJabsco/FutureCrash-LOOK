@@ -8,6 +8,7 @@ import os
 from pathlib import Path
 import re
 import select
+import signal
 import shutil
 import sqlite3
 import subprocess
@@ -130,6 +131,86 @@ def copy_clipboard(text):
         return False
 
 
+
+def wayland_session():
+    return sys.platform != 'darwin' and bool(
+        os.environ.get('WAYLAND_DISPLAY') or os.environ.get('XDG_SESSION_TYPE') == 'wayland')
+
+
+def wayland_token():
+    keys = ('WAYLAND_DISPLAY', 'XDG_SESSION_ID', 'XDG_RUNTIME_DIR', 'XDG_CURRENT_DESKTOP')
+    return hashlib.sha256('|'.join(os.environ.get(key, '') for key in keys).encode()).hexdigest()
+
+
+def sample_automatic(shelf):
+    # A wl-paste read can map a focus-stealing surface on GNOME. Never poll it.
+    if not wayland_session() and shelf.enabled:
+        shelf.observe(read_clipboard())
+
+
+def capture_stdin():
+    if os.environ.get('CLIPBOARD_STATE', 'data') != 'data':
+        return
+    if not (directory()/'history.sqlite3').is_file():
+        return
+    text = sys.stdin.read(TEXT_LIMIT+1)
+    if len(text) > TEXT_LIMIT:
+        return
+    shelf = Shelf()
+    try:
+        if shelf.enabled:
+            shelf.observe(text)
+    finally:
+        shelf.close()
+
+
+def watch_wayland(shelf):
+    tool = shutil.which('wl-paste')
+    if not tool:
+        shelf.set('blocked_wayland', wayland_token())
+        return
+    # --watch requires data-control. Unsupported compositors fail once instead
+    # of falling back to wl-paste's temporary focus-stealing window.
+    try:
+        proc = subprocess.Popen(
+            [tool, '--type', 'text', '--watch', sys.executable,
+             str(Path(__file__).resolve()), '--capture-stdin'],
+            stdin=subprocess.DEVNULL, stdout=subprocess.DEVNULL,
+            stderr=subprocess.DEVNULL, start_new_session=True)
+    except OSError:
+        shelf.set('blocked_wayland', wayland_token())
+        return
+    try:
+        while shelf.enabled and proc.poll() is None:
+            time.sleep(POLL_SECONDS)  # Check opt-out without reading the clipboard.
+        if shelf.enabled:
+            shelf.set('blocked_wayland', wayland_token())
+    finally:
+        if proc.poll() is None:
+            try:
+                os.killpg(proc.pid, signal.SIGTERM)
+            except ProcessLookupError:
+                pass
+            try:
+                proc.wait(timeout=2)
+            except subprocess.TimeoutExpired:
+                try:
+                    os.killpg(proc.pid, signal.SIGKILL)
+                except ProcessLookupError:
+                    pass
+                proc.wait(timeout=2)
+
+
+def capture_description(shelf):
+    if not shelf.enabled:
+        return 'off'
+    if wayland_session():
+        if shelf.setting('blocked_wayland') == wayland_token():
+            return 'unavailable on this Wayland desktop · use lk clip add'
+        return 'requested · Wayland events'
+    return 'on'
+
+
 def watch():
     shelf = Shelf()
     try:
@@ -137,6 +218,9 @@ def watch():
             try:
                 fcntl.flock(lock, fcntl.LOCK_EX | fcntl.LOCK_NB)
             except BlockingIOError:
+                return
+            if wayland_session():
+                if shelf.enabled and shelf.setting('blocked_wayland')!=wayland_token():watch_wayland(shelf)
                 return
             failures = 0
             while shelf.enabled:
@@ -160,6 +244,7 @@ def ensure_watcher():
     try:
         if not shelf.enabled or backend() is None:
             return
+        if wayland_session() and shelf.setting('blocked_wayland')==wayland_token():return
         with (shelf.root/'watch.lock').open('a') as lock:
             try:
                 fcntl.flock(lock, fcntl.LOCK_EX | fcntl.LOCK_NB)
@@ -287,8 +372,7 @@ def show(*, insert=False, fd=None, reader=None, shelf=None):
     try:
         tty.setraw(fd)
         sys.stdout.write('\033[?25l\033[?2004h')
-        if shelf.enabled:
-            shelf.observe(read_clipboard())
+        sample_automatic(shelf)
         ensure_watcher()
         # Freeze numbered slots while this popup owns input. New copies are
         # still captured in the background, but cannot move a target mid-keypress.
@@ -298,7 +382,7 @@ def show(*, insert=False, fd=None, reader=None, shelf=None):
             width, height = shutil.get_terminal_size((90, 26))
             width = max(1, width-1)
             colors = terminal_style.list_colors()
-            state = 'capture on' if shelf.enabled else 'capture off'
+            state = 'capture '+capture_description(shelf)
             lines = [colors['CYAN']+'CLIPBOARD SHELF'+ '\033[0m · '+state+' · local text only']
             if not shelf.enabled:
                 lines += ['e enables background text history on this computer.',
@@ -317,10 +401,10 @@ def show(*, insert=False, fd=None, reader=None, shelf=None):
                     line = colors['CYAN']+prefix+colors['WHITE']+clip_line(summary, max(0,width-len(prefix)))
                     lines.append(terminal_style.list_row(line, width, index, index == selected, colors))
                 if not rows:
-                    lines += ['No saved clips yet. Enable capture, then copy some text.']
+                    lines += ['No saved clips yet. a adds the current clipboard; e requests automatic capture.']
             action = 'insert' if insert else 'copy & close'
             controls = [f'1–9,0 {action} · Shift-number remove (US: !@#$%^&*())',
-                        '↑↓ move · Enter preview · x remove · e capture on/off',
+                        '↑↓ move · Enter preview · x remove · e capture on/off · a add clipboard',
                         's save selected to Notes / Fabric · Esc '+('list' if expanded else 'back')]
             lines += [colors['CYAN']+line+'\033[0m' for line in controls]
             lines += [safe_text(notice)]
@@ -356,10 +440,16 @@ def show(*, insert=False, fd=None, reader=None, shelf=None):
                     continue
                 shelf.set('enabled', '0' if shelf.enabled else '1')
                 if shelf.enabled:
-                    shelf.observe(read_clipboard())
+                    shelf.set('blocked_wayland','')
+                    sample_automatic(shelf)
                     ensure_watcher()
                 rows = shelf.rows()
                 notice = 'Capture enabled' if shelf.enabled else 'Capture stopped; saved clips retained'
+                continue
+            if key == 'a':
+                text=read_clipboard()
+                if text is None:notice='Clipboard read unavailable'
+                else:shelf.observe(text);rows=shelf.rows();notice='Current clipboard added'
                 continue
             remove = removal_slot(key)
             if key == 'x':
@@ -391,9 +481,12 @@ def show(*, insert=False, fd=None, reader=None, shelf=None):
 
 def main(argv=None):
     parser = argparse.ArgumentParser(prog='lk clip', description=__doc__)
-    parser.add_argument('action', nargs='?', choices=['on','off','status','clear'])
+    parser.add_argument('action', nargs='?', choices=['on','off','status','clear','add'])
     parser.add_argument('--watch', action='store_true', help=argparse.SUPPRESS)
+    parser.add_argument('--capture-stdin',action='store_true',help=argparse.SUPPRESS)
     args = parser.parse_args(argv)
+    if args.capture_stdin:
+        capture_stdin();return 0
     if args.watch:
         watch(); return 0
     if not args.action:
@@ -405,12 +498,16 @@ def main(argv=None):
         if args.action == 'on':
             if backend() is None:
                 print('Clipboard unavailable: install wl-clipboard (Wayland) or xclip (X11).'); return 1
-            shelf.set('enabled','1'); shelf.observe(read_clipboard()); ensure_watcher()
+            shelf.set('enabled','1');shelf.set('blocked_wayland','');sample_automatic(shelf);ensure_watcher()
         elif args.action == 'off':
             shelf.set('enabled','0')
+        elif args.action == 'add':
+            text=read_clipboard()
+            if text is None:print('Clipboard read unavailable');return 1
+            shelf.observe(text)
         elif args.action == 'clear':
             shelf.clear()
-        print(f'Clipboard capture {"on" if shelf.enabled else "off"} · {len(shelf.rows())}/10 saved · local only')
+        print(f'Clipboard capture {capture_description(shelf)} · {len(shelf.rows())}/10 saved · local only')
         return 0
     finally:
         shelf.close()
