@@ -17,6 +17,9 @@ system defaults, including the existing PDF application preference.
 No account-specific paths, machine names or drives are assumed. The default for
 a fresh account is `~/Media/books`. The existing media destination chooses the
 owner; `--node local` or `--node NAME` overrides it for imports, scans and fetches.
+For example, `lk books --node my-server` opens the shelf on this computer while
+new imports and Gutenberg downloads go to that paired server's books folder.
+The shelf header shows the current import owner.
 An empty shelf does not scan the home directory or initialize attached drives.
 
 ## Shelf controls

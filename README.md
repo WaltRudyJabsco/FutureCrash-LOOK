@@ -1,4 +1,4 @@
-# Future Crash + LOOK 8.18.0 — FABRIC MEDIA
+# Future Crash + LOOK 8.18.1 — FABRIC MEDIA
 
 8.18.0 adds **`lk books`** / **`lk bk`**: a Fabric EPUB/PDF shelf with local imports,
 Gutenberg search, reading states and Notes links. Orrery and Phosphor Rain join
