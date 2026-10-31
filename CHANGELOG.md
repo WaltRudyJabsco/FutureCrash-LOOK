@@ -1,3 +1,11 @@
+## 8.20.0 — Reading and offline knowledge (LOOK 4.67.0)
+
+- Add missing Bookokrat Shift-arrow page/end bindings while retaining custom bindings, comments and a backup. Space remains a tap-then-letter sequence.
+- Integrate opt-in LK Clip history with reading, including a final capture on return and Shift-P from Books.
+- Add local EPUB/PDF read-aloud controls with chapter/paragraph selection, pause/resume/stop, voice selection and independent speech bookmarks. Prefer installed British macOS voices; offer optional isolated Piper neural speech.
+- Add lk wiki over Kiwix ZIM archives, with owner/destination configuration, offline search/article/link navigation, explicit package setup and confirmed downloads with progress, resume, mirror fallback and SHA-256 verification.
+- Protect active voice/reference setup and reference downloads during managed updates, while accepting legacy 404 endpoints.
+
 ## 8.19.1 — Reader setup upgrade compatibility (LOOK 4.66.1)
 
 - Allow the new maintenance helper to drain older nodes that do not yet expose reader setup status. Treat only a missing endpoint as legacy support; retain other HTTP failures.

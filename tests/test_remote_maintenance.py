@@ -196,6 +196,7 @@ def test_idle_update_reserves_worker_and_respects_active_media_stream(home, monk
     rounds = []
     stream = {'listeners': {'tailcat': {'oldest_active': [{'path': '/v1/media/browser'}]}}}
     def local(path, payload=None):
+        if path == "/v1/wiki":return {}
         rounds.append(path)
         if path == '/v1/activity': return {'active': None}
         if path == '/v1/media/state': return {'active': False}
@@ -216,6 +217,7 @@ def test_idle_update_reserves_worker_and_respects_active_media_stream(home, monk
 def test_idle_update_waits_for_disc_import(home, monkeypatch):
     reads = []
     def local(path, payload=None):
+        if path == "/v1/wiki":return {}
         reads.append(path)
         if path == '/v1/activity': return {'active': None}
         if path == '/v1/media/state': return {'active': False}
@@ -235,6 +237,7 @@ def test_idle_update_waits_for_disc_import(home, monkeypatch):
 def test_restart_waits_for_import_without_requiring_worker_lease(home, monkeypatch):
     calls = []
     def local(path, payload=None):
+        if path == "/v1/wiki":return {}
         if path == '/v1/books/reader': return {}
         assert path == '/v1/media/import?action=jobs'
         calls.append(path)
@@ -361,6 +364,7 @@ def test_linux_isolation_failure_has_no_unsafe_detached_fallback(home,monkeypatc
 def test_restart_waits_for_reader_setup(monkeypatch):
     reads=[]
     def local(path, payload=None):
+        if path == "/v1/wiki":return {}
         if path == '/v1/media/import?action=jobs': return {'jobs': []}
         assert path == '/v1/books/reader'
         reads.append(path)
@@ -375,6 +379,7 @@ def test_reader_setup_check_supports_older_nodes_but_preserves_errors(monkeypatc
     import urllib.error
     code=404
     def local(path, payload=None):
+        if path == "/v1/wiki":return {}
         if path == '/v1/media/import?action=jobs':return {'jobs': []}
         assert path == '/v1/books/reader'
         raise urllib.error.HTTPError(path,code,'status',{},None)
@@ -382,3 +387,14 @@ def test_reader_setup_check_supports_older_nodes_but_preserves_errors(monkeypatc
     assert m.imports_active() is False
     code=503
     with pytest.raises(urllib.error.HTTPError):m.imports_active()
+
+
+@pytest.mark.parametrize('reference,speech',[(True,False),(False,True)])
+def test_updates_wait_for_reference_downloads_and_voice_setup(monkeypatch,reference,speech):
+    def local(path,payload=None):
+        if path=='/v1/media/import?action=jobs':return {'jobs':[]}
+        if path=='/v1/wiki':return {'jobs':[{'state':'downloading'}] if reference else []}
+        if path=='/v1/books/reader':return {'speech_setup':{'state':'installing' if speech else 'idle'}}
+        raise AssertionError(path)
+    monkeypatch.setattr(m,'local_json',local)
+    assert m.imports_active()

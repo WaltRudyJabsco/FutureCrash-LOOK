@@ -24,7 +24,7 @@ def test_real_reader_returns_to_books_shelf(tmp_path):
         archive.writestr('mimetype','application/epub+zip')
         archive.writestr('META-INF/container.xml','<container xmlns="urn:oasis:names:tc:opendocument:xmlns:container"><rootfiles><rootfile full-path="book.opf" media-type="application/oebps-package+xml"/></rootfiles></container>')
         archive.writestr('book.opf','<package xmlns="http://www.idpf.org/2007/opf" version="3.0" unique-identifier="id"><metadata xmlns:dc="http://purl.org/dc/elements/1.1/"><dc:identifier id="id">test-book</dc:identifier><dc:title>Reader Fixture</dc:title><dc:language>en</dc:language></metadata><manifest><item id="chapter" href="chapter.xhtml" media-type="application/xhtml+xml"/></manifest><spine><itemref idref="chapter"/></spine></package>')
-        archive.writestr('chapter.xhtml','<html xmlns="http://www.w3.org/1999/xhtml"><head><title>Test</title></head><body><h1>TERMINAL READER FIXTURE</h1><p>A quiet chapter inside the terminal.</p></body></html>')
+        archive.writestr('chapter.xhtml','<html xmlns="http://www.w3.org/1999/xhtml"><head><title>Test</title></head><body><h1>TERMINAL READER FIXTURE</h1><p>A quiet chapter inside the terminal.</p>'+''.join('<p>READER LINE '+str(i).zfill(3)+'</p>' for i in range(1,181))+'</body></html>')
     root=Path(__file__).resolve().parents[1]
     script=r'''
 import os,sys,termios,importlib.machinery,importlib.util
@@ -67,6 +67,14 @@ print('TERMINAL_RESTORED')
     try:
         assert until(b'FILTER'),output[-2000:]
         output=b'';os.write(master,b'\r')
+        assert until(b'TERMINAL READER FIXTURE'),output[-2000:]
+        output=b'';os.write(master,b'\x1b[1;2C\x0c')
+        assert until(b'READER LINE 180'),output[-2000:]
+        output=b'';os.write(master,b'\x1b[1;2D\x0c')
+        assert until(b'TERMINAL READER FIXTURE'),output[-2000:]
+        output=b'';os.write(master,b'\x1b[1;2B\x0c')
+        assert until(b'READER LINE 020'),output[-2000:]
+        output=b'';os.write(master,b'\x1b[1;2A\x0c')
         assert until(b'TERMINAL READER FIXTURE'),output[-2000:]
         output=b'';os.write(master,b'q')
         assert until(b'Returned from Bookokrat'),output[-2000:]

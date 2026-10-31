@@ -100,3 +100,49 @@ def test_synchronized_frame_always_closes_on_exception(monkeypatch):
             with look_renderer.synchronized_update():raise RuntimeError('failed render')
     assert terminal.getvalue().count('\x1b[?2026h')==1
     assert terminal.getvalue().endswith('\x1b[?2026l')
+
+
+@pytest.mark.parametrize('original',[
+    '# Keep this comment\ncontent."q" = "quit"\n',
+    '[all]\n"<S-Up>" = "scroll_half_up"\n[content]\n"q" = "quit"\n',
+    'all."x" = "nop"\n[content]\n"<S-Right>" = "next_chapter"\n',
+])
+def test_shift_bindings_preserve_user_toml_and_are_idempotent(tmp_path,monkeypatch,original):
+    import tomllib
+    monkeypatch.setattr(Path,'home',lambda:tmp_path)
+    monkeypatch.setenv('XDG_CONFIG_HOME',str(tmp_path/'.config'))
+    path=tmp_path/'.config/bookokrat/keybindings.toml';path.parent.mkdir(parents=True)
+    path.write_text(original)
+    book_reader.configure_bindings();first=path.read_bytes()
+    value=tomllib.loads(first.decode())
+    assert value['all']['<S-Down>']=='scroll_page_down'
+    assert value['all']['<S-Left>']=='go_top'
+    assert value.get('content',{})==tomllib.loads(original).get('content',{})
+    assert value['all']['<S-Up>']==tomllib.loads(original).get('all',{}).get('<S-Up>','scroll_page_up')
+    assert path.with_suffix('.toml.look-backup').read_text()==original
+    book_reader.configure_bindings();assert path.read_bytes()==first
+
+
+def test_bad_reader_config_is_retained(tmp_path,monkeypatch):
+    monkeypatch.setattr(Path,'home',lambda:tmp_path)
+    monkeypatch.setenv('XDG_CONFIG_HOME',str(tmp_path/'.config'))
+    path=tmp_path/'.config/bookokrat/keybindings.toml';path.parent.mkdir(parents=True)
+    path.write_text('not valid TOML')
+    with pytest.raises(ValueError,match='invalid'):book_reader.configure_bindings()
+    assert path.read_text()=='not valid TOML'
+
+
+def test_reader_clip_capture_respects_opt_in_and_preserves_system_clipboard(tmp_path,monkeypatch):
+    import clipboard_shelf
+    monkeypatch.setattr(Path,'home',lambda:tmp_path)
+    reads=[]
+    monkeypatch.setattr(clipboard_shelf,'read_clipboard',lambda:reads.append(True) or 'Café — copied passage')
+    book_reader.capture_reader_clipboard();assert not clipboard_shelf.directory().exists()
+    shelf=clipboard_shelf.Shelf()
+    book_reader.capture_reader_clipboard();assert reads==[]
+    shelf.set('enabled','1')
+    book_reader.capture_reader_clipboard();book_reader.capture_reader_clipboard()
+    assert [text for _,text in shelf.rows()]==['Café — copied passage']
+    shelf.set('enabled','0');book_reader.capture_reader_clipboard()
+    assert len(reads)==2
+    shelf.close()

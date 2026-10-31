@@ -5,6 +5,7 @@ import json
 import os
 from pathlib import Path
 import sys
+import subprocess
 import tempfile
 import termios
 import tty
@@ -120,7 +121,7 @@ def desk(ui,query='',owner=None):
             visible=results if results is not None else rows_for(value,query,shelf)
             if sort_reverse:visible=list(reversed(visible))
             index=max(0,min(index,max(0,len(visible)-1)));chosen=visible[index] if visible else None
-            controls='↑↓ move · Shift-arrows page/ends · Enter '+('import book' if results is not None else 'read')+' · o system reader · / search · s shelves · m reading state · e edit · i import · g Gutenberg · k keep offline · y copy link · R scan/refresh · G reverse · W shell pane · Esc back'
+            controls='↑↓ move · Shift-arrows page/ends · Enter '+('import book' if results is not None else 'read')+' · a read aloud · o system reader · / search · s shelves · m reading state · e edit · i import · g Gutenberg · k keep offline · y copy link · R scan/refresh · G reverse · P clipboard · W shell pane · Esc back'
             if width<80 and not help_visible:controls='↑↓ select · Enter open · / search · ? help · Esc back'
             else:controls+=' · ? help'
             hints='\n'.join(ui._media_hints(controls,width).splitlines()[:max(1,height-8)]);page=max(1,height-8-len(hints.splitlines()));top=max(0,index-page+1)
@@ -169,6 +170,9 @@ def desk(ui,query='',owner=None):
                 if key=='R':request('scan',node=owner);value=catalog();notice='Books folder scanned; shelf refreshed'
                 elif key=='G':sort_reverse=not sort_reverse
                 elif key=='W':notice=terminal_style.open_pane(Path.cwd())[1]
+                elif key=='P':
+                    import clipboard_shelf
+                    clipboard_shelf.show(fd=fd)
                 elif key=='s':
                     shelves=['All',*book_core.STATUSES]+sorted({r.get('shelf') for r in value.get('entries',[]) if r.get('shelf')})
                     shelf=shelves[((shelves.index(shelf) if shelf in shelves else -1)+1)%len(shelves)];results=None;index=0
@@ -199,7 +203,10 @@ def desk(ui,query='',owner=None):
                             if os.environ.get('KITTY_WINDOW_ID') or os.environ.get('TERM')=='xterm-kitty':sys.stdout.write('\x1b_Ga=d,d=a,q=2\x1b\\')
                             sys.stdout.write('\x1b[0m\x1b[2J\x1b[H');sys.stdout.flush()
                 elif chosen and results is None:
-                    if key=='o':
+                    if key=='a':
+                        import book_speech
+                        notice=book_speech.desk(ui,local_copy(chosen),chosen['title'])
+                    elif key=='o':
                         notice=book_reader.open_book(local_copy(chosen),ui._desktop_launch,mode='system')
                     elif key=='y':
                         target='@'+chosen['node']+':'+chosen['path'] if chosen.get('node') else chosen['path']
@@ -214,18 +221,34 @@ def desk(ui,query='',owner=None):
                             if answer is None:fields={};break
                             fields[field]=answer
                         if fields:request('update',node=chosen.get('node','local'),id=chosen['id'],fields=fields);value=catalog();notice='Metadata saved; document bytes unchanged'
-            except (OSError,ValueError,RuntimeError,KeyError) as exc:notice=str(exc)
+            except (OSError,ValueError,RuntimeError,KeyError,subprocess.SubprocessError) as exc:notice=str(exc)
     finally:termios.tcsetattr(fd,termios.TCSADRAIN,old);sys.stdout.write('\033[0m\n')
 
 
 def main(args,ui):
     parser=argparse.ArgumentParser(prog='lk books',description='Fabric EPUB/PDF shelf; bk is an alias. Files stay on their owner; opening remote books makes a verified local cache copy.')
-    parser.add_argument('action',nargs='?',default='shelf',choices=['shelf','list','scan','import','search','fetch','reader'])
+    parser.add_argument('action',nargs='?',default='shelf',choices=['shelf','list','scan','import','search','fetch','reader','listen','voices','speech-setup'])
     parser.add_argument('values',nargs='*')
     parser.add_argument('--node',default=None,help='Library owner; defaults to configured media destination')
     parser.add_argument('--json',action='store_true')
+    parser.add_argument('--chapter',type=int)
+    parser.add_argument('--paragraph',type=int)
     selected=parser.parse_args(args);owner=selected.node or media_storage.settings()['node']
     try:
+        if selected.action in {'listen','voices','speech-setup'}:
+            import book_speech
+            if selected.action=='voices':value={'voices':book_speech.voices(),'setup':book_speech.setup_status()}
+            elif selected.action=='speech-setup':value=book_speech.setup(confirmed=True)
+            else:
+                if len(selected.values)!=1:raise ValueError('Use lk books listen FILE [--chapter N --paragraph N]')
+                if not sys.stdin.isatty() or not sys.stdout.isatty():raise ValueError('Open read-aloud controls in a terminal')
+                fd=sys.stdin.fileno();old=termios.tcgetattr(fd)
+                try:
+                    tty.setcbreak(fd)
+                    book_speech.desk(ui,Path(selected.values[0]).expanduser(),chapter=selected.chapter,paragraph=selected.paragraph)
+                finally:termios.tcsetattr(fd,termios.TCSADRAIN,old)
+                return 0
+            print(json.dumps(value,ensure_ascii=False,indent=2));return 0
         if selected.action=='reader':
             choice=selected.values[0] if selected.values else 'status'
             if len(selected.values)>1:raise ValueError('Choose reader status, install, auto, bookokrat or system')
@@ -253,4 +276,4 @@ def main(args,ui):
             if not value.get('entries'):print('No books yet · lk books scan · lk books import FILE · lk books search QUERY')
             for warning in value.get('warnings',[]):print('Warning: '+book_core.clean(warning))
         return 0
-    except (OSError,ValueError,RuntimeError) as exc:print('LOOK Books: '+book_core.clean(exc));return 1
+    except (OSError,ValueError,RuntimeError,subprocess.SubprocessError) as exc:print('LOOK Books: '+book_core.clean(exc));return 1

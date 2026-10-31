@@ -61,6 +61,64 @@ def command(path,mode=None):
     return args
 
 
+SHIFT_BINDINGS={'<S-Up>':'scroll_page_up','<S-Down>':'scroll_page_down',
+                '<S-Left>':'go_top','<S-Right>':'go_bottom'}
+
+
+def configure_bindings():
+    """Add group defaults, leaving every explicit user binding and comment intact."""
+    import tomllib
+    config=Path.home()/'.config' if sys.platform=='darwin' else Path(os.environ.get('XDG_CONFIG_HOME') or Path.home()/'.config')
+    path=config/'bookokrat/keybindings.toml'
+    path.parent.mkdir(parents=True,exist_ok=True)
+    with (path.parent/'.look-bindings.lock').open('a') as lock:
+        fcntl.flock(lock,fcntl.LOCK_EX)
+        text=path.read_text() if path.exists() else ''
+        try:values=tomllib.loads(text)
+        except ValueError as exc:raise ValueError('Bookokrat keybindings.toml is invalid; fix it before adding LOOK controls') from exc
+        existing=values.get('all',{})
+        missing={key:value for key,value in SHIFT_BINDINGS.items() if key not in existing}
+        if not missing:return path
+        lines=['# LOOK Shift-arrows: page up/down, beginning/end. Edit or use "nop" to override.']
+        lines += [json.dumps(key)+' = '+json.dumps(value) for key,value in missing.items()]
+        # Insert within an existing [all] table; otherwise dotted keys belong
+        # before any table header. Never serialize the user's whole config.
+        content=text.splitlines(keepends=True);section=None
+        for index,line in enumerate(content):
+            if not line.lstrip().startswith('['):continue
+            try:header=tomllib.loads(line)
+            except ValueError:continue
+            if header=={'all':{}}:section=index+1;break
+        if section is None:
+            addition='\n'.join([lines[0],*['all.'+line for line in lines[1:]]])+'\n'
+            updated=addition+text
+        else:
+            content[section:section]=['\n'.join(lines)+'\n'];updated=''.join(content)
+        tomllib.loads(updated)
+        if path.exists():
+            backup=path.with_suffix('.toml.look-backup')
+            try:
+                with backup.open('x') as out:out.write(text)
+            except FileExistsError:pass
+        fd,temp=tempfile.mkstemp(dir=path.parent,prefix='.look-keybindings-')
+        try:
+            with os.fdopen(fd,'w') as out:out.write(updated)
+            os.chmod(temp,path.stat().st_mode&0o777 if path.exists() else 0o600)
+            os.replace(temp,path)
+        finally:Path(temp).unlink(missing_ok=True)
+    return path
+
+
+def capture_reader_clipboard():
+    """Catch the last copy on return, only when the owner enabled LK Clip."""
+    import clipboard_shelf
+    if not (clipboard_shelf.directory()/'history.sqlite3').is_file():return
+    shelf=clipboard_shelf.Shelf()
+    try:
+        if shelf.enabled:shelf.observe(clipboard_shelf.read_clipboard())
+    finally:shelf.close()
+
+
 def open_book(path,system_open,*,mode=None):
     args=command(path,mode)
     if args is None:
@@ -70,7 +128,11 @@ def open_book(path,system_open,*,mode=None):
     # A stable library directory and content-named cache preserve reader-local
     # bookmarks regardless of which project directory launched the shelf.
     library=Path.home()/'.local/share/look/book-reader';library.mkdir(parents=True,exist_ok=True)
-    result=subprocess.run(args,cwd=library,check=False)
+    configure_bindings()
+    import clipboard_shelf
+    clipboard_shelf.ensure_watcher()
+    try:result=subprocess.run(args,cwd=library,check=False)
+    finally:capture_reader_clipboard()
     if result.returncode:raise RuntimeError('Bookokrat exited with status '+str(result.returncode)+'; press o for the system reader')
     return 'Returned from Bookokrat · reading position is saved by the reader on this computer'
 
@@ -95,7 +157,8 @@ def status():
     if tool:
         try:version=subprocess.run([tool,'--version'],stdin=subprocess.DEVNULL,capture_output=True,text=True,timeout=3,check=True).stdout.strip()
         except (OSError,subprocess.SubprocessError):pass
-    return {'ok':True,'reader':preference(),'installed':bool(tool and version),'version':version,
+    import book_speech
+    return {'speech_setup':book_speech.setup_status(),'ok':True,'reader':preference(),'installed':bool(tool and version),'version':version,
             'can_install':bool(binary('brew')),'setup':setup_state()}
 
 

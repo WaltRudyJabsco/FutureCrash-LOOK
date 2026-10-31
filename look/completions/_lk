@@ -27,6 +27,7 @@ _lk() {
     'tldr:short offline command examples'
     'mp:integrated Fabric media player'
     'books:Fabric EPUB/PDF shelf'
+    'wiki:offline Kiwix references'
     'bk:alias for books'
     'ytd:download videos on a Fabric node'
     'describe:searchable catalog description'
@@ -169,13 +170,17 @@ _lk() {
           ;;
       esac
       ;;
+    wiki)
+      _values 'reference command' shelf status setup catalog fetch jobs cancel configure search article --node --archive --root --confirm --json
+      return
+      ;;
     books|bk)
       if [[ "$words[3]" == reader ]]; then
         _values 'reader mode' status install auto bookokrat system
         return
       fi
       if (( CURRENT == 3 )); then
-        _values 'books command' shelf list scan import search fetch reader --node --json
+        _values 'books command' shelf list scan import search fetch reader listen voices speech-setup --node --chapter --paragraph --json
       else
         _files -g '*.epub|*.pdf|*(-/)'
       fi
