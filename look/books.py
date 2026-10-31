@@ -98,7 +98,7 @@ def import_files(paths,node):
 
 def desk(ui,query='',owner=None):
     fd=sys.stdin.fileno();old=termios.tcgetattr(fd);index=0;shelf='All';search=False;notice='';results=None
-    value=catalog();owner=owner or media_storage.settings()['node'];sort_reverse=False;help_visible=False
+    owner=owner or media_storage.settings()['node'];sort_reverse=False;help_visible=False
     def ask(label,initial='',path=False):
         termios.tcsetattr(fd,termios.TCSADRAIN,old)
         try:
@@ -108,6 +108,12 @@ def desk(ui,query='',owner=None):
         finally:tty.setcbreak(fd)
     try:
         tty.setcbreak(fd)
+        # A prior Kitty preview has a graphics placement independent of text.
+        # Clear both before any catalog request can delay the first Books frame.
+        if os.environ.get('KITTY_WINDOW_ID') or os.environ.get('TERM')=='xterm-kitty':
+            sys.stdout.write('\x1b_Ga=d,d=a,q=2\x1b\\')
+        sys.stdout.write('\x1b[0m\x1b[2J\x1b[HLOOK BOOKS · opening shelf…');sys.stdout.flush()
+        value=catalog()
         while True:
             width,height=ui.shutil.get_terminal_size((100,30));width=max(20,width);height=max(10,height)
             visible=results if results is not None else rows_for(value,query,shelf)
@@ -120,7 +126,7 @@ def desk(ui,query='',owner=None):
             colors=terminal_style.list_colors();colors=dict(colors)
             # The same palette and selected-row contrast as the media desks.
             title_w=max(12,(width-8)*55//100);author_w=max(8,width-title_w-21)
-            frame=[ui._c('LOOK BOOKS','1;36')+' · '+('PROJECT GUTENBERG' if results is not None else shelf)+f' · {len(visible)} books',
+            frame=[ui._c('LOOK BOOKS','1;36')+' · '+('PROJECT GUTENBERG' if results is not None else shelf)+f' · {len(visible)} books · import to '+safe_text(owner),
                    ui._c('TITLE'.ljust(title_w)+'  '+'AUTHOR'.ljust(author_w)+'  FORMAT','2')]
             for pos,row in enumerate(visible[top:top+page],top):
                 text=ui._media_find_cell(safe_text(row.get('title','')),title_w)+'  '+ui._media_find_cell(safe_text(row.get('author','')),author_w)+'  '+safe_text(row.get('format','EPUB'))

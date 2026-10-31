@@ -187,3 +187,25 @@ def test_interactive_owner_override_reaches_shelf(monkeypatch):
     seen=[];monkeypatch.setattr(books,'desk',lambda ui,query,owner:seen.append(owner) or 0)
     assert books.main(['--node','chosen-owner'],object())==0
     assert seen==['chosen-owner']
+
+
+@pytest.mark.parametrize('kitty',[False,True])
+def test_books_clears_text_and_native_graphics_before_catalog_load(lk,monkeypatch,capsys,kitty):
+    if kitty:monkeypatch.setenv('KITTY_WINDOW_ID','test')
+    else:
+        monkeypatch.delenv('KITTY_WINDOW_ID',raising=False);monkeypatch.setenv('TERM','xterm-256color')
+    def catalog():
+        startup=capsys.readouterr().out
+        assert '\x1b[2J\x1b[H' in startup and 'opening shelf' in startup
+        assert ('\x1b_Ga=d,d=a,q=2\x1b\\' in startup)==kitty
+        return {'entries':[]}
+    monkeypatch.setattr(books,'catalog',catalog)
+    monkeypatch.setattr(books.termios,'tcgetattr',lambda fd:[])
+    monkeypatch.setattr(books.termios,'tcsetattr',lambda *a:None)
+    monkeypatch.setattr(books.tty,'setcbreak',lambda *a:None)
+    class Input:
+        def fileno(self):return 0
+    monkeypatch.setattr(books.sys,'stdin',Input())
+    monkeypatch.setattr(lk,'_read_tty_key',lambda *a:'esc')
+    assert books.desk(lk,owner='library-server')==0
+    assert 'import to library-server' in capsys.readouterr().out

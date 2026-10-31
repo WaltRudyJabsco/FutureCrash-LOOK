@@ -1,3 +1,9 @@
+## 8.18.1 — Clean Books startup (LOOK 4.65.1)
+
+- Clear previous terminal text and Kitty image placements before Books loads its catalog, removing stale media previews.
+- Show the current import owner in the shelf header and document opening the shelf on one computer while importing/downloading to another with --node.
+- Preserve existing destination choices, shelf content and command keys.
+
 ## 8.18.0 — Bookshelf (LOOK 4.65.0)
 
 - Add lk books / lk bk over a separate owner-scoped EPUB/PDF catalog, using existing configured books directories, paired Fabric routes, system readers and Notes link conventions.
