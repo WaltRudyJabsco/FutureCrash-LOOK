@@ -215,3 +215,19 @@ cursor. Existing local speech bookmarks are retained and published when you next
 use read-aloud from the Books shelf. Simply opening an ebook in Bookokrat does
 not create a shared narration bookmark. Browser access uses existing lo.use
 endpoint authorization; cover/audio endpoints do not accept arbitrary paths.
+
+
+## Wiki navigation repair (8.22.1)
+
+`lk wiki` uses your configured media owner unless `--node NODE` overrides it.
+The shelf displays that owner's archive folder and reader readiness. **o** chooses
+another advertised Fabric owner. Installing a reader on a Mac does not copy a
+remote 49 GiB archive there; the owner with the archive supplies article text.
+
+On the shelf, select the archive and press **/** to search. Enter opens its saved
+landing page; **/** also searches from there or any article. Choose a numbered
+result (Enter chooses the first), **l** lists internal links, **b** goes back, and
+Esc returns to the archive shelf. The header says **SAVED ARCHIVE · owner NAME**;
+that describes the content source, not a disconnected owner. English Wikipedia
+source links in an English Wikipedia archive resolve inside the archive without
+contacting the public website. Exact article paths precede full-text matches.

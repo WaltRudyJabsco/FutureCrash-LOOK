@@ -221,7 +221,7 @@ def zim_call(action,path,query=''):
 
 
 class ArticleParser(book_speech.PassageParser):
-    def __init__(self,path):super().__init__();self.links=[];self.path=path;self.link=None;self.label=[]
+    def __init__(self,path,wiki_host=None):super().__init__();self.links=[];self.path=path;self.wiki_host=wiki_host;self.link=None;self.label=[]
     def handle_starttag(self,tag,attrs):
         super().handle_starttag(tag,attrs)
         if tag=='a':self.link=dict(attrs).get('href');self.label=[]
@@ -231,8 +231,18 @@ class ArticleParser(book_speech.PassageParser):
     def handle_endtag(self,tag):
         if tag=='a' and self.link:
             url=urllib.parse.urlsplit(self.link)
-            if not url.scheme and not url.netloc and url.path:
-                path=posixpath.normpath(posixpath.join(posixpath.dirname(self.path),urllib.parse.unquote(url.path)))
+            target=None
+            # Some Kiwix landing pages retain absolute links to their source wiki.
+            # Resolve only that archive's known source; never fetch external URLs.
+            if self.wiki_host and url.hostname==self.wiki_host and url.scheme in {'http','https',''}:
+                if url.path.startswith('/wiki/'):target=urllib.parse.unquote(url.path[6:])
+                elif url.path=='/w/index.php':target=(urllib.parse.parse_qs(url.query).get('title') or [None])[0]
+            elif self.wiki_host and not url.scheme and not url.netloc and url.path.startswith('/wiki/'):
+                target=urllib.parse.unquote(url.path[6:])
+            elif not url.scheme and not url.netloc and url.path:
+                target=posixpath.join(posixpath.dirname(self.path),urllib.parse.unquote(url.path))
+            if target:
+                path=posixpath.normpath(target)
                 if not path.startswith('../') and not path.startswith('/'):
                     self.links.append({'title':' '.join(''.join(self.label).split()) or path,'path':path})
             self.link=None
@@ -247,12 +257,21 @@ def zim_worker(action,path,query):
     if action=='verify':return {'ok':True,'articles':archive.article_count}
     if action=='search':
         from libzim.search import Query,Searcher
+        exact=[]
+        for candidate in dict.fromkeys(value.replace(' ','_') for value in (query,query[:1].upper()+query[1:])):
+            try:
+                entry=archive.get_entry_by_path(candidate)
+                exact.append({'title':entry.title,'path':entry.path})
+                break
+            except KeyError:pass
         result=Searcher(archive).search(Query().set_query(query))
-        return {'entries':[{'title':r.title,'path':r.path} for r in result.get_results(0,40)]}
+        combined=exact+[{'title':r.title,'path':r.path} for r in result.get_results(0,40)]
+        return {'entries':list({r['path']:r for r in combined}.values())[:40]}
     entry=archive.get_entry_by_path(query) if query else archive.main_entry
     item=entry.get_item()
     if item.size>MAX_ARTICLE_BYTES:raise ValueError('Article exceeds 4 MiB')
-    parser=ArticleParser(entry.path);parser.feed(bytes(item.content).decode('utf-8',errors='replace'));parser.flush()
+    host='en.wikipedia.org' if Path(path).name.startswith('wikipedia_en_') else None
+    parser=ArticleParser(entry.path,wiki_host=host);parser.feed(bytes(item.content).decode('utf-8',errors='replace'));parser.flush()
     unique={r['path']:r for r in parser.links}
     return {'title':entry.title,'path':entry.path,'paragraphs':parser.parts,'links':list(unique.values())[:200]}
 
@@ -325,9 +344,9 @@ def desk(ui,owner):
                 lines=[]
                 for text in article['paragraphs']:lines.extend(textwrap.wrap(safe_text(text),width) or ['']);lines.append('')
                 top=max(0,min(top,max(0,len(lines)-page)))
-                frame=[ui._c(safe_text(article['title']),'1;36')+' · OFFLINE · '+safe_text(owner),*lines[top:top+page]]
+                frame=[ui._c(safe_text(article['title']),'1;36')+' · SAVED ARCHIVE · owner '+safe_text(owner),*lines[top:top+page]]
                 frame+=['']*max(0,page+1-len(frame))
-                frame+=[ui._media_hints('↑↓ scroll · Shift-arrows page/ends · l follow numbered link · b back · y copy passage · Esc shelf',width)]
+                frame+=[ui._media_hints('↑↓ scroll · Shift-arrows page/ends · / search archive · l links ('+str(len(article['links']))+') · b back · y copy passage · Esc shelf',width)]
                 sys.stdout.write(ui._terminal_frame_payload('\n'.join(ui._ansi_clip(line,width) for line in frame)));sys.stdout.flush()
                 key=ui._read_tty_key(fd,.25)
                 if key in {'esc','q','\x03'}:return
@@ -339,7 +358,18 @@ def desk(ui,owner):
                 elif key in {'shiftright','end'}:top=len(lines)
                 elif key=='y':look_renderer.copy_text('\n'.join(lines[top:top+page]))
                 elif key=='b' and history:path,top=history.pop();break
+                elif key=='/':
+                    query=ask('Search this saved archive · Enter cancels')
+                    if query:
+                        found=request('search',node=owner,archive=archive,query=query)['entries']
+                        if found:
+                            answer=ask('\n'.join(str(i+1)+'. '+safe_text(row['title']) for i,row in enumerate(found))+'\nResult number · Enter chooses 1')
+                            choice=int(answer or '1') if answer is not None and (not answer or answer.isdigit()) else 0
+                            if 0<choice<=len(found):history.append((path,top));path=found[choice-1]['path'];top=0;break
+                        else:ask('No matching articles · Enter returns')
                 elif key=='l':
+                    if not article['links']:
+                        ask('This page has no internal links · / searches the archive · Enter returns');continue
                     listing='\n'.join(str(i+1)+'. '+safe_text(link['title']) for i,link in enumerate(article['links']))
                     answer=ask(listing+'\nLink number · Enter cancels')
                     if answer and answer.isdigit() and 0<int(answer)<=len(article['links']):
@@ -349,11 +379,12 @@ def desk(ui,owner):
         if os.environ.get('KITTY_WINDOW_ID') or os.environ.get('TERM')=='xterm-kitty':sys.stdout.write('\x1b_Ga=d,d=a,q=2\x1b\\')
         sys.stdout.write('\x1b[0m\x1b[2J\x1b[HOFFLINE REFERENCES · opening…');sys.stdout.flush()
         status=refresh();rows=status['archives']
+        notice='/ searches the selected saved archive · Enter opens its landing page' if rows else 'No archives on this owner · o chooses another owner · d finds downloads'
         while True:
             width,height=ui.shutil.get_terminal_size((100,30));width=max(20,width);page=max(1,height-9)
             index=max(0,min(index,max(0,len(rows)-1)));selected=rows[index] if rows else None;top=max(0,index-page+1)
             frame=[ui._c('OFFLINE REFERENCES','1;36')+' · '+safe_text(owner)+' · '+mode,
-                   ui._c('Destination: ','2')+safe_text(status['root'])]
+                   ui._c('Archive folder: ','2')+safe_text(status['root'])+' · '+ui._c('reader ready' if status.get('reader_installed') else 'reader not installed','32' if status.get('reader_installed') else '33')]
             colors=ui.terminal_style.list_colors()
             for i,row in enumerate(rows[top:top+page],top):
                 text=('› ' if i==index else '  ')+safe_text(row['title'])
@@ -364,7 +395,7 @@ def desk(ui,owner):
             if status.get('jobs'):
                 latest=status['jobs'][0];total=latest.get('total',0);progress=f' · {100*latest.get("bytes",0)/total:.1f}%' if total else ''
                 frame.append(ui._c('Job: ','1;36')+safe_text(latest['state']+progress+' · '+str(latest.get('error') or latest['kind'])))
-            frame += [ui._media_hints('↑↓ select · Shift-arrows page/ends · Enter open/download · / search · d download catalog · i reader setup · r refresh · x cancel download · Esc back',width),safe_text(notice)]
+            frame += [ui._media_hints('↑↓ select · Shift-arrows page/ends · Enter open/download · / search · o owner · d download catalog · i reader setup · r refresh · x cancel download · Esc back',width),safe_text(notice)]
             sys.stdout.write(ui._terminal_frame_payload('\n'.join(ui._ansi_clip(line,width) for line in frame)));sys.stdout.flush()
             key=ui._read_tty_key(fd,.25)
             if not key:continue
@@ -379,6 +410,14 @@ def desk(ui,owner):
             if key in {'shiftright','end'}:index=len(rows)-1;continue
             try:
                 if key=='r':status=refresh();rows=status['archives'];mode='archives';notice='Refreshed'
+                elif key=='o':
+                    choices=['local',*[n.node for n in fabric_files.nodes()]]
+                    answer=ask('Reference owner · '+', '.join(choices)+' · Enter cancels')
+                    if answer:
+                        if answer not in choices:raise ValueError('Choose one of the listed Fabric owners')
+                        replacement=request(node=answer)
+                        owner=answer;status=replacement;rows=status['archives'];mode='archives';archive=None;index=0
+                        notice='Selected owner '+owner
                 elif key=='d':rows=request('catalog',node=owner,query='wikipedia')['entries'];mode='catalog';index=0
                 elif key=='/':
                     text=ask('Search downloadable collections' if mode=='catalog' else 'Search this offline archive')
@@ -389,6 +428,7 @@ def desk(ui,owner):
                             rows=request('search',node=owner,archive=archive,query=text)['entries'];mode='articles'
                         index=0
                 elif key=='i':
+                    if status.get('reader_installed'):notice='Reader already installed on '+owner+' · / searches the selected archive';continue
                     answer=ask('Install optional libzim in an isolated environment on '+owner+'? y/N')
                     if answer and answer.casefold()=='y':request('setup',node=owner,confirm=True);status=refresh();notice='Reader setup started · r refreshes status'
                 elif key=='x':

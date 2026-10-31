@@ -1,4 +1,7 @@
-# Future Crash + LOOK 8.22.0 — FABRIC MEDIA
+# Future Crash + LOOK 8.22.1 — FABRIC MEDIA
+
+8.22.1 repairs Wiki navigation and makes the archive owner/reader state clear.
+Use `/` to search from an article, `l` to follow links and `o` to choose the owner.
 
 8.22.0 adds Books discovery, cover previews and browser read-aloud in Signal and
 Albert. Use `/books`, “read TITLE” or “continue reading”; narration and progress

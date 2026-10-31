@@ -110,6 +110,7 @@ with Creator(sys.argv[1]).config_indexing(True,'eng') as writer:
     subprocess.run([str(python),'-c',script,str(path)],check=True,capture_output=True,timeout=20)
     assert wiki.zim_call('verify',path)['articles']==2
     assert wiki.zim_call('search',path,'reef')['entries']
+    assert wiki.zim_call('search',path,'Home')['entries'][0]['path']=='Home'
     article=wiki.zim_call('article',path,'Home')
     assert article['title']=='Knowledge' and 'Café coral reef research.' in article['paragraphs']
     assert article['links']==[{'title':'Other article','path':'Other'}]
@@ -137,3 +138,58 @@ def test_wiki_prompt_and_copy_use_renderer_without_lk_module_attribute(lk,tmp_pa
     keys=iter(['i','enter','y','esc','esc']);monkeypatch.setattr(lk,'_read_tty_key',lambda *a:next(keys))
     assert wiki.desk(lk,'local')==0
     assert prompt.call_count==1 and any('Offline text' in text for text in copied)
+
+
+def test_source_wikipedia_links_are_local_only_for_the_matching_archive():
+    parser=wiki.ArticleParser('mainPage',wiki_host='en.wikipedia.org')
+    parser.feed('<a href="https://en.wikipedia.org/wiki/Ancient_Rome">Rome</a><a href="//en.wikipedia.org/wiki/Latin">Latin</a><a href="https://en.wikipedia.org/w/index.php?title=Arts">Arts</a><a href="https://elsewhere.example/wiki/Test">external</a><a href="https://en.wikipedia.org/wiki/../../escape">escape</a>')
+    assert parser.links==[{'title':'Rome','path':'Ancient_Rome'},{'title':'Latin','path':'Latin'},{'title':'Arts','path':'Arts'}]
+    other=wiki.ArticleParser('Home')
+    other.feed('<a href="https://en.wikipedia.org/wiki/Latin">Latin</a>')
+    assert other.links==[]
+
+
+def test_wiki_can_search_from_linkless_landing_and_does_not_reinstall_reader(lk,tmp_path,monkeypatch,capsys):
+    import termios,tty
+    class Terminal:
+        def fileno(self):return 0
+        def isatty(self):return True
+    monkeypatch.setattr(wiki.sys,'stdin',Terminal())
+    monkeypatch.setattr(termios,'tcgetattr',lambda fd:[])
+    monkeypatch.setattr(termios,'tcsetattr',lambda *a:None)
+    monkeypatch.setattr(tty,'setcbreak',lambda fd:None)
+    prompts=iter([('Latin',False),('',False)])
+    monkeypatch.setattr(wiki.look_renderer,'prompt_line',lambda *a,**kw:next(prompts))
+    calls=[]
+    def request(action='status',**kwargs):
+        calls.append((action,kwargs))
+        if action=='article':return {'title':kwargs['query'] or 'mainPage','paragraphs':['Saved text'],'links':[]}
+        if action=='search':return {'entries':[{'title':'Latin','path':'Latin'}]}
+        return {'root':str(tmp_path),'reader_installed':True,'archives':[{'id':'test.zim','title':'Wikipedia','bytes':1}],'jobs':[]}
+    monkeypatch.setattr(wiki,'request',request)
+    keys=iter(['i','enter','/','esc','esc']);monkeypatch.setattr(lk,'_read_tty_key',lambda *a:next(keys))
+    assert wiki.desk(lk,'owner')==0
+    assert not any(action=='setup' for action,_ in calls)
+    assert any(action=='article' and args['query']=='Latin' for action,args in calls)
+    assert 'SAVED ARCHIVE' in capsys.readouterr().out
+
+
+def test_wiki_owner_picker_switches_only_after_success(lk,tmp_path,monkeypatch):
+    import termios,tty
+    class Terminal:
+        def fileno(self):return 0
+        def isatty(self):return True
+    monkeypatch.setattr(wiki.sys,'stdin',Terminal())
+    monkeypatch.setattr(termios,'tcgetattr',lambda fd:[])
+    monkeypatch.setattr(termios,'tcsetattr',lambda *a:None)
+    monkeypatch.setattr(tty,'setcbreak',lambda fd:None)
+    monkeypatch.setattr(wiki.fabric_files,'nodes',lambda:[wiki.fabric_files.Destination('library-owner','/')])
+    monkeypatch.setattr(wiki.look_renderer,'prompt_line',lambda *a,**kw:('library-owner',False))
+    seen=[]
+    def request(action='status',node='local',**kwargs):
+        seen.append(node)
+        return {'root':str(tmp_path),'archives':[],'jobs':[],'reader_installed':True}
+    monkeypatch.setattr(wiki,'request',request)
+    keys=iter(['o','esc']);monkeypatch.setattr(lk,'_read_tty_key',lambda *a:next(keys))
+    assert wiki.desk(lk,'local')==0
+    assert seen==['local','library-owner']
