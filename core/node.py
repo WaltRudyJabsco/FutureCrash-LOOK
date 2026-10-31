@@ -3844,7 +3844,7 @@ class API(BaseHTTPRequestHandler):
                 def read(peer):
                     owner=peer.get('name')
                     try:
-                        value=_peer_json(peer,'/v1/books',timeout=3,total_timeout=6)
+                        value=_file_peer_json(peer,'/v1/books')
                         return [dict(row,node=owner) for row in value.get('entries',[])],None
                     except Exception as exc:return [],{'node':owner,'error':str(exc)}
                 with concurrent.futures.ThreadPoolExecutor(max_workers=4) as pool:

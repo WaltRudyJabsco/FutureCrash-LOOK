@@ -96,9 +96,9 @@ def import_files(paths,node):
     return request('scan',node=node)['entries']
 
 
-def desk(ui,query=''):
+def desk(ui,query='',owner=None):
     fd=sys.stdin.fileno();old=termios.tcgetattr(fd);index=0;shelf='All';search=False;notice='';results=None
-    value=catalog();owner=media_storage.settings()['node'];sort_reverse=False;help_visible=False
+    value=catalog();owner=owner or media_storage.settings()['node'];sort_reverse=False;help_visible=False
     def ask(label,initial='',path=False):
         termios.tcsetattr(fd,termios.TCSADRAIN,old)
         try:
@@ -203,7 +203,7 @@ def main(args,ui):
     parser.add_argument('--json',action='store_true')
     selected=parser.parse_args(args);owner=selected.node or media_storage.settings()['node']
     try:
-        if selected.action=='shelf' and sys.stdin.isatty() and sys.stdout.isatty():return desk(ui,' '.join(selected.values))
+        if selected.action=='shelf' and sys.stdin.isatty() and sys.stdout.isatty():return desk(ui,' '.join(selected.values),owner=owner)
         if selected.action in {'list','shelf'}:
             value=catalog();value=dict(value,entries=rows_for(value,' '.join(selected.values)))
         elif selected.action=='scan':value=request('scan',node=owner)
