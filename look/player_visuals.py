@@ -4,15 +4,31 @@ import math
 import hashlib
 import json
 
-NAMES = ('Bars', 'Waves', 'Orbit', 'Tunnel', 'Stars', 'Plasma', 'Album Art', 'Black Hole', 'Rooftops', 'Spectrum', 'Moon Jelly', 'Firefly Garden', 'Clockwork Garden', 'Rain on Glass', 'Neon Reef', 'Aurora Loom', 'Paper Lanterns', 'Magnetic Field', 'Comet Trails', 'Orrery', 'Phosphor Rain', 'Kinetic Mobile', 'Cycle')
+NAMES = ('Bars', 'Waves', 'Orbit', 'Tunnel', 'Stars', 'Plasma', 'Album Art', 'Black Hole', 'Rooftops', 'Spectrum', 'Moon Jelly', 'Firefly Garden', 'Clockwork Garden', 'Rain on Glass', 'Neon Reef', 'Aurora Loom', 'Paper Lanterns', 'Magnetic Field', 'Comet Trails', 'Orrery', 'Phosphor Rain', 'Kinetic Mobile', 'Haunted Hollow', 'Cycle')
 CYCLE_MODE = len(NAMES)
 CYCLE_INTERVAL_SECONDS = 10.0
 
 
-def active_mode(mode, elapsed):
+def playback_modes(enabled=None):
+    enabled=tuple(range(1,CYCLE_MODE)) if enabled is None else tuple(i for i in enabled if 1<=i<CYCLE_MODE)
+    return (0,*enabled,*((CYCLE_MODE,) if enabled else ()))
+
+
+def next_mode(mode,enabled=None):
+    modes=playback_modes(enabled)
+    return modes[(modes.index(mode)+1)%len(modes)] if mode in modes else modes[1] if len(modes)>1 else 0
+
+
+def available_mode(mode,enabled=None):
+    modes=playback_modes(enabled)
+    return mode if mode in modes else modes[1] if len(modes)>1 else 0
+
+
+def active_mode(mode, elapsed, enabled=None):
     """Cycle only through visuals; normal player view is never a timed step."""
     if mode==CYCLE_MODE:
-        return 1+int(max(0.0,elapsed)//CYCLE_INTERVAL_SECONDS)%(CYCLE_MODE-1)
+        modes=playback_modes(enabled)[1:-1]
+        return modes[int(max(0.0,elapsed)//CYCLE_INTERVAL_SECONDS)%len(modes)] if modes else 0
     return mode
 
 
@@ -53,6 +69,8 @@ def frame(mode, width, height, phase, playing=True, seed=0):
             depth=(i*.618034+t*.18)%1
             point((width-1)/2+math.cos(angle)*depth*width*.65,
                   (height-1)/2+math.sin(angle)*depth*height*.65,'.+*'[min(2,int(depth*3))])
+    elif mode==22:
+        return haunted_hollow_frame(width,height,t,seed)
     elif mode==21:
         return kinetic_mobile_frame(width,height,t,seed)
     elif mode==20:
@@ -566,4 +584,46 @@ def kinetic_mobile_frame(width,height,phase,seed=0):
             point(weight_x+math.cos(angle)*max(1,width*.025),end_y+math.sin(angle)*max(.5,spacing*.2),'o' if level%2 else '*')
         x,y=right if level%2==0 else left
     wire(x,y,x,y+spacing*.5);point(x,y+spacing*.5,'@')
+    return [''.join(row) for row in canvas]
+
+
+HALLOWEEN_COLOR='35'
+HALLOWEEN_BAT_PERIOD=18.0
+HALLOWEEN_PUMPKIN_WIDTH=11
+HALLOWEEN_PUMPKIN=('    _/     ', '  .-"""-.  ', ' / ^   ^ \\ ', '|   /_\\   |', ' \\ \\___/ / ', "  `-----'  ")
+
+
+def haunted_hollow_frame(width,height,phase,seed=0):
+    """Moonlit bats and quietly flickering jack-o'-lanterns; no random frame state."""
+    canvas=[[' ']*width for _ in range(height)]
+    def point(x,y,char):
+        x=round(x);y=round(y)
+        if 0<=x<width and 0<=y<height:canvas[y][x]=char
+    def stamp(x,y,rows,opaque=False):
+        for dy,row in enumerate(rows):
+            for dx,char in enumerate(row):
+                if opaque or char!=' ':point(x+dx,y+dy,char)
+    moon_x=width*.78;moon_y=max(1,height*.18)
+    for i in range(32):
+        angle=i*math.tau/32
+        point(moon_x+math.cos(angle)*max(1,width*.045),moon_y+math.sin(angle)*max(1,height*.12),'.' if i%3 else '*')
+    for i in range(max(1,width//24)):
+        speed=.6+i*.13
+        travel=(phase*speed/HALLOWEEN_BAT_PERIOD+i*.31+seed*.017)%1
+        x=travel*(width+6)-3;y=height*.12+((i*7+seed)%5)*height*.055+math.sin(phase*.8+i)*.6
+        stamp(x,y,['\\o/' if math.sin(phase*3+i)>0 else '/o\\'])
+    horizon=max(0,height-3)
+    for x in range(width):
+        if (x+seed)%5!=0:point(x,horizon,'.' if x%3 else '_')
+    # Uneven grave markers sit behind the row of pumpkins.
+    for i,x in enumerate(range(3,width,max(12,width//5))):
+        y=horizon-6-(i%2)
+        stamp(x,y,[ '.---.', '| + |', '|___|' ])
+    pumpkin_y=max(0,height-len(HALLOWEEN_PUMPKIN))
+    spacing=max(HALLOWEEN_PUMPKIN_WIDTH+4,width//3)
+    for i,x in enumerate(range(max(0,(width-HALLOWEEN_PUMPKIN_WIDTH)%spacing//2),width,spacing)):
+        rows=list(HALLOWEEN_PUMPKIN)
+        # A candle's small change is confined to the eyes; never flash the scene.
+        if int(phase*.6+i+seed)%7==0:rows[2]=rows[2].replace('^','-')
+        stamp(x,pumpkin_y,rows,opaque=True)
     return [''.join(row) for row in canvas]

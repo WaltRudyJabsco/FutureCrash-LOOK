@@ -268,13 +268,35 @@ Matched audio CDs download a 500-pixel front cover from the Cover Art Archive in
 
 ## Player visuals
 
-In `lk player`, press lowercase `v` to cycle Bars, Waves, Orbit, Tunnel, Stars,
-Plasma, **Album Art**, **Black Hole**, **Rooftops**, **Spectrum**, **Moon Jelly**, **Firefly Garden**, then **Cycle**, followed by the
-normal player view. In `lk mp`, `v` opens the same player visuals. Cycle rotates through the twelve
-visualizers every ten seconds while its view is open, including Album Art, and
-never switches automatically to the normal player view. Selecting Cycle starts
-at Bars; pressing `v` again returns to the normal view. Transport controls remain
-available throughout. Album Art fills the available canvas with a centered ASCII
+In `lk player`, lowercase `v` steps through enabled visuals, **Cycle**, then the
+normal player view. In `lk mp` / `lk tv`, `v` opens the same player visuals.
+Cycle rotates through enabled visuals every ten seconds while open. It never
+inserts the normal player view into a nonempty rotation. Transport controls remain
+available throughout.
+
+Capital **V** opens the shared visualizer checklist from player, MP and TV results
+(outside search text entry). Arrow keys move, Shift-arrows page/jump to ends,
+**Space** toggles a checkbox, **a** selects all, **n** selects none, **Enter** saves,
+and **Esc** cancels without changing the file. The same picker is available as
+`lk visualizers` or **lk settings → Visualizer selection**; `lk visualizers --json`
+reports the current selection for scripts. Media Find's existing V physical-source
+view is unchanged.
+
+Preferences live in `~/.config/look/visualizers.json`, shared across terminal player
+implementations for this OS account. They are local to each computer, not a new
+Fabric-wide configuration protocol. Disabled names are stored rather than numeric
+mode positions; newly added visualizers start enabled. Settings survive runtime
+updates and other open player panes observe changes within a second. If all visuals
+are disabled, v stays in normal view; V remains available to restore the selection.
+The picker never stops playback or changes the queue. Cancelling it retains the
+previous selection and excludes time spent in the picker from the visual clock.
+
+**Haunted Hollow** is the Halloween addition: a moonlit graveyard, fluttering bats
+and jack-o'-lanterns whose eyes occasionally change with their candles. It is an
+ambient animation, not an audio analyzer. It freezes when paused and is available
+year-round through the same checklist.
+
+Album Art fills the available canvas with a centered ASCII
 cover while keeping track information and transport controls visible. Covers
 preserve their proportions for terminal cells, and remote covers load in the
 background. Missing artwork displays an availability message. While playing,

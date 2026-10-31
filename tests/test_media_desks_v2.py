@@ -206,3 +206,17 @@ def test_find_redraws_when_last_duration_completes_before_wait(lk,desk,rows,monk
     monkeypatch.setattr(lk,'_read_tty_key',lambda *a:'esc')
     assert lk._media_selector(rows)==('none',None)
     assert len(desk)==2
+
+
+@pytest.mark.parametrize('kind',['audio','video'])
+def test_V_opens_shared_visualizer_picker_only_after_search(lk,desk,monkeypatch,kind):
+    monkeypatch.setattr(sys,'stdout',Terminal());monkeypatch.setattr(sys,'stdin',Terminal())
+    calls=[]
+    monkeypatch.setattr(lk.visualizer_settings,'picker',lambda *args:calls.append(args) or True)
+    monkeypatch.setattr(lk,'_media_launch_session',lambda *a:pytest.fail('Settings must not start playback'))
+    keys=iter(['/','V','enter','V','esc','esc'])
+    monkeypatch.setattr(lk,'_read_tty_key',lambda *a:next(keys))
+    assert lk._media_player_library(media_kind=kind)==0
+    assert len(calls)==1
+    assert any('SEARCH /V' in frame for frame in desk)
+    assert any('Visualizer selection saved' in frame and 'FILTER V' in frame for frame in desk)
