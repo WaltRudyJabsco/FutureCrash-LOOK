@@ -1223,7 +1223,7 @@ class PeerRegistry:
                     prior.update(node=ad,node_seen_at=t,error=None,failures=0,url=base,active_transport=transport,
                                  next_due=t+PEER_NODE_REFRESH_SECONDS+random.uniform(0,3.0))
                 else:
-                    failures=int(prior.get("failures") or 0)+1; known=bool(prior.get("node"))
+                    failures=int(prior.get("failures") or 0)+1; known=bool(prior.get("node")) or bool(p.get("trusted"))
                     base_delay=PEER_NODE_REFRESH_SECONDS if known else PEER_UNKNOWN_BACKOFF_SECONDS
                     backoff=min(PEER_FAILURE_BACKOFF_MAX_SECONDS,base_delay*(2**min(failures-1,3)))
                     err=str(last_exc or "no reachable transport")
