@@ -75,9 +75,10 @@ class Availability:
             if future.done():
                 try: state = future.result()
                 except Exception: state = 'offline'
+                previous=self.checked.get(key)
                 self.checked[key] = (time.monotonic(), state)
                 del self.pending[key]
-                changed = True
+                changed = changed or previous is None or previous[1]!=state
         for row in rows:
             key = self.key(row)
             cached = self.checked.get(key)

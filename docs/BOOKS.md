@@ -3,7 +3,8 @@
 `lk books` (alias `lk bk`) opens a dedicated EPUB/PDF shelf. It shares the Fabric
 and media-root configuration, but does not insert documents into MP/TV queues or
 send them to mpv. Install an EPUB/PDF reader appropriate for your OS; Enter uses
-system defaults, including the existing PDF application preference.
+Bookokrat when available in Auto mode; **o** uses system defaults, including
+the existing PDF application preference.
 
 ## First book
 
@@ -28,7 +29,8 @@ An empty shelf does not scan the home directory or initialize attached drives.
 | --- | --- |
 | Arrows / Shift-arrows | Select / page and ends |
 | `/` | Search title, author, shelf or format; Enter returns to browsing |
-| Enter | Open the book in a reader |
+| Enter | Read in Bookokrat when available; quit it with q to return |
+| `o` | Open in the system/configured reader |
 | `s` | Cycle All, To Read, Reading, Finished and custom shelf filters |
 | `m` | Cycle the selected book's reading state |
 | `e` | Edit prefilled title, author, custom shelf and reading-position label |
@@ -52,6 +54,8 @@ Reading states and metadata belong to the owning catalog. Editing does not
 rewrite or rename document files. Identical content shares a book ID; rescans and
 renames retain reading state. Reading-position labels are manual: this release
 does not extract progress from external readers or synchronize their bookmarks.
+Bookokrat remembers its own position locally, with a stable LOOK reader-library
+directory so launching from another project does not create a new reader library.
 PDF metadata uses optional `pdfinfo`; without it, filenames remain useful titles.
 EPUB metadata is read from the package. Protected/unsupported books may require
 their own authorized reader; LOOK does not remove protection.
@@ -77,3 +81,32 @@ are bounded at 100 MiB; malformed/oversized metadata is rejected.
 **Notes:** paste the link from **y** into an existing note. It uses the ordinary
 `@node:/path` convention, with readable labels and spaces handled by the existing
 Markdown link builder. There is no new book-link protocol.
+
+## Terminal reader
+
+```
+lk books reader status
+lk books reader install
+lk books reader auto
+lk books reader bookokrat
+lk books reader system
+```
+
+Reader setup/preferences apply to **the computer where you read**, independently
+of `--node`, which selects the owner for imports and downloads. The unified
+installer offers Bookokrat as an optional dependency. On first use without it,
+Enter offers installation, the system reader, or cancellation. Setup installs
+only the fixed `bookokrat` formula through existing Homebrew/Linuxbrew, without
+sudo or modifying taps. It runs independently and reports status; maintenance
+waits for active setup. Other package managers can install Bookokrat manually.
+
+Auto uses Bookokrat when installed. PDF reading in-terminal needs a supported
+graphics terminal; Auto can use the system reader otherwise. EPUB can be read as
+text in an ordinary terminal. Bookokrat owns keys while reading: **q** returns to
+the shelf, **?** opens help, arrows scroll, Page Up/Down page, and **Space then t**
+selects its theme. Existing Bookokrat configuration is preserved. LOOK does not
+rewrite its keybindings, themes or bookmarks.
+
+[Bookokrat documentation](https://github.com/bugzmanov/bookokrat) describes its
+native reader controls and optional PDF support. The integration was tested with
+Bookokrat 0.3.14 on macOS, including a real terminal launch/read/quit/shelf return.

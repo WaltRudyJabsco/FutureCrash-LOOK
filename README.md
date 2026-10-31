@@ -1,4 +1,8 @@
-# Future Crash + LOOK 8.18.1 — FABRIC MEDIA
+# Future Crash + LOOK 8.19.0 — FABRIC MEDIA
+
+8.19.0 integrates optional Bookokrat terminal reading with return to the shelf,
+keeps the system reader available, and stabilizes native media previews with
+synchronized redraws and fewer unnecessary refreshes.
 
 8.18.0 adds **`lk books`** / **`lk bk`**: a Fabric EPUB/PDF shelf with local imports,
 Gutenberg search, reading states and Notes links. Orrery and Phosphor Rain join

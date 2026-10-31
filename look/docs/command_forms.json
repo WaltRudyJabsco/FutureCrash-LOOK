@@ -879,8 +879,14 @@
     "Alias for lk books; Fabric EPUB/PDF shelf"
   ],
   [
+    "lk books reader",
+    "[status|install|auto|bookokrat|system]",
+    "media",
+    "Choose the local book reader or install optional Bookokrat"
+  ],
+  [
     "lk books",
-    "[shelf|list|scan|import FILE...|search QUERY|fetch URL] [--node NODE] [--json]",
+    "[shelf|list|scan|import FILE...|search QUERY|fetch URL|reader MODE] [--node NODE] [--json]",
     "media",
     "Fabric EPUB/PDF shelf; bk alias, reading state and Notes links"
   ],

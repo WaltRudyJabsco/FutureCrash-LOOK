@@ -517,6 +517,26 @@ def _chafa_render(path:Path, width:int, height:int)->list[str]:
 
 
 
+_SYNC_FRAME_STATE=threading.local()
+
+
+@contextmanager
+def synchronized_update():
+    """Kitty presents text erasure and its replacement image as one frame."""
+    enabled=bool(os.environ.get('KITTY_WINDOW_ID') or os.environ.get('TERM')=='xterm-kitty')
+    if not enabled:
+        yield
+        return
+    depth=getattr(_SYNC_FRAME_STATE,'depth',0)
+    if depth==0:sys.stdout.write('\x1b[?2026h')
+    _SYNC_FRAME_STATE.depth=depth+1
+    try:yield
+    finally:
+        _SYNC_FRAME_STATE.depth-=1
+        if depth==0:
+            sys.stdout.write('\x1b[?2026l');sys.stdout.flush()
+
+
 class NativePreviewController:
     """Prepare native previews off-thread; only the pager thread may paint them."""
     IMAGE_SUFFIXES={'.png','.jpg','.jpeg','.gif','.webp','.bmp','.tif','.tiff','.heic'}
