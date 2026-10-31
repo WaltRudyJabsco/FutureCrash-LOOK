@@ -249,6 +249,21 @@ class ArticleParser(book_speech.PassageParser):
         super().handle_endtag(tag)
 
 
+def landing_links(archive,paragraphs):
+    links=[];seen=set()
+    for text in paragraphs:
+        if '•' not in text:continue
+        for title in text.split('•'):
+            path=title.strip().replace(' ','_')
+            if not path or path in seen:continue
+            seen.add(path)
+            try:entry=archive.get_entry_by_path(path)
+            except KeyError:continue
+            links.append({'title':entry.title,'path':entry.path})
+            if len(links)>=200:return links
+    return links
+
+
 def zim_worker(action,path,query):
     import libzim
     from libzim.reader import Archive
@@ -272,6 +287,10 @@ def zim_worker(action,path,query):
     if item.size>MAX_ARTICLE_BYTES:raise ValueError('Article exceeds 4 MiB')
     host='en.wikipedia.org' if Path(path).name.startswith('wikipedia_en_') else None
     parser=ArticleParser(entry.path,wiki_host=host);parser.feed(bytes(item.content).decode('utf-8',errors='replace'));parser.flush()
+    if not query and not parser.links:
+        # Some ZIM landing pages retain a topic list but strip all anchor hrefs.
+        # Link only names actually present in this archive; never guess a URL.
+        parser.links=landing_links(archive,parser.parts)
     unique={r['path']:r for r in parser.links}
     return {'title':entry.title,'path':entry.path,'paragraphs':parser.parts,'links':list(unique.values())[:200]}
 

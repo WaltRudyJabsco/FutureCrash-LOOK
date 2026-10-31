@@ -185,7 +185,7 @@ def lookup(toc,status=None):
     # Disc-ID replies already include medium disc IDs. Adding inc=discids here
     # requires a different query shape and makes the service reject this request.
     url='https://musicbrainz.org/ws/2/discid/'+toc['disc_id']+'?'+urlencode({'toc':toc['toc'],'inc':'artists+recordings','fmt':'json'})
-    request=urllib.request.Request(url,headers={'User-Agent':'FutureCrash-LOOK/8.22.1 (personal disc importer)'})
+    request=urllib.request.Request(url,headers={'User-Agent':'FutureCrash-LOOK/8.22.2 (personal disc importer)'})
     try:
         with urllib.request.urlopen(request,timeout=5) as response:data=json.load(response)
     except (OSError,ValueError) as exc:

@@ -193,3 +193,14 @@ def test_wiki_owner_picker_switches_only_after_success(lk,tmp_path,monkeypatch):
     keys=iter(['o','esc']);monkeypatch.setattr(lk,'_read_tty_key',lambda *a:next(keys))
     assert wiki.desk(lk,'local')==0
     assert seen==['local','library-owner']
+
+
+
+def test_linkless_landing_uses_only_verified_topic_entries():
+    archive=Mock()
+    def entry(path):
+        if path in {'Arts','Ancient_Rome'}:return Mock(title=path.replace('_',' '),path=path)
+        raise KeyError(path)
+    archive.get_entry_by_path.side_effect=entry
+    assert wiki.landing_links(archive,['Unlinked heading','Arts • Missing • Ancient Rome • Arts'])==[
+        {'title':'Arts','path':'Arts'},{'title':'Ancient Rome','path':'Ancient_Rome'}]
