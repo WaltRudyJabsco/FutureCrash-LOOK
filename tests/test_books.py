@@ -161,7 +161,7 @@ def test_books_ui_search_and_copy_link_with_unicode(lk,monkeypatch):
     class Input:
         def fileno(self):return 0
     monkeypatch.setattr(books.sys,'stdin',Input())
-    keys=iter(['/','C','a','f','é','\n','y','esc','esc'])
+    keys=iter(['/','C','a','up','f','é','paste: Book\n','\n','y','esc','esc'])
     monkeypatch.setattr(lk,'_read_tty_key',lambda *a:next(keys))
     links=[];monkeypatch.setattr(books.look_renderer,'copy_text',lambda value:links.append(value))
     assert books.desk(lk)==0

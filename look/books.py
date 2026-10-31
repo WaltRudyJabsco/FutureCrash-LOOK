@@ -136,11 +136,13 @@ def desk(ui,query='',owner=None):
             key=ui._read_tty_key(fd,.25)
             if not key:continue
             if key=='\x03':return 0
+            if key.startswith('paste:'):
+                query+=' '.join(safe_text(key[6:]).split());search=True;results=None;index=0;continue
             if search:
-                if key in {'esc','\r','\n'}:search=False
-                elif key in {'\x7f','\b'}:query=query[:-1];index=0
-                elif key.isprintable():query+=key;index=0
-                continue
+                if key in {'esc','enter','\r','\n'}:search=False;continue
+                if key in {'\x7f','\b'}:query=query[:-1];index=0;continue
+                if len(key)==1 and key.isprintable():query+=key;index=0;continue
+                if key not in {'up','down','shiftup','shiftdown','pageup','pagedown','shiftleft','shiftright','home','end'}:continue
             if key=='esc':
                 if results is not None:results=None;index=0;continue
                 if query:query='';index=0;continue
@@ -168,7 +170,7 @@ def desk(ui,query='',owner=None):
                 elif key=='i':
                     path=ask('Import EPUB or PDF · Tab completes · arrows open the path picker',path=True)
                     if path:import_files([path],owner);value=catalog();notice='Imported; source retained'
-                elif key in {'\r','\n'} and chosen:
+                elif key in {'enter','\r','\n'} and chosen:
                     if results is not None:
                         answer=ask('Download “'+chosen['title']+'” to '+owner+'? y/N')
                         if answer and answer.casefold()=='y':request('fetch',node=owner,url=chosen['url']);value=catalog();results=None;notice='Book imported'
