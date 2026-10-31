@@ -4,7 +4,7 @@ import math
 import hashlib
 import json
 
-NAMES = ('Bars', 'Waves', 'Orbit', 'Tunnel', 'Stars', 'Plasma', 'Album Art', 'Black Hole', 'Rooftops', 'Spectrum', 'Moon Jelly', 'Firefly Garden', 'Clockwork Garden', 'Rain on Glass', 'Neon Reef', 'Aurora Loom', 'Paper Lanterns', 'Magnetic Field', 'Comet Trails', 'Orrery', 'Phosphor Rain', 'Cycle')
+NAMES = ('Bars', 'Waves', 'Orbit', 'Tunnel', 'Stars', 'Plasma', 'Album Art', 'Black Hole', 'Rooftops', 'Spectrum', 'Moon Jelly', 'Firefly Garden', 'Clockwork Garden', 'Rain on Glass', 'Neon Reef', 'Aurora Loom', 'Paper Lanterns', 'Magnetic Field', 'Comet Trails', 'Orrery', 'Phosphor Rain', 'Kinetic Mobile', 'Cycle')
 CYCLE_MODE = len(NAMES)
 CYCLE_INTERVAL_SECONDS = 10.0
 
@@ -53,6 +53,8 @@ def frame(mode, width, height, phase, playing=True, seed=0):
             depth=(i*.618034+t*.18)%1
             point((width-1)/2+math.cos(angle)*depth*width*.65,
                   (height-1)/2+math.sin(angle)*depth*height*.65,'.+*'[min(2,int(depth*3))])
+    elif mode==21:
+        return kinetic_mobile_frame(width,height,t,seed)
     elif mode==20:
         return phosphor_rain_frame(width,height,t,seed)
     elif mode==19:
@@ -526,4 +528,42 @@ def phosphor_rain_frame(width,height,phase,seed=0):
         else:
             radius=int((age-floor)*1.8)
             for side in (-1,1):put(x+side*radius,floor+(radius%2),'~' if radius%2 else '-')
+    return [''.join(row) for row in canvas]
+
+
+MOBILE_COLOR='38;5;110'
+MOBILE_LEVELS=4
+MOBILE_SWAY_SPEED=.45
+MOBILE_ROD_SPAN=.28
+
+
+def kinetic_mobile_frame(width,height,phase,seed=0):
+    """A hanging sculpture: connected rods and slow, out-of-phase paper weights."""
+    canvas=[[' ']*width for _ in range(height)]
+    def point(x,y,char):
+        x=round(x);y=round(y)
+        if 0<=x<width and 0<=y<height:canvas[y][x]=char
+    def wire(x1,y1,x2,y2):
+        steps=max(1,round(max(abs(x2-x1),abs(y2-y1))))
+        char='|' if abs(x2-x1)<1 else '-' if abs(y2-y1)<max(1,abs(x2-x1)*.15) else '/' if (x2-x1)*(y2-y1)<0 else '\\'
+        for i in range(steps+1):
+            ratio=i/steps;point(x1+(x2-x1)*ratio,y1+(y2-y1)*ratio,char)
+    x=(width-1)*.45;y=0
+    spacing=max(1,(height-2)/(MOBILE_LEVELS+.8))
+    for level in range(MOBILE_LEVELS):
+        sway=math.sin(phase*MOBILE_SWAY_SPEED+level*1.7+seed*.11)
+        pivot_x=x+sway*width*.025;pivot_y=y+spacing*.85
+        wire(x,y,pivot_x,pivot_y)
+        span=max(1,min(width*MOBILE_ROD_SPAN*(1-level*.16),pivot_x-3,width-4-pivot_x))
+        tilt=math.sin(phase*.32+level+seed*.07)*spacing*.25
+        left=(pivot_x-span,pivot_y-tilt);right=(pivot_x+span,pivot_y+tilt)
+        wire(*left,*right);point(pivot_x,pivot_y,'+')
+        weight_x,weight_y=left if level%2==0 else right
+        end_y=weight_y+spacing*.6
+        wire(weight_x,weight_y,weight_x,end_y)
+        for i in range(16):
+            angle=i*math.tau/16
+            point(weight_x+math.cos(angle)*max(1,width*.025),end_y+math.sin(angle)*max(.5,spacing*.2),'o' if level%2 else '*')
+        x,y=right if level%2==0 else left
+    wire(x,y,x,y+spacing*.5);point(x,y+spacing*.5,'@')
     return [''.join(row) for row in canvas]

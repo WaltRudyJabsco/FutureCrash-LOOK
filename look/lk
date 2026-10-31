@@ -37,7 +37,7 @@ try:
 except Exception:
     readline = None
 
-VERSION="4.71.0"
+VERSION="4.72.0"
 
 LOOK_WORDMARK = r"""       ██╗      ██╗  ██╗
        ██║      ██║ ██╔╝
@@ -8514,6 +8514,7 @@ _TOOL_POLICY = {
     "notebook_search":("all","observation"),
     "notebook_list":("all","observation"),"notebook_read":("all","observation"),
     "notebook_capture":("workspace","mutation"),"notebook_complete":("workspace","mutation"),"notebook_update":("workspace","mutation"),
+    "word_reference":("all","observation"),
     "fabric_status":("all","observation"),"fabric_maintain":("workspace","action"),
     "run_command":("power","command"),
 }
@@ -8625,8 +8626,14 @@ def _run_system_inspection_tool(name,args):
     return f"Unknown system inspection tool: {name}"
 
 
+def _word_reference(args):
+    import words
+    return json.dumps(words.tool(args.get("action","lookup"),args.get("query",""),args.get("language","en_US")),ensure_ascii=False)
+
+
 def _information_tools():
     return [
+        {"type":"function","function":{"name":"word_reference","description":"Offline English dictionary/thesaurus, word patterns and spelling. Returns actual local reference entries and named sources; no network or setup. Missing vocabulary is not proof of misspelling.","parameters":{"type":"object","properties":{"action":{"type":"string","enum":["lookup","spell","find","status"]},"query":{"type":"string"},"language":{"type":"string","enum":["en_US","en_GB"]}},"required":["action","query"]}}},
         {"type":"function","function":{"name":"weather","description":"Canonical live weather edge. Get current weather and forecast from Open-Meteo. MUST use for current weather rather than model memory.","parameters":{"type":"object","properties":{"location":{"type":"string"},"request":{"type":"string","description":"Requested day or range, such as tomorrow, weekend, five-day or seven-day forecast."}},"required":["location"]}}},
         {"type":"function","function":{"name":"place_lookup","description":"Canonical PLACE edge. Resolve a geographic place to coordinates and timezone. Not a business search or directions tool.","parameters":{"type":"object","properties":{"query":{"type":"string"}},"required":["query"]}}},
         {"type":"function","function":{"name":"wikipedia","description":"Canonical WIKI edge. Search English Wikipedia for stable human-readable encyclopedic background.","parameters":{"type":"object","properties":{"query":{"type":"string"}},"required":["query"]}}},
@@ -10077,7 +10084,7 @@ def _direct_searxng_search(query, limit=8):
     params=urllib.parse.urlencode({"q":query,"format":"json"})
     request=urllib.request.Request(base+"/search?"+params,headers={
         "Accept":"application/json",
-        "User-Agent":"Future-Crash-Fabric/8.24.0",
+        "User-Agent":"Future-Crash-Fabric/8.25.0",
     })
     with urllib.request.urlopen(request,timeout=12) as response:
         data=json.load(response)
@@ -11151,7 +11158,7 @@ def ollama_chat(force_search=False, initial_prompt=None, allow_start=True, host_
             "Do not claim to have read or changed a file unless the corresponding tool supplied or confirmed it. "
             "CRITICAL EXECUTION CONTRACT: when the user explicitly asks you to create, write, copy, move, rename, edit, or remove local files/folders, you must CALL the appropriate filesystem tool before reporting success. Planning or describing a tool call is not execution. Never say an operation succeeded unless a tool result confirms it. "
             "Filesystem reach starts at the workspace and may be extended only by LOOK's explicit host-owned path grants. "
-            "Use canonical information edges before generic search whenever they fit: weather=WEATHER, place_lookup=PLACE, wikipedia=WIKI, wikidata=DATA, papers=PAPERS, archive=ARCHIVE. You MUST call weather for current weather, temperature, rain, wind, or forecasts; never answer those from model memory. Use WIKI for readable stable background, DATA for structured entity facts, PAPERS for bibliographic/DOI questions, and ARCHIVE when the historical object or primary artifact matters. Canonical tool results include an epistemic receipt: edge, source, confidence, as_of when available, retrieved_at, and source_url. Preserve that provenance compactly in factual answers. DIRECT means the canonical source returned the fact; DERIVED means LOOK computed it from canonical data; SEARCHED means general web results were interpreted; MODEL means no external verification. Never invent numerical confidence percentages. If web_search is available, use it when current or externally verifiable information is needed and no canonical tool fits; "
+            "Use word_reference for offline definitions, synonyms, antonyms, word patterns and spelling; preserve its named source and distinguish reference entries from creative suggestions. Missing vocabulary is not proof of a spelling error. Never install dictionaries automatically. Use canonical information edges before generic search whenever they fit: weather=WEATHER, place_lookup=PLACE, wikipedia=WIKI, wikidata=DATA, papers=PAPERS, archive=ARCHIVE. You MUST call weather for current weather, temperature, rain, wind, or forecasts; never answer those from model memory. Use WIKI for readable stable background, DATA for structured entity facts, PAPERS for bibliographic/DOI questions, and ARCHIVE when the historical object or primary artifact matters. Canonical tool results include an epistemic receipt: edge, source, confidence, as_of when available, retrieved_at, and source_url. Preserve that provenance compactly in factual answers. DIRECT means the canonical source returned the fact; DERIVED means LOOK computed it from canonical data; SEARCHED means general web results were interpreted; MODEL means no external verification. Never invent numerical confidence percentages. If web_search is available, use it when current or externally verifiable information is needed and no canonical tool fits; "
             "when citing or recommending web material, always preserve the exact http/https URL supplied by the search result and emit a complete Markdown link in the form [descriptive label](https://actual-url). Never emit citation placeholders such as [source], [1], or a site name styled like a link without an actual URL. Never invent a URL from a site name."
         )},
     ]
@@ -12198,6 +12205,9 @@ def ollama_chat(force_search=False, initial_prompt=None, allow_start=True, host_
                             with _activity("geocoding"):
                                 tool_content=_place_lookup(query)
                         except Exception as exc: tool_content=f"Place lookup failed: {exc}"
+                    elif name == "word_reference":
+                        try:tool_content=_word_reference(args)
+                        except Exception as exc:tool_content="Word reference failed: "+str(exc)
                     elif name == "wikipedia":
                         query=args.get("query","")
                         try:
@@ -14451,6 +14461,9 @@ def _settings_rows():
         ("sound","FEEL","Feedback sound",_load_feedback()["sound"],
          "Receipt-driven sounds: subtle confirms meaningful completion/error; expressive also voices lighter accepted events.",
          "sound audio beep feedback quiet subtle expressive receipts"),
+        ("words","REFERENCE","Offline words","portable + system",
+         "Install a compact English dictionary/thesaurus; inspect local spelling tools. Lookups stay offline.",
+         "words dictionary thesaurus spelling spellcheck language wordnet offline reference"),
         ("transcription","SPEECH","Local speech input","optional",
          "Offline Phonon-2 transcription and dictation; setup downloads runtime/model explicitly. Alternate local servers supported.",
          "transcribe dictation microphone speech input phonon whisper parakeet"),
@@ -14711,6 +14724,9 @@ def _settings_action(key):
     if key=="key": return ollama_key([])
     if key=="share": return _settings_share_menu()
     if key=="sound": return _settings_pick_sound()
+    if key=="words":
+        import words
+        return _settings_pick_choice("offline word reference","status",[("status","inspect portable dictionary and local spelling tools"),("setup","download dictionary + spelling (~12 MB); build local reference index")],lambda args:words.main(args))
     if key=="transcription":
         import transcription
         return _settings_pick_choice("local speech input","status",[("status","inspect optional engine"),("setup","download runtime (~1.3 GB on tested Mac) + English model/cache")],lambda args:transcription.main(args))
@@ -19786,7 +19802,7 @@ def _media_player_full_visual(snap,mode,visual_elapsed=0):
             '←/→ seek · s shuffle · r repeat · O reset audio · x stop · q close']
     art_height=max(1,height-len(header)-len(footer))
     elapsed=visual_elapsed%player_visuals.CYCLE_INTERVAL_SECONDS if cycling else visual_elapsed
-    phase=elapsed if name in {'Black Hole','Rooftops','Spectrum','Moon Jelly','Firefly Garden','Clockwork Garden','Rain on Glass','Neon Reef','Aurora Loom','Paper Lanterns','Magnetic Field','Comet Trails','Orrery','Phosphor Rain'} else time.monotonic()
+    phase=elapsed if name in {'Black Hole','Rooftops','Spectrum','Moon Jelly','Firefly Garden','Clockwork Garden','Rain on Glass','Neon Reef','Aurora Loom','Paper Lanterns','Magnetic Field','Comet Trails','Orrery','Phosphor Rain','Kinetic Mobile'} else time.monotonic()
     art=_media_player_large_art(entry,width,art_height) if album_art else player_visuals.frame(mode,width,art_height,phase,state in {'play','playing'},seed)
     lines=header+art+footer
     color=player_visuals.album_color(snap) if album_art else ("1;32","1;36","1;35","1;34","1;37","1;33")[(mode-1)%6]
@@ -19803,6 +19819,7 @@ def _media_player_full_visual(snap,mode,visual_elapsed=0):
     if name=='Comet Trails': color=player_visuals.COMET_COLOR
     if name=='Orrery': color=player_visuals.ORRERY_COLOR
     if name=='Phosphor Rain': color=player_visuals.PHOSPHOR_COLOR
+    if name=='Kinetic Mobile': color=player_visuals.MOBILE_COLOR
     shimmer=album_art and state in {'play','playing'} and not any(
         status in line for line in art for status in ('Loading album art','Album art unavailable'))
     rendered=[]
@@ -21088,6 +21105,7 @@ _COMMANDS = [
     ("lk tv", "[QUERY]", "media", "Fabric movies, TV and video player"),
     ("lk bk", "[ARGS]", "media", "Alias for lk books; Fabric EPUB/PDF shelf"),
     ("lk latin", "[home|list|lesson N|practice|review|words QUERY|grammar QUERY|read|progress|about|export FILE] [--lesson N] [--strict-macrons on|off] [--json]", "learn", "Offline Latin classroom: complete course, vocabulary, checked forms and spaced review"),
+    ("lk words", "[status|setup|lookup WORD|spell TEXT|find PATTERN|add WORD] [--language en_US|en_GB] [--node NODE] [--json]", "web", "Offline dictionary, thesaurus, word finder and system spelling fallbacks"),
     ("lk wiki", "[shelf|status|setup|catalog QUERY|fetch ID|jobs|cancel ID|configure|search QUERY|article PATH] [--online|--offline] [--open-link URI] [--node NODE] [--archive FILE] [--root PATH] [--confirm] [--json]", "web", "Live/saved Wikipedia; colored links, inline images, hints and W shell panes"),
     ("lk books discover", "[popular|new|subjects|surprise|subject NAME] [--json]", "media", "Browse Project Gutenberg without downloading books"),
     ("lk books listen", "FILE [--chapter N] [--paragraph N]", "media", "Read aloud from a chapter/paragraph using a local voice"),
@@ -22464,6 +22482,9 @@ def main():
         return transcription.main(rest,live=cmd=="dictate")
     if cmd=="mp": return media_mp(" ".join(rest))
     if cmd=="tv": return media_tv(" ".join(rest))
+    if cmd=="words":
+        import words
+        return words.main(rest,sys.modules[__name__])
     if cmd=="latin":
         import latin
         return latin.main(rest,sys.modules[__name__])

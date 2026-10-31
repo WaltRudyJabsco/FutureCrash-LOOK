@@ -26,7 +26,7 @@ try:
 except ImportError:
     from fabric_identity import FabricIdentity
 
-VERSION = "8.24.0"
+VERSION = "8.25.0"
 DEFAULT_HOST = "127.0.0.1"
 DEFAULT_PORT = 7333
 DEFAULT_BACKEND_HOST = "127.0.0.1"
@@ -57,6 +57,7 @@ def _is_stream_path(path: str) -> bool:
 
 
 def _request_timeout(path: str, method: str, body: bytes | None, is_stream: bool) -> float:
+    if path == '/v1/words':return 90.0
     if path == '/v1/books/audio':return 180.0
     if path in {'/v1/books/read','/v1/books/discover'}:return BOOKS_REQUEST_TIMEOUT_SECONDS
     if path == '/v1/books' and method == 'POST':return BOOKS_REQUEST_TIMEOUT_SECONDS

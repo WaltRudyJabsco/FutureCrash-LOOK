@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Future Crash + LOOK Unified Node 8.24.0.
+"""Future Crash + LOOK Unified Node 8.25.0.
 
 A small distributed supervisor for trusted personal machines. Immediate events stay
 asynchronous; a one-second fabric pulse reconciles presence, leases and stale work.
@@ -155,7 +155,7 @@ def _file_peer_json(peer,path):
     return _file_race(peer,path)[1]
 
 
-VERSION = "8.24.0"
+VERSION = "8.25.0"
 RELEASE_NAME = "FABRIC VISION"
 DEFAULT_HOST = "127.0.0.1"
 DEFAULT_PORT = 7332
@@ -2657,7 +2657,7 @@ def _local_web_search(query, limit=8):
     base=os.environ.get("FCL_SEARXNG_URL","http://127.0.0.1:8888").rstrip("/")
     request=urllib.request.Request(base+"/search?"+params,headers={
         "Accept":"application/json",
-        "User-Agent":"Future-Crash-Fabric/8.24.0",
+        "User-Agent":"Future-Crash-Fabric/8.25.0",
     })
     try:
         with urllib.request.urlopen(request,timeout=8) as response:
@@ -3830,6 +3830,21 @@ class API(BaseHTTPRequestHandler):
             raise PermissionError("Destination node is not paired and advertising")
         return peer, value
 
+    def _words_request(self,payload=None):
+        try:
+            _look_catalog_modules();import words
+            peer,_=self._file_target();value=dict(payload or {})
+            if peer is not None:
+                result=http_json(_copy_route(peer)+'/v1/words',data=value,timeout=60)
+            else:
+                action=value.get('action','status')
+                if action=='setup':
+                    if value.get('confirm') is not True:raise PermissionError('Confirm the ~12 MB offline word reference download')
+                    result=words.setup()
+                else:result=words.tool(action,value.get('query',''),value.get('language','en_US'))
+            return self.sendj(200,result)
+        except Exception as exc:return self.sendj(400,{'ok':False,'error':str(exc)})
+
     def _wiki_request(self,payload=None):
         try:
             _look_catalog_modules();import wiki
@@ -4653,6 +4668,7 @@ class API(BaseHTTPRequestHandler):
             except ImportError: import notifications
             return self.sendj(200,{'ok':True,'settings':notifications.settings()})
         if path == "/v1/downloads" or path.startswith("/v1/downloads/"): return self._downloads_request()
+        if path == "/v1/words": return self._words_request()
         if path == "/v1/wiki": return self._wiki_request()
         if path in {"/v1/books/read","/v1/books/audio","/v1/books/cover","/v1/books/discover","/v1/books/discovery-cover"}: return self._book_content()
         if path == "/v1/books/reader": return self._book_reader_request()
@@ -4914,6 +4930,7 @@ class API(BaseHTTPRequestHandler):
         if not self._authorized_ingress(path): return
         if path == "/v1/files/copy": return self._files_copy()
         d = self.body()
+        if path == "/v1/words": return self._words_request(d)
         if path == "/v1/wiki": return self._wiki_request(d)
         if path == "/v1/books/reader": return self._book_reader_request(d)
         if path == "/v1/books": return self._books_request(d)
