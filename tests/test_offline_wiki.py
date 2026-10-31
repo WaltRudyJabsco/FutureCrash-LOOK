@@ -119,7 +119,7 @@ with Creator(sys.argv[1]).config_indexing(True,'eng') as writer:
     assert article['title']=='Knowledge' and 'Café coral reef research.' in article['paragraphs']
     assert article['links']==[{'title':'Other article','path':'Other'}]
     assert any('[aa]' in text for text in article['hinted_paragraphs'])
-    assert article['images']==[{'path':'picture.png','title':'Local photo'}]
+    assert article['images']==[{'path':'picture.png','title':'Local photo','before':3,'width':120}]
     image=wiki.zim_call('image',path,'picture.png')
     import base64
     assert image['mime']=='image/png' and base64.b64decode(image['data'])==b'bounded image bytes'

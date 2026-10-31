@@ -1,3 +1,9 @@
+## 8.24.0 — Inline Wiki images and reading panes (LOOK 4.71.0)
+
+- Wiki pictures appear at their article positions, with fixed-height loading, ASCII fallback and clipped native Kitty images. `I` toggles inline pictures; `M` toggles image/ASCII; `i` keeps the gallery.
+- `W` opens a shell pane from Wiki shelves, articles, link selectors and galleries, plus Books shelves and read-aloud. Existing focus/close shortcuts remain unchanged.
+- Books displays the full pane status, and short-lived image workers release their resources on exit.
+
 ## 8.23.2 — Stable Wiki reading position (LOOK 4.70.2)
 
 - Anchor the viewport center to original paragraph/character positions when hint codes change wrapping.

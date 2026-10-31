@@ -103,7 +103,7 @@ def import_files(paths,node):
 
 def desk(ui,query='',owner=None):
     fd=sys.stdin.fileno();old=termios.tcgetattr(fd);index=0;shelf='All';search=False;notice='';results=None
-    owner=owner or media_storage.settings()['node'];sort_reverse=False;help_visible=False
+    owner=owner or media_storage.settings()['node'];sort_reverse=False;help_visible=False;pane_help=False
     previews=LatestWork();native=look_renderer.NativePreviewController();native_images=True;show_preview=True;last_frame=None
     def ask(label,initial='',path=False):
         termios.tcsetattr(fd,termios.TCSADRAIN,old)
@@ -126,8 +126,9 @@ def desk(ui,query='',owner=None):
             if sort_reverse:visible=list(reversed(visible))
             index=max(0,min(index,max(0,len(visible)-1)));chosen=visible[index] if visible else None
             controls='↑↓ move · Shift-arrows page/ends · Enter '+('import book' if results is not None else 'read')+' · a read aloud · o system reader · / search · s shelves · m reading state · e edit · i import · g Gutenberg · d discover · I preview · M image/ASCII · k keep offline · y copy link · R scan/refresh · G reverse · P clipboard · W shell pane · Esc back'
-            if width<80 and not help_visible:controls='↑↓ select · Enter open · / search · ? help · Esc back'
+            if width<80 and not help_visible:controls='↑↓ select · Enter open · / search · W pane · ? help · Esc back'
             else:controls+=' · ? help'
+            if pane_help or help_visible:controls+=' · '+' · '.join(terminal_style.pane_shortcuts())
             hints='\n'.join(ui._media_hints(controls,width).splitlines()[:max(1,height-8)]);page=max(1,height-8-len(hints.splitlines()));top=max(0,index-page+1)
             art_width=min(36,width//3) if show_preview and width>=90 else 0
             list_width=width-art_width-3 if art_width else width
@@ -193,7 +194,8 @@ def desk(ui,query='',owner=None):
                 elif key=='G':sort_reverse=not sort_reverse
                 elif key=='I':show_preview=not show_preview;native.frame_cleared();last_frame=None
                 elif key=='M':native_images=not native_images;native.frame_cleared();last_frame=None;notice='Auto image' if native_images and native.enabled else 'ASCII previews'
-                elif key=='W':notice=terminal_style.open_pane(Path.cwd())[1]
+                elif key=='W':
+                    notice=terminal_style.open_pane(Path.cwd());pane_help=notice.startswith('Shell opened beside LOOK');last_frame=None
                 elif key=='P':
                     import clipboard_shelf
                     clipboard_shelf.show(fd=fd);last_frame=None
@@ -255,7 +257,7 @@ def desk(ui,query='',owner=None):
                         if fields:request('update',node=chosen.get('node','local'),id=chosen['id'],fields=fields);value=catalog();notice='Metadata saved; document bytes unchanged'
             except (OSError,ValueError,RuntimeError,KeyError,subprocess.SubprocessError) as exc:notice=str(exc)
     finally:
-        previews.close();native.frame_cleared()
+        previews.close();native.frame_cleared();native.close()
         termios.tcsetattr(fd,termios.TCSADRAIN,old);sys.stdout.write('\033[0m\n')
 
 

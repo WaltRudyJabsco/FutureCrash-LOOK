@@ -6,6 +6,7 @@ import os
 import tempfile
 import urllib.parse
 import media_art
+import terminal_style
 import look_renderer
 from media_ui_work import LatestWork
 from notebook_markdown import safe_text
@@ -44,17 +45,17 @@ def prepare(row,width,height,**source):
 def gallery(ui,fd,article,*,live=False,archive='',owner='local'):
     rows=article.get('images',[])
     if not rows:return 'No pictures in this article. The no-pictures archive cannot supply photos; v selects live Wikipedia.'
-    work=LatestWork();native=look_renderer.NativePreviewController();index=0;native_images=True;last=None
+    work=LatestWork();native=look_renderer.NativePreviewController();index=0;native_images=True;last=None;notice=''
     try:
         while True:
             width,height=ui.shutil.get_terminal_size((100,30));width=max(20,width)
-            controls=ui._media_hints('←→ image · Shift-←/→ first/last · M image/ASCII · y copy image source · Esc article',width).splitlines()
+            controls=ui._media_hints('←→ image · Shift-←/→ first/last · M image/ASCII · y copy image source · W shell pane · Esc article',width).splitlines()
             art_h=max(2,height-len(controls)-6);art_w=min(90,width-1)
             row=rows[index]
             art,path,error=work.get((index,art_w,art_h),lambda row=dict(row),w=art_w,h=art_h:prepare(row,w,h,live=live,archive=archive,owner=owner),([],None,'Preparing image…'),ttl=60) or ([],None,'Image unavailable')
             frame=[ui._c('ARTICLE IMAGES','1;36')+f' · {index+1}/{len(rows)} · '+('LIVE / CACHED' if live else 'SAVED ARCHIVE'),safe_text(row['title']),*art[:art_h]]
             frame+=['']*max(0,art_h+2-len(frame))
-            frame += [ui._c(safe_text(error or ('Auto image' if native_images and native.enabled else 'ASCII')),'2'),ui._c(safe_text(row.get('source') or row.get('path','')),'2'),*controls]
+            frame += [ui._c(safe_text(notice or error or ('Auto image' if native_images and native.enabled else 'ASCII')),'2'),ui._c(safe_text(row.get('source') or row.get('path','')),'2'),*controls]
             rendered=ui._terminal_frame_payload('\n'.join(ui._ansi_clip(line,width) for line in frame))
             if rendered!=last:native.frame_cleared();syswrite(rendered);last=rendered
             if path and native_images:native.request(path,3,1,art_h,art_w)
@@ -65,9 +66,10 @@ def gallery(ui,fd,article,*,live=False,archive='',owner='local'):
             elif key in {'right','down'}:index=min(len(rows)-1,index+1)
             elif key in {'shiftleft','home'}:index=0
             elif key in {'shiftright','end'}:index=len(rows)-1
+            elif key=='W':notice=terminal_style.open_pane(Path.cwd());last=None
             elif key=='M':native_images=not native_images;native.frame_cleared();last=None
             elif key=='y':look_renderer.copy_text(row.get('source') or row.get('path',''))
-    finally:work.close();native.frame_cleared()
+    finally:work.close();native.frame_cleared();native.close()
 
 
 def syswrite(text):
