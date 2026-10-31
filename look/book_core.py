@@ -106,7 +106,9 @@ class Shelf:
             finally:
                 if os.path.exists(temp):os.unlink(temp)
 
-    def catalog(self):return {'entries':self.load()['entries'],'root':str(self.root)}
+    def catalog(self):
+        data=self.load()
+        return {'entries':[dict(r,reading=data.get('reading',{}).get(r['id'],{})) for r in data['entries']],'root':str(self.root)}
 
     def scan(self):
         if not self.root.is_dir():return dict(self.catalog(),warnings=['Books folder is empty or not mounted'])
@@ -183,6 +185,22 @@ class Shelf:
         if not path.resolve().is_relative_to(self.root.resolve()) or path.is_symlink() or not path.is_file():raise FileNotFoundError('Book is unavailable on its owner')
         return row,path
 
+    def progress(self,ident,fields=None):
+        self.item(ident)  # Progress never creates a reference to an arbitrary path.
+        if fields is None:return self.load().get('reading',{}).get(ident,{})
+        allowed={'chapter','paragraph','offset','finished'}
+        if not isinstance(fields,dict) or set(fields)-allowed:raise ValueError('Invalid reading progress')
+        for key in ('chapter','paragraph'):
+            if key in fields and (type(fields[key]) is not int or not 0<=fields[key]<100000):raise ValueError('Invalid reading position')
+        if 'finished' in fields and type(fields['finished']) is not bool:raise ValueError('Invalid completion state')
+        if 'offset' in fields:
+            import math
+            if not isinstance(fields['offset'],(int,float)) or not math.isfinite(fields['offset']) or not 0<=fields['offset']<=3600:raise ValueError('Invalid audio offset')
+        with self.edit() as data:
+            row=dict(data.setdefault('reading',{}).get(ident,{}),**fields,updated=time.time())
+            data['reading'][ident]=row
+        return row
+
     def fetch(self,url):
         parsed=urllib.parse.urlsplit(url)
         if parsed.hostname in {'www.gutenberg.org','gutenberg.org'} and parsed.path.endswith('.opds'):
@@ -223,8 +241,10 @@ class Shelf:
         finally:Path(temp).unlink(missing_ok=True)
 
 
-def gutenberg(query):
-    url=GUTENBERG+'?'+urllib.parse.urlencode({'query':query})
+def gutenberg(query='',sort=None):
+    params={'query':query}
+    if sort:params['sort_order']=sort
+    url=GUTENBERG+'?'+urllib.parse.urlencode(params)
     with urllib.request.urlopen(url,timeout=15) as response:root=xml(response.read(MAX_METADATA_BYTES+1))
     ns={'a':'http://www.w3.org/2005/Atom'};rows=[]
     for entry in root.findall('a:entry',ns):
@@ -232,7 +252,27 @@ def gutenberg(query):
         if not links:
             links=[n for n in entry.findall('a:link',ns) if n.get('rel')=='subsection' and n.get('href','').endswith('.opds')]
         if not links:continue
-        rows.append({'title':clean(entry.findtext('a:title',default='',namespaces=ns)),
-                     'author':clean(entry.findtext('a:author/a:name',default='',namespaces=ns) or entry.findtext('a:content',default='',namespaces=ns)),
-                     'url':urllib.parse.urljoin(url,links[0].get('href',''))})
+        row={'title':clean(entry.findtext('a:title',default='',namespaces=ns)),
+             'author':clean(entry.findtext('a:author/a:name',default='',namespaces=ns) or entry.findtext('a:content',default='',namespaces=ns)),
+             'url':urllib.parse.urljoin(url,links[0].get('href',''))}
+        image=next((n.get('href') for n in entry.findall('a:link',ns) if n.get('rel')=='http://opds-spec.org/image' and not n.get('href','').startswith('data:')),None)
+        if image:row['cover_url']=urllib.parse.urljoin(url,image)
+        rows.append(row)
     return rows[:20]
+
+
+SUBJECTS=('Adventure','Classics','Detective and mystery stories','History','Philosophy','Poetry','Science fiction','Travel')
+
+
+def discover(mode='popular',subject=''):
+    if mode=='subjects':return [{'title':s,'subject':s,'kind':'subject'} for s in SUBJECTS]
+    if mode=='subject':
+        if subject not in SUBJECTS:raise ValueError('Choose a listed subject')
+        return gutenberg('subject:'+subject,sort='downloads')
+    if mode=='popular':return gutenberg(sort='downloads')
+    if mode=='new':return gutenberg(sort='release_date')
+    if mode=='surprise':
+        import random
+        rows=gutenberg(sort='downloads')
+        return random.sample(rows,min(1,len(rows)))
+    raise ValueError('Choose popular, new, subjects or surprise')

@@ -1,3 +1,11 @@
+## 8.22.0 — Books discovery and browser narration (LOOK 4.69.0)
+
+- Add Gutenberg Popular, New arrivals, Subjects and Surprise discovery with explicit acquisition.
+- Add asynchronous EPUB/PDF covers and public catalog art, ASCII fallback and native image toggle in the terminal shelf.
+- Add shared Signal/Albert Books page and /books, read TITLE and continue reading commands.
+- Generate bounded local AAC narration for browser playback; persist chapter/paragraph/offset on the existing book owner and share paragraph progress with terminal read-aloud.
+- Preserve source books, private Bookokrat state, clipboard preferences and narrow layouts; protect in-progress narration preparation during managed updates.
+
 ## 8.21.2 — Quiet Wayland clipboard capture (LOOK 4.68.2)
 
 - Replace automatic Wayland clipboard reads with wl-paste change events. Never fall back to focus-stealing periodic reads, including on return from the book reader.

@@ -558,6 +558,17 @@ class Handler(BaseHTTPRequestHandler):
         self.send_response(404); self.send_header('Content-Length','0'); self.end_headers()
     def do_GET(self):
         path=urlparse(self.path).path
+
+        if path=='/books':
+            if not self._require_endpoint('lo.use'):return
+            import book_web
+            data=book_web.PAGE.encode()
+            self.send_response(200);self.send_header('Content-Type','text/html; charset=utf-8');self.send_header('Content-Length',str(len(data)));self.end_headers();self.wfile.write(data);return
+        if path.startswith('/api/books'):
+            if not self._require_endpoint('lo.use'):return
+            import book_web
+            try:return book_web.handle(self,NODE)
+            except Exception as exc:return self.send_json(502,{'error':str(exc)})
         if path=='/api/auth/status': return self._auth_status()
         if path=='/api/media/ticket': return self._media_ticket_request(urlparse(self.path))
         if path in {'/health','/v1/health'}: return self.send_json(200,{"ok":True,"surface":"albert","version":"1.4.0","fabric":NODE})
@@ -612,6 +623,17 @@ class Handler(BaseHTTPRequestHandler):
         if not target.is_file(): return self.send_error(404)
         data=target.read_bytes(); self.send_response(200); self.send_header('Content-Type',mimetypes.guess_type(target.name)[0] or 'application/octet-stream'); self.send_header('Cache-Control','no-cache'); self.send_header('Content-Length',str(len(data))); self.end_headers(); self.wfile.write(data)
     def do_POST(self):
+
+        if urlparse(self.path).path.startswith('/api/books'):
+            if not self._require_endpoint('lo.use'):return
+            import book_web
+            try:
+                size=int(self.headers.get('Content-Length') or 0)
+                if not 0<size<=65536:raise ValueError('Invalid Books request size')
+                payload=json.loads(self.rfile.read(size))
+                if not isinstance(payload,dict):raise ValueError('Invalid Books request')
+                return book_web.handle(self,NODE,payload)
+            except Exception as exc:return self.send_json(400,{'error':str(exc)})
         path=urlparse(self.path).path
         if path=='/api/notebook/answer':
             if not self._require_endpoint('lo.use'): return
