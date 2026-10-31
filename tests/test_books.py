@@ -131,6 +131,16 @@ def test_books_api_catalog_range_and_unknown_id(tmp_path,monkeypatch):
         assert failure.value.code==400
         accepted=urllib.request.Request(base+'/v1/books/reader',data=json.dumps({'action':'install','confirm':True}).encode())
         with urllib.request.urlopen(accepted) as response:assert json.load(response)['ok']
+        import wiki
+        monkeypatch.setattr(wiki,'root',lambda:tmp_path/'reference')
+        monkeypatch.setattr(wiki,'state_root',lambda:tmp_path/'reference-state')
+        with urllib.request.urlopen(base+'/v1/wiki') as response:assert json.load(response)['archives']==[]
+        denied=urllib.request.Request(base+'/v1/wiki',data=json.dumps({'action':'setup'}).encode())
+        with pytest.raises(urllib.error.HTTPError) as failure:urllib.request.urlopen(denied)
+        assert failure.value.code==400
+        monkeypatch.setattr(wiki,'start',lambda kind,**payload:{'ok':payload.get('confirmed') is True,'kind':kind})
+        accepted=urllib.request.Request(base+'/v1/wiki',data=json.dumps({'action':'setup','confirm':True}).encode())
+        with urllib.request.urlopen(accepted) as response:assert json.load(response)['ok']
         assert shelf.catalog()['entries'][0]['title']=='Edited title'
         assert Path(row['path']).read_bytes()==(tmp_path/'seed.epub').read_bytes()
         request=urllib.request.Request(base+'/v1/books/item?id='+row['id'],headers={'Range':'bytes=0-3'})

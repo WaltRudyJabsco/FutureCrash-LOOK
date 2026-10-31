@@ -287,9 +287,17 @@ def platform_service(action, name):
 
 def imports_active():
     imports = local_json('/v1/media/import?action=jobs')
+    try:
+        reference=local_json('/v1/wiki')
+        if any(row.get('state') not in {'complete','failed','cancelled'} for row in reference.get('jobs',[])):return True
+    except urllib.error.HTTPError as exc:
+        if exc.code!=404:raise
     # Detached import workers still belong to the node's systemd service;
     # restarting that service can kill them along with the node.
-    try:reader_setup=local_json('/v1/books/reader').get('setup') or {}
+    try:
+        reader_status=local_json('/v1/books/reader')
+        reader_setup=reader_status.get('setup') or {}
+        if (reader_status.get('speech_setup') or {}).get('state')=='installing':return True
     except urllib.error.HTTPError as exc:
         # The old node keeps serving during the new helper's drain phase.
         if exc.code != 404:raise

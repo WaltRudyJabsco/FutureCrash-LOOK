@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Future Crash + LOOK Unified Node 8.19.1.
+"""Future Crash + LOOK Unified Node 8.20.0.
 
 A small distributed supervisor for trusted personal machines. Immediate events stay
 asynchronous; a one-second fabric pulse reconciles presence, leases and stale work.
@@ -155,7 +155,7 @@ def _file_peer_json(peer,path):
     return _file_race(peer,path)[1]
 
 
-VERSION = "8.19.1"
+VERSION = "8.20.0"
 RELEASE_NAME = "FABRIC VISION"
 DEFAULT_HOST = "127.0.0.1"
 DEFAULT_PORT = 7332
@@ -2657,7 +2657,7 @@ def _local_web_search(query, limit=8):
     base=os.environ.get("FCL_SEARXNG_URL","http://127.0.0.1:8888").rstrip("/")
     request=urllib.request.Request(base+"/search?"+params,headers={
         "Accept":"application/json",
-        "User-Agent":"Future-Crash-Fabric/8.19.1",
+        "User-Agent":"Future-Crash-Fabric/8.20.0",
     })
     try:
         with urllib.request.urlopen(request,timeout=8) as response:
@@ -3830,11 +3830,26 @@ class API(BaseHTTPRequestHandler):
             raise PermissionError("Destination node is not paired and advertising")
         return peer, value
 
+    def _wiki_request(self,payload=None):
+        try:
+            _look_catalog_modules();import wiki
+            peer,_=self._file_target()
+            value=dict(payload or {})
+            if peer is not None:
+                result=http_json(_copy_route(peer)+'/v1/wiki',data=value,timeout=45)
+            else:
+                action=value.pop('action','status');result=wiki.local(action,**value)
+            return self.sendj(200,result)
+        except Exception as exc:return self.sendj(400,{'ok':False,'error':str(exc)})
+
     def _book_reader_request(self, payload=None):
         try:
             _look_catalog_modules();import book_reader
             if payload is None:value=book_reader.status()
             elif payload.get('action')=='install':value=book_reader.install(confirmed=payload.get('confirm'))
+            elif payload.get('action')=='speech-setup':
+                import book_speech
+                value=book_speech.setup(confirmed=payload.get('confirm'))
             else:raise ValueError('Reader setup supports only explicit Bookokrat installation')
             return self.sendj(200,value)
         except Exception as exc:return self.sendj(400,{'ok':False,'error':str(exc)})
@@ -4582,6 +4597,7 @@ class API(BaseHTTPRequestHandler):
             except ImportError: import notifications
             return self.sendj(200,{'ok':True,'settings':notifications.settings()})
         if path == "/v1/downloads" or path.startswith("/v1/downloads/"): return self._downloads_request()
+        if path == "/v1/wiki": return self._wiki_request()
         if path == "/v1/books/reader": return self._book_reader_request()
         if path == "/v1/books": return self._books_request()
         if path == "/v1/books/fabric": return self._books_request(fabric=True)
@@ -4841,6 +4857,7 @@ class API(BaseHTTPRequestHandler):
         if not self._authorized_ingress(path): return
         if path == "/v1/files/copy": return self._files_copy()
         d = self.body()
+        if path == "/v1/wiki": return self._wiki_request(d)
         if path == "/v1/books/reader": return self._book_reader_request(d)
         if path == "/v1/books": return self._books_request(d)
         if path == '/v1/media/artwork/settings':

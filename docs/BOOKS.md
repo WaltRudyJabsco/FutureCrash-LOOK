@@ -31,6 +31,8 @@ An empty shelf does not scan the home directory or initialize attached drives.
 | `/` | Search title, author, shelf or format; Enter returns to browsing |
 | Enter | Read in Bookokrat when available; quit it with q to return |
 | `o` | Open in the system/configured reader |
+| `a` | Open local read-aloud controls; choose a paragraph, then Enter |
+| Shift-P | Open LK Clip history |
 | `s` | Cycle All, To Read, Reading, Finished and custom shelf filters |
 | `m` | Cycle the selected book's reading state |
 | `e` | Edit prefilled title, author, custom shelf and reading-position label |
@@ -104,9 +106,54 @@ Auto uses Bookokrat when installed. PDF reading in-terminal needs a supported
 graphics terminal; Auto can use the system reader otherwise. EPUB can be read as
 text in an ordinary terminal. Bookokrat owns keys while reading: **q** returns to
 the shelf, **?** opens help, arrows scroll, Page Up/Down page, and **Space then t**
-selects its theme. Existing Bookokrat configuration is preserved. LOOK does not
-rewrite its keybindings, themes or bookmarks.
+selects its theme. Space commands are **sequences**: tap and release Space, then
+press the letter. Do not hold Space; split-keyboard hold/layer behavior can remain.
+
+LOOK adds missing defaults to Bookokrat's `all` keybinding group on reader launch:
+**Shift-Up/Down** page, **Shift-Left/Right** go to the beginning/end of the current
+chapter/document. Ordinary Left/Right still change EPUB chapters. Explicit user
+bindings take precedence. The first changed keybinding file is backed up as
+`keybindings.toml.look-backup`; comments and unrelated settings are retained.
+Use `nop` or a custom action to override a LOOK default. Malformed TOML is reported
+without replacing it. Bookokrat themes and bookmarks remain reader-owned.
+
+**Copy:** v selects characters, Shift-V selects lines, c copies the selection;
+Space then c copies the chapter. These use the regular system clipboard. When
+LK Clip capture is enabled, its watcher captures reader copies and LOOK checks
+once more on return to catch the last copy. History remains local, limited to ten
+text items, and disabled capture stays disabled. Run `lk clip on` or open Shift-P
+from the Books shelf to enable it; `lk clip off` stops capture.
 
 [Bookokrat documentation](https://github.com/bugzmanov/bookokrat) describes its
 native reader controls and optional PDF support. The integration was tested with
 Bookokrat 0.3.14 on macOS, including a real terminal launch/read/quit/shelf return.
+
+
+## Read aloud
+
+Press **a** on a shelf book, or run:
+
+```
+lk books listen "/path/book.epub" --chapter 3 --paragraph 8
+lk books voices
+lk books speech-setup
+```
+
+The read-aloud view lists chapter paragraphs. Up/Down chooses a paragraph;
+Left/Right changes chapter; Shift-arrows page/go to ends. **Enter** starts there,
+**Space** pauses/resumes, **s** stops, **v** cycles installed voices and **Esc**
+stops this reader's speech and returns. Completing a paragraph advances within
+the chapter. Moving the selection stops speech until Enter, so browsing does not
+start unwanted audio. The voice choice and speech position are saved locally.
+These positions are separate from Bookokrat's private cursor/bookmarks; LOOK does
+not guess where another reader is currently positioned.
+
+macOS uses installed system voices, preferring Jamie (Premium), then an available
+British voice; it does not silently download Apple voices. The optional fixed
+Piper setup installs `piper-tts` in an isolated environment and downloads
+`en_GB-alan-medium` for local neural speech on Linux or Mac. It reports durable
+setup status and updates wait while setup runs. Basic `espeak-ng` is an explicitly
+labelled fallback when present. No book text is sent to an online speech service.
+PDF speech needs text extraction (`pdftotext`); image-only scans need OCR first.
+Temporary Piper audio is removed on exit. Controls affect only processes launched
+by this read-aloud view; music queues and system audio routing are untouched.
