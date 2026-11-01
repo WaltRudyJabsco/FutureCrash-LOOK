@@ -26,17 +26,21 @@ import time
 SCHEMA = 1
 DAILY_SECONDS = 24 * 60 * 60
 MIN_FREE_BYTES = 512 * 1024 * 1024
-MAX_CAPSULE_BYTES = 512 * 1024 * 1024
+# Capsules stream through temporary files. The live essential-state inventory
+# already exceeds 512 MiB; retain a finite 1 GiB bound including Mercury history.
+MAX_CAPSULE_BYTES = 1024 * 1024 * 1024
 CONFIG_TREES = ('.config/future-crash-look', '.config/look', '.future_crash')
 STATE_TREES = ('.local/share/look/notebook', '.local/share/look/personalities',
                '.local/share/look/memory_queue', '.local/share/look/skill_feedback_queue',
                '.local/share/look/receipts', '.local/share/look/jobs', '.local/share/look/events',
                '.local/share/future-crash-look/artifacts',
                '.local/share/future-crash-look/albert-artifacts')
+MERCURY_APPS = ('Applications/Mercury-Writer', '.local/share/mercury-writer')
+MERCURY_DATA = ('library', 'state', 'history', 'workspace')
 EXCLUDED = ['audio/video and documents referenced by catalogs', 'models and embeddings',
             'installed code (reinstall the recorded release)', 'generated file index',
             'logs, caches, sockets, PIDs, locks, transient playback',
-            'SSH keys and operating-system accounts', 'other applications and their data']
+            'SSH keys and operating-system accounts', 'other applications except Mercury writing data']
 SKIP_NAMES = {'recovery', 'recovery-keys', 'completions', 'advertisement.json', 'pair.json', 'lock'}
 SKIP_SUFFIXES = ('.lock', '.log', '.pid', '.sock', '.tmp', '-wal', '-shm')
 
@@ -69,7 +73,8 @@ def sources(home):
     home = Path(home)
     candidates = []
     skipped = []
-    for relative in CONFIG_TREES + STATE_TREES:
+    mercury_trees=tuple(app+'/'+folder for app in MERCURY_APPS for folder in MERCURY_DATA)
+    for relative in CONFIG_TREES + STATE_TREES + mercury_trees:
         base = home / relative
         if base.is_symlink():
             skipped.append(relative); continue
@@ -80,6 +85,8 @@ def sources(home):
                 if p.is_symlink() or name in SKIP_NAMES:
                     dirs.remove(name); skipped.append(str(p.relative_to(home)))
             candidates.extend(Path(folder) / name for name in files)
+    for app in MERCURY_APPS:
+        candidates.extend(home/app/name for name in ('mercury_config.json','mercury_memory.json','mercury_epoch.json'))
     for relative in ('.local/share/look', '.local/share/future-crash-look'):
         base = home / relative
         if base.is_symlink():
@@ -150,6 +157,11 @@ def export(home, output):
         if lock.exists():
             stream = stack.enter_context(lock.open('r'))
             fcntl.flock(stream, fcntl.LOCK_SH)
+        for app in MERCURY_APPS:
+            writer_lock=home/app/'.mercury.lock'
+            if writer_lock.is_file() and not any(path.is_symlink() for path in (writer_lock,*writer_lock.parents) if path!=home and home in path.parents):
+                stream=stack.enter_context(writer_lock.open('r'))
+                fcntl.flock(stream,fcntl.LOCK_SH)
         paths, skipped = sources(home)
         rows = []
         for source in paths:
@@ -157,9 +169,11 @@ def export(home, output):
             destination = output / 'home' / relative
             copy_state(source, destination)
             rows.append({'path': relative, 'size': destination.stat().st_size, 'sha256': digest(destination)})
+    mercury=verify_mercury(output/'home',rows)
     manifest = {'schema': SCHEMA, 'created_at': time.time(), 'node': capsule_owner(home), 'label': socket.gethostname() + ' / ' + home.name,
                 'files': rows, 'skipped': skipped, 'excluded': EXCLUDED,
-                'consistency': 'SQLite online snapshots; notebook lock; other files checked individually. Not a global transaction.'}
+                'mercury':mercury,
+                'consistency': 'SQLite online snapshots; notebook and Mercury writer locks; other files checked individually. Not a global transaction.'}
     private_json(output / 'manifest.json', manifest)
     verify(output)
     return {'files': len(rows), 'bytes': sum(row['size'] for row in rows), 'node': manifest['node']}
@@ -184,7 +198,25 @@ def verify(output):
             with contextlib.closing(sqlite3.connect(path.as_uri() + '?mode=ro', uri=True)) as db:
                 if db.execute('PRAGMA quick_check').fetchone()[0] != 'ok':
                     raise ValueError('Restored database failed integrity check')
-    return {'verified': True, 'files': len(seen)}
+    return {'verified': True, 'files': len(seen),'mercury':verify_mercury(output/'home',manifest['files'])}
+
+
+def verify_mercury(home,rows):
+    selected=[row for row in rows if any(row['path'].startswith(app+'/') for app in MERCURY_APPS)]
+    projects=0;revisions=0
+    for app in MERCURY_APPS:
+        library=Path(home)/app/'library/projects'
+        for head in library.glob('*/revision.json'):
+            meta=json.loads(head.read_text());identity=meta.get('revision_id')
+            if not isinstance(identity,str) or not re.fullmatch(r'[A-Za-z0-9_.+\-]{1,160}',identity):raise ValueError('Invalid Mercury recovery head')
+            snapshot=head.parent/'revisions'/(identity+'.json')
+            if not snapshot.is_file():raise ValueError('Mercury recovery snapshot is missing its head revision')
+            record=json.loads(snapshot.read_text())
+            checksum=hashlib.sha256(json.dumps(record['project'],ensure_ascii=False,sort_keys=True,separators=(',',':')).encode()).hexdigest()
+            if record.get('revision')!=meta or checksum!=meta.get('content_sha256'):raise ValueError('Mercury recovery manuscript/revision mismatch')
+            projects+=1
+        revisions+=sum(1 for _ in library.glob('*/revisions/*.json'))
+    return {'projects':projects,'revisions':revisions,'files':len(selected),'bytes':sum(row['size'] for row in selected)}
 
 
 def mount_for(uuid):
@@ -333,7 +365,8 @@ def store_capsule(home, repo, capsule, receipt_path):
         restore(home, Path(folder) / 'verified', host=host)
     receipt = {'files': len(manifest['files']), 'bytes': sum(row['size'] for row in manifest['files']),
                'node': host, 'label': manifest.get('label') or host, 'verified_at': time.time(), 'uuid': load_config(home)['uuid'],
-               'restore_tested': True, 'scope': 'essential state of this node', 'excluded': EXCLUDED}
+               'restore_tested': True, 'scope': ('Fabric essential state and Mercury writing data' if manifest.get('mercury',{}).get('files') else 'Fabric essential state; no Mercury writing data in this capsule'), 'excluded': EXCLUDED,
+               'mercury':manifest.get('mercury',{'projects':0,'revisions':0,'files':0,'bytes':0})}
     private_json(receipt_path, receipt)
     return receipt
 

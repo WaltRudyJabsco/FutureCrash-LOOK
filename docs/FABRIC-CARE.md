@@ -55,8 +55,9 @@ installed bundles agree, not that they are the latest upstream release.
 
 ## Scope and evidence
 
-Recovery covers Fabric identity, Notes and settings. Documents, photos and media
-are excluded. A node counts as recently backed up only when its cryptographic
+Recovery covers Fabric identity, Notes, settings and Mercury manuscripts/revision
+history. Other documents, photos and media are excluded. Mercury protection is
+reported only by restore-tested receipts containing explicit Mercury counts. A node counts as recently backed up only when its cryptographic
 capsule-owner identity has a restore-tested receipt from the past 24 hours,
 including receipts held by another backup owner. Invalid, future or stale dates
 and unverified snapshots do not count. Unreachable nodes are reported as unknown.

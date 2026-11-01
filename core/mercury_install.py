@@ -18,9 +18,9 @@ import time
 import urllib.request
 import uuid
 
-REVISION='56e79394b7c7ba7de2134294f4c836e385c8be02'
-ARCHIVE_SHA256='8736b13503fa48c5381255d16d1cdcb956f99a5edd73f9b07e3dcd911f044ec2'
-VERSION='1.6.0'
+REVISION='f27aa1dee497e1dfc1e5a856ba332e71b5f7462f'
+ARCHIVE_SHA256='1bdee147b2fdb074e76be26951e32b3015f15c2b2ade1855f3b8291f749e94eb'
+VERSION='1.6.1'
 PORT=8765
 LABEL='com.mercury.writer'
 
@@ -158,7 +158,7 @@ def run(folder,enable_sync):
     def phase(state,**fields):
         receipt.update(state=state,updated=time.time(),**fields);atomic(root()/'status.json',receipt)
     try:
-        if sys.version_info<(3,12):raise RuntimeError('Mercury 1.6 needs Python 3.12 or later; existing Mercury was left unchanged')
+        if sys.version_info<(3,12):raise RuntimeError('Mercury needs Python 3.12 or later; existing Mercury was left unchanged')
         if app.is_symlink():raise ValueError('Mercury app is a symlink; preserve it and update its owning checkout explicitly')
         phase('downloading')
         archive=folder/'release.tar.gz'
