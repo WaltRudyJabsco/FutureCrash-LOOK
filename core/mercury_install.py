@@ -18,9 +18,9 @@ import time
 import urllib.request
 import uuid
 
-REVISION='f27aa1dee497e1dfc1e5a856ba332e71b5f7462f'
-ARCHIVE_SHA256='1bdee147b2fdb074e76be26951e32b3015f15c2b2ade1855f3b8291f749e94eb'
-VERSION='1.6.1'
+REVISION='924a3e8400c393e83f7c957ab0e9cd3c6077a89b'
+ARCHIVE_SHA256='ab4d0c9746cb4c1b18c602b3876ba55de1273b8a89c9d573cced46f8690ca1f9'
+VERSION='1.6.2'
 PORT=8765
 LABEL='com.mercury.writer'
 
