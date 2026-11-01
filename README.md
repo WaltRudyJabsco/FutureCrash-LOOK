@@ -1,5 +1,20 @@
 # Future Crash + LOOK 8.26.1 — FABRIC MEDIA
 
+## Current interfaces and documentation
+
+![Commands browser](docs/screenshots/commands.png)
+
+Fresh capture of the running Commands browser with an isolated demo home.
+Command keys use one blue accent with subdued descriptions. Page Up/Down and
+Shift+Up/Down move a page; Home/End and Shift+Left/Right select the first/last item.
+The footer wraps to the terminal width.
+
+The [generated reference](look/docs/REFERENCE.md), machine-readable
+[command help](look/docs/command_help.json), and [man page](look/lk.1) share the
+command registry. `python3 tools/command_reference.py --check` detects drift.
+See [documentation maintenance](docs/DOCUMENTATION.md) for manual installation
+and the relationship between these repositories.
+
 8.26.1 adds `lk wd` as a shortcut for Words, plus a fresh offline word and definition on each blank desk launch. See [Offline words](docs/WORDS.md).
 
 8.23.1 adds Wiki research links in Notes. Press c in an article to copy a Markdown
