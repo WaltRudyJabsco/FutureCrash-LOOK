@@ -24,6 +24,7 @@ DEFAULT_RATE=155
 MIN_SPEED=.5
 MAX_SPEED=2.0
 SPEED_STEP=.1
+PIPER_MODELS={'piper:alan':'en_GB-alan-medium','piper:alba':'en_GB-alba-medium'}
 MAX_NATIVE_TEXT_CHARS=128000
 MAX_NATIVE_REQUEST_BYTES=MAX_NATIVE_TEXT_CHARS*6+4096
 MAX_PASSAGE_CHARS=6000
@@ -141,13 +142,20 @@ def voices():
         for line in result.stdout.splitlines():
             match=re.match(r'(.+?)\s+(en_[A-Z]+)\s+#',line)
             if match:rows.append({'id':'say:'+match[1].strip(),'name':match[1].strip(),'locale':match[2],'engine':'say'})
-    model=Path.home()/'.local/share/look/book-speech/en_GB-alan-medium.onnx'
-    piper=Path.home()/'.local/share/look/book-speech/venv/bin/piper'
-    if piper.is_file() and model.is_file() and model.with_suffix('.onnx.json').is_file():
-        rows.append({'id':'piper:alan','name':'Alan (neural, offline)','locale':'en_GB','engine':'piper'})
-    if book_reader.binary('espeak-ng'):rows.append({'id':'espeak:en-gb','name':'English UK (basic fallback)','locale':'en_GB','engine':'espeak'})
+    root=Path.home()/'.local/share/look/book-speech'
+    piper=root/'venv/bin/piper'
+    for ident,stem in PIPER_MODELS.items():
+        model=root/(stem+'.onnx')
+        if piper.is_file() and model.is_file() and model.with_suffix('.onnx.json').is_file():
+            name='Alan' if ident=='piper:alan' else 'Alba'
+            rows.append({'id':ident,'name':name+' (neural, offline)','locale':'en_GB','engine':'piper'})
+    if book_reader.binary('espeak-ng'):
+        rows.extend([{'id':'espeak:en-gb','name':'English UK (basic male fallback)','locale':'en_GB','engine':'espeak'},
+                     {'id':'espeak:en-gb+f3','name':'English UK (basic female fallback)','locale':'en_GB','engine':'espeak'}])
     # Repeated macOS IDs made index() jump back rather than wrap at the end.
-    return list({row['id']:row for row in rows}.values())
+    rows=list({row['id']:row for row in rows}.values())
+    standard=[row for row in standard_voices(rows).values() if row]
+    return standard+[row for row in rows if row['id'] not in {voice['id'] for voice in standard}]
 
 
 def preferred_voice(rows):
@@ -155,8 +163,31 @@ def preferred_voice(rows):
     return next((r for r in rows if r['id']==saved),None) or default_voice(rows)
 
 
+def standard_voices(rows):
+    """Choose installed narrators explicitly; never infer gender from a locale."""
+    def choose(ids):return next((row for ident in ids for row in rows if row['id']==ident),None)
+    return {'male':choose(('say:Jamie (Premium)','say:Jamie (Enhanced)','piper:alan','say:Daniel (Premium)','say:Daniel (Enhanced)','say:Daniel','say:Daniel (English (UK))','espeak:en-gb')),
+            'female':choose(('say:Serena (Premium)','say:Serena (Enhanced)','say:Kate (Premium)','say:Kate (Enhanced)','piper:alba','say:Serena','say:Kate','say:Shelley (English (UK))','say:Flo (English (UK))','espeak:en-gb+f3'))}
+
+
 def default_voice(rows):
-    return next((r for r in rows if r['id']=='say:Jamie (Premium)'),None) or next((r for r in rows if r['engine']=='piper'),None) or next((r for r in rows if r['id']=='say:Daniel'),None) or next((r for r in rows if r.get('locale')=='en_GB'),None) or next(iter(rows),None)
+    return standard_voices(rows)['male'] or next((r for r in rows if r.get('locale')=='en_GB'),None) or next(iter(rows),None)
+
+
+def voice_label(voice,rows):
+    kind=next((kind for kind,row in standard_voices(rows).items() if row and row['id']==voice['id']),None)
+    return ('British '+kind+' — ' if kind else '')+voice['name']
+
+
+def piper_model(voice):
+    # Model filenames come from our registry, never from request parameters.
+    stem=PIPER_MODELS.get(voice['id'])
+    if not stem:raise ValueError('Unknown Piper narration voice')
+    return Path.home()/'.local/share/look/book-speech'/(stem+'.onnx')
+
+
+def espeak_voice(voice):
+    return 'en-gb+f3' if voice['id']=='espeak:en-gb+f3' else 'en-gb'
 
 
 def reading_speed(value=1):
@@ -186,10 +217,10 @@ class Speech:
             self.launch([book_reader.binary('say'),'-v',self.voice['name'],'-r',str(self.rate),'-f',str(source)])
             self.phase='reading'
         elif self.voice['engine']=='espeak':
-            self.launch([book_reader.binary('espeak-ng'),'-v','en-gb','-s',str(self.rate),'-f',str(source)]);self.phase='reading'
+            self.launch([book_reader.binary('espeak-ng'),'-v',espeak_voice(self.voice),'-s',str(self.rate),'-f',str(source)]);self.phase='reading'
         else:
             root=Path.home()/'.local/share/look/book-speech'
-            self.launch([str(root/'venv/bin/piper'),'-m',str(root/'en_GB-alan-medium.onnx'),'--input-file',str(source),'-f',str(folder/'passage.wav')]);self.phase='preparing'
+            self.launch([str(root/'venv/bin/piper'),'-m',str(piper_model(self.voice)),'--input-file',str(source),'-f',str(folder/'passage.wav')]);self.phase='preparing'
     def pause(self):
         if self.proc and self.proc.poll() is None:
             os.killpg(self.proc.pid,signal.SIGCONT if self.paused else signal.SIGSTOP);self.paused=not self.paused
@@ -209,7 +240,7 @@ class Speech:
 def desk(ui,path,title='',chapter=None,paragraph=None,reading=None,save_reading=None):
     import clipboard_shelf
     rows=chapters(path);available=voices();voice=preferred_voice(available)
-    if not voice:raise ValueError('No local voice. Install a macOS voice or run lk books speech-setup for the offline British neural voice')
+    if not voice:raise ValueError('No local voice. Install a macOS voice or run lk books speech-setup for offline British male/female neural voices')
     ident=book_core.digest(path);state_path=Path.home()/'.local/share/look/book-speech/positions.json'
     try:positions=json.loads(state_path.read_text());saved=positions.get(ident,{})
     except (OSError,ValueError):positions={};saved={}
@@ -236,7 +267,7 @@ def desk(ui,path,title='',chapter=None,paragraph=None,reading=None,save_reading=
             if speech.error:notice=speech.error
             frame=[ui._c('READ ALOUD','1;36')+' · '+safe_text(title or Path(path).stem),
                    safe_text(rows[ci]['title'])+f' · chapter {ci+1}/{len(rows)} · paragraph {pi+1}/{len(rows[ci]["paragraphs"])}',
-                   safe_text(voice['name'])+f' · voice {available.index(voice)+1}/{len(available)} · {speed:.1f}× · '+('paused' if speech.paused else speech.phase)]
+                   safe_text(voice_label(voice,available))+f' · voice {available.index(voice)+1}/{len(available)} · {speed:.1f}× · '+('paused' if speech.paused else speech.phase)]
             colors=ui.terminal_style.list_colors()
             footer=clipboard_shelf.command_rows([('↑↓','paragraph'),('←→','chapter'),('PgUp/PgDn','scroll'),('Shift-←/→','ends'),('Enter','read'),('Space','pause/resume'),('s','stop'),('v','next voice'),('V','default voice'),('−/+','speed'),('P','clipboard'),('W','shell pane'),('q/Esc','return')],width,colors)
             notes=clipboard_shelf.wrap_cells(safe_text(notice),width)[:2]
@@ -309,7 +340,7 @@ def setup_status():
 
 
 def setup(confirmed=False):
-    if confirmed is not True:raise PermissionError('Confirm the optional Piper package and British voice download')
+    if confirmed is not True:raise PermissionError('Confirm the optional Piper package and two British voice downloads (Alan and Alba, about 130 MB of models)')
     root=Path.home()/'.local/share/look/book-speech';root.mkdir(parents=True,exist_ok=True)
     import fcntl,sys,time
     with (root/'setup.lock').open('a') as lock:
@@ -332,8 +363,9 @@ def setup_worker():
         python=root/'venv/bin/python'
         subprocess.run([sys.executable,'-m','venv',str(root/'venv')],check=True,timeout=60,stdin=subprocess.DEVNULL)
         subprocess.run([str(python),'-m','pip','install','piper-tts'],check=True,timeout=600,stdin=subprocess.DEVNULL)
-        subprocess.run([str(python),'-m','piper.download_voices','--data-dir',str(root),'en_GB-alan-medium'],check=True,timeout=600,stdin=subprocess.DEVNULL)
-        if not (root/'en_GB-alan-medium.onnx').is_file() or not (root/'en_GB-alan-medium.onnx.json').is_file():raise RuntimeError('British voice download is incomplete')
+        subprocess.run([str(python),'-m','piper.download_voices','--data-dir',str(root),*PIPER_MODELS.values()],check=True,timeout=600,stdin=subprocess.DEVNULL)
+        for stem in PIPER_MODELS.values():
+            if not (root/(stem+'.onnx')).is_file() or not (root/(stem+'.onnx.json')).is_file():raise RuntimeError('British voice download is incomplete: '+stem)
         value={'state':'ready','finished':time.time()}
     except Exception as exc:value={'state':'failed','error':str(exc),'log':str(root/'setup.log'),'finished':time.time()}
     book_reader.write_json(root/'setup.json',value)
@@ -348,7 +380,7 @@ def native_worker():
     speed=reading_speed(preferences().get('speed',1));player=Speech(voice,round(DEFAULT_RATE*speed))
     token=0;chunks=[];part=0;pending=b''
     def emit(state,**fields):
-        print(json.dumps(dict(state=state,id=token,voice=voice['name'],speed=speed,**fields)),flush=True)
+        print(json.dumps(dict(state=state,id=token,voice=voice_label(voice,available),speed=speed,**fields)),flush=True)
     selector=selectors.DefaultSelector();selector.register(sys.stdin,selectors.EVENT_READ)
     emit('ready')
     try:

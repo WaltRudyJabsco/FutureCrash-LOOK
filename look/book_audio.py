@@ -61,7 +61,7 @@ def _voices(minute):
 
 def voice_options():
     rows=_voices(int(time.monotonic()//60))
-    return {'voices':rows,'default':book_speech.preferred_voice(rows),'automatic':book_speech.default_voice(rows)}
+    return {'voices':rows,'default':book_speech.preferred_voice(rows),'automatic':book_speech.default_voice(rows),'standard':book_speech.standard_voices(rows)}
 
 
 def render(text,ident,chapter,paragraph,voice_id=''):
@@ -83,10 +83,10 @@ def render(text,ident,chapter,paragraph,voice_id=''):
             folder=Path(folder);source=folder/'text.txt';source.write_text(text)
             wave=folder/'voice.wav'
             if voice['engine']=='say':args=[book_speech.book_reader.binary('say'),'-v',voice['name'],'-r',str(book_speech.DEFAULT_RATE),'-f',str(source),'-o',str(wave),'--file-format=WAVE','--data-format=LEI16@22050']
-            elif voice['engine']=='espeak':args=[book_speech.book_reader.binary('espeak-ng'),'-v','en-gb','-s',str(book_speech.DEFAULT_RATE),'-f',str(source),'-w',str(wave)]
+            elif voice['engine']=='espeak':args=[book_speech.book_reader.binary('espeak-ng'),'-v',book_speech.espeak_voice(voice),'-s',str(book_speech.DEFAULT_RATE),'-f',str(source),'-w',str(wave)]
             else:
                 base=Path.home()/'.local/share/look/book-speech'
-                args=[str(base/'venv/bin/piper'),'-m',str(base/'en_GB-alan-medium.onnx'),'--input-file',str(source),'-f',str(wave)]
+                args=[str(base/'venv/bin/piper'),'-m',str(book_speech.piper_model(voice)),'--input-file',str(source),'-f',str(wave)]
             subprocess.run(args,stdin=subprocess.DEVNULL,capture_output=True,timeout=120,check=True)
             target=folder/'audio.m4a'
             subprocess.run([ffmpeg,'-nostdin','-v','error','-i',str(wave),'-c:a','aac','-b:a','96k','-movflags','+faststart',str(target)],stdin=subprocess.DEVNULL,capture_output=True,timeout=30,check=True)

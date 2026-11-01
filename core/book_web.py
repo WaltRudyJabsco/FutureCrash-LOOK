@@ -27,8 +27,9 @@ nav,.preferences,.masthead{display:flex;align-items:center;gap:8px;flex-wrap:wra
 .masthead h1{font-size:25px;margin:0}
 .preferences{font:14px system-ui;color:var(--muted)}
 #font-size{min-width:3ch;text-align:center}
-#search{display:flex;gap:8px;margin:16px 0}
-#query{flex:1;min-width:0}
+#search{display:flex;flex-wrap:wrap;gap:8px;margin:16px 0}
+.shelf-tools{font:14px system-ui;display:flex;gap:10px;align-items:center;flex-wrap:wrap}#library [hidden]{display:none}#items button.owned{opacity:.65}#items small{display:block;font:13px system-ui;color:var(--muted);margin-top:5px}
+#query{flex:1 1 240px;min-width:0}
 #status{font:14px/1.5 system-ui;color:var(--muted);min-height:1.5em;margin:8px 0 14px}
 #items button{display:block;text-align:left;width:100%;padding:16px 18px;border-left:8px solid #9caaad;margin:8px 0}
 #items button:nth-child(even){background:var(--panel);border-left-color:#b9a786}
@@ -129,17 +130,21 @@ figcaption{font:14px/1.5 system-ui;color:var(--muted);margin-top:10px}
 <nav>
 <button id="shelf">My shelf</button>
 <button id="continue">Continue reading</button>
+<button id="discover">Discover Gutenberg</button>
 <button data-mode="popular">Popular</button>
 <button data-mode="new">New arrivals</button>
 <button data-mode="subjects">Subjects</button>
 <button data-mode="surprise">Surprise me</button>
 </nav>
 <form id="search">
-<input id="query" aria-label="Search your shelf" placeholder="Find a book on your shelf">
-<button>Search shelf</button>
+<input id="query" aria-label="Book title or author" placeholder="Book title or author" maxlength="500">
+<button type="submit" value="shelf">Search shelf</button>
+<button type="submit" value="gutenberg">Search Gutenberg</button>
 </form>
+<div class="shelf-tools"><label id="sort-label" for="shelf-sort">Sort shelf</label><select id="shelf-sort"><option value="title">Title · A–Z</option><option value="author">Author · A–Z</option><option value="opened">Last opened</option><option value="added">Date added</option></select><span id="result-count"></span></div>
 <div id="items">
 </div>
+<button id="load-more" hidden>Load more books</button>
 </section>
 </main>
 <script src="/browser-views.js">
@@ -154,7 +159,7 @@ def handle(handler,node_url,payload=None):
     parsed=urllib.parse.urlsplit(handler.path)
     action=parsed.path.removeprefix('/api/books').strip('/')
     query=urllib.parse.parse_qs(parsed.query)
-    allowed={'target','id','chapter','paragraph','mode','subject','image','content','voice'}
+    allowed={'target','id','chapter','paragraph','mode','subject','image','content','voice','query','start_index'}
     query={k:v[0] for k,v in query.items() if k in allowed}
     route={'':'/v1/books/fabric','read':'/v1/books/read','audio':'/v1/books/audio','voices':'/v1/books/voices','cover':'/v1/books/cover','image':'/v1/books/image','discover':'/v1/books/discover','discovery-cover':'/v1/books/discovery-cover'}.get(action)
     if payload is not None:

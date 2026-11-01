@@ -125,6 +125,7 @@ def desk(ui,query='',owner=None):
             visible=results if results is not None else rows_for(value,query,shelf)
             if sort_reverse:visible=list(reversed(visible))
             index=max(0,min(index,max(0,len(visible)-1)));chosen=visible[index] if visible else None
+            owned_gutenberg={book_core.gutenberg_id(r):r for r in value.get('entries',[]) if book_core.gutenberg_id(r)}
             controls='↑↓ move · Shift-arrows page/ends · Enter '+('import book' if results is not None else 'read')+' · a read aloud · o system reader · / search · s shelves · m reading state · e edit · i import · g Gutenberg · d discover · I preview · M image/ASCII · k keep offline · y copy link · R scan/refresh · G reverse · P clipboard · W shell pane · Esc back'
             if width<80 and not help_visible:controls='↑↓ select · Enter open · / search · W pane · ? help · Esc back'
             else:controls+=' · ? help'
@@ -144,7 +145,7 @@ def desk(ui,query='',owner=None):
             frame=[ui._c('LOOK BOOKS','1;36')+' · '+('PROJECT GUTENBERG' if results is not None else shelf)+f' · {len(visible)} books · import to '+safe_text(owner),
                    ui._c('TITLE'.ljust(title_w)+'  '+'AUTHOR'.ljust(author_w)+'  FORMAT','2')]
             for pos,row in enumerate(visible[top:top+page],top):
-                text=ui._media_find_cell(safe_text(row.get('title','')),title_w)+'  '+ui._media_find_cell(safe_text(row.get('author','')),author_w)+'  '+safe_text(row.get('format','EPUB'))
+                text=ui._media_find_cell(safe_text(('[on shelf] ' if results is not None and book_core.gutenberg_id(row) in owned_gutenberg else '')+row.get('title','')),title_w)+'  '+ui._media_find_cell(safe_text(row.get('author','')),author_w)+'  '+safe_text(row.get('format','EPUB'))
                 frame.append(terminal_style.list_row(('› ' if pos==index else '  ')+text,list_width,pos,pos==index,colors))
             frame+=['']*max(0,page-len(visible[top:top+page]))
             if art_width:
@@ -217,6 +218,8 @@ def desk(ui,query='',owner=None):
                 elif key in {'enter','\r','\n'} and chosen:
                     if results is not None:
                         if chosen.get('kind')=='subject':results=book_core.discover('subject',chosen['subject']);index=0;continue
+                        if book_core.gutenberg_id(chosen) in owned_gutenberg:
+                            results=None;index=0;notice='Already on your Fabric shelf; choose the existing copy to read';continue
                         answer=ask('Download “'+chosen['title']+'” to '+owner+'? y/N')
                         if answer and answer.casefold()=='y':request('fetch',node=owner,url=chosen['url']);value=catalog();results=None;notice='Book imported'
                     else:
@@ -278,7 +281,8 @@ def main(args,ui):
     try:
         if selected.action in {'listen','voices','speech-setup'}:
             import book_speech
-            if selected.action=='voices':value={'voices':book_speech.voices(),'setup':book_speech.setup_status()}
+            if selected.action=='voices':
+                available=book_speech.voices();value={'voices':available,'standard':book_speech.standard_voices(available),'setup':book_speech.setup_status()}
             elif selected.action=='speech-setup':value=book_speech.setup(confirmed=True)
             else:
                 if len(selected.values)!=1:raise ValueError('Use lk books listen FILE [--chapter N --paragraph N]')

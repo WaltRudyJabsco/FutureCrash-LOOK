@@ -24,6 +24,20 @@ MAX_SCAN_FILES=10000
 GUTENBERG='https://www.gutenberg.org/ebooks/search.opds/'
 
 
+def gutenberg_id(row):
+    """Match a Gutenberg record number, never a title or author guess."""
+    if re.fullmatch(r'[1-9][0-9]{0,8}',str(row.get('gutenberg_id',''))):return str(row['gutenberg_id'])
+    for key in ('source_url','url','identifier'):
+        for value in str(row.get(key,'')).split('; '):
+            try:parsed=urllib.parse.urlsplit(value)
+            except ValueError:continue
+            if parsed.hostname not in {'www.gutenberg.org','gutenberg.org'}:continue
+            match=re.fullmatch(r'/ebooks/([1-9][0-9]*)(?:\.opds|\.epub(?:\d)?(?:\.images|\.noimages)?)?/?',parsed.path)
+            if not match:match=re.match(r'/cache/epub/([1-9][0-9]*)/|/files/([1-9][0-9]*)/',parsed.path)
+            if match:return next(group for group in match.groups() if group)
+    return ''
+
+
 def clean(value):return ''.join(c for c in str(value or '') if c.isprintable()).strip()
 
 
@@ -108,7 +122,7 @@ class Shelf:
 
     def catalog(self):
         data=self.load()
-        return {'entries':[dict(r,reading=data.get('reading',{}).get(r['id'],{})) for r in data['entries']],'root':str(self.root)}
+        return {'entries':[dict(r,gutenberg_id=gutenberg_id(r),reading=data.get('reading',{}).get(r['id'],{})) for r in data['entries']],'root':str(self.root)}
 
     def scan(self):
         if not self.root.is_dir():return dict(self.catalog(),warnings=['Books folder is empty or not mounted'])
@@ -129,7 +143,7 @@ class Shelf:
                     prior=prior or by_id.get(ident,{})
                     row=dict(facts,id=ident,path=str(path),bytes=stat.st_size,mtime_ns=stat.st_mtime_ns,added=prior.get('added',time.time()),status='To Read',shelf='',position='')
                     # User edits survive rescans; source bytes and names are never rewritten.
-                    for key in ('title','author','status','shelf','position','source_url'):
+                    for key in ('title','author','status','shelf','position','source_url','gutenberg_id'):
                         if key in prior:row[key]=prior[key]
                     rows.append(row)
                 except (OSError,ValueError,KeyError,zipfile.BadZipFile,ET.ParseError) as exc:
@@ -202,6 +216,12 @@ class Shelf:
         return row
 
     def fetch(self,url):
+        source_id=gutenberg_id({'url':url})
+        if source_id:
+            existing=next((r for r in self.load()['entries'] if gutenberg_id(r)==source_id),None)
+            if existing:
+                self.item(existing['id'])
+                return existing
         parsed=urllib.parse.urlsplit(url)
         if parsed.hostname in {'www.gutenberg.org','gutenberg.org'} and parsed.path.endswith('.opds'):
             with urllib.request.urlopen(url,timeout=15) as response:entry=xml(response.read(MAX_METADATA_BYTES+1))
@@ -235,14 +255,23 @@ class Shelf:
                 row=next(r for r in self.load()['entries'] if r['path']==str(target))
                 with self.edit() as data:
                     for entry in data['entries']:
-                        if entry['path']==str(target):entry['source_url']=url;row=entry
+                        if entry['path']==str(target):
+                            entry['source_url']=url
+                            if source_id:entry['gutenberg_id']=source_id
+                            row=entry
                 return row
             finally:staged.unlink(missing_ok=True)
         finally:Path(temp).unlink(missing_ok=True)
 
 
-def gutenberg(query='',sort=None):
+def gutenberg(query='',sort=None,*,subject='',start_index=1,page=False):
+    if len(query)>500:raise ValueError('Search is limited to 500 characters')
+    try:start_index=int(start_index)
+    except (TypeError,ValueError):raise ValueError('Invalid catalog page')
+    if not 1<=start_index<=1000000:raise ValueError('Invalid catalog page')
     params={'query':query}
+    if subject:params['query']=' '.join('s.'+word for word in subject.split() if word.casefold()!='and')
+    if start_index!=1:params['start_index']=start_index
     if sort:params['sort_order']=sort
     url=GUTENBERG+'?'+urllib.parse.urlencode(params)
     with urllib.request.urlopen(url,timeout=15) as response:root=xml(response.read(MAX_METADATA_BYTES+1))
@@ -250,7 +279,7 @@ def gutenberg(query='',sort=None):
     for entry in root.findall('a:entry',ns):
         links=[link for link in entry.findall('a:link',ns) if link.get('type')=='application/epub+zip' and link.get('rel') in {'http://opds-spec.org/acquisition','http://opds-spec.org/acquisition/open-access'}]
         if not links:
-            links=[n for n in entry.findall('a:link',ns) if n.get('rel')=='subsection' and n.get('href','').endswith('.opds')]
+            links=[n for n in entry.findall('a:link',ns) if n.get('rel')=='subsection' and re.fullmatch(r'/ebooks/[0-9]+\.opds',urllib.parse.urlsplit(n.get('href','')).path)]
         if not links:continue
         row={'title':clean(entry.findtext('a:title',default='',namespaces=ns)),
              'author':clean(entry.findtext('a:author/a:name',default='',namespaces=ns) or entry.findtext('a:content',default='',namespaces=ns)),
@@ -258,21 +287,35 @@ def gutenberg(query='',sort=None):
         image=next((n.get('href') for n in entry.findall('a:link',ns) if n.get('rel')=='http://opds-spec.org/image' and not n.get('href','').startswith('data:')),None)
         if image:row['cover_url']=urllib.parse.urljoin(url,image)
         rows.append(row)
-    return rows[:20]
+    # OPDS pages normally contain 25 books. Follow only the numeric cursor;
+    # callers never supply an arbitrary URL for the server to retrieve.
+    next_index=None
+    for link in root.findall('a:link',ns):
+        if link.get('rel')!='next':continue
+        target=urllib.parse.urlsplit(urllib.parse.urljoin(url,link.get('href','')))
+        if target.hostname!='www.gutenberg.org' or target.path!='/ebooks/search.opds/':continue
+        cursor=urllib.parse.parse_qs(target.query).get('start_index',[''])[0]
+        if cursor.isdigit() and start_index<int(cursor)<=1000000:next_index=int(cursor)
+    return {'entries':rows,'next_index':next_index} if page else rows
 
 
 SUBJECTS=('Adventure','Classics','Detective and mystery stories','History','Philosophy','Poetry','Science fiction','Travel')
 
 
-def discover(mode='popular',subject=''):
-    if mode=='subjects':return [{'title':s,'subject':s,'kind':'subject'} for s in SUBJECTS]
+def discover(mode='popular',subject='',*,query='',start_index=1,page=False):
+    if mode=='subjects':
+        rows=[{'title':s,'subject':s,'kind':'subject'} for s in SUBJECTS]
+        return {'entries':rows,'next_index':None} if page else rows
+    options={'start_index':start_index,'page':page}
+    if mode=='search':return gutenberg(query,**options)
     if mode=='subject':
         if subject not in SUBJECTS:raise ValueError('Choose a listed subject')
-        return gutenberg('subject:'+subject,sort='downloads')
-    if mode=='popular':return gutenberg(sort='downloads')
-    if mode=='new':return gutenberg(sort='release_date')
+        return gutenberg(subject=subject,sort='downloads',**options)
+    if mode=='popular':return gutenberg(sort='downloads',**options)
+    if mode=='new':return gutenberg(sort='release_date',**options)
     if mode=='surprise':
         import random
         rows=gutenberg(sort='downloads')
-        return random.sample(rows,min(1,len(rows)))
-    raise ValueError('Choose popular, new, subjects or surprise')
+        rows=random.sample(rows,min(1,len(rows)))
+        return {'entries':rows,'next_index':None} if page else rows
+    raise ValueError('Choose search, popular, new, subjects or surprise')
