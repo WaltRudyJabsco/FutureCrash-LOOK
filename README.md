@@ -656,3 +656,11 @@ Terminal palettes and editor movement: [Terminal styles](docs/TERMINAL-STYLES.md
 
 Terminal browsing: [`lk web`](docs/WEB.md) opens a keyboard reading desk for installed
 browsers, bookmarks and search, with an explicit qutebrowser choice.
+
+## Mercury Writer companion
+
+The installer offers Mercury Writer as an optional local writing studio with
+browser split views, Neovim and small terminal desks, offline manuscript
+replicas, paired Fabric revision exchange and stable LOOK Note links.
+Use `./install.sh --mercury=install`, or `--mercury=off` to skip it.
+See [Mercury setup and ownership](docs/MERCURY.md).

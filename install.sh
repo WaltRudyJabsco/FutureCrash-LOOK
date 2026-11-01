@@ -41,7 +41,13 @@ grep -q 'choices=.*serve.*fabric' "$ROOT/core/node.py" || { echo "BUNDLE ERROR: 
 DRY_RUN=0
 UNINSTALL=0
 OPENJEV_MODE="${FCL_OPENJEV_MODE:-auto}"
+MERCURY_MODE="${FCL_MERCURY_MODE:-prompt}"
+MERCURY_SOURCE="${FCL_MERCURY_SOURCE:-}"
 for a in "$@"; do
+  case "$a" in
+    --mercury=*) MERCURY_MODE="${a#--mercury=}" ;;
+    --mercury-source=*) MERCURY_SOURCE="${a#--mercury-source=}" ;;
+  esac
   [[ "$a" == "--dry-run" ]] && DRY_RUN=1
   [[ "$a" == "--uninstall" ]] && UNINSTALL=1
   [[ "$a" == "--openjev=off" ]] && OPENJEV_MODE="off"
@@ -49,6 +55,7 @@ for a in "$@"; do
   [[ "$a" == "--openjev=adopt" ]] && OPENJEV_MODE="adopt"
   [[ "$a" == "--openjev=install" ]] && OPENJEV_MODE="install"
 done
+case "$MERCURY_MODE" in prompt|off|install) ;; *) echo "Use --mercury=prompt, off, or install"; exit 4;; esac
 case "$OPENJEV_MODE" in off|auto|adopt|install) ;; *) echo "BUNDLE ERROR: invalid --openjev mode: $OPENJEV_MODE"; exit 4;; esac
 
 FCL_UNIFIED_INSTALL_CHILD=1 "$ROOT/install-look.sh" "$@"
@@ -56,6 +63,7 @@ FCL_UNIFIED_INSTALL_CHILD=1 "$ROOT/install-look.sh" "$@"
 if ((DRY_RUN)); then
   echo
   echo "[dry-run] would install/restart Unified Node 8.26.1 · RESTORE CHANNELS with signed Fabric rendezvous, Tailcat direct transport, ONE BRAIN cognition, LIVING MIND memory, browser endpoints, SearXNG, Media, Artifacts, and Signal Window 1.11.0"
+  echo "[dry-run] optional Mercury Writer: $MERCURY_MODE (browser, terminal desks and local server; no AI download)"
   echo "[dry-run] OpenJev mode: $OPENJEV_MODE (auto provisions on capable nodes; absence/failure is non-fatal)"
   echo "[dry-run] would initialize Tailcat :7443, install optional signed rendezvous discovery, keep Tailscale :7332 → fcl-ingress :7333 as fallback, and verify Fabric CLI wiring"
   exit 0
@@ -675,3 +683,20 @@ python3 "$HOME/.local/share/future-crash-look/core/maintenance.py" --register "$
 # All verification completed; failure recovery is no longer needed.
 INSTALL_COMPLETE=1
 trap - EXIT
+
+
+# Optional companion installation is explicit and never changes manuscript data.
+if [[ "$MERCURY_MODE" == "prompt" && -t 0 ]]; then
+  echo
+  echo "Mercury Writer adds a local writing studio, browser split view, terminal desks and offline manuscripts."
+  echo "It uses existing AI and paired Fabric services when available; no model download is required."
+  read -r -p "Install/update Mercury Writer too? [y/N] " mercury_reply || mercury_reply=""
+  case "$mercury_reply" in [Yy]*) MERCURY_MODE="install" ;; *) MERCURY_MODE="off" ;; esac
+fi
+if [[ "$MERCURY_MODE" == "install" ]]; then
+  mercury_args=()
+  [[ -n "$MERCURY_SOURCE" ]] && mercury_args+=(--source "$MERCURY_SOURCE")
+  python3 "$ROOT/integrations/install_mercury.py" "${mercury_args[@]}"
+  echo "  Mercury verified · mercury open · mercury edit --editor mini · mercury edit --editor nvim"
+  echo "  Enable offline replication in Mercury Project settings on each paired writing computer."
+fi

@@ -578,7 +578,7 @@ def capabilities():
         "vision.screen.provider": vision_capture_provider().get("name") or "",
         "node": True,
         "comfyui": probe("127.0.0.1", 8188),
-        "mercury": probe("127.0.0.1", 8888),
+        "mercury": probe("127.0.0.1", 8765),
         # Artifact transport is a first-class capability. Media is only the first
         # visible consumer; the same range primitive serves large datasets/files.
         "artifact.read": True,
@@ -2441,6 +2441,42 @@ def _notebook_sync():
 
 def _notebook_reminders():
     return _notebook_store().pending(identity()['name'])
+
+
+MERCURY_SYNC_LOCK = threading.Lock()
+MERCURY_SYNC_SECONDS = 15.0
+MERCURY_LOCAL = "http://127.0.0.1:8765"
+
+
+def _mercury_sync():
+    if not MERCURY_SYNC_LOCK.acquire(blocking=False):
+        return {'ok':True,'state':'sync already running'}
+    try:
+        if not probe('127.0.0.1',8765):return {'ok':True,'state':'not running','peers':[]}
+        local=http_json(MERCURY_LOCAL+'/api/sync/status',timeout=2)
+        if not local.get('enabled'):return {'ok':True,'state':'disabled','peers':[]}
+        snapshot={'self':node_info(),'peers':PEERS.public()};deliveries=[]
+        for peer in snapshot['peers'] or []:
+            if not peer.get('trusted') or not (peer.get('node') or {}).get('capabilities',{}).get('mercury'):continue
+            name=str(peer.get('name') or '')
+            try:
+                remote=_peer_json(peer,'/v1/mercury/status',timeout=2)
+                if not remote.get('enabled'):continue
+                outgoing=http_json(MERCURY_LOCAL+'/api/sync/export',{'have':remote.get('have',[])},timeout=5)
+                incoming=http_json(_remote_url(snapshot,name,'/v1/mercury/exchange'),outgoing,timeout=8)
+                receipt=http_json(MERCURY_LOCAL+'/api/sync/exchange',incoming,timeout=5)
+                deliveries.append({'node':name,'ok':True,'conflicts':receipt.get('conflicts',[]),
+                                   'remote_conflicts':incoming.get('conflicts',[])})
+            except Exception as exc:deliveries.append({'node':name,'ok':False,'error':str(exc)})
+        return {'ok':all(row['ok'] for row in deliveries),'peers':deliveries}
+    finally:MERCURY_SYNC_LOCK.release()
+
+
+def _mercury_loop():
+    while True:
+        try:_mercury_sync()
+        except Exception as exc:print(f'Mercury background: {exc}',file=sys.stderr)
+        time.sleep(MERCURY_SYNC_SECONDS)
 
 
 def _notebook_tick():
@@ -4668,6 +4704,9 @@ class API(BaseHTTPRequestHandler):
             except ImportError: import notifications
             return self.sendj(200,{'ok':True,'settings':notifications.settings()})
         if path == "/v1/downloads" or path.startswith("/v1/downloads/"): return self._downloads_request()
+        if path == "/v1/mercury/status":
+            try:return self.sendj(200,http_json(MERCURY_LOCAL+'/api/sync/status',timeout=2))
+            except Exception as exc:return self.sendj(503,{'error':str(exc),'enabled':False})
         if path == "/v1/words": return self._words_request()
         if path == "/v1/wiki": return self._wiki_request()
         if path in {"/v1/books/read","/v1/books/audio","/v1/books/cover","/v1/books/discover","/v1/books/discovery-cover"}: return self._book_content()
@@ -4930,6 +4969,14 @@ class API(BaseHTTPRequestHandler):
         if not self._authorized_ingress(path): return
         if path == "/v1/files/copy": return self._files_copy()
         d = self.body()
+        if path in {'/v1/mercury/exchange','/v1/mercury/sync'}:
+            try:
+                if path.endswith('/sync'):
+                    if getattr(self.server,'plane','local')!='local' or self.headers.get('X-Fabric-Node'):
+                        return self.sendj(403,{'error':'Sync dispatch is local-control only'})
+                    return self.sendj(200,_mercury_sync())
+                return self.sendj(200,http_json(MERCURY_LOCAL+'/api/sync/exchange',d,timeout=8))
+            except Exception as exc:return self.sendj(409,{'error':str(exc)})
         if path == "/v1/words": return self._words_request(d)
         if path == "/v1/wiki": return self._wiki_request(d)
         if path == "/v1/books/reader": return self._book_reader_request(d)
@@ -7322,6 +7369,7 @@ def main():
     threading.Thread(target=_decision_expiry_loop,name="fabric-decisions",daemon=True).start()
     _downloads()
     threading.Thread(target=_notebook_loop,name='fabric-notebook',daemon=True).start()
+    threading.Thread(target=_mercury_loop,name='fabric-mercury',daemon=True).start()
     JOB_WAKE.set()
     srv=FabricHTTPServer((a.host,a.port),API,plane="local")
     threading.Thread(target=_local_accept_watchdog,args=(srv,),name="fabric-http-watchdog",daemon=True).start()
