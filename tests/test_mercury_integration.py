@@ -75,3 +75,5 @@ def test_optional_installer_has_explicit_noninteractive_choices():
     assert '--mercury=' in source and 'prompt|off|install' in source
     assert '"$MERCURY_MODE" == "prompt" && -t 0' in source
     assert 'integrations/install_mercury.py' in source
+    child=(root/'install-look.sh').read_text()
+    assert '--mercury=prompt|--mercury=off|--mercury=install|--mercury-source=*) : ;;' in child

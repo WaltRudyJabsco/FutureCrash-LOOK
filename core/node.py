@@ -86,9 +86,10 @@ except ImportError:
     from fabric_vision import capture_provider as vision_capture_provider, capture_screen as vision_capture_screen, list_displays as vision_list_displays, vision_broker_request
 
 try:
-    from . import maintenance, file_transfer, downloads
+    from . import maintenance, file_transfer, downloads, mercury_install
 except ImportError:
     import maintenance
+    import mercury_install
     import file_transfer
     import downloads
 
@@ -1468,7 +1469,7 @@ MANAGED_SERVICES = {
     "albert": {"linux": "albert.service", "darwin": "com.futurecrash.albert"},
     "ollama": {"linux": "ollama.service", "darwin": None},
     "comfy": {"linux": "server-comfy.service", "darwin": None},
-    "mercury": {"linux": "server-mercury.service", "darwin": None},
+    "mercury": {"linux": "server-mercury.service", "darwin": "com.mercury.writer"},
     "openjev": {"linux": "future-crash-look-openjev.service", "darwin": None},
 }
 
@@ -4704,6 +4705,7 @@ class API(BaseHTTPRequestHandler):
             except ImportError: import notifications
             return self.sendj(200,{'ok':True,'settings':notifications.settings()})
         if path == "/v1/downloads" or path.startswith("/v1/downloads/"): return self._downloads_request()
+        if path == "/v1/mercury/install/status":return self.sendj(200,mercury_install.status())
         if path == "/v1/mercury/status":
             try:return self.sendj(200,http_json(MERCURY_LOCAL+'/api/sync/status',timeout=2))
             except Exception as exc:return self.sendj(503,{'error':str(exc),'enabled':False})
@@ -4969,6 +4971,10 @@ class API(BaseHTTPRequestHandler):
         if not self._authorized_ingress(path): return
         if path == "/v1/files/copy": return self._files_copy()
         d = self.body()
+        if path == '/v1/mercury/install':
+            try:return self.sendj(202,mercury_install.schedule(confirm=d.get('confirm'),enable_sync=d.get('enable_sync',False)))
+            except PermissionError as exc:return self.sendj(403,{'error':str(exc)})
+            except (OSError,ValueError,RuntimeError) as exc:return self.sendj(409,{'error':str(exc)})
         if path in {'/v1/mercury/exchange','/v1/mercury/sync'}:
             try:
                 if path.endswith('/sync'):

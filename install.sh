@@ -154,6 +154,7 @@ install -m 0644 "$ROOT/core/fabric_packet.py" "$HOME/.local/share/future-crash-l
 install -m 0644 "$ROOT/core/fabric_care.py" "$HOME/.local/share/future-crash-look/core/fabric_care.py"
 install -m 0644 "$ROOT/core/book_web.py" "$HOME/.local/share/future-crash-look/core/book_web.py"
 install -m 0644 "$ROOT/core/browser_presentations.py" "$HOME/.local/share/future-crash-look/core/browser_presentations.py"
+install -m 0644 "$ROOT/core/mercury_install.py" "$HOME/.local/share/future-crash-look/core/mercury_install.py"
 install -m 0644 "$ROOT/core/maintenance.py" "$HOME/.local/share/future-crash-look/core/maintenance.py"
 install -m 0644 "$ROOT/core/tailscale_serve.py" "$HOME/.local/share/future-crash-look/core/tailscale_serve.py"
 install -m 0644 "$ROOT/core/__init__.py" "$HOME/.local/share/future-crash-look/core/__init__.py"

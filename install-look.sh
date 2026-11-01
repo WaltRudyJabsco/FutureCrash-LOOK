@@ -50,6 +50,7 @@ while (($#)); do
     --kitty) KITTY_CONFIG=1 ;;
     --force-downgrade) FORCE_DOWNGRADE=1 ;;
     --openjev=off|--openjev=auto|--openjev=adopt|--openjev=install) : ;;
+    --mercury=prompt|--mercury=off|--mercury=install|--mercury-source=*) : ;;
     --uninstall)
       if command -v lk >/dev/null 2>&1; then
         exec lk uninstall
