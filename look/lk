@@ -12839,8 +12839,8 @@ def _read_tty_key(fd, timeout=None):
         b"\x1b[1;2B":"shiftdown",
         b"\x1b[1;2C":"shiftright",
         b"\x1b[1;2D":"shiftleft",
-        b"\x1b[H":"home", b"\x1b[1~":"home",
-        b"\x1b[F":"end", b"\x1b[4~":"end",
+        b"\x1b[H":"home", b"\x1b[1~":"home", b"\x1bOH":"home", b"\x1b[7~":"home",
+        b"\x1b[F":"end", b"\x1b[4~":"end", b"\x1bOF":"end", b"\x1b[8~":"end",
     }.get(bytes(seq))
     if mapped is not None:return mapped
     if bytes(seq)==b'\x1b':return 'esc'
@@ -21209,6 +21209,7 @@ def _write_command_request(command):
 
 def commands_screen():
     """Searchable command palette. Enter/Right sends the template back to the parent shell."""
+    import clipboard_shelf,terminal_style
     rows=_command_rows()
     if not (sys.stdin.isatty() and sys.stdout.isatty()):
         for template,category,description in rows:
@@ -21222,15 +21223,21 @@ def commands_screen():
             terms=query.casefold().split()
             visible=[r for r in rows if all(t in " ".join(r).casefold() for t in terms)]
             idx=min(idx,max(0,len(visible)-1))
-            term=shutil.get_terminal_size((100,30)); usable=max(4,term.lines-5)
+            term=shutil.get_terminal_size((100,30));width=max(1,term.columns-1)
+            colors=terminal_style.list_colors();blue,gray=clipboard_shelf.command_inks(colors)
+            hints=clipboard_shelf.command_rows([('Type','search'),('↑↓','choose'),('PgUp/PgDn','page'),
+                ('Shift+↑/↓','page'),('Home/End','first/last'),('Shift+←/→','first/last'),
+                ('Enter/→','send to shell'),('Esc','clear/back'),('Q','quit')],width,colors)
+            usable=max(1,term.lines-len(hints)-3)
             top=max(0,min(max(0,len(visible)-usable),idx-usable+1))
-            os.system("clear")
+            sys.stdout.write('\033[2J\033[H')
             print(f"LOOK COMMANDS · {len(visible)} of {len(rows)}")
             print("─"*min(term.columns,100))
             for n,(template,category,description) in enumerate(visible[top:top+usable],start=top):
                 mark=_c("›","1;36") if n==idx else " "
-                print(f"{mark} {template:<34} {_c(category,'2'):<18} {description}")
-            print(f"\n{_c('FILTER','1;36')} {query}█  {_c('type search · ↑↓ choose · Enter/→ send to shell · Esc clear/back · Q quit','2')}",end="",flush=True)
+                print(_ansi_clip(f"{mark} {template:<34} {_c(category,'2'):<18} {description}",width))
+            print(_ansi_clip(blue+'FILTER '+gray+query+'█\033[0m',width))
+            print('\n'.join(hints),end='',flush=True)
             key=_read_tty_key(fd)
             if key in {"q","Q","\x03"}: break
             if key=="esc":
@@ -21238,8 +21245,10 @@ def commands_screen():
                 break
             if key in {"up","k"} and visible: idx=max(0,idx-1); continue
             if key in {"down","j"} and visible: idx=min(len(visible)-1,idx+1); continue
-            if key=="pageup" and visible: idx=max(0,idx-usable); continue
-            if key=="pagedown" and visible: idx=min(len(visible)-1,idx+usable); continue
+            if key in {"pageup","shiftup"} and visible: idx=max(0,idx-usable); continue
+            if key in {"pagedown","shiftdown"} and visible: idx=min(len(visible)-1,idx+usable); continue
+            if key in {"home","shiftleft"} and visible: idx=0;continue
+            if key in {"end","shiftright"} and visible: idx=len(visible)-1;continue
             if key in {"\r","\n","right"} and visible:
                 _write_command_request(visible[idx][0]); break
             if key in {"\x7f","\b"}:
@@ -22341,8 +22350,14 @@ def capability_command(args):
     return 0
 
 
+_HIDDEN_COMMANDS = {'force'}
+
+
 def main():
     _safe_cwd(repair=True)
+    if len(sys.argv)>=2 and sys.argv[1]=='force':
+        import force_player
+        return force_player.main(sys.argv[2:])
     import clipboard_shelf
     try: clipboard_shelf.ensure_watcher()
     except (OSError,clipboard_shelf.sqlite3.Error): pass
