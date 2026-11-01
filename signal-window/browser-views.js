@@ -55,9 +55,40 @@
     try{root.open(url,'_blank','noopener')}catch{}
     return url;
   }
+  function createBookAhead({read,audio,createURL=blob=>URL.createObjectURL(blob),revokeURL=url=>URL.revokeObjectURL(url)}){
+    let entry=null;
+    function clear(){
+      const old=entry;entry=null;if(!old)return;
+      old.controller.abort();if(old.url)revokeURL(old.url);
+    }
+    return {
+      clear,
+      prepare(key,readRoute,audioRoute){
+        if(entry?.key===key)return entry.promise;
+        clear();const current={key,controller:new AbortController(),url:''};entry=current;
+        current.promise=Promise.all([read(readRoute,current.controller.signal),audio(audioRoute,current.controller.signal)]).then(([value,blob])=>{
+          if(current.controller.signal.aborted)return null;
+          current.url=createURL(blob);return {value,url:current.url};
+        }).catch(()=>{if(entry===current)clear();return null});
+        return current.promise;
+      },
+      take(key){
+        if(!entry||entry.key!==key){clear();return null}
+        // Keep an unfinished handoff cancelable if the reader seeks again.
+        const current=entry;
+        return current.promise.then(result=>{if(entry===current)entry=null;return result});
+      }
+    };
+  }
+  function bookPosition(chapters,chapter,paragraph,delta=1){
+    let c=chapter,p=paragraph+delta;
+    if(p>=chapters[c].paragraphs){c++;p=0}
+    if(p<0){c--;if(c>=0)p=chapters[c].paragraphs-1}
+    return c<0||c>=chapters.length?null:{chapter:c,paragraph:p};
+  }
   function booksCommand(text){
     const value=String(text||'').trim().replace(/[.!?]+$/,'');
-    if (/^\/books$/i.test(value))return {query:'',resume:false};
+    if (/^\/(?:books|reader|mercury-reader)$/i.test(value)||/^(?:open\s+)?mercury reader$/i.test(value))return {query:'',resume:false};
     if (/^(?:please\s+)?continue (?:reading|listening)(?:\s+please)?$/i.test(value))return {query:'',resume:true};
     if(/^(?:please\s+)?read\s+(?:(?:my|our|the)\s+)?(?:notes?|files?|articles?|webpages?|messages?|clipboard)\b/i.test(value))return null;
     if(/^continue\s+(?:with|that|this|your|writing|from|working|on)\b/i.test(value))return null;
@@ -65,13 +96,13 @@
     return match?{query:match[1],resume:true}:null;
   }
   function openBooks(command){
-    const url=new URL('/books',root.location.href);
+    const url=new URL('/reader',root.location.href);
     if(command.query)url.searchParams.set('query',command.query);
     if(command.resume)url.searchParams.set('resume','1');
     try{root.open(url.href,'_blank','noopener')}catch{}
     return url.href;
   }
-  root.FabricBrowserViews={beginImage,imageArtifacts,imageRequest,fabricCommand,openFabric,booksCommand,openBooks};
+  root.FabricBrowserViews={beginImage,imageArtifacts,imageRequest,fabricCommand,openFabric,booksCommand,openBooks,createBookAhead,bookPosition};
 })(globalThis);
 
 
@@ -83,6 +114,25 @@
   try{sortOrder=localStorage.getItem('look-books-shelf-sort')||'title'}catch{}
   if(!['title','author','opened','added'].includes(sortOrder))sortOrder='title';
   let catalog=[],book=null,model=null,chapter=0,paragraph=0,generation=0,lastSave=0,saving=Promise.resolve();
+  let activeAudioURL='',playbackIntent=false,switchingAudio=false,requestedPosition=null;
+  const MAX_AHEAD_AUDIO_BYTES=8*1024*1024;
+  const ahead=FabricBrowserViews.createBookAhead({
+    read:(route,signal)=>api(route,undefined,signal),
+    audio:async(route,signal)=>{
+      const response=await fetch(route,{signal,cache:'no-store'});
+      if(!response.ok||Number(response.headers.get('Content-Length'))>MAX_AHEAD_AUDIO_BYTES)throw Error('Next narration unavailable');
+      const blob=await response.blob();if(blob.size>MAX_AHEAD_AUDIO_BYTES)throw Error('Next narration too large');return blob;
+    }
+  });
+  function releaseAudio(){if(activeAudioURL)URL.revokeObjectURL(activeAudioURL);activeAudioURL=''}
+  function narrationRoute(c,p){return '/api/books/audio?'+params({chapter:c,paragraph:p,...((selectedVoice||defaultVoice)?{voice:selectedVoice||defaultVoice}:{})})}
+  function prepareNext(){
+    if(!book||!model||audio.paused||audio.ended)return;
+    const next=FabricBrowserViews.bookPosition(model.chapters,chapter,paragraph);
+    if(!next){ahead.clear();return}
+    const route=narrationRoute(next.chapter,next.paragraph);
+    ahead.prepare(route,'/read?'+params({...next,content:next.chapter===chapter?'0':'1'}),route);
+  }
   let content=null,follow=true,fontSize=21,theme='paper',speed=1,selectedVoice='',defaultVoice='',voiceByOwner={};
   try{const prefs=JSON.parse(localStorage.getItem('look-books-appearance')||'{}');
     fontSize=Math.max(16,Math.min(32,Number(prefs.fontSize)||21));theme=prefs.theme==='dark'?'dark':'paper';follow=prefs.follow!==false;
@@ -124,15 +174,15 @@
       });
       if(i===content.paragraphs.length)break;
       const index=i+(content.start||0),p=document.createElement('p');p.className='reading-paragraph';p.dataset.paragraph=index;p.tabIndex=0;p.textContent=content.paragraphs[i];
-      const select=()=>{const autoplay=!audio.paused;save();load(chapter,index,autoplay).then(()=>save()).catch(e=>status(e.message))};
+      const select=()=>{const autoplay=playbackIntent;save();load(chapter,index,autoplay).then(()=>save()).catch(e=>status(e.message))};
       p.onclick=select;p.onkeydown=e=>{if(e.key==='Enter'||e.key===' '){e.preventDefault();select()}};elements.push(p);
     }
     $('passage').replaceChildren(...elements);
   }
-  function libraryView(){++generation;audio.pause();save();$('reader').hidden=true;$('library').hidden=false;$('books-app').classList.remove('reading')}
+  function libraryView(){++generation;playbackIntent=false;requestedPosition=null;ahead.clear();audio.pause();save();$('reader').hidden=true;$('library').hidden=false;$('books-app').classList.remove('reading')}
   function status(text){$('status').textContent=text}
-  async function api(route='',payload){
-    const response=await fetch('/api/books'+route,payload?{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(payload)}:{cache:'no-store'});
+  async function api(route='',payload,signal){
+    const response=await fetch('/api/books'+route,payload?{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(payload),signal}:{cache:'no-store',signal});
     const value=await response.json();if(!response.ok||value.error)throw Error(value.error||'Books request failed');return value;
   }
   function params(extra={}){return new URLSearchParams({target:book.node||'local',id:book.id,...extra})}
@@ -143,12 +193,17 @@
     saving=saving.catch(()=>{}).then(()=>api(route,{id,fields})).catch(error=>status('Progress not saved: '+error.message));
   }
   async function load(c,p,autoplay=false,resumeOffset=0){
-    const mine=++generation;audio.pause();audio.removeAttribute('src');audio.load();
+    requestedPosition=c===undefined?null:{chapter:c,paragraph:p};
+    const preparedTask=c===undefined?null:ahead.take(narrationRoute(c,p));
+    if(c===undefined)ahead.clear();
+    const mine=++generation;playbackIntent=autoplay;switchingAudio=true;audio.pause();audio.removeAttribute('src');audio.load();releaseAudio();
     status('Preparing your reading position…');
     const needContent=!content||content.legacy||c===undefined||c!==chapter;
-    const value=await api('/read?'+params({...(c===undefined?{}:{chapter:c,paragraph:p}),content:needContent?'1':'0'}));
-    if(mine!==generation)return;
-    model=value;chapter=value.chapter;paragraph=value.paragraph;
+    const prepared=preparedTask?await preparedTask:null;
+    if(mine!==generation){if(prepared?.url)URL.revokeObjectURL(prepared.url);return}
+    const value=prepared?.value||await api('/read?'+params({...(c===undefined?{}:{chapter:c,paragraph:p}),content:needContent?'1':'0'}));
+    if(mine!==generation){if(prepared?.url)URL.revokeObjectURL(prepared.url);return}
+    model=value;chapter=value.chapter;paragraph=value.paragraph;requestedPosition=null;
     $('reader').hidden=false;$('library').hidden=true;$('books-app').classList.add('reading');$('title').textContent=book.title;
     if(value.content){content=value.content;renderChapter()}
     else if(needContent){content={paragraphs:[value.text],images:[],start:paragraph,legacy:true};renderChapter()}
@@ -159,17 +214,17 @@
     if($('cover').getAttribute('src')!==coverURL){
       $('cover').hidden=false;$('cover').onerror=()=>{$('cover').hidden=true};$('cover').src=coverURL;
     }
-    const narrationVoice=selectedVoice||defaultVoice;
-    audio.src='/api/books/audio?'+params({chapter,paragraph,...(narrationVoice?{voice:narrationVoice}:{})});
+    activeAudioURL=prepared?.url||'';
+    audio.src=activeAudioURL||narrationRoute(chapter,paragraph);switchingAudio=false;
     audio.playbackRate=speed;
     const offset=c===undefined?(value.reading.offset||0):resumeOffset;
     audio.onloadedmetadata=()=>{if(mine!==generation)return;audio.playbackRate=speed;if(offset&&offset<audio.duration)audio.currentTime=offset};
-    audio.onerror=()=>status('Narration unavailable. Check that the book owner is reachable and has a speech voice and ffmpeg installed.');
+    audio.onerror=()=>mine===generation&&status('Narration unavailable. Check that the book owner is reachable and has a speech voice and ffmpeg installed.');
     status('Ready. Press Play to prepare narration and listen on this device.');
-    if(autoplay){status('Preparing narration…');await audio.play().catch(()=>status('Tap Play to continue listening.'))}
+    if(autoplay&&playbackIntent){status('Preparing narration…');await audio.play().catch(()=>{if(mine===generation){playbackIntent=false;status('Tap Play to continue listening.')}})}
   }
   async function open(row){
-    ++libraryGeneration;audio.pause();if(book)save();book=row;model=null;content=null;const mine=++generation;
+    ++libraryGeneration;playbackIntent=false;requestedPosition=null;ahead.clear();audio.pause();if(book)save();book=row;model=null;content=null;const mine=++generation;
     status('Loading narration voices…');
     let options;try{options=await api('/voices?'+params())}catch{options={voices:[]}}
     if(mine!==generation)return;
@@ -183,10 +238,10 @@
     await load();window.scrollTo({top:0,behavior:'auto'});focusPassage();
   }
   async function move(delta,autoplay=false){
-    if(!model)return;save();let c=chapter,p=paragraph+delta;
-    if(p>=model.chapters[c].paragraphs){if(c+1>=model.chapters.length){save(true);status('Book finished.');return}c++;p=0}
-    if(p<0){if(c===0)return;c--;p=model.chapters[c].paragraphs-1}
-    await load(c,p,autoplay);save();
+    if(!model)return;save();const start=requestedPosition||{chapter,paragraph};
+    const next=FabricBrowserViews.bookPosition(model.chapters,start.chapter,start.paragraph,delta);
+    if(!next){if(delta>0){playbackIntent=false;ahead.clear();save(true);status('Book finished.')}return}
+    await load(next.chapter,next.paragraph,autoplay);save();
   }
   function button(label,click){const b=document.createElement('button');b.textContent=label;b.onclick=()=>Promise.resolve().then(click).catch(e=>status(e.message));return b}
   function gutenbergId(row){
@@ -269,19 +324,20 @@
   $('follow').onclick=()=>{follow=!follow;appearance();focusPassage()};appearance();
   $('speech-speed').oninput=()=>{speed=Number($('speech-speed').value);appearance()};
   audio.onratechange=()=>{const rate=Math.max(.5,Math.min(2,audio.playbackRate));if(rate!==speed||rate!==audio.playbackRate){speed=rate;appearance()}};
-  $('voice').onchange=()=>{if(!book||!model)return;const autoplay=!audio.paused;
+  $('voice').onchange=()=>{if(!book||!model)return;const autoplay=playbackIntent;
     selectedVoice=$('voice').value;voiceByOwner[book.node||'local']=selectedVoice;appearance();
-    save();load(chapter,paragraph,autoplay).then(()=>save()).catch(e=>status(e.message));
+    const position=requestedPosition||{chapter,paragraph};
+    save();load(position.chapter,position.paragraph,autoplay).then(()=>save()).catch(e=>status(e.message));
   };
   document.querySelectorAll('[data-mode]').forEach(b=>b.onclick=()=>discoverMode(b.dataset.mode).catch(e=>status(e.message)));
   $('search').onsubmit=e=>{e.preventDefault();const query=$('query').value.trim();(e.submitter?.value==='gutenberg'?discoverMode('search','',query):shelf(query)).catch(e=>status(e.message))};
-  $('previous').onclick=()=>move(-1).catch(e=>status(e.message));$('next').onclick=()=>move(1).catch(e=>status(e.message));
+  $('previous').onclick=()=>move(-1,playbackIntent).catch(e=>status(e.message));$('next').onclick=()=>move(1,playbackIntent).catch(e=>status(e.message));
   $('retry').onclick=()=>load(chapter,paragraph,true,audio.currentTime||0).catch(e=>status(e.message));
-  $('chapters').onchange=()=>load(Number($('chapters').value),0).then(()=>save()).catch(e=>status(e.message));
-  audio.onplay=()=>{status('Preparing / playing narration…');save();focusPassage()};audio.onplaying=()=>status('Reading on this device.');
-  audio.onpause=()=>{save();if(audio.currentSrc&&!audio.ended)status('Paused. Press Play to continue from here.')};
-  audio.ontimeupdate=()=>{if(Date.now()-lastSave>5000){lastSave=Date.now();save()}};
+  $('chapters').onchange=()=>{const autoplay=playbackIntent;save();load(Number($('chapters').value),0,autoplay).then(()=>save()).catch(e=>status(e.message))};
+  audio.onplay=()=>{playbackIntent=true;status('Preparing / playing narration…');save();focusPassage()};audio.onplaying=()=>{status('Reading on this device.');prepareNext()};
+  audio.onpause=()=>{if(switchingAudio||!audio.paused)return;if(!audio.ended)playbackIntent=false;save();if(audio.currentSrc&&!audio.ended)status('Paused. Press Play to continue from here.')};
+  audio.ontimeupdate=()=>{if(Date.now()-lastSave>5000){lastSave=Date.now();save();prepareNext()}};
   audio.onended=()=>move(1,true).catch(e=>status(e.message));
-  window.addEventListener('pagehide',()=>{if(book&&model)fetch('/api/books/progress?'+params(),{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({id:book.id,fields:{chapter,paragraph,offset:audio.currentTime||0}}),keepalive:true}).catch(()=>{})});
+  window.addEventListener('pagehide',()=>{ahead.clear();releaseAudio();if(book&&model)fetch('/api/books/progress?'+params(),{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({id:book.id,fields:{chapter,paragraph,offset:audio.currentTime||0}}),keepalive:true}).catch(()=>{})});
   try{await shelf();const q=new URLSearchParams(location.search);if(q.has('resume')||q.has('query'))await resume(q.get('query')||'')}catch(e){status(e.message)}
 })();

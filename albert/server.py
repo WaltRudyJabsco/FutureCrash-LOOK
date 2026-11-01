@@ -559,7 +559,7 @@ class Handler(BaseHTTPRequestHandler):
     def do_GET(self):
         path=urlparse(self.path).path
 
-        if path=='/books':
+        if path in {'/books','/reader'}:
             if not self._require_endpoint('lo.use'):return
             import book_web
             data=book_web.PAGE.encode()

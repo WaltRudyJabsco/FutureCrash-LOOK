@@ -9,7 +9,7 @@ PAGE='''<!doctype html>
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width,initial-scale=1">
-<title>LOOK Books</title>
+<title>Mercury Reader</title>
 <style>
 :root{color-scheme:light;--paper:#f5f0e5;--panel:#ece8df;--ink:#233342;--muted:#566473;--line:#b8b1a5;--button:#fff;--accent:#315c80;--highlight:#e5dcc1;--reading-size:21px}
 
@@ -25,6 +25,7 @@ button[aria-pressed=true]{background:var(--highlight);border-color:var(--accent)
 nav,.preferences,.masthead{display:flex;align-items:center;gap:8px;flex-wrap:wrap}
 .masthead{justify-content:space-between;margin-bottom:12px}
 .masthead h1{font-size:25px;margin:0}
+.brand{font-family:"Iowan Old Style","Palatino Linotype",Palatino,Georgia,serif;font-weight:700;letter-spacing:.04em}.brand em{font-style:normal;color:#795716}:root[data-theme=dark] .brand em{color:#d6b36a}
 .preferences{font:14px system-ui;color:var(--muted)}
 #font-size{min-width:3ch;text-align:center}
 #search{display:flex;flex-wrap:wrap;gap:8px;margin:16px 0}
@@ -80,7 +81,7 @@ figcaption{font:14px/1.5 system-ui;color:var(--muted);margin-top:10px}
 <body>
 <main id="books-app">
 <header class="masthead">
-<h1>Books</h1>
+<h1 class="brand" aria-label="Mercury Reader"><em>MERCURY</em> / READER</h1>
 <div class="preferences" aria-label="Reading appearance">
 <button id="theme" aria-pressed="false">Dark theme</button>
 <button id="font-smaller" aria-label="Smaller book text">A−</button>
@@ -92,7 +93,7 @@ figcaption{font:14px/1.5 system-ui;color:var(--muted);margin-top:10px}
 <div id="reader-head">
 <nav>
 <button id="library-back">← Library</button>
-<span class="reading-label">LOOK / READING ROOM</span>
+<span class="reading-label">MERCURY / READING ROOM</span>
 </nav>
 <div class="book-heading">
 <img id="cover" alt="Book cover" hidden>
