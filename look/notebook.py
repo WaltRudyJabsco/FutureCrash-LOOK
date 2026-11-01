@@ -252,6 +252,8 @@ def link_target(text):
         raise ValueError('Use one path, URL, or note link without controls or angle brackets')
     if text.startswith('note:'):
         if not re.fullmatch(r'note:[a-f0-9]{32}',text): raise ValueError('Choose a note with Ctrl-N, or paste its copied link')
+    elif text.startswith('mercury:'):
+        if not re.fullmatch(r'mercury:[A-Za-z0-9_-]{1,128}',text):raise ValueError('Mercury links need a stable project ID')
     elif text.startswith('wiki:'):
         import wiki_links
         wiki_links.parse(text)
@@ -290,6 +292,7 @@ def link_fields(text):
     name=(parts.path if parts and parts.scheme in {'http','https','file'} else target).rstrip('/').rsplit('/',1)[-1]
     if parts and parts.scheme in {'http','https'} and not parts.path.strip('/'): name=parts.hostname
     if target.startswith('note:'): name='Note'
+    if target.startswith('mercury:'): name='Mercury manuscript'
     if target.startswith('wiki:'):
         import wiki_links
         name=wiki_links.parse(target)['title'].replace('_',' ')
@@ -673,6 +676,9 @@ def resolve_link(store,row,target):
         if not matches: raise ValueError('Linked note is missing or deleted')
         if len(matches)!=1: raise ValueError('Linked note has a conflict; resolve it from the list')
         return 'note',matches[0]
+    if target.startswith('mercury:'):
+        link_target(target)
+        return 'mercury',target[8:]
     if target.startswith('wiki:'):
         import wiki_links
         wiki_links.parse(target)
@@ -733,7 +739,11 @@ def open_link(kind,target):
             from look_renderer import browse_fabric
         browse_fabric(target)
         return
-    if kind=='wiki':
+    if kind=='mercury':
+        executable=shutil.which('mercury')
+        if not executable:raise ValueError('Install Mercury Writer through the Future Crash + LOOK installer first')
+        args=[executable,'open',str(target)]
+    elif kind=='wiki':
         args=[sys.executable,str(Path(__file__).with_name('lk')),'wiki','--open-link',str(target)]
     elif kind=='path':
         args=[sys.executable,str(Path(__file__).with_name('look_renderer.py')),
