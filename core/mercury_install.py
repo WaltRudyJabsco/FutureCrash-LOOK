@@ -29,6 +29,15 @@ def root():return Path.home()/'.local/share/future-crash-look/mercury-install'
 def app_root():return Path.home()/('Applications/Mercury-Writer' if platform.system()=='Darwin' else '.local/share/mercury-writer')
 
 
+def python_runtime():
+    candidates=[sys.executable,shutil.which('python3'),'/opt/homebrew/bin/python3','/usr/local/bin/python3']
+    for value in dict.fromkeys(path for path in candidates if path):
+        if not Path(value).is_file():continue
+        result=subprocess.run([value,'-c','import sys; sys.exit(0 if sys.version_info >= (3,12) else 1)'],capture_output=True,timeout=5)
+        if result.returncode==0:return value
+    raise RuntimeError('Install Python 3.12 or later, then retry Mercury; existing app and manuscripts are unchanged')
+
+
 def atomic(path,value):
     path.parent.mkdir(parents=True,exist_ok=True)
     temp=path.with_name(path.name+'.tmp')
@@ -130,11 +139,12 @@ def _schedule(confirm=False,enable_sync=False):
     if old.get('state') in {'staged','downloading','installing','verifying'}:
         try:os.kill(old['pid'],0);return old
         except (OSError,KeyError):pass
+    runtime=python_runtime()
     folder=root()/(time.strftime('%Y%m%d-%H%M%S')+'-'+uuid.uuid4().hex[:8]);folder.mkdir(parents=True,exist_ok=True)
     runner=folder/'runner.py';shutil.copy2(__file__,runner)
     receipt={'state':'staged','version':VERSION,'revision':REVISION,'backup':str(folder/'previous-app'),'enable_sync':enable_sync is True,'created':time.time()}
     with (folder/'install.log').open('ab') as log:
-        process=subprocess.Popen([sys.executable,str(runner),'--run',str(folder),str(int(enable_sync is True))],stdin=subprocess.DEVNULL,stdout=log,stderr=log,start_new_session=True)
+        process=subprocess.Popen([runtime,str(runner),'--run',str(folder),str(int(enable_sync is True))],stdin=subprocess.DEVNULL,stdout=log,stderr=log,start_new_session=True)
     receipt['pid']=process.pid;atomic(root()/'status.json',receipt)
     (folder/'go').touch();return receipt
 
