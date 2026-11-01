@@ -2,7 +2,7 @@ import pytest
 import player_visuals as visuals
 
 
-@pytest.mark.parametrize('name',['Orrery','Phosphor Rain'])
+@pytest.mark.parametrize('name',['Orrery','Phosphor Rain','Dune Sea','Harmonic Ink'])
 @pytest.mark.parametrize('size',[(1,1),(20,6),(100,30),(240,80)])
 def test_new_visuals_are_bounded_deterministic_and_cycle(name,size):
     mode=visuals.NAMES.index(name)+1;width,height=size

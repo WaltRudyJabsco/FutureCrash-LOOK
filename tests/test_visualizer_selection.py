@@ -84,9 +84,9 @@ def test_checklist_save_and_cancel_are_paged_and_bounded(home,lk,monkeypatch,siz
     assert not settings.picker(lk) and not settings.path().exists()
     keys(lk,monkeypatch,[' ','shiftright',' ','enter'])
     assert settings.picker(lk)
-    assert settings.read()['disabled']==['Bars','Haunted Hollow']
+    assert settings.read()['disabled']==['Bars',visuals.NAMES[-2]]
     assert all(len(frame.splitlines())<=size[1] for frame in frames)
-    assert any('Haunted Hollow' in frame for frame in frames)
+    assert any(visuals.NAMES[-2] in frame for frame in frames)
 
 
 def test_none_and_all_can_be_saved_without_breaking_normal_view(home,lk,monkeypatch):

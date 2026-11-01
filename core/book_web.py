@@ -75,7 +75,13 @@ figcaption{font:14px/1.5 system-ui;color:var(--muted);margin-top:10px}
 }
 
 .speed-control{display:inline-flex;align-items:center;gap:8px;min-width:0}
-#compact-transport,.controls-heading{display:none}
+#compact-transport{display:flex;gap:8px;margin:8px 0}
+#compact-transport button{min-height:48px;padding:10px 18px;font-size:16px}
+#compact-play{min-width:150px;font-size:18px!important;font-weight:600;border-color:var(--accent)}
+#controls-toggle{margin-left:auto}
+.controls-heading{display:none}
+.reading.desktop-quiet #reader-options{display:none}
+.reading:not(.compact-reader) #previous,.reading:not(.compact-reader) #next{display:none}
 .compact-reader #reader-head{position:relative;padding:4px 0 8px}
 .compact-reader .reader-navigation{display:block;height:0}
 .compact-reader #library-back{position:absolute;right:0;top:3px;min-height:44px;padding:5px 10px}

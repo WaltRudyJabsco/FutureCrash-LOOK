@@ -133,10 +133,11 @@
     const route=narrationRoute(next.chapter,next.paragraph);
     ahead.prepare(route,'/read?'+params({...next,content:next.chapter===chapter?'0':'1'}),route);
   }
-  let content=null,follow=true,fontSize=21,theme='paper',speed=1,selectedVoice='',defaultVoice='',voiceByOwner={},pauses='natural';
+  let content=null,follow=true,fontSize=21,theme='paper',speed=1,selectedVoice='',defaultVoice='',voiceByOwner={},pauses='natural',desktopQuiet=false;
   try{const prefs=JSON.parse(localStorage.getItem('look-books-appearance')||'{}');
     fontSize=Math.max(16,Math.min(32,Number(prefs.fontSize)||21));theme=prefs.theme==='dark'?'dark':'paper';follow=prefs.follow!==false;
     speed=Math.max(.5,Math.min(2,Number(prefs.speed)||1));
+    desktopQuiet=prefs.desktopQuiet===true;
     if(['voice','natural','relaxed'].includes(prefs.pauses))pauses=prefs.pauses;
     if(prefs.voices&&typeof prefs.voices==='object')voiceByOwner=prefs.voices;
   }catch{}
@@ -147,16 +148,29 @@
     $('follow').setAttribute('aria-pressed',String(follow));
     $('speech-speed').value=speed;$('speech-speed-value').textContent=Number(speed.toFixed(2))+'×';
     $('pauses').value=pauses;
+    syncControls();
     audio.defaultPlaybackRate=speed;audio.playbackRate=speed;
-    try{localStorage.setItem('look-books-appearance',JSON.stringify({theme,fontSize,follow,speed,pauses,voices:voiceByOwner}))}catch{}
+    try{localStorage.setItem('look-books-appearance',JSON.stringify({theme,fontSize,follow,speed,pauses,desktopQuiet,voices:voiceByOwner}))}catch{}
   }
   const compactMedia=matchMedia('(max-width:1100px), (max-height:600px), (hover: none) and (pointer: coarse)');
   const preferences=document.querySelector('.preferences');
+  function syncControls(){
+    const compact=$('books-app').classList.contains('compact-reader');
+    $('books-app').classList.toggle('desktop-quiet',!compact&&desktopQuiet);
+    $('controls-toggle').textContent=compact?'Controls':desktopQuiet?'Show controls':'Hide controls';
+    $('controls-toggle').setAttribute('aria-expanded',String(compact?$('books-app').classList.contains('controls-open'):!desktopQuiet));
+    $('compact-previous').textContent=compact?'←':'← Previous';
+    $('compact-next').textContent=compact?'→':'Next →';
+  }
+  function dismissDrawer(restoreFocus=false){
+    $('books-app').classList.remove('controls-open');syncControls();
+    if(restoreFocus)$('controls-toggle').focus();
+  }
   function controlsOpen(open,restoreFocus=false){
     const compact=$('books-app').classList.contains('compact-reader');
-    $('books-app').classList.toggle('controls-open',compact&&open);
-    $('controls-toggle').setAttribute('aria-expanded',String(compact&&open));
-    if(compact&&open)$('controls-close').focus();else if(restoreFocus)$('controls-toggle').focus();
+    if(!compact){desktopQuiet=!open;appearance();focusPassage();return}
+    $('books-app').classList.toggle('controls-open',open);syncControls();
+    if(open)$('controls-close').focus();else if(restoreFocus)$('controls-toggle').focus();
   }
   function syncTransport(){
     $('compact-play').textContent=playbackIntent?'Pause':'Play';
@@ -173,7 +187,8 @@
     // Move the existing controls, retaining their state, handlers and unique IDs.
     const home=compact?$('reader-appearance'):$('appearance-home');
     if(preferences.parentElement!==home)home.append(preferences);
-    if(!compact)controlsOpen(false);
+    if(!compact)dismissDrawer();
+    syncControls();
     syncTransport();focusPassage();
   }
   compactMedia.addEventListener('change',readerLayout);
@@ -208,7 +223,7 @@
     }
     $('passage').replaceChildren(...elements);
   }
-  function libraryView(){controlsOpen(false);++generation;playbackIntent=false;requestedPosition=null;ahead.clear();audio.pause();save();$('reader').hidden=true;$('library').hidden=false;$('books-app').classList.remove('reading');readerLayout()}
+  function libraryView(){dismissDrawer();++generation;playbackIntent=false;requestedPosition=null;ahead.clear();audio.pause();save();$('reader').hidden=true;$('library').hidden=false;$('books-app').classList.remove('reading');readerLayout()}
   function status(text){$('status').textContent=text}
   async function api(route='',payload,signal){
     const response=await fetch('/api/books'+route,payload?{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(payload),signal}:{cache:'no-store',signal});
@@ -254,7 +269,7 @@
     if(playbackIntent){status('Preparing narration…');await audio.play().catch(()=>{if(mine===generation){playbackIntent=false;syncTransport();status('Tap Play to continue listening.')}})}
   }
   async function open(row){
-    ++libraryGeneration;controlsOpen(false);playbackIntent=false;requestedPosition=null;ahead.clear();audio.pause();if(book)save();book=row;model=null;content=null;const mine=++generation;
+    ++libraryGeneration;dismissDrawer();playbackIntent=false;requestedPosition=null;ahead.clear();audio.pause();if(book)save();book=row;model=null;content=null;const mine=++generation;
     status('Loading narration voices…');
     let options;try{options=await api('/voices?'+params())}catch{options={voices:[]}}
     if(mine!==generation)return;
@@ -367,7 +382,7 @@
   };
   document.querySelectorAll('[data-mode]').forEach(b=>b.onclick=()=>discoverMode(b.dataset.mode).catch(e=>status(e.message)));
   $('search').onsubmit=e=>{e.preventDefault();const query=$('query').value.trim();(e.submitter?.value==='gutenberg'?discoverMode('search','',query):shelf(query)).catch(e=>status(e.message))};
-  $('controls-toggle').onclick=()=>controlsOpen(!$('books-app').classList.contains('controls-open'));
+  $('controls-toggle').onclick=()=>controlsOpen($('books-app').classList.contains('compact-reader')?!$('books-app').classList.contains('controls-open'):desktopQuiet);
   $('controls-close').onclick=()=>controlsOpen(false,true);
   document.addEventListener('keydown',event=>{if(event.key==='Escape'&&$('books-app').classList.contains('controls-open')){event.preventDefault();controlsOpen(false,true)}});
   document.addEventListener('pointerdown',event=>{if($('books-app').classList.contains('controls-open')&&!$('reader-head').contains(event.target))controlsOpen(false)});

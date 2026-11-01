@@ -32,6 +32,8 @@ Writer. Open it with `/reader` or “open Mercury Reader”; `/books` still work
 Shelf rows include cover thumbnails. Narration prepares the next paragraph while
 the current one plays, with separate controls for speed and punctuation pauses.
 Phone and tablet reading uses a compact transport with full settings behind Controls.
+Desktop adds larger playback buttons and an optional Hide controls reading view.
+Dune Sea and Harmonic Ink join the LOOK media-player visualizers.
 
 8.22.0 adds Books discovery, cover previews and browser read-aloud in Signal and
 Albert. Use `/books`, “read TITLE” or “continue reading”; narration and progress
