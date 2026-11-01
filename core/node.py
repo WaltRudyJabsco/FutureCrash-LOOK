@@ -3901,6 +3901,9 @@ class API(BaseHTTPRequestHandler):
                 import book_audio
                 value=dict(book_reader.status(),narration_busy=book_audio._LOCK.locked())
             elif payload.get('action')=='install':value=book_reader.install(confirmed=payload.get('confirm'))
+            elif payload.get('action')=='native-install':
+                import book_native
+                value=book_native.install(confirmed=payload.get('confirm'))
             elif payload.get('action')=='speech-setup':
                 import book_speech
                 value=book_speech.setup(confirmed=payload.get('confirm'))

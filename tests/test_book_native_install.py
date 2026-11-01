@@ -35,3 +35,16 @@ def test_native_installer_rejects_tampered_bytes_and_symlinks(tmp_path):
     data,build=package(link=True)
     with pytest.raises(ValueError,match='invalid member'):book_native.install_package(data,build,tmp_path/'bad')
     assert not (tmp_path/'bad').exists()
+
+
+def test_fabric_native_setup_requires_confirmation(monkeypatch):
+    from core import node
+    handler=node.API.__new__(node.API);handler.sendj=Mock()
+    handler._book_reader_request({'action':'native-install'})
+    assert handler.sendj.call_args.args[0]==400
+    assert 'confirmation' in handler.sendj.call_args.args[1]['error']
+    install=Mock(return_value={'setup':{'state':'installing'}})
+    monkeypatch.setattr(book_native,'install',install)
+    handler._book_reader_request({'action':'native-install','confirm':True})
+    install.assert_called_once_with(confirmed=True)
+    assert handler.sendj.call_args.args[0]==200
