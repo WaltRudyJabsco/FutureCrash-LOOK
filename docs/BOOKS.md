@@ -153,7 +153,9 @@ not guess where another reader is currently positioned.
 macOS uses installed system voices, preferring Jamie (Premium), then an available
 British voice; it does not silently download Apple voices. The optional fixed
 Piper setup installs `piper-tts` in an isolated environment and downloads
-`en_GB-alan-medium` for local neural speech on Linux or Mac. It reports durable
+`en_GB-alan-medium` (male) and `en_GB-alba-medium` (female) for local neural
+speech on Linux or Mac (about 130 MB of models). Re-run `lk books speech-setup`
+to add Alba to an existing Alan-only installation. It reports durable
 setup status and updates wait while setup runs. Basic `espeak-ng` is an explicitly
 labelled fallback when present. No book text is sent to an online speech service.
 PDF speech needs text extraction (`pdftotext`); image-only scans need OCR first.
@@ -443,3 +445,46 @@ the two readers.
 ![Native Bookokrat paragraph narration](screenshots/bookokrat-native-narration.png)
 
 Terminal captures use fictional text and a silent fixture speech worker.
+
+### Shelf search and Gutenberg discovery
+
+The browser has separate **Search shelf** and **Search Gutenberg** buttons using
+the same title/author field. Shelf search filters the list without opening a book.
+**Discover Gutenberg** opens Popular; New arrivals, Subjects and Surprise me remain
+available. **Load more books** retrieves the next official catalog page instead
+of treating the first page as the whole category. Subjects use Gutenberg's field
+query syntax; navigation entries are excluded from book results.
+
+Sort the shelf by title (the default), author, last opened, or date added. The
+browser remembers the sort choice. Last opened uses the saved reading timestamp;
+books without reading history follow those with history.
+
+Gutenberg results already on the reachable Fabric shelf are dimmed and labeled
+**Already on your shelf · Read**. Selecting one opens the existing copy. Matching
+uses Gutenberg record numbers from saved acquisition metadata or an explicit
+Gutenberg EPUB identifier, never similar titles. Unreachable owners are reported;
+LOOK cannot verify their holdings while offline. Downloads retain their original
+Gutenberg identity across rescans, and repeated local acquisition of that record
+returns the existing book without fetching it again.
+
+### Standard British narrators
+
+The web Voice selector puts **British male** and **British female** choices first
+when those voices are installed on the book owner. `lk books voices --json` also
+reports these platform choices in `standard`. They lead the terminal/native voice
+cycle, with all other installed voices still available. Available Mac system voices are
+used directly; Piper provides Alan and Alba for offline neural narration. The
+explicitly labeled eSpeak male/female variants are basic fallbacks when present.
+Existing voice preferences remain selected. **Default** continues to restore the
+existing automatic/preferred narrator, rather than changing it during an upgrade.
+
+Alba's [model card](https://huggingface.co/rhasspy/piper-voices/blob/main/en/en_GB/alba/medium/MODEL_CARD)
+identifies the Edinburgh dataset and its CC BY 4.0 license. Voice capabilities
+come from the book owner, so a browser on a Mac reading a 3090-owned book uses
+the voices installed on the 3090.
+
+![Browser Gutenberg discovery with a dimmed exact match (fictional test library)](screenshots/books-gutenberg-discovery.png)
+
+![Shelf search and remembered sort order](screenshots/books-shelf-search-sort.png)
+
+![British female narrator selected in the test reader](screenshots/books-standard-voices.png)

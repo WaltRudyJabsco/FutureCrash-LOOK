@@ -3969,7 +3969,7 @@ class API(BaseHTTPRequestHandler):
                 return self._serve_file_range(image,mimetypes.guess_type(image.name)[0] or 'image/jpeg')
             if action=='discover':
                 import book_core
-                return self.sendj(200,{'ok':True,'entries':book_core.discover((params.get('mode') or ['popular'])[0],(params.get('subject') or [''])[0])})
+                return self.sendj(200,dict(ok=True,**book_core.discover((params.get('mode') or ['popular'])[0],(params.get('subject') or [''])[0],query=(params.get('query') or [''])[0],start_index=(params.get('start_index') or ['1'])[0],page=True)))
             peer,_=self._file_target()
             if peer is not None:
                 query={k:v[0] for k,v in params.items() if k!='target'}

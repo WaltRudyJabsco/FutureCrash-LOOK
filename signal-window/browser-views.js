@@ -79,6 +79,9 @@
 (async function(){
   if(typeof document==='undefined'||!document.getElementById?.('books-app'))return;
   const $=id=>document.getElementById(id),audio=$('audio');
+  let libraryGeneration=0,shelfQuery='',discovery=null,sortOrder='title';
+  try{sortOrder=localStorage.getItem('look-books-shelf-sort')||'title'}catch{}
+  if(!['title','author','opened','added'].includes(sortOrder))sortOrder='title';
   let catalog=[],book=null,model=null,chapter=0,paragraph=0,generation=0,lastSave=0,saving=Promise.resolve();
   let content=null,follow=true,fontSize=21,theme='paper',speed=1,selectedVoice='',defaultVoice='',voiceByOwner={};
   try{const prefs=JSON.parse(localStorage.getItem('look-books-appearance')||'{}');
@@ -126,7 +129,7 @@
     }
     $('passage').replaceChildren(...elements);
   }
-  function libraryView(){audio.pause();save();$('reader').hidden=true;$('library').hidden=false;$('books-app').classList.remove('reading')}
+  function libraryView(){++generation;audio.pause();save();$('reader').hidden=true;$('library').hidden=false;$('books-app').classList.remove('reading')}
   function status(text){$('status').textContent=text}
   async function api(route='',payload){
     const response=await fetch('/api/books'+route,payload?{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(payload)}:{cache:'no-store'});
@@ -166,14 +169,15 @@
     if(autoplay){status('Preparing narration…');await audio.play().catch(()=>status('Tap Play to continue listening.'))}
   }
   async function open(row){
-    audio.pause();if(book)save();book=row;model=null;content=null;const mine=++generation;
+    ++libraryGeneration;audio.pause();if(book)save();book=row;model=null;content=null;const mine=++generation;
     status('Loading narration voices…');
     let options;try{options=await api('/voices?'+params())}catch{options={voices:[]}}
     if(mine!==generation)return;
     const voices=options.voices||[];
     defaultVoice=options.default?.id||'';
     selectedVoice=voices.some(voice=>voice.id===voiceByOwner[book.node||'local'])?voiceByOwner[book.node||'local']:'';
-    $('voice').replaceChildren(...[{id:'',name:options.default?'Default — '+options.default.name:'Default voice'},...voices].map(voice=>{
+    const standards=Object.entries(options.standard||{}).filter(([,voice])=>voice).map(([kind,voice])=>({...voice,name:'British '+kind+' — '+voice.name}));
+    $('voice').replaceChildren(...[{id:'',name:options.default?'Default — '+options.default.name:'Default voice'},...standards,...voices.filter(voice=>!standards.some(row=>row.id===voice.id))].map(voice=>{
       const option=document.createElement('option');option.value=voice.id;option.textContent=voice.name+(voice.locale?' · '+voice.locale:'');return option;
     }));$('voice').value=selectedVoice;$('voice').disabled=!voices.length;
     await load();window.scrollTo({top:0,behavior:'auto'});focusPassage();
@@ -185,29 +189,78 @@
     await load(c,p,autoplay);save();
   }
   function button(label,click){const b=document.createElement('button');b.textContent=label;b.onclick=()=>Promise.resolve().then(click).catch(e=>status(e.message));return b}
-  function show(rows,discover=false){
-    $('items').replaceChildren(...rows.map(row=>button(row.title+(row.author?' — '+row.author:''),async()=>{
-      if(row.kind==='subject')return discoverMode('subject',row.subject);
-      if(!discover)return open(row);
-      if(!confirm('Download '+row.title+' to this Fabric host’s books library?'))return;
-      status('Downloading book…');const value=await api('/fetch',{url:row.url});await shelf();status('Added to your shelf: '+value.book.title);
-    })));
-    if(discover)document.querySelectorAll('#items button').forEach((b,i)=>{
-      const id=rows[i].url?.match(/\/ebooks\/(\d+)\.opds/);if(!id)return;
-      const img=document.createElement('img');img.alt='';img.loading='lazy';img.src='/api/books/discovery-cover?id='+id[1];img.style.cssText='width:45px;max-height:65px;object-fit:contain;vertical-align:middle;margin-right:12px';img.onerror=()=>img.remove();b.prepend(img);
-    });
-    if(!rows.length)status('No books found.');
+  function gutenbergId(row){
+    if(/^[1-9]\d{0,8}$/.test(String(row.gutenberg_id||'')))return String(row.gutenberg_id);
+    for(const key of ['source_url','url','identifier'])for(const value of String(row[key]||'').split('; ')){
+      try{const u=new URL(value);if(!['www.gutenberg.org','gutenberg.org'].includes(u.hostname))continue;
+        const m=u.pathname.match(/^\/ebooks\/([1-9]\d*)(?:\.opds|\.epub(?:\d)?(?:\.images|\.noimages)?)?\/?$/)||u.pathname.match(/^\/(?:cache\/epub|files)\/([1-9]\d*)\//);
+        if(m)return m[1];
+      }catch{}
+    }
+    return '';
   }
-  async function shelf(){libraryView();status('Loading Fabric shelf…');const value=await api();catalog=value.entries||[];show(catalog);status(value.errors?.length?'Some book owners are unavailable.':'Choose a book or continue reading.')}
-  async function discoverMode(mode,subject=''){libraryView();status('Browsing Project Gutenberg…');const value=await api('/discover?'+new URLSearchParams({mode,subject}));show(value.entries||[],true);status('Project Gutenberg · select a title to download. Surprise me samples the popular list.')}
+  function show(rows,discover=false){
+    $('result-count').textContent=rows.length+(discover?(rows.length===1?' result':' results'):(rows.length===1?' book':' books'));
+    $('items').replaceChildren(...rows.map(row=>{
+      const id=gutenbergId(row),owned=discover&&id?catalog.find(book=>gutenbergId(book)===id):null;
+      const b=button(row.title+(row.author?' — '+row.author:''),async()=>{
+        if(row.kind==='subject')return discoverMode('subject',row.subject);
+        if(!discover||owned)return open(owned||row);
+        if(!confirm('Download '+row.title+' to this Fabric host’s books library?'))return;
+        b.disabled=true;
+        try{status('Downloading book…');const value=await api('/fetch',{url:row.url});await shelf();status('Added to your shelf: '+value.book.title)}finally{b.disabled=false}
+      });
+      if(owned){b.classList.add('owned');const badge=document.createElement('small');badge.textContent='Already on your shelf · Read';b.append(badge)}
+      if(discover&&id){const img=document.createElement('img');img.alt='';img.loading='lazy';img.src='/api/books/discovery-cover?id='+id;img.style.cssText='width:45px;max-height:65px;object-fit:contain;vertical-align:middle;margin-right:12px';img.onerror=()=>img.remove();b.prepend(img)}
+      return b;
+    }));
+  }
+  function shelfRows(){
+    const terms=shelfQuery.toLocaleLowerCase().split(/\s+/).filter(Boolean);
+    return catalog.filter(row=>terms.every(term=>(row.title+' '+(row.author||'')).toLocaleLowerCase().includes(term))).sort((a,b)=>{
+      const title=()=>String(a.title).localeCompare(String(b.title),undefined,{numeric:true,sensitivity:'base'});
+      if(sortOrder==='opened')return (b.reading?.updated||0)-(a.reading?.updated||0)||title();
+      if(sortOrder==='added')return (b.added||0)-(a.added||0)||title();
+      if(sortOrder==='author')return String(a.author||'').localeCompare(String(b.author||''),undefined,{sensitivity:'base'})||title();
+      return title();
+    });
+  }
+  function libraryControls(isShelf){
+    $('shelf-sort').hidden=$('sort-label').hidden=!isShelf;
+    $('shelf').setAttribute('aria-pressed',String(isShelf));$('discover').setAttribute('aria-pressed',String(!isShelf));
+    $('load-more').hidden=true;
+  }
+  function renderShelf(){const rows=shelfRows();show(rows);status(rows.length?'Choose a book or continue reading.':'No matching book on your Fabric shelf. Use Search Gutenberg to find new books.')}
+  async function shelf(query=''){
+    const mine=++libraryGeneration;discovery=null;shelfQuery=query;libraryView();libraryControls(true);status('Loading Fabric shelf…');
+    const value=await api();if(mine!==libraryGeneration)return;catalog=value.entries||[];renderShelf();
+    if(value.errors?.length)status('Some book owners are unavailable. Showing the reachable shelf.');
+  }
+  async function discoverMode(mode,subject='',query='',more=false){
+    const mine=++libraryGeneration;libraryView();libraryControls(false);status('Browsing Project Gutenberg…');
+    const cursor=more?discovery?.next_index:1;
+    if(!cursor)return;
+    const [value,shelfValue]=await Promise.all([api('/discover?'+new URLSearchParams({mode,subject,query,start_index:cursor})),api()]);
+    if(mine!==libraryGeneration)return;
+    catalog=shelfValue.entries||[];
+    const rows=more?[...discovery.entries,...(value.entries||[])]:value.entries||[];
+    discovery={mode,subject,query,entries:rows,next_index:value.next_index};show(rows,true);
+    $('load-more').hidden=!value.next_index;
+    const label=mode==='subject'?subject:mode==='search'?'Search: '+query:mode==='new'?'New arrivals':mode==='subjects'?'Subjects':mode==='surprise'?'Surprise me':'Popular';
+    status('Project Gutenberg · '+label+' · '+(rows.length?(mode==='subjects'?'Choose a subject.':'Select a title to download; dimmed titles are already on your shelf.'):'No matching books.')+(shelfValue.errors?.length?' Some book owners are unavailable; ownership checks are incomplete.':''));
+  }
   async function resume(query=''){
     await shelf();const terms=query.toLocaleLowerCase().split(/\s+/).filter(Boolean);
     const rows=catalog.filter(row=>(query||!row.reading?.finished)&&terms.every(t=>(row.title+' '+row.author).toLocaleLowerCase().includes(t))).sort((a,b)=>(b.reading?.updated||0)-(a.reading?.updated||0));
-    if(!rows.length){status('No matching book on your Fabric shelf. Try Discover to add it.');return}
+    if(!rows.length){status('No matching book on your Fabric shelf. Use Search Gutenberg to find new books.');return}
     if(query&&new Set(rows.map(r=>r.id)).size>1){show(rows);status('Choose the book you meant.');return}
     if(!query&&!rows[0].reading?.updated){show(rows);status('Choose a book to begin reading.');return}
     await open(rows[0]);
   }
+  $('shelf-sort').value=sortOrder;
+  $('shelf-sort').onchange=()=>{sortOrder=$('shelf-sort').value;try{localStorage.setItem('look-books-shelf-sort',sortOrder)}catch{}renderShelf()};
+  $('discover').onclick=()=>discoverMode('popular').catch(e=>status(e.message));
+  $('load-more').onclick=()=>{if(discovery)discoverMode(discovery.mode,discovery.subject,discovery.query,true).catch(e=>{status(e.message);$('load-more').hidden=!discovery?.next_index})};
   $('shelf').onclick=()=>shelf().catch(e=>status(e.message));$('continue').onclick=()=>resume().catch(e=>status(e.message));
   $('library-back').onclick=()=>shelf().catch(e=>status(e.message));
   $('theme').onclick=()=>{theme=theme==='dark'?'paper':'dark';appearance()};
@@ -221,7 +274,7 @@
     save();load(chapter,paragraph,autoplay).then(()=>save()).catch(e=>status(e.message));
   };
   document.querySelectorAll('[data-mode]').forEach(b=>b.onclick=()=>discoverMode(b.dataset.mode).catch(e=>status(e.message)));
-  $('search').onsubmit=e=>{e.preventDefault();resume($('query').value).catch(e=>status(e.message))};
+  $('search').onsubmit=e=>{e.preventDefault();const query=$('query').value.trim();(e.submitter?.value==='gutenberg'?discoverMode('search','',query):shelf(query)).catch(e=>status(e.message))};
   $('previous').onclick=()=>move(-1).catch(e=>status(e.message));$('next').onclick=()=>move(1).catch(e=>status(e.message));
   $('retry').onclick=()=>load(chapter,paragraph,true,audio.currentTime||0).catch(e=>status(e.message));
   $('chapters').onchange=()=>load(Number($('chapters').value),0).then(()=>save()).catch(e=>status(e.message));
