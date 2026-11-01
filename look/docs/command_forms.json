@@ -934,9 +934,9 @@
   ],
   [
     "lk books reader",
-    "[status|install|auto|bookokrat|system]",
+    "[status|install|native-install|auto|bookokrat|system]",
     "media",
-    "Choose the local book reader or install optional Bookokrat"
+    "Choose the local reader; install standard or native read-along Bookokrat"
   ],
   [
     "lk books",

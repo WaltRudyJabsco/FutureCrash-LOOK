@@ -367,3 +367,79 @@ or add OCR to scanned pages.
 ![Dark reading view with the active paragraph highlighted](screenshots/books-reading-dark.jpg)
 
 Screenshots use a fictional illustrated book and silent test narration.
+
+## Narration controls in the browser
+
+**Voice** lists installed voices on the book owner; **Default** uses that owner's
+LOOK speech preference when the book is opened. A browser's explicit voice choice is remembered
+per owner without changing another listener's choice. Changing voice restarts the
+current paragraph and preserves whether playback was running or paused.
+
+The **Speed** slider changes playback immediately from 0.5× to 2× and is remembered
+with the reading appearance. It continues at that speed through paragraph and
+chapter changes. Speed changes reuse the prepared narration instead of generating
+another copy. Voice choices may differ between owners because their installed
+local voices differ. The interface never downloads a voice automatically.
+
+## Terminal read-along controls
+
+The read-aloud view now wraps complete paragraphs and highlights the selected
+paragraph. Up/Down selects a paragraph; Page Up/Down and Shift-Up/Down scroll the
+text, including long paragraphs. Left/Right changes chapter; Home/End and
+Shift-Left/Right go to the first/last paragraph. Enter reads, Space pauses/resumes,
+s stops and q/Esc returns. Blue command keys and subdued labels wrap across the
+footer, including **P clipboard** and **W shell pane**. Shelf cover images are
+cleared before entering the reader.
+
+**v** cycles unique installed voice IDs and wraps after the final voice. **V**
+restores the automatic default (Jamie Premium when installed on macOS; otherwise
+the existing local fallback preference). **- / +** changes speed by 0.1× within
+0.5–2×. Voice/speed changes preserve pause state and restart the current paragraph
+when already reading. The local preference is shared with native Bookokrat
+narration. The default voice is chosen from discovered installed voices.
+
+## Native Bookokrat read-along companion
+
+LOOK no longer forces Bookokrat's Zen mode, so its normal control bar is visible.
+**q** quits and **?** opens searchable Help. Space then z still selects Zen mode.
+
+The optional [LOOK Bookokrat companion](https://github.com/WaltRudyJabsco/Bookokrat-LOOK)
+adds narration directly to Bookokrat's own EPUB text view:
+
+```sh
+lk books reader native-install
+lk books reader status
+lk books reader bookokrat
+```
+
+Setup downloads a fixed, checksum-verified native package for Apple Silicon
+macOS or x86-64 Linux. Installation is explicit, staged and verified; maintenance
+waits for it. The companion is kept in a versioned private directory and selected
+by LOOK. Its source, upstream AGPL license and package source commit are available
+with each build. Standard PDF/SVG reading remains enabled.
+
+| Native Bookokrat sequence | Action |
+|---|---|
+| Space then r | Start narration at the visible/focused paragraph, pause/resume |
+| Space then R | Read from the current visual paragraph |
+| Space then x | Stop narration |
+| Space then v / V | Next voice / automatic default voice |
+| Space then - / + | Slower / faster |
+| q / ? | Quit / native Help |
+
+These are normal configurable Bookokrat actions. Its own paragraph blocks are
+highlighted across wrapped lines and followed through paragraphs and chapters.
+Navigating chapters manually stops the prior narration. The current voice and
+speed appear in the reader HUD. No sound process outside this reader is stopped.
+Native narration supports EPUB; PDF reading remains available without narration.
+Bookokrat's native visual bookmarks stay separate from LOOK's owner-held browser
+speech bookmarks; this integration does not guess a paragraph mapping between
+the two readers.
+
+![Web voice selector and playback speed](screenshots/books-voice-speed.jpg)
+
+![Wrapped terminal read-along with complete controls](screenshots/books-terminal-readalong.png)
+
+![Native Bookokrat paragraph narration](screenshots/bookokrat-native-narration.png)
+
+Terminal captures use fictional text and a silent fixture speech worker.

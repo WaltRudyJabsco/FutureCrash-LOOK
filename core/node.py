@@ -3901,6 +3901,9 @@ class API(BaseHTTPRequestHandler):
                 import book_audio
                 value=dict(book_reader.status(),narration_busy=book_audio._LOCK.locked())
             elif payload.get('action')=='install':value=book_reader.install(confirmed=payload.get('confirm'))
+            elif payload.get('action')=='native-install':
+                import book_native
+                value=book_native.install(confirmed=payload.get('confirm'))
             elif payload.get('action')=='speech-setup':
                 import book_speech
                 value=book_speech.setup(confirmed=payload.get('confirm'))
@@ -3980,6 +3983,7 @@ class API(BaseHTTPRequestHandler):
                         if response.headers.get(key):self.send_header(key,response.headers[key])
                     self.end_headers();shutil.copyfileobj(response,self.wfile)
                 return
+            if action=='voices':return self.sendj(200,dict(book_audio.voice_options(),ok=True))
             ident=(params.get('id') or [''])[0]
             shelf=self._books_shelf();row,path=shelf.item(ident)
             if action=='cover':
@@ -4003,7 +4007,8 @@ class API(BaseHTTPRequestHandler):
                     'chapters':[{'title':r['title'],'paragraphs':len(r['paragraphs'])} for r in rows]}
                 if (params.get('content') or ['1'])[0]!='0':value['content']=book_audio.chapter_content(rows,chapter)
                 return self.sendj(200,value)
-            return self._serve_file_range(book_audio.render(text,ident,chapter,paragraph),'audio/mp4')
+            voice_id=(params.get('voice') or [''])[0]
+            return self._serve_file_range(book_audio.render(text,ident,chapter,paragraph,voice_id) if voice_id else book_audio.render(text,ident,chapter,paragraph),'audio/mp4')
         except Exception as exc:return self.sendj(400,{'ok':False,'error':str(exc)})
 
     def _serve_book_item(self):
@@ -4719,7 +4724,7 @@ class API(BaseHTTPRequestHandler):
             except Exception as exc:return self.sendj(503,{'error':str(exc),'enabled':False})
         if path == "/v1/words": return self._words_request()
         if path == "/v1/wiki": return self._wiki_request()
-        if path in {"/v1/books/read","/v1/books/audio","/v1/books/cover","/v1/books/image","/v1/books/discover","/v1/books/discovery-cover"}: return self._book_content()
+        if path in {"/v1/books/read","/v1/books/audio","/v1/books/cover","/v1/books/image","/v1/books/voices","/v1/books/discover","/v1/books/discovery-cover"}: return self._book_content()
         if path == "/v1/books/reader": return self._book_reader_request()
         if path == "/v1/books": return self._books_request()
         if path == "/v1/books/fabric": return self._books_request(fabric=True)
