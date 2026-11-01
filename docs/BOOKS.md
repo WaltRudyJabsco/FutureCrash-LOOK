@@ -518,3 +518,38 @@ is needed.
 Paragraph and chapter navigation preserve the current playing/paused state.
 
 ![Mercury Reader wordmark and reading view (fictional test book)](screenshots/mercury-reader.png)
+
+### Shelf covers and punctuation pauses
+
+Mercury Reader shows a small, lazy-loaded cover beside each shelf title. Covers
+come from the book's owner using embedded EPUB art or the existing PDF first-page
+preview. Books without a supported cover show a consistent BOOK placeholder;
+selecting the row still opens the book normally.
+
+**Pauses** is separate from **Speed**. Choose **Voice default** for the engine's
+original phrasing, **More space** (the new browser default) for extra breathing
+room, or **Unhurried** for longer gaps. Speed still starts at 1× for a fresh
+browser; your existing speed choice remains unchanged. Both settings are saved
+locally. Changing pauses restarts the current paragraph and prepares subsequent
+audio with the new setting, preserving playing/paused state.
+
+The paced profiles target sentence endings, em dashes, spaced dashes, and colons;
+word hyphens, numeric ranges, decimals, times, and common English abbreviations
+are protected. This is punctuation-based phrasing, not a semantic language parser.
+The source text and bookmarks are unchanged.
+
+At 1×, More space requests 350 ms at sentence endings and 200 ms at clause breaks;
+Unhurried requests 650 ms and 350 ms. Piper inserts frame-aligned silence while
+loading its model only once per paragraph. Mac system voices use embedded silence
+commands; eSpeak uses escaped SSML breaks. Actual engine timing varies, and browser
+playback speed scales these pauses along with the spoken words. No new model or
+package is required on a reader that already has its voice installed.
+
+The [Piper synthesis API](https://github.com/OHF-Voice/piper1-gpl/blob/main/src/piper/voice.py)
+provides the audio chunks used for this local composition. Pause profiles are
+part of the audio cache identity, so prepared audio from a different setting is
+discarded rather than played with the wrong pacing.
+
+![Shelf cover thumbnails using a fictional book](screenshots/mercury-reader-shelf-covers.png)
+
+![Independent punctuation pauses at 1.3× playback](screenshots/mercury-reader-pacing.png)
