@@ -18,8 +18,8 @@ before making changes, then performs the first backup and an actual restore test
 ## What it protects
 
 This is **essential Fabric state**, including identity, Notes/revisions, settings,
-memories and durable state. It is not a computer image or a backup of documents,
-photos, music or video files. `lk fabric backup inventory` shows the exact local
+memories, durable state and Mercury manuscripts/revision history. It is not a
+computer image or a backup of other documents, photos, music or video files. `lk fabric backup inventory` shows the exact local
 inventory and exclusions. `lk profile backup` remains a separate portable,
 secret-free profile.
 

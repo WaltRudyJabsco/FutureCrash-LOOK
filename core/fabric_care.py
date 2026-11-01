@@ -43,7 +43,12 @@ def backup_status(home):
         except ProcessLookupError:job.update(state='failed',error='Backup worker stopped before publishing a result')
         except PermissionError:pass
     receipts=[raw.get('last_backup'),raw.get('last_sent'),*raw.get('received',[])]
-    mercury_required=any((Path(home)/app/'library/library.json').is_file() for app in recovery.MERCURY_APPS)
+    mercury_required=False
+    for app in recovery.MERCURY_APPS:
+        index=Path(home)/app/'library/library.json'
+        if not index.is_file():continue
+        try:mercury_required=mercury_required or bool(json.loads(index.read_text()).get('projects'))
+        except (OSError,ValueError):mercury_required=True
     return {'configured':raw.get('configured',False),'role':raw.get('role'),'connected':raw.get('connected'),
             'owner':recovery.capsule_owner(home),'scope':'fabric-essential-and-mercury','excluded':['other documents','photos','media'],
             'receipts':[r for r in receipts if isinstance(r,dict)],'job':job,'mercury_required':mercury_required,
@@ -114,7 +119,7 @@ def inspect(snapshot,get):
         for receipt in receipts:
             try:age=now-float(receipt.get('verified_at') or 0)
             except (TypeError,ValueError):continue
-            if owner and receipt.get('node')==owner and receipt.get('restore_tested') and 0<=age<=BACKUP_MAX_AGE and (not backup.get('mercury_required') or receipt.get('mercury',{}).get('files',0)>0):matching.append(receipt)
+            if owner and receipt.get('node')==owner and receipt.get('restore_tested') and 0<=age<=BACKUP_MAX_AGE and (not backup.get('mercury_required') or receipt.get('mercury',{}).get('projects',0)>0):matching.append(receipt)
         backup['verified_recently']=bool(matching)
         backup['verified_at']=max((r.get('verified_at',0) for r in matching),default=None)
     digests={row.get('release',{}).get('digest') if isinstance(row.get('release',{}).get('digest'),str) else None for row in rows}

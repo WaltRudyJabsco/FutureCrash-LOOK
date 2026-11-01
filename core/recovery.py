@@ -76,7 +76,7 @@ def sources(home):
     mercury_trees=tuple(app+'/'+folder for app in MERCURY_APPS for folder in MERCURY_DATA)
     for relative in CONFIG_TREES + STATE_TREES + mercury_trees:
         base = home / relative
-        if base.is_symlink():
+        if base.is_symlink() or any(parent.is_symlink() for parent in base.parents if parent!=home and home in parent.parents):
             skipped.append(relative); continue
         if not base.exists(): continue
         for folder, dirs, files in os.walk(base, followlinks=False):
