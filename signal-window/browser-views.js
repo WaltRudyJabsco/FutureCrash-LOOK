@@ -80,6 +80,49 @@
   if(typeof document==='undefined'||!document.getElementById?.('books-app'))return;
   const $=id=>document.getElementById(id),audio=$('audio');
   let catalog=[],book=null,model=null,chapter=0,paragraph=0,generation=0,lastSave=0,saving=Promise.resolve();
+  let content=null,follow=true,fontSize=21,theme='paper';
+  try{const prefs=JSON.parse(localStorage.getItem('look-books-appearance')||'{}');
+    fontSize=Math.max(16,Math.min(32,Number(prefs.fontSize)||21));theme=prefs.theme==='dark'?'dark':'paper';follow=prefs.follow!==false;
+  }catch{}
+  function appearance(){
+    document.documentElement.dataset.theme=theme;document.documentElement.style.setProperty('--reading-size',fontSize+'px');
+    $('theme').textContent=theme==='dark'?'Paper theme':'Dark theme';$('theme').setAttribute('aria-pressed',String(theme==='dark'));
+    $('font-size').textContent=fontSize;$('font-smaller').disabled=fontSize<=16;$('font-larger').disabled=fontSize>=32;
+    $('follow').setAttribute('aria-pressed',String(follow));
+    try{localStorage.setItem('look-books-appearance',JSON.stringify({theme,fontSize,follow}))}catch{}
+  }
+  function focusPassage(smooth=false){
+    const active=$('passage').querySelector('[aria-current="true"]');if(!active||!follow)return;
+    const viewport=$('reading-body'),a=active.getBoundingClientRect(),v=viewport.getBoundingClientRect();
+    viewport.scrollTo({top:viewport.scrollTop+a.top-v.top-Math.max(0,(viewport.clientHeight-active.offsetHeight)/2),
+      behavior:smooth&&!matchMedia('(prefers-reduced-motion: reduce)').matches?'smooth':'auto'});
+  }
+  function highlight(){
+    $('passage').querySelectorAll('[data-paragraph]').forEach(element=>{
+      const active=Number(element.dataset.paragraph)===paragraph;
+      if(active)element.setAttribute('aria-current','true');else element.removeAttribute('aria-current');
+    });
+    focusPassage(true);
+  }
+  function renderChapter(){
+    const elements=[],images=content.images||[];
+    for(let i=0;i<=content.paragraphs.length;i++){
+      images.filter(image=>image.before===i).forEach(image=>{
+        const figure=document.createElement('figure'),picture=document.createElement('img');
+        picture.alt=image.alt||'Book illustration';picture.loading='lazy';picture.decoding='async';
+        picture.src='/api/books/image?'+params({chapter,image:image.index});figure.append(picture);
+        picture.onload=()=>focusPassage();
+        picture.onerror=()=>{picture.remove();caption.textContent='Illustration unavailable'+(image.alt?': '+image.alt:'.')};
+        const caption=document.createElement('figcaption');caption.textContent=image.alt||'';figure.append(caption);elements.push(figure);
+      });
+      if(i===content.paragraphs.length)break;
+      const index=i+(content.start||0),p=document.createElement('p');p.className='reading-paragraph';p.dataset.paragraph=index;p.tabIndex=0;p.textContent=content.paragraphs[i];
+      const select=()=>{const autoplay=!audio.paused;save();load(chapter,index,autoplay).then(()=>save()).catch(e=>status(e.message))};
+      p.onclick=select;p.onkeydown=e=>{if(e.key==='Enter'||e.key===' '){e.preventDefault();select()}};elements.push(p);
+    }
+    $('passage').replaceChildren(...elements);
+  }
+  function libraryView(){audio.pause();save();$('reader').hidden=true;$('library').hidden=false;$('books-app').classList.remove('reading')}
   function status(text){$('status').textContent=text}
   async function api(route='',payload){
     const response=await fetch('/api/books'+route,payload?{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(payload)}:{cache:'no-store'});
@@ -95,13 +138,20 @@
   async function load(c,p,autoplay=false,resumeOffset=0){
     const mine=++generation;audio.pause();audio.removeAttribute('src');audio.load();
     status('Preparing your reading position…');
-    const value=await api('/read?'+params(c===undefined?{}:{chapter:c,paragraph:p}));
+    const needContent=!content||content.legacy||c===undefined||c!==chapter;
+    const value=await api('/read?'+params({...(c===undefined?{}:{chapter:c,paragraph:p}),content:needContent?'1':'0'}));
     if(mine!==generation)return;
     model=value;chapter=value.chapter;paragraph=value.paragraph;
-    $('reader').hidden=false;$('title').textContent=book.title;$('passage').textContent=value.text;
+    $('reader').hidden=false;$('library').hidden=true;$('books-app').classList.add('reading');$('title').textContent=book.title;
+    if(value.content){content=value.content;renderChapter()}
+    else if(needContent){content={paragraphs:[value.text],images:[],start:paragraph,legacy:true};renderChapter()}
+    highlight();
     $('where').textContent=`${value.chapters[chapter].title} · paragraph ${paragraph+1}/${value.chapters[chapter].paragraphs}`;
     $('chapters').replaceChildren(...value.chapters.map((row,i)=>{const o=document.createElement('option');o.value=i;o.textContent=row.title;return o}));$('chapters').value=chapter;
-    $('cover').hidden=false;$('cover').src='/api/books/cover?'+params();$('cover').onerror=()=>{$('cover').hidden=true};
+    const coverURL='/api/books/cover?'+params();
+    if($('cover').getAttribute('src')!==coverURL){
+      $('cover').hidden=false;$('cover').onerror=()=>{$('cover').hidden=true};$('cover').src=coverURL;
+    }
     audio.src='/api/books/audio?'+params({chapter,paragraph});
     const offset=c===undefined?(value.reading.offset||0):resumeOffset;
     audio.onloadedmetadata=()=>{if(mine===generation&&offset&&offset<audio.duration)audio.currentTime=offset};
@@ -109,7 +159,7 @@
     status('Ready. Press Play to prepare narration and listen on this device.');
     if(autoplay){status('Preparing narration…');await audio.play().catch(()=>status('Tap Play to continue listening.'))}
   }
-  async function open(row){if(book)save();book=row;model=null;await load()}
+  async function open(row){audio.pause();if(book)save();book=row;model=null;content=null;await load();window.scrollTo({top:0,behavior:'auto'});focusPassage()}
   async function move(delta,autoplay=false){
     if(!model)return;save();let c=chapter,p=paragraph+delta;
     if(p>=model.chapters[c].paragraphs){if(c+1>=model.chapters.length){save(true);status('Book finished.');return}c++;p=0}
@@ -130,8 +180,8 @@
     });
     if(!rows.length)status('No books found.');
   }
-  async function shelf(){status('Loading Fabric shelf…');const value=await api();catalog=value.entries||[];show(catalog);status(value.errors?.length?'Some book owners are unavailable.':'Choose a book or continue reading.')}
-  async function discoverMode(mode,subject=''){status('Browsing Project Gutenberg…');const value=await api('/discover?'+new URLSearchParams({mode,subject}));show(value.entries||[],true);status('Project Gutenberg · select a title to download. Surprise me samples the popular list.')}
+  async function shelf(){libraryView();status('Loading Fabric shelf…');const value=await api();catalog=value.entries||[];show(catalog);status(value.errors?.length?'Some book owners are unavailable.':'Choose a book or continue reading.')}
+  async function discoverMode(mode,subject=''){libraryView();status('Browsing Project Gutenberg…');const value=await api('/discover?'+new URLSearchParams({mode,subject}));show(value.entries||[],true);status('Project Gutenberg · select a title to download. Surprise me samples the popular list.')}
   async function resume(query=''){
     await shelf();const terms=query.toLocaleLowerCase().split(/\s+/).filter(Boolean);
     const rows=catalog.filter(row=>(query||!row.reading?.finished)&&terms.every(t=>(row.title+' '+row.author).toLocaleLowerCase().includes(t))).sort((a,b)=>(b.reading?.updated||0)-(a.reading?.updated||0));
@@ -141,13 +191,19 @@
     await open(rows[0]);
   }
   $('shelf').onclick=()=>shelf().catch(e=>status(e.message));$('continue').onclick=()=>resume().catch(e=>status(e.message));
+  $('library-back').onclick=()=>shelf().catch(e=>status(e.message));
+  $('theme').onclick=()=>{theme=theme==='dark'?'paper':'dark';appearance()};
+  $('font-smaller').onclick=()=>{fontSize=Math.max(16,fontSize-1);appearance();focusPassage()};
+  $('font-larger').onclick=()=>{fontSize=Math.min(32,fontSize+1);appearance();focusPassage()};
+  $('follow').onclick=()=>{follow=!follow;appearance();focusPassage()};appearance();
   document.querySelectorAll('[data-mode]').forEach(b=>b.onclick=()=>discoverMode(b.dataset.mode).catch(e=>status(e.message)));
   $('search').onsubmit=e=>{e.preventDefault();resume($('query').value).catch(e=>status(e.message))};
   $('previous').onclick=()=>move(-1).catch(e=>status(e.message));$('next').onclick=()=>move(1).catch(e=>status(e.message));
   $('retry').onclick=()=>load(chapter,paragraph,true,audio.currentTime||0).catch(e=>status(e.message));
   $('chapters').onchange=()=>load(Number($('chapters').value),0).then(()=>save()).catch(e=>status(e.message));
-  audio.onplay=()=>{status('Preparing / playing narration…');save()};audio.onplaying=()=>status('Reading on this device.');
-  audio.onpause=()=>save();audio.ontimeupdate=()=>{if(Date.now()-lastSave>5000){lastSave=Date.now();save()}};
+  audio.onplay=()=>{status('Preparing / playing narration…');save();focusPassage()};audio.onplaying=()=>status('Reading on this device.');
+  audio.onpause=()=>{save();if(audio.currentSrc&&!audio.ended)status('Paused. Press Play to continue from here.')};
+  audio.ontimeupdate=()=>{if(Date.now()-lastSave>5000){lastSave=Date.now();save()}};
   audio.onended=()=>move(1,true).catch(e=>status(e.message));
   window.addEventListener('pagehide',()=>{if(book&&model)fetch('/api/books/progress?'+params(),{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({id:book.id,fields:{chapter,paragraph,offset:audio.currentTime||0}}),keepalive:true}).catch(()=>{})});
   try{await shelf();const q=new URLSearchParams(location.search);if(q.has('resume')||q.has('query'))await resume(q.get('query')||'')}catch(e){status(e.message)}

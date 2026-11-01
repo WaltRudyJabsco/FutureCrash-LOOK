@@ -331,3 +331,39 @@ globally in the Look Kitty profile. With tmux, use **Ctrl-B, O** for focus and
 `exit` to close the shell. Without either backend, the status explains setup.
 Bookokrat's own typing/reader bindings are unchanged; the terminal-wide pane
 shortcuts still apply there.
+
+## Browser reading room
+
+Selecting a book brings its compact title, cover, chapter selector and playback
+controls to the top. **← Library** pauses narration and returns to the shelves;
+the existing search and discovery controls remain there.
+
+The reader loads the current chapter's text, highlights the narration paragraph
+and centers it as playback advances. **Follow reading** turns automatic scrolling
+off when you want to browse elsewhere; turn it on to return to the active passage.
+Select a paragraph (or focus it and press Enter) to start there. Playback remains
+paused when choosing text while paused. Previous/next paragraph, the audio slider,
+chapter selection and owner-held speech bookmarks keep their existing behavior.
+Chapter text is reused between paragraph changes rather than downloaded again.
+
+**Dark theme / Paper theme** and **A− / A+** control reading appearance. Text size
+ranges from 16–32 pixels. The browser remembers theme, size and follow preference
+on this origin. If browser storage is unavailable, the controls still work for
+this session; owner-held narration progress is saved independently.
+Reduced-motion preferences disable smooth following.
+
+Embedded PNG, JPEG, GIF and WebP illustrations appear in reading order when the
+EPUB includes them in its package manifest. Captions/alternative descriptions
+remain visible; an image inside a spoken paragraph is displayed after that
+paragraph so narration addresses and existing bookmarks do not change. External
+image URLs, active SVG/HTML, and illustrations larger than 8 MiB are not served.
+Images use the same authorized Fabric owner route as book text and audio.
+A caption without an actual image cannot supply the missing diagram. PDF reading
+continues to use text extraction; this feature does not reconstruct PDF page art
+or add OCR to scanned pages.
+
+![Paper reading view with an embedded EPUB map](screenshots/books-reading-paper.jpg)
+
+![Dark reading view with the active paragraph highlighted](screenshots/books-reading-dark.jpg)
+
+Screenshots use a fictional illustrated book and silent test narration.

@@ -28,6 +28,7 @@ def library(tmp_path):
         opf=z.read('OPS/book.opf').decode().replace('<manifest>','<manifest><item id="cover" href="cover.png" media-type="image/png" properties="cover-image"/>')
         # Rebuild to avoid ambiguous duplicate ZIP member names.
         contents={n:z.read(n) for n in z.namelist() if n!='OPS/book.opf'}
+        contents['OPS/one.xhtml']=contents['OPS/one.xhtml'].replace(b'</h1>',b'</h1><img src="cover.png" alt="Illustration">')
     with zipfile.ZipFile(source,'w') as z:
         for name,data in contents.items():z.writestr(name,data)
         z.writestr('OPS/book.opf',opf);z.writestr('OPS/cover.png',b'\x89PNG\r\n\x1a\ncover')
@@ -114,22 +115,30 @@ def test_books_read_progress_audio_range_and_cover_api(tmp_path,monkeypatch):
         with urllib.request.urlopen(base+'/v1/books/read?id='+row['id']) as response:value=json.load(response)
         assert value['chapter']==1 and value['paragraph']==1 and value['text']=='Another passage.'
         assert value['chapters'][0]['paragraphs']==3
+        assert value['content']['paragraphs']==['Chapter Two','Another passage.']
+        with urllib.request.urlopen(base+'/v1/books/read?id='+row['id']+'&content=0') as response:
+            assert 'content' not in json.load(response)
         request=urllib.request.Request(base+'/v1/books/audio?id='+row['id'],headers={'Range':'bytes=2-5'})
         with urllib.request.urlopen(request) as response:assert response.status==206 and response.read()==b'2345'
         with urllib.request.urlopen(base+'/v1/books/cover?id='+row['id']) as response:assert response.read().endswith(b'cover')
+        with urllib.request.urlopen(base+'/v1/books/image?id='+row['id']+'&chapter=0&image=0') as response:
+            assert response.headers['Content-Type']=='image/png' and response.read().endswith(b'cover')
+        with pytest.raises(urllib.error.HTTPError):
+            urllib.request.urlopen(base+'/v1/books/image?id='+row['id']+'&chapter=0&image=-1')
         payload['fields']['paragraph']=999
         request=urllib.request.Request(base+'/v1/books',data=json.dumps(payload).encode())
         with pytest.raises(urllib.error.HTTPError):urllib.request.urlopen(request)
         assert shelf.progress(row['id'])['paragraph']==1
     finally:server.shutdown();server.server_close()
     assert ingress._is_stream_path('/v1/books/audio')
+    assert ingress._is_stream_path('/v1/books/image')
     assert ingress._request_timeout('/v1/books/audio','GET',None,True)>=180
 
 
 @pytest.mark.parametrize('surface',['signal-window','albert'])
 def test_browser_books_requires_auth_for_page_json_and_audio(surface,monkeypatch):
     module=load(surface)
-    for path in ('/books','/api/books','/api/books/audio?id=one'):
+    for path in ('/books','/api/books','/api/books/audio?id=one','/api/books/image?id=one&chapter=0&image=0'):
         handler=module.Handler.__new__(module.Handler);handler.path=path
         handler._require_endpoint=Mock(return_value=False)
         handler.headers={}

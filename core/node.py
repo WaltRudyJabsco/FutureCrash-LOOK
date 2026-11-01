@@ -3990,11 +3990,19 @@ class API(BaseHTTPRequestHandler):
             reading=shelf.progress(ident)
             rows=book_audio.document(path)
             chapter=int((params.get('chapter') or [reading.get('chapter',0)])[0])
+            if action=='image':
+                data,mime=book_audio.image(path,rows,chapter,int((params.get('image') or ['0'])[0]))
+                self.send_response(200);self.send_header('Content-Type',mime)
+                self.send_header('Content-Length',str(len(data)));self.send_header('X-Content-Type-Options','nosniff')
+                self.send_header('Cache-Control','private, max-age=3600');self.end_headers();self.wfile.write(data)
+                return
             paragraph=int((params.get('paragraph') or [reading.get('paragraph',0)])[0])
             text=book_audio.passage(rows,chapter,paragraph)
             if action=='read':
-                return self.sendj(200,{'ok':True,'book':row,'reading':reading,'chapter':chapter,'paragraph':paragraph,'text':text,
-                    'chapters':[{'title':r['title'],'paragraphs':len(r['paragraphs'])} for r in rows]})
+                value={'ok':True,'book':row,'reading':reading,'chapter':chapter,'paragraph':paragraph,'text':text,
+                    'chapters':[{'title':r['title'],'paragraphs':len(r['paragraphs'])} for r in rows]}
+                if (params.get('content') or ['1'])[0]!='0':value['content']=book_audio.chapter_content(rows,chapter)
+                return self.sendj(200,value)
             return self._serve_file_range(book_audio.render(text,ident,chapter,paragraph),'audio/mp4')
         except Exception as exc:return self.sendj(400,{'ok':False,'error':str(exc)})
 
@@ -4711,7 +4719,7 @@ class API(BaseHTTPRequestHandler):
             except Exception as exc:return self.sendj(503,{'error':str(exc),'enabled':False})
         if path == "/v1/words": return self._words_request()
         if path == "/v1/wiki": return self._wiki_request()
-        if path in {"/v1/books/read","/v1/books/audio","/v1/books/cover","/v1/books/discover","/v1/books/discovery-cover"}: return self._book_content()
+        if path in {"/v1/books/read","/v1/books/audio","/v1/books/cover","/v1/books/image","/v1/books/discover","/v1/books/discovery-cover"}: return self._book_content()
         if path == "/v1/books/reader": return self._book_reader_request()
         if path == "/v1/books": return self._books_request()
         if path == "/v1/books/fabric": return self._books_request(fabric=True)

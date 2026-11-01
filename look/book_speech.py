@@ -22,17 +22,25 @@ MAX_TEXT_BYTES=16*1024*1024
 MAX_CHAPTER_BYTES=2*1024*1024
 DEFAULT_RATE=155
 MAX_PASSAGE_CHARS=6000
+IMAGE_TYPES={'image/png','image/jpeg','image/gif','image/webp'}
+MAX_CHAPTER_IMAGES=128
 
 
 class PassageParser(HTMLParser):
     def __init__(self):
-        super().__init__(convert_charrefs=True);self.parts=[];self.current=[];self.skip=0;self.title=''
+        super().__init__(convert_charrefs=True);self.parts=[];self.current=[];self.skip=0;self.title='';self.images=[]
     def flush(self):
         text=' '.join(''.join(self.current).split());self.current=[]
         if text:self.parts.append(text)
     def handle_starttag(self,tag,attrs):
         if tag in {'script','style','head'}:self.skip+=1
         if self.skip:return
+        if tag in {'img','image'} and len(self.images)<MAX_CHAPTER_IMAGES:
+            fields=dict(attrs)
+            # Images never split narration paragraphs or move existing bookmarks.
+            self.images.append({'before':len(self.parts)+bool(''.join(self.current).strip()),
+                'source':fields.get('src') or fields.get('href') or fields.get('xlink:href') or '',
+                'alt':(fields.get('alt') or '')[:500]})
         if tag in {'p','div','li','br','h1','h2','h3','blockquote','pre'}:self.flush()
     def handle_endtag(self,tag):
         if tag in {'script','style','head'}:self.skip=max(0,self.skip-1);return
@@ -65,6 +73,12 @@ def chapters(path):
             package=next(n.get('full-path') for n in container.iter() if n.tag.endswith('rootfile'))
             opf=book_core.xml(read(package))
             manifest={n.get('id'):n.get('href') for n in opf.iter() if n.tag.endswith('}item') or n.tag=='item'}
+            image_names=set()
+            for entry in opf.iter():
+                if entry.get('media-type') not in IMAGE_TYPES:continue
+                url=urlsplit(entry.get('href',''))
+                if url.scheme or url.netloc:continue
+                image_names.add(posixpath.normpath(posixpath.join(posixpath.dirname(package),unquote(url.path))))
             rows=[];total=0
             for item in opf.iter():
                 if not (item.tag.endswith('}itemref') or item.tag=='itemref') or item.get('linear')=='no':continue
@@ -77,9 +91,31 @@ def chapters(path):
                 data=read(name);total+=len(data)
                 if total>MAX_TEXT_BYTES:raise ValueError('Extracted book text exceeds 16 MiB')
                 parser=PassageParser();parser.feed(data.decode('utf-8',errors='replace'));parser.flush()
-                rows.append({'title':parser.title or 'Chapter '+str(len(rows)+1),'paragraphs':parser.parts})
-    rows=[r for r in rows if r['paragraphs']]
+                images=[]
+                for image in parser.images:
+                    url=urlsplit(image['source'])
+                    if url.scheme or url.netloc:continue
+                    source=posixpath.normpath(posixpath.join(posixpath.dirname(name),unquote(url.path)))
+                    if source.startswith(('../','/')) or source not in image_names:continue
+                    images.append(dict(image,source=source))
+                rows.append({'title':parser.title or 'Chapter '+str(len(rows)+1),'paragraphs':parser.parts,'images':images})
+    # Keep image-only spine pages without introducing new narration chapter IDs.
+    readable=[];leading_images=[]
     for row in rows:
+        if row['paragraphs']:
+            row['images']=(leading_images+row.get('images',[]))[:MAX_CHAPTER_IMAGES]
+            leading_images=[];readable.append(row)
+        elif readable:
+            prior=readable[-1]
+            prior['images']=(prior.get('images',[])+[dict(image,before=len(prior['paragraphs']))
+                for image in row.get('images',[])])[:MAX_CHAPTER_IMAGES]
+        else:
+            leading_images=(leading_images+[dict(image,before=0) for image in row.get('images',[])])[:MAX_CHAPTER_IMAGES]
+    rows=readable
+    for row in rows:
+        offsets=[0]
+        for text in row['paragraphs']:offsets.append(offsets[-1]+(len(text)+MAX_PASSAGE_CHARS-1)//MAX_PASSAGE_CHARS)
+        for image in row.get('images',[]):image['before']=offsets[image['before']]
         row['paragraphs']=[text[i:i+MAX_PASSAGE_CHARS] for text in row['paragraphs'] for i in range(0,len(text),MAX_PASSAGE_CHARS)]
     if not rows:raise ValueError('No readable text found; scanned PDFs need OCR first')
     return rows
