@@ -27,6 +27,10 @@ and ASCII/native article images. Saved mode stays separate from live web access.
 It also repairs Wiki navigation and makes the archive owner/reader state clear.
 Use `/` to search from an article, `l` to follow links and `o` to choose the owner.
 
+The browser book experience is now **Mercury Reader**, styled to match Mercury
+Writer. Open it with `/reader` or “open Mercury Reader”; `/books` still works.
+Narration prepares the next paragraph while the current one plays.
+
 8.22.0 adds Books discovery, cover previews and browser read-aloud in Signal and
 Albert. Use `/books`, “read TITLE” or “continue reading”; narration and progress
 stay with your book's owner. See [Books](docs/BOOKS.md).

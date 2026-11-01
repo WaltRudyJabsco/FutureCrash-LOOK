@@ -141,7 +141,7 @@ def test_books_read_progress_audio_range_and_cover_api(tmp_path,monkeypatch):
 @pytest.mark.parametrize('surface',['signal-window','albert'])
 def test_browser_books_requires_auth_for_page_json_and_audio(surface,monkeypatch):
     module=load(surface)
-    for path in ('/books','/api/books','/api/books/audio?id=one','/api/books/image?id=one&chapter=0&image=0','/api/books/voices?target=local'):
+    for path in ('/books','/reader','/api/books','/api/books/audio?id=one','/api/books/image?id=one&chapter=0&image=0','/api/books/voices?target=local'):
         handler=module.Handler.__new__(module.Handler);handler.path=path
         handler._require_endpoint=Mock(return_value=False)
         handler.headers={}
@@ -152,7 +152,7 @@ def test_browser_books_requires_auth_for_page_json_and_audio(surface,monkeypatch
         handler._require_endpoint=Mock(return_value=True)
         handler.send_response=Mock();handler.send_header=Mock();handler.end_headers=Mock()
         handler.do_GET()
-        if path=='/books':assert b'books-app' in handler.wfile.getvalue()
+        if path in {'/books','/reader'}:assert b'books-app' in handler.wfile.getvalue()
         else:gateway.assert_called_once()
 
 

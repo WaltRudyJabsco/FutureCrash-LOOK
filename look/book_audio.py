@@ -12,6 +12,8 @@ import book_speech
 
 _LOCK = threading.Lock()
 MAX_IMAGE_BYTES=8*1024*1024
+# A seek may arrive while the previous paragraph's lookahead is finishing.
+NARRATION_WAIT_SECONDS=30
 
 
 def chapter_content(rows,chapter):
@@ -76,7 +78,7 @@ def render(text,ident,chapter,paragraph,voice_id=''):
     out=root/(key+'.m4a')
     if out.is_file():return out
     # Bound CPU work; simultaneous tabs requesting a passage share its result.
-    if not _LOCK.acquire(timeout=1):raise ValueError('Narration is preparing another passage; try again shortly')
+    if not _LOCK.acquire(timeout=NARRATION_WAIT_SECONDS):raise ValueError('Narration is preparing another passage; try again shortly')
     try:
         if out.is_file():return out
         with tempfile.TemporaryDirectory(dir=root) as folder:

@@ -1,4 +1,4 @@
-# Books
+# Mercury Reader and LOOK Books
 
 `lk books` (alias `lk bk`) opens a dedicated EPUB/PDF shelf. It shares the Fabric
 and media-root configuration, but does not insert documents into MP/TV queues or
@@ -488,3 +488,33 @@ the voices installed on the 3090.
 ![Shelf search and remembered sort order](screenshots/books-shelf-search-sort.png)
 
 ![British female narrator selected in the test reader](screenshots/books-standard-voices.png)
+
+### Mercury Reader and next-paragraph preparation
+
+The browser reading room is **Mercury Reader**, with Mercury Writer's serif
+wordmark and gold accent. Open **Mercury Reader**, `/reader`, `/mercury-reader`,
+or the existing `/books` command in Signal or Albert. `/reader` is the browser
+page; existing `/books` bookmarks and query links continue to work. The terminal
+command remains `lk books`.
+
+During playback the browser prepares exactly one next paragraph: its reading
+metadata and its complete narration file. At a chapter boundary it also prepares
+the next chapter text. When that paragraph begins, the transport and highlighting
+use the prepared data without another metadata request or speech-generation wait.
+Speed changes reuse the same audio; changing voice, skipping elsewhere, opening
+a different book, leaving for the shelf or closing the page cancels/discards stale
+lookahead. A paused reader never starts playing because preparation completed.
+
+Only the active clip and one next clip are retained in browser memory, with an
+8 MiB limit on the next clip and object URLs released as clips are discarded. A
+failed preparation falls back to the normal on-demand path. The book owner's
+existing bounded audio cache can reuse previously generated passages. Very short
+paragraphs, fast playback, or a slow book owner can still outpace preparation;
+this reduces the generation gap rather than promising sample-accurate gapless
+audio. A foreground seek briefly waits for already-running narration work instead
+of immediately failing with a busy error. No new speech service or voice download
+is needed.
+
+Paragraph and chapter navigation preserve the current playing/paused state.
+
+![Mercury Reader wordmark and reading view (fictional test book)](screenshots/mercury-reader.png)
