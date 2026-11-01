@@ -2,7 +2,7 @@
 
 `lk clip` opens ten local text slots, numbered 1–9,0. Select a number to copy
 and close; Shift-number or x removes a saved item. Enter previews; Esc returns.
-Shift-P opens the shelf from supported LOOK workspaces. Saved history stays on
+Shift-Z opens the shelf from supported LOOK workspaces. Saved history stays on
 this computer; s explicitly saves one clip as a normal synced note.
 Shortcut keys and numbered slots use blue, with subdued gray action labels.
 The command footer wraps to the terminal width.
@@ -23,3 +23,6 @@ pulse and dismiss menus when called repeatedly. Upgrades preserve the owner's
 on/off preference and existing clips. No screen-control permission is required.
 
 Upstream: [wl-clipboard manual](https://github.com/bugaevc/wl-clipboard/blob/master/data/wl-clipboard.1).
+
+Mercury Mini opens this same local shelf with Ctrl-B; the Mercury web Clipboard
+button reads its local saved clips when opened on localhost.
