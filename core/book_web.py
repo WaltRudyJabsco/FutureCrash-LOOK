@@ -73,6 +73,36 @@ figcaption{font:14px/1.5 system-ui;color:var(--muted);margin-top:10px}
 #reader-head nav button{font-size:13px;padding:8px}
 #chapters{width:100%;flex-basis:100%}
 }
+
+.speed-control{display:inline-flex;align-items:center;gap:8px;min-width:0}
+#compact-transport,.controls-heading{display:none}
+.compact-reader #reader-head{position:relative;padding:4px 0 8px}
+.compact-reader .reader-navigation{display:block;height:0}
+.compact-reader #library-back{position:absolute;right:0;top:3px;min-height:44px;padding:5px 10px}
+.compact-reader .reading-label,.compact-reader #cover{display:none}
+.compact-reader .book-heading{display:block;margin:0 0 5px;padding-right:80px;min-width:0;min-height:46px}
+.compact-reader #title{font-size:18px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;margin:0}
+.compact-reader #where{font-size:11px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.compact-reader #compact-transport{display:flex;flex-wrap:nowrap;gap:6px}
+.compact-reader #compact-transport button{min-height:44px;font-size:15px;padding:8px 12px;margin:0}
+.compact-reader #compact-play{flex:1;min-width:80px}
+.compact-reader #controls-toggle{margin-left:auto}
+.compact-reader #reader-options{display:none;position:absolute;left:0;right:0;top:100%;z-index:5;max-height:calc(100dvh - 180px);overflow:auto;overscroll-behavior:contain;background:var(--paper);border:1px solid var(--line);border-radius:10px;padding:12px;box-shadow:0 12px 25px #0003}
+.compact-reader.controls-open #reader-options{display:block}
+.compact-reader .controls-heading{display:flex;align-items:center;justify-content:space-between;font:14px system-ui;margin-bottom:8px}
+.compact-reader #controls-close{min-height:44px}
+.compact-reader #reader-appearance{margin-bottom:10px}
+.compact-reader #reader-options nav{gap:6px}
+.compact-reader #reader-options select{max-width:100%;min-width:0}
+.compact-reader #reader-options #chapters{flex-basis:100%}
+.compact-reader #reader-options button{min-height:44px}
+.compact-reader .narration-options{display:grid;grid-template-columns:auto minmax(0,1fr);gap:8px}
+.compact-reader .narration-options select{width:100%;max-width:none;min-height:44px;font-size:14px}
+.compact-reader .speed-control input{width:100%;min-width:0;min-height:36px;flex:1}
+.compact-reader #passage{padding-top:18px}
+.compact-reader #status{font-size:12px;line-height:1.35;margin:4px 0}
+@media(max-height:500px){.compact-reader .masthead{display:none}}
+
 @media(prefers-reduced-motion:reduce){*{scroll-behavior:auto!important}
 }
 
@@ -82,16 +112,16 @@ figcaption{font:14px/1.5 system-ui;color:var(--muted);margin-top:10px}
 <main id="books-app">
 <header class="masthead">
 <h1 class="brand" aria-label="Mercury Reader"><em>MERCURY</em> / READER</h1>
-<div class="preferences" aria-label="Reading appearance">
+<div id="appearance-home"><div class="preferences" aria-label="Reading appearance">
 <button id="theme" aria-pressed="false">Dark theme</button>
 <button id="font-smaller" aria-label="Smaller book text">A−</button>
 <output id="font-size" aria-live="polite">21</output>
 <button id="font-larger" aria-label="Larger book text">A+</button>
-</div>
+</div></div>
 </header>
 <section id="reader" hidden aria-label="Book reader">
 <div id="reader-head">
-<nav>
+<nav class="reader-navigation">
 <button id="library-back">← Library</button>
 <span class="reading-label">MERCURY / READING ROOM</span>
 </nav>
@@ -104,6 +134,15 @@ figcaption{font:14px/1.5 system-ui;color:var(--muted);margin-top:10px}
 </p>
 </div>
 </div>
+<nav id="compact-transport" aria-label="Playback">
+<button id="compact-previous" aria-label="Previous paragraph">←</button>
+<button id="compact-play" aria-label="Play narration">Play</button>
+<button id="compact-next" aria-label="Next paragraph">→</button>
+<button id="controls-toggle" aria-expanded="false" aria-controls="reader-options">Controls</button>
+</nav>
+<section id="reader-options" aria-label="Reading controls">
+<div class="controls-heading"><strong>Reading controls</strong><button id="controls-close" aria-label="Close reading controls">Done</button></div>
+<div id="reader-appearance"></div>
 <nav>
 <select id="chapters" aria-label="Chapter">
 </select>
@@ -117,9 +156,10 @@ figcaption{font:14px/1.5 system-ui;color:var(--muted);margin-top:10px}
 <nav class="narration-options" aria-label="Narration settings">
 <label for="voice">Voice</label><select id="voice" aria-label="Narration voice" title="Changing voice restarts the current paragraph"><option value="">Default voice</option></select>
 <label for="pauses">Pauses</label><select id="pauses" aria-label="Punctuation pauses" title="Changing pauses restarts the current paragraph"><option value="voice">Voice default</option><option value="natural" selected>More space</option><option value="relaxed">Unhurried</option></select>
-<label for="speech-speed">Speed</label><input id="speech-speed" aria-label="Speech speed" type="range" min="0.5" max="2" step="0.05" value="1"><output id="speech-speed-value" for="speech-speed">1×</output>
+<label for="speech-speed">Speed</label><span class="speed-control"><input id="speech-speed" aria-label="Speech speed" type="range" min="0.5" max="2" step="0.05" value="1"><output id="speech-speed-value" for="speech-speed">1×</output></span>
 </nav>
 <p class="reader-note">Listen here, or read at your own pace. Select a paragraph to read from there.</p>
+</section>
 </div>
 <div id="reading-body" tabindex="0" aria-label="Chapter text">
 <article id="passage" aria-label="Book text">
