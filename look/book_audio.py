@@ -7,9 +7,35 @@ import subprocess
 import tempfile
 import threading
 import time
+import zipfile
 import book_speech
 
 _LOCK = threading.Lock()
+MAX_IMAGE_BYTES=8*1024*1024
+
+
+def chapter_content(rows,chapter):
+    row=rows[chapter]
+    return {'paragraphs':row['paragraphs'],
+            'images':[{'before':image['before'],'alt':image['alt'],'index':index}
+                      for index,image in enumerate(row.get('images',[]))]}
+
+
+def image(path,rows,chapter,index):
+    if not 0<=chapter<len(rows) or not 0<=index<len(rows[chapter].get('images',[])):
+        raise ValueError('Choose an illustration from this chapter')
+    name=rows[chapter]['images'][index]['source']
+    with zipfile.ZipFile(path) as archive:
+        info=archive.getinfo(name)
+        if info.file_size>MAX_IMAGE_BYTES:raise ValueError('Book illustration exceeds 8 MiB')
+        data=archive.read(info)
+    # Only inert raster bytes leave the owner. Never serve EPUB HTML or SVG.
+    if data.startswith(b'\x89PNG\r\n\x1a\n'):mime='image/png'
+    elif data.startswith(b'\xff\xd8\xff'):mime='image/jpeg'
+    elif data.startswith((b'GIF87a',b'GIF89a')):mime='image/gif'
+    elif data.startswith(b'RIFF') and data[8:12]==b'WEBP':mime='image/webp'
+    else:raise ValueError('Unsupported book illustration format')
+    return data,mime
 
 
 @lru_cache(maxsize=4)

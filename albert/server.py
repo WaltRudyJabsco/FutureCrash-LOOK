@@ -618,6 +618,13 @@ class Handler(BaseHTTPRequestHandler):
             if not item_id: return self.send_json(400,{'ok':False,'error':'media item id required'})
             return _proxy_media_item(self,node,item_id,browser=(path=='/api/media/browser'))
         rel='index.html' if path in {'/','/index.html'} else path.lstrip('/')
+        if rel=='browser-views.js' and not (ROOT/rel).is_file():
+            # Source checkouts share Signal's script; installers copy it beside Albert.
+            shared=ROOT.parent/'signal-window/browser-views.js'
+            if shared.is_file():
+                data=shared.read_bytes();self.send_response(200);self.send_header('Content-Type','text/javascript')
+                self.send_header('Content-Length',str(len(data)));self.send_header('Cache-Control','no-cache')
+                self.end_headers();self.wfile.write(data);return
         target=(ROOT/rel).resolve()
         if ROOT not in target.parents and target!=ROOT: return self.send_error(403)
         if not target.is_file(): return self.send_error(404)
