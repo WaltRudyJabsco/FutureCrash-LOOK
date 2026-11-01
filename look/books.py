@@ -223,7 +223,10 @@ def desk(ui,query='',owner=None):
                         print('\nOpening reader; copying a remote book locally if needed…',flush=True)
                         path=local_copy(chosen)
                         if book_reader.preference()!='system' and not book_reader.binary('bookokrat'):
-                            choice=ask('Terminal reader not installed · i installs Bookokrat · s system reader · Esc cancels')
+                            choice=ask('Terminal reader not installed · n installs Bookokrat with read-along · i standard Bookokrat · s system reader · Esc cancels')
+                            if choice and choice.casefold()=='n':
+                                import book_native
+                                book_native.install(confirmed=True);notice='Native reader setup started; Enter retries when ready';continue
                             if choice and choice.casefold()=='i':
                                 book_reader.install(confirmed=True);notice='Bookokrat setup started; Enter retries when ready · o opens system reader';continue
                             if not choice or choice.casefold()!='s':continue
@@ -238,6 +241,8 @@ def desk(ui,query='',owner=None):
                 elif chosen and results is None:
                     if key=='a':
                         import book_speech
+                        native.frame_cleared()
+                        if os.environ.get('KITTY_WINDOW_ID') or os.environ.get('TERM')=='xterm-kitty':sys.stdout.write('\x1b_Ga=d,d=a,q=2\x1b\\')
                         notice=book_speech.desk(ui,local_copy(chosen),chosen['title'],reading=chosen.get('reading'),save_reading=lambda fields:request('progress',node=chosen.get('node','local'),id=chosen['id'],fields=fields))
                         value=catalog();last_frame=None
                     elif key=='o':
@@ -264,7 +269,7 @@ def desk(ui,query='',owner=None):
 def main(args,ui):
     parser=argparse.ArgumentParser(prog='lk books',description='Fabric EPUB/PDF shelf; bk is an alias. Files stay on their owner; opening remote books makes a verified local cache copy.')
     parser.add_argument('action',nargs='?',default='shelf',choices=['shelf','list','scan','import','search','discover','fetch','reader','listen','voices','speech-setup'])
-    parser.add_argument('values',nargs='*')
+    parser.add_argument('values',nargs='*',help='reader: status/install/native-install/auto/bookokrat/system; listen: FILE; other actions: query or path')
     parser.add_argument('--node',default=None,help='Library owner; defaults to configured media destination')
     parser.add_argument('--json',action='store_true')
     parser.add_argument('--chapter',type=int)
@@ -287,12 +292,15 @@ def main(args,ui):
             print(json.dumps(value,ensure_ascii=False,indent=2));return 0
         if selected.action=='reader':
             choice=selected.values[0] if selected.values else 'status'
-            if len(selected.values)>1:raise ValueError('Choose reader status, install, auto, bookokrat or system')
-            if choice=='install':value=book_reader.install(confirmed=True)
+            if len(selected.values)>1:raise ValueError('Choose reader status, install, native-install, auto, bookokrat or system')
+            if choice=='native-install':
+                import book_native
+                value=book_native.install(confirmed=True)
+            elif choice=='install':value=book_reader.install(confirmed=True)
             elif choice in book_reader.MODES:book_reader.preference(choice);value=book_reader.status()
             elif choice=='status':value=book_reader.status()
-            else:raise ValueError('Choose reader status, install, auto, bookokrat or system')
-            print(json.dumps(value,ensure_ascii=False) if selected.json else 'Reader: '+value['reader']+' · '+(value['version'] or 'Bookokrat not installed')+' · setup '+value['setup']['state'])
+            else:raise ValueError('Choose reader status, install, native-install, auto, bookokrat or system')
+            print(json.dumps(value,ensure_ascii=False) if selected.json else 'Reader: '+value['reader']+' · '+(value['version'] or 'Bookokrat not installed')+' · setup '+value['setup']['state']+' · native read-along: '+('installed' if value.get('native_narration',{}).get('installed') else 'lk books reader native-install'))
             return 0
         if selected.action=='shelf' and sys.stdin.isatty() and sys.stdout.isatty():return desk(ui,' '.join(selected.values),owner=owner)
         if selected.action in {'list','shelf'}:

@@ -105,10 +105,13 @@ def test_books_read_progress_audio_range_and_cover_api(tmp_path,monkeypatch):
     monkeypatch.setattr(node,'identity',lambda:{'name':'owner'})
     audio=tmp_path/'passage.m4a';audio.write_bytes(b'0123456789')
     monkeypatch.setattr(book_audio,'render',lambda *a:audio)
+    monkeypatch.setattr(book_audio,'voice_options',lambda:{'voices':[{'id':'fixture','name':'Fixture'}],'default':{'id':'fixture','name':'Fixture'}})
     server=node.FabricHTTPServer(('127.0.0.1',0),node.API,plane='local')
     threading.Thread(target=server.serve_forever,daemon=True).start()
     base=f'http://127.0.0.1:{server.server_port}'
     try:
+        with urllib.request.urlopen(base+'/v1/books/voices') as response:
+            assert json.load(response)['voices'][0]['id']=='fixture'
         payload={'action':'progress','id':row['id'],'fields':{'chapter':1,'paragraph':1,'offset':2}}
         request=urllib.request.Request(base+'/v1/books',data=json.dumps(payload).encode(),headers={'Content-Type':'application/json'})
         with urllib.request.urlopen(request) as response:assert json.load(response)['reading']['offset']==2
@@ -138,7 +141,7 @@ def test_books_read_progress_audio_range_and_cover_api(tmp_path,monkeypatch):
 @pytest.mark.parametrize('surface',['signal-window','albert'])
 def test_browser_books_requires_auth_for_page_json_and_audio(surface,monkeypatch):
     module=load(surface)
-    for path in ('/books','/api/books','/api/books/audio?id=one','/api/books/image?id=one&chapter=0&image=0'):
+    for path in ('/books','/api/books','/api/books/audio?id=one','/api/books/image?id=one&chapter=0&image=0','/api/books/voices?target=local'):
         handler=module.Handler.__new__(module.Handler);handler.path=path
         handler._require_endpoint=Mock(return_value=False)
         handler.headers={}

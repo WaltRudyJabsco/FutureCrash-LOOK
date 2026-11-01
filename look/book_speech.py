@@ -21,6 +21,11 @@ from notebook_markdown import safe_text
 MAX_TEXT_BYTES=16*1024*1024
 MAX_CHAPTER_BYTES=2*1024*1024
 DEFAULT_RATE=155
+MIN_SPEED=.5
+MAX_SPEED=2.0
+SPEED_STEP=.1
+MAX_NATIVE_TEXT_CHARS=128000
+MAX_NATIVE_REQUEST_BYTES=MAX_NATIVE_TEXT_CHARS*6+4096
 MAX_PASSAGE_CHARS=6000
 IMAGE_TYPES={'image/png','image/jpeg','image/gif','image/webp'}
 MAX_CHAPTER_IMAGES=128
@@ -141,12 +146,24 @@ def voices():
     if piper.is_file() and model.is_file() and model.with_suffix('.onnx.json').is_file():
         rows.append({'id':'piper:alan','name':'Alan (neural, offline)','locale':'en_GB','engine':'piper'})
     if book_reader.binary('espeak-ng'):rows.append({'id':'espeak:en-gb','name':'English UK (basic fallback)','locale':'en_GB','engine':'espeak'})
-    return rows
+    # Repeated macOS IDs made index() jump back rather than wrap at the end.
+    return list({row['id']:row for row in rows}.values())
 
 
 def preferred_voice(rows):
     saved=preferences().get('voice')
-    return next((r for r in rows if r['id']==saved),None) or next((r for r in rows if r['id']=='say:Jamie (Premium)'),None) or next((r for r in rows if r['engine']=='piper'),None) or next((r for r in rows if r['id']=='say:Daniel'),None) or next((r for r in rows if r['locale']=='en_GB'),None) or next(iter(rows),None)
+    return next((r for r in rows if r['id']==saved),None) or default_voice(rows)
+
+
+def default_voice(rows):
+    return next((r for r in rows if r['id']=='say:Jamie (Premium)'),None) or next((r for r in rows if r['engine']=='piper'),None) or next((r for r in rows if r['id']=='say:Daniel'),None) or next((r for r in rows if r.get('locale')=='en_GB'),None) or next(iter(rows),None)
+
+
+def reading_speed(value=1):
+    import math
+    try:value=float(value)
+    except (TypeError,ValueError):return 1.0
+    return min(MAX_SPEED,max(MIN_SPEED,value)) if math.isfinite(value) else 1.0
 
 
 class Speech:
@@ -184,12 +201,13 @@ class Speech:
         if self.phase=='preparing':
             tool=book_reader.binary('mpv')
             if not tool:self.error='Piper playback needs mpv';self.stop();return False
-            self.launch([tool,'--no-config','--no-video','--audio-display=no','--terminal=no',str(Path(self.folder.name)/'passage.wav')]);self.phase='reading';return False
+            self.launch([tool,'--no-config','--no-video','--audio-display=no','--terminal=no',f'--speed={self.rate/DEFAULT_RATE:.3f}','--audio-pitch-correction=yes',str(Path(self.folder.name)/'passage.wav')]);self.phase='reading';return False
         self.stop();return True
     def close(self):self.stop();self.folder.cleanup()
 
 
 def desk(ui,path,title='',chapter=None,paragraph=None,reading=None,save_reading=None):
+    import clipboard_shelf
     rows=chapters(path);available=voices();voice=preferred_voice(available)
     if not voice:raise ValueError('No local voice. Install a macOS voice or run lk books speech-setup for the offline British neural voice')
     ident=book_core.digest(path);state_path=Path.home()/'.local/share/look/book-speech/positions.json'
@@ -198,7 +216,11 @@ def desk(ui,path,title='',chapter=None,paragraph=None,reading=None,save_reading=
     if reading:saved=reading
     ci=max(0,min(len(rows)-1,(chapter-1) if chapter else saved.get('chapter',0)))
     pi=max(0,min(len(rows[ci]['paragraphs'])-1,(paragraph-1) if paragraph else saved.get('paragraph',0)))
-    speech=Speech(voice);notice='Enter reads from selected paragraph · speech stays on this computer'
+    speed=reading_speed(preferences().get('speed',1))
+    speech=Speech(voice,round(DEFAULT_RATE*speed));notice='Enter reads from selected paragraph · speech stays on this computer';scroll=None
+    layout_key=None;lines=[];starts=[]
+    if os.environ.get('KITTY_WINDOW_ID') or os.environ.get('TERM')=='xterm-kitty':sys.stdout.write('\x1b_Ga=d,d=a,q=2\x1b\\')
+    sys.stdout.write('\x1b[0m\x1b[2J\x1b[H');sys.stdout.flush()
     def save():
         nonlocal notice
         positions[ident]={'chapter':ci,'paragraph':pi};book_reader.write_json(state_path,positions)
@@ -209,19 +231,29 @@ def desk(ui,path,title='',chapter=None,paragraph=None,reading=None,save_reading=
         while True:
             width,height=ui.shutil.get_terminal_size((100,30));width=max(20,width);height=max(12,height)
             if speech.poll():
-                if pi+1<len(rows[ci]['paragraphs']):pi+=1;save();speech.start(rows[ci]['paragraphs'][pi])
+                if pi+1<len(rows[ci]['paragraphs']):pi+=1;scroll=None;save();speech.start(rows[ci]['paragraphs'][pi])
                 else:notice='Chapter finished'
             if speech.error:notice=speech.error
-            page=max(1,height-10);top=max(0,pi-page//2)
             frame=[ui._c('READ ALOUD','1;36')+' · '+safe_text(title or Path(path).stem),
                    safe_text(rows[ci]['title'])+f' · chapter {ci+1}/{len(rows)} · paragraph {pi+1}/{len(rows[ci]["paragraphs"])}',
-                   safe_text(voice['name'])+' · '+('paused' if speech.paused else speech.phase)]
+                   safe_text(voice['name'])+f' · voice {available.index(voice)+1}/{len(available)} · {speed:.1f}× · '+('paused' if speech.paused else speech.phase)]
             colors=ui.terminal_style.list_colors()
-            for index,text in enumerate(rows[ci]['paragraphs'][top:top+page],top):
-                frame.append(ui.terminal_style.list_row(('› ' if index==pi else '  ')+str(index+1)+' '+safe_text(text),width,index,index==pi,colors))
-            frame+=['']*max(0,height-7-len(frame))
-            frame+=textwrap.wrap(safe_text(rows[ci]['paragraphs'][pi]),width)[:3]
-            frame += [ui._media_hints('↑↓ paragraph · ←→ chapter · Shift-arrows page/ends · Enter read · Space pause/resume · s stop · v voice · W shell pane · P clipboard · Esc return',width),safe_text(notice)]
+            footer=clipboard_shelf.command_rows([('↑↓','paragraph'),('←→','chapter'),('PgUp/PgDn','scroll'),('Shift-←/→','ends'),('Enter','read'),('Space','pause/resume'),('s','stop'),('v','next voice'),('V','default voice'),('−/+','speed'),('P','clipboard'),('W','shell pane'),('q/Esc','return')],width,colors)
+            notes=clipboard_shelf.wrap_cells(safe_text(notice),width)[:2]
+            page=max(1,height-len(frame)-len(footer)-len(notes))
+            # Wrapping a long chapter belongs to navigation/reflow, not idle ticks.
+            if layout_key!=(ci,width):
+                lines=[];starts=[];layout_key=(ci,width)
+                for index,text in enumerate(rows[ci]['paragraphs']):
+                    starts.append(len(lines));prefix='  '+str(index+1)+' ';size=max(1,width-len(prefix))
+                    wrapped=[part for line in textwrap.wrap(safe_text(text),size) or [''] for part in clipboard_shelf.wrap_cells(line,size)]
+                    for number,line in enumerate(wrapped):lines.append((index,(prefix if number==0 else ' '*len(prefix))+line))
+                    lines.append((index,''))
+            if scroll is None:scroll=max(0,starts[pi]-page//3)
+            scroll=max(0,min(scroll,max(0,len(lines)-page)))
+            frame += [ui.terminal_style.list_row(('› '+text[2:] if index==pi and line==starts[index] else text),width,index,index==pi,colors) for line,(index,text) in enumerate(lines[scroll:scroll+page],scroll)]
+            frame+=['']*max(0,height-len(footer)-len(notes)-len(frame))
+            frame+=footer+notes
             sysout='\n'.join(ui._ansi_clip(line,width) for line in frame)
             sys.stdout.write(ui._terminal_frame_payload(sysout));sys.stdout.flush()
             key=ui._read_tty_key(sys.stdin.fileno(),.15)
@@ -234,20 +266,33 @@ def desk(ui,path,title='',chapter=None,paragraph=None,reading=None,save_reading=
             if key=='P':
                 import clipboard_shelf
                 clipboard_shelf.show(fd=sys.stdin.fileno());continue
-            if key=='v':
-                voice=available[(available.index(voice)+1)%len(available)];preferences(voice=voice['id']);speech.close();speech=Speech(voice);continue
+            if key in {'v','V','-','+','='}:
+                playing=speech.phase!='stopped';paused=speech.paused
+                if key in {'v','V'}:
+                    voice=default_voice(available) if key=='V' else available[(available.index(voice)+1)%len(available)]
+                    preferences(voice='' if key=='V' else voice['id'])
+                else:
+                    chosen_speed=round(reading_speed(speed+(-SPEED_STEP if key=='-' else SPEED_STEP)),1)
+                    if chosen_speed==speed:notice=f'Speed limit: {speed:.1f}×';continue
+                    speed=chosen_speed;preferences(speed=speed)
+                speech.close();speech=Speech(voice,round(DEFAULT_RATE*speed))
+                if playing:
+                    speech.start(rows[ci]['paragraphs'][pi])
+                    if paused:speech.pause()
+                notice='Voice / speed updated'+('; current paragraph restarted' if playing else '')
+                continue
+            if key in {'shiftup','pageup','shiftdown','pagedown'}:
+                scroll+=(-page if key in {'shiftup','pageup'} else page);continue
             old=(ci,pi)
             if key=='left':ci=max(0,ci-1);pi=0
             elif key=='right':ci=min(len(rows)-1,ci+1);pi=0
             elif key=='up':pi-=1
             elif key=='down':pi+=1
-            elif key in {'shiftup','pageup'}:pi-=page
-            elif key in {'shiftdown','pagedown'}:pi+=page
             elif key in {'shiftleft','home'}:pi=0
             elif key in {'shiftright','end'}:pi=len(rows[ci]['paragraphs'])-1
             pi=max(0,min(len(rows[ci]['paragraphs'])-1,pi))
             if old!=(ci,pi):
-                speech.stop();save();notice='Enter reads from this paragraph'
+                speech.stop();scroll=None;save();notice='Enter reads from this paragraph'
         save()
     finally:speech.close()
     return 'Reading position saved'
@@ -294,6 +339,68 @@ def setup_worker():
     book_reader.write_json(root/'setup.json',value)
 
 
+def native_worker():
+    """Private JSON-line bridge for Bookokrat; owns only its speech processes."""
+    import selectors
+    available=voices();voice=preferred_voice(available)
+    if not voice:
+        print(json.dumps({'state':'error','message':'No local narration voice installed; run lk books speech-setup'}),flush=True);return
+    speed=reading_speed(preferences().get('speed',1));player=Speech(voice,round(DEFAULT_RATE*speed))
+    token=0;chunks=[];part=0;pending=b''
+    def emit(state,**fields):
+        print(json.dumps(dict(state=state,id=token,voice=voice['name'],speed=speed,**fields)),flush=True)
+    selector=selectors.DefaultSelector();selector.register(sys.stdin,selectors.EVENT_READ)
+    emit('ready')
+    try:
+        while True:
+            if player.poll() and chunks:
+                part+=1
+                if part<len(chunks):player.start(chunks[part])
+                else:chunks=[];emit('done')
+            if player.error:emit('error',message=player.error);player.error='';chunks=[]
+            if not selector.select(.05):continue
+            block=os.read(sys.stdin.fileno(),4096)
+            if not block:break
+            pending+=block
+            if len(pending)>MAX_NATIVE_REQUEST_BYTES:raise ValueError('Narration request exceeds limit')
+            while b'\n' in pending:
+                line,pending=pending.split(b'\n',1)
+                try:
+                    value=json.loads(line)
+                    if not isinstance(value,dict):raise ValueError('Narration request must be an object')
+                    action=value.get('action');token=value.get('id',token)
+                    if action=='quit':return
+                    if action=='speak':
+                        text=str(value.get('text',''))
+                        if len(text)>MAX_NATIVE_TEXT_CHARS:raise ValueError('Narration paragraph exceeds limit')
+                        chunks=[text[i:i+MAX_PASSAGE_CHARS] for i in range(0,len(text),MAX_PASSAGE_CHARS)];part=0
+                        if chunks:player.start(chunks[0])
+                    elif action=='pause':player.pause()
+                    elif action=='stop':player.stop();chunks=[]
+                    elif action in {'voice','default','slower','faster'}:
+                        playing=player.phase!='stopped';paused=player.paused
+                        if action in {'voice','default'}:
+                            voice=default_voice(available) if action=='default' else available[(available.index(voice)+1)%len(available)]
+                            preferences(voice='' if action=='default' else voice['id'])
+                        else:
+                            chosen_speed=round(reading_speed(speed+(-SPEED_STEP if action=='slower' else SPEED_STEP)),1)
+                            if chosen_speed==speed:
+                                emit('paused' if player.paused else player.phase if player.phase!='stopped' else 'ready');continue
+                            speed=chosen_speed;preferences(speed=speed)
+                        player.close();player=Speech(voice,round(DEFAULT_RATE*speed))
+                        if playing and chunks:
+                            player.start(chunks[part])
+                            if paused:player.pause()
+                    else:raise ValueError('Unknown narration action')
+                    emit('paused' if player.paused else player.phase if player.phase!='stopped' else 'ready')
+                except (OSError,ValueError,KeyError,TypeError) as error:
+                    player.stop();chunks=[];emit('error',message=str(error))
+    except (OSError,ValueError) as error:emit('error',message=str(error))
+    finally:
+        selector.close();player.close()
+
+
 if __name__=='__main__':
     import sys
     if sys.argv[1:]==['--setup-worker']:setup_worker()
+    elif sys.argv[1:]==['--native-worker']:native_worker()

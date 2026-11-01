@@ -59,8 +59,15 @@ def _voices(minute):
     return book_speech.voices()
 
 
-def render(text,ident,chapter,paragraph):
-    voice=book_speech.preferred_voice(_voices(int(time.monotonic()//60)))
+def voice_options():
+    rows=_voices(int(time.monotonic()//60))
+    return {'voices':rows,'default':book_speech.preferred_voice(rows),'automatic':book_speech.default_voice(rows)}
+
+
+def render(text,ident,chapter,paragraph,voice_id=''):
+    rows=_voices(int(time.monotonic()//60))
+    voice=next((row for row in rows if row['id']==voice_id),None) if voice_id else book_speech.preferred_voice(rows)
+    if voice_id and not voice:raise ValueError('This voice is not installed on the book owner; choose an available voice')
     if not voice:raise ValueError('No narration voice installed on book owner; run lk books speech-setup there')
     ffmpeg=book_speech.book_reader.binary('ffmpeg')
     if not ffmpeg:raise ValueError('Browser narration needs ffmpeg on the book owner')

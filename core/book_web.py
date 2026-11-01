@@ -41,6 +41,7 @@ nav,.preferences,.masthead{display:flex;align-items:center;gap:8px;flex-wrap:wra
 #title{font-size:23px;line-height:1.25;margin:0 0 4px}
 #where{font:13px system-ui;color:var(--muted);margin:0}
 #chapters{max-width:100%;min-width:140px;flex:1}
+.narration-options{font:13px system-ui;color:var(--muted);gap:8px;margin-top:5px}.narration-options select{flex:1;min-width:150px;max-width:320px;font-size:13px;padding:6px}.narration-options input{padding:0;min-width:80px;width:110px;accent-color:var(--accent)}#speech-speed-value{min-width:3.5ch}
 audio{display:block;width:100%;height:42px;margin-top:8px}
 .reader-note{font:12px system-ui;color:var(--muted);margin:6px 0 0}
 #reading-body{min-height:120px;flex:1;overflow:auto;overscroll-behavior:contain;scrollbar-gutter:stable;scroll-padding:35% 0;border-bottom:1px solid var(--line)}
@@ -111,6 +112,10 @@ figcaption{font:14px/1.5 system-ui;color:var(--muted);margin-top:10px}
 </nav>
 <audio id="audio" controls preload="none">
 </audio>
+<nav class="narration-options" aria-label="Narration settings">
+<label for="voice">Voice</label><select id="voice" aria-label="Narration voice" title="Changing voice restarts the current paragraph"><option value="">Default voice</option></select>
+<label for="speech-speed">Speed</label><input id="speech-speed" aria-label="Speech speed" type="range" min="0.5" max="2" step="0.05" value="1"><output id="speech-speed-value" for="speech-speed">1×</output>
+</nav>
 <p class="reader-note">Listen here, or read at your own pace. Select a paragraph to read from there.</p>
 </div>
 <div id="reading-body" tabindex="0" aria-label="Chapter text">
@@ -149,9 +154,9 @@ def handle(handler,node_url,payload=None):
     parsed=urllib.parse.urlsplit(handler.path)
     action=parsed.path.removeprefix('/api/books').strip('/')
     query=urllib.parse.parse_qs(parsed.query)
-    allowed={'target','id','chapter','paragraph','mode','subject','image','content'}
+    allowed={'target','id','chapter','paragraph','mode','subject','image','content','voice'}
     query={k:v[0] for k,v in query.items() if k in allowed}
-    route={'':'/v1/books/fabric','read':'/v1/books/read','audio':'/v1/books/audio','cover':'/v1/books/cover','image':'/v1/books/image','discover':'/v1/books/discover','discovery-cover':'/v1/books/discovery-cover'}.get(action)
+    route={'':'/v1/books/fabric','read':'/v1/books/read','audio':'/v1/books/audio','voices':'/v1/books/voices','cover':'/v1/books/cover','image':'/v1/books/image','discover':'/v1/books/discover','discovery-cover':'/v1/books/discovery-cover'}.get(action)
     if payload is not None:
         if action not in {'progress','fetch'}:raise ValueError('Unknown Books action')
         route='/v1/books'

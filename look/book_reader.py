@@ -13,9 +13,13 @@ import uuid
 
 MODES=('auto','bookokrat','system')
 BINARY_DIRS=('/opt/homebrew/bin','/home/linuxbrew/.linuxbrew/bin','/usr/local/bin','/usr/bin')
+from book_native import VERSION as NATIVE_VERSION
 
 
 def binary(name):
+    if name=='bookokrat':
+        native=Path.home()/'.local/share/look/book-reader-native'/NATIVE_VERSION/'bookokrat'
+        if native.is_file() and os.access(native,os.X_OK):return str(native)
     found=shutil.which(name)
     if found:return found
     roots=(*BINARY_DIRS,Path.home()/'.cargo/bin',Path.home()/'.local/bin')
@@ -56,7 +60,7 @@ def command(path,mode=None):
     if path.suffix.casefold()=='.pdf' and not graphics():
         if mode=='bookokrat':raise ValueError('PDF reading in Bookokrat needs a graphics-capable terminal such as Kitty; use o for the system reader')
         return None
-    args=[tool,str(path),'--zen-mode']
+    args=[tool,str(path)]
     if not graphics():args.append('--no-images')
     return args
 
@@ -131,7 +135,9 @@ def open_book(path,system_open,*,mode=None):
     configure_bindings()
     import clipboard_shelf
     clipboard_shelf.ensure_watcher()
-    try:result=subprocess.run(args,cwd=library,check=False)
+    env=dict(os.environ,LOOK_BOOK_SPEECH_HELPER=str(Path(__file__).resolve().with_name('book_speech.py')),
+             LOOK_BOOK_SPEECH_PYTHON=sys.executable)
+    try:result=subprocess.run(args,cwd=library,check=False,env=env)
     finally:capture_reader_clipboard()
     if result.returncode:raise RuntimeError('Bookokrat exited with status '+str(result.returncode)+'; press o for the system reader')
     return 'Returned from Bookokrat · reading position is saved by the reader on this computer'
@@ -159,7 +165,7 @@ def status():
         except (OSError,subprocess.SubprocessError):pass
     import book_speech
     return {'speech_setup':book_speech.setup_status(),'ok':True,'reader':preference(),'installed':bool(tool and version),'version':version,
-            'can_install':bool(binary('brew')),'setup':setup_state()}
+            'can_install':bool(binary('brew')),'native_narration':{'version':NATIVE_VERSION,'installed':'-look.' in version},'setup':setup_state()}
 
 
 def install(confirmed=False):
