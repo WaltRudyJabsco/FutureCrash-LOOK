@@ -41,6 +41,20 @@ def test_schedule_does_not_install_without_confirmation(tmp_path,monkeypatch):
     spawn.assert_not_called()
 
 
+def test_helper_uses_existing_modern_python_instead_of_old_node_interpreter(monkeypatch):
+    monkeypatch.setattr(installer.sys,'executable','/usr/bin/python3')
+    monkeypatch.setattr(installer.shutil,'which',lambda name:'/usr/bin/python3')
+    monkeypatch.setattr(installer.Path,'is_file',lambda path:True)
+    run=Mock(side_effect=lambda command,**kwargs:type('Result',(),{'returncode':0 if command[0]=='/opt/homebrew/bin/python3' else 1})())
+    monkeypatch.setattr(installer.subprocess,'run',run)
+    assert installer.python_runtime()=='/opt/homebrew/bin/python3'
+
+
+def test_missing_modern_python_fails_before_app_changes(monkeypatch):
+    monkeypatch.setattr(installer.Path,'is_file',lambda path:False)
+    with pytest.raises(RuntimeError,match='unchanged'):installer.python_runtime()
+
+
 @pytest.mark.parametrize('kind',['traversal','symlink'])
 def test_archive_refuses_paths_and_symlinks(tmp_path,kind):
     archive=tmp_path/'bad.tar.gz'
