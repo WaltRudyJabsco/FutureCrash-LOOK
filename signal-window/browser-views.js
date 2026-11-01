@@ -150,6 +150,33 @@
     audio.defaultPlaybackRate=speed;audio.playbackRate=speed;
     try{localStorage.setItem('look-books-appearance',JSON.stringify({theme,fontSize,follow,speed,pauses,voices:voiceByOwner}))}catch{}
   }
+  const compactMedia=matchMedia('(max-width:1100px), (max-height:600px), (hover: none) and (pointer: coarse)');
+  const preferences=document.querySelector('.preferences');
+  function controlsOpen(open,restoreFocus=false){
+    const compact=$('books-app').classList.contains('compact-reader');
+    $('books-app').classList.toggle('controls-open',compact&&open);
+    $('controls-toggle').setAttribute('aria-expanded',String(compact&&open));
+    if(compact&&open)$('controls-close').focus();else if(restoreFocus)$('controls-toggle').focus();
+  }
+  function syncTransport(){
+    $('compact-play').textContent=playbackIntent?'Pause':'Play';
+    $('compact-play').setAttribute('aria-label',playbackIntent?'Pause narration':'Play narration');
+    $('compact-play').setAttribute('aria-pressed',String(playbackIntent));
+    $('compact-play').disabled=!book||!model;
+    const position=requestedPosition||{chapter,paragraph};
+    $('compact-previous').disabled=!model||!FabricBrowserViews.bookPosition(model.chapters,position.chapter,position.paragraph,-1);
+    $('compact-next').disabled=!model||!FabricBrowserViews.bookPosition(model.chapters,position.chapter,position.paragraph);
+  }
+  function readerLayout(){
+    const compact=compactMedia.matches&&$('books-app').classList.contains('reading');
+    $('books-app').classList.toggle('compact-reader',compact);
+    // Move the existing controls, retaining their state, handlers and unique IDs.
+    const home=compact?$('reader-appearance'):$('appearance-home');
+    if(preferences.parentElement!==home)home.append(preferences);
+    if(!compact)controlsOpen(false);
+    syncTransport();focusPassage();
+  }
+  compactMedia.addEventListener('change',readerLayout);
   function focusPassage(smooth=false){
     const active=$('passage').querySelector('[aria-current="true"]');if(!active||!follow)return;
     const viewport=$('reading-body'),a=active.getBoundingClientRect(),v=viewport.getBoundingClientRect();
@@ -181,7 +208,7 @@
     }
     $('passage').replaceChildren(...elements);
   }
-  function libraryView(){++generation;playbackIntent=false;requestedPosition=null;ahead.clear();audio.pause();save();$('reader').hidden=true;$('library').hidden=false;$('books-app').classList.remove('reading')}
+  function libraryView(){controlsOpen(false);++generation;playbackIntent=false;requestedPosition=null;ahead.clear();audio.pause();save();$('reader').hidden=true;$('library').hidden=false;$('books-app').classList.remove('reading');readerLayout()}
   function status(text){$('status').textContent=text}
   async function api(route='',payload,signal){
     const response=await fetch('/api/books'+route,payload?{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(payload),signal}:{cache:'no-store',signal});
@@ -198,7 +225,7 @@
     requestedPosition=c===undefined?null:{chapter:c,paragraph:p};
     const preparedTask=c===undefined?null:ahead.take(narrationRoute(c,p));
     if(c===undefined)ahead.clear();
-    const mine=++generation;playbackIntent=autoplay;switchingAudio=true;audio.pause();audio.removeAttribute('src');audio.load();releaseAudio();
+    const mine=++generation;playbackIntent=autoplay;switchingAudio=true;syncTransport();audio.pause();audio.removeAttribute('src');audio.load();releaseAudio();
     status('Preparing your reading position…');
     const needContent=!content||content.legacy||c===undefined||c!==chapter;
     const prepared=preparedTask?await preparedTask:null;
@@ -206,7 +233,7 @@
     const value=prepared?.value||await api('/read?'+params({...(c===undefined?{}:{chapter:c,paragraph:p}),content:needContent?'1':'0'}));
     if(mine!==generation){if(prepared?.url)URL.revokeObjectURL(prepared.url);return}
     model=value;chapter=value.chapter;paragraph=value.paragraph;requestedPosition=null;
-    $('reader').hidden=false;$('library').hidden=true;$('books-app').classList.add('reading');$('title').textContent=book.title;
+    $('reader').hidden=false;$('library').hidden=true;$('books-app').classList.add('reading');$('title').textContent=book.title;readerLayout();
     if(value.content){content=value.content;renderChapter()}
     else if(needContent){content={paragraphs:[value.text],images:[],start:paragraph,legacy:true};renderChapter()}
     highlight();
@@ -221,12 +248,13 @@
     audio.playbackRate=speed;
     const offset=c===undefined?(value.reading.offset||0):resumeOffset;
     audio.onloadedmetadata=()=>{if(mine!==generation)return;audio.playbackRate=speed;if(offset&&offset<audio.duration)audio.currentTime=offset};
-    audio.onerror=()=>mine===generation&&status('Narration unavailable. Check that the book owner is reachable and has a speech voice and ffmpeg installed.');
+    audio.onerror=()=>{if(mine!==generation)return;playbackIntent=false;syncTransport();status('Narration unavailable. Check that the book owner is reachable and has a speech voice and ffmpeg installed.')};
     status('Ready. Press Play to prepare narration and listen on this device.');
-    if(autoplay&&playbackIntent){status('Preparing narration…');await audio.play().catch(()=>{if(mine===generation){playbackIntent=false;status('Tap Play to continue listening.')}})}
+    syncTransport();
+    if(playbackIntent){status('Preparing narration…');await audio.play().catch(()=>{if(mine===generation){playbackIntent=false;syncTransport();status('Tap Play to continue listening.')}})}
   }
   async function open(row){
-    ++libraryGeneration;playbackIntent=false;requestedPosition=null;ahead.clear();audio.pause();if(book)save();book=row;model=null;content=null;const mine=++generation;
+    ++libraryGeneration;controlsOpen(false);playbackIntent=false;requestedPosition=null;ahead.clear();audio.pause();if(book)save();book=row;model=null;content=null;const mine=++generation;
     status('Loading narration voices…');
     let options;try{options=await api('/voices?'+params())}catch{options={voices:[]}}
     if(mine!==generation)return;
@@ -242,7 +270,7 @@
   async function move(delta,autoplay=false){
     if(!model)return;save();const start=requestedPosition||{chapter,paragraph};
     const next=FabricBrowserViews.bookPosition(model.chapters,start.chapter,start.paragraph,delta);
-    if(!next){if(delta>0){playbackIntent=false;ahead.clear();save(true);status('Book finished.')}return}
+    if(!next){if(delta>0){playbackIntent=false;ahead.clear();save(true);syncTransport();status('Book finished.')}return}
     await load(next.chapter,next.paragraph,autoplay);save();
   }
   function button(label,click){const b=document.createElement('button');b.textContent=label;b.onclick=()=>Promise.resolve().then(click).catch(e=>status(e.message));return b}
@@ -339,13 +367,25 @@
   };
   document.querySelectorAll('[data-mode]').forEach(b=>b.onclick=()=>discoverMode(b.dataset.mode).catch(e=>status(e.message)));
   $('search').onsubmit=e=>{e.preventDefault();const query=$('query').value.trim();(e.submitter?.value==='gutenberg'?discoverMode('search','',query):shelf(query)).catch(e=>status(e.message))};
+  $('controls-toggle').onclick=()=>controlsOpen(!$('books-app').classList.contains('controls-open'));
+  $('controls-close').onclick=()=>controlsOpen(false,true);
+  document.addEventListener('keydown',event=>{if(event.key==='Escape'&&$('books-app').classList.contains('controls-open')){event.preventDefault();controlsOpen(false,true)}});
+  document.addEventListener('pointerdown',event=>{if($('books-app').classList.contains('controls-open')&&!$('reader-head').contains(event.target))controlsOpen(false)});
+  $('compact-previous').onclick=()=>move(-1,playbackIntent).catch(e=>status(e.message));
+  $('compact-next').onclick=()=>move(1,playbackIntent).catch(e=>status(e.message));
+  $('compact-play').onclick=()=>{
+    if(playbackIntent){playbackIntent=false;audio.pause();syncTransport();return}
+    playbackIntent=true;syncTransport();if(switchingAudio)return;
+    const mine=generation;audio.play().catch(()=>{if(mine===generation){playbackIntent=false;syncTransport();status('Tap Play or Retry narration in Controls to try again.')}});
+  };
   $('previous').onclick=()=>move(-1,playbackIntent).catch(e=>status(e.message));$('next').onclick=()=>move(1,playbackIntent).catch(e=>status(e.message));
   $('retry').onclick=()=>load(chapter,paragraph,true,audio.currentTime||0).catch(e=>status(e.message));
   $('chapters').onchange=()=>{const autoplay=playbackIntent;save();load(Number($('chapters').value),0,autoplay).then(()=>save()).catch(e=>status(e.message))};
-  audio.onplay=()=>{playbackIntent=true;status('Preparing / playing narration…');save();focusPassage()};audio.onplaying=()=>{status('Reading on this device.');prepareNext()};
-  audio.onpause=()=>{if(switchingAudio||!audio.paused)return;if(!audio.ended)playbackIntent=false;save();if(audio.currentSrc&&!audio.ended)status('Paused. Press Play to continue from here.')};
+  audio.onplay=()=>{if(audio.paused)return;playbackIntent=true;syncTransport();status('Preparing / playing narration…');save();focusPassage()};audio.onplaying=()=>{status('Reading on this device.');prepareNext()};
+  audio.onpause=()=>{if(switchingAudio||!audio.paused)return;if(!audio.ended)playbackIntent=false;syncTransport();save();if(audio.currentSrc&&!audio.ended)status('Paused. Press Play to continue from here.')};
   audio.ontimeupdate=()=>{if(Date.now()-lastSave>5000){lastSave=Date.now();save();prepareNext()}};
   audio.onended=()=>move(1,true).catch(e=>status(e.message));
   window.addEventListener('pagehide',()=>{ahead.clear();releaseAudio();if(book&&model)fetch('/api/books/progress?'+params(),{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({id:book.id,fields:{chapter,paragraph,offset:audio.currentTime||0}}),keepalive:true}).catch(()=>{})});
+  readerLayout();
   try{await shelf();const q=new URLSearchParams(location.search);if(q.has('resume')||q.has('query'))await resume(q.get('query')||'')}catch(e){status(e.message)}
 })();

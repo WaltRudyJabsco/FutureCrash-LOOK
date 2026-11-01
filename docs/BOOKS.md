@@ -553,3 +553,29 @@ discarded rather than played with the wrong pacing.
 ![Shelf cover thumbnails using a fictional book](screenshots/mercury-reader-shelf-covers.png)
 
 ![Independent punctuation pauses at 1.3× playback](screenshots/mercury-reader-pacing.png)
+
+### Compact phone and tablet reading controls
+
+On phones, tablets with touch input, narrow windows (up to 1100 CSS pixels), or
+short landscape windows (up to 600 CSS pixels tall), Mercury Reader uses a compact
+reading header: book/position, Library, previous paragraph, Play/Pause, next
+paragraph, and **Controls**. The book text keeps the remaining height.
+
+**Controls** opens a scrollable panel over the text for the full transport,
+chapter picker, voice, speed, pauses, follow-reading, narration retry, theme and
+font-size settings. Choose **Done**, tap outside the panel, or press Escape to
+close it. Keyboard focus returns to Controls after Done or Escape. Settings and
+playback share the same controls/audio element as the desktop reader; changing
+orientation does not restart narration. Wide desktop windows retain the expanded
+interface. Returning to the shelf restores the regular appearance controls.
+
+Browser viewport checks covered 390×844 phone portrait, 844×390 phone landscape,
+820×1180 tablet portrait, and a 1366×1024 landscape tablet with touch emulation.
+These are layout and interaction checks, rather than tests on physical iOS
+hardware.
+
+![Compact phone reader using fictional text](screenshots/mercury-reader-phone.png)
+
+![Phone reading controls panel](screenshots/mercury-reader-phone-controls.png)
+
+![Compact tablet reader](screenshots/mercury-reader-tablet.png)
