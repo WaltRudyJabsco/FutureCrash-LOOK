@@ -29,7 +29,7 @@ nav,.preferences,.masthead{display:flex;align-items:center;gap:8px;flex-wrap:wra
 .preferences{font:14px system-ui;color:var(--muted)}
 #font-size{min-width:3ch;text-align:center}
 #search{display:flex;flex-wrap:wrap;gap:8px;margin:16px 0}
-.shelf-tools{font:14px system-ui;display:flex;gap:10px;align-items:center;flex-wrap:wrap}#library [hidden]{display:none}#items button.owned{opacity:.65}#items small{display:block;font:13px system-ui;color:var(--muted);margin-top:5px}
+.shelf-tools{font:14px system-ui;display:flex;gap:10px;align-items:center;flex-wrap:wrap}#library [hidden]{display:none}#items button.owned{opacity:.65}.book-thumb{display:inline-flex;width:45px;height:65px;flex:none;align-items:center;justify-content:center;margin-right:12px;vertical-align:middle;background:var(--panel);border:1px solid var(--line);border-radius:3px;font:12px Georgia,serif;color:var(--muted)}.book-thumb img{width:100%;height:100%;object-fit:contain}#items small{display:block;font:13px system-ui;color:var(--muted);margin-top:5px}
 #query{flex:1 1 240px;min-width:0}
 #status{font:14px/1.5 system-ui;color:var(--muted);min-height:1.5em;margin:8px 0 14px}
 #items button{display:block;text-align:left;width:100%;padding:16px 18px;border-left:8px solid #9caaad;margin:8px 0}
@@ -116,6 +116,7 @@ figcaption{font:14px/1.5 system-ui;color:var(--muted);margin-top:10px}
 </audio>
 <nav class="narration-options" aria-label="Narration settings">
 <label for="voice">Voice</label><select id="voice" aria-label="Narration voice" title="Changing voice restarts the current paragraph"><option value="">Default voice</option></select>
+<label for="pauses">Pauses</label><select id="pauses" aria-label="Punctuation pauses" title="Changing pauses restarts the current paragraph"><option value="voice">Voice default</option><option value="natural" selected>More space</option><option value="relaxed">Unhurried</option></select>
 <label for="speech-speed">Speed</label><input id="speech-speed" aria-label="Speech speed" type="range" min="0.5" max="2" step="0.05" value="1"><output id="speech-speed-value" for="speech-speed">1×</output>
 </nav>
 <p class="reader-note">Listen here, or read at your own pace. Select a paragraph to read from there.</p>
@@ -160,7 +161,7 @@ def handle(handler,node_url,payload=None):
     parsed=urllib.parse.urlsplit(handler.path)
     action=parsed.path.removeprefix('/api/books').strip('/')
     query=urllib.parse.parse_qs(parsed.query)
-    allowed={'target','id','chapter','paragraph','mode','subject','image','content','voice','query','start_index'}
+    allowed={'target','id','chapter','paragraph','mode','subject','image','content','voice','query','start_index','pauses'}
     query={k:v[0] for k,v in query.items() if k in allowed}
     route={'':'/v1/books/fabric','read':'/v1/books/read','audio':'/v1/books/audio','voices':'/v1/books/voices','cover':'/v1/books/cover','image':'/v1/books/image','discover':'/v1/books/discover','discovery-cover':'/v1/books/discovery-cover'}.get(action)
     if payload is not None:

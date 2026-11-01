@@ -9,6 +9,7 @@ import threading
 import time
 import zipfile
 import book_speech
+import book_pacing
 
 _LOCK = threading.Lock()
 MAX_IMAGE_BYTES=8*1024*1024
@@ -66,14 +67,15 @@ def voice_options():
     return {'voices':rows,'default':book_speech.preferred_voice(rows),'automatic':book_speech.default_voice(rows),'standard':book_speech.standard_voices(rows)}
 
 
-def render(text,ident,chapter,paragraph,voice_id=''):
+def render(text,ident,chapter,paragraph,voice_id='',pauses='voice'):
+    if pauses not in book_pacing.PROFILES:raise ValueError('Choose voice, natural or relaxed pauses')
     rows=_voices(int(time.monotonic()//60))
     voice=next((row for row in rows if row['id']==voice_id),None) if voice_id else book_speech.preferred_voice(rows)
     if voice_id and not voice:raise ValueError('This voice is not installed on the book owner; choose an available voice')
     if not voice:raise ValueError('No narration voice installed on book owner; run lk books speech-setup there')
     ffmpeg=book_speech.book_reader.binary('ffmpeg')
     if not ffmpeg:raise ValueError('Browser narration needs ffmpeg on the book owner')
-    key=hashlib.sha256(json.dumps([ident,chapter,paragraph,text,voice['id'],'aac-96-v1']).encode()).hexdigest()
+    key=hashlib.sha256(json.dumps([ident,chapter,paragraph,text,voice['id'],'aac-96-pacing-v2',pauses]).encode()).hexdigest()
     root=Path.home()/'.cache/look/book-audio';root.mkdir(parents=True,exist_ok=True)
     out=root/(key+'.m4a')
     if out.is_file():return out
@@ -89,6 +91,13 @@ def render(text,ident,chapter,paragraph,voice_id=''):
             else:
                 base=Path.home()/'.local/share/look/book-speech'
                 args=[str(base/'venv/bin/piper'),'-m',str(book_speech.piper_model(voice)),'--input-file',str(source),'-f',str(wave)]
+            if pauses!='voice':
+                if voice['engine']=='say':source.write_text(book_pacing.say_text(text,pauses))
+                elif voice['engine']=='espeak':
+                    source.write_text(book_pacing.espeak_text(text,pauses));args.append('-m')
+                else:
+                    parts=folder/'parts.json';parts.write_text(json.dumps(book_pacing.segments(text,pauses)))
+                    args=[str(base/'venv/bin/python'),str(Path(book_pacing.__file__).resolve()),str(book_speech.piper_model(voice)),str(parts),str(wave)]
             subprocess.run(args,stdin=subprocess.DEVNULL,capture_output=True,timeout=120,check=True)
             target=folder/'audio.m4a'
             subprocess.run([ffmpeg,'-nostdin','-v','error','-i',str(wave),'-c:a','aac','-b:a','96k','-movflags','+faststart',str(target)],stdin=subprocess.DEVNULL,capture_output=True,timeout=30,check=True)

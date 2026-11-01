@@ -29,7 +29,8 @@ Use `/` to search from an article, `l` to follow links and `o` to choose the own
 
 The browser book experience is now **Mercury Reader**, styled to match Mercury
 Writer. Open it with `/reader` or “open Mercury Reader”; `/books` still works.
-Narration prepares the next paragraph while the current one plays.
+Shelf rows include cover thumbnails. Narration prepares the next paragraph while
+the current one plays, with separate controls for speed and punctuation pauses.
 
 8.22.0 adds Books discovery, cover previews and browser read-aloud in Signal and
 Albert. Use `/books`, “read TITLE” or “continue reading”; narration and progress

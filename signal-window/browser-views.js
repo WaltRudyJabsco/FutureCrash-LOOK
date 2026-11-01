@@ -125,7 +125,7 @@
     }
   });
   function releaseAudio(){if(activeAudioURL)URL.revokeObjectURL(activeAudioURL);activeAudioURL=''}
-  function narrationRoute(c,p){return '/api/books/audio?'+params({chapter:c,paragraph:p,...((selectedVoice||defaultVoice)?{voice:selectedVoice||defaultVoice}:{})})}
+  function narrationRoute(c,p){return '/api/books/audio?'+params({chapter:c,paragraph:p,pauses,...((selectedVoice||defaultVoice)?{voice:selectedVoice||defaultVoice}:{})})}
   function prepareNext(){
     if(!book||!model||audio.paused||audio.ended)return;
     const next=FabricBrowserViews.bookPosition(model.chapters,chapter,paragraph);
@@ -133,10 +133,11 @@
     const route=narrationRoute(next.chapter,next.paragraph);
     ahead.prepare(route,'/read?'+params({...next,content:next.chapter===chapter?'0':'1'}),route);
   }
-  let content=null,follow=true,fontSize=21,theme='paper',speed=1,selectedVoice='',defaultVoice='',voiceByOwner={};
+  let content=null,follow=true,fontSize=21,theme='paper',speed=1,selectedVoice='',defaultVoice='',voiceByOwner={},pauses='natural';
   try{const prefs=JSON.parse(localStorage.getItem('look-books-appearance')||'{}');
     fontSize=Math.max(16,Math.min(32,Number(prefs.fontSize)||21));theme=prefs.theme==='dark'?'dark':'paper';follow=prefs.follow!==false;
     speed=Math.max(.5,Math.min(2,Number(prefs.speed)||1));
+    if(['voice','natural','relaxed'].includes(prefs.pauses))pauses=prefs.pauses;
     if(prefs.voices&&typeof prefs.voices==='object')voiceByOwner=prefs.voices;
   }catch{}
   function appearance(){
@@ -145,8 +146,9 @@
     $('font-size').textContent=fontSize;$('font-smaller').disabled=fontSize<=16;$('font-larger').disabled=fontSize>=32;
     $('follow').setAttribute('aria-pressed',String(follow));
     $('speech-speed').value=speed;$('speech-speed-value').textContent=Number(speed.toFixed(2))+'×';
+    $('pauses').value=pauses;
     audio.defaultPlaybackRate=speed;audio.playbackRate=speed;
-    try{localStorage.setItem('look-books-appearance',JSON.stringify({theme,fontSize,follow,speed,voices:voiceByOwner}))}catch{}
+    try{localStorage.setItem('look-books-appearance',JSON.stringify({theme,fontSize,follow,speed,pauses,voices:voiceByOwner}))}catch{}
   }
   function focusPassage(smooth=false){
     const active=$('passage').querySelector('[aria-current="true"]');if(!active||!follow)return;
@@ -266,7 +268,12 @@
         try{status('Downloading book…');const value=await api('/fetch',{url:row.url});await shelf();status('Added to your shelf: '+value.book.title)}finally{b.disabled=false}
       });
       if(owned){b.classList.add('owned');const badge=document.createElement('small');badge.textContent='Already on your shelf · Read';b.append(badge)}
-      if(discover&&id){const img=document.createElement('img');img.alt='';img.loading='lazy';img.src='/api/books/discovery-cover?id='+id;img.style.cssText='width:45px;max-height:65px;object-fit:contain;vertical-align:middle;margin-right:12px';img.onerror=()=>img.remove();b.prepend(img)}
+      if(row.kind!=='subject'&&(!discover||id)){
+        const thumb=document.createElement('span');thumb.className='book-thumb';thumb.setAttribute('aria-hidden','true');
+        const img=document.createElement('img');img.alt='';img.loading='lazy';img.decoding='async';
+        img.src=discover?'/api/books/discovery-cover?id='+id:'/api/books/cover?'+new URLSearchParams({target:row.node||'local',id:row.id});
+        img.onerror=()=>{img.remove();thumb.textContent='BOOK'};thumb.append(img);b.prepend(thumb);
+      }
       return b;
     }));
   }
@@ -324,6 +331,7 @@
   $('follow').onclick=()=>{follow=!follow;appearance();focusPassage()};appearance();
   $('speech-speed').oninput=()=>{speed=Number($('speech-speed').value);appearance()};
   audio.onratechange=()=>{const rate=Math.max(.5,Math.min(2,audio.playbackRate));if(rate!==speed||rate!==audio.playbackRate){speed=rate;appearance()}};
+  $('pauses').onchange=()=>{pauses=$('pauses').value;appearance();if(!book||!model)return;const position=requestedPosition||{chapter,paragraph};save();load(position.chapter,position.paragraph,playbackIntent).then(()=>save()).catch(e=>status(e.message))};
   $('voice').onchange=()=>{if(!book||!model)return;const autoplay=playbackIntent;
     selectedVoice=$('voice').value;voiceByOwner[book.node||'local']=selectedVoice;appearance();
     const position=requestedPosition||{chapter,paragraph};

@@ -4008,7 +4008,9 @@ class API(BaseHTTPRequestHandler):
                 if (params.get('content') or ['1'])[0]!='0':value['content']=book_audio.chapter_content(rows,chapter)
                 return self.sendj(200,value)
             voice_id=(params.get('voice') or [''])[0]
-            return self._serve_file_range(book_audio.render(text,ident,chapter,paragraph,voice_id) if voice_id else book_audio.render(text,ident,chapter,paragraph),'audio/mp4')
+            pauses=(params.get('pauses') or ['voice'])[0]
+            audio=book_audio.render(text,ident,chapter,paragraph,voice_id,pauses) if pauses!='voice' else (book_audio.render(text,ident,chapter,paragraph,voice_id) if voice_id else book_audio.render(text,ident,chapter,paragraph))
+            return self._serve_file_range(audio,'audio/mp4')
         except Exception as exc:return self.sendj(400,{'ok':False,'error':str(exc)})
 
     def _serve_book_item(self):
