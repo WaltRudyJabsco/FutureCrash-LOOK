@@ -18,8 +18,8 @@ before making changes, then performs the first backup and an actual restore test
 ## What it protects
 
 This is **essential Fabric state**, including identity, Notes/revisions, settings,
-memories and durable state. It is not a computer image or a backup of documents,
-photos, music or video files. `lk fabric backup inventory` shows the exact local
+memories, durable state and Mercury manuscripts/revision history. It is not a
+computer image or a backup of other documents, photos, music or video files. `lk fabric backup inventory` shows the exact local
 inventory and exclusions. `lk profile backup` remains a separate portable,
 secret-free profile.
 
@@ -126,3 +126,19 @@ An independent offsite destination and selected-document/media protection are
 future work; one attached drive alone is not protection against losing that drive.
 
 Conversational checks and configured backup runs: [Fabric care](FABRIC-CARE.md).
+
+## Mercury manuscripts on FabBack
+
+Mercury writing data is an explicit exception to the general document exclusion.
+The inventory includes only the known Mercury app's `library`, `state`, `history`
+and `workspace` trees and its writing configuration/memory, on macOS and Linux.
+It does not traverse arbitrary Documents folders or include Mercury runtime code.
+
+Mercury's writer lock holds the manuscript/revision inventory consistent during
+export. Verification checks every file checksum and each manuscript head against
+its immutable revision body. Encrypted backup receipts include Mercury project,
+revision, file and byte counts only after the Restic restore check succeeds.
+Old essential-state receipts without Mercury coverage do not count as current
+manuscript protection. Existing FabBack destination, keys, schedules and unrelated
+drive contents are preserved. Replication brings writes to the 3090; its existing
+backup plan protects the resulting point-in-time library and revision history.

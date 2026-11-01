@@ -87,3 +87,15 @@ verifies its HTTP version before enabling requested sync. Failed upgrades retain
 both the old app and failed app for recovery. This companion step follows the
 ordinary LOOK runtime update; older nodes first receive the new guarded route
 through their existing rollback-capable updater.
+
+## Opening the writing library
+
+Mercury 1.6.1 makes browser Open a project catalogue, with search and offline
+availability, and puts file importing behind a separate Import file action.
+`mercury` / `mercury library` shows the terminal catalogue; `mercury open` opens
+the browser catalogue. These are views of replicated project identities, not
+separate local/remote file browsers.
+
+Mercury manuscripts and revision history now join the configured FabBack backup
+scope. Restore-tested receipts carry explicit Mercury counts; old essential-state
+receipts do not prove manuscript protection. See FABRIC-RECOVERY.md.

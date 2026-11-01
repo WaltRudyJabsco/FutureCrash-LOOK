@@ -58,6 +58,43 @@ class RecoveryTests(unittest.TestCase):
         self.assertEqual(report['paths'], [])
         self.assertIn('.config/look/secrets.json', report['skipped'])
 
+    def test_mercury_manuscripts_and_revisions_are_restore_verified_but_code_is_excluded(self):
+        import hashlib
+        project={'project_id':'book','title':'café','chapters':[]}
+        checksum=hashlib.sha256(json.dumps(project,ensure_ascii=False,sort_keys=True,separators=(',',':')).encode()).hexdigest()
+        meta={'revision_id':'revision-1','content_sha256':checksum}
+        for app in r.MERCURY_APPS:
+            base=app+'/library/projects/book/'
+            self.write(base+'revision.json',json.dumps(meta))
+            self.write(base+'revisions/revision-1.json',json.dumps({'project':project,'revision':meta}))
+            self.write(base+'project.mercury',json.dumps(project))
+            self.write(app+'/mercury_server.py','runtime code')
+            self.write(app+'/mercury_config.json','{}')
+            self.write(app+'/.mercury.lock','')
+        self.write('Documents/other.txt','unrelated')
+        output=self.base/'mercury-snapshot';r.export(self.home,output)
+        result=r.verify(output)
+        self.assertEqual(result['mercury']['projects'],2)
+        self.assertEqual(result['mercury']['revisions'],2)
+        paths=r.inventory(self.home)['paths']
+        self.assertFalse(any(path.endswith('mercury_server.py') for path in paths))
+        self.assertNotIn('Documents/other.txt',paths)
+        self.assertFalse(any(path.endswith('.lock') for path in paths))
+        # Even recomputing the outer file manifest cannot hide a broken revision head.
+        head=output/'home'/r.MERCURY_APPS[0]/'library/projects/book/revision.json'
+        head.write_text(json.dumps({**meta,'revision_id':'missing'}))
+        manifest=json.loads((output/'manifest.json').read_text())
+        for row in manifest['files']:
+            if row['path']==str(head.relative_to(output/'home')):
+                row.update(size=head.stat().st_size,sha256=r.digest(head))
+        (output/'manifest.json').write_text(json.dumps(manifest))
+        with self.assertRaisesRegex(ValueError,'missing its head'):r.verify(output)
+
+    def test_mercury_symlink_install_is_not_followed(self):
+        outside=self.base/'outside-app';outside.mkdir();(outside/'library').mkdir();(outside/'library/private.json').write_text('secret')
+        app=self.home/r.MERCURY_APPS[0];app.parent.mkdir(parents=True);app.symlink_to(outside,target_is_directory=True)
+        self.assertFalse(any('private.json' in path for path in r.inventory(self.home)['paths']))
+
     def test_checksums_and_traversal_rejected(self):
         self.write('.local/share/look/fabric_memory.json', '{}')
         output = self.base / 'capsule'; r.export(self.home, output)

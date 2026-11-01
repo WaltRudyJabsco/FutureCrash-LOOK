@@ -28,7 +28,7 @@ def intent(text):
 
 def tools():
     return [
-      {'type':'function','function':{'name':'fabric_status','description':'Check trusted Fabric nodes, installed releases, updater receipts and restore-tested essential-state backups. Read-only; does not check GitHub or claim documents/media are backed up.','parameters':{'type':'object','properties':{}}}},
+      {'type':'function','function':{'name':'fabric_status','description':'Check trusted Fabric nodes, installed releases, updater receipts and restore-tested essential-state backups. Read-only; reports explicit Mercury coverage in restore-tested receipts. Does not check GitHub; other documents/media are excluded.','parameters':{'type':'object','properties':{}}}},
       {'type':'function','function':{'name':'fabric_maintain','description':'Only after an explicit upkeep request: run already configured backups, synchronize installed runtime from a named trusted source, or ensure backups and inspect releases. No new drive setup, firmware, package upgrades, GitHub downloads or arbitrary shell. Accepted jobs remain pending until receipts verify completion.','parameters':{'type':'object','properties':{'operation':{'type':'string','enum':['backup','sync','ensure']},'source':{'type':'string','description':'Required for synchronization; local or a trusted node name explicitly named by the user.'}},'required':['operation']}}}
     ]
 
@@ -43,9 +43,15 @@ def backup_status(home):
         except ProcessLookupError:job.update(state='failed',error='Backup worker stopped before publishing a result')
         except PermissionError:pass
     receipts=[raw.get('last_backup'),raw.get('last_sent'),*raw.get('received',[])]
+    mercury_required=False
+    for app in recovery.MERCURY_APPS:
+        index=Path(home)/app/'library/library.json'
+        if not index.is_file():continue
+        try:mercury_required=mercury_required or bool(json.loads(index.read_text()).get('projects'))
+        except (OSError,ValueError):mercury_required=True
     return {'configured':raw.get('configured',False),'role':raw.get('role'),'connected':raw.get('connected'),
-            'owner':recovery.capsule_owner(home),'scope':'fabric-essential','excluded':['documents','photos','media'],
-            'receipts':[r for r in receipts if isinstance(r,dict)],'job':job,
+            'owner':recovery.capsule_owner(home),'scope':'fabric-essential-and-mercury','excluded':['other documents','photos','media'],
+            'receipts':[r for r in receipts if isinstance(r,dict)],'job':job,'mercury_required':mercury_required,
             'setup': 'lk fabric backup add' if not raw.get('configured') else 'lk fabric backup configure'}
 
 
@@ -113,12 +119,12 @@ def inspect(snapshot,get):
         for receipt in receipts:
             try:age=now-float(receipt.get('verified_at') or 0)
             except (TypeError,ValueError):continue
-            if owner and receipt.get('node')==owner and receipt.get('restore_tested') and 0<=age<=BACKUP_MAX_AGE:matching.append(receipt)
+            if owner and receipt.get('node')==owner and receipt.get('restore_tested') and 0<=age<=BACKUP_MAX_AGE and (not backup.get('mercury_required') or receipt.get('mercury',{}).get('projects',0)>0):matching.append(receipt)
         backup['verified_recently']=bool(matching)
         backup['verified_at']=max((r.get('verified_at',0) for r in matching),default=None)
     digests={row.get('release',{}).get('digest') if isinstance(row.get('release',{}).get('digest'),str) else None for row in rows}
     return {'schema':SCHEMA,'local':local,'nodes':rows,'releases_match':bool(rows) and None not in digests and len(digests)==1,
-            'scope':'Installed Fabric runtime and essential-state backups; excludes documents, photos and media. No GitHub latest-release check.',
+            'scope':'Installed Fabric runtime, essential-state and Mercury manuscript backups; excludes other documents, photos and media. No GitHub latest-release check.',
             'actions':[]}
 
 
@@ -167,7 +173,7 @@ def describe(report):
     for action in report.get('actions') or []:lines.append(f"{action['node']}: {action['action']} {action.get('state','accepted')}"+(' · '+action['error'] if action.get('error') else ''))
     if any(a.get('state') in {'queued','staged','running','restarting'} for a in report.get('actions') or []):lines.append('Work is pending; ask “check our Fabric” again to verify completion.')
     if report.get('next'):lines.append(report['next'])
-    lines.append('Backup scope: Fabric identity, Notes and settings—not documents, photos or media.')
+    lines.append('Backup scope: Fabric identity, Notes, settings and Mercury manuscripts/revisions; other documents, photos and media are excluded.')
     if any(r.get('backup') and not r['backup'].get('configured') and not r['backup'].get('verified_recently') for r in report.get('nodes') or []):lines.append('Unprotected nodes need inclusion in a configured backup plan; use lk fabric backup add/configure.')
     return '\n'.join(lines)
 
