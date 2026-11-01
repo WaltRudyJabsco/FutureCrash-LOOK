@@ -579,3 +579,17 @@ hardware.
 ![Phone reading controls panel](screenshots/mercury-reader-phone-controls.png)
 
 ![Compact tablet reader](screenshots/mercury-reader-tablet.png)
+
+### Desktop playback controls and quiet reading
+
+Wide desktop windows now show a large Play/Pause button with Previous and Next
+paragraph buttons, matching the direct transport used on phones and tablets.
+Full chapter, voice, speed, pause, follow-reading and seek controls remain visible
+by default. **Hide controls** tucks those settings away while the larger transport
+stays visible; **Show controls** restores them inline. The choice is remembered
+per browser, independently of the phone/tablet pop-out panel. Hiding settings,
+resizing, or restoring them does not restart narration or change the current book.
+
+![Desktop playback controls](screenshots/mercury-reader-desktop-transport.png)
+
+![Desktop quiet reading with settings hidden](screenshots/mercury-reader-desktop-quiet.png)

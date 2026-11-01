@@ -559,3 +559,22 @@ owner's catalog; a changed revision fetches it again. This does not replace item
 IDs or imply that cataloged files are currently reachable. Older peers retain
 full-transfer compatibility. Shift-R refreshes an open media desk; a cold startup
 may show local-only results while the first Fabric snapshot is being built.
+
+### Dune Sea and Harmonic Ink
+
+Two more ambient visuals join LOOK's terminal player and shared MP/TV player
+view: **Dune Sea**, slow wind over layered sand ridges beneath a small sun, and
+**Harmonic Ink**, a harmonograph pattern traced by coupled pendulum curves.
+
+Use lowercase **v** to cycle visuals or uppercase **V** for the checklist; both
+also participate in **Cycle** and the existing `lk visualizers` selection. New
+visuals start enabled; existing disabled-name preferences are preserved. They
+freeze while paused, remain bounded at small terminal sizes, and use the existing
+ambient animation timing rather than analyzing audio samples. Reopen a running
+`lk player` after installation to load the updated registry.
+
+Animation previews rendered from the same terminal frame functions:
+
+![Dune Sea](screenshots/visualizer-dune-sea.gif)
+
+![Harmonic Ink](screenshots/visualizer-harmonic-ink.gif)

@@ -4,7 +4,7 @@ import math
 import hashlib
 import json
 
-NAMES = ('Bars', 'Waves', 'Orbit', 'Tunnel', 'Stars', 'Plasma', 'Album Art', 'Black Hole', 'Rooftops', 'Spectrum', 'Moon Jelly', 'Firefly Garden', 'Clockwork Garden', 'Rain on Glass', 'Neon Reef', 'Aurora Loom', 'Paper Lanterns', 'Magnetic Field', 'Comet Trails', 'Orrery', 'Phosphor Rain', 'Kinetic Mobile', 'Haunted Hollow', 'Cycle')
+NAMES = ('Bars', 'Waves', 'Orbit', 'Tunnel', 'Stars', 'Plasma', 'Album Art', 'Black Hole', 'Rooftops', 'Spectrum', 'Moon Jelly', 'Firefly Garden', 'Clockwork Garden', 'Rain on Glass', 'Neon Reef', 'Aurora Loom', 'Paper Lanterns', 'Magnetic Field', 'Comet Trails', 'Orrery', 'Phosphor Rain', 'Kinetic Mobile', 'Haunted Hollow', 'Dune Sea', 'Harmonic Ink', 'Cycle')
 CYCLE_MODE = len(NAMES)
 CYCLE_INTERVAL_SECONDS = 10.0
 
@@ -69,6 +69,10 @@ def frame(mode, width, height, phase, playing=True, seed=0):
             depth=(i*.618034+t*.18)%1
             point((width-1)/2+math.cos(angle)*depth*width*.65,
                   (height-1)/2+math.sin(angle)*depth*height*.65,'.+*'[min(2,int(depth*3))])
+    elif mode==24:
+        return harmonic_ink_frame(width,height,t,seed)
+    elif mode==23:
+        return dune_sea_frame(width,height,t,seed)
     elif mode==22:
         return haunted_hollow_frame(width,height,t,seed)
     elif mode==21:
@@ -626,4 +630,51 @@ def haunted_hollow_frame(width,height,phase,seed=0):
         # A candle's small change is confined to the eyes; never flash the scene.
         if int(phase*.6+i+seed)%7==0:rows[2]=rows[2].replace('^','-')
         stamp(x,pumpkin_y,rows,opaque=True)
+    return [''.join(row) for row in canvas]
+
+
+DUNE_COLOR='38;5;180'
+DUNE_RIDGES=5
+DUNE_SPEED=.18
+INK_COLOR='38;5;117'
+INK_POINTS=720
+INK_SPEED=.16
+
+
+def dune_sea_frame(width,height,phase,seed=0):
+    """Slow wind over layered sand ridges beneath a small desert sun."""
+    canvas=[[' ']*width for _ in range(height)]
+    def point(x,y,char):
+        x=round(x);y=round(y)
+        if 0<=x<width and 0<=y<height:canvas[y][x]=char
+    sun_x=(width-1)*.8;sun_y=(height-1)*.16
+    for i in range(32):
+        angle=i*math.tau/32
+        point(sun_x+math.cos(angle)*width*.035,sun_y+math.sin(angle)*height*.08,'o')
+    wind=phase*DUNE_SPEED+seed*.09
+    for ridge in range(DUNE_RIDGES):
+        baseline=height*(.35+ridge*.13)
+        amplitude=max(.5,height*(.035+ridge*.008))
+        for x in range(width):
+            along=x/max(1,width-1)
+            y=baseline+amplitude*(math.sin(along*math.tau+wind+ridge)*.7+math.sin(along*math.tau*2-wind*.5+ridge)*.3)
+            point(x,y,'~' if ridge==0 else '_')
+            # Sparse grains move along the slope rather than blinking at random.
+            if (x-int(wind*9)+ridge*3)%13==0:point(x,y+1,'.')
+    return [''.join(row) for row in canvas]
+
+
+def harmonic_ink_frame(width,height,phase,seed=0):
+    """Two coupled pendulums trace a slowly turning harmonograph rosette."""
+    canvas=[[' ']*width for _ in range(height)]
+    cx=(width-1)/2;cy=(height-1)/2;rx=(width-1)*.44;ry=(height-1)*.43
+    drift=phase*INK_SPEED+seed*.11
+    for i in range(INK_POINTS):
+        angle=i*math.tau/INK_POINTS
+        x=cx+rx*(math.sin(angle*3+drift)*.68+math.sin(angle*5-drift*.7)*.32)
+        y=cy+ry*(math.sin(angle*4-drift)*.68+math.sin(angle*2+drift*.6)*.32)
+        x=round(x);y=round(y)
+        if 0<=x<width and 0<=y<height:
+            # Overlapping traces build an ink density instead of solid fill.
+            canvas[y][x]='+' if canvas[y][x]!=' ' else '.'
     return [''.join(row) for row in canvas]
