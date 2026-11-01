@@ -4,6 +4,8 @@
 and close; Shift-number or x removes a saved item. Enter previews; Esc returns.
 Shift-P opens the shelf from supported LOOK workspaces. Saved history stays on
 this computer; s explicitly saves one clip as a normal synced note.
+Shortcut keys and numbered slots use blue, with subdued gray action labels.
+The command footer wraps to the terminal width.
 
 - `lk clip on` requests automatic capture; `lk clip off` stops it without deleting history.
 - `lk clip status` reports the preference and platform support.

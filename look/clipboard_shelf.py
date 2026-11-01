@@ -345,6 +345,29 @@ def wrap_cells(text, width):
     return rows
 
 
+def command_inks(colors):
+    light=terminal_style.luminance(colors.get('_palette',{}).get('background','#111111'))>.3
+    blue='\033[38;2;33;92;154m' if light else '\033[38;2;95;175;255m'
+    gray='\033[38;2;95;95;95m' if light else '\033[38;2;160;160;160m'
+    return blue,gray
+
+
+def command_rows(bindings,width,colors):
+    blue,gray=command_inks(colors)
+    rows=[''];used=0
+    for key,label in bindings:
+        if used and used+2+sum(cell_width(char) for char in key+' '+label)>width:rows.append('');used=0
+        if used:rows[-1]+=gray+'  ';used+=2
+        for text,style in ((key,blue),(' '+label,gray)):
+            rows[-1]+=style
+            for char in text:
+                size=cell_width(char)
+                if used+size>width:rows.append(style);used=0
+                if not used and char==' ':continue
+                rows[-1]+=char;used+=size
+    return [row+'\033[0m' for row in rows]
+
+
 def share_note(text):
     try:
         from .notebook_core import Notebook
@@ -385,28 +408,27 @@ def show(*, insert=False, fd=None, reader=None, shelf=None):
             state = 'capture '+capture_description(shelf)
             lines = [colors['CYAN']+'CLIPBOARD SHELF'+ '\033[0m · '+state+' · local text only']
             if not shelf.enabled:
-                lines += ['e enables background text history on this computer.',
-                          'Copied text may include secrets. History stays local; s saves one item as a synced note.']
+                lines += command_rows([('e','enables background text history on this computer.')],width,colors)
+                lines += ['Copied text may include secrets. History stays local; s saves one item as a synced note.']
+            action = 'insert' if insert else 'copy & close'
+            controls=command_rows([('1–9,0',action),('Shift-number','remove'),('↑↓','move'),('Enter','preview'),
+                ('x','remove'),('e','capture on/off'),('a','add clipboard'),('s','save to Notes/Fabric'),
+                ('Esc','list' if expanded else 'back')],width,colors)
+            page=max(1,height-len(lines)-len(controls)-2)
             if expanded and rows:
                 content = wrap_cells(safe_text(rows[selected][1]).expandtabs(4), width)
-                page = max(1, height-7)
                 scroll = min(scroll, max(0, len(content)-page))
                 lines += content[scroll:scroll+page]
             else:
-                page = max(1, height-8)
                 top = max(0, selected-page+1)
                 for index, (_, text) in list(enumerate(rows))[top:top+page]:
                     summary = ' ↵ '.join(text.splitlines())
                     prefix = f'{SLOTS[index]} '+('› ' if index == selected else '  ')
-                    line = colors['CYAN']+prefix+colors['WHITE']+clip_line(summary, max(0,width-len(prefix)))
+                    line = command_inks(colors)[0]+prefix+colors['WHITE']+clip_line(summary, max(0,width-len(prefix)))
                     lines.append(terminal_style.list_row(line, width, index, index == selected, colors))
                 if not rows:
                     lines += ['No saved clips yet. a adds the current clipboard; e requests automatic capture.']
-            action = 'insert' if insert else 'copy & close'
-            controls = [f'1–9,0 {action} · Shift-number remove (US: !@#$%^&*())',
-                        '↑↓ move · Enter preview · x remove · e capture on/off · a add clipboard',
-                        's save selected to Notes / Fabric · Esc '+('list' if expanded else 'back')]
-            lines += [colors['CYAN']+line+'\033[0m' for line in controls]
+            lines += controls
             lines += [safe_text(notice)]
             frame = [fit_styled(line, width) for line in lines]
             # Each styled row has already been measured; wrap explanatory text
