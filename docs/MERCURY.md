@@ -71,3 +71,19 @@ the default service for automatic node replication. Exchange batches fit the
 existing 8 MiB ingress limit; individual revisions above 6 MiB need manual
 export. Folder organization and availability preferences remain per endpoint.
 The optional install and node update do not enable pairing or sync themselves.
+
+## Managed companion updates
+
+Paired nodes expose `POST /v1/mercury/install` with explicit `confirm: true`
+and optional `enable_sync: true`. This operation installs only the pinned,
+checksum-verified Mercury release; it does not accept commands, arbitrary
+URLs or destination paths. `GET /v1/mercury/install/status` reports progress,
+backups and verified running-version/offline-copy counts.
+
+The helper retires only the known Mercury service or a process proven to belong
+to its installed app. It keeps an app/state rollback copy, preserves configuration
+and manuscripts, installs code, starts a user-managed local-only service, and
+verifies its HTTP version before enabling requested sync. Failed upgrades retain
+both the old app and failed app for recovery. This companion step follows the
+ordinary LOOK runtime update; older nodes first receive the new guarded route
+through their existing rollback-capable updater.
