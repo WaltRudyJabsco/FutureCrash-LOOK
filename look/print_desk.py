@@ -1,10 +1,10 @@
 """Small physical-printer desk; selections never submit a print job."""
-import json
 import sys
 import termios
 import tty
 import clipboard_shelf
 import printing
+import print_details
 from notebook_markdown import safe_text
 
 
@@ -29,12 +29,12 @@ def screen(ui,select=False,node='auto'):
             hints=[('↑↓','choose'),('Tab','next'),('Enter','select' if select else 'options')]
             if not select:hints += [('o','options'),('j','jobs'),('r','routes'),('n','nickname'),('R','refresh')]
             hints += [('PgUp/PgDn','scroll'),('q/Esc','back' if detail else 'close')]
+            if detail:hints=[('↑↓','scroll'),('PgUp/PgDn','page'),('q/Esc','back')]
             footer=clipboard_shelf.command_rows(hints,width,ui.terminal_style.list_colors())
             frame=[ui._c('LOOK PRINT','1;36')+' · '+('Choose a printer' if select else 'Printers')]
             if detail:
                 page=max(1,height-len(footer)-3)
-                lines=[]
-                for line in detail.splitlines():lines+=clipboard_shelf.wrap_cells(safe_text(line),width)
+                lines=print_details.render(detail[0],detail[1],width,ui.terminal_style.list_colors())
                 offset=max(0,min(offset,max(0,len(lines)-page)));frame+=lines[offset:offset+page]
             else:
                 page=max(1,height-len(footer)-3);top=max(0,selected-page+1)
@@ -43,7 +43,7 @@ def screen(ui,select=False,node='auto'):
                     if not row.get('identity_verified'):label+=' · identity unverified'
                     frame.append(ui.terminal_style.list_row(safe_text(label),width,index,index==selected,ui.terminal_style.list_colors()))
                 if not rows:frame.append('No configured printers visible. Use system printer settings or lk print discover.')
-            message=notice or ('Some owners/spoolers unavailable; list may be incomplete.' if errors else 'Select a printer; queues are managed underneath. Nothing prints here.')
+            message=notice or ('Read-only details; printer defaults remain in system settings.' if detail else 'Some owners/spoolers unavailable; list may be incomplete.' if errors else 'Select a printer; queues are managed underneath. Nothing prints here.')
             frame+=['']*max(0,height-len(footer)-len(frame)-1);frame+=footer+[safe_text(message)]
             sys.stdout.write(ui._terminal_frame_payload('\n'.join(ui._ansi_clip(line,width) for line in frame)));sys.stdout.flush()
             key=ui._read_tty_key(fd)
@@ -64,7 +64,7 @@ def screen(ui,select=False,node='auto'):
             elif chosen and key in {'enter','\r','\n','o','j','r','n'}:
                 if select and key in {'enter','\r','\n'}:return chosen
                 try:
-                    if key=='r':detail=json.dumps(chosen['routes'],ensure_ascii=False,indent=2)
+                    if key=='r':detail=('routes',{'printer':chosen['label'],'routes':chosen['routes']})
                     elif key=='n':
                         from look_renderer import prompt_line
                         termios.tcsetattr(fd,termios.TCSADRAIN,old)
@@ -79,7 +79,7 @@ def screen(ui,select=False,node='auto'):
                         finally:tty.setcbreak(fd)
                     else:
                         value=printing.request('jobs' if key=='j' else 'options','auto',queue=chosen['id'])
-                        detail=value.get('options') or json.dumps(value,ensure_ascii=False,indent=2)
+                        detail=('jobs' if key=='j' else 'options',value)
                     offset=0
                 except (OSError,ValueError,RuntimeError) as error:notice=str(error)
     finally:

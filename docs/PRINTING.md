@@ -3,7 +3,10 @@
 Bare `lk print` opens a small terminal desk with one entry per identified physical
 printer. Enter/o opens Options, j shows Jobs, r shows underlying Routes, n sets a
 Nickname, and R refreshes. Arrows/Tab select; Page Up/Down scroll detail views;
-q/Esc returns or closes. Key hints use LOOK's standard blue/subdued footer and
+q/Esc returns or closes. Options show aligned setting/current-default columns
+with available choices beneath each setting, blue labels and subdued hints.
+Jobs and Routes show readable labeled fields, including owner/queue and errors,
+rather than JSON. Narrow panes wrap details without dropping choices. Key hints use LOOK's standard blue/subdued footer and
 wrap in narrow terminals. `lk print options` or `jobs` without a name opens the
 same printer picker; files/receipts without `--printer` also offer a picker.
 
@@ -20,8 +23,11 @@ printer names; start a new shell after updating the completion script.
 Physical identity uses observed DNS-SD/IPP UUIDs and normalized endpoints, never
 model names alone. CUPS `lpstat -v` supplies configured connections; optional
 `ippfind` supplies read-only Bonjour UUID/endpoint links, cached for a minute.
-If identity cannot be verified, queues stay separate rather than merging two
-printers of the same model. No CUPS queue is deleted or rewritten.
+Linux cups-browsed `implicitclass://` routes are resolved only when their service
+name corresponds to one observed Bonjour UUID. Minimal installations without
+`ippfind` can use the UUID-bearing DNS-SD entries from `lpinfo -v`. Ambiguous
+service matches remain unverified. If identity cannot be verified, queues stay
+separate rather than merging two printers of the same model. No CUPS queue is deleted or rewritten.
 
 An automatic route selects an enabled local queue first, then an enabled peer
 queue, before preparing or inspecting. Owner availability means the spooler is
@@ -171,3 +177,7 @@ printing schedules now.
 References: [CUPS printing/options](https://www.cups.org/doc/options.html),
 [CUPS lp command](https://www.cups.org/doc/man-lp.html),
 [Epson legacy raster command](https://download4.epson.biz/sec_pubs/pos/reference_en/escpos/gs_lv_0.html).
+
+[Formatted Options preview](screenshots/print-options-readable.png) uses the real
+Epson driver option list with synthetic printer/owner labels, in a private demo HOME.
+Linux class behavior: [OpenPrinting cups-browsed](https://github.com/OpenPrinting/cups-browsed).

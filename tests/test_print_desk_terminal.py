@@ -52,7 +52,7 @@ print('DONE',flush=True)
         assert until(b'Brother'),output[-1500:]
         assert b'Epson' in output and b'2 routes' in output
         os.write(master,b'\r')
-        assert until(b'media/Media'),output[-1500:]
+        assert until(b'Current / default'),output[-1500:]
         if not picker:
             output=b'';os.write(master,b'q')
             assert until(b'Brother'),output[-1500:]

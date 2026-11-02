@@ -31,7 +31,7 @@ def request(action='list',node='local',**fields):
         for candidate in destination['routes']:
             try:results.append(_request(action,candidate['node'],**dict(fields,queue=candidate['name'])))
             except (OSError,RuntimeError,ValueError) as error:results.append({'node':candidate['node'],'queue':candidate['name'],'error':str(error)})
-        return {'printer':destination['label'],'routes':results}
+        return {'printer':destination['label'],'view':action,'routes':results}
     selected=route(destination,value.get('local_node',''))
     # Choose before dispatch. Never fail over a write after it may have arrived.
     result=_request(action,selected['node'],**dict(fields,queue=selected['name']))
@@ -84,6 +84,13 @@ def destination_label(row):
 
 
 def display(result):
+    if isinstance(result.get('options'),str) or isinstance(result.get('jobs'),str) or result.get('view')=='jobs':
+        import print_details,shutil,terminal_style
+        view='options' if 'options' in result else 'jobs'
+        if 'jobs' in result:result={'routes':[result]}
+        colors=terminal_style.list_colors() if sys.stdout.isatty() else None
+        print('\n'.join(print_details.render(view,result,shutil.get_terminal_size((80,24)).columns,colors)))
+        return
     if 'printers' in result:
         print('FABRIC PRINTERS')
         for row in result['printers']:print('  '+destination_label(row)+(' · '+str(row['route_count'])+' routes' if 'routes' in row else ' @ '+row.get('node','local')+' · '+row.get('profile',{}).get('kind','document')+' · '+row.get('status','')))
