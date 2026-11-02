@@ -14,10 +14,10 @@ def query_text(value):
 
 def intent(prompt):
     text=' '.join(str(prompt or '').strip().strip(' .!?').split())
-    text=re.sub(r"^(?:(?:let['’]?s|let us|can we|could we|can you|could you|please|I want to|I'd like to)\s+)+",'',text,flags=re.I)
+    text=re.sub(r"^(?:(?:well|okay|ok|let['’]?s|let us|can we|could we|can you|could you|please|I want to|I'd like to)[,\s]+)+",'',text,flags=re.I)
     if re.fullmatch(r'/(?:books|reader|mercury-reader)|(?:open\s+)?mercury reader|(?:show|open|list) (?:my |our |the )?(?:books|bookshelf|book library)|what books (?:do we|do I) have',text,re.I):return {'action':'shelf','query':''}
     if re.fullmatch(r'(?:continue|resume) (?:reading|listening)(?: please)?',text,re.I):return {'action':'resume','query':''}
-    match=re.fullmatch(r'(?:read(?: more(?: of)?)?|start reading|continue(?: reading| listening)?|resume(?: reading| listening)?|listen to)\s+(.+?)(?:\s+please)?',text,re.I)
+    match=re.fullmatch(r'(?:read(?: (?:some(?: more)?|more)(?: of)?)?|try reading|try to read|start reading|continue(?: reading| listening)?|resume(?: reading| listening)?|listen to)\s+(.+?)(?:\s+please)?',text,re.I)
     if not match:return None
     query=re.sub(r'^to\s+','',match[1],flags=re.I)
     if re.match(r'(?:(?:my|our|the)\s+)?(?:notes?|files?|articles?|webpages?|messages?|clipboard|music|playback|songs?|tracks?|albums?|playlists?|podcasts?|videos?|movies?)\b|(?:this|that|it|with|writing|working|from|on|about|up on)\b',query,re.I):return None
