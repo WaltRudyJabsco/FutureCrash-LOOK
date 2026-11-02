@@ -396,6 +396,7 @@ install_file "$ROOT/look/book_speech.py" "$HOME/.local/share/look/book_speech.py
 install_file "$ROOT/look/book_reader.py" "$HOME/.local/share/look/book_reader.py"
 install_file "$ROOT/look/print_core.py" "$HOME/.local/share/look/print_core.py"
 install_file "$ROOT/look/print_destinations.py" "$HOME/.local/share/look/print_destinations.py"
+install_file "$ROOT/look/print_details.py" "$HOME/.local/share/look/print_details.py"
 install_file "$ROOT/look/print_desk.py" "$HOME/.local/share/look/print_desk.py"
 install_file "$ROOT/look/print_completion.py" "$HOME/.local/share/look/print_completion.py"
 install_file "$ROOT/look/printing.py" "$HOME/.local/share/look/printing.py"

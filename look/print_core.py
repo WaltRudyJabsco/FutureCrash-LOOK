@@ -65,6 +65,18 @@ def discovered_devices():
                     uri,uuid,label=json.loads(line);rows.append({'uri':uri,'uuid':uuid,'label':label})
                 except (ValueError,TypeError):continue
         except (OSError,RuntimeError,subprocess.SubprocessError):pass
+    if not rows:
+        # Minimal Linux CUPS installs may expose Bonjour through lpinfo without
+        # shipping ippfind. Those observed UUIDs remain useful for class routes.
+        try:
+            from urllib.parse import urlsplit,parse_qs,unquote
+            for line in run(['lpinfo','-v']).splitlines():
+                parts=line.split(None,1)
+                if len(parts)!=2:continue
+                uri=parts[1];parsed=urlsplit(uri)
+                ident=(parse_qs(parsed.query).get('uuid') or [''])[0]
+                if parsed.scheme=='dnssd' and re.fullmatch(r'[0-9a-fA-F-]{36}',ident):rows.append({'uri':uri,'uuid':ident,'label':unquote(parsed.netloc).split('._')[0]})
+        except (OSError,RuntimeError,ValueError,subprocess.SubprocessError):pass
     _DEVICE_CACHE=(time.monotonic(),rows)
     return rows
 

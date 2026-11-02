@@ -20,6 +20,17 @@ def device(uri,discovered):
     keys=[];label=''
     try:parsed=urlsplit(uri)
     except ValueError:return {'keys':[],'label':''}
+    if parsed.scheme=='implicitclass':
+        # cups-browsed names its implicit routes after discovered services. Only
+        # bridge to a single observed UUID; never infer identity from a model.
+        normalize=lambda value:re.sub(r'[^a-z0-9]+','_',value.casefold()).strip('_')
+        class_name=normalize(unquote(parsed.netloc))
+        candidates=[row for row in discovered if class_name and normalize(row.get('label',''))==class_name]
+        uuids={row.get('uuid','').casefold() for row in candidates if re.fullmatch(r'[0-9a-fA-F-]{36}',row.get('uuid',''))}
+        if len(uuids)==1:
+            ident=next(iter(uuids));candidate=next(row for row in candidates if row.get('uuid','').casefold()==ident)
+            return {'keys':['uuid:'+ident],'label':candidate.get('label',''),'source':'unique-discovered-service','connection_scheme':'implicitclass'}
+        return {'keys':[],'label':'','source':'unverified-implicitclass','connection_scheme':'implicitclass'}
     uuid=(parse_qs(parsed.query).get('uuid') or [''])[0].casefold().removeprefix('urn:uuid:')
     if re.fullmatch(r'[0-9a-f-]{36}',uuid):keys.append('uuid:'+uuid)
     direct=endpoint(uri)
