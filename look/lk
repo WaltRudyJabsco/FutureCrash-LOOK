@@ -8324,6 +8324,26 @@ def _fabric_care_tool(name,args,profile,prompt):
     return json.dumps(report,ensure_ascii=False)
 
 
+def _lo_printers_direct(prompt,events=None):
+    text=' '.join(str(prompt).strip().strip(' .!?').casefold().split())
+    if not re.fullmatch(r'(?:show|list) (?:our |my |the |available )?printers|(?:what|which) printers(?: (?:do we have|are available|are on (?:the |our )?fabric))?',text):return None
+    import printing
+    try:
+        value=printing.request('list','all');rows=value.get('printers',[])
+        answer='Fabric printers:\n'+'\n'.join('• '+printing.destination_label(row)+' @ '+row['node']+' · '+row.get('status','') for row in rows) if rows else 'No configured printer queues are visible. Use lk print discover --node OWNER or the owner’s system printer settings.'
+        if value.get('errors'):answer+='\nSome owners or spoolers are unavailable; the list may be incomplete.'
+        status='ok'
+    except (OSError,RuntimeError,ValueError) as error:
+        answer='Could not inspect Fabric printers: '+str(error);status='failed'
+    print(answer)
+    if events:
+        events.emit('intent_routed',family='printing',families=['printing'],confidence=1.0,source='rules')
+        if status=='ok':events.emit('source_receipt',edge='PRINTERS',source='Paired Fabric printer queues',confidence='OBSERVED',retrieved_at=time.time())
+        events.emit('response',text=answer)
+        events.emit('request_done',status=status,rounds=0,tool_calls=1,prompt_tokens=0,output_tokens=0,load_ms=0)
+    return answer
+
+
 def _lo_books_direct(prompt,events=None,book_context=None):
     import book_assistant
     intent=book_assistant.intent(prompt)
@@ -8562,6 +8582,7 @@ _TOOL_POLICY = {
     "list_processes":("all","observation"),"listening_ports":("all","observation"),"system_snapshot":("all","observation"),
     "game_action":("all","action"),
     "audio_speak":("all","action"),
+    "printers_list":("all","observation"),"printer_inspect":("all","observation"),"print_prepare":("workspace","mutation"),
     "books_shelf":("all","observation"),"books_lookup":("all","observation"),
     "media_search":("all","observation"),"media_play":("all","action"),"media_queue":("all","action"),"media_control":("all","action"),
     "video_search":("all","observation"),"video_download_status":("all","observation"),
@@ -8588,6 +8609,8 @@ def _lo_tools(profile):
     tools.extend(notebook.tools())
     import book_assistant
     tools.extend(book_assistant.tools())
+    import printing
+    tools.extend(printing.tools())
     tools.extend(_information_tools())
     tools.extend(_system_inspection_tools())
     tools.extend(_capability_tools())
@@ -11088,6 +11111,13 @@ def ollama_chat(force_search=False, initial_prompt=None, allow_start=True, host_
         return 0
 
     if initial_prompt and not force_search and not selected_paths:
+        printer_answer=_lo_printers_direct(initial_prompt,events)
+        if printer_answer is not None:
+            _save_recent_exchange(initial_prompt,printer_answer)
+            if one_shot:return 0
+            initial_prompt=None
+
+    if initial_prompt and not force_search and not selected_paths:
         book_answer=_lo_books_direct(initial_prompt,events,book_context)
         if book_answer is not None:
             _save_recent_exchange(initial_prompt,book_answer)
@@ -11785,6 +11815,7 @@ def ollama_chat(force_search=False, initial_prompt=None, allow_start=True, host_
         else:
             messages.append({"role":"system","content":(
                 "RESOURCE SCOPE: unqualified open/play/find requests default to the operator's local world. "
+                "Fabric printers use printers_list/printer_inspect. To print a to-do list from Notes, use notebook_search/list/read for its actual body, then print_prepare with that text and the chosen receipt destination; do not substitute a guessed list. print_prepare creates a review plan only, never sends paper. Return the confirmation command; do not run it yourself. Never claim physical printing from a spooler receipt. Export DOCX/manuscripts to PDF first. "
                 "Mercury Reader is the built-in Fabric EPUB/PDF library. For books and saved reading positions use books_shelf/books_lookup; never guess a media folder or substitute music search. Reader links are relative to the current Signal/Albert browser host; lk books is the terminal shelf. Book lookups do not launch or start narration. "
                 "For music or media, use media_search/media_play/media_queue/media_control against the Fabric catalog before any web search or filesystem guessing. "
                 "Do not silently escalate a local miss to the public web; ask or wait for explicit online intent."
@@ -11840,6 +11871,14 @@ def ollama_chat(force_search=False, initial_prompt=None, allow_start=True, host_
             _ai_foreground(False,"lo")
             if one_shot: return 0 if game_ok else 1
             continue
+
+        if not turn_force_search and not selected_paths:
+            printer_answer=_lo_printers_direct(prompt,events)
+            if printer_answer is not None:
+                book_context.clear();messages.append({'role':'assistant','content':printer_answer})
+                _ai_foreground(False,'lo')
+                if one_shot:return 0
+                continue
 
         if turn_force_search or selected_paths:book_context.clear()
         if not turn_force_search and not selected_paths:
@@ -12363,6 +12402,10 @@ def ollama_chat(force_search=False, initial_prompt=None, allow_start=True, host_
                             tool_content,_ok,_elapsed=_tool_transaction(
                                 name,args,lambda: _run_system_inspection_tool(name,args))
                         if _ok: turn_successful_tools.add(name)
+                    elif name in {'printers_list','printer_inspect','print_prepare'}:
+                        import printing
+                        tool_content,_ok,_elapsed=_tool_transaction(name,args,lambda:printing.run_tool(name,args,workspace))
+                        if _ok:turn_successful_tools.add(name)
                     elif name in {'books_shelf','books_lookup'}:
                         import book_assistant
                         tool_content,_ok,_elapsed=_tool_transaction(name,args,lambda:book_assistant.run_tool(name,args))
@@ -21209,6 +21252,17 @@ _COMMANDS = [
     ("lk player", "", "media", "Live LOOK miniplayer"),
     ("lk mp", "[QUERY]", "media", "Fabric audio library, queue and player"),
     ("lk tv", "[QUERY]", "media", "Fabric movies, TV and video player"),
+    ("lk print", "[list|discover|options QUEUE|jobs QUEUE] [--node NODE]", "files", "Discover Fabric printers and inspect system queues; no paper sent"),
+    ("lk print add", "QUEUE --uri URI [--driver everywhere|raw] [--node NODE] [--confirm]", "files", "Review then explicitly add a CUPS queue; no drivers installed automatically"),
+    ("lk print nickname", "QUEUE NAME [--node NODE] [--confirm]", "files", "Name a destination, such as Little Printer, without renaming the system queue"),
+    ("lk print profile", "QUEUE --kind document|escpos [--width DOTS] [--columns N] [--node NODE] [--confirm]", "files", "Review a document or verified receipt printer profile"),
+    ("lk print file", "FILE --printer QUEUE [--node NODE] [--pages 1-3,5] [--copies N] [--media MEDIA] [--sides SIDES]", "files", "Prepare a bounded document job; export manuscripts to PDF first"),
+    ("lk print text", "TEXT|- --printer QUEUE [--node NODE]", "files", "Prepare UTF-8 text for a document printer"),
+    ("lk print receipt", "[TEXT|-|--image FILE] --printer QUEUE [--node NODE]", "files", "Prepare ESC/POS text or dithered raster art; explicit receipt profile required"),
+    ("lk print send", "ID [--node NODE] [--confirm]", "files", "Review or explicitly submit a prepared job once; never auto-retry uncertain printing"),
+    ("lk print inspect", "ID [--node NODE]", "files", "Inspect a print plan or spooler acceptance receipt"),
+    ("lk print discard", "ID [--node NODE] [--confirm]", "files", "Discard unsent print content"),
+    ("lk print cancel", "QUEUE JOB [--node NODE] [--confirm]", "files", "Request cancellation of an exact CUPS job"),
     ("lk bk", "[ARGS]", "media", "Alias for lk books; Fabric EPUB/PDF shelf"),
     ("lk latin", "[home|list|lesson N|practice|review|words QUERY|grammar QUERY|read|progress|about|export FILE] [--lesson N] [--strict-macrons on|off] [--json]", "learn", "Offline Latin classroom: complete course, vocabulary, checked forms and spaced review"),
     ("lk visualizers", "[--json]", "media", "Shared visualizer checklist; Space toggle, Enter save, Esc cancel"),
@@ -22620,6 +22674,9 @@ def main():
     if cmd=="wiki":
         import wiki
         return wiki.main(rest,sys.modules[__name__])
+    if cmd == "print":
+        import printing
+        return printing.main(rest)
     if cmd in {"books","bk"}:
         import books
         return books.main(rest,sys.modules[__name__])
