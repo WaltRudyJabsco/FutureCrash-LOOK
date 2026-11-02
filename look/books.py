@@ -101,6 +101,20 @@ def import_files(paths,node):
     return request('scan',node=node)['entries']
 
 
+def read_along(ui,row):
+    """Lend the terminal to the existing reader and always restore LO's input."""
+    import book_speech
+    path=local_copy(row)
+    fd=sys.stdin.fileno();old=termios.tcgetattr(fd)
+    try:
+        tty.setcbreak(fd)
+        return book_speech.desk(ui,path,row['title'],reading=row.get('reading'),
+            save_reading=lambda fields:request('progress',node=row.get('node','local'),id=row['id'],fields=fields))
+    finally:
+        termios.tcsetattr(fd,termios.TCSADRAIN,old)
+        sys.stdout.write('\x1b[0m\x1b[2J\x1b[H');sys.stdout.flush()
+
+
 def desk(ui,query='',owner=None):
     fd=sys.stdin.fileno();old=termios.tcgetattr(fd);index=0;shelf='All';search=False;notice='';results=None
     owner=owner or media_storage.settings()['node'];sort_reverse=False;help_visible=False;pane_help=False

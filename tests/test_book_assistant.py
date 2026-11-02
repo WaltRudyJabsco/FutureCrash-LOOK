@@ -76,3 +76,57 @@ def test_multiple_titles_require_a_choice_instead_of_claiming_resume():
     result=book_assistant.lookup('Alexandria',catalog={'entries':ROWS+[{'id':'other','title':'Alexandria: Another History'}]})
     assert result['status']=='ambiguous' and len(result['entries'])==2
     assert 'choose' in book_assistant.describe(result).lower()
+
+@pytest.mark.parametrize('text',['lets read more alexandria book',"let’s read more of the Alexandria book",'read more Alexandria'])
+def test_read_more_wording(text):
+    assert book_assistant.intent(text)=={'action':'resume','query':'Alexandria' if 'Alexandria' in text else 'alexandria'}
+
+
+def terminal_catalog(monkeypatch,lk,rows):
+    import books
+    monkeypatch.setattr(lk.sys,'stdin',Mock(isatty=lambda:True))
+    monkeypatch.setattr(lk.sys,'stdout',Mock(isatty=lambda:True))
+    monkeypatch.setattr(books,'catalog',lambda:{'entries':rows})
+    original=book_assistant.lookup
+    monkeypatch.setattr(book_assistant,'lookup',lambda query,**kwargs:original(query,catalog={'entries':rows},**kwargs))
+    launch=Mock(return_value='Reading position saved')
+    monkeypatch.setattr(books,'read_along',launch)
+    monkeypatch.setattr(lk,'_ai_foreground',Mock())
+    return launch
+
+
+def test_terminal_request_opens_reader_and_returns_to_lo(monkeypatch,lk):
+    launch=terminal_catalog(monkeypatch,lk,ROWS)
+    context={}
+    answer=lk._lo_books_direct('lets read more alexandria book',book_context=context)
+    launch.assert_called_once_with(lk,ROWS[0])
+    assert 'Returned to LO' in answer and context['entries'][0]['id']=='alex'
+    launch.reset_mock()
+    lk._lo_books_direct('open link',book_context=context)
+    launch.assert_called_once_with(lk,ROWS[0])
+
+
+def test_uncertain_book_waits_for_choice_and_revalidates_removed_book(monkeypatch,lk):
+    rows=[dict(ROWS[0]),dict(ROWS[0],id='other',title='Alexandria: Another History')]
+    launch=terminal_catalog(monkeypatch,lk,rows)
+    context={}
+    answer=lk._lo_books_direct('read Alexandria',book_context=context)
+    assert 'number' in answer and not launch.called
+    lk._lo_books_direct('2',book_context=context)
+    assert launch.call_args.args[1]['id']=='other'
+    launch.reset_mock();rows.clear()
+    answer=lk._lo_books_direct('open link',book_context=context)
+    assert not launch.called and 'No matching book' in answer
+
+
+def test_machine_client_never_takes_over_terminal(monkeypatch,lk):
+    from look.lo_engine import EventCollector
+    launch=terminal_catalog(monkeypatch,lk,ROWS)
+    answer=lk._lo_books_direct('lets read more alexandria book',events=EventCollector())
+    assert 'chapter 3, paragraph 5' in answer and not launch.called
+
+
+def test_explicit_session_choice_is_not_lost_in_a_large_shelf():
+    rows=[{'id':str(i),'title':'Book '+str(i)} for i in range(50)]
+    result=book_assistant.lookup('',catalog={'entries':rows},book_ids={'49'})
+    assert result['entries'][0]['id']=='49' and result['total_matches']==1

@@ -8324,16 +8324,46 @@ def _fabric_care_tool(name,args,profile,prompt):
     return json.dumps(report,ensure_ascii=False)
 
 
-def _lo_books_direct(prompt,events=None):
+def _lo_books_direct(prompt,events=None,book_context=None):
     import book_assistant
     intent=book_assistant.intent(prompt)
+    terminal=events is None and sys.stdin.isatty() and sys.stdout.isatty()
+    # Only this session's observed book choices can supply a follow-up referent.
+    previous=(book_context or {}).get('entries',[])
+    choice=None
+    if terminal and previous and re.fullmatch(r'(?:open (?:the )?(?:link|book)|open it|read it|continue)',prompt.strip().strip('.!?'),re.I):
+        intent={'action':'resume','query':''}
+        if len(previous)==1:choice=previous[0]
+    elif terminal and previous and prompt.strip().isdigit() and 1<=int(prompt.strip())<=len(previous):
+        intent={'action':'resume','query':''};choice=previous[int(prompt.strip())-1]
     if not intent:return None
     name='books_shelf' if intent['action']=='shelf' else 'books_lookup'
     if events:events.emit('tool_start',tool=name)
     try:
-        result=book_assistant.lookup(intent['query']);answer=book_assistant.describe(result);status='needs_input' if result['status']!='matched' else 'ok'
-    except (OSError,ValueError,RuntimeError) as exc:
-        answer='Mercury Reader could not inspect the Fabric shelf: '+str(exc)+'. Use /reader in Signal/Albert or lk books in the terminal.';status='failed'
+        ids=None
+        if terminal and previous and not intent['query'] and intent['action']!='shelf':
+            # Revalidate against today's shelf; never replay a remembered file path.
+            ids={choice['id']} if choice else {row['id'] for row in previous}
+        result=book_assistant.lookup(intent['query'],book_ids=ids) if ids is not None else book_assistant.lookup(intent['query'])
+        if ids is not None and len(result['entries'])>1:result['status']='ambiguous'
+        if book_context is not None:book_context['entries']=result['entries']
+        answer=book_assistant.describe(result);status='needs_input' if result['status']!='matched' else 'ok'
+        if terminal and intent['action']=='shelf':
+            import books
+            _ai_foreground(False,'lo');books.desk(sys.modules[__name__])
+            answer='Returned from the Mercury Reader shelf to LO.'
+        elif terminal and result['status']=='matched' and len(result['entries'])==1:
+            import books
+            selected=result['entries'][0]
+            rows=[row for row in books.catalog().get('entries',[]) if row['id']==selected['id'] and row.get('node','local')==selected.get('node','local')]
+            if not rows:raise ValueError('The selected book is no longer available on the Fabric shelf')
+            _ai_foreground(False,'lo')
+            receipt=books.read_along(sys.modules[__name__],rows[0])
+            answer='Returned to LO from '+selected['title']+' · '+receipt
+        elif terminal and result['entries']:
+            answer+='\nChoose a book by number: '+', '.join(str(i+1)+' '+row['title'] for i,row in enumerate(result['entries']))
+    except (OSError,ValueError,RuntimeError,subprocess.SubprocessError) as exc:
+        answer='Mercury Reader could not complete the book request: '+str(exc)+'. Use /reader in Signal/Albert or lk books in the terminal.';status='failed'
     if events:
         events.emit('intent_routed',family='books',families=['books'],confidence=1.0,source='rules',forced_search=False)
         if status!='failed':events.emit('source_receipt',edge='BOOKS',source='Trusted Fabric bookshelf and owner reading progress',confidence='OBSERVED',retrieved_at=time.time())
@@ -11049,6 +11079,7 @@ def ollama_chat(force_search=False, initial_prompt=None, allow_start=True, host_
                     host=("fabric" if fabric_mode else (host_name or _ollama_host_name(base))),
                     source=("fabric" if fabric_mode else ("override" if host_override else "environment")))
     profile=(access_profile or _load_lo_profile()).lower()
+    book_context={}
     if profile not in LO_PROFILES:
         print(f"LOOK OLLAMA · unknown access profile: {profile}")
         return 1
@@ -11057,7 +11088,7 @@ def ollama_chat(force_search=False, initial_prompt=None, allow_start=True, host_
         return 0
 
     if initial_prompt and not force_search and not selected_paths:
-        book_answer=_lo_books_direct(initial_prompt,events)
+        book_answer=_lo_books_direct(initial_prompt,events,book_context)
         if book_answer is not None:
             _save_recent_exchange(initial_prompt,book_answer)
             if one_shot:return 0
@@ -11810,13 +11841,15 @@ def ollama_chat(force_search=False, initial_prompt=None, allow_start=True, host_
             if one_shot: return 0 if game_ok else 1
             continue
 
+        if turn_force_search or selected_paths:book_context.clear()
         if not turn_force_search and not selected_paths:
-            book_answer=_lo_books_direct(prompt,events)
+            book_answer=_lo_books_direct(prompt,events,book_context)
             if book_answer is not None:
                 messages.append({"role":"assistant","content":book_answer})
                 _ai_foreground(False,"lo")
                 if one_shot:return 0
                 continue
+            book_context.clear()
 
         # Narrow local-media commands are deterministic capability requests, not
         # general web/search questions. Resolve them before inference so a model
