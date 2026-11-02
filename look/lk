@@ -6863,6 +6863,7 @@ def _lo_latest_tool_error_answer():
 
 def _lo_cognition_route(prompt,use_openjev=True):
     """Return the shared bounded route while preserving exact host reflexes."""
+    import book_assistant
     # Exact deterministic edges remain authoritative. Cognition adds fuzziness and
     # tool neighborhoods; it never weakens the hard weather/game/media contracts.
     if _lo_game_intent(prompt):
@@ -6873,6 +6874,8 @@ def _lo_cognition_route(prompt,use_openjev=True):
         family="web"
     elif _fabric_care_module().intent(prompt):
         family="system"
+    elif book_assistant.intent(prompt):
+        family="books"
     elif _lo_media_intent_profile(prompt,"workspace"):
         family="media"
     else:
@@ -8321,6 +8324,26 @@ def _fabric_care_tool(name,args,profile,prompt):
     return json.dumps(report,ensure_ascii=False)
 
 
+def _lo_books_direct(prompt,events=None):
+    import book_assistant
+    intent=book_assistant.intent(prompt)
+    if not intent:return None
+    name='books_shelf' if intent['action']=='shelf' else 'books_lookup'
+    if events:events.emit('tool_start',tool=name)
+    try:
+        result=book_assistant.lookup(intent['query']);answer=book_assistant.describe(result);status='needs_input' if result['status']!='matched' else 'ok'
+    except (OSError,ValueError,RuntimeError) as exc:
+        answer='Mercury Reader could not inspect the Fabric shelf: '+str(exc)+'. Use /reader in Signal/Albert or lk books in the terminal.';status='failed'
+    if events:
+        events.emit('intent_routed',family='books',families=['books'],confidence=1.0,source='rules',forced_search=False)
+        if status!='failed':events.emit('source_receipt',edge='BOOKS',source='Trusted Fabric bookshelf and owner reading progress',confidence='OBSERVED',retrieved_at=time.time())
+        events.emit('tool_done',tool=name,status=status,mode='preflight')
+        events.emit('response',text=answer)
+        events.emit('request_done',status=status,rounds=0,tool_calls=1,prompt_tokens=0,output_tokens=0,load_ms=0)
+    print(answer)
+    return answer
+
+
 def _fabric_care_direct(prompt,profile,events=None):
     care=_fabric_care_module();intent=care.intent(prompt)
     if not intent:return None
@@ -8509,6 +8532,7 @@ _TOOL_POLICY = {
     "list_processes":("all","observation"),"listening_ports":("all","observation"),"system_snapshot":("all","observation"),
     "game_action":("all","action"),
     "audio_speak":("all","action"),
+    "books_shelf":("all","observation"),"books_lookup":("all","observation"),
     "media_search":("all","observation"),"media_play":("all","action"),"media_queue":("all","action"),"media_control":("all","action"),
     "video_search":("all","observation"),"video_download_status":("all","observation"),
     "video_download":("workspace","mutation"),
@@ -8532,6 +8556,8 @@ def _lo_tools(profile):
     tools=_filesystem_tools()
     tools.extend(ytd.tools())
     tools.extend(notebook.tools())
+    import book_assistant
+    tools.extend(book_assistant.tools())
     tools.extend(_information_tools())
     tools.extend(_system_inspection_tools())
     tools.extend(_capability_tools())
@@ -11031,6 +11057,13 @@ def ollama_chat(force_search=False, initial_prompt=None, allow_start=True, host_
         return 0
 
     if initial_prompt and not force_search and not selected_paths:
+        book_answer=_lo_books_direct(initial_prompt,events)
+        if book_answer is not None:
+            _save_recent_exchange(initial_prompt,book_answer)
+            if one_shot:return 0
+            initial_prompt=None
+
+    if initial_prompt and not force_search and not selected_paths:
         download_answer=_lo_download_direct(initial_prompt,profile,events)
         if download_answer is not None:
             _save_recent_exchange(initial_prompt,download_answer)
@@ -11721,6 +11754,7 @@ def ollama_chat(force_search=False, initial_prompt=None, allow_start=True, host_
         else:
             messages.append({"role":"system","content":(
                 "RESOURCE SCOPE: unqualified open/play/find requests default to the operator's local world. "
+                "Mercury Reader is the built-in Fabric EPUB/PDF library. For books and saved reading positions use books_shelf/books_lookup; never guess a media folder or substitute music search. Reader links are relative to the current Signal/Albert browser host; lk books is the terminal shelf. Book lookups do not launch or start narration. "
                 "For music or media, use media_search/media_play/media_queue/media_control against the Fabric catalog before any web search or filesystem guessing. "
                 "Do not silently escalate a local miss to the public web; ask or wait for explicit online intent."
             )})
@@ -11775,6 +11809,14 @@ def ollama_chat(force_search=False, initial_prompt=None, allow_start=True, host_
             _ai_foreground(False,"lo")
             if one_shot: return 0 if game_ok else 1
             continue
+
+        if not turn_force_search and not selected_paths:
+            book_answer=_lo_books_direct(prompt,events)
+            if book_answer is not None:
+                messages.append({"role":"assistant","content":book_answer})
+                _ai_foreground(False,"lo")
+                if one_shot:return 0
+                continue
 
         # Narrow local-media commands are deterministic capability requests, not
         # general web/search questions. Resolve them before inference so a model
@@ -12288,6 +12330,10 @@ def ollama_chat(force_search=False, initial_prompt=None, allow_start=True, host_
                             tool_content,_ok,_elapsed=_tool_transaction(
                                 name,args,lambda: _run_system_inspection_tool(name,args))
                         if _ok: turn_successful_tools.add(name)
+                    elif name in {'books_shelf','books_lookup'}:
+                        import book_assistant
+                        tool_content,_ok,_elapsed=_tool_transaction(name,args,lambda:book_assistant.run_tool(name,args))
+                        if _ok:turn_successful_tools.add(name)
                     elif name in {'fabric_status','fabric_maintain'}:
                         tool_content,_ok,_elapsed=_tool_transaction(name,args,lambda:_fabric_care_tool(name,args,profile,prompt))
                         if _ok:turn_successful_tools.add(name)

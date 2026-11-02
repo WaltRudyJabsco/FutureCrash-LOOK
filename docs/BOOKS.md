@@ -6,6 +6,25 @@ send them to mpv. Install an EPUB/PDF reader appropriate for your OS; Enter uses
 Bookokrat when available in Auto mode; **o** uses system defaults, including
 the existing PDF application preference.
 
+## Asking LOOK about books
+
+In Signal or Albert, `/reader`, `/books`, “show our books” and “let’s continue
+reading the Alexandria book” open Mercury Reader. A unique title match restores
+the book’s saved chapter and paragraph. Multiple matches and approximate spellings
+show choices instead of opening an uncertain match. Narration starts with Play.
+
+Terminal LO also understands these requests. Its read-only `books_shelf` and
+`books_lookup` tools consult the canonical Fabric shelf, report saved progress,
+and return an owner-scoped reader link plus `lk books` for the terminal interface.
+They do not start speech, download books or search guessed media folders. Relative
+reader links use the current Signal/Albert browser host. A book owner that is
+offline may leave cached catalog entries visible; LOOK reports the incomplete
+shelf rather than treating those entries as proof that the book is reachable.
+Requests about notes, clipboard contents and music retain their existing paths.
+
+The [resume regression preview](screenshots/mercury-reader-assistant-resume.jpg)
+uses synthetic book text and a seeded reading position.
+
 ## First book
 
 - Put existing EPUB/PDF files in the configured media owner's `books` directory,
