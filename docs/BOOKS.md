@@ -16,8 +16,10 @@ show choices instead of opening an uncertain match. Narration starts with Play.
 In terminal LO, “lets read more alexandria book” opens the existing highlighted
 read-along desk at the Fabric owner's saved chapter and paragraph. Arrows navigate,
 Enter starts narration, Space pauses, and q/Esc returns to LO. Progress goes back
-to the owning catalog. The terminal is restored even if the reader fails. “Show
-our books” opens the shelf. Ambiguous/approximate titles show numbered choices;
+to the owning catalog. Phrases such as “let’s read some Dracula” and “well, okay,
+try reading The Great Gatsby” also work; title matching excludes those conversational
+wrappers. Quote a title to preserve its wording exactly. The terminal is restored
+even if the reader fails. “Show our books” opens the shelf. Ambiguous/approximate titles show numbered choices;
 choose a number or say “open link” after one observed match. Follow-ups use this
 session's book choices and recheck the live shelf, never a remembered file path.
 

@@ -130,3 +130,30 @@ def test_explicit_session_choice_is_not_lost_in_a_large_shelf():
     rows=[{'id':str(i),'title':'Book '+str(i)} for i in range(50)]
     result=book_assistant.lookup('',catalog={'entries':rows},book_ids={'49'})
     assert result['entries'][0]['id']=='49' and result['total_matches']==1
+
+@pytest.mark.parametrize('text,query',[
+    ("let's read some Dracula",'Dracula'),
+    ('let’s read some more of Dracula','Dracula'),
+    ('try reading The Great Gatsby','The Great Gatsby'),
+    ('well, okay, try reading The Great Gatsby','The Great Gatsby'),
+    ('well okay try to read The Great Gatsby','The Great Gatsby'),
+    ('read "Some Prefer Nettles"','Some Prefer Nettles'),
+])
+def test_loose_book_phrasing_finds_title(text,query):
+    request=book_assistant.intent(text)
+    assert request=={'action':'resume','query':query}
+    assert book_assistant.lookup(query,catalog={'entries':[{'id':'book','title':query}]})['status']=='matched'
+
+@pytest.mark.parametrize('text',["let's read some notes",'okay, try reading my files','try reading this aloud','read some music'])
+def test_loose_non_book_phrasing_stays_out_of_books(text):
+    assert book_assistant.intent(text) is None
+
+
+def test_sequential_terminal_books_do_not_reuse_previous_title(monkeypatch,lk):
+    rows=[dict(ROWS[0]),{'id':'dracula','title':'Dracula','node':'owner'}, {'id':'gatsby','title':'The Great Gatsby','node':'owner'}]
+    launch=terminal_catalog(monkeypatch,lk,rows)
+    context={}
+    for phrase in ['lets read more alexandria book',"let's read some Dracula",'well, okay, try reading The Great Gatsby']:
+        lk._lo_books_direct(phrase,book_context=context)
+    assert [call.args[1]['id'] for call in launch.call_args_list]==['alex','dracula','gatsby']
+    assert context['entries'][0]['id']=='gatsby'
