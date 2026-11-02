@@ -77,6 +77,9 @@ ACTION_SPECS = (
     ActionSpec("preview_path", "display", "local_effect", "action", ("preview", "quick look")),
     ActionSpec("reveal_path", "display", "local_effect", "action", ("reveal", "show in finder", "show in files")),
     ActionSpec("open_url", "browser", "local_effect", "action", ("open website", "open url", "visit", "browser")),
+    ActionSpec("printers_list", "printing", "read", "observation", ("printers", "available printers", "receipt printer")),
+    ActionSpec("printer_inspect", "printing", "read", "observation", ("printer options", "print jobs")),
+    ActionSpec("print_prepare", "printing", "local_effect", "mutation", ("print file", "print document", "print receipt")),
     ActionSpec("books_shelf", "books", "read", "observation", ("bookshelf", "our books", "Mercury Reader")),
     ActionSpec("books_lookup", "books", "read", "observation", ("continue reading", "resume reading", "find a book")),
     ActionSpec("media_search", "media", "read", "observation", ("find music", "find movie", "media search")),
@@ -110,6 +113,7 @@ ACTION_IDS = {
     "create_text_files":"files.create", "copy_path":"files.copy", "move_path":"files.move",
     "remove_path":"files.remove", "make_directory":"files.mkdir",
     "open_path":"display.open", "preview_path":"display.preview", "reveal_path":"display.reveal",
+    "printers_list":"printing.list", "printer_inspect":"printing.inspect", "print_prepare":"printing.prepare",
     "books_shelf":"books.shelf", "books_lookup":"books.lookup",
     "open_url":"browser.open", "media_search":"media.search", "media_play":"media.play",
     "media_queue":"media.queue", "media_control":"media.control", "audio_speak":"audio.speak",
@@ -130,6 +134,7 @@ def public_registry() -> list[dict[str,Any]]:
 FAMILY_TOOLS: dict[str, set[str]] = {}
 for _spec in ACTION_SPECS:
     FAMILY_TOOLS.setdefault(_spec.family, set()).add(_spec.name)
+FAMILY_TOOLS.setdefault('printing',set()).update({'notebook_search','notebook_list','notebook_read'})
 FAMILY_TOOLS.setdefault('schedule',set()).update({'notebook_search','notebook_capture','notebook_complete'})
 
 # Families may need adjacent capabilities to complete a natural request.  These
@@ -138,6 +143,7 @@ FAMILY_NEIGHBORS = {
     "web": {"web", "browser", "speech", "display"},
     "weather": {"weather", "speech"},
     "files": {"files", "display", "image"},
+    "printing": {"printing","files"},
     "books": {"books"},
     "media": {"media", "speech"},
     "games": {"games"},
@@ -234,6 +240,7 @@ def _rule_scores(text: str) -> dict[str, float]:
         ("weather", r"\b(weather|forecast|temperature|temp|rain(?:ing)?|snow(?:ing)?|wind(?:y)?|humidity|precipitation)\b", .995),
         ("web", r"\b(youtube|yt-dlp|download (?:a |the )?video)\b", .995),
         ("web", r"\b(headlines?|breaking news|latest news|current events?|news today|today'?s news)\b", .995),
+        ("printing", r"\b(printers?|printing|print (?:file|document|receipt|jobs|this|that|my|our|the|a))\b", .98),
         ("books", r"\b(mercury reader|bookshelf|book library|continue reading|resume reading|what books)\b", .97),
         ("media", r"\b(play|queue|shuffle|pause|resume|next track|previous track|now playing|listen to)\b", .82),
         ("speech", r"\b(say|speak|read (?:this|that|it)?\s*aloud|out loud|tell .* aloud)\b", .94),

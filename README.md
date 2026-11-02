@@ -687,3 +687,5 @@ browser split views, Neovim and small terminal desks, offline manuscript
 replicas, paired Fabric revision exchange and stable LOOK Note links.
 Use `./install.sh --mercury=install`, or `--mercury=off` to skip it.
 See [Mercury setup and ownership](docs/MERCURY.md).
+
+Printer discovery, document jobs and optional receipt-printer profiles: [LK Print](docs/PRINTING.md).

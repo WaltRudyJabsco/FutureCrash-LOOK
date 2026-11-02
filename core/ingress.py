@@ -57,6 +57,7 @@ def _is_stream_path(path: str) -> bool:
 
 
 def _request_timeout(path: str, method: str, body: bytes | None, is_stream: bool) -> float:
+    if path in {'/v1/print','/v1/print/fabric'}:return 60.0
     if path == '/v1/words':return 90.0
     if path == '/v1/books/audio':return 180.0
     if path in {'/v1/books/read','/v1/books/discover'}:return BOOKS_REQUEST_TIMEOUT_SECONDS

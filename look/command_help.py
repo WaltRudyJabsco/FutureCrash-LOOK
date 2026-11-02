@@ -6,6 +6,9 @@ from pathlib import Path
 def show(words):
     text=' '.join(words).strip()
     text=text.removeprefix('lk ')
+    if text=='print' or text.startswith('print '):
+        import printing
+        return printing.main(text.split()[1:]+['--help'])
     if text in {'media import','media disc','media rip'}:
         import disc_ui
         return disc_ui.main(['--help'],None,None,None)

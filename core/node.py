@@ -3894,6 +3894,33 @@ class API(BaseHTTPRequestHandler):
             return self.sendj(200,result)
         except Exception as exc:return self.sendj(400,{'ok':False,'error':str(exc)})
 
+    def _print_request(self,payload=None,fabric=False):
+        try:
+            _look_catalog_modules();import print_core
+            if fabric:
+                local=print_core.catalog();owner=identity()['name']
+                entries=[dict(row,node=owner) for row in local['printers']]
+                errors=[] if local.get('available') else [{'node':owner,'error':local.get('warning')}]
+                peers=[p for p in PEERS.public() if p.get('trusted') and _peer_bases(p)]
+                def read(peer):
+                    try:
+                        value=_file_peer_json(peer,'/v1/print')
+                        return [dict(row,node=peer['name']) for row in value.get('printers',[])],None if value.get('available') else {'node':peer['name'],'error':value.get('warning')}
+                    except Exception as error:return [],{'node':peer.get('name'),'error':str(error)}
+                with concurrent.futures.ThreadPoolExecutor(max_workers=4) as pool:
+                    for rows,error in pool.map(read,peers):
+                        entries.extend(rows)
+                        if error:errors.append(error)
+                return self.sendj(200,{'ok':True,'printers':entries,'errors':errors})
+            peer,_=self._file_target()
+            if peer is not None:
+                value=http_json(_copy_route(peer)+'/v1/print',data=payload,timeout=45)
+                return self.sendj(200,value)
+            value=print_core.local(payload)
+            return self.sendj(200,dict(value,ok=True,node=identity()['name']))
+        except PermissionError as error:return self.sendj(403,{'ok':False,'error':str(error)})
+        except Exception as error:return self.sendj(400,{'ok':False,'error':str(error)})
+
     def _book_reader_request(self, payload=None):
         try:
             _look_catalog_modules();import book_reader
@@ -4728,6 +4755,8 @@ class API(BaseHTTPRequestHandler):
         if path == "/v1/wiki": return self._wiki_request()
         if path in {"/v1/books/read","/v1/books/audio","/v1/books/cover","/v1/books/image","/v1/books/voices","/v1/books/discover","/v1/books/discovery-cover"}: return self._book_content()
         if path == "/v1/books/reader": return self._book_reader_request()
+        if path == "/v1/print": return self._print_request()
+        if path == "/v1/print/fabric": return self._print_request(fabric=True)
         if path == "/v1/books": return self._books_request()
         if path == "/v1/books/fabric": return self._books_request(fabric=True)
         if path == "/v1/books/item": return self._serve_book_item()
@@ -4985,6 +5014,8 @@ class API(BaseHTTPRequestHandler):
         path = urlparse(self.path).path
         if not self._authorized_ingress(path): return
         if path == "/v1/files/copy": return self._files_copy()
+        if path == '/v1/print' and (not self.headers.get('Content-Length','').isdigit() or int(self.headers['Content-Length'])>5*1024*1024):
+            return self.sendj(413,{'error':'Print request must be bounded to 5 MiB'})
         d = self.body()
         if path == '/v1/mercury/install':
             try:return self.sendj(202,mercury_install.schedule(confirm=d.get('confirm'),enable_sync=d.get('enable_sync',False)))
@@ -5001,6 +5032,7 @@ class API(BaseHTTPRequestHandler):
         if path == "/v1/words": return self._words_request(d)
         if path == "/v1/wiki": return self._wiki_request(d)
         if path == "/v1/books/reader": return self._book_reader_request(d)
+        if path == "/v1/print": return self._print_request(d)
         if path == "/v1/books": return self._books_request(d)
         if path == '/v1/media/artwork/settings':
             try:

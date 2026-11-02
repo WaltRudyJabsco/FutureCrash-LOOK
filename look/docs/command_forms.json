@@ -873,6 +873,72 @@
     "Fabric movies, TV and video player"
   ],
   [
+    "lk print",
+    "[list|discover|options QUEUE|jobs QUEUE] [--node NODE]",
+    "files",
+    "Discover Fabric printers and inspect system queues; no paper sent"
+  ],
+  [
+    "lk print add",
+    "QUEUE --uri URI [--driver everywhere|raw] [--node NODE] [--confirm]",
+    "files",
+    "Review then explicitly add a CUPS queue; no drivers installed automatically"
+  ],
+  [
+    "lk print nickname",
+    "QUEUE NAME [--node NODE] [--confirm]",
+    "files",
+    "Name a destination, such as Little Printer, without renaming the system queue"
+  ],
+  [
+    "lk print profile",
+    "QUEUE --kind document|escpos [--width DOTS] [--columns N] [--node NODE] [--confirm]",
+    "files",
+    "Review a document or verified receipt printer profile"
+  ],
+  [
+    "lk print file",
+    "FILE --printer QUEUE [--node NODE] [--pages 1-3,5] [--copies N] [--media MEDIA] [--sides SIDES]",
+    "files",
+    "Prepare a bounded document job; export manuscripts to PDF first"
+  ],
+  [
+    "lk print text",
+    "TEXT|- --printer QUEUE [--node NODE]",
+    "files",
+    "Prepare UTF-8 text for a document printer"
+  ],
+  [
+    "lk print receipt",
+    "[TEXT|-|--image FILE] --printer QUEUE [--node NODE]",
+    "files",
+    "Prepare ESC/POS text or dithered raster art; explicit receipt profile required"
+  ],
+  [
+    "lk print send",
+    "ID [--node NODE] [--confirm]",
+    "files",
+    "Review or explicitly submit a prepared job once; never auto-retry uncertain printing"
+  ],
+  [
+    "lk print inspect",
+    "ID [--node NODE]",
+    "files",
+    "Inspect a print plan or spooler acceptance receipt"
+  ],
+  [
+    "lk print discard",
+    "ID [--node NODE] [--confirm]",
+    "files",
+    "Discard unsent print content"
+  ],
+  [
+    "lk print cancel",
+    "QUEUE JOB [--node NODE] [--confirm]",
+    "files",
+    "Request cancellation of an exact CUPS job"
+  ],
+  [
     "lk bk",
     "[ARGS]",
     "media",
