@@ -86,14 +86,36 @@
     if(p<0){c--;if(c>=0)p=chapters[c].paragraphs-1}
     return c<0||c>=chapters.length?null:{chapter:c,paragraph:p};
   }
+  function bookQuery(value){
+    value=String(value||'').trim().replace(/^[ .!?]+|[ .!?]+$/g,'');
+    if(/^["“].*["”]$/.test(value))return value.slice(1,-1);
+    if(/\s+book$/i.test(value))value=value.replace(/\s+book$/i,'').replace(/^(?:the|a|an)\s+/i,'');
+    return value.replace(/^(?:the\s+)?book\s+/i,'').trim();
+  }
   function booksCommand(text){
-    const value=String(text||'').trim().replace(/[.!?]+$/,'');
-    if (/^\/(?:books|reader|mercury-reader)$/i.test(value)||/^(?:open\s+)?mercury reader$/i.test(value))return {query:'',resume:false};
-    if (/^(?:please\s+)?continue (?:reading|listening)(?:\s+please)?$/i.test(value))return {query:'',resume:true};
-    if(/^(?:please\s+)?read\s+(?:(?:my|our|the)\s+)?(?:notes?|files?|articles?|webpages?|messages?|clipboard)\b/i.test(value))return null;
-    if(/^continue\s+(?:with|that|this|your|writing|from|working|on)\b/i.test(value))return null;
-    const match=value.match(/^(?:please\s+)?(?:read|continue(?: reading)?|listen to)\s+(.+?)(?:\s+please)?$/i);
-    return match?{query:match[1],resume:true}:null;
+    const value=String(text||'').trim().replace(/[.!?]+$/,'').replace(/\s+/g,' ').replace(/^(?:(?:let['’]s|let us|can we|could we|can you|could you|please|I want to|I'd like to)\s+)+/i,'');
+    if (/^\/(?:books|reader|mercury-reader)$/i.test(value)||/^(?:open\s+)?mercury reader$/i.test(value)||/^(?:(?:show|open|list) (?:my |our |the )?(?:books|bookshelf|book library)|what books (?:do we|do I) have)$/i.test(value))return {query:'',resume:false};
+    if (/^(?:continue|resume) (?:reading|listening)(?:\s+please)?$/i.test(value))return {query:'',resume:true};
+    const match=value.match(/^(?:read|start reading|continue(?: reading| listening)?|resume(?: reading| listening)?|listen to)\s+(.+?)(?:\s+please)?$/i);
+    if(!match||/^(?:(?:my|our|the)\s+)?(?:notes?|files?|articles?|webpages?|messages?|clipboard|music|playback|songs?|tracks?|albums?|playlists?|podcasts?|videos?|movies?)\b|^(?:this|that|it|with|writing|working|from|on|about|up on)\b/i.test(match[1]))return null;
+    return {query:bookQuery(match[1].replace(/^to\s+/i,'')),resume:true};
+  }
+  function bookMatches(query,rows){
+    const fold=text=>String(text||'').normalize('NFKD').replace(/[\u0300-\u036f]/g,'').toLocaleLowerCase();
+    const terms=fold(bookQuery(query)).split(/\s+/).filter(Boolean);
+    const exact=rows.filter(row=>terms.every(term=>fold(row.title+' '+(row.author||'')).includes(term)));
+    if(exact.length)return {status:'matched',entries:exact};
+    function similar(a,b){
+      if(Math.min(a.length,b.length)<4)return 0;
+      const right=Array.from({length:b.length-1},(_,i)=>b.slice(i,i+2));let common=0;
+      for(let i=0;i<a.length-1;i++){const index=right.indexOf(a.slice(i,i+2));if(index>=0){common++;right.splice(index,1)}}
+      return 2*common/Math.max(1,a.length+b.length-2);
+    }
+    const scored=rows.map(row=>{
+      const words=fold(row.title+' '+(row.author||'')).match(/[\p{L}\p{N}_]+/gu)||[];
+      return {row,score:terms.length?Math.min(...terms.map(term=>Math.max(0,...words.map(word=>similar(term,word))))):0};
+    }).filter(item=>item.score>=.65).sort((a,b)=>b.score-a.score);
+    return {status:scored.length?'suggestions':'no_match',entries:scored.slice(0,8).map(item=>item.row)};
   }
   function openBooks(command){
     const url=new URL('/reader',root.location.href);
@@ -102,7 +124,7 @@
     try{root.open(url.href,'_blank','noopener')}catch{}
     return url.href;
   }
-  root.FabricBrowserViews={beginImage,imageArtifacts,imageRequest,fabricCommand,openFabric,booksCommand,openBooks,createBookAhead,bookPosition};
+  root.FabricBrowserViews={beginImage,imageArtifacts,imageRequest,fabricCommand,openFabric,booksCommand,openBooks,bookQuery,bookMatches,createBookAhead,bookPosition};
 })(globalThis);
 
 
@@ -355,8 +377,9 @@
     status('Project Gutenberg · '+label+' · '+(rows.length?(mode==='subjects'?'Choose a subject.':'Select a title to download; dimmed titles are already on your shelf.'):'No matching books.')+(shelfValue.errors?.length?' Some book owners are unavailable; ownership checks are incomplete.':''));
   }
   async function resume(query=''){
-    await shelf();const terms=query.toLocaleLowerCase().split(/\s+/).filter(Boolean);
-    const rows=catalog.filter(row=>(query||!row.reading?.finished)&&terms.every(t=>(row.title+' '+row.author).toLocaleLowerCase().includes(t))).sort((a,b)=>(b.reading?.updated||0)-(a.reading?.updated||0));
+    await shelf();const match=FabricBrowserViews.bookMatches(query,catalog);
+    const rows=match.entries.filter(row=>query||!row.reading?.finished).sort((a,b)=>(b.reading?.updated||0)-(a.reading?.updated||0));
+    if(match.status==='suggestions'){show(rows);status('Closest books on your Fabric shelf — choose the one you meant.');return}
     if(!rows.length){status('No matching book on your Fabric shelf. Use Search Gutenberg to find new books.');return}
     if(query&&new Set(rows.map(r=>r.id)).size>1){show(rows);status('Choose the book you meant.');return}
     if(!query&&!rows[0].reading?.updated){show(rows);status('Choose a book to begin reading.');return}
@@ -402,5 +425,5 @@
   audio.onended=()=>move(1,true).catch(e=>status(e.message));
   window.addEventListener('pagehide',()=>{ahead.clear();releaseAudio();if(book&&model)fetch('/api/books/progress?'+params(),{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({id:book.id,fields:{chapter,paragraph,offset:audio.currentTime||0}}),keepalive:true}).catch(()=>{})});
   readerLayout();
-  try{await shelf();const q=new URLSearchParams(location.search);if(q.has('resume')||q.has('query'))await resume(q.get('query')||'')}catch(e){status(e.message)}
+  try{await shelf();const q=new URLSearchParams(location.search);if(q.has('id')){const row=catalog.filter(row=>row.id===q.get('id')).sort((a,b)=>Number(b.node===q.get('target'))-Number(a.node===q.get('target')))[0];if(row)await open(row);else status('This book is unavailable on the reachable Fabric shelf. Refresh the shelf or reconnect its owner.')}else if(q.has('resume')||q.has('query'))await resume(q.get('query')||'')}catch(e){status(e.message)}
 })();
