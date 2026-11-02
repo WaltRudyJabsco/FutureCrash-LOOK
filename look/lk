@@ -1841,6 +1841,7 @@ LIVE FILTER / SELECTION
   B          copy file object(s) to desktop clipboard
   C / M      Copy To / Move To
   R / D      rename / delete
+  N          print selected file · choose printer and review before sending
   H          toggle hidden files (hidden by default)
   lh         open LOOK with hidden files shown; lk home opens the home screen
   L          hand persistent working set to a new LO session
@@ -22675,6 +22676,11 @@ def main():
     if cmd=="wiki":
         import wiki
         return wiki.main(rest,sys.modules[__name__])
+    if cmd=='_print-file':
+        if len(rest)!=1 or not sys.stdin.isatty() or not sys.stdout.isatty():
+            print('LOOK Print: choose one file from the interactive LOOK filer');return 2
+        import printing
+        return printing.selected_file(rest[0],sys.modules[__name__])
     if cmd == "print":
         import printing
         return printing.main(rest,sys.modules[__name__])
