@@ -13,6 +13,7 @@ import re
 import shutil
 import sqlite3
 import subprocess
+import sys
 import time
 import uuid
 from urllib.parse import urlsplit
@@ -47,14 +48,38 @@ def profiles():
     except FileNotFoundError:return {}
 
 
+_DEVICE_CACHE=(0,[])
+
+
+def discovered_devices():
+    global _DEVICE_CACHE
+    if time.monotonic()-_DEVICE_CACHE[0]<60:return _DEVICE_CACHE[1]
+    rows=[]
+    if shutil.which('ippfind'):
+        try:
+            output=run(['ippfind','-T','2','--exec',sys.executable,'-c','import json,sys;print(json.dumps(sys.argv[1:]))','{service_uri}','{txt_UUID}','{service_name}',';'])
+            for line in output.splitlines():
+                try:
+                    uri,uuid,label=json.loads(line);rows.append({'uri':uri,'uuid':uuid,'label':label})
+                except (ValueError,TypeError):continue
+        except (OSError,RuntimeError,subprocess.SubprocessError):pass
+    _DEVICE_CACHE=(time.monotonic(),rows)
+    return rows
+
+
 def catalog():
     try:output=run(['lpstat','-p'])
     except RuntimeError as error:
         return {'printers':[],'available':False,'warning':str(error),'setup':'lk print discover; use system printer settings to install/enable CUPS'}
     rows=[];configured=profiles()
+    try:
+        connections={match[1]:match[2] for line in run(['lpstat','-v']).splitlines() if (match:=re.match(r'device for (\S+): (.+)',line))}
+    except (OSError,RuntimeError,subprocess.SubprocessError):connections={}
+    from print_destinations import device
+    observed=discovered_devices() if connections else []
     for line in output.splitlines():
         match=re.match(r'printer (\S+) (.*)',line)
-        if match:rows.append({'name':match[1],'status':match[2],'profile':configured.get(match[1],{'kind':'document'})})
+        if match:rows.append({'name':match[1],'status':match[2],'profile':configured.get(match[1],{'kind':'document'}),'device':device(connections.get(match[1],''),observed)})
     return {'printers':rows,'available':True}
 
 
@@ -63,7 +88,11 @@ def require_queue(queue):
     value=catalog();configured=profiles()
     exact=[row for row in value['printers'] if row['name']==queue]
     matches=exact or [row for row in value['printers'] if configured.get(row['name'],{}).get('label','').casefold()==queue.casefold()]
-    if len(matches)>1:raise ValueError('Nickname is ambiguous; choose an exact queue name')
+    if len(matches)>1:
+        from print_destinations import consolidate,route
+        groups=consolidate([dict(row,node='local') for row in matches])
+        if len(groups)!=1 or not groups[0]['identity_verified']:raise ValueError('Nickname is ambiguous; choose an exact queue name')
+        return name(route(groups[0],'local')['name'])
     if not matches:raise ValueError('Queue unavailable: '+queue+'. '+value.get('warning','Run lk print list or configure it in system printer settings.'))
     return name(matches[0]['name'])
 
@@ -74,7 +103,11 @@ def update_profile(queue,fields):
     with (folder/'.printers.lock').open('a') as lock:
         fcntl.flock(lock,fcntl.LOCK_EX)
         values=profiles()
-        if 'label' in fields and any(key!=queue and row.get('label','').casefold()==fields['label'].casefold() for key,row in values.items()):raise ValueError('Nickname already belongs to another local queue')
+        conflicts=[key for key,row in values.items() if key!=queue and row.get('label','').casefold()==fields.get('label','').casefold()] if 'label' in fields else []
+        if conflicts:
+            from print_destinations import consolidate
+            groups=consolidate([dict(row,node='local') for row in catalog()['printers'] if row['name'] in {queue,*conflicts}])
+            if len(groups)!=1 or not groups[0]['identity_verified']:raise ValueError('Nickname already belongs to another local queue')
         value=dict(values.get(queue,{'kind':'document'}),**fields);values[queue]=value
         temporary=folder/('.printers-'+uuid.uuid4().hex)
         try:

@@ -27,6 +27,7 @@ _lk() {
     'tldr:short offline command examples'
     'mp:integrated Fabric media player'
     'books:Fabric EPUB/PDF shelf'
+    'print:physical Fabric printers and print desk'
     'wiki:offline Kiwix references'
     'latin:offline Latin classroom'
     'bk:alias for books'
@@ -112,6 +113,18 @@ _lk() {
   fi
 
   case "$words[2]" in
+    print)
+      if (( CURRENT == 3 )); then
+        _values 'print action' list options jobs nickname profile discover file text receipt inspect send discard cancel add
+      elif [[ "$words[CURRENT-1]" == '--printer' ]] || { (( CURRENT == 4 )) && [[ "$words[3]" == (options|jobs|nickname|profile) ]]; }; then
+        local -a printers
+        printers=("${(@f)$(lk print list --json 2>/dev/null | python3 -c 'import json,sys; print("\n".join(p["label"] for p in json.load(sys.stdin).get("printers",[])))' 2>/dev/null)}")
+        _describe 'printer' printers
+      else
+        _files
+      fi
+      return
+      ;;
     scan)
       _files
       return

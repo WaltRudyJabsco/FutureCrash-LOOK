@@ -1,11 +1,31 @@
 # LK Print
 
-`lk print` lists configured queues on trusted Fabric computers. Each printer is
-identified by **queue + owner**: printing on a Mac can send to a USB printer
-attached to a Linux peer without installing that USB driver on the Mac. Printer
-availability is observed from CUPS; a queue can exist while its device is offline.
-Missing peers/spoolers are shown as an incomplete list. Discovery never prints,
-changes a default printer, or adds a queue.
+Bare `lk print` opens a small terminal desk with one entry per identified physical
+printer. Enter/o opens Options, j shows Jobs, r shows underlying Routes, n sets a
+Nickname, and R refreshes. Arrows/Tab select; Page Up/Down scroll detail views;
+q/Esc returns or closes. Key hints use LOOK's standard blue/subdued footer and
+wrap in narrow terminals. `lk print options` or `jobs` without a name opens the
+same printer picker; files/receipts without `--printer` also offer a picker.
+
+`lk print list` lists physical printers without the desk. `list --queues` exposes
+owner/queue routes for troubleshooting. `--json` preserves machine-readable data.
+Zsh Tab completion after `lk print options ` or `--printer ` offers current friendly
+printer names; start a new shell after updating the completion script.
+
+Physical identity uses observed DNS-SD/IPP UUIDs and normalized endpoints, never
+model names alone. CUPS `lpstat -v` supplies configured connections; optional
+`ippfind` supplies read-only Bonjour UUID/endpoint links, cached for a minute.
+If identity cannot be verified, queues stay separate rather than merging two
+printers of the same model. No CUPS queue is deleted or rewritten.
+
+An automatic route selects an enabled local queue first, then an enabled peer
+queue, before preparing or inspecting. Owner availability means the spooler is
+reachable; an idle queue is not proof that paper/device is ready. Disabled queues
+are excluded. Jobs show all routes. A prepared plan pins queue + owner and its
+send command: it is never rerouted/retried after dispatch. Exact `--node OWNER`
+plus queue remains available for direct control. Names apply to reachable routes;
+partial nickname changes are reported. Queues verified as the same physical
+printer can share a nickname locally.
 
 ## Discover and configure
 
@@ -58,8 +78,8 @@ lk print nickname receipt 'Little Printer' --node OWNER --confirm
 lk print receipt 'Buy paper' --printer 'Little Printer' --node OWNER
 ```
 
-Nicknames are unique on an owner and shown alongside the real queue. The owner
-remains explicit, so two computers' queues cannot silently become one destination.
+Nicknames select the physical printer; use Routes when you want the exact queue
+and owner. The send confirmation always retains its chosen owner.
 Text plans include a bounded content preview for review.
 
 File/text/receipt commands **prepare** a plan on the printer's owner and show a
