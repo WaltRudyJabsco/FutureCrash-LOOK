@@ -94,7 +94,7 @@ selection, amber indicates paused/partial/unavailable, purple indicates modes.
 Colors supplement text and never carry the only indication of state.
 
 LOOK files: H hidden, F sort, R rename, D delete, B desktop clipboard,
-C Copy To, M Move To, T cut, P paste, L LO context, X clear working set,
+C Copy To, M Move To, T cut, P paste, N print selected file, L LO context, X clear working set,
 Y path, G exit to directory. Hidden files default off; lh shows them.
 
 Media Find: type filters or / enters search; ↑↓ or J/K move; Shift-↑↓ page; Shift-←→ ends;

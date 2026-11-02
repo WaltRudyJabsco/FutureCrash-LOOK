@@ -1634,6 +1634,23 @@ def pager(rows:list[str],height:int,width:int,rebuild=None,browse_rebuild=None,f
         marked.clear()
         notice=('done · remote copy' if kind in {'copy','move'} and remote else 'done · lk undo') if proc.returncode==0 else 'action failed'
 
+    def run_print()->None:
+        nonlocal notice
+        paths=action_paths()
+        if len(paths)!=1:
+            notice='choose one file to print'; return
+        if not paths[0].is_file():
+            notice='folders are not printable'; return
+        lk=Path(__file__).resolve().parent/'lk'
+        native_preview.frame_cleared()
+        sys.stdout.write(SHOW+RESET+'\n');sys.stdout.flush()
+        try:
+            result=subprocess.run([sys.executable,str(lk),'_print-file',str(paths[0])])
+            notice='print review closed' if result.returncode==0 else 'print review failed; no automatic retry'
+        except (OSError,KeyboardInterrupt):notice='print review interrupted'
+        finally:
+            sys.stdout.write(HIDE+RESET+CLEAR);sys.stdout.flush()
+
     def run_rename()->None:
         """Rename selected/marked objects. # runs are deterministic batch counters."""
         nonlocal notice
@@ -1717,11 +1734,11 @@ def pager(rows:list[str],height:int,width:int,rebuild=None,browse_rebuild=None,f
             if filtering:
                 if preview_view:
                     action_parts=['J/K move','Space/Tab mark','V list','Enter/→ open','B clipboard','T Cut','P Paste',
-                                  'C Copy To','M Move To','R rename','D delete','L LO context','X clear set','E edit',
+                                  'C Copy To','M Move To','R rename','N print','D delete','L LO context','X clear set','E edit',
                                   'O open with','Y path','G go','Esc list']
                 else:
                     action_parts=['J/K move','H hidden','Tab mark','A all','V Preview','Enter/→ open','B clipboard',
-                                  'T Cut','P Paste','C Copy To','M Move To','R rename','D delete',
+                                  'T Cut','P Paste','C Copy To','M Move To','R rename','N print','D delete',
                                   'L LO context','X clear set','E edit','O open with','Y path','G go','← parent','Esc clear']
             else:
                 back_hint='Esc back' if on_back else 'Esc exit'
@@ -1948,6 +1965,8 @@ def pager(rows:list[str],height:int,width:int,rebuild=None,browse_rebuild=None,f
                 elif key in {'C','M','D'} and matches:
                     run_action({'C':'copy','M':'move','D':'remove'}[key])
                     refresh_filter()
+                elif key=='N' and matches:
+                    run_print()
                 elif key=='R' and matches:
                     run_rename(); refresh_filter()
                 elif key=='B' and matches:

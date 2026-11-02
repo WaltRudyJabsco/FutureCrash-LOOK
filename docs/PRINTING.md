@@ -181,3 +181,20 @@ References: [CUPS printing/options](https://www.cups.org/doc/options.html),
 [Formatted Options preview](screenshots/print-options-readable.png) uses the real
 Epson driver option list with synthetic printer/owner labels, in a private demo HOME.
 Linux class behavior: [OpenPrinting cups-browsed](https://github.com/OpenPrinting/cups-browsed).
+
+## Printing a selected LOOK file
+
+In LOOK’s file selector or preview, **Shift+N** opens printing for the highlighted
+file (or one marked file). Choose the physical printer, review the file, owner,
+queue and options, then press **P** to submit. Enter/Esc cancels and discards the
+unsent plan. After a submission, Enter returns to the same LOOK selection. The
+working set is preserved. Lowercase n still types into the filter; folders and
+multiple marked files are refused with a clear message.
+
+The file action, `lk print file`, and LO’s workspace-file tool share
+`printing.prepare_file`: supported PDF/text/PNG/JPEG input, bounded upload,
+physical-printer routing and a pinned owner/queue. A configured receipt destination
+takes text files as receipt text and PNG/JPEG as monochrome raster art. PDF needs
+a document printer. Other application formats, including manuscript projects,
+need export to PDF first. This is also the reusable file hook for Albert/Signal
+clients; it does not add a separate web print button or bypass job confirmation.

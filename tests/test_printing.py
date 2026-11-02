@@ -122,7 +122,7 @@ def test_assistant_cannot_upload_files_outside_workspace(tmp_path,monkeypatch):
 
 def test_cli_stages_and_returns_owner_scoped_send_command(tmp_path,monkeypatch,capsys):
     path=tmp_path/'chapter.pdf';path.write_bytes(b'%PDF-1.4 fixture')
-    call=Mock(return_value={'id':'a'*32,'state':'prepared','queue':'desk','kind':'document','bytes':16,'options':{'copies':1},'note':'Not sent'});monkeypatch.setattr(printing,'request',call)
+    call=Mock(side_effect=lambda action,node,**fields:{'printers':[{'name':'desk','profile':{'kind':'document'}}],'node':'owner'} if action=='list' else {'id':'a'*32,'node':'owner','state':'prepared','queue':'desk','kind':'document','bytes':16,'options':{'copies':1},'note':'Not sent'});monkeypatch.setattr(printing,'request',call)
     assert printing.main(['file',str(path),'--printer','desk','--node','owner','--pages','1-2'])==0
     args=call.call_args
     assert args.args==('prepare','owner') and args.kwargs['options_value']['pages']=='1-2'

@@ -45,7 +45,7 @@ def prepare(queue,node='auto',path=None,text=None,receipt=False,**options):
         if not source.is_file() or source.stat().st_size>MAX_INPUT_BYTES:raise ValueError('Choose a file up to 3 MiB')
         with source.open('rb') as stream:data=stream.read(MAX_INPUT_BYTES+1)
         title=source.name
-        kind='receipt-image' if receipt else 'document'
+        kind=('receipt-text' if source.suffix.casefold()=='.txt' else 'receipt-image') if receipt else 'document'
     else:
         data=str(text).encode('utf-8');title='LOOK receipt.txt' if receipt else 'LOOK text.txt'
         kind='receipt-text' if receipt else 'document'
@@ -53,6 +53,66 @@ def prepare(queue,node='auto',path=None,text=None,receipt=False,**options):
     result=request('prepare',node,queue=queue,data=base64.b64encode(data).decode(),filename=title,kind=kind,options_value=options)
     result['send_command']='lk print send '+result['id']+' --node '+result.get('node',node)+' --confirm'
     return result
+
+
+def printable_file(path):
+    source=Path(path).expanduser().resolve()
+    if not source.is_file():raise ValueError('Choose one regular file to print; folders are not printable')
+    if source.suffix.casefold() not in {'.pdf','.txt','.png','.jpg','.jpeg'}:raise ValueError('Print PDF, UTF-8 text, PNG or JPEG; export other documents/manuscripts to PDF first')
+    if not 0<source.stat().st_size<=MAX_INPUT_BYTES:raise ValueError('Choose a nonempty file up to 3 MiB')
+    return source
+
+
+def prepare_file(queue,path,node='auto',receipt=None,**options):
+    """All frontends share the same file validation and pinned destination route."""
+    source=printable_file(path)
+    if node=='auto':
+        from print_destinations import choose,route
+        value=destinations();destination=choose(value,queue)
+        selected=route(destination,value.get('local_node',''));label=destination['label'];owner=selected['node']
+    else:
+        value=request('list',node)
+        rows=[row for row in value.get('printers',[]) if row['name']==queue or row.get('profile',{}).get('label','').casefold()==queue.casefold()]
+        if len(rows)!=1:raise ValueError('Choose an exact queue on this owner')
+        selected=rows[0];owner=value.get('node',node);label=selected.get('profile',{}).get('label',selected['name'])
+    is_receipt=selected.get('profile',{}).get('kind')=='escpos'
+    if receipt is not None and receipt!=is_receipt:raise ValueError('Requested print format does not match the selected printer profile')
+    if is_receipt and source.suffix.casefold()=='.pdf':raise ValueError('Choose a document printer for PDF; receipt printers accept text or raster images')
+    result=prepare(selected['name'],owner,path=source,receipt=is_receipt,**options)
+    return dict(result,destination=label)
+
+
+def selected_file(path,ui):
+    """Foreground file-manager handoff: choose, review, explicitly print, return."""
+    from print_desk import pick
+    from look_renderer import prompt_line
+    plan=None
+    try:
+        source=printable_file(path)
+        choice=pick(ui)
+        if not choice:return 0
+        plan=prepare_file(choice['id'],source)
+        display(plan)
+        answer,cancelled=prompt_line('Print '+source.name+' on '+plan['destination']+' via '+plan['node']+'? [p prints · Enter/Esc cancels] ')
+        if cancelled or answer.strip().casefold()!='p':
+            request('discard',plan['node'],ident=plan['id'],confirm=True)
+            print('Print cancelled; the prepared content was discarded.')
+            return 0
+        result=request('send',plan['node'],ident=plan['id'],confirm=True)
+        display(result)
+        prompt_line('Enter returns to LOOK. ')
+        return 0 if result.get('state')=='queued' else 1
+    except KeyboardInterrupt:
+        if plan:
+            # Only discard an unsent draft. Never attempt a second submission.
+            try:request('discard',plan['node'],ident=plan['id'],confirm=True)
+            except (OSError,RuntimeError,ValueError):pass
+        return 0
+    except (OSError,ValueError,RuntimeError) as error:
+        print('LOOK Print: '+str(error))
+        if plan:print('Inspect this plan before retrying: '+plan['id']+' on '+plan['node'])
+        prompt_line('Enter returns to LOOK. ')
+        return 1
 
 
 def parser():
@@ -133,7 +193,7 @@ def main(args,ui=None):
             if action=='receipt' and not content and not image:raise ValueError('Choose receipt text or --image FILE')
             if content=='-' and action!='file':content=sys.stdin.buffer.read(MAX_INPUT_BYTES+1).decode('utf-8')
             options={k:v for k,v in value.items() if v is not None}
-            result=prepare(queue,node,path=content if action=='file' else image,text=None if action=='file' or image else content,receipt=action=='receipt',**options)
+            result=prepare_file(queue,content,node,**options) if action=='file' else prepare(queue,node,path=image,text=None if image else content,receipt=action=='receipt',**options)
         else:result=request(action or 'list',node,**value)
         if queues:result=dict(result,printers=result.get('queues',[]))
         if as_json:print(json.dumps(result,ensure_ascii=False,indent=2))
@@ -164,4 +224,5 @@ def run_tool(tool,args,workspace):
         path=(Path(workspace)/path).resolve() if not path.is_absolute() else path.resolve()
         if not path.is_relative_to(Path(workspace).resolve()):raise ValueError('Print files must be inside the current workspace; explicitly copy/export the document there first')
         value['path']=str(path)
+        return json.dumps(prepare_file(**value))
     return json.dumps(prepare(**value))
