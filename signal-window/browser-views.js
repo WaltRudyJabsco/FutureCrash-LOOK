@@ -93,10 +93,10 @@
     return value.replace(/^(?:the\s+)?book\s+/i,'').trim();
   }
   function booksCommand(text){
-    const value=String(text||'').trim().replace(/[.!?]+$/,'').replace(/\s+/g,' ').replace(/^(?:(?:let['’]s|let us|can we|could we|can you|could you|please|I want to|I'd like to)\s+)+/i,'');
+    const value=String(text||'').trim().replace(/[.!?]+$/,'').replace(/\s+/g,' ').replace(/^(?:(?:let['’]?s|let us|can we|could we|can you|could you|please|I want to|I'd like to)\s+)+/i,'');
     if (/^\/(?:books|reader|mercury-reader)$/i.test(value)||/^(?:open\s+)?mercury reader$/i.test(value)||/^(?:(?:show|open|list) (?:my |our |the )?(?:books|bookshelf|book library)|what books (?:do we|do I) have)$/i.test(value))return {query:'',resume:false};
     if (/^(?:continue|resume) (?:reading|listening)(?:\s+please)?$/i.test(value))return {query:'',resume:true};
-    const match=value.match(/^(?:read|start reading|continue(?: reading| listening)?|resume(?: reading| listening)?|listen to)\s+(.+?)(?:\s+please)?$/i);
+    const match=value.match(/^(?:read(?: more(?: of)?)?|start reading|continue(?: reading| listening)?|resume(?: reading| listening)?|listen to)\s+(.+?)(?:\s+please)?$/i);
     if(!match||/^(?:(?:my|our|the)\s+)?(?:notes?|files?|articles?|webpages?|messages?|clipboard|music|playback|songs?|tracks?|albums?|playlists?|podcasts?|videos?|movies?)\b|^(?:this|that|it|with|writing|working|from|on|about|up on)\b/i.test(match[1]))return null;
     return {query:bookQuery(match[1].replace(/^to\s+/i,'')),resume:true};
   }

@@ -13,10 +13,18 @@ reading the Alexandria book” open Mercury Reader. A unique title match restore
 the book’s saved chapter and paragraph. Multiple matches and approximate spellings
 show choices instead of opening an uncertain match. Narration starts with Play.
 
-Terminal LO also understands these requests. Its read-only `books_shelf` and
+In terminal LO, “lets read more alexandria book” opens the existing highlighted
+read-along desk at the Fabric owner's saved chapter and paragraph. Arrows navigate,
+Enter starts narration, Space pauses, and q/Esc returns to LO. Progress goes back
+to the owning catalog. The terminal is restored even if the reader fails. “Show
+our books” opens the shelf. Ambiguous/approximate titles show numbered choices;
+choose a number or say “open link” after one observed match. Follow-ups use this
+session's book choices and recheck the live shelf, never a remembered file path.
+
+LO's browser/machine interface keeps its read-only `books_shelf` and
 `books_lookup` tools consult the canonical Fabric shelf, report saved progress,
 and return an owner-scoped reader link plus `lk books` for the terminal interface.
-They do not start speech, download books or search guessed media folders. Relative
+These tools do not start speech, download books or search guessed media folders. Relative
 reader links use the current Signal/Albert browser host. A book owner that is
 offline may leave cached catalog entries visible; LOOK reports the incomplete
 shelf rather than treating those entries as proof that the book is reachable.

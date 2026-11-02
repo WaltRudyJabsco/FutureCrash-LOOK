@@ -14,10 +14,10 @@ def query_text(value):
 
 def intent(prompt):
     text=' '.join(str(prompt or '').strip().strip(' .!?').split())
-    text=re.sub(r"^(?:(?:let['’]s|let us|can we|could we|can you|could you|please|I want to|I'd like to)\s+)+",'',text,flags=re.I)
+    text=re.sub(r"^(?:(?:let['’]?s|let us|can we|could we|can you|could you|please|I want to|I'd like to)\s+)+",'',text,flags=re.I)
     if re.fullmatch(r'/(?:books|reader|mercury-reader)|(?:open\s+)?mercury reader|(?:show|open|list) (?:my |our |the )?(?:books|bookshelf|book library)|what books (?:do we|do I) have',text,re.I):return {'action':'shelf','query':''}
     if re.fullmatch(r'(?:continue|resume) (?:reading|listening)(?: please)?',text,re.I):return {'action':'resume','query':''}
-    match=re.fullmatch(r'(?:read|start reading|continue(?: reading| listening)?|resume(?: reading| listening)?|listen to)\s+(.+?)(?:\s+please)?',text,re.I)
+    match=re.fullmatch(r'(?:read(?: more(?: of)?)?|start reading|continue(?: reading| listening)?|resume(?: reading| listening)?|listen to)\s+(.+?)(?:\s+please)?',text,re.I)
     if not match:return None
     query=re.sub(r'^to\s+','',match[1],flags=re.I)
     if re.match(r'(?:(?:my|our|the)\s+)?(?:notes?|files?|articles?|webpages?|messages?|clipboard|music|playback|songs?|tracks?|albums?|playlists?|podcasts?|videos?|movies?)\b|(?:this|that|it|with|writing|working|from|on|about|up on)\b',query,re.I):return None
@@ -51,12 +51,14 @@ def matches(query,entries):
     return {'status':'suggestions' if scored else 'no_match','entries':[row for _,row in scored[:8]]}
 
 
-def lookup(query='',catalog=None):
+def lookup(query='',catalog=None,book_ids=None):
     if len(query)>500:raise ValueError('Book search is limited to 500 characters')
     if catalog is None:
         import books
         catalog=books.catalog()
-    result=matches(query,catalog.get('entries',[]));unique={}
+    rows=catalog.get('entries',[])
+    if book_ids is not None:rows=[row for row in rows if row['id'] in book_ids]
+    result=matches(query,rows);unique={}
     for row in sorted(result['entries'],key=lambda r:(r.get('offline',False),-r.get('reading',{}).get('updated',0))):unique.setdefault(row['id'],row)
     entries=[]
     for row in list(unique.values())[:30]:
