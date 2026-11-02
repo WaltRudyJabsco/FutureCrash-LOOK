@@ -874,9 +874,15 @@
   ],
   [
     "lk print",
-    "[list|discover|options QUEUE|jobs QUEUE] [--node NODE]",
+    "[list [--queues]|discover|options [PRINTER]|jobs [PRINTER]] [--node NODE]",
     "files",
-    "Discover Fabric printers and inspect system queues; no paper sent"
+    "Physical-printer desk; pick options/jobs and manage friendly names"
+  ],
+  [
+    "lk print completion",
+    "[--node NODE] [--confirm]",
+    "files",
+    "Review/install current LOOK zsh printer completion; preserves the prior script"
   ],
   [
     "lk print add",
@@ -886,9 +892,9 @@
   ],
   [
     "lk print nickname",
-    "QUEUE NAME [--node NODE] [--confirm]",
+    "[PRINTER] [NAME] [--node NODE] [--confirm]",
     "files",
-    "Name a destination, such as Little Printer, without renaming the system queue"
+    "Name a physical destination across its reachable routes"
   ],
   [
     "lk print profile",
@@ -898,19 +904,19 @@
   ],
   [
     "lk print file",
-    "FILE --printer QUEUE [--node NODE] [--pages 1-3,5] [--copies N] [--media MEDIA] [--sides SIDES]",
+    "FILE [--printer PRINTER] [--node NODE] [--pages 1-3,5] [--copies N] [--media MEDIA] [--sides SIDES]",
     "files",
     "Prepare a bounded document job; export manuscripts to PDF first"
   ],
   [
     "lk print text",
-    "TEXT|- --printer QUEUE [--node NODE]",
+    "TEXT|- [--printer PRINTER] [--node NODE]",
     "files",
     "Prepare UTF-8 text for a document printer"
   ],
   [
     "lk print receipt",
-    "[TEXT|-|--image FILE] --printer QUEUE [--node NODE]",
+    "[TEXT|-|--image FILE] [--printer PRINTER] [--node NODE]",
     "files",
     "Prepare ESC/POS text or dithered raster art; explicit receipt profile required"
   ],

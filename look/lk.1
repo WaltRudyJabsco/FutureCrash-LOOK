@@ -300,19 +300,21 @@ lk mp [QUERY]
   [media] Fabric audio library, queue and player
 lk tv [QUERY]
   [media] Fabric movies, TV and video player
-lk print [list|discover|options QUEUE|jobs QUEUE] [--node NODE]
-  [files] Discover Fabric printers and inspect system queues; no paper sent
+lk print [list [--queues]|discover|options [PRINTER]|jobs [PRINTER]] [--node NODE]
+  [files] Physical-printer desk; pick options/jobs and manage friendly names
+lk print completion [--node NODE] [--confirm]
+  [files] Review/install current LOOK zsh printer completion; preserves the prior script
 lk print add QUEUE --uri URI [--driver everywhere|raw] [--node NODE] [--confirm]
   [files] Review then explicitly add a CUPS queue; no drivers installed automatically
-lk print nickname QUEUE NAME [--node NODE] [--confirm]
-  [files] Name a destination, such as Little Printer, without renaming the system queue
+lk print nickname [PRINTER] [NAME] [--node NODE] [--confirm]
+  [files] Name a physical destination across its reachable routes
 lk print profile QUEUE --kind document|escpos [--width DOTS] [--columns N] [--node NODE] [--confirm]
   [files] Review a document or verified receipt printer profile
-lk print file FILE --printer QUEUE [--node NODE] [--pages 1-3,5] [--copies N] [--media MEDIA] [--sides SIDES]
+lk print file FILE [--printer PRINTER] [--node NODE] [--pages 1-3,5] [--copies N] [--media MEDIA] [--sides SIDES]
   [files] Prepare a bounded document job; export manuscripts to PDF first
-lk print text TEXT|- --printer QUEUE [--node NODE]
+lk print text TEXT|- [--printer PRINTER] [--node NODE]
   [files] Prepare UTF-8 text for a document printer
-lk print receipt [TEXT|-|--image FILE] --printer QUEUE [--node NODE]
+lk print receipt [TEXT|-|--image FILE] [--printer PRINTER] [--node NODE]
   [files] Prepare ESC/POS text or dithered raster art; explicit receipt profile required
 lk print send ID [--node NODE] [--confirm]
   [files] Review or explicitly submit a prepared job once; never auto-retry uncertain printing
@@ -980,6 +982,7 @@ Parser arguments and recognized option tokens (grouped by handler):
 --node
 --pages
 --printer
+--queues — Show underlying owner/queue routes
 --sides
 --uri
 --width

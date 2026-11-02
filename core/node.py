@@ -3904,14 +3904,15 @@ class API(BaseHTTPRequestHandler):
                 peers=[p for p in PEERS.public() if p.get('trusted') and _peer_bases(p)]
                 def read(peer):
                     try:
-                        value=_file_peer_json(peer,'/v1/print')
+                        value=http_json(_copy_route(peer)+'/v1/print',timeout=10)
                         return [dict(row,node=peer['name']) for row in value.get('printers',[])],None if value.get('available') else {'node':peer['name'],'error':value.get('warning')}
                     except Exception as error:return [],{'node':peer.get('name'),'error':str(error)}
                 with concurrent.futures.ThreadPoolExecutor(max_workers=4) as pool:
                     for rows,error in pool.map(read,peers):
                         entries.extend(rows)
                         if error:errors.append(error)
-                return self.sendj(200,{'ok':True,'printers':entries,'errors':errors})
+                import print_destinations
+                return self.sendj(200,{'ok':True,'printers':print_destinations.consolidate(entries),'queues':entries,'local_node':owner,'errors':errors})
             peer,_=self._file_target()
             if peer is not None:
                 value=http_json(_copy_route(peer)+'/v1/print',data=payload,timeout=45)

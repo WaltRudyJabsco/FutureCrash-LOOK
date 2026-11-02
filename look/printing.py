@@ -8,12 +8,37 @@ import fabric_files
 from print_core import MAX_INPUT_BYTES
 
 
-def request(action='list',node='local',**fields):
+def _request(action='list',node='local',**fields):
     if action=='list' and node=='all':return fabric_files.request('/v1/print/fabric',timeout=60)
     return fabric_files.request('/v1/print',{'target':node},json.dumps(dict(action=action,**fields)).encode(),timeout=60)
 
 
-def prepare(queue,node='local',path=None,text=None,receipt=False,**options):
+def destinations():
+    value=_request('list','all')
+    if value.get('printers') and 'routes' not in value['printers'][0]:
+        from print_destinations import consolidate
+        value=dict(value,queues=value['printers'],printers=consolidate(value['printers']))
+    return value
+
+
+def request(action='list',node='local',**fields):
+    if action=='list' and node=='all':return destinations()
+    if node!='auto':return _request(action,node,**fields)
+    from print_destinations import choose,route
+    value=destinations();destination=choose(value,fields['queue'])
+    if action in {'jobs','nickname'}:
+        results=[]
+        for candidate in destination['routes']:
+            try:results.append(_request(action,candidate['node'],**dict(fields,queue=candidate['name'])))
+            except (OSError,RuntimeError,ValueError) as error:results.append({'node':candidate['node'],'queue':candidate['name'],'error':str(error)})
+        return {'printer':destination['label'],'routes':results}
+    selected=route(destination,value.get('local_node',''))
+    # Choose before dispatch. Never fail over a write after it may have arrived.
+    result=_request(action,selected['node'],**dict(fields,queue=selected['name']))
+    return dict(result,destination=destination['label'])
+
+
+def prepare(queue,node='auto',path=None,text=None,receipt=False,**options):
     if (path is None)==(text is None):raise ValueError('Choose exactly one file or text')
     if path is not None:
         source=Path(path).expanduser().resolve()
@@ -26,7 +51,7 @@ def prepare(queue,node='local',path=None,text=None,receipt=False,**options):
         kind='receipt-text' if receipt else 'document'
     if not 0<len(data)<=MAX_INPUT_BYTES:raise ValueError('Print input must be 1 byte–3 MiB')
     result=request('prepare',node,queue=queue,data=base64.b64encode(data).decode(),filename=title,kind=kind,options_value=options)
-    result['send_command']='lk print send '+result['id']+' --node '+node+' --confirm'
+    result['send_command']='lk print send '+result['id']+' --node '+result.get('node',node)+' --confirm'
     return result
 
 
@@ -34,15 +59,17 @@ def parser():
     result=argparse.ArgumentParser(prog='lk print',description='Fabric printers and reviewed print plans; nothing prints during discovery/preparation.')
     result.add_argument('--json',action='store_true',help='Machine-readable result')
     sub=result.add_subparsers(dest='action')
+    item=sub.add_parser('completion');item.add_argument('--confirm',action='store_true');item.add_argument('--node',default='local')
     for action in ['list','discover']:
         item=sub.add_parser(action);item.add_argument('--node',default='all' if action=='list' else 'local')
+        if action=='list':item.add_argument('--queues',action='store_true',help='Show underlying owner/queue routes')
     for action in ['options','jobs']:
-        item=sub.add_parser(action);item.add_argument('queue');item.add_argument('--node',default='local')
+        item=sub.add_parser(action);item.add_argument('queue',nargs='?');item.add_argument('--node',default='auto')
     item=sub.add_parser('add');item.add_argument('queue');item.add_argument('--uri',required=True);item.add_argument('--driver',choices=['everywhere','raw'],default='everywhere');item.add_argument('--confirm',action='store_true');item.add_argument('--node',default='local')
-    item=sub.add_parser('nickname');item.add_argument('queue');item.add_argument('label');item.add_argument('--confirm',action='store_true');item.add_argument('--node',default='local')
+    item=sub.add_parser('nickname');item.add_argument('queue',nargs='?');item.add_argument('label',nargs='?');item.add_argument('--confirm',action='store_true');item.add_argument('--node',default='auto')
     item=sub.add_parser('profile');item.add_argument('queue');item.add_argument('--kind',choices=['document','escpos'],required=True);item.add_argument('--width',type=int,default=384);item.add_argument('--columns',type=int,default=32);item.add_argument('--confirm',action='store_true');item.add_argument('--node',default='local')
     for action in ['file','text','receipt']:
-        item=sub.add_parser(action);item.add_argument('content',nargs='?' if action=='receipt' else None);item.add_argument('--image');item.add_argument('--printer',required=True);item.add_argument('--node',default='local');item.add_argument('--copies',type=int,default=1);item.add_argument('--pages');item.add_argument('--media');item.add_argument('--sides',choices=['one-sided','two-sided-long-edge','two-sided-short-edge'])
+        item=sub.add_parser(action);item.add_argument('content',nargs='?' if action=='receipt' else None);item.add_argument('--image');item.add_argument('--printer');item.add_argument('--node',default='auto');item.add_argument('--copies',type=int,default=1);item.add_argument('--pages');item.add_argument('--media');item.add_argument('--sides',choices=['one-sided','two-sided-long-edge','two-sided-short-edge'])
     for action in ['inspect','send','discard']:
         item=sub.add_parser(action);item.add_argument('ident');item.add_argument('--node',default='local')
         if action!='inspect':item.add_argument('--confirm',action='store_true')
@@ -53,13 +80,13 @@ def parser():
 
 def destination_label(row):
     label=row.get('profile',{}).get('label')
-    return label+' ['+row['name']+']' if label and label!=row['name'] else row['name']
+    return row['label'] if 'routes' in row else label+' ['+row['name']+']' if label and label!=row['name'] else row['name']
 
 
 def display(result):
     if 'printers' in result:
         print('FABRIC PRINTERS')
-        for row in result['printers']:print('  '+destination_label(row)+' @ '+row.get('node','local')+' · '+row.get('profile',{}).get('kind','document')+' · '+row.get('status',''))
+        for row in result['printers']:print('  '+destination_label(row)+(' · '+str(row['route_count'])+' routes' if 'routes' in row else ' @ '+row.get('node','local')+' · '+row.get('profile',{}).get('kind','document')+' · '+row.get('status','')))
         if not result['printers']:print('No configured queues visible. Run lk print discover --node OWNER or open that computer’s printer settings.')
         for error in result.get('errors',[]):print('Unavailable: '+str(error.get('node','owner'))+' · '+str(error.get('error','')))
     elif 'id' in result and 'state' in result:
@@ -75,9 +102,24 @@ def display(result):
             if key not in {'ok','node'}:print(key+': '+(json.dumps(value,ensure_ascii=False) if isinstance(value,(dict,list)) else str(value)))
 
 
-def main(args):
+def main(args,ui=None):
+    if not args and sys.stdin.isatty() and sys.stdout.isatty():
+        from print_desk import desk
+        return desk(ui)
     selected=parser().parse_args(args or ['list']);value=vars(selected);action=value.pop('action');node=value.pop('node','all');as_json=value.pop('json',False)
     try:
+        if action in {'options','jobs','nickname'} and not value.get('queue') or action in {'file','text','receipt'} and not value.get('printer'):
+            if not sys.stdin.isatty() or not sys.stdout.isatty():raise ValueError('Choose a printer; run lk print in a terminal or pass --printer/queue')
+            from print_desk import pick
+            choice=pick(ui,node=node)
+            if not choice:return 0
+            value['printer' if action in {'file','text','receipt'} else 'queue']=choice['id'] if node=='auto' else choice['routes'][0]['name']
+        if action=='nickname' and not value.get('label'):
+            if not sys.stdin.isatty() or not sys.stdout.isatty():raise ValueError('Provide a nickname, or use lk print in a terminal')
+            from look_renderer import prompt_line
+            value['label'],cancelled=prompt_line('Printer nickname: ')
+            if cancelled:return 0
+        queues=value.pop('queues',False)
         if action in {'file','text','receipt'}:
             content=value.pop('content');image=value.pop('image');queue=value.pop('printer')
             if image and (action!='receipt' or content):raise ValueError('--image is only for receipt images, without text')
@@ -86,6 +128,7 @@ def main(args):
             options={k:v for k,v in value.items() if v is not None}
             result=prepare(queue,node,path=content if action=='file' else image,text=None if action=='file' or image else content,receipt=action=='receipt',**options)
         else:result=request(action or 'list',node,**value)
+        if queues:result=dict(result,printers=result.get('queues',[]))
         if as_json:print(json.dumps(result,ensure_ascii=False,indent=2))
         else:display(result)
         return 0
@@ -93,11 +136,11 @@ def main(args):
 
 
 def tools():
-    fields={'node':{'type':'string','description':'Exact owner from printer discovery; default local'},'queue':{'type':'string','description':'Exact queue name or unique nickname from discovery'}}
+    fields={'node':{'type':'string','description':'Optional exact owner; default auto selects an enabled route'},'queue':{'type':'string','description':'Stable physical printer ID or unique friendly name from discovery; an exact queue works with an explicit owner'}}
     return [
-        {'type':'function','function':{'name':'printers_list','description':'List configured printers across the trusted Fabric, with queue, owner and document/receipt profile. No setup or printing.','parameters':{'type':'object','properties':{},'additionalProperties':False}}},
+        {'type':'function','function':{'name':'printers_list','description':'List physical printers once across the trusted Fabric, with stable ID, friendly name and underlying queue routes. No setup or printing.','parameters':{'type':'object','properties':{},'additionalProperties':False}}},
         {'type':'function','function':{'name':'printer_inspect','description':'Inspect printer options or jobs on an exact owner/queue.','parameters':{'type':'object','properties':dict(fields,view={'type':'string','enum':['options','jobs']}),'required':['queue'],'additionalProperties':False}}},
-        {'type':'function','function':{'name':'print_prepare','description':'Prepare a text/document/receipt job for user review, NEVER send paper. Return immutable plan, options and confirmation command. Ask for an exact printer/owner first. Export DOCX/manuscripts to PDF before preparing.','parameters':{'type':'object','properties':dict(fields,path={'type':'string'},text={'type':'string'},receipt={'type':'boolean','description':'True for a configured ESC/POS receipt destination; false for document printers'},copies={'type':'integer','minimum':1,'maximum':20},pages={'type':'string'},media={'type':'string'},sides={'type':'string','enum':['one-sided','two-sided-long-edge','two-sided-short-edge']}),'required':['queue'],'additionalProperties':False}}}]
+        {'type':'function','function':{'name':'print_prepare','description':'Prepare a text/document/receipt job for user review, NEVER send paper. Return immutable plan, options and confirmation command. Choose a physical printer from discovery; automatic routing hides its underlying queues. Export DOCX/manuscripts to PDF before preparing.','parameters':{'type':'object','properties':dict(fields,path={'type':'string'},text={'type':'string'},receipt={'type':'boolean','description':'True for a configured ESC/POS receipt destination; false for document printers'},copies={'type':'integer','minimum':1,'maximum':20},pages={'type':'string'},media={'type':'string'},sides={'type':'string','enum':['one-sided','two-sided-long-edge','two-sided-short-edge']}),'required':['queue'],'additionalProperties':False}}}]
 
 
 def run_tool(tool,args,workspace):
@@ -107,7 +150,7 @@ def run_tool(tool,args,workspace):
         if set(value)-{'view','node','queue'}:raise ValueError('Printer inspection accepts only owner, queue and options/jobs view')
         view=value.pop('view','options')
         if view not in {'options','jobs'}:raise ValueError('Printer inspection is read-only: choose options or jobs')
-        return json.dumps(request(view,value.pop('node','local'),**value))
+        return json.dumps(request(view,value.pop('node','auto'),**value))
     if tool!='print_prepare':raise ValueError('Unknown print tool')
     if value.get('path'):
         path=Path(value['path']).expanduser()
