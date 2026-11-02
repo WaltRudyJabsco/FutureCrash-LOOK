@@ -879,6 +879,12 @@
     "Physical-printer desk; pick options/jobs and manage friendly names"
   ],
   [
+    "lk print completion",
+    "[--node NODE] [--confirm]",
+    "files",
+    "Review/install current LOOK zsh printer completion; preserves the prior script"
+  ],
+  [
     "lk print add",
     "QUEUE --uri URI [--driver everywhere|raw] [--node NODE] [--confirm]",
     "files",

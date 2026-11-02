@@ -9,6 +9,11 @@ same printer picker; files/receipts without `--printer` also offer a picker.
 
 `lk print list` lists physical printers without the desk. `list --queues` exposes
 owner/queue routes for troubleshooting. `--json` preserves machine-readable data.
+Zsh completion is copied by the normal installer. Existing Fabric installs can
+review `lk print completion --node OWNER`, then add `--confirm` to update the
+LOOK-owned script with a backup of its prior contents. Rollout uses this explicit
+setup action; the runtime updater does not gain access to arbitrary shell config.
+
 Zsh Tab completion after `lk print options ` or `--printer ` offers current friendly
 printer names; start a new shell after updating the completion script.
 

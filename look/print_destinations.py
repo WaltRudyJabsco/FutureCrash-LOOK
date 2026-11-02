@@ -12,7 +12,7 @@ def endpoint(uri):
         # a shared print server may expose many printers on the same host.
         scheme='ipp' if parsed.scheme in {'ipp','ipps'} else parsed.scheme
         port=parsed.port or (631 if scheme=='ipp' else 9100 if scheme=='socket' else 515 if scheme=='lpd' else 0)
-        return scheme+'://'+parsed.hostname.casefold().rstrip('.')+':'+str(port)+unquote(parsed.path).rstrip('/')+('?' + parsed.query if scheme=='usb' else '')
+        return scheme+'://'+parsed.hostname.casefold().rstrip('.')+':'+str(port)+unquote(parsed.path).rstrip('/')+('?' + parsed.query if parsed.query else '')
     except ValueError:return ''
 
 

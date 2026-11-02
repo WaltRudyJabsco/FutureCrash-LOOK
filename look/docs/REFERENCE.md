@@ -297,6 +297,8 @@ lk tv [QUERY]
   [media] Fabric movies, TV and video player
 lk print [list [--queues]|discover|options [PRINTER]|jobs [PRINTER]] [--node NODE]
   [files] Physical-printer desk; pick options/jobs and manage friendly names
+lk print completion [--node NODE] [--confirm]
+  [files] Review/install current LOOK zsh printer completion; preserves the prior script
 lk print add QUEUE --uri URI [--driver everywhere|raw] [--node NODE] [--confirm]
   [files] Review then explicitly add a CUPS queue; no drivers installed automatically
 lk print nickname [PRINTER] [NAME] [--node NODE] [--confirm]

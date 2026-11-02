@@ -106,3 +106,17 @@ _lk
 '''
     result=subprocess.run(['zsh','-f','-c',script,'completion-test',str(source)],capture_output=True,text=True,check=True)
     assert result.stdout.splitlines()==['Brother MFC','Epson Photo']
+
+
+def test_completion_install_is_explicit_and_preserves_previous_script(tmp_path,monkeypatch):
+    from pathlib import Path
+    import print_completion
+    monkeypatch.setattr(Path,'home',lambda:tmp_path)
+    assert not print_completion.install()['applied']
+    target=tmp_path/'.config/look/completions/_lk'
+    assert not target.exists()
+    target.parent.mkdir(parents=True);target.write_text('# prior LOOK completion')
+    assert print_completion.install(True)['applied']
+    assert target.read_text()==print_completion.SCRIPT
+    assert list(target.parent.glob('_lk.before-*'))[0].read_text()=='# prior LOOK completion'
+    assert print_completion.install(True)['unchanged']

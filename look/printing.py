@@ -59,6 +59,7 @@ def parser():
     result=argparse.ArgumentParser(prog='lk print',description='Fabric printers and reviewed print plans; nothing prints during discovery/preparation.')
     result.add_argument('--json',action='store_true',help='Machine-readable result')
     sub=result.add_subparsers(dest='action')
+    item=sub.add_parser('completion');item.add_argument('--confirm',action='store_true');item.add_argument('--node',default='local')
     for action in ['list','discover']:
         item=sub.add_parser(action);item.add_argument('--node',default='all' if action=='list' else 'local')
         if action=='list':item.add_argument('--queues',action='store_true',help='Show underlying owner/queue routes')

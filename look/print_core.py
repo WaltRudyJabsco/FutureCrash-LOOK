@@ -48,16 +48,18 @@ def profiles():
     except FileNotFoundError:return {}
 
 
+DISCOVERY_CACHE_SECONDS=60
+DISCOVERY_BROWSE_SECONDS=2
 _DEVICE_CACHE=(0,[])
 
 
 def discovered_devices():
     global _DEVICE_CACHE
-    if time.monotonic()-_DEVICE_CACHE[0]<60:return _DEVICE_CACHE[1]
+    if time.monotonic()-_DEVICE_CACHE[0]<DISCOVERY_CACHE_SECONDS:return _DEVICE_CACHE[1]
     rows=[]
     if shutil.which('ippfind'):
         try:
-            output=run(['ippfind','-T','2','--exec',sys.executable,'-c','import json,sys;print(json.dumps(sys.argv[1:]))','{service_uri}','{txt_UUID}','{service_name}',';'])
+            output=run(['ippfind','-T',str(DISCOVERY_BROWSE_SECONDS),'--exec',sys.executable,'-c','import json,sys;print(json.dumps(sys.argv[1:]))','{service_uri}','{txt_UUID}','{service_name}',';'])
             for line in output.splitlines():
                 try:
                     uri,uuid,label=json.loads(line);rows.append({'uri':uri,'uuid':uuid,'label':label})
@@ -301,6 +303,9 @@ class Spool:
 
 def local(payload=None):
     value=dict(payload or {});action=value.pop('action','list')
+    if action=='completion':
+        import print_completion
+        return print_completion.install(**value)
     if action=='list':return catalog()
     if action=='discover':return {'devices':run(['lpinfo','-v']),'note':'Observed device URIs only; nothing configured or printed.'}
     if action=='options':return options(value['queue'])
