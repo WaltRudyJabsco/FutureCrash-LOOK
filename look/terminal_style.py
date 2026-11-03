@@ -663,8 +663,9 @@ if __name__=='__main__': raise SystemExit(main())
 
 
 def keycap(text, colors):
-    palette=colors['_palette']
-    if luminance(palette['background']) <= .4:
+    palette=colors.get('_palette')
+    # Older callers provide ANSI colors without theme metadata.
+    if not palette or luminance(palette['background']) <= .4:
         return colors['CYAN']+'\033[1m'+text+'\033[22m'
     fill=palette.get('color75',palette['url_color'])
     ink='#ffffff'
