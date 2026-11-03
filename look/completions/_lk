@@ -118,7 +118,7 @@ _lk() {
     saver|sv)
       case "$words[CURRENT-1]" in
         --display) _values 'display' all current; return ;;
-        --palette) _values 'palette' auto neon paper slate mercury harbor orchard porcelain ember vellum frost midnight; return ;;
+        --palette) _values 'palette' auto neon paper slate bridge mercury harbor orchard porcelain ember vellum frost midnight; return ;;
         --interval|--seconds) _message 'seconds'; return ;;
       esac
       if [[ "$PREFIX" == -* ]]; then
@@ -126,7 +126,7 @@ _lk() {
       else
         local -a scenes
         scenes=("${(@f)$(lk saver list 2>/dev/null)}")
-        [[ "$words[2]" == saver ]] && scenes+=(start list setup)
+        [[ "$words[2]" == saver ]] && scenes+=(start list setup text)
         _describe 'screensaver' scenes
       fi
       return

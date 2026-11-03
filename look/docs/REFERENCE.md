@@ -293,7 +293,7 @@ lk media [...]
   [media] Media library, queue, playlists, transport · alias: lk music
 lk player
   [media] Live LOOK miniplayer
-lk saver [start|list|setup|NAME] [--display all|current] [--palette NAME] [--interval SECONDS] [--matching|--independent] [--invert|--no-invert] [--preview] [--seconds N] [--save]
+lk saver [start|list|setup|text [reset]|NAME] [--display all|current] [--palette NAME] [--interval SECONDS] [--matching|--independent] [--invert|--no-invert] [--preview] [--seconds N] [--save]
   [media] Screensaver picker, previews, and settings
 lk sv [NAME|cycle] [OPTIONS]
   [media] Start saved ambient screensaver; Escape dismisses
@@ -1215,7 +1215,7 @@ Parser arguments and recognized option tokens (grouped by handler):
 --preview — open a small graphical preview
 --save — save supplied settings without launching
 --seconds — dismiss automatically after this many seconds
-selection — scene name, cycle, start, list, or setup
+selection — scene name, cycle, start, list, setup, or text [reset]
 
 LOCAL SPEECH INPUT
 

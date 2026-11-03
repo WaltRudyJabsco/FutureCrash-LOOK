@@ -45,6 +45,8 @@ THEMES={
 }
 # Each preset defines foreground inks separately from selection and tab backgrounds.
 for name, background, ink, selection, accents in (
+    ('bridge','#101719','#e6e6cf','#344348',
+     ('#e6967c','#b5d6a4','#ebc47a','#9dbbd7','#cbb5d1','#91cbc0','#a1b1b0')),
     ('mercury','#f5f0e5','#233342','#e5dcc1',
      ('#7d302c','#28583b','#795716','#315c80','#593c64','#1e4f56','#566473')),
     ('harbor','#101e29','#e3edf0','#224559',
@@ -76,7 +78,8 @@ for name, background, ink, selection, accents in (
     }
 
 NAMES=(*THEMES,'custom')
-DESCRIPTIONS={'mercury':'Mercury Reader and Writer · warm paper, blue ink, brass',
+DESCRIPTIONS={'bridge':'Spacecraft console · amber, pale green, and cool blue',
+              'mercury':'Mercury Reader and Writer · warm paper, blue ink, brass',
               'neon':'Green phosphor · current LOOK colors',
               'paper':'MercuryWriter paper · warm white and dark ink',
               'slate':'Quiet charcoal · warm ink and restrained accents',
@@ -660,8 +663,9 @@ if __name__=='__main__': raise SystemExit(main())
 
 
 def keycap(text, colors):
-    palette=colors['_palette']
-    if luminance(palette['background']) <= .4:
+    palette=colors.get('_palette')
+    # Older callers provide ANSI colors without theme metadata.
+    if not palette or luminance(palette['background']) <= .4:
         return colors['CYAN']+'\033[1m'+text+'\033[22m'
     fill=palette.get('color75',palette['url_color'])
     ink='#ffffff'

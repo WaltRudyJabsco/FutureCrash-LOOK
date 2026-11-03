@@ -146,3 +146,29 @@ def test_picker_controls_save_preview_and_return(settings_file,monkeypatch,size)
         assert len(frame.splitlines())<=size[1]
         assert all(len(ui._strip_ansi(line))<=size[0] for line in frame.splitlines())
     assert '\033[?25h' in output.getvalue()
+
+
+def test_live_colors_change_without_changing_scene_or_flickering():
+    run=saver.SceneRun({**saver.defaults(),'scene':'Stars','palette':'harbor','inversions':False},42)
+    before=run.sample(1,50,20)
+    run.next_color()
+    after=run.sample(1,50,20)
+    assert before[:2]==after[:2] and before[2]!=after[2]
+    assert after[2]==run.sample(1.1,50,20)[2]
+
+
+def test_next_visual_works_from_named_scene_and_uses_enabled_list():
+    run=saver.SceneRun({**saver.defaults(),'scene':'Stars','enabled':['Stars','Dune Sea'],'independent':False},42)
+    assert run.sample(65,50,20)[0]=='Stars'
+    run.next_scene()
+    assert run.sample(65,50,20)[0]=='Dune Sea'
+    run.next_scene()
+    assert run.sample(65,50,20)[0]=='Stars'
+
+
+def test_matching_controls_remain_synchronized():
+    config={**saver.defaults(),'independent':False}
+    one=saver.SceneRun(config,42);two=saver.SceneRun(config,42)
+    for run in (one,two):
+        run.sample(10,40,20);run.next_scene();run.next_color()
+    assert one.sample(11,40,20)==two.sample(11,40,20)

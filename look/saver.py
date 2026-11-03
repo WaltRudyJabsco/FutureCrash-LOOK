@@ -88,10 +88,34 @@ class SceneRun:
         if not self.scenes:raise ValueError('Enable at least one screensaver for Cycle')
         self.rng.shuffle(self.scenes)
         self.step=None;self.style=None
+        self.inverse_rows=set()
+        self.color_revision=0;self.scene_offset=0;self.timeline_step=0
+        self.cycling=self.settings['scene']=='cycle'
         self.offset=self.rng.random()*self.settings['interval'] if self.settings['independent'] else 0
+
+    def next_color(self):
+        self.color_revision+=1
+        self.step=None
+
+    def copy_controls_from(self,other):
+        self.color_revision=other.color_revision
+        self.scene_offset=other.scene_offset
+        self.scenes=list(other.scenes);self.cycling=other.cycling
+        self.step=None
+
+    def next_scene(self,elapsed=None):
+        if elapsed is not None:self.timeline_step=int(max(0,elapsed+self.offset)//self.settings['interval'])
+        if not self.cycling:
+            current=self.scenes[0]
+            self.scenes=[name for name in SCENES if name in self.settings['enabled'] or name==current]
+            self.scene_offset=self.scenes.index(current)-self.timeline_step
+            self.cycling=True
+        self.scene_offset+=1
+        self.next_color()
 
     def sample(self,elapsed,width,height):
         step=int(max(0,elapsed+self.offset)//self.settings['interval'])
+        self.timeline_step=step
         if step!=self.step:
             pairs=[]
             palettes=terminal_style.THEMES.values() if self.settings['palette']=='auto' else [terminal_style.THEMES[self.settings['palette']]]
@@ -101,12 +125,14 @@ class SceneRun:
                     if terminal_style.contrast(paper,ink)>=4.5:pairs.append((paper,ink))
             # Matching displays stay synchronized even if one misses a paint.
             step_rng=random.Random(self.seed+step)
-            paper,ink=step_rng.choice(pairs)
+            pairs=list(dict.fromkeys(pairs))
+            paper,ink=pairs[(step_rng.randrange(len(pairs))+self.color_revision)%len(pairs)]
             if self.settings['inversions'] and step_rng.randrange(5)==0:paper,ink=ink,paper
             self.style=(paper,ink);self.step=step
-        scene=self.scenes[step%len(self.scenes)]
+        scene=self.scenes[(step+self.scene_offset)%len(self.scenes)]
         phase=elapsed+self.offset
         lines=player_visuals.frame(player_visuals.NAMES.index(scene)+1,width,height,phase,True,self.seed)
+        self.inverse_rows=player_visuals.flight_deck_inverse_rows(height,phase) if scene=='Flight Deck' else set()
         return scene,lines,self.style
 
 
@@ -223,7 +249,7 @@ def picker(ui):
 
 def main(args,*,ui=None,quick=False):
     parser=argparse.ArgumentParser(prog='lk sv' if quick else 'lk saver',description='Ambient multi-display screensavers. Escape dismisses; this does not lock the computer.')
-    parser.add_argument('selection',nargs='*',help='scene name, cycle, start, list, or setup')
+    parser.add_argument('selection',nargs='*',help='scene name, cycle, start, list, setup, or text [reset]')
     parser.add_argument('--display',choices=('all','current'),help='current means the display under the pointer at launch')
     parser.add_argument('--interval',type=float,help='seconds per scene, 5–600')
     parser.add_argument('--palette',choices=PALETTES)
@@ -241,6 +267,9 @@ def main(args,*,ui=None,quick=False):
         if action=='list':
             print('\n'.join(('cycle',*SCENES)));return 0
         if action=='setup':return setup()
+        if action in {'text','text reset'}:
+            import saver_text
+            return saver_text.reset() if action=='text reset' else saver_text.generate()
         if not args and not quick:
             if ui is None:raise ValueError('Picker needs the LOOK terminal interface')
             return picker(ui)
@@ -256,5 +285,5 @@ def main(args,*,ui=None,quick=False):
         settings=validate(settings)
         if options.save:save(settings);print('Saver settings saved');return 0
         return launch(settings,preview=options.preview,seconds=options.seconds)
-    except (OSError,ValueError,subprocess.SubprocessError) as exc:
+    except (OSError,ValueError,RuntimeError,ImportError,subprocess.SubprocessError) as exc:
         print('LOOK SAVER · '+str(exc),file=sys.stderr);return 1

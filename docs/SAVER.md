@@ -1,7 +1,7 @@
 # LOOK Saver
 
 `lk saver` opens the terminal picker. `lk sv` starts the saved selection on all
-attached displays by default. Escape, q, or a click dismisses all saver windows;
+attached displays by default. Space, Escape, or a click dismisses all saver windows;
 the terminal session and music playback continue. This is an ambient screensaver,
 not a password lock or system sleep command.
 
@@ -70,3 +70,38 @@ mode falls back to a remaining display if its original display is disconnected.
 
 Automatic idle activation, native password-lock integration, audio-reactive
 analysis, and multi-panel control-room compositions are not part of this release.
+
+On macOS, the saver covers displays with borderless windows and temporarily hides
+the menu bar and Dock using application-local presentation options. It does not
+create full-screen Spaces or change system preferences. Display geometry is
+reapplied after presentation begins so the former menu-bar area is covered too.
+Escape/click, timed dismissal, and interrupt restore the original presentation
+options before closing the windows. Small previews retain normal window controls.
+
+While running, **C** changes colors and **V** advances the visualizer on every
+display. Matching displays remain matched; independent displays keep their own
+sequences. V also works after launching a named scene, stepping into the enabled
+scene list. Space or Escape dismisses; unrelated keys are ignored, and holding
+C/V does not repeatedly cycle. Mouse movement does not dismiss; a click does.
+
+## Cinematic scenes and Bridge palette
+
+Flight Deck uses oversized block lettering, alternating inverse bands, fictional
+readouts, and short deep-space captions. Signal Bloom pairs a slow radar sweep
+with orbiting contacts. Both are available in the player visualizer picker as
+well as the saver. Bridge adds charcoal, amber, pale green, and cool blue:
+
+```sh
+lk sv "Flight Deck" --palette bridge
+lk sv "Signal Bloom" --palette bridge
+lk terminal theme bridge
+```
+
+Flight Deck works offline with built-in captions. Optionally run `lk saver text`
+to prepare a fresh set through the existing Fabric inference service. This is an
+explicit, bounded request using a generic fictional-writing prompt; it sends no
+files, notes, or listening history. Validated captions are saved in
+`~/.config/look/saver-text.json` and read once by new player/saver processes.
+Rendering never waits for a model. Missing or malformed cached text falls back to
+built-in captions; failed generation preserves an existing set. `lk saver text reset`
+returns new sessions to built-in captions. Setup requires no new AI provider.

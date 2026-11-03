@@ -5,7 +5,7 @@ import hashlib
 import json
 import random
 
-NAMES = ('Bars', 'Waves', 'Orbit', 'Tunnel', 'Stars', 'Plasma', 'Album Art', 'Black Hole', 'Rooftops', 'Spectrum', 'Moon Jelly', 'Firefly Garden', 'Clockwork Garden', 'Rain on Glass', 'Neon Reef', 'Aurora Loom', 'Paper Lanterns', 'Magnetic Field', 'Comet Trails', 'Orrery', 'Phosphor Rain', 'Kinetic Mobile', 'Haunted Hollow', 'Dune Sea', 'Harmonic Ink', 'Tide Pools', 'Switchyard', 'Cycle')
+NAMES = ('Bars', 'Waves', 'Orbit', 'Tunnel', 'Stars', 'Plasma', 'Album Art', 'Black Hole', 'Rooftops', 'Spectrum', 'Moon Jelly', 'Firefly Garden', 'Clockwork Garden', 'Rain on Glass', 'Neon Reef', 'Aurora Loom', 'Paper Lanterns', 'Magnetic Field', 'Comet Trails', 'Orrery', 'Phosphor Rain', 'Kinetic Mobile', 'Haunted Hollow', 'Dune Sea', 'Harmonic Ink', 'Tide Pools', 'Switchyard', 'Flight Deck', 'Signal Bloom', 'Cycle')
 CYCLE_MODE = len(NAMES)
 CYCLE_INTERVAL_SECONDS = 10.0
 
@@ -86,6 +86,10 @@ def frame(mode, width, height, phase, playing=True, seed=0):
             depth=(i*.618034+t*.18)%1
             point((width-1)/2+math.cos(angle)*depth*width*.65,
                   (height-1)/2+math.sin(angle)*depth*height*.65,'.+*'[min(2,int(depth*3))])
+    elif mode==28:
+        return signal_bloom_frame(width,height,t,seed)
+    elif mode==27:
+        return flight_deck_frame(width,height,t,seed)
     elif mode==26:
         return switchyard_frame(width,height,t,seed)
     elif mode==25:
@@ -729,4 +733,90 @@ def switchyard_frame(width,height,phase,seed=0):
         if y+1<height:
             for x in range(4,width,17):
                 canvas[y+1][x]='●' if (int(phase)+x+lane)%4==0 else '·'
+    return [''.join(row) for row in canvas]
+
+
+# Compact original glyphs keep Flight Deck readable in both terminal cells and
+# graphical saver windows; no font download or raster scaling is involved.
+DECK_GLYPHS={
+ 'A':'010101111101101','B':'110101110101110','C':'011100100100011',
+ 'D':'110101101101110','E':'111100110100111','F':'111100110100100',
+ 'G':'011100101101011','H':'101101111101101','I':'111010010010111',
+ 'J':'001001001101010','K':'101101110101101','L':'100100100100111',
+ 'M':'101111111101101','N':'101111111111101','O':'010101101101010',
+ 'P':'110101110100100','Q':'010101101111011','R':'110101110101101',
+ 'S':'011100010001110','T':'111010010010010','U':'101101101101111',
+ 'V':'101101101101010','W':'101101111111101','X':'101101010101101',
+ 'Y':'101101010010010','Z':'111001010100111',' ':'000000000000000',
+}
+DECK_WORDS=('LISTEN','ORBIT','AWAIT','SIGNAL','RETURN','DREAM','DRIFT','ALIGN')
+DECK_LINES=('THE QUIET BETWEEN STARS','ALL CHANNELS OPEN','A DISTANT LIGHT RETURNS',
+            'THE LONG WATCH CONTINUES','WE ARE STILL LISTENING','HOLD THE HORIZON')
+DECK_PAGE_SECONDS=8.0
+
+
+def flight_deck_inverse_rows(height,phase):
+    scale=max(1,min(3,height//18))
+    center=max(3,(height-5*scale)//2)
+    rows={0,1,max(0,height-2),max(0,height-1)}
+    if int(phase//DECK_PAGE_SECONDS)%2==0:rows.update(range(center-1,center+5*scale+1))
+    return {row for row in rows if 0<=row<height}
+
+
+def flight_deck_frame(width,height,phase,seed=0,phrases=None):
+    canvas=[[' ']*width for _ in range(height)]
+    def write(y,text,x=None):
+        if not 0<=y<height:return
+        x=max(0,(width-len(text))//2) if x is None else x
+        for col,char in enumerate(text):
+            if 0<=x+col<width:canvas[y][x+col]=char
+    page=int(phase//DECK_PAGE_SECONDS)
+    word=DECK_WORDS[(page+seed)%len(DECK_WORDS)]
+    sx=max(1,min(5,width//max(1,len(word)*4)))
+    sy=max(1,min(3,height//18));top=max(3,(height-5*sy)//2)
+    write(0,' F L I G H T   D E C K ')
+    write(1,f'CHANNEL {(seed%8)+1:02d}     DEEP SPACE ARRAY     SECTOR {(page+seed)%99:02d}')
+    write(3,'[ TRANSMISSION RECEIVED ]' if page%2 else '[ LONG RANGE MONITOR ]')
+    for row in range(5):
+        line=' '.join(''.join(('#' if DECK_GLYPHS[letter][row*3+col]=='1' else ' ')*sx for col in range(3)) for letter in word)
+        for repeat in range(sy):write(top+row*sy+repeat,line)
+    if phrases is None:
+        import saver_text
+        phrases=saver_text.read()
+    phrase_pool=phrases or DECK_LINES
+    write(min(height-4,top+5*sy+2),phrase_pool[(page+seed)%len(phrase_pool)][:width])
+    if height>=25:
+        for i,label in enumerate(('BEACON','VECTOR','MEMORY')):
+            amount=int((.5+.5*math.sin(phase*.25+i+seed))*12)
+            write(height-8+i,label+'  ['+'='*amount+'.'*(12-amount)+']  '+f'{(seed*17+page*7+i*23)%100:02d}')
+    write(height-2,'LOOK / FICTIONAL TELEMETRY')
+    write(height-1,f'UPLINK {page%1000:03d}     SYSTEM NOMINAL')
+    return [''.join(row) for row in canvas]
+
+
+def signal_bloom_frame(width,height,phase,seed=0):
+    canvas=[[' ']*width for _ in range(height)]
+    cx=(width-1)*.5;cy=(height-1)*.5
+    radius=max(1,min(width*.44,height*.9))
+    sweep=phase*.22+seed
+    for y in range(height):
+        for x in range(width):
+            dx=x-cx;dy=(y-cy)*2
+            distance=math.hypot(dx,dy)/radius
+            if distance>1:continue
+            ring=min(abs(distance-r) for r in (.25,.5,.75,1))
+            delta=(sweep-math.atan2(dy,dx))%math.tau
+            char='.' if ring<.018 else ' '
+            if delta<.045:char='+'
+            elif delta<.22 and (x+y)%3==0:char=':'
+            if abs(dx)<.5 or abs(dy)<.6:char='·'
+            canvas[y][x]=char
+    for i in range(9):
+        orbit=.2+(i%4)*.19
+        angle=i*2.399963+phase*(.025+i*.002)+seed
+        x=round(cx+math.cos(angle)*orbit*radius);y=round(cy+math.sin(angle)*orbit*radius/2)
+        if 0<=x<width and 0<=y<height:canvas[y][x]='*' if (sweep-angle)%math.tau<.65 else 'o'
+    label='S I G N A L   B L O O M'
+    if height>3:
+        for i,char in enumerate(label[:width]):canvas[0][max(0,(width-len(label))//2)+i]=char
     return [''.join(row) for row in canvas]
