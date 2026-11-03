@@ -65,7 +65,7 @@ def test_shift_h_preserves_filter_query_and_refreshes_candidates(tmp_path,monkey
     assert not any(query!='notes' for query,_ in queries)
 
 
-@pytest.mark.parametrize('mode',[*range(1,7),8,9,10,11])
+@pytest.mark.parametrize('mode',[*range(1,7),8,9,10,11,26,27])
 def test_ambient_frames_animate_stay_bounded_and_pause(mode):
     for width,height in [(1,1),(18,7),(120,35)]:
         a=player_visuals.frame(mode,width,height,1.3)

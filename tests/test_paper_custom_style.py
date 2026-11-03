@@ -202,6 +202,6 @@ def test_light_theme_keycap_has_blue_fill_and_resets_before_label(monkeypatch,th
     colors=styles.list_colors()
     hint=styles.command_text('Enter open',('Enter',),colors=colors)
     assert '\x1b[48;2;' in hint
-    assert ';97;1mEnter\x1b[0m'+colors['GRAY']+' open' in hint
+    assert '\x1b[38;2;255;255;255;1mEnter\x1b[0m'+colors['GRAY']+' open' in hint
     fill=styles.settings(theme)['color75']
     assert styles.contrast(fill,'#ffffff')>=4.5

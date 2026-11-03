@@ -607,7 +607,7 @@ def keycap(text, colors):
     if contrast(fill,ink)<4.5:
         fill='#214b7b'
     rgb=';'.join(str(int(fill[i:i+2],16)) for i in (1,3,5))
-    return f'\033[48;2;{rgb};97;1m{text}\033[0m'
+    return f'\033[48;2;{rgb}m\033[38;2;255;255;255;1m{text}\033[0m'
 
 
 def command_text(text, keys, *, colors=None, body='GRAY'):
