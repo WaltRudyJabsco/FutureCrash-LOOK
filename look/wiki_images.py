@@ -12,6 +12,15 @@ from media_ui_work import LatestWork
 from notebook_markdown import safe_text
 
 
+def article_images(article):
+    """Ignore legacy EPUB-shaped duplicates retained in older Wiki caches."""
+    return [(index,row) for index,row in enumerate(article.get('images') or [])
+            if isinstance(row,dict) and (row.get('url') or row.get('path'))]
+
+
+def title(row):return safe_text(row.get('title') or row.get('alt') or 'Article image')
+
+
 def image(row,*,live=False,archive='',owner='local'):
     import wiki,wiki_online
     key=hashlib.sha256(str((live,owner,archive,row.get('url') or row.get('path'))).encode()).hexdigest()
@@ -43,7 +52,7 @@ def prepare(row,width,height,**source):
 
 
 def gallery(ui,fd,article,*,live=False,archive='',owner='local'):
-    rows=article.get('images',[])
+    rows=[row for _,row in article_images(article)]
     if not rows:return 'No pictures in this article. The no-pictures archive cannot supply photos; v selects live Wikipedia.'
     work=LatestWork();native=look_renderer.NativePreviewController();index=0;native_images=True;last=None;notice=''
     try:
@@ -53,7 +62,7 @@ def gallery(ui,fd,article,*,live=False,archive='',owner='local'):
             art_h=max(2,height-len(controls)-6);art_w=min(90,width-1)
             row=rows[index]
             art,path,error=work.get((index,art_w,art_h),lambda row=dict(row),w=art_w,h=art_h:prepare(row,w,h,live=live,archive=archive,owner=owner),([],None,'Preparing image…'),ttl=60) or ([],None,'Image unavailable')
-            frame=[ui._c('ARTICLE IMAGES','1;36')+f' · {index+1}/{len(rows)} · '+('LIVE / CACHED' if live else 'SAVED ARCHIVE'),safe_text(row['title']),*art[:art_h]]
+            frame=[ui._c('ARTICLE IMAGES','1;36')+f' · {index+1}/{len(rows)} · '+('LIVE / CACHED' if live else 'SAVED ARCHIVE'),title(row),*art[:art_h]]
             frame+=['']*max(0,art_h+2-len(frame))
             frame += [ui._c(safe_text(notice or error or ('Auto image' if native_images and native.enabled else 'ASCII')),'2'),ui._c(safe_text(row.get('source') or row.get('path','')),'2'),*controls]
             rendered=ui._terminal_frame_payload('\n'.join(ui._ansi_clip(line,width) for line in frame))

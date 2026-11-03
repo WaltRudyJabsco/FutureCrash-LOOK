@@ -293,6 +293,10 @@ lk media [...]
   [media] Media library, queue, playlists, transport · alias: lk music
 lk player
   [media] Live LOOK miniplayer
+lk saver [start|list|setup|NAME] [--display all|current] [--palette NAME] [--interval SECONDS] [--matching|--independent] [--invert|--no-invert] [--preview] [--seconds N] [--save]
+  [media] Screensaver picker, previews, and settings
+lk sv [NAME|cycle] [OPTIONS]
+  [media] Start saved ambient screensaver; Escape dismisses
 lk mp [QUERY]
   [media] Fabric audio library, queue and player
 lk tv [QUERY]
@@ -1198,6 +1202,20 @@ Parser arguments and recognized option tokens (grouped by handler):
 --native-style — Keep the browser appearance instead of LOOK invocation colors
 --tags — Initial numbered-link display; defaults to remembered preference or off
 target — URL, search WORDS, home, or list
+
+look/saver.py
+
+Parser arguments and recognized option tokens (grouped by handler):
+--display — current means the display under the pointer at launch
+--independent — independent scenes and colors across displays
+--interval — seconds per scene, 5–600
+--invert — occasional inverted colors
+--matching — matching scenes and colors across displays
+--palette
+--preview — open a small graphical preview
+--save — save supplied settings without launching
+--seconds — dismiss automatically after this many seconds
+selection — scene name, cycle, start, list, or setup
 
 LOCAL SPEECH INPUT
 

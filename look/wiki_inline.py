@@ -17,7 +17,7 @@ def layout(ui,article,width,page,hints=False,show=True):
     text_anchors=[];text=wiki.article_lines(ui,article,width,hints,text_anchors)
     groups=defaultdict(list)
     if show:
-        for index,image in enumerate(article.get('images',[])):
+        for index,image in wiki_images.article_images(article):
             before=image.get('before')
             if type(before) is int and 0<=before<=len(article['paragraphs']):groups[before].append((index,image))
     lines=[];anchors=[];blocks=[];inserted=set()
@@ -29,7 +29,7 @@ def layout(ui,article,width,page,hints=False,show=True):
             if image.get('width') and image.get('height'):
                 rows=max(MIN_IMAGE_ROWS,min(rows,round(cols*image['height']/image['width']/2)))
             base=IMAGE_ANCHOR_BASE+order*IMAGE_ANCHOR_STEP
-            lines.append(ui._c(f'IMAGE {index+1} · '+safe_text(image['title']),'2'));anchors.append((pi,base))
+            lines.append(ui._c(f'IMAGE {index+1} · '+wiki_images.title(image),'2'));anchors.append((pi,base))
             blocks.append({'image':index,'start':len(lines),'rows':rows,'cols':cols})
             for row in range(rows):lines.append('');anchors.append((pi,base+row+1))
             lines.append('');anchors.append((pi,base+rows+1))

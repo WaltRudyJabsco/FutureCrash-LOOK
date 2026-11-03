@@ -129,6 +129,7 @@ Download videos directly on a chosen Fabric node with `lk ytd URL --node 3090`. 
 - `Shift-D`: remove selected/marked objects with confirmation and journaled undo where supported.
 - `Shift-R`: rename one or many objects; `#`, `##`, `###` provide numbered batch patterns.
 - `lk media find QUERY`: Fabric media selector with local or owner-rendered remote terminal artwork; navigation repaints without clear-to-blank flashes.
+- `lk saver`: screensaver picker with live preview, display and palette settings; `lk sv` launches the saved selection. [Saver setup and controls](docs/SAVER.md).
 - `lk player`: live queue/player with terminal artwork, EQ activity view, transport controls, `s` shuffle, `r` repeat, and `Q` to view the upcoming queue.
 - `lk mp`: integrated Fabric media workspace: searchable library, queue, art/info, now playing, and transport in one terminal surface.
 - `lk media offline QUERY` / `--queue`, or **Shift-Y** in MP, TV and Media Find: verified local travel copies. [Offline travel and Oracle cancellation](docs/OFFLINE-TRAVEL.md).

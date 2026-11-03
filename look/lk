@@ -21335,6 +21335,8 @@ _COMMANDS = [
     ("lk media edit", "<QUERY> [--artist NAME] [--album NAME] [--album-artist NAME] [--title NAME] [--track N] [--disc N] [--series NAME] [--season N] [--episode N] [--content-kind episode|special|extra|unclassified] [--all] [--json]", "media", "Correct metadata for one track or matching batch"),
     ("lk media", "[...]", "media", "Media library, queue, playlists, transport", "lk music"),
     ("lk player", "", "media", "Live LOOK miniplayer"),
+    ("lk saver", "[start|list|setup|NAME] [--display all|current] [--palette NAME] [--interval SECONDS] [--matching|--independent] [--invert|--no-invert] [--preview] [--seconds N] [--save]", "media", "Screensaver picker, previews, and settings"),
+    ("lk sv", "[NAME|cycle] [OPTIONS]", "media", "Start saved ambient screensaver; Escape dismisses"),
     ("lk mp", "[QUERY]", "media", "Fabric audio library, queue and player"),
     ("lk tv", "[QUERY]", "media", "Fabric movies, TV and video player"),
     ("lk print", "[list [--queues]|discover|options [PRINTER]|jobs [PRINTER]] [--node NODE]", "files", "Physical-printer desk; pick options/jobs and manage friendly names"),
@@ -22591,13 +22593,16 @@ def main():
         import command_help
         return command_help.show(sys.argv[2:])
     if len(sys.argv)>2 and any(flag in sys.argv[2:] for flag in ('--help','-h')):
-        if sys.argv[1] not in {'web','terminal','notes','tasks','reminders','ytd','describe','notifications'} and not (sys.argv[1] in {'media','music'} and sys.argv[2] in {'import','disc','rip','edit','storage'}):
+        if sys.argv[1] not in {'web','terminal','saver','sv','notes','tasks','reminders','ytd','describe','notifications'} and not (sys.argv[1] in {'media','music'} and sys.argv[2] in {'import','disc','rip','edit','storage'}):
             import command_help
             return command_help.show([word for word in sys.argv[1:] if word not in {'--help','-h'}])
     if len(sys.argv)>=2 and sys.argv[1] in {"notes","tasks","reminders"}:
         import notebook
         kind={"notes":None,"tasks":"task","reminders":"reminder"}[sys.argv[1]]
         return notebook.main(sys.argv[2:],kind=kind,read_key=_read_tty_key,hints=_media_hints)
+    if len(sys.argv)>=2 and sys.argv[1] in {'saver','sv'}:
+        import saver
+        return saver.main(sys.argv[2:],ui=sys.modules[__name__],quick=sys.argv[1]=='sv')
     if len(sys.argv)>=2 and sys.argv[1]=='terminal':
         import terminal_style
         return terminal_style.main(sys.argv[2:],read_key=_read_tty_key)

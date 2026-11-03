@@ -161,3 +161,32 @@ def test_inline_clear_only_erases_native_placements_once(lk):
     second.invalidate.assert_called_once()
     painter.close()
     first.close.assert_called_once();second.close.assert_called_once()
+
+
+def test_book_parser_image_capture_does_not_pollute_wiki_schema():
+    value=article()
+    assert len(value['images'])==1
+    image=value['images'][0]
+    assert image['title']=='Photo' and image['url'].startswith('https://thumb.wikimedia.org/')
+    assert 'alt' not in image  # Parent EPUB-only records must not be appended.
+    ui=SimpleNamespace(_c=lambda text,style:text)
+    assert len(wiki_inline.layout(ui,value,70,20)[2])==1
+
+
+def test_existing_cached_duplicates_and_missing_title_are_safe():
+    value=article()
+    valid=dict(value['images'][0]);valid.pop('title')
+    value['images']=[{'before':1,'source':'//thumb.wikimedia.org/old.jpg','alt':'legacy'},valid]
+    ui=SimpleNamespace(_c=lambda text,style:text)
+    lines,anchors,blocks=wiki_inline.layout(ui,value,70,20)
+    assert len(blocks)==1 and blocks[0]['image']==1
+    assert any('Article image' in line for line in lines)
+    assert len(lines)==len(anchors)
+    import wiki_images
+    assert wiki_images.article_images(value)==[(1,valid)]
+    assert wiki_images.title({'alt':'Alternative caption'})=='Alternative caption'
+
+
+def test_rejected_remote_images_do_not_leak_through_parent_parser():
+    value=wiki.article_payload('<p>Text</p><img src="https://example.test/photo.jpg" alt="Untrusted"><img src="//upload.wikimedia.org/icon.svg">','Test','Test',live=True)
+    assert value['images']==[]

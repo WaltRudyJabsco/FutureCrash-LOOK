@@ -232,7 +232,9 @@ class ArticleParser(book_speech.PassageParser):
     def __init__(self,path,wiki_host=None,hints=None,decorate=False,live=False):
         super().__init__();self.links=[];self.path=path;self.wiki_host=wiki_host;self.link=None;self.label=[];self.hints=hints or {};self.decorate=decorate;self.live=live;self.link_start=0;self.images=[]
     def handle_starttag(self,tag,attrs):
-        super().handle_starttag(tag,attrs)
+        # EPUB images use source/alt records. Wiki owns its URL-filtered image
+        # schema; letting the parent append too creates untitled duplicates.
+        if tag not in {'img','image'}:super().handle_starttag(tag,attrs)
         if tag=='a':self.link=dict(attrs).get('href');self.label=[];self.link_start=len(self.current)
         if tag=='img' and not self.skip and len(self.images)<12:
             values=dict(attrs);src=values.get('src','')
