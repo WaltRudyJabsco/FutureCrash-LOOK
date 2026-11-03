@@ -43,7 +43,7 @@ def collect(root=ROOT):
         forms.append((f'lk {command}','[ARGS]','aliases','Additional routed entry point; see usage details below'))
     usages={}
     options={}
-    for relative in ['look/printing.py','look/lk','look/look_renderer.py','look/ytd.py','look/games.py','look/notebook.py','look/disc_ui.py','look/terminal_style.py','look/web_desk.py']:
+    for relative in ['look/printing.py','look/lk','look/look_renderer.py','look/ytd.py','look/games.py','look/notebook.py','look/disc_ui.py','look/terminal_style.py','look/web_desk.py','look/saver.py']:
         parsed=ast.parse((root/relative).read_text())
         lines=set(); flags=set()
         for n in ast.walk(parsed):
@@ -274,6 +274,8 @@ def command_help_pages(root,forms,usages):
             pending=next_level
         if flags and name!='settings': parts.extend(['','RECOGNIZED FLAGS',', '.join(sorted(flags))])
         surface_help={
+            'saver':'Arrows select; Space enables for Cycle; P previews; Enter starts; A saves; D displays; M matching/independent; C colors; I inversions; -/+ interval; G graphics setup; q/Esc back. lk saver setup installs isolated Qt. See docs/SAVER.md.',
+            'sv':'Start saved screensaver. Escape, q or click dismisses all windows. Options: --display all|current, --palette NAME, --interval SECONDS, --matching, --independent, --invert/--no-invert, --preview, --seconds N. This is not a password lock.',
             'commands':'Type to filter; arrows choose; Page Up/Down or Shift-Up/Down moves a screen; Home/End or Shift-Left/Right goes to the first/last result. Enter/Right composes a command in the shell; Esc clears the filter, then returns. Blue keys and gray descriptions wrap in the footer.',
             'clip':'Local ten-slot text shelf: 1–9,0 recalls; Shift-number removes (US !@#$%^&*()), or x removes the highlighted item. Enter previews; Esc returns. Run lk clip on to enable background capture, off to stop, status to inspect, clear to empty history. Capture restarts on the next LOOK command after login. Shift-Z opens from LOOK or Notes; Ctrl-Y inserts at the note editor cursor. s explicitly saves one item as a Clipboard-project note using normal Fabric sync; local history never syncs automatically.',
             'settings':'Settings opens a searchable picker. Supply a word to start filtered, e.g. lk settings voice. Arrows choose; Enter opens the setting.',

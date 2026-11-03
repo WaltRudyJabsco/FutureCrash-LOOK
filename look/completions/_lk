@@ -25,6 +25,8 @@ _lk() {
   top=(
     'doc:full offline command and keyboard reference'
     'tldr:short offline command examples'
+    'saver:screensaver picker and settings'
+    'sv:start ambient screensaver'
     'mp:integrated Fabric media player'
     'books:Fabric EPUB/PDF shelf'
     'print:physical Fabric printers and print desk'
@@ -113,6 +115,22 @@ _lk() {
   fi
 
   case "$words[2]" in
+    saver|sv)
+      case "$words[CURRENT-1]" in
+        --display) _values 'display' all current; return ;;
+        --palette) _values 'palette' auto neon paper slate mercury harbor orchard porcelain ember vellum frost midnight; return ;;
+        --interval|--seconds) _message 'seconds'; return ;;
+      esac
+      if [[ "$PREFIX" == -* ]]; then
+        _values 'saver option' --display --palette --interval --matching --independent --invert --no-invert --preview --seconds --save --help
+      else
+        local -a scenes
+        scenes=("${(@f)$(lk saver list 2>/dev/null)}")
+        [[ "$words[2]" == saver ]] && scenes+=(start list setup)
+        _describe 'screensaver' scenes
+      fi
+      return
+      ;;
     print)
       if (( CURRENT == 3 )); then
         _values 'print action' list options jobs nickname profile discover file text receipt inspect send discard cancel add

@@ -419,6 +419,8 @@ install_file "$ROOT/look/media_duration.py" "$HOME/.local/share/look/media_durat
 install_file "$ROOT/look/media_ui_work.py" "$HOME/.local/share/look/media_ui_work.py"
 install_file "$ROOT/look/media_cover_lookup.py" "$HOME/.local/share/look/media_cover_lookup.py"
 install_file "$ROOT/look/visualizer_settings.py" "$HOME/.local/share/look/visualizer_settings.py"
+install_file "$ROOT/look/saver.py" "$HOME/.local/share/look/saver.py"
+install_file "$ROOT/look/saver_gui.py" "$HOME/.local/share/look/saver_gui.py"
 install_file "$ROOT/look/player_visuals.py" "$HOME/.local/share/look/player_visuals.py"
 install_file "$ROOT/look/terminal_style.py" "$HOME/.local/share/look/terminal_style.py"
 install_file "$ROOT/look/media_watch.py" "$HOME/.local/share/look/media_watch.py"
