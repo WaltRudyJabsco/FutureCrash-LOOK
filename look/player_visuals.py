@@ -4,7 +4,7 @@ import math
 import hashlib
 import json
 
-NAMES = ('Bars', 'Waves', 'Orbit', 'Tunnel', 'Stars', 'Plasma', 'Album Art', 'Black Hole', 'Rooftops', 'Spectrum', 'Moon Jelly', 'Firefly Garden', 'Clockwork Garden', 'Rain on Glass', 'Neon Reef', 'Aurora Loom', 'Paper Lanterns', 'Magnetic Field', 'Comet Trails', 'Orrery', 'Phosphor Rain', 'Kinetic Mobile', 'Haunted Hollow', 'Dune Sea', 'Harmonic Ink', 'Cycle')
+NAMES = ('Bars', 'Waves', 'Orbit', 'Tunnel', 'Stars', 'Plasma', 'Album Art', 'Black Hole', 'Rooftops', 'Spectrum', 'Moon Jelly', 'Firefly Garden', 'Clockwork Garden', 'Rain on Glass', 'Neon Reef', 'Aurora Loom', 'Paper Lanterns', 'Magnetic Field', 'Comet Trails', 'Orrery', 'Phosphor Rain', 'Kinetic Mobile', 'Haunted Hollow', 'Dune Sea', 'Harmonic Ink', 'Tide Pools', 'Switchyard', 'Cycle')
 CYCLE_MODE = len(NAMES)
 CYCLE_INTERVAL_SECONDS = 10.0
 
@@ -69,6 +69,10 @@ def frame(mode, width, height, phase, playing=True, seed=0):
             depth=(i*.618034+t*.18)%1
             point((width-1)/2+math.cos(angle)*depth*width*.65,
                   (height-1)/2+math.sin(angle)*depth*height*.65,'.+*'[min(2,int(depth*3))])
+    elif mode==26:
+        return switchyard_frame(width,height,t,seed)
+    elif mode==25:
+        return tide_pools_frame(width,height,t,seed)
     elif mode==24:
         return harmonic_ink_frame(width,height,t,seed)
     elif mode==23:
@@ -677,4 +681,35 @@ def harmonic_ink_frame(width,height,phase,seed=0):
         if 0<=x<width and 0<=y<height:
             # Overlapping traces build an ink density instead of solid fill.
             canvas[y][x]='+' if canvas[y][x]!=' ' else '.'
+    return [''.join(row) for row in canvas]
+
+def tide_pools_frame(width,height,phase,seed=0):
+    """Two ripple sources cross over a slowly drifting shallow current."""
+    rows=[]
+    for y in range(height):
+        row=[]
+        for x in range(width):
+            u,v=x/max(1,width-1),y/max(1,height-1)
+            a=math.hypot((u-.30)*1.7,v-.4)
+            b=math.hypot((u-.72)*1.7,v-.62)
+            wave=math.sin(26*a-phase*2+seed*.2)+math.sin(23*b-phase*1.5)
+            row.append('≈' if wave>1.6 else '~' if wave>1.05 else '·' if wave>.65 else ' ')
+        rows.append(''.join(row))
+    return rows
+
+
+def switchyard_frame(width,height,phase,seed=0):
+    """Trains cross staggered tracks while signal lights change."""
+    canvas=[[' ']*width for _ in range(height)]
+    for lane,y in enumerate(range(0,height,3)):
+        track=canvas[y]
+        for x in range(width):
+            track[x]='┄' if x%5 else '┼'
+        direction=1 if lane%2==0 else -1
+        head=int(phase*(5+lane%3)*direction+seed+lane*13)%width
+        for i,char in enumerate('◆■■■'):
+            track[(head-direction*i)%width]=char
+        if y+1<height:
+            for x in range(4,width,17):
+                canvas[y+1][x]='●' if (int(phase)+x+lane)%4==0 else '·'
     return [''.join(row) for row in canvas]
