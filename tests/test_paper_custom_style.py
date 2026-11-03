@@ -189,9 +189,19 @@ def test_named_palette_stays_separate_and_appears_in_picker(tmp_path,monkeypatch
     assert (path/'look-theme.conf').read_text().startswith('# LOOK palette: blue-notebook')
 
 
-@pytest.mark.parametrize('name',['paper','harbor','orchard','porcelain','ember'])
+@pytest.mark.parametrize('name',['paper','harbor','orchard','porcelain','ember','vellum','frost','midnight'])
 def test_preview_and_lookup_inks_have_contrast(name):
     palette=styles.settings(name)
     for key in ('foreground','url_color','color8','color9','color10','color75','color81','color114','color221'):
         assert styles.contrast(palette['background'],palette[key])>=4.5,key
     assert styles.contrast(palette['selection_background'],palette['selection_foreground'])>=4.5
+
+@pytest.mark.parametrize('theme',['paper','porcelain','vellum','frost'])
+def test_light_theme_keycap_has_blue_fill_and_resets_before_label(monkeypatch,theme):
+    monkeypatch.setenv('LOOK_TERMINAL_THEME',theme)
+    colors=styles.list_colors()
+    hint=styles.command_text('Enter open',('Enter',),colors=colors)
+    assert '\x1b[48;2;' in hint
+    assert ';97;1mEnter\x1b[0m'+colors['GRAY']+' open' in hint
+    fill=styles.settings(theme)['color75']
+    assert styles.contrast(fill,'#ffffff')>=4.5

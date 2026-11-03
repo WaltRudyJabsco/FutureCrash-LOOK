@@ -1434,9 +1434,10 @@ def action_footer(parts:list[str],width:int)->list[str]:
     prefix='  '
     lines=[]
     current=prefix
+    colors=terminal_style.list_colors()
     for part in parts:
         key,separator,label=part.partition(' ')
-        styled=f'{RESET}{CYAN}{BOLD}{key}{RESET}{FAINT} {label}' if separator else f'{RESET}{CYAN}{BOLD}{part}{RESET}{FAINT}'
+        styled=RESET+terminal_style.keycap(key,colors)+RESET+FAINT+(' '+label if separator else '')
         piece=styled if current==prefix else ' · '+styled
         if len(strip_ansi(current+piece)) > width and current!=prefix:
             lines.append(f'{FAINT}{current}{RESET}')

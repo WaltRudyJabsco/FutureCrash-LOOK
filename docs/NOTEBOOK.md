@@ -236,10 +236,9 @@ inside the note. **Ctrl-G** collapses it and restores the Notes controls.
 Select the block again and press **Enter** to resume. The shell starts beside
 the note file and uses your configured interactive shell.
 
-Inline terminals use the optional Python package `pyte`. Install it in a
-virtual environment and run the installed `lk` with that Python on each machine
-where you want inline terminals. Ordinary note links and commands use the
-existing Notes runtime.
+Run `lk work --setup` once on each machine to install the inline terminal
+packages into LOOK's user directory. Notes and Work use that directory with
+the usual `lk` command. Setup requires Python with pip.
 
 ## Adjacent shell pane
 

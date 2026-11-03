@@ -28,7 +28,9 @@ In a pipe or script it still prints the palette list.
 The palettes are Neon (the existing green LOOK colors), Paper (MercuryWriter's
 warm white #f6f1e7 and dark ink #201e1a), and Slate (quiet charcoal).
 Harbor adds deep blue, Orchard dark olive, Porcelain cool white, and Ember
-warm charcoal.
+warm charcoal. Vellum adds cream paper, Frost a cool mint page, and Midnight
+deep indigo. Light palettes use white lettering on blue keycaps for action
+keys. Labels keep their regular ink and selection keeps its own highlight.
 Paper uses saturated navy, red, green, and violet inks, including LOOK’s
 explicit RGB directory headings and Markdown file labels. Selection uses a yellow
 highlighter with dark text. Prompt panels for OS/time and Git use lighter neutral,

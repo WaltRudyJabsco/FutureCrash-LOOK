@@ -77,9 +77,9 @@ RESET='\033[0m'
 def command_hints(text):
     """Style after wrapping/clipping so ANSI escapes never affect the layout."""
     plain=re.sub(r'\033\[[0-9;]*m','',text)
-    colors=terminal_style.list_colors();key='\033[1m'+colors['CYAN'];label=colors['GRAY']
+    colors=terminal_style.list_colors();label=colors['GRAY']
     return '\n'.join(label+re.sub(r'(^\s*| · )(\S+)',
-        lambda match:match[1]+key+match[2]+RESET+label,line)+RESET
+        lambda match:match[1]+terminal_style.keycap(match[2],colors)+RESET+label,line)+RESET
         for line in plain.split('\n'))
 
 
@@ -853,7 +853,7 @@ def note_view(store,row,read_key):
                     notice = 'Terminal cancelled'
                 elif key in {'\r','\n','enter'}:
                     try:
-                        import pyte
+                        pyte = work.load_emulator()
                         scripts = [(body,language) for _,body,language,_ in work.document_blocks(row['body'])
                                    if language in work.SHELL_FENCES]
                         body,language = scripts[pending-1]

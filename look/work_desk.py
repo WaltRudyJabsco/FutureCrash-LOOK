@@ -4,6 +4,7 @@ import codecs
 import curses
 import errno
 import fcntl
+import importlib
 import os
 from pathlib import Path
 import pty
@@ -469,13 +470,62 @@ def desk(window, pyte, path, source, block=None, editable=True):
             session.close()
 
 
+WORK_PACKAGES = ('pyte==0.8.2','wcwidth==0.2.13')
+
+
+def dependency_path():
+    return Path.home()/'.local/share/look/work/python'
+
+
+def load_emulator():
+    try:
+        return importlib.import_module('pyte')
+    except ModuleNotFoundError as error:
+        if error.name != 'pyte':
+            raise
+    path = dependency_path()
+    if path.is_dir() and str(path) not in sys.path:
+        sys.path.append(str(path))
+        importlib.invalidate_caches()
+    try:
+        return importlib.import_module('pyte')
+    except ImportError as error:
+        raise ValueError('Run lk work --setup to install inline terminal support for this account.') from error
+
+
+def setup_emulator():
+    try:
+        load_emulator()
+        print('Inline terminal support is ready.')
+        return
+    except (ImportError,ValueError):
+        pass
+    path = dependency_path()
+    path.parent.mkdir(parents=True,exist_ok=True)
+    with tempfile.TemporaryDirectory(prefix='.setup-',dir=path.parent) as temporary:
+        staged = Path(temporary)/'python'
+        subprocess.run([sys.executable,'-m','pip','--disable-pip-version-check','install',
+                        '--target',str(staged),*WORK_PACKAGES],check=True)
+        subprocess.run([sys.executable,'-I','-c',
+                        'import sys; sys.path.insert(0,sys.argv[1]); import pyte; pyte.Screen(10,5)',
+                        str(staged)],check=True)
+        if path.exists():
+            raise ValueError(f'Existing setup at {path} needs repair before it can be replaced.')
+        staged.rename(path)
+    print('Inline terminal support installed for this account.')
+
+
 def main(argv=None):
     parser = argparse.ArgumentParser(prog='lk work', description='Read Markdown, review command blocks and open interactive shell blocks.')
     parser.add_argument('document', nargs='?', type=Path, help='Markdown file. Omit to open the demo.')
     parser.add_argument('--block', type=int, help='Select a shell block by number.')
     parser.add_argument('--read-only', action='store_true', help='Edit managed notes in Notes.')
+    parser.add_argument('--setup', action='store_true', help='Install inline terminal support for this account.')
     args = parser.parse_args(argv)
     try:
+        if args.setup:
+            setup_emulator()
+            return 0
         if not sys.stdin.isatty() or not sys.stdout.isatty():
             raise ValueError('Open LK Work in Kitty or another interactive terminal.')
         if args.document:
@@ -489,14 +539,11 @@ def main(argv=None):
             except FileExistsError:
                 pass
         source = read_document(path)
-        try:
-            import pyte
-        except ImportError:
-            raise ValueError('LK Work needs pyte in the Python environment running lk. Install it in a virtual environment and run lk with that Python.') from None
+        pyte = load_emulator()
         if args.block is not None and not 1 <= args.block <= sum(part[2] in SHELL_FENCES for part in document_blocks(source)):
             raise ValueError('Shell block no longer exists.')
         curses.wrapper(desk,pyte,path,source,args.block,not args.read_only)
-    except (OSError,ValueError,curses.error) as error:
+    except (OSError,ValueError,ImportError,subprocess.CalledProcessError,curses.error) as error:
         print(f'LK Work · {error}',file=sys.stderr)
         return 1
     return 0
