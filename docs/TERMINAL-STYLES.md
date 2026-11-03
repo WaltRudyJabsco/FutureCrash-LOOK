@@ -23,6 +23,14 @@ The optional appearance command provides one local entry point on each node:
 In an interactive terminal, lk terminal themes opens the same full-screen picker
 as lk terminal. Arrow keys update the preview of text, keys, status inks, ANSI
 swatches and selection. Enter applies, E opens the color editor, and Escape cancels.
+**A** applies the highlighted palette and keeps the picker open. **L** opens
+a separate Kitty preview window with the highlighted palette and opacity.
+Left and Right adjust opacity in steps of 0.02, and Enter applies and closes.
+For example, `lk terminal theme vellum --opacity 0.94` saves a slight
+transparency. `lk terminal launch vellum --opacity 0.94` previews it in a new
+window. Kitty applies opacity to its default background. Existing windows may
+need to reopen when dynamic background opacity was disabled at launch.
+
 In a pipe or script it still prints the palette list.
 
 The palettes are Neon (the existing green LOOK colors), Paper (MercuryWriter's

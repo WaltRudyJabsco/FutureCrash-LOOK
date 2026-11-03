@@ -3,10 +3,27 @@ from __future__ import annotations
 import math
 import hashlib
 import json
+import random
 
 NAMES = ('Bars', 'Waves', 'Orbit', 'Tunnel', 'Stars', 'Plasma', 'Album Art', 'Black Hole', 'Rooftops', 'Spectrum', 'Moon Jelly', 'Firefly Garden', 'Clockwork Garden', 'Rain on Glass', 'Neon Reef', 'Aurora Loom', 'Paper Lanterns', 'Magnetic Field', 'Comet Trails', 'Orrery', 'Phosphor Rain', 'Kinetic Mobile', 'Haunted Hollow', 'Dune Sea', 'Harmonic Ink', 'Tide Pools', 'Switchyard', 'Cycle')
 CYCLE_MODE = len(NAMES)
 CYCLE_INTERVAL_SECONDS = 10.0
+
+
+RUN_ACCENTS = ('36','34','32','33','35','31')
+
+
+class RunAccent:
+    """Keep the accent stable for each activation and avoid immediate repeats."""
+    def __init__(self):
+        self.activation = None
+        self.color = None
+
+    def choose(self,activation):
+        if activation != self.activation:
+            self.color = random.choice([ink for ink in RUN_ACCENTS if ink != self.color])
+            self.activation = activation
+        return self.color
 
 
 def playback_modes(enabled=None):

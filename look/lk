@@ -19913,7 +19913,7 @@ def _media_player_large_art(entry,width,height):
     return [line[:width].ljust(width) for line in (lines+['']*height)[:height]]
 
 
-def _media_player_full_visual(snap,mode,visual_elapsed=0):
+def _media_player_full_visual(snap,mode,visual_elapsed=0,*,accent=None,run=None):
     terminal=shutil.get_terminal_size((80,24))
     width=max(1,min(240,terminal.columns-1)); height=max(1,terminal.lines-1)
     entry=snap['entry']; state=str(snap['state']).lower()
@@ -19954,6 +19954,10 @@ def _media_player_full_visual(snap,mode,visual_elapsed=0):
     if name=='Harmonic Ink': color=player_visuals.INK_COLOR
     if name=='Tide Pools': color='36'
     if name=='Switchyard': color='35'
+    if accent is not None:
+        cycle_step=int(visual_elapsed//player_visuals.CYCLE_INTERVAL_SECONDS) if cycling else 0
+        track=(snap['index'],_media_entry_label(entry)) if album_art else None
+        color=accent.choose((run,mode,cycle_step,track))
     shimmer=album_art and state in {'play','playing'} and not any(
         status in line for line in art for status in ('Loading album art','Album art unavailable'))
     rendered=[]
@@ -19961,7 +19965,7 @@ def _media_player_full_visual(snap,mode,visual_elapsed=0):
         plain=_media_player_line(line,width)
         if len(header)<=i<len(header)+len(art):
             y=i-len(header)
-            row_color=player_visuals.spectrum_color(y,len(art)) if name=='Spectrum' else ('33' if y>=len(art)*.6 else color) if name=='Haunted Hollow' else color
+            row_color=color if accent is not None else player_visuals.spectrum_color(y,len(art)) if name=='Spectrum' else ('33' if y>=len(art)*.6 else color) if name=='Haunted Hollow' else color
             spans=player_visuals.shimmer_spans(plain,y,width,len(art),elapsed,shimmer)
             rendered.append(''.join(_c(text,('1;' if bright else '')+row_color) for text,bright in spans))
         else:
@@ -19969,12 +19973,12 @@ def _media_player_full_visual(snap,mode,visual_elapsed=0):
     return "\n".join(rendered)
 
 
-def _media_player_render(visualizer=0,visual_elapsed=0):
+def _media_player_render(visualizer=0,visual_elapsed=0,*,accent=None,run=None):
     visualizer=player_visuals.available_mode(visualizer,visualizer_settings.enabled_modes())
     snap=_media_status_snapshot()
     if snap: player_visuals.album_color(snap)
     if visualizer and snap:
-        return _media_player_full_visual(snap,visualizer,visual_elapsed)
+        return _media_player_full_visual(snap,visualizer,visual_elapsed,accent=accent,run=run)
     width=max(42,min(88,shutil.get_terminal_size((72,24)).columns-2))
     inner=width-2
     if not snap:
@@ -20045,6 +20049,8 @@ def media_player(initial_visualizer=0):
         return 0
     visualizer=player_visuals.available_mode(initial_visualizer % (len(player_visuals.NAMES)+1),visualizer_settings.enabled_modes(refresh=True))
     visual_started=time.monotonic()
+    accent=player_visuals.RunAccent()
+    run=0
     notice=visualizer_settings.warning()
     fd=sys.stdin.fileno()
     old=termios.tcgetattr(fd)
@@ -20054,8 +20060,11 @@ def media_player(initial_visualizer=0):
         while True:
             allowed=visualizer_settings.enabled_modes()
             available=player_visuals.available_mode(visualizer,allowed)
-            if available!=visualizer:visualizer=available;visual_started=time.monotonic()
-            sys.stdout.write("\033[H"+_media_player_render(visualizer,time.monotonic()-visual_started)+(f"\n{_ansi_clip(notice,shutil.get_terminal_size((80,24)).columns-1)}" if notice else "")+"\033[J")
+            if available!=visualizer:
+                visualizer=available
+                visual_started=time.monotonic()
+                run+=1
+            sys.stdout.write("\033[H"+_media_player_render(visualizer,time.monotonic()-visual_started,accent=accent,run=run)+(f"\n{_ansi_clip(notice,shutil.get_terminal_size((80,24)).columns-1)}" if notice else "")+"\033[J")
             sys.stdout.flush()
             key=_read_tty_key(fd,.25)
             if not key:
@@ -20064,12 +20073,14 @@ def media_player(initial_visualizer=0):
             if key=="v":
                 visualizer=player_visuals.next_mode(visualizer,visualizer_settings.enabled_modes())
                 visual_started=time.monotonic()
+                run+=1
             elif key=="V":
                 opened=time.monotonic();saved=visualizer_settings.picker(sys.modules[__name__],fd)
                 tty.setcbreak(fd)
                 if saved:
                     visualizer=player_visuals.available_mode(visualizer,visualizer_settings.enabled_modes(refresh=True))
                     visual_started=time.monotonic();notice="Visualizer selection saved"
+                    run+=1
                 else:visual_started+=time.monotonic()-opened
                 sys.stdout.write("\033[2J")
             elif key=="O": _,notice=_media_reset_audio()
