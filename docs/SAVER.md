@@ -70,3 +70,10 @@ mode falls back to a remaining display if its original display is disconnected.
 
 Automatic idle activation, native password-lock integration, audio-reactive
 analysis, and multi-panel control-room compositions are not part of this release.
+
+On macOS, the saver covers displays with borderless windows and temporarily hides
+the menu bar and Dock using application-local presentation options. It does not
+create full-screen Spaces or change system preferences. Display geometry is
+reapplied after presentation begins so the former menu-bar area is covered too.
+Escape/click, timed dismissal, and interrupt restore the original presentation
+options before closing the windows. Small previews retain normal window controls.
