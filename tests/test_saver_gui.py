@@ -112,3 +112,35 @@ def test_mac_settling_reapplies_every_full_display_rectangle():
     control.settle_presentation()
     control.presentation.enter.assert_called_once()
     for screen,window in control.windows.items():window.setGeometry.assert_called_once_with(screen.geometry())
+
+
+def test_running_keys_reserve_colors_visuals_and_explicit_dismissal(app,monkeypatch):
+    control=saver_gui.SaverController(app,saver.defaults(),preview=True,seed=1)
+    try:
+        window=next(iter(control.windows.values()))
+        change=Mock();dismiss=Mock()
+        monkeypatch.setattr(control,'change_visual',change);monkeypatch.setattr(control,'dismiss',dismiss)
+        for key in (Qt.Key.Key_C,Qt.Key.Key_V,Qt.Key.Key_A,Qt.Key.Key_Q):
+            window.keyPressEvent(QKeyEvent(QEvent.Type.KeyPress,key,Qt.KeyboardModifier.NoModifier))
+        assert [call.kwargs for call in change.call_args_list]==[{'color':True},{'color':False}]
+        dismiss.assert_not_called()
+        window.keyPressEvent(QKeyEvent(QEvent.Type.KeyPress,Qt.Key.Key_C,Qt.KeyboardModifier.NoModifier,'c',True))
+        assert change.call_count==2
+        for key in (Qt.Key.Key_Space,Qt.Key.Key_Escape):
+            window.keyPressEvent(QKeyEvent(QEvent.Type.KeyPress,key,Qt.KeyboardModifier.NoModifier))
+        assert dismiss.call_count==2
+    finally:
+        control.timer.stop()
+        for window in control.windows.values():window.removing=True;window.close()
+
+
+def test_live_controls_reach_every_display():
+    control=object.__new__(saver_gui.SaverController)
+    import time
+    control.started=time.monotonic()
+    windows=[Mock(),Mock(),Mock()];control.windows=dict(enumerate(windows))
+    control.change_visual(color=True);control.change_visual(color=False)
+    for window in windows:
+        window.run.next_color.assert_called_once()
+        window.run.next_scene.assert_called_once()
+        assert window.update.call_count==2

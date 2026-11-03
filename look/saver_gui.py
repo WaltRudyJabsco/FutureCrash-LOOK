@@ -58,6 +58,8 @@ class SaverWindow(QWidget):
         super().__init__()
         self.controller=controller;self.removing=False
         self.run=saver.SceneRun(controller.settings,seed)
+        if not controller.settings['independent'] and controller.windows:
+            self.run.copy_controls_from(next(iter(controller.windows.values())).run)
         self.font_family=next((name for name in ('Menlo','DejaVu Sans Mono','Liberation Mono','Courier New') if name in QFontDatabase.families()),QFontDatabase.systemFont(QFontDatabase.SystemFont.FixedFont).family())
         self.layout_size=None
         self.setWindowTitle('LOOK Saver Preview' if controller.preview else 'LOOK Saver')
@@ -100,14 +102,25 @@ class SaverWindow(QWidget):
         painter.fillRect(self.rect(),QColor(paper));painter.setPen(QColor(ink))
         left=(self.width()-columns*cell_width)/2
         top=(self.height()-rows*cell_height)/2+metrics.ascent()
-        for index,line in enumerate(lines):painter.drawText(round(left),round(top+index*cell_height),line)
+        for index,line in enumerate(lines):
+            inverse=index in self.run.inverse_rows
+            if inverse:painter.fillRect(0,round(top-metrics.ascent()+index*cell_height),self.width(),round(cell_height+1),QColor(ink))
+            painter.setPen(QColor(paper if inverse else ink))
+            painter.drawText(round(left),round(top+index*cell_height),line)
+        painter.setPen(QColor(ink))
         if elapsed<HINT_SECONDS:
-            painter.fillRect(12,12,260,30,QColor(paper))
-            painter.drawText(22,33,'Escape · return to terminal')
+            hint='C colors · V visual · Space/Escape exit'
+            painter.fillRect(12,12,round(metrics.horizontalAdvance(hint))+20,30,QColor(paper))
+            painter.drawText(22,33,hint)
         painter.end()
 
     def keyPressEvent(self,event):
-        if event.key() in {Qt.Key.Key_Escape,Qt.Key.Key_Q}:self.controller.dismiss()
+        # One physical press changes one scene/color; held keys cannot race
+        # through colors or accidentally turn into a flashing animation.
+        if event.isAutoRepeat():return
+        if event.key()==Qt.Key.Key_C:self.controller.change_visual(color=True)
+        elif event.key()==Qt.Key.Key_V:self.controller.change_visual(color=False)
+        elif event.key() in {Qt.Key.Key_Escape,Qt.Key.Key_Space}:self.controller.dismiss()
         else:event.ignore()
 
     def mousePressEvent(self,event):self.controller.dismiss()
@@ -175,6 +188,12 @@ class SaverController:
         if hasattr(self,'timer'):self.timer.stop()
         for window in self.windows.values():window.removing=True;window.close()
         self.app.quit()
+
+    def change_visual(self,*,color):
+        for window in self.windows.values():
+            if color:window.run.next_color()
+            else:window.run.next_scene(elapsed=max(0,time.monotonic()-self.started))
+            window.update()
 
     def tick(self):
         for window in self.windows.values():window.update()

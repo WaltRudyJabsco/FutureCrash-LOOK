@@ -596,3 +596,9 @@ Node identity is reused for 30 seconds during queue preparation. Player redraws
 read playback status without rewriting the saved queue. A missing-file response
 still needs a repaired library path or an available copy; longer network waits
 cannot restore absent source files.
+
+Flight Deck adds oversized fictional spacecraft status words and alternating
+inverse bands. Signal Bloom adds a slow orbital/radar sweep. Both use the shared
+visualizer registry, so they are available in Player, MP, TV, and LOOK Saver.
+Flight Deck's optional captions can be prepared with `lk saver text`; rendering
+uses the local cache or built-in phrases and never makes inference requests.

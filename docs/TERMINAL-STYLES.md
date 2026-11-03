@@ -116,3 +116,7 @@ Signal drawing programs, history and scan animation are unchanged; conversation
 Signal panels use the same selected style. `future-crash --signal-style negative`
 (or `normal`) overrides the saved choice for that launch. V in text editors is
 ordinary input. Press D in ambient to try a drawing, then V to compare styles.
+
+Bridge is a dark spacecraft-console palette: charcoal, amber, pale green and cool
+blue. Use `lk terminal theme bridge` or `lk terminal launch bridge`; the same
+palette is available in the saver through `lk sv --palette bridge`.

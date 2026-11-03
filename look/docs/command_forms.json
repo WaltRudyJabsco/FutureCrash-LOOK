@@ -868,7 +868,7 @@
   ],
   [
     "lk saver",
-    "[start|list|setup|NAME] [--display all|current] [--palette NAME] [--interval SECONDS] [--matching|--independent] [--invert|--no-invert] [--preview] [--seconds N] [--save]",
+    "[start|list|setup|text [reset]|NAME] [--display all|current] [--palette NAME] [--interval SECONDS] [--matching|--independent] [--invert|--no-invert] [--preview] [--seconds N] [--save]",
     "media",
     "Screensaver picker, previews, and settings"
   ],

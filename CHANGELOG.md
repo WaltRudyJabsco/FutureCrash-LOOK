@@ -1,5 +1,8 @@
 ## Unreleased — LOOK Saver and live Wiki images
 
+- Flight Deck and Signal Bloom add cinematic status typography and orbital radar visuals. Bridge adds a charcoal/amber/green/blue palette. Optional `lk saver text` prepares fictional captions through Fabric for offline rendering.
+
+- Running savers accept C for new colors and V for the next scene; Space/Escape dismiss. Unrelated and repeated keypresses do not close or rapidly cycle the saver.
 - Mac savers start without menu/title bars: borderless display windows hide app-local menu/Dock chrome and restore presentation options on dismissal. No mouse sweep is required.
 
 - `lk saver` opens the theme-aware scene/settings picker; `lk sv` launches saved ambient visuals across attached displays. Includes independent/matching scenes, named palettes, optional inversions, previews, interval controls, and Tab completion.
