@@ -40,3 +40,11 @@ def test_application_navigation_keys_are_not_terminal_shortcuts():
     assert 'clear_all_shortcuts yes' in text
     assert not {'shift+up','shift+down','shift+left','shift+right','ctrl+r','alt+j','alt+k'}.intersection(bindings)
     assert 'ctrl+shift+page_up' in bindings
+
+
+def test_mini_pane_keys_are_scoped_and_preserve_terminal_panes():
+    text=(ROOT/'terminal/kitty.conf').read_text()
+    assert 'map alt+shift+w next_window\n' in text
+    assert 'map ctrl+shift+w close_window\n' in text
+    for key,code in [('alt+shift+w',4),('ctrl+shift+w',6),('ctrl+alt+w',7)]:
+        assert f'map --when-focus-on var:mercury_mini {key} send_text all \\x1b[119;{code}u' in text
