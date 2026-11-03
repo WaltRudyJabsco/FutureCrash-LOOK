@@ -68,6 +68,7 @@ def test_archive_refuses_paths_and_symlinks(tmp_path,kind):
 
 @pytest.mark.parametrize('failure',[False,True])
 def test_upgrade_preserves_manuscripts_and_retains_rollback_copy(tmp_path,monkeypatch,failure):
+    monkeypatch.setattr(installer,'configure_mini_keys',lambda:{'state':'current'})
     app=tmp_path/'app';app.mkdir();(app/'mercury_server.py').write_text('old runtime')
     (app/'library').mkdir();(app/'library/project.mercury').write_text('precious manuscript')
     (app/'mercury_config.json').write_text('personal settings')
@@ -96,3 +97,29 @@ def test_upgrade_preserves_manuscripts_and_retains_rollback_copy(tmp_path,monkey
     assert (app/'mercury_server.py').read_text()==('old runtime' if failure else 'new runtime')
     if failure:assert (folder/'failed-app/mercury_server.py').read_text()=='new runtime'
     else:assert ('/api/sync/config',{'enabled':True}) in calls
+
+
+def test_mini_keys_preserve_config_and_are_idempotent(tmp_path,monkeypatch):
+    monkeypatch.setattr(installer.Path,'home',lambda:tmp_path)
+    assert installer.configure_mini_keys()['state']=='not_configured'
+    path=tmp_path/'.config/kitty/kitty.conf';path.parent.mkdir(parents=True)
+    original='font_size 17\ninclude kitty-local.conf\nmap ctrl+shift+w close_window\n'
+    path.write_text(original)
+    receipt=installer.configure_mini_keys()
+    assert Path(receipt['backup']).read_text()==original
+    assert path.read_text().startswith(original)
+    assert installer.MINI_KITTY_KEYS in path.read_text()
+    assert installer.configure_mini_keys()['state']=='current'
+    assert len(list(path.parent.glob('kitty.conf.before-mercury-mini-*')))==1
+
+
+def test_mini_keys_preserve_symlink_target_and_match_shared_profile(tmp_path,monkeypatch):
+    monkeypatch.setattr(installer.Path,'home',lambda:tmp_path)
+    target=tmp_path/'personal';target.write_text('font_size 19\n')
+    path=tmp_path/'.config/kitty/kitty.conf';path.parent.mkdir(parents=True);path.symlink_to(target)
+    receipt=installer.configure_mini_keys()
+    assert target.read_text()=='font_size 19\n'
+    assert Path(receipt['backup']).is_symlink()
+    assert not path.is_symlink()
+    shared=(Path(__file__).resolve().parents[1]/'terminal/kitty.conf').read_text()
+    assert all(line in shared.splitlines() for line in installer.MINI_KITTY_KEYS.splitlines())
