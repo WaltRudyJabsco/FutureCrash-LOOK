@@ -578,3 +578,21 @@ Animation previews rendered from the same terminal frame functions:
 ![Dune Sea](screenshots/visualizer-dune-sea.gif)
 
 ![Harmonic Ink](screenshots/visualizer-harmonic-ink.gif)
+
+## Responsive queue controls
+
+In `lk player`, **Q** toggles the upcoming queue. The current song is marked;
+arrows and Page Up/Down browse the list, and Home returns to the playing area.
+Lowercase **q** or Escape closes the player without stopping playback.
+
+In LKMP, Enter starts the selected tracks and **B** appends them. Source checks
+and playback startup run outside the input loop, so searching, scrolling, and
+switching between library and queue stay available. Another playback mutation
+waits until the current request completes; it is not silently queued. Closing
+the desk does not cancel a playback request already submitted. Unreachable
+tracks are reported and skipped when adding to the queue.
+
+Node identity is reused for 30 seconds during queue preparation. Player redraws
+read playback status without rewriting the saved queue. A missing-file response
+still needs a repaired library path or an available copy; longer network waits
+cannot restore absent source files.

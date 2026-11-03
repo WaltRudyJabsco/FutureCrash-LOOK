@@ -37,7 +37,10 @@ The palettes are Neon (the existing green LOOK colors), Paper (MercuryWriter's
 warm white #f6f1e7 and dark ink #201e1a), and Slate (quiet charcoal).
 Harbor adds deep blue, Orchard dark olive, Porcelain cool white, and Ember
 warm charcoal. Vellum adds cream paper, Frost a cool mint page, and Midnight
-deep indigo. Light palettes use white lettering on blue keycaps for action
+deep indigo. Mercury matches Reader’s warm paper (#f5f0e5), blue-gray ink
+(#233342), blue actions (#315c80), and brass accents, alongside Writer’s paper
+aesthetic. Select it with `lk terminal theme mercury` or preview with
+`lk terminal launch mercury`. Light palettes use white lettering on blue keycaps for action
 keys. Labels keep their regular ink and selection keeps its own highlight.
 Paper uses saturated navy, red, green, and violet inks, including LOOK’s
 explicit RGB directory headings and Markdown file labels. Selection uses a yellow

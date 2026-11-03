@@ -45,3 +45,46 @@ class LatestWork:
     def close(self):
         with self.condition:
             self.closed=True;self.pending=None;self.condition.notify()
+
+
+class MediaAction:
+    """One explicit playback mutation in a child process; UI polling never blocks.
+
+    File-backed output avoids both pipe deadlocks and process-wide stdout redirects
+    while the parent continues rendering. Closing the desk leaves requested playback
+    running, just as closing the small player does.
+    """
+    def __init__(self):
+        self.process=None
+        self.output=None
+
+    @property
+    def busy(self):
+        return self.process is not None
+
+    def start(self,argv,rows):
+        import json
+        import subprocess
+        import tempfile
+        if self.busy:return False
+        self.output=tempfile.TemporaryFile(mode='w+b')
+        try:
+            with tempfile.TemporaryFile(mode='w+b') as source:
+                source.write(json.dumps(rows).encode());source.seek(0)
+                self.process=subprocess.Popen(argv,stdin=source,stdout=self.output,stderr=self.output)
+        except Exception:
+            self.output.close();self.output=None
+            raise
+        return True
+
+    def poll(self):
+        if self.process is None or self.process.poll() is None:return None
+        code=self.process.returncode
+        self.output.seek(0)
+        message=self.output.read().decode('utf-8',errors='replace').strip()
+        self.close()
+        return code,message
+
+    def close(self):
+        if self.output is not None:self.output.close()
+        self.output=None;self.process=None

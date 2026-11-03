@@ -89,7 +89,16 @@ def test_frames_fit_and_play_preserves_identity(lk,rows,monkeypatch,size,kind):
     frames=[];original=lk._terminal_frame_payload
     monkeypatch.setattr(lk,'_terminal_frame_payload',lambda frame:frames.append(frame) or original(frame))
     launches=[]
-    monkeypatch.setattr(lk,'_media_launch_session',lambda session:launches.append(session))
+    import media_ui_work
+    class Action:
+        busy=False
+        def start(self,argv,rows):
+            assert argv[-2:]==['_desk-action','play']
+            launches.append(lk.media_core.new_session(rows));self.busy=True
+            return True
+        def poll(self):return None
+        def close(self):pass
+    monkeypatch.setattr(media_ui_work,'MediaAction',Action)
     assert lk._media_player_library(media_kind=kind)==0
     assert launches and launches[0]['queue'][0]['id'] in ({'a','p'} if kind=='audio' else {'m','t','w'})
     assert 'SORT Title ↓' in lk._strip_ansi(out.getvalue())
