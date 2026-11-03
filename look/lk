@@ -16825,6 +16825,8 @@ def _media_status_snapshot(*,read_only=False):
 
 
 _MEDIA_CATALOG_LOCAL_NAMES=set()
+_MEDIA_IDENTITY_CACHE=(0.0,set())
+MEDIA_IDENTITY_CACHE_SECONDS=30.0
 
 
 def _media_catalog_local_names(catalog_meta):
@@ -16841,9 +16843,14 @@ def _media_catalog_local_names(catalog_meta):
 
 def _media_local_node_names():
     """Names that unambiguously refer to this machine for media routing."""
+    global _MEDIA_IDENTITY_CACHE
     names={"local","localhost","127.0.0.1",platform.node(),socket.gethostname()}
     if _MEDIA_CATALOG_LOCAL_NAMES:
         return {str(name).strip().casefold() for name in names if str(name).strip()} | _MEDIA_CATALOG_LOCAL_NAMES
+
+    cached_at,cached_names=_MEDIA_IDENTITY_CACHE
+    if time.monotonic()-cached_at < MEDIA_IDENTITY_CACHE_SECONDS and cached_names:
+        return set(cached_names)
 
     # Catalog ownership uses the Unified Node's advertised Fabric name, which
     # need not equal the operating-system hostname. Ask the local node for its
@@ -16863,7 +16870,9 @@ def _media_local_node_names():
         # Local hostname aliases remain a valid fallback while the node starts.
         pass
 
-    return {str(name).strip().casefold() for name in names if str(name).strip()}
+    result={str(name).strip().casefold() for name in names if str(name).strip()}
+    _MEDIA_IDENTITY_CACHE=(time.monotonic(),result)
+    return set(result)
 
 
 def _media_standard_audio_url(url):
@@ -17022,6 +17031,7 @@ def _media_pin_playable_rows(rows):
                 file=sys.stderr,
             )
     if not rows: return [],[]
+    _media_local_node_names()
     from concurrent.futures import ThreadPoolExecutor, as_completed
     pinned=[None]*len(rows); failures=[]
     workers=max(1,min(8,len(rows)))
@@ -19928,7 +19938,7 @@ def _media_player_full_visual(snap,mode,visual_elapsed=0,*,accent=None,run=None)
             _media_entry_label(entry),
             f"{state.upper()} · {_media_time(snap.get('position') or 0)} / {_media_time(snap.get('duration') or 0)} · Queue {snap['index']+1}/{len(queue)}"]
     import textwrap
-    footer=textwrap.wrap('v next visual / normal · V choose visuals · space pause · p/n previous/next · ←/→ seek · s shuffle · r repeat · O reset audio · x stop · q close',width)
+    footer=textwrap.wrap('v next visual / normal · V choose visuals · Q queue · space pause · p/n previous/next · ←/→ seek · s shuffle · r repeat · O reset audio · x stop · q close',width)
     art_height=max(1,height-len(header)-len(footer))
     elapsed=visual_elapsed%player_visuals.CYCLE_INTERVAL_SECONDS if cycling else visual_elapsed
     phase=elapsed if name in {'Black Hole','Rooftops','Spectrum','Moon Jelly','Firefly Garden','Clockwork Garden','Rain on Glass','Neon Reef','Aurora Loom','Paper Lanterns','Magnetic Field','Comet Trails','Orrery','Phosphor Rain','Kinetic Mobile','Haunted Hollow','Dune Sea','Harmonic Ink','Tide Pools','Switchyard'} else time.monotonic()
@@ -19973,9 +19983,11 @@ def _media_player_full_visual(snap,mode,visual_elapsed=0,*,accent=None,run=None)
     return "\n".join(rendered)
 
 
-def _media_player_render(visualizer=0,visual_elapsed=0,*,accent=None,run=None):
+def _media_player_render(visualizer=0,visual_elapsed=0,*,accent=None,run=None,show_queue=False,queue_offset=0):
     visualizer=player_visuals.available_mode(visualizer,visualizer_settings.enabled_modes())
-    snap=_media_status_snapshot()
+    snap=_media_status_snapshot(read_only=True)
+    if show_queue:
+        return _media_player_queue_render(snap,queue_offset)
     if snap: player_visuals.album_color(snap)
     if visualizer and snap:
         return _media_player_full_visual(snap,visualizer,visual_elapsed,accent=accent,run=run)
@@ -20002,7 +20014,7 @@ def _media_player_render(visualizer=0,visual_elapsed=0,*,accent=None,run=None):
                 f"Shuffle {'on' if snap['session'].get('shuffle') else 'off'}  ·  "
                 f"Repeat {snap['session'].get('repeat','off')}")
         eq=_media_player_visualizer(entry,snap["state"],inner)
-        player_controls="space play/pause · ←/→ seek 10s · p/n previous/next · s shuffle · r repeat · O reset audio · v visuals · V choose visuals · x stop · q/Esc close player"
+        player_controls="space play/pause · ←/→ seek 10s · p/n previous/next · s shuffle · r repeat · Q queue · O reset audio · v visuals · V choose visuals · x stop · q/Esc close player"
         raw_body=[
             f"{artist} — {title}" if artist else title, album, eq or "",
             f"{time_text}  {bar}",
@@ -20042,6 +20054,22 @@ def _media_player_render(visualizer=0,visual_elapsed=0,*,accent=None,run=None):
     return "\n".join(out)
 
 
+def _media_player_queue_render(snap,offset=0):
+    width=max(20,shutil.get_terminal_size((80,24)).columns-2)
+    height=max(1,shutil.get_terminal_size((80,24)).lines-5)
+    queue=(snap or {}).get('session',{}).get('queue') or []
+    current=(snap or {}).get('index',0)
+    start=max(0,min(current+offset,max(0,len(queue)-height)))
+    lines=[_c('LOOK PLAYER · QUEUE','1;36')]
+    for index in range(start,min(len(queue),start+height)):
+        marker='▶' if index==current else ' '
+        line=f'{marker} {index+1:>3}  '+_media_entry_label(queue[index])
+        lines.append(_ansi_clip(_c(line,'1;36' if index==current else '37'),width))
+    if not queue:lines.append('Queue is empty')
+    lines.extend(['',_media_hints('↑↓ scroll · Page Up/Down page · Q back · q/Esc close player',width)])
+    return '\n'.join(lines)
+
+
 def media_player(initial_visualizer=0):
     """Tiny live view over MediaSession; closing it never stops playback."""
     if not (sys.stdin.isatty() and sys.stdout.isatty()):
@@ -20052,6 +20080,7 @@ def media_player(initial_visualizer=0):
     accent=player_visuals.RunAccent()
     run=0
     notice=visualizer_settings.warning()
+    show_queue=False;queue_offset=0
     fd=sys.stdin.fileno()
     old=termios.tcgetattr(fd)
     try:
@@ -20064,12 +20093,20 @@ def media_player(initial_visualizer=0):
                 visualizer=available
                 visual_started=time.monotonic()
                 run+=1
-            sys.stdout.write("\033[H"+_media_player_render(visualizer,time.monotonic()-visual_started,accent=accent,run=run)+(f"\n{_ansi_clip(notice,shutil.get_terminal_size((80,24)).columns-1)}" if notice else "")+"\033[J")
+            sys.stdout.write("\033[H"+_media_player_render(visualizer,time.monotonic()-visual_started,accent=accent,run=run,show_queue=show_queue,queue_offset=queue_offset)+(f"\n{_ansi_clip(notice,shutil.get_terminal_size((80,24)).columns-1)}" if notice else "")+"\033[J")
             sys.stdout.flush()
             key=_read_tty_key(fd,.25)
             if not key:
                 continue
             if key in {"q","esc"}: return 0
+            if key=="Q":
+                show_queue=not show_queue;queue_offset=0;continue
+            if show_queue and key in {"up","down","pageup","pagedown","home"}:
+                page=max(1,shutil.get_terminal_size((80,24)).lines-5)
+                queue_offset=0 if key=="home" else queue_offset+{"up":-1,"down":1,"pageup":-page,"pagedown":page}[key]
+                session=_media_session() or {};current=int(session.get("current_index") or 0)
+                queue_offset=max(-current,min(queue_offset,max(0,len(session.get("queue") or [])-page)-current))
+                continue
             if key=="v":
                 visualizer=player_visuals.next_mode(visualizer,visualizer_settings.enabled_modes())
                 visual_started=time.monotonic()
@@ -20230,6 +20267,8 @@ def _media_player_library(initial_query="",media_kind="audio"):
     view_key=None
     visible=[];query_plan=None
     art_work=LatestWork();transport_work=LatestWork()
+    from media_ui_work import MediaAction
+    action_work=MediaAction()
     # Search state must exist before the first frame is rendered.  The initial
     # frame reads this flag before any key event has had a chance to create it.
     search_mode=False
@@ -20350,7 +20389,7 @@ def _media_player_library(initial_query="",media_kind="audio"):
                         filter_text=f"FILTER {query or ('all '+medium)} · / search"
                     print(_c(filter_text,"1;36"))
                     print(footer)
-                    print(_ansi_clip(_c(notice,"33"),width),end="")
+                    print(_ansi_clip(_c(notice or ("Preparing playback request… · browsing remains available" if action_work.busy else ""),"33"),width),end="")
                     notice=""
                 with synchronized_update():
                     native_preview.frame_cleared()
@@ -20369,6 +20408,11 @@ def _media_player_library(initial_query="",media_kind="audio"):
                 art_retry_at=time.monotonic()+REMOTE_ART_RETRY_SECONDS if chosen and right_w and not art and art_status=="ART unavailable" else None
                 dirty=False
 
+            completed=action_work.poll()
+            if completed is not None:
+                code,message=completed
+                notice=(message.splitlines()[-1] if message else ('Playback failed' if code else 'Done'))
+                view_key=None;dirty=True
             now=time.monotonic()
             if now>=next_transport_poll and transport_row:
                 next_transport_poll=now+.8
@@ -20497,6 +20541,8 @@ def _media_player_library(initial_query="",media_kind="audio"):
                 _media_refresh_rows(library_rows,catalog_meta=catalog_meta);notice="catalog refreshed";view_key=None;continue
             if key=="Y" and picked:
                 notice=_media_keep_offline(picked,fd,old);continue
+            if key=="E" and picked and action_work.busy:
+                notice="Finishing the current playback request…";continue
             if key=="E" and picked:
                 result=_media_edit_prompt(picked,fd,old)
                 updates={(row.get('node'),row.get('id')):row for row in result['entries']}
@@ -20509,10 +20555,17 @@ def _media_player_library(initial_query="",media_kind="audio"):
                     _media_save_session(session)
                 notice=f"updated {result['count']} source(s)"+(' · '+' · '.join(result['errors']) if result['errors'] else '')
                 view_key=None;selected_ids.clear();continue
-            if key in {"enter","\r","\n"} and picked:
-                notice=_media_launch_from_library(picked); continue
-            if key=="B" and picked:
-                notice=_media_queue_notice(_media_queue_append(picked)); view_key=None if mode=="queue" else view_key; continue
+            if key in {"enter","\r","\n","B"} and picked:
+                if action_work.busy:
+                    notice="Finishing the current playback request…";continue
+                operation='append' if key=='B' else 'play'
+                try:
+                    action_work.start([sys.executable,str(Path(__file__).resolve()),'media','_desk-action',operation],picked)
+                    notice='Adding to queue…' if operation=='append' else 'Checking sources and starting playback…'
+                except OSError as exc:notice='Playback request failed · '+str(exc)
+                continue
+            if action_work.busy and key in {' ','n','p','left','right','s','r','x','E'}:
+                notice="Finishing the current playback request…";continue
             if key==" ": _media_control_session("toggle"); continue
             if key=="n": _media_control_session("next"); continue
             if key=="p": _media_control_session("prev"); continue
@@ -20524,6 +20577,7 @@ def _media_player_library(initial_query="",media_kind="audio"):
     except KeyboardInterrupt:
         return 0
     finally:
+        action_work.close()
         art_work.close();transport_work.close()
         availability.close()
         duration_preview.close()
@@ -20643,6 +20697,22 @@ def media(args):
     if raw=="edit": return _media_edit_command(args[1:])
     if raw=="artists": return _media_group_command("artist",args[1:])
     if raw=="albums": return _media_group_command("album",args[1:])
+    if raw=="_desk-action":
+        if len(args)!=2 or args[1] not in {'play','append'}:return 2
+        try:
+            rows=json.load(sys.stdin)
+            if not isinstance(rows,list) or not rows or not all(isinstance(row,dict) for row in rows):
+                raise ValueError('Expected selected media rows')
+            if args[1]=='play':
+                message=_media_launch_from_library(rows)
+                print(message)
+                return 1 if message.startswith('Playback failed') else 0
+            rows,failures=_media_pin_playable_rows(rows)
+            count=_media_queue_append(rows) if rows else 0
+            print(_media_queue_notice(count)+(f" · {len(failures)} unavailable item(s) skipped" if failures else ''))
+            return 0 if count else 1
+        except (OSError,ValueError,RuntimeError) as exc:
+            print('Playback request failed · '+str(exc));return 1
     if raw=="queue": return _media_queue_command()
     if raw=="audio": return _media_audio_command(args[1:])
     if raw in {"doctor","diagnose","debug"}: return _media_doctor()

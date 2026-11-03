@@ -45,6 +45,8 @@ THEMES={
 }
 # Each preset defines foreground inks separately from selection and tab backgrounds.
 for name, background, ink, selection, accents in (
+    ('mercury','#f5f0e5','#233342','#e5dcc1',
+     ('#7d302c','#28583b','#795716','#315c80','#593c64','#1e4f56','#566473')),
     ('harbor','#101e29','#e3edf0','#224559',
      ('#ef8e88','#91c6ad','#e8c480','#94bcf2','#c2ace6','#82c9d6','#9eb0bf')),
     ('orchard','#19231b','#edf0df','#394d30',
@@ -61,7 +63,7 @@ for name, background, ink, selection, accents in (
      ('#f59aab','#a4d6bb','#ecc985','#a6baff','#d5b5f0','#8fd0e3','#a5aac7')),
 ):
     red,green,gold,blue,violet,cyan,muted=accents
-    prompt_ink,prompt_green,prompt_gold = (ink,'#bcd5c6','#ecd491') if name in {'porcelain','vellum','frost'} else (background,green,gold)
+    prompt_ink,prompt_green,prompt_gold = (ink,'#bcd5c6','#ecd491') if name in {'porcelain','vellum','frost','mercury'} else (background,green,gold)
     THEMES[name]={
         'background':background,'foreground':ink,'cursor':blue,'cursor_text_color':background,
         'selection_background':selection,'selection_foreground':ink,'url_color':blue,
@@ -74,7 +76,8 @@ for name, background, ink, selection, accents in (
     }
 
 NAMES=(*THEMES,'custom')
-DESCRIPTIONS={'neon':'Green phosphor · current LOOK colors',
+DESCRIPTIONS={'mercury':'Mercury Reader and Writer · warm paper, blue ink, brass',
+              'neon':'Green phosphor · current LOOK colors',
               'paper':'MercuryWriter paper · warm white and dark ink',
               'slate':'Quiet charcoal · warm ink and restrained accents',
               'harbor':'Deep blue · sea glass and chart ink',
