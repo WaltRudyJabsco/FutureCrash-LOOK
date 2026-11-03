@@ -53,9 +53,15 @@ for name, background, ink, selection, accents in (
      ('#9b343c','#306343','#745619','#244e80','#6d427d','#21606a','#525f70')),
     ('ember','#251918','#f4e5d7','#54342d',
      ('#f29c88','#a8c693','#efc085','#a9baf3','#dcb0ce','#90c8c3','#b7a399')),
+    ('vellum','#f5efda','#302a21','#ead18a',
+     ('#8e332f','#38593a','#705116','#284b73','#674164','#275860','#605646')),
+    ('frost','#eaf4f1','#20343a','#efda8d',
+     ('#903746','#2e604b','#6d531d','#254e78','#60447b','#225c63','#4e6063')),
+    ('midnight','#171a2e','#e7eafa','#343b60',
+     ('#f59aab','#a4d6bb','#ecc985','#a6baff','#d5b5f0','#8fd0e3','#a5aac7')),
 ):
     red,green,gold,blue,violet,cyan,muted=accents
-    prompt_ink,prompt_green,prompt_gold = (ink,'#bcd5c6','#ecd491') if name=='porcelain' else (background,green,gold)
+    prompt_ink,prompt_green,prompt_gold = (ink,'#bcd5c6','#ecd491') if name in {'porcelain','vellum','frost'} else (background,green,gold)
     THEMES[name]={
         'background':background,'foreground':ink,'cursor':blue,'cursor_text_color':background,
         'selection_background':selection,'selection_foreground':ink,'url_color':blue,
@@ -75,6 +81,9 @@ DESCRIPTIONS={'neon':'Green phosphor · current LOOK colors',
               'orchard':'Dark olive · leaf green and warm gold',
               'porcelain':'Cool white · cobalt, plum, and jade',
               'ember':'Warm charcoal · copper and dusk blue',
+              'vellum':'Cream paper · brown ink and forest green',
+              'frost':'Cool mint paper · teal and navy',
+              'midnight':'Deep indigo · lilac and ice blue',
               'custom':'Your editable style · lk terminal customize'}
 INCLUDE='globinclude look-theme.conf'
 PERSONAL='globinclude kitty-local.conf'
@@ -425,7 +434,7 @@ def palette_preview(palette,width):
         return f'\033[38;2;{rgb(fg)};48;2;{rgb(bg)}m{text}\033[0m'
     lines = [
         sample('  ~/Projects  ·  notes.md'.ljust(width),'foreground'),
-        sample('  Enter','url_color')+sample(' open   ','foreground')+
+        '  '+(keycap('Enter',{'_palette':palette}) if luminance(palette['background'])>.4 else sample('Enter','url_color'))+sample(' open   ','foreground')+
         sample('OK','color10')+sample('   Alert','color9'),
         sample('  Selected match: notes.md'.ljust(width),'selection_foreground','selection_background'),
     ]
@@ -589,12 +598,24 @@ def open_pane(path):
 if __name__=='__main__': raise SystemExit(main())
 
 
+def keycap(text, colors):
+    palette=colors['_palette']
+    if luminance(palette['background']) <= .4:
+        return colors['CYAN']+'\033[1m'+text+'\033[22m'
+    fill=palette.get('color75',palette['url_color'])
+    ink='#ffffff'
+    if contrast(fill,ink)<4.5:
+        fill='#214b7b'
+    rgb=';'.join(str(int(fill[i:i+2],16)) for i in (1,3,5))
+    return f'\033[48;2;{rgb};97;1m{text}\033[0m'
+
+
 def command_text(text, keys, *, colors=None, body='GRAY'):
     """Contrast explicit action tokens without changing their wording or case."""
     import re
     colors=colors or list_colors()
     pattern=r'(?<!\w)(?:'+ '|'.join(re.escape(key) for key in sorted(set(keys),key=len,reverse=True))+r')(?!\w)'
-    styled=re.sub(pattern,lambda match:colors['CYAN']+'\033[1m'+match.group()+'\033[22m'+colors[body],text) if keys else text
+    styled=re.sub(pattern,lambda match:keycap(match.group(),colors)+colors[body],text) if keys else text
     return colors[body]+styled+'\033[0m'
 
 
