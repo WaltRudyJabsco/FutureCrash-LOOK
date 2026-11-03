@@ -1,8 +1,9 @@
 {
+  "work": "LOOK HELP · work\n\nCOMMAND FORMS\nlk work [DOCUMENT]\n  Read Markdown and open an inline interactive shell\n\nMore: lk help all · lk doc · man lk\nFor command-specific help: lk COMMAND --help or lk help COMMAND",
   "lh": "LOOK HELP · lh\n\nCOMMAND FORMS\nlh [PATH]\n  LOOK with hidden files shown\n\nMore: lk help all · lk doc · man lk\nFor command-specific help: lk COMMAND --help or lk help COMMAND",
   "hidden": "LOOK HELP · hidden\n\nCOMMAND FORMS\nlk hidden [PATH]\n  LOOK with hidden files shown\n\nMore: lk help all · lk doc · man lk\nFor command-specific help: lk COMMAND --help or lk help COMMAND",
   "doc": "LOOK HELP · doc\n\nCOMMAND FORMS\nlk doc\n  Full generated command, option and keyboard reference\n\nMore: lk help all · lk doc · man lk\nFor command-specific help: lk COMMAND --help or lk help COMMAND",
-  "terminal": "LOOK HELP · terminal\n\nCOMMAND FORMS\nlk terminal [theme NAME|launch NAME|customize]\n  Kitty palette picker and custom inks/highlighter; reset removes the appearance overlay\n\nMore: lk help all · lk doc · man lk\nFor command-specific help: lk COMMAND --help or lk help COMMAND",
+  "terminal": "LOOK HELP · terminal\n\nCOMMAND FORMS\nlk terminal [themes|theme NAME|launch NAME|customize]\n  Kitty palette picker and custom inks/highlighter; reset removes the appearance overlay\n\nMore: lk help all · lk doc · man lk\nFor command-specific help: lk COMMAND --help or lk help COMMAND",
   "web": "LOOK HELP · web\n\nCOMMAND FORMS\nlk web [URL|search WORDS|home|list] [--browser NAME] [--native-style]\n  Keyboard reading desk, terminal browsers and an explicit qutebrowser handoff\nlk web [...]\n  Web-search key/status\n\nMore: lk help all · lk doc · man lk\nFor command-specific help: lk COMMAND --help or lk help COMMAND",
   "tldr": "LOOK HELP · tldr\n\nCOMMAND FORMS\nlk tldr\n  Short offline command examples\n\nMore: lk help all · lk doc · man lk\nFor command-specific help: lk COMMAND --help or lk help COMMAND",
   "dash": "LOOK HELP · dash\n\nCOMMAND FORMS\nlk dash\n  Live Fabric dashboard\n\nMore: lk help all · lk doc · man lk\nFor command-specific help: lk COMMAND --help or lk help COMMAND",

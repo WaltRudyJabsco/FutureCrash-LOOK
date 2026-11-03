@@ -92,6 +92,11 @@ ordinary text inside note editors and URL/bookmark prompts. In a launched web
 browser, the browser owns its keys; quit back to the desk to use Shift-W.
 Without Kitty or tmux, LOOK explains the requirement and stays in your view.
 
+Mercury Mini owns its internal writing splits. While Mini is open, LOOK's Kitty
+profile sends **Option/Alt-Shift-W** to switch Mini panes and **Ctrl-Shift-W**
+(also **Ctrl-Option/Alt-W**) to close the focused Mini pane. Other shell panes
+keep their ordinary terminal shortcuts. Mini removes this scope when it exits.
+
 ## Reading without link tags
 
 Numbered browsers start with tags off. Press **t** in the desk to remember tags

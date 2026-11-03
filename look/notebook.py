@@ -150,13 +150,13 @@ HELP_TEXT='''LOOK NOTEBOOK — notes, tasks and reminders share one record.
 Capture: N opens a draft. Enter/Ctrl-J inserts a newline; Shift-Enter/Ctrl-S saves.
 Escape cancels a draft. Enter opens a boxed Markdown note view.
 The view previews headings, bold/italic, lists, checkboxes, quotes and code.
-L selects numbered links and command blocks; B shows notes linking back to this ID.
+L selects numbered links, commands and terminals; B shows notes linking back to this ID.
 Use a closed ```command fence to make its contents runnable.
 Optional header: command label="Project tests" cwd="~/Projects/My Book".
 Selecting a command shows its text and local working directory; R confirms execution.
 Ordinary code fences stay inert; commands never run during preview or sync.
 Y copies this note's complete Markdown link from the list or preview.
-Editor Ctrl-K opens Insert Link; Ctrl-T switches to a multiline Command block.
+Editor Ctrl-K opens Insert Link; Ctrl-T cycles Link, Command, and Terminal.
 Ctrl-N inside that dialog finds notes by title/project and inserts their ID.
 Use [label](note:FULL_ID), [label](wiki:Article_title), [label](<file path>), [label](https://example.com),
 or [label](<@3090:/path with spaces>). Relative paths start beside the note.
@@ -356,15 +356,15 @@ def choose_note(store,fd,read_key):
         elif len(key)==1 and key.isprintable(): query+=key;selected=0
 
 
-def make_command(body,label='',directory=''):
-    if not body.strip():raise ValueError('Paste or type a command first')
+def make_command(body,label='',directory='',*,kind='command'):
+    if kind=='command' and not body.strip():raise ValueError('Paste or type a command first')
     validate_command_text(body,directory)
     validate_command_text(label,'')
     if any(unicodedata.category(char) in {'Cc','Cs'} for char in label):
         raise ValueError('Use a single-line label')
     # A longer fence preserves pasted scripts containing literal backticks.
     fence='`'*max(3,1+max((len(run) for run in re.findall(r'`+',body)),default=0))
-    header='command'
+    header=kind
     if label:header+=' label='+shlex.quote(label)
     if directory:header+=' cwd='+shlex.quote(directory)
     return '\n\n'+fence+header+'\n'+body+'\n'+fence+'\n\n'
@@ -381,15 +381,23 @@ def insert_link(store,fd,read_key):
         values[:]=link_fields(clipboard); active=1
     except ValueError: pass
     cursors=[len(value) for value in values]; replace=[bool(value) for value in values]
-    forms={'command':([clipboard,'',''],[len(clipboard),0,0],[bool(clipboard),False,False],0)}
+    modes = ('link','command','terminal')
+    forms = {
+        'command':([clipboard,'',''],[len(clipboard),0,0],[bool(clipboard),False,False],0),
+        'terminal':([clipboard,''],[len(clipboard),0],[bool(clipboard),False],0),
+    }
     while True:
         width,height=shutil.get_terminal_size((100,30))
-        rows=['INSERT LINK · Type: Link' if mode=='link' else 'INSERT COMMAND · Type: Command']
-        names=('Target','Label') if mode=='link' else ('Command','Label','Working directory (optional)')
+        rows=[f'INSERT {mode.upper()} · Type: {mode.title()}']
+        names = {
+            'link':('Target','Label'),
+            'command':('Command','Label','Working directory (optional)'),
+            'terminal':('Startup commands (optional)','Label'),
+        }[mode]
         for index,(name,value) in enumerate(zip(names,values)):
             cursor=cursors[index]
             shown=value[:cursor]+'█'+value[cursor:] if active==index else value
-            if mode=='command' and index==0:
+            if mode!='link' and index==0:
                 rows.append(('› ' if active==index else '  ')+name+':')
                 body_rows=[part for line in shown.split('\n') for part in
                            (textwrap.wrap(line,max(1,width-5),replace_whitespace=False,drop_whitespace=False) or [''])]
@@ -400,15 +408,15 @@ def insert_link(store,fd,read_key):
             else:rows.append(('› ' if active==index else '  ')+name+': '+shown)
         rows+=(['Type replaces suggestion · arrows edit · Enter confirms',
                 'Tab target/label · Ctrl-N find note · Esc cancel'] if mode=='link' else
-               ['Enter newline in Command · Tab next field',
+               ['Enter newline in body · Tab next field',
                 'Shift-Enter/Ctrl-S insert block · Esc cancel'])
-        rows+=['Ctrl-T switch Link / Command',notice]
+        rows+=['Ctrl-T cycle Link / Command / Terminal',notice]
         sys.stdout.write('\033[2J\033[H'+'\r\n'.join(dialog_line(line,max(1,width-1)) for line in rows)+'\033[J');sys.stdout.flush()
         key=read_key(fd,None);notice=''
         if key in {'esc','\x03'}: return None
         if key=='\x14':
             forms[mode]=(values,cursors,replace,active)
-            mode='command' if mode=='link' else 'link'
+            mode=modes[(modes.index(mode)+1)%len(modes)]
             values,cursors,replace,active=forms[mode]
             continue
         if key=='\x0e' and mode=='link':
@@ -420,11 +428,11 @@ def insert_link(store,fd,read_key):
                 values=['note:'+row['id'],row['title']];cursors=[len(value) for value in values];replace=[True,True];active=1
             continue
         if key=='\t': active=(active+1)%len(values);continue
-        if mode=='command' and (key in {'shiftenter','\x13'} or (key in {'\r','\n','enter'} and active==2)):
-            try:return make_command(*values)
+        if mode!='link' and (key in {'shiftenter','\x13'} or (key in {'\r','\n','enter'} and active==len(values)-1)):
+            try:return make_command(*values,kind=mode)
             except ValueError as exc:notice=str(exc)
             continue
-        if mode=='command' and key in {'\r','\n','enter'}:
+        if mode!='link' and key in {'\r','\n','enter'}:
             if active==0:
                 replace[0]=False
                 cursor=cursors[0];values[0]=values[0][:cursor]+'\n'+values[0][cursor:];cursors[0]+=1
@@ -439,7 +447,7 @@ def insert_link(store,fd,read_key):
                 else: return make_link(values[1],values[0])
             except ValueError as exc: notice=str(exc);active=0
             continue
-        if mode=='command' and active==0 and key in {'up','down'}:
+        if mode!='link' and active==0 and key in {'up','down'}:
             replace[0]=False;text=values[0];cursor=cursors[0]
             start=text.rfind('\n',0,cursor)+1;column=cursor-start;end=text.find('\n',cursor)
             if key=='up' and start:
@@ -453,9 +461,9 @@ def insert_link(store,fd,read_key):
                 cursors[active]=word_cursor(values[active],cursors[active],-1 if key=='wordleft' else 1)
             elif key=='left': cursors[active]=max(0,cursors[active]-1)
             elif key=='right': cursors[active]=min(len(values[active]),cursors[active]+1)
-            elif key=='home': cursors[active]=values[active].rfind('\n',0,cursors[active])+1 if mode=='command' and active==0 else 0
+            elif key=='home': cursors[active]=values[active].rfind('\n',0,cursors[active])+1 if mode!='link' and active==0 else 0
             else:
-                end=values[active].find('\n',cursors[active]) if mode=='command' and active==0 else -1
+                end=values[active].find('\n',cursors[active]) if mode!='link' and active==0 else -1
                 cursors[active]=len(values[active]) if end<0 else end
             continue
         if key in {'\b','\x7f','delete'}:
@@ -467,7 +475,7 @@ def insert_link(store,fd,read_key):
         text=key[6:] if key.startswith('paste:') else key if len(key)==1 and key.isprintable() else ''
         if text:
             # Paste is field data, never dialog keys.
-            if mode=='command' and active==0:
+            if mode!='link' and active==0:
                 text=text.replace('\r\n','\n').replace('\r','\n')
                 try:validate_command_text(text,'')
                 except ValueError as exc:notice=str(exc);continue
@@ -523,7 +531,7 @@ def capture_note(fd,read_key,initial_text='',label='NEW NOTE',store=None):
             heading=(label+' · ')[:max(1,width-1)]
             actions='Enter newline · Shift-Enter/Ctrl-S save · Esc cancel'[:max(0,width-1-len(heading))]
             frame=[KEY_CYAN+heading+'\033[0m'+command_hints(actions),
-                   command_hints('Ctrl-Y clipboard · Ctrl-D dictate · Ctrl-K insert link/command · Alt-arrows words/paragraphs'[:max(1,width-1)]),
+                   command_hints('Ctrl-Y clipboard · Ctrl-D dictate · Ctrl-K insert action · Alt-arrows words/paragraphs'[:max(1,width-1)]),
                    *notice_rows]
             if boxed:
                 frame.extend(['┌'+'─'*columns+'┐',*['│'+line.ljust(columns)+'│' for line in visible],'└'+'─'*columns+'┘'])
@@ -660,6 +668,14 @@ def run_note_command(target):
 def resolve_link(store,row,target):
     """Validate targets; only explicit command blocks may request execution."""
     if isinstance(target,dict):
+        if target.get('kind')=='terminal':
+            block = target.get('block')
+            if type(block) is not int or block < 1:
+                raise ValueError('Invalid terminal block')
+            path = Path(row['path'])
+            if path.read_text(encoding='utf-8') != Notebook.markdown(row):
+                raise ValueError('Note changed. Reopen it before selecting a terminal block.')
+            return 'terminal',(path,block)
         if target.get('kind')!='command':raise ValueError('Unknown note action')
         return 'command',resolve_command(row,target)
     from urllib.parse import urlsplit, unquote
@@ -755,16 +771,50 @@ def open_link(kind,target):
 def note_view(store,row,read_key):
     """Own terminal state so the same view works from the list and named CLI entry."""
     fd=sys.stdin.fileno(); old=termios.tcgetattr(fd); top=0; notice=''; pane_help=False
+    sessions = {}
+    active = pending = None
+    work = None
+    last_frame = None
+
+    def unfocus():
+        termios.tcsetattr(fd,termios.TCSADRAIN,old)
+        tty.setcbreak(fd)
+        sys.stdout.write('\033[?25l')
+
+    def close_sessions():
+        for session in sessions.values():
+            session.close()
+        sessions.clear()
+
     try:
         tty.setcbreak(fd); sys.stdout.write('\033[?25l')
         while True:
             width,height=shutil.get_terminal_size((100,30))
             controls='↑↓/Space scroll · W shell pane · Z clipboard · L links · Y copy link · B related · E edit · V editor · H help · Esc back'
             if pane_help:controls+=' · '+' · '.join(terminal_style.pane_shortcuts())
+            if active is not None:
+                controls='Ctrl-G collapse terminal · Ctrl-C interrupt · exit end shell'
+            elif pending is not None:
+                controls='Enter open terminal · Esc cancel'
             control_rows=textwrap.wrap(controls,max(1,width-1))
             inner=max(1,min(96,width-4)); page=max(1,height-5-len(control_rows))
             links=[]
-            content=render_markdown(row['body'],inner,links)
+            for session in sessions.values():
+                session.read()
+            shell = sessions.get(active)
+            terminal_positions = {}
+            terminal_rows = {}
+            if shell is not None:
+                if shell.running:
+                    size = (inner,work.inline_height(page))
+                    if size != (shell.screen.columns,shell.screen.lines):
+                        shell.resize(*size)
+                terminal_rows[active] = list(work.styled_terminal_rows(shell.screen))
+            content=render_markdown(row['body'],inner,links,terminal_rows,terminal_positions)
+            if active is not None:
+                top=max(0,terminal_positions[active]-2)
+            elif pending is not None:
+                top=max(0,terminal_positions[pending]-2)
             top=max(0,min(top,max(0,len(content)-page)))
             border='─'*inner
             title_rows=render_markdown(row['title'],max(1,width-1))
@@ -775,8 +825,51 @@ def note_view(store,row,read_key):
                 frame.append('│'+line+'│')
             frame.extend(['│'+' '*inner+'│']*max(0,page-len(content[top:top+page])))
             frame.extend(['└'+border+'┘',command_hints('\n'.join(control_rows)),notice[:max(1,width-1)]])
-            sys.stdout.write('\033[2J\033[H'+'\n'.join(frame)+'\033[J'); sys.stdout.flush()
-            key=read_key(fd,1)
+            screen = '\033[2J\033[H'+'\r\n'.join(frame)+'\033[J'
+            if shell is not None and shell.running:
+                cursor_row = 4+terminal_positions[active]-top+shell.screen.cursor.y
+                cursor_col = 2+shell.screen.cursor.x
+                screen += f'\033[{cursor_row};{cursor_col}H\033[?25h'
+            else:
+                screen += '\033[?25l'
+            if active is None or screen != last_frame:
+                sys.stdout.write(screen)
+                sys.stdout.flush()
+            last_frame = screen
+            key=read_key(fd,.05 if active is not None else 1)
+            if active is not None:
+                if key=='\x07' or (not shell.running and key in {'esc','q','\r','\n','enter'}):
+                    active = None
+                    unfocus()
+                    notice = 'Terminal collapsed' if shell.running else 'Terminal exited'
+                elif shell.running:
+                    data = work.notes_key(key)
+                    if data:
+                        shell.send(data)
+                continue
+            if pending is not None:
+                if key in {'esc','\x03'}:
+                    pending = None
+                    notice = 'Terminal cancelled'
+                elif key in {'\r','\n','enter'}:
+                    try:
+                        import pyte
+                        scripts = [(body,language) for _,body,language,_ in work.document_blocks(row['body'])
+                                   if language in work.SHELL_FENCES]
+                        body,language = scripts[pending-1]
+                        previous = sessions.get(pending)
+                        if previous is None or not previous.running:
+                            if previous:
+                                sessions.pop(pending).close()
+                            sessions[pending] = work.InlineShell(pyte,Path(row['path']).parent,body,inner,
+                                                                work.inline_height(page),'shell' if language=='terminal' else language)
+                        active = pending
+                        tty.setraw(fd)
+                        notice = ''
+                    except (ImportError,OSError,ValueError,IndexError) as error:
+                        notice = 'Terminal unavailable: '+str(error)
+                    pending = None
+                continue
             if not key:continue
             if key in {'esc','q','\x03'}: return
             if key in {'down','j','\r','\n'}: top+=1
@@ -802,7 +895,12 @@ def note_view(store,row,read_key):
                     continue
                 try:
                     kind,value=resolve_link(store,row,target)
-                    if kind=='note':
+                    if kind=='terminal':
+                        import work_desk as work
+                        _,pending=value
+                        notice='Press Enter to open or resume the terminal'
+                    elif kind=='note':
+                        close_sessions()
                         row=value; top=0; notice=''
                     else:
                         if kind=='command' and not confirm_command(fd,read_key,value):
@@ -813,10 +911,14 @@ def note_view(store,row,read_key):
                             code=run_note_command(value) if kind=='command' else open_link(kind,value)
                         finally:
                             tty.setcbreak(fd); sys.stdout.write('\033[?25l')
-                        notice=('Command exited '+str(code)) if kind=='command' else 'Opened '+safe_text(target)
+                        if kind=='command':
+                            notice='Command exited '+str(code)
+                        else:
+                            notice='Opened '+safe_text(target)
                 except (ValueError,OSError,RuntimeError,subprocess.SubprocessError) as exc:
                     notice=safe_text(str(exc))
             elif key in {'E','V'}:
+                close_sessions()
                 if key=='E':
                     notice='Resolve this conflict in the full editor (V).' if row['conflict'] else quick_edit(store,row,fd,read_key)
                 else:
@@ -828,6 +930,7 @@ def note_view(store,row,read_key):
                 matches=[item for item in store.list(include_done=True) if item['id']==row['id']]
                 row=next((item for item in matches if item['revision']==row['revision']),matches[0] if matches else row)
     finally:
+        close_sessions()
         termios.tcsetattr(fd,termios.TCSADRAIN,old)
         sys.stdout.write('\033[?25h\033[0m'); sys.stdout.flush()
 

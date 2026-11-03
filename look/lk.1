@@ -14,13 +14,15 @@ this full reference. man lk: the same reference offline. tldr lk: short examples
 
 COMMAND INDEX
 
+lk work [DOCUMENT]
+  [files] Read Markdown and open an inline interactive shell
 lh [PATH]
   [files] LOOK with hidden files shown
 lk hidden [PATH]
   [files] LOOK with hidden files shown
 lk doc
   [meta] Full generated command, option and keyboard reference
-lk terminal [theme NAME|launch NAME|customize]
+lk terminal [themes|theme NAME|launch NAME|customize]
   [meta] Kitty palette picker and custom inks/highlighter; reset removes the appearance overlay
 lk web [URL|search WORDS|home|list] [--browser NAME] [--native-style]
   [apps] Keyboard reading desk, terminal browsers and an explicit qutebrowser handoff
@@ -1188,6 +1190,7 @@ id — Album name, latest, short ID, or full ID; watch defaults to all active wo
 look/terminal_style.py
 
 Parser arguments and recognized option tokens (grouped by handler):
+--name — Save to a named palette
 base — Preset to fine-tune into custom
 name
 
@@ -1379,6 +1382,11 @@ The views redraw to fit the terminal after panes open or close. Shift-W stays
 ordinary text inside note editors and URL/bookmark prompts. In a launched web
 browser, the browser owns its keys; quit back to the desk to use Shift-W.
 Without Kitty or tmux, LOOK explains the requirement and stays in your view.
+
+Mercury Mini owns its internal writing splits. While Mini is open, LOOK's Kitty
+profile sends **Option/Alt-Shift-W** to switch Mini panes and **Ctrl-Shift-W**
+(also **Ctrl-Option/Alt-W**) to close the focused Mini pane. Other shell panes
+keep their ordinary terminal shortcuts. Mini removes this scope when it exits.
 
 ## Reading without link tags
 
