@@ -205,3 +205,14 @@ def test_light_theme_keycap_has_blue_fill_and_resets_before_label(monkeypatch,th
     assert '\x1b[38;2;255;255;255;1mEnter\x1b[0m'+colors['GRAY']+' open' in hint
     fill=styles.settings(theme)['color75']
     assert styles.contrast(fill,'#ffffff')>=4.5
+
+def test_picker_applies_opacity_and_stays_open_for_preview(tmp_path,monkeypatch,terminal):
+    path=folder(tmp_path,monkeypatch)
+    monkeypatch.setattr(styles,'reload_kitty',lambda:True)
+    launch=Mock()
+    monkeypatch.setattr(styles,'launch_theme',launch)
+    keys=iter(['down','left','A','L','esc'])
+    assert styles.choose_theme(lambda *args:next(keys)) is None
+    assert 'background_opacity 0.98' in (path/'look-theme.conf').read_text()
+    launch.assert_called_once_with('paper','0.98')
+    assert 'Applied paper' in terminal.getvalue()

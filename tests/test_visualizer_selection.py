@@ -100,7 +100,7 @@ def test_none_and_all_can_be_saved_without_breaking_normal_view(home,lk,monkeypa
 def test_player_V_picker_preserves_transport_and_skips_disabled(home,lk,monkeypatch):
     terminal(lk,monkeypatch)
     frames=[];calls=[]
-    monkeypatch.setattr(lk,'_media_player_render',lambda mode=0,visual_elapsed=0:frames.append(mode) or 'frame')
+    monkeypatch.setattr(lk,'_media_player_render',lambda mode=0,visual_elapsed=0,**kwargs:frames.append(mode) or 'frame')
     def picker(*args):settings.save(set(visuals.NAMES[:-1]) - {'Album Art'});return True
     monkeypatch.setattr(lk.visualizer_settings,'picker',picker)
     monkeypatch.setattr(lk,'_media_control_session',lambda value:calls.append(value))
@@ -126,7 +126,7 @@ def test_cancelled_picker_does_not_advance_cycle_time(home,lk,monkeypatch):
     terminal(lk,monkeypatch)
     clock=[100.];frames=[]
     monkeypatch.setattr(lk.time,'monotonic',lambda:clock[0])
-    monkeypatch.setattr(lk,'_media_player_render',lambda mode=0,visual_elapsed=0:frames.append((mode,visual_elapsed)) or 'frame')
+    monkeypatch.setattr(lk,'_media_player_render',lambda mode=0,visual_elapsed=0,**kwargs:frames.append((mode,visual_elapsed)) or 'frame')
     def picker(*args):clock[0]=150.;return False
     monkeypatch.setattr(lk.visualizer_settings,'picker',picker)
     events=iter([('V',110.),('q',150.)])

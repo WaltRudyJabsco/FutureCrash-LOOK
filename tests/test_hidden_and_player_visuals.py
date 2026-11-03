@@ -85,7 +85,7 @@ def lk():
 def test_player_cycles_all_views_without_losing_transport_controls(lk,monkeypatch):
     terminal(monkeypatch,lk)
     modes=[]; calls=[]
-    monkeypatch.setattr(lk,'_media_player_render',lambda mode=0,visual_elapsed=0:modes.append(mode) or 'frame')
+    monkeypatch.setattr(lk,'_media_player_render',lambda mode=0,visual_elapsed=0,**kwargs:modes.append(mode) or 'frame')
     keys=iter(['v']*(len(player_visuals.NAMES)+1)+[' ','n','p','left','right','s','r','x','q'])
     monkeypatch.setattr(lk,'_read_tty_key',lambda *args:next(keys))
     monkeypatch.setattr(lk,'_media_control_session',lambda action:calls.append(action))
@@ -119,7 +119,7 @@ def test_selecting_cycle_starts_its_own_timer(lk,monkeypatch):
     terminal(monkeypatch,lk)
     clock=[100.0];frames=[]
     monkeypatch.setattr(lk.time,'monotonic',lambda:clock[0])
-    monkeypatch.setattr(lk,'_media_player_render',lambda mode=0,visual_elapsed=0:frames.append((mode,visual_elapsed)) or 'frame')
+    monkeypatch.setattr(lk,'_media_player_render',lambda mode=0,visual_elapsed=0,**kwargs:frames.append((mode,visual_elapsed)) or 'frame')
     keys=iter([('v',1000.0),('',1009.0),('',1010.0),('q',1010.0)])
     def key(*args):
         value,clock[0]=next(keys)
@@ -322,3 +322,12 @@ def test_new_ambient_visuals_are_bounded_deterministic_and_in_cycle(name):
     assert player_visuals.frame(mode,80,24,3,True,4)!=player_visuals.frame(mode,80,24,7,True,4)
     assert player_visuals.frame(mode,80,24,3,False,4)==player_visuals.frame(mode,80,24,7,False,4)
     assert mode in {player_visuals.active_mode(player_visuals.CYCLE_MODE,i*10) for i in range(player_visuals.CYCLE_MODE-1)}
+
+def test_visual_accent_changes_per_activation_and_stays_on_redraw(monkeypatch):
+    monkeypatch.setattr(player_visuals.random,'choice',lambda options:options[0])
+    accent=player_visuals.RunAccent()
+    first=accent.choose((0,1,0,None))
+    assert first==accent.choose((0,1,0,None))
+    cycle=accent.choose((0,2,1,None))
+    assert cycle!=first and cycle==accent.choose((0,2,1,None))
+    assert accent.choose((1,2,0,None))!=cycle

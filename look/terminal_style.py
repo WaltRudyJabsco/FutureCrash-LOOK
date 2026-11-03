@@ -206,9 +206,24 @@ def write_file(path,data):
     finally: temporary.unlink(missing_ok=True)
 
 
-def select_theme(name,folder):
+def opacity_value(value):
+    number = float(value)
+    if not .50 <= number <= 1:
+        raise ValueError('Opacity must be between 0.50 and 1.00')
+    return f'{number:.2f}'
+
+
+def apply_opacity(palette,opacity):
+    if opacity is not None:
+        palette['background_opacity']=opacity_value(opacity)
+    return palette
+
+
+def select_theme(name,folder,opacity=None):
     if name not in (*palette_names(folder),'reset'): raise ValueError('Unknown palette')
-    chosen=settings(name,folder) if name!='reset' else {}
+    if name=='reset' and opacity is not None:
+        raise ValueError('Choose a palette to set its opacity')
+    chosen=apply_opacity(settings(name,folder),opacity) if name!='reset' else {}
     config=folder/'kitty.conf'
     if not config.is_file(): raise ValueError('No Kitty config here; run ./install.sh --kitty first')
     before=config.read_text(encoding='utf-8')
@@ -443,11 +458,29 @@ def palette_preview(palette,width):
     return lines
 
 
+def launch_theme(name,opacity=None):
+    palette=apply_opacity(settings(name),opacity)
+    command=[kitty_executable(),'--override','env=LOOK_TERMINAL_THEME='+name]
+    for key,value in palette.items():
+        command+=['--override',key+'='+value]
+    subprocess.Popen(command,stdin=subprocess.DEVNULL,stdout=subprocess.DEVNULL,stderr=subprocess.DEVNULL)
+
+
 def choose_theme(read_key):
     """Preview by moving. Enter applies, E edits, and Escape leaves the theme alone."""
     folder=directory()
     names=(*palette_names(folder),'reset')
     selected=0
+    opacities={}
+    try:
+        saved=(folder/'look-theme.conf').read_text().splitlines()
+        saved_name=saved[0].removeprefix('# LOOK palette: ')
+        for line in saved[1:]:
+            if line.startswith('background_opacity ') and saved_name in names and saved_name!='reset':
+                opacities[saved_name]=opacity_value(line.split(maxsplit=1)[1])
+    except (OSError,ValueError,IndexError):
+        pass
+    notice=''
     fd=sys.stdin.fileno();old=termios.tcgetattr(fd)
     try:
         from .look_renderer import fit
@@ -458,7 +491,7 @@ def choose_theme(read_key):
         while True:
             width,height=shutil.get_terminal_size((100,30))
             width=max(1,width-1)
-            page=max(1,height-10)
+            page=max(1,height-12)
             top=max(0,min(selected-page+1,len(names)-page))
             name=names[selected]
             lines=['LOOK TERMINAL  /  THEMES','']
@@ -467,20 +500,44 @@ def choose_theme(read_key):
                 label=DESCRIPTIONS.get(entry,'Saved palette' if entry!='reset' else 'Restore underlying Kitty colors')
                 row=('› ' if index==selected else '  ')+entry+'  ·  '+label
                 lines.append(list_row(row,width,selected=index==selected,colors=colors))
+            opacity=opacities.get(name)
             lines+=['','PREVIEW']
             if name=='reset':
                 lines.append('Restore your underlying Kitty appearance.')
             else:
-                try:lines+=palette_preview(settings(name,folder),min(width,64))
+                try:
+                    palette=apply_opacity(settings(name,folder),opacity)
+                    lines+=palette_preview(palette,min(width,64))
+                    value=palette.get('background_opacity')
+                    lines.append('Opacity '+(value if value else 'inherited')+'  ·  ←/→ adjust')
                 except (OSError,ValueError) as error:lines.append(str(error))
-            lines+=['',command_text('↑↓ preview · Enter apply · E customize · Esc cancel',
-                                   ('↑↓','Enter','E','Esc'),colors=colors)]
+            lines+=['',*command_lines('↑↓ preview · A apply here · L preview window · Enter apply/close · E customize · Esc close',
+                                     width,colors=colors),notice]
             sys.stdout.write('\033[2J\033[H'+'\n'.join(fit(line,width) for line in lines)+'\033[J');sys.stdout.flush()
             key=read_key(fd,None)
             if key=='down':selected=min(len(names)-1,selected+1)
             elif key=='up':selected=max(0,selected-1)
             elif key in {'esc','q','\x03'}:return None
-            elif key in {'\r','\n','enter'}:return names[selected],False
+            elif key in {'left','right'} and name!='reset':
+                value=float(opacity or settings(name,folder).get('background_opacity','1.0'))
+                opacities[name]=opacity_value(max(.50,min(1,value+(.02 if key=='right' else -.02))))
+            elif key in {'l','L'} and name!='reset':
+                try:
+                    launch_theme(name,opacity)
+                    notice='Opened preview window for '+name
+                except (OSError,ValueError) as error:
+                    notice=str(error)
+            elif key in {'a','A'}:
+                try:
+                    select_theme(name,folder,opacity)
+                    reloaded=reload_kitty()
+                    notice='Applied '+name
+                    if opacity is not None or not reloaded:
+                        notice+=' · reopen Kitty if opacity or colors have not changed'
+                except (OSError,ValueError) as error:
+                    notice=str(error)
+            elif key in {'\r','\n','enter'}:
+                return (name,False,opacity) if opacity is not None else (name,False)
             elif key in {'e','E'} and name!='reset':return name,True
     finally:
         termios.tcsetattr(fd,termios.TCSADRAIN,old)
@@ -494,36 +551,37 @@ def main(argv=None,read_key=None):
     commands.add_parser('themes',help='Browse and preview palettes')
     theme=commands.add_parser('theme',help='Persist a palette; reset removes the LOOK overlay and restores your underlying Kitty appearance')
     theme.add_argument('name',choices=(*names,'reset'))
+    theme.add_argument('--opacity',help='Kitty background opacity from 0.50 to 1.00')
     launch=commands.add_parser('launch',help='Launch a separate Kitty window with a palette, without changing config')
     launch.add_argument('name',choices=names)
+    launch.add_argument('--opacity',help='Kitty background opacity for the new window')
     custom=commands.add_parser('customize',help='Edit custom or start from a preset; saves as custom')
     custom.add_argument('base',nargs='?',choices=names,help='Preset to fine-tune into custom')
     custom.add_argument('--name',default='custom',help='Save to a named palette')
     args=parser.parse_args(argv)
     try:
         if args.action=='theme':
-            path=select_theme(args.name,directory())
+            select_theme(args.name,directory(),args.opacity)
             print('Kitty palette: '+args.name)
             print('Applied to current Kitty.' if reload_kitty() else 'Reload Kitty with Ctrl-Shift-F5, or reopen it.')
+            if args.opacity is not None:
+                print('Reopen Kitty if the opacity has not changed.')
             print('Personal overrides in kitty-local.conf still apply.')
         elif args.action=='launch':
-            command=[kitty_executable()]
-            command+=['--override','env=LOOK_TERMINAL_THEME='+args.name]
-            for key,value in settings(args.name).items(): command+=['--override',key+'='+value]
-            subprocess.Popen(command,stdin=subprocess.DEVNULL,stdout=subprocess.DEVNULL,stderr=subprocess.DEVNULL)
+            launch_theme(args.name,args.opacity)
             print('Opened Kitty · '+args.name)
         elif args.action=='customize':
             print('Custom style saved. Reload/reopen LOOK to refresh its text colors.' if customize(read_key,directory(),args.base,args.name) else 'Custom style unchanged.')
         elif read_key and sys.stdin.isatty() and sys.stdout.isatty():
             picked=choose_theme(read_key)
             if picked:
-                name,edit=picked
+                name,edit,*opacity=picked
                 if edit:
                     saved=customize(read_key,directory(),None if name not in THEMES else name,
                                     name if name not in THEMES else 'custom')
                     print('Custom style saved. Reopen LOOK to refresh its text colors.' if saved else 'Custom style unchanged.')
                 else:
-                    select_theme(name,directory())
+                    select_theme(name,directory(),*opacity)
                     print('Kitty palette: '+name)
                     print('Applied to current Kitty.' if reload_kitty() else 'Reload Kitty with Ctrl-Shift-F5, or reopen it.')
         else:
