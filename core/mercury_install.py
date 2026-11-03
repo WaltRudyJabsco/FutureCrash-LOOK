@@ -18,11 +18,14 @@ import time
 import urllib.request
 import uuid
 
-REVISION='d0539a7cde30b9a126da5fbb990d260276c7e58a'
-ARCHIVE_SHA256='ee528e5709bfc7361843cb7ea26c83b59807a4a4c946e89bd9ba18047caa2953'
+REVISION='d637aab53cc02d85e6c8ac994b77ad42b9170e90'
+ARCHIVE_SHA256='eca30af2ab99518832ac9ba9be0fb9b6bf55e71e6b62cf503b98beec73aea264'
 VERSION='1.6.8'
 PORT=8765
 LABEL='com.mercury.writer'
+MINI_KITTY_KEYS='\n'.join(
+    'map --when-focus-on var:mercury_mini '+key+' send_text all \\x1b[119;'+str(modifier)+'u'
+    for key,modifier in [('alt+shift+w',4),('ctrl+shift+w',6),('ctrl+alt+w',7)])
 
 
 def root():return Path.home()/'.local/share/future-crash-look/mercury-install'
@@ -42,6 +45,24 @@ def atomic(path,value):
     path.parent.mkdir(parents=True,exist_ok=True)
     temp=path.with_name(path.name+'.tmp')
     temp.write_text(json.dumps(value,indent=2));os.replace(temp,path)
+
+
+def configure_mini_keys():
+    """Only augment an existing Kitty profile, retaining a recoverable original."""
+    path=Path.home()/'.config/kitty/kitty.conf'
+    if not path.is_file():return {'state':'not_configured','reason':'No existing Kitty profile'}
+    text=path.read_text()
+    if all(line in text.splitlines() for line in MINI_KITTY_KEYS.splitlines()):return {'state':'current'}
+    backup=path.with_name('kitty.conf.before-mercury-mini-'+uuid.uuid4().hex[:8])
+    if path.is_symlink():backup.symlink_to(path.readlink())
+    else:shutil.copy2(path,backup)
+    temp=path.with_name('.kitty-mini-'+uuid.uuid4().hex)
+    try:
+        temp.write_text(text.rstrip()+'\n\n# Mercury Mini: internal pane shortcuts while the editor is focused.\n'+MINI_KITTY_KEYS+'\n')
+        shutil.copymode(path,temp)
+        os.replace(temp,path)
+    finally:temp.unlink(missing_ok=True)
+    return {'state':'updated','backup':str(backup),'reload':'Reload Kitty with Ctrl-Shift-F5 or reopen it'}
 
 
 def status():
@@ -184,7 +205,9 @@ def run(folder,enable_sync):
         else:raise RuntimeError('Mercury did not report its new running version')
         if enable_sync:api('/api/sync/config',{'enabled':True},timeout=10)
         state=api('/api/sync/status',timeout=15)
-        phase('healthy',running_version=VERSION,sync_enabled=state['enabled'],projects=len(state.get('offline',[])),offline_ready=sum(row['ready'] for row in state.get('offline',[])),conflicts=len(state.get('conflicts',[])))
+        keys=configure_mini_keys()
+        runtime_hashes={name:hashlib.sha256((app/name).read_bytes()).hexdigest() for name in ('mercury_desk.py','mercury_terminal.py') if (app/name).is_file()}
+        phase('healthy',running_version=VERSION,runtime_hashes=runtime_hashes,kitty=keys,sync_enabled=state['enabled'],projects=len(state.get('offline',[])),offline_ready=sum(row['ready'] for row in state.get('offline',[])),conflicts=len(state.get('conflicts',[])))
     except Exception as error:
         recovery=[]
         if changed and (folder/'previous-app').is_dir():

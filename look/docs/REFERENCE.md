@@ -1373,6 +1373,11 @@ fallback. Within the existing splits layout, only the selected pane is subdivide
 The views redraw to fit the terminal after panes open or close. Shift-W stays
 ordinary text inside note editors and URL/bookmark prompts. In a launched web
 browser, the browser owns its keys; quit back to the desk to use Shift-W.
+
+Mercury Mini owns its internal writing splits. While Mini is open, LOOK's Kitty
+profile sends **Option/Alt-Shift-W** to switch Mini panes and **Ctrl-Shift-W**
+(also **Ctrl-Option/Alt-W**) to close the focused Mini pane. Other shell panes
+keep their ordinary terminal shortcuts. Mini removes this scope when it exits.
 Without Kitty or tmux, LOOK explains the requirement and stays in your view.
 
 ## Reading without link tags
