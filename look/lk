@@ -12709,16 +12709,16 @@ def _c(text, code):
         os.environ.get("COLORTERM","").lower() in {"truecolor","24bit"}
         or os.environ.get("TERM_PROGRAM") in {"iTerm.app","Apple_Terminal","WezTerm","ghostty"}
     ))
-    if not truecolor:
-        return f"\033[{code}m{text}\033[0m"
-
-    if _APP_COLORS:
+    if _APP_COLORS and not classic:
         role={'36':'CYAN','32':'GREEN','33':'YELLOW','31':'RED','34':'BLUE',
               '35':'MAGENTA','37':'WHITE','2':'GRAY'}.get(code.removeprefix('1;'))
         if role:
             r,g,b=_APP_COLORS[role]
             bold='\033[1m' if code.startswith('1;') else ''
             return f"{bold}\033[38;2;{r};{g};{b}m{text}\033[0m"
+
+    if not truecolor:
+        return f"\033[{code}m{text}\033[0m"
 
     rgb={
         "36":(103,214,238), "1;36":(103,214,238),
@@ -12948,7 +12948,7 @@ def _read_tty_key(fd, timeout=None):
         b"\x1bb":"wordleft", b"\x1bf":"wordright",
         b"\x1b[107;5u":"\x0b", b"\x1b[110;5u":"\x0e",
         b"\x1b[116;5u":"\x14", b"\x1b[115;5u":"\x13", b"\x1b[106;5u":"\n",
-        b"\x1b[99;5u":"\x03", b"\x1b[121;5u":"\x19",
+        b"\x1b[99;5u":"\x03", b"\x1b[121;5u":"\x19", b"\x1b[103;5u":"\x07",
         b"\x1b[13;2u":"shiftenter", b"\x1b[27;2;13~":"shiftenter",
         b"\x1b\r":"shiftenter", b"\x1b\n":"shiftenter",
         b"\x1b[13u":"enter", b"\x1b[13;1u":"enter",
@@ -21106,10 +21106,11 @@ def _file_find_command(args):
 # Canonical human-facing command grammar. Aliases are entry points, not separate implementations.
 # Keep internal worker commands out of this registry.
 _COMMANDS = [
+    ("lk work", "[DOCUMENT]", "files", "Read Markdown and open an inline interactive shell"),
     ('lh', '[PATH]', 'files', 'LOOK with hidden files shown'),
     ('lk hidden', '[PATH]', 'files', 'LOOK with hidden files shown'),
     ('lk doc', '', 'meta', 'Full generated command, option and keyboard reference'),
-    ('lk terminal', '[theme NAME|launch NAME|customize]', 'meta', 'Kitty palette picker and custom inks/highlighter; reset removes the appearance overlay'),
+    ('lk terminal', '[themes|theme NAME|launch NAME|customize]', 'meta', 'Kitty palette picker and custom inks/highlighter; reset removes the appearance overlay'),
     ('lk web', '[URL|search WORDS|home|list] [--browser NAME] [--native-style]', 'apps', 'Keyboard reading desk, terminal browsers and an explicit qutebrowser handoff'),
     ("lk tldr", "", "meta", "Short offline command examples"),
     ('lk dash', '', 'fabric', 'Live Fabric dashboard'),
@@ -22492,6 +22493,9 @@ _HIDDEN_COMMANDS = {'force'}
 
 def main():
     _safe_cwd(repair=True)
+    if len(sys.argv)>=2 and sys.argv[1]=='work':
+        import work_desk
+        return work_desk.main(sys.argv[2:])
     if len(sys.argv)>=2 and sys.argv[1]=='force':
         import force_player
         return force_player.main(sys.argv[2:])

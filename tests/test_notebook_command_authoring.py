@@ -45,7 +45,7 @@ def test_enter_adds_command_line_and_does_not_drop_clipboard(terminal,monkeypatc
 
 def test_switching_type_preserves_both_drafts(terminal,monkeypatch):
     monkeypatch.setattr(renderer,'clipboard_text',lambda:'/project folder')
-    keys=iter(['paste:Project','\x14','paste:echo done','\x14','enter'])
+    keys=iter(['paste:Project','\x14','paste:echo done','\x14','\x14','enter'])
     source=nb.insert_link(None,5,lambda *args:next(keys))
     assert md.extract_links(source)==[('Project','/project folder')]
 
@@ -82,3 +82,17 @@ def test_command_body_can_be_edited_with_arrows(terminal,monkeypatch):
     monkeypatch.setattr(renderer,'clipboard_text',lambda:'echo one\necho two')
     keys=iter(['\x14','up','end','left','paste:X','\x13'])
     assert 'X' in action(nb.insert_link(None,5,lambda *args:next(keys)))[1]['command']
+
+def test_terminal_type_inserts_clipboard_and_resolves_numbered_work_block(terminal,monkeypatch,tmp_path):
+    monkeypatch.setattr(renderer,'clipboard_text',lambda:'echo interactive')
+    keys=iter(['\x14','\x14','\t','paste:Project shell','\x13'])
+    block=nb.insert_link(None,5,lambda *args:next(keys))
+    body='```sh\necho ordinary\n```\n'+block
+    label,target=action(body)
+    assert label=='Project shell'
+    assert target=={'kind':'terminal','block':2}
+    path=tmp_path/'note.md'
+    row={'path':str(path),'title':'Project','body':body}
+    path.write_text(nb.Notebook.markdown(row))
+    kind,value=nb.resolve_link(None,row,target)
+    assert (kind,value)==('terminal',(path,2))

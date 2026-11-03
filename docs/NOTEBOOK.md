@@ -185,8 +185,8 @@ Label and Working directory (optional), so a path containing spaces is never
 mistaken for executable code. Paste multiline command text into Command; Enter
 adds a newline there. Tab moves to Label and then Working directory. Use
 Shift-Enter/Ctrl-S to insert the finished block; Enter in the last field also
-inserts it. Save the note as usual afterward. Ctrl-T switches back to Link and
-preserves both drafts; Ctrl-N's note picker stays available in Link mode.
+inserts it. Save the note as usual afterward. Ctrl-T cycles through Terminal and back to Link,
+preserving each draft; Ctrl-N's note picker stays available in Link mode.
 
 The helper supplies quoting and a suitable Markdown fence, even when the pasted
 script contains backticks, and inserts it on its own lines. Creating the block
@@ -216,6 +216,30 @@ code blocks stay examples. Unclosed, empty or invalid command blocks cannot be
 selected. Terminal controls and hidden directional controls are rejected before
 execution. Previewing, editing, copying, syncing and opening a note never run
 its commands; each execution requires the explicit R confirmation.
+
+### Interactive terminal blocks
+
+In the Notes editor, press **Ctrl-K**, then **Ctrl-T** twice to reach
+**Terminal**. The form suggests startup commands from the clipboard. Clear
+that field for an empty shell, add an optional label, then press **Ctrl-S**
+to insert the block. Save the note.
+
+````markdown
+```terminal label="Project shell"
+pwd
+```
+````
+
+The preview shows **Terminal: Project shell** with a link number. Choose it
+with **Shift-L** or its number, then press **Enter** to open the shell
+inside the note. **Ctrl-G** collapses it and restores the Notes controls.
+Select the block again and press **Enter** to resume. The shell starts beside
+the note file and uses your configured interactive shell.
+
+Inline terminals use the optional Python package `pyte`. Install it in a
+virtual environment and run the installed `lk` with that Python on each machine
+where you want inline terminals. Ordinary note links and commands use the
+existing Notes runtime.
 
 ## Adjacent shell pane
 

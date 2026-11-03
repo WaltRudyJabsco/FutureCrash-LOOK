@@ -1,5 +1,11 @@
 [
   [
+    "lk work",
+    "[DOCUMENT]",
+    "files",
+    "Read Markdown and open an inline interactive shell"
+  ],
+  [
     "lh",
     "[PATH]",
     "files",
@@ -19,7 +25,7 @@
   ],
   [
     "lk terminal",
-    "[theme NAME|launch NAME|customize]",
+    "[themes|theme NAME|launch NAME|customize]",
     "meta",
     "Kitty palette picker and custom inks/highlighter; reset removes the appearance overlay"
   ],

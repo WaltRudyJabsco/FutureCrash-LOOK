@@ -115,6 +115,18 @@ def wrap_spans(spans,width):
     return rows
 
 
+SHELL_FENCES = {'sh', 'shell', 'bash', 'zsh', 'terminal'}
+
+
+def terminal_label(info):
+    parts = shlex.split(info)
+    if len(parts) == 1:
+        return 'Interactive terminal'
+    if len(parts) == 2 and parts[1].startswith('label=') and parts[1][6:].strip():
+        return parts[1][6:]
+    raise ValueError('Use terminal label="Name"')
+
+
 def command_block(info,body):
     """Only explicit command fences become actions; no URL command protocol."""
     parts=shlex.split(info)
@@ -130,13 +142,13 @@ def command_block(info,body):
     return label,{'kind':'command','command':body,'cwd':options.get('cwd','')}
 
 
-def render(text,width,links=None):
+def render(text,width,links=None,terminals=None,terminal_positions=None):
     """Render common note Markdown without HTML, image fetching, or side effects."""
     width=max(1,width)
     # Notes cannot inject terminal commands. Tabs keep a predictable visual width.
     raw_lines=text.replace('\r\n','\n').replace('\r','\n').split('\n')
     text=safe_text(text).expandtabs(4)
-    lines=text.splitlines(); rows=[]; fence=None; index=0
+    lines=text.splitlines(); rows=[]; fence=None; index=0; shell_number=0
     while index<len(lines):
         line=lines[index]; index+=1
         marker=re.match(r'^ {0,3}(`{3,}|~{3,})(.*)$',line)
@@ -147,7 +159,8 @@ def render(text,width,links=None):
             continue
         if marker:
             info=raw_lines[index-1].lstrip()[len(marker[1]):].strip()
-            if info.split(None,1)[:1]==['command']:
+            language = info.split(None,1)[0].lower() if info else ''
+            if language in SHELL_FENCES or language == 'command':
                 end=index
                 while end<len(lines):
                     close=re.match(r'^ {0,3}(`{3,}|~{3,})\s*$',lines[end])
@@ -155,14 +168,32 @@ def render(text,width,links=None):
                     end+=1
                 if end<len(lines):
                     try:
-                        label,target=command_block(info,'\n'.join(raw_lines[index:end]))
-                        if links is not None:
-                            links.append((safe_text(label),target))
-                            rows.extend(wrap_spans([('Run: '+safe_text(label)+' ['+str(len(links))+']',CYAN)],width))
-                        else:rows.extend(wrap_spans([('Run: '+safe_text(label),CYAN)],width))
+                        if language in SHELL_FENCES:
+                            shell_number += 1
+                        if language == 'terminal':
+                            label = terminal_label(info)
+                            target = {'kind':'terminal','block':shell_number}
+                            prefix = 'Terminal: '
+                        elif language == 'command':
+                            label,target=command_block(info,'\n'.join(raw_lines[index:end]))
+                            prefix = 'Run: '
+                        else:
+                            target = None
+                        if target:
+                            marker_text = prefix+safe_text(label)
+                            if links is not None:
+                                links.append((safe_text(label),target))
+                                marker_text += ' ['+str(len(links))+']'
+                            rows.extend(wrap_spans([(marker_text,CYAN)],width))
                     except ValueError as exc:
-                        rows.extend(wrap_spans([('Command unavailable: '+str(exc),DIM)],width))
-                    for body_line in lines[index:end]:rows.extend(wrap_spans([(body_line,CODE)],width))
+                        rows.extend(wrap_spans([(('Command unavailable: ' if language=='command' else 'Terminal unavailable: ')+str(exc),DIM)],width))
+                    if language == 'terminal' and terminal_positions is not None:
+                        terminal_positions[shell_number] = len(rows)
+                    if language == 'terminal' and terminals and shell_number in terminals:
+                        rows.extend(terminals[shell_number])
+                    else:
+                        for body_line in lines[index:end]:
+                            rows.extend(wrap_spans([(body_line,CODE)],width))
                     index=end+1;continue
             fence=marker[1]; continue
         heading=re.match(r'^ {0,3}(#{1,6})\s+(.+?)\s*$',line)

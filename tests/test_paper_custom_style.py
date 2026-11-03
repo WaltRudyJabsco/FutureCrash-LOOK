@@ -168,8 +168,30 @@ assert '✓' in row and 'notes.md' in row
 assert row.count(r.RESET)==1,repr(row)
 entries=r.read_entries(root,False)
 for row in r.column_grid(entries,100,note,{note.resolve()})+r.detail_rows(entries,100,note,{note.resolve()}):
- assert row.startswith(expected),repr(row)
+ assert row.startswith('\x1b[48;2;243;215;106m'),repr(row)
+ assert '\x1b[38;2;32;30;26m' in row.split('notes.md')[0],repr(row)
  assert r.RESET not in row.split('notes.md')[0],repr(row)
 '''
     env=dict(os.environ,COLORTERM='truecolor' if truecolor else '')
     subprocess.run([sys.executable,'-c',code,str(listing)],cwd=ROOT,env=env,check=True)
+
+def test_named_palette_stays_separate_and_appears_in_picker(tmp_path,monkeypatch,terminal):
+    path=folder(tmp_path,monkeypatch)
+    monkeypatch.setattr(styles,'reload_kitty',lambda:False)
+    assert styles.customize(lambda *args:'s',path,base='paper',name='blue-notebook')
+    assert (path/'look-palettes/blue-notebook.json').is_file()
+    assert not (path/'look-custom.json').exists()
+    assert 'blue-notebook' in styles.palette_names(path)
+    keys=iter(['down','esc'])
+    assert styles.choose_theme(lambda *args:next(keys)) is None
+    assert 'PREVIEW' in terminal.getvalue()
+    assert 'Selected match: notes.md' in terminal.getvalue()
+    assert (path/'look-theme.conf').read_text().startswith('# LOOK palette: blue-notebook')
+
+
+@pytest.mark.parametrize('name',['paper','harbor','orchard','porcelain','ember'])
+def test_preview_and_lookup_inks_have_contrast(name):
+    palette=styles.settings(name)
+    for key in ('foreground','url_color','color8','color9','color10','color75','color81','color114','color221'):
+        assert styles.contrast(palette['background'],palette[key])>=4.5,key
+    assert styles.contrast(palette['selection_background'],palette['selection_foreground'])>=4.5
