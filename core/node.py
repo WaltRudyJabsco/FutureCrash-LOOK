@@ -4954,6 +4954,10 @@ class API(BaseHTTPRequestHandler):
             return self.sendj(200, _local_media_catalog())
         if path == "/v1/media/catalog/revision":
             return self.sendj(200, {"node":identity()["name"],"revision":_local_media_catalog_revision()})
+        if path == "/v1/media/videos":
+            try:from . import video_library
+            except ImportError:import video_library
+            return self.sendj(200,video_library.catalog(_fabric_media_catalog()))
         if path == "/v1/media/fabric":
             return self.sendj(200, _fabric_media_catalog())
         if path == "/v1/media/item":

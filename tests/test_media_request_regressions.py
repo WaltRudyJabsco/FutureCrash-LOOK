@@ -824,3 +824,11 @@ def test_artist_title_combination_outranks_other_artist_tracks(lk, query):
     match,selected=lk._media_query_matches(query,catalog_rows=rows)
     assert match=='item' and len(selected)==1
     assert selected[0]['title']=="Please Don't Make Me Cry"
+
+@pytest.mark.parametrize('exact',[False,True])
+def test_explicit_video_kind_cannot_resolve_library_alert_sound(lk,monkeypatch,exact):
+    rows=[{'id':'basso','path':'/System/Library/Sounds/Basso.aiff','title':'Basso','album':'Library Sounds','media_type':'audio/x-aiff'}]
+    monkeypatch.setattr(lk,'_media_catalog_entries',lambda:(rows,{}))
+    monkeypatch.setattr(lk,'_intent_normalizer_module',lambda:intent_normalizer)
+    with pytest.raises(ValueError,match='no Fabric'):
+        lk._media_resolve_targets(['Library Sounds','--kind','video']+(['--exact'] if exact else []))

@@ -128,3 +128,5 @@ body.media-fullscreen-open{overflow:hidden}
 #mediaPanel:not([data-playback="playing"]) .media-ambient i{animation-play-state:paused}
 @keyframes media-drift{to{height:85%;opacity:.35}}
 @media(prefers-reduced-motion:reduce){.media-ambient i{animation:none}}
+
+.media-fullscreen-button{min-height:44px;padding:10px 16px;border:1px solid #9dbbd7;border-radius:6px;background:#243746;color:#fff;font:inherit;cursor:pointer;margin-left:auto}

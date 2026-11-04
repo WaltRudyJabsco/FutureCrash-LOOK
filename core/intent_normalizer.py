@@ -44,6 +44,12 @@ def normalize(prompt: str) -> dict[str, Any] | None:
         return None
     low = text.casefold().strip(" .!?")
 
+    try:from . import video_library
+    except ImportError:import video_library
+    video_request=video_library.intent(text)
+    if video_request and video_request['action']=='choose':
+        return _intent('media.play',kind='video',selection='random',limit=1,match_mode='selector')
+
     controls = {
         "pause": "pause", "pause music": "pause", "pause playback": "pause",
         "resume": "play", "resume music": "play", "resume playback": "play",

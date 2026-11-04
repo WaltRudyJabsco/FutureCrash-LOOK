@@ -19504,6 +19504,8 @@ def _media_resolve_targets(args):
             return rows,shuffle
 
     catalog,_=_media_catalog_entries()
+    if kind in {'audio','video'}:
+        catalog=[row for row in catalog if str(row.get('media_type') or '').casefold().startswith(kind+'/')]
     # Direct `lk play ...` is still human language. Normalize selectors here so
     # it cannot disagree with LO/Signal (the old "a song" literal-query bug).
     if not exact:
@@ -19516,7 +19518,7 @@ def _media_resolve_targets(args):
         if isinstance(intent,dict) and intent.get("action")=="media.play":
             if not intent.get("query"):
                 rows=media_core.select_entries(
-                    {"entries":_media_selection_catalog(catalog)}, kind=str(intent.get("kind") or ""),
+                    {"entries":_media_selection_catalog(catalog)}, kind=kind or str(intent.get("kind") or ""),
                     artist=str(intent.get("artist") or ""), selection=str(intent.get("selection") or "all"),
                     limit=int(intent.get("limit") or 0),
                 )
@@ -19528,7 +19530,7 @@ def _media_resolve_targets(args):
             # video requests on the deterministic path instead of leaking them
             # into general cognition.
             typed_query=str(intent.get("query") or "").strip()
-            typed_kind=str(intent.get("kind") or "").casefold()
+            typed_kind=kind or str(intent.get("kind") or "").casefold()
             typed_match,typed_rows=_media_query_matches(typed_query,match_mode=str(intent.get("match_mode") or "fuzzy"),catalog_rows=catalog)
             if typed_kind in {"audio","video"}:
                 typed_rows=[r for r in typed_rows if str(r.get("media_type") or "").casefold().startswith(typed_kind+"/")]
