@@ -274,6 +274,8 @@ def command_help_pages(root,forms,usages):
             pending=next_level
         if flags and name!='settings': parts.extend(['','RECOGNIZED FLAGS',', '.join(sorted(flags))])
         surface_help={
+            'lock':'Open PIN curtain settings: L lock, U unlock, P set/change PIN, G prepare AI captions, R refresh, Q back. lk lk activates; lk unlock prompts privately. Not an operating-system lock. See docs/CURTAIN.md.',
+            'unlock':'Prompt privately for the four-digit PIN and dismiss reachable Fabric curtains. Offline nodes require retry after reconnecting.',
             'saver':'Arrows select; Space enables for Cycle; P previews; Enter starts; A saves; D displays; M matching/independent; C colors; I inversions; -/+ interval; G graphics setup; q/Esc back. lk saver setup installs isolated Qt. See docs/SAVER.md.',
             'sv':'Start saved screensaver. C changes colors; V advances visuals; Space, Escape or click dismisses all windows. Options: --display all|current, --palette NAME, --interval SECONDS, --matching, --independent, --invert/--no-invert, --preview, --seconds N. This is not a password lock.',
             'commands':'Type to filter; arrows choose; Page Up/Down or Shift-Up/Down moves a screen; Home/End or Shift-Left/Right goes to the first/last result. Enter/Right composes a command in the shell; Esc clears the filter, then returns. Blue keys and gray descriptions wrap in the footer.',

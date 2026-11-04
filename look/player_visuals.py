@@ -49,7 +49,7 @@ def active_mode(mode, elapsed, enabled=None):
     return mode
 
 
-def frame(mode, width, height, phase, playing=True, seed=0):
+def frame(mode, width, height, phase, playing=True, seed=0, *, captions=None):
     width=max(1,min(240,int(width))); height=max(1,min(80,int(height)))
     t=float(phase) if playing else 0.0
     mode=(int(mode)-1)%len(NAMES)
@@ -89,7 +89,7 @@ def frame(mode, width, height, phase, playing=True, seed=0):
     elif mode==28:
         return signal_bloom_frame(width,height,t,seed)
     elif mode==27:
-        return flight_deck_frame(width,height,t,seed)
+        return flight_deck_frame(width,height,t,seed,phrases=captions)
     elif mode==26:
         return switchyard_frame(width,height,t,seed)
     elif mode==25:

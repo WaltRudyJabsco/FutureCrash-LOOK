@@ -105,3 +105,9 @@ files, notes, or listening history. Validated captions are saved in
 Rendering never waits for a model. Missing or malformed cached text falls back to
 built-in captions; failed generation preserves an existing set. `lk saver text reset`
 returns new sessions to built-in captions. Setup requires no new AI provider.
+
+## Fabric PIN curtain
+
+For synchronized Flight Deck curtains, use `lk lock` for settings and `lk lk` to
+activate. See [Fabric PIN curtain](CURTAIN.md) for setup, browser controls and
+offline behavior. The ordinary saver retains its immediate dismissal keys.

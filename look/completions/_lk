@@ -25,6 +25,9 @@ _lk() {
   top=(
     'doc:full offline command and keyboard reference'
     'tldr:short offline command examples'
+    'lock:PIN curtain settings'
+    'lk:activate Fabric PIN curtain'
+    'unlock:open Fabric PIN curtain'
     'saver:screensaver picker and settings'
     'sv:start ambient screensaver'
     'mp:integrated Fabric media player'
@@ -115,6 +118,10 @@ _lk() {
   fi
 
   case "$words[2]" in
+    lock)
+      _values 'curtain action' setup status lock unlock
+      return
+      ;;
     saver|sv)
       case "$words[CURRENT-1]" in
         --display) _values 'display' all current; return ;;
