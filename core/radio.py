@@ -87,8 +87,9 @@ class Radio:
             state = self.read(); items = state['items']; action = data.get('action')
             if action == 'add':
                 url = canonical_url(data.get('url',''))
-                if any(i['url']==url for i in items):
-                    return self.snapshot()
+                existing=next((i for i in items if i['url']==url),None)
+                if existing:
+                    return dict(self.snapshot(),radio_added={'id':existing['id'],'already_present':True})
                 if len(items)>=MAX_ITEMS:raise ValueError('Radio queue is full')
                 job = self.downloads.create(url, directory=str(self.root/'audio'), audio=True)
                 items.append({'id':uuid.uuid4().hex,'url':url,'job':job['id'],
@@ -117,7 +118,9 @@ class Radio:
                     item['job']=self.downloads.create(item['url'],directory=str(self.root/'audio'),audio=True)['id']
                 else:raise ValueError('Unknown radio action')
             state['revision']+=1;self.save(state)
-            return self.snapshot()
+            result=self.snapshot()
+            if action=='add':result['radio_added']={'id':items[-1]['id'],'already_present':False}
+            return result
 
     def audio_file(self, item_id):
         with self.lock:

@@ -53,6 +53,30 @@
     const match=String(text||'').trim().match(/^\/ytr(?:\s+(https?:\/\/\S+))?$/i);
     return match?{url:match[1]||''}:null;
   }
+  function radioAddCommand(text){
+    const value=String(text||'').trim();
+    const links=value.match(/https?:\/\/[^\s<>]+/gi)||[];
+    const words=value.replace(/https?:\/\/[^\s<>]+/gi,' ').replace(/[<>"“”()[\]]/g,' ').replace(/\s+/g,' ').trim().replace(/[.!?:,]+$/,'');
+    if(!/^(?:(?:please|can you|could you)\s+)?(?:add|queue|save)\s+(?:(?:this|that|it|this video|this link|this youtube video|the video|the link)\s+)?(?:to|in|for)\s+(?:(?:my|our|the)\s+)?(?:youtube\s+radio|ytr)(?:\s+queue)?(?:\s+please)?$/i.test(words))return null;
+    if(links.length!==1)return {error:'Paste one YouTube video link in the same message, followed by “add this to YouTube Radio”.'};
+    return {url:links[0].replace(/[).,!?:;]+$/,'')};
+  }
+  async function addRadio(command){
+    if(command.error)throw Error(command.error);
+    let owner;
+    try{owner=JSON.parse(root.localStorage.getItem('look-ytr-owner'))}catch{}
+    if(typeof owner!=='string'||!owner){
+      const response=await root.fetch('/api/ytr/config');const config=await response.json();
+      if(!response.ok||!config.owner)throw Error(config.error||'Could not find the YouTube Radio queue owner');
+      owner=config.owner;
+    }
+    const response=await root.fetch('/api/ytr?'+new URLSearchParams({target:owner}),{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({action:'add',url:command.url})});
+    const data=await response.json();
+    if(!response.ok||!data.ok)throw Error(data.error||'The queue did not confirm this addition');
+    const receipt=data.radio_added,item=data.items?.find(item=>item.id===receipt?.id);
+    if(!item)throw Error('The queue did not return an addition receipt. Check /ytr before retrying.');
+    return (receipt.already_present?'Already in':'Added to')+' YouTube Radio on '+data.node+': '+(item.title||item.url)+'. Playback has not started.';
+  }
   function openRadio(command){
     const url=new URL('/ytr',root.location.href);if(command?.url)url.searchParams.set('url',command.url);
     try{root.open(url.href,'_blank','noopener')}catch{}
@@ -133,7 +157,7 @@
     try{root.open(url.href,'_blank','noopener')}catch{}
     return url.href;
   }
-  root.FabricBrowserViews={radioCommand,openRadio,beginImage,imageArtifacts,imageRequest,fabricCommand,openFabric,booksCommand,openBooks,bookQuery,bookMatches,createBookAhead,bookPosition};
+  root.FabricBrowserViews={radioAddCommand,addRadio,radioCommand,openRadio,beginImage,imageArtifacts,imageRequest,fabricCommand,openFabric,booksCommand,openBooks,bookQuery,bookMatches,createBookAhead,bookPosition};
 })(globalThis);
 
 
