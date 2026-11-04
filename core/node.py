@@ -2615,6 +2615,19 @@ def _radio():
         return _RADIO_MANAGER
 
 
+_MUSEUM_MANAGER = None
+_MUSEUM_LOCK = threading.Lock()
+
+def _museum():
+    global _MUSEUM_MANAGER
+    with _MUSEUM_LOCK:
+        if _MUSEUM_MANAGER is None:
+            try:from .museum import Museum
+            except ImportError:from museum import Museum
+            _MUSEUM_MANAGER=Museum()
+        return _MUSEUM_MANAGER
+
+
 def _local_file_search(query,limit=80):
     """Bounded local metadata + FTS5 search; file contents never cross the network."""
     if not LOOK_FILE_CATALOG.exists(): return {"schema":"fabric-file-search-v2","node":identity()["name"],"entries":[],"count":0}
@@ -4091,6 +4104,59 @@ class API(BaseHTTPRequestHandler):
             self.end_headers()
             shutil.copyfileobj(response,self.wfile,1024*1024)
 
+    def _museum_request(self,payload=None):
+        try:
+            peer,_value=self._file_target();parsed=urlparse(self.path);params=parse_qs(parsed.query)
+            image=parsed.path=='/v1/museum/image'
+            ident=(params.get('id') or [''])[0]
+            route=parsed.path+'?'+urllib.parse.urlencode({k:v[0] for k,v in params.items() if k in {'id','q','source','page'}})
+            if peer is not None:
+                if payload and payload.get('action')=='sync':
+                    result=_file_peer_json(peer,'/v1/museum')
+                    def download(row):
+                        url=_copy_route(peer)+'/v1/museum/image?'+urllib.parse.urlencode({'id':row['id']})
+                        req=urllib.request.Request(url,headers=FABRIC_IDENTITY.auth_headers_for_url(url))
+                        with urllib.request.urlopen(req,timeout=30,context=FABRIC_IDENTITY.ssl_context_for_url(url)) as response:return response.read(20*1024*1024+1)
+                    result=_museum().start_sync(result['items'],download)
+                    return self.sendj(200,dict(result,ok=True,node=identity()['name']))
+                if payload and payload.get('action')=='pin':
+                    ident=str(payload.get('id',''))
+                    result=_file_peer_json(peer,'/v1/museum')
+                    row=next((x for x in result['items'] if x['id']==ident),None)
+                    if row is None:raise ValueError('Artwork is not in that node’s collection')
+                    url=_copy_route(peer)+'/v1/museum/image?'+urllib.parse.urlencode({'id':ident})
+                    req=urllib.request.Request(url,headers=FABRIC_IDENTITY.auth_headers_for_url(url))
+                    with urllib.request.urlopen(req,timeout=30,context=FABRIC_IDENTITY.ssl_context_for_url(url)) as response:
+                        data=response.read(20*1024*1024+1)
+                    if hashlib.sha256(data).hexdigest()!=row.get('sha256'):raise ValueError('Artwork transfer checksum mismatch')
+                    _museum().store(row,data,row.get('collection','Pinned collection'))
+                    return self.sendj(200,dict(_museum().snapshot(),ok=True,node=identity()['name']))
+                if image:
+                    url=_copy_route(peer)+route
+                    req=urllib.request.Request(url,headers=FABRIC_IDENTITY.auth_headers_for_url(url))
+                    with urllib.request.urlopen(req,timeout=30,context=FABRIC_IDENTITY.ssl_context_for_url(url)) as response:
+                        self.send_response(response.status)
+                        for key in ('Content-Type','Content-Length'):
+                            if response.headers.get(key):self.send_header(key,response.headers[key])
+                        self.end_headers();shutil.copyfileobj(response,self.wfile,65536)
+                    return
+                if parsed.path=='/v1/museum/search':result=http_json(_copy_route(peer)+route,timeout=90)
+                else:result=_file_peer_json(peer,route) if payload is None else http_json(_copy_route(peer)+route,data=payload,timeout=90)
+                return self.sendj(200,result)
+            manager=_museum()
+            if image:
+                path=manager.image(ident)
+                with path.open('rb') as stream:signature=stream.read(8)
+                return self._serve_file_range(path,'image/png' if signature==b'\x89PNG\r\n\x1a\n' else 'image/jpeg')
+            if payload is not None:
+                if payload.get('action')=='pin':manager.image(payload.get('id',''))
+                result=manager.snapshot() if payload.get('action') in {'pin','sync'} else manager.change(payload)
+            elif parsed.path=='/v1/museum/search':
+                result=manager.search((params.get('source') or ['met'])[0],(params.get('q') or [''])[0],int((params.get('page') or ['1'])[0]))
+            else:result=manager.snapshot((params.get('q') or [''])[0])
+            return self.sendj(200,dict(result,ok=True,node=identity()['name']))
+        except Exception as exc:return self.sendj(400,{'ok':False,'error':str(exc)})
+
     def _radio_request(self, payload=None):
         try:
             peer,_value=self._file_target()
@@ -4807,6 +4873,7 @@ class API(BaseHTTPRequestHandler):
             try: from . import notifications
             except ImportError: import notifications
             return self.sendj(200,{'ok':True,'settings':notifications.settings()})
+        if path in {"/v1/museum","/v1/museum/search","/v1/museum/image"}: return self._museum_request()
         if path in {"/v1/radio","/v1/radio/audio"}: return self._radio_request()
         if path == "/v1/downloads" or path.startswith("/v1/downloads/"): return self._downloads_request()
         if path == "/v1/mercury/install/status":return self.sendj(200,mercury_install.status())
@@ -5163,6 +5230,7 @@ class API(BaseHTTPRequestHandler):
                 return self.sendj(200,result)
             except (ValueError,TypeError,OSError) as exc:
                 return self.sendj(400,{'ok':False,'error':str(exc)})
+        if path == "/v1/museum": return self._museum_request(d)
         if path == "/v1/radio": return self._radio_request(d)
         if path == "/v1/downloads": return self._downloads_request(d)
         if path == "/v1/endpoints/fabric/allow":

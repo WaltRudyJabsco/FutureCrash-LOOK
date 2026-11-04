@@ -49,6 +49,8 @@
       cancel(){try{if(tab&&!tab.closed)tab.close()}catch{}tab=null}
     };
   }
+  function museumCommand(text){return /^\/museum$/i.test(String(text||'').trim())}
+  function openMuseum(){const url=new URL('/museum',root.location.href).href;try{root.open(url,'_blank','noopener')}catch{}return url}
   function radioCommand(text){
     const match=String(text||'').trim().match(/^\/ytr(?:\s+(https?:\/\/\S+))?$/i);
     return match?{url:match[1]||''}:null;
@@ -157,7 +159,7 @@
     try{root.open(url.href,'_blank','noopener')}catch{}
     return url.href;
   }
-  root.FabricBrowserViews={radioAddCommand,addRadio,radioCommand,openRadio,beginImage,imageArtifacts,imageRequest,fabricCommand,openFabric,booksCommand,openBooks,bookQuery,bookMatches,createBookAhead,bookPosition};
+  root.FabricBrowserViews={museumCommand,openMuseum,radioAddCommand,addRadio,radioCommand,openRadio,beginImage,imageArtifacts,imageRequest,fabricCommand,openFabric,booksCommand,openBooks,bookQuery,bookMatches,createBookAhead,bookPosition};
 })(globalThis);
 
 

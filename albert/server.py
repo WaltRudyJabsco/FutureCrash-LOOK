@@ -567,6 +567,11 @@ class Handler(BaseHTTPRequestHandler):
             except Exception:return self.send_json(503,{'error':'Fabric node unavailable'})
         path=urlparse(self.path).path
 
+        if path=='/museum' or path.startswith('/api/museum'):
+            if not self._require_endpoint('lo.use'):return
+            import museum_web
+            try:return museum_web.handle(self,NODE)
+            except Exception as exc:return self.send_json(502,{'error':str(exc)})
         if path=='/ytr' or path.startswith('/api/ytr'):
             if not self._require_endpoint('lo.use'):return
             import radio_web
@@ -662,6 +667,11 @@ class Handler(BaseHTTPRequestHandler):
                 return self.send_json(200,node_json('/v1/curtain',{'action':data['action'],'pin':data.get('pin')},timeout=12))
             except Exception as exc:return self.send_json(400,{'error':str(exc)})
 
+        if urlparse(self.path).path.startswith('/api/museum'):
+            if not self._require_endpoint('lo.use'):return
+            import museum_web
+            try:return museum_web.post(self,NODE)
+            except Exception as exc:return self.send_json(400,{'error':str(exc)})
         if urlparse(self.path).path.startswith('/api/ytr'):
             if not self._require_endpoint('lo.use'):return
             import radio_web

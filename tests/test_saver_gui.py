@@ -144,3 +144,19 @@ def test_live_controls_reach_every_display():
         window.run.next_color.assert_called_once()
         window.run.next_scene.assert_called_once()
         assert window.update.call_count==2
+
+
+def test_museum_draws_cached_artwork_in_existing_saver(app,tmp_path,monkeypatch):
+    from PySide6.QtGui import QImage,QColor
+    import museum_art
+    path=tmp_path/'art.png';art=QImage(100,100,QImage.Format.Format_RGB32);art.fill(QColor('#5588aa'));art.save(str(path))
+    monkeypatch.setattr(museum_art,'artwork',lambda phase:({'title':'Fixture artwork','artist':'Artist','museum':'Museum'},path))
+    control=saver_gui.SaverController(app,{**saver.defaults(),'scene':'Museum'},preview=True,seed=1)
+    try:
+        app.processEvents();window=next(iter(control.windows.values()));image=window.grab().toImage()
+        assert window.museum_key==str(path)
+        assert image.pixelColor(image.width()//2,image.height()//2).name()=='#5588aa'
+        cached=window.museum_scaled.cacheKey();window.grab();assert window.museum_scaled.cacheKey()==cached
+    finally:
+        control.timer.stop()
+        for window in control.windows.values():window.removing=True;window.close()
