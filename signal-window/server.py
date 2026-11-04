@@ -1138,6 +1138,11 @@ class App(BaseHTTPRequestHandler):
             except Exception:return self.json(503,{'error':'Fabric node unavailable'})
         parsed=urlparse(self.path); path=parsed.path
 
+        if path=='/ytr' or path.startswith('/api/ytr'):
+            if not self._require_endpoint('lo.use'):return
+            import radio_web
+            try:return radio_web.handle(self,NODE_URL)
+            except Exception as exc:return self.json(502,{'error':str(exc)})
         if path in {'/books','/reader'}:
             if not self._require_endpoint('lo.use'):return
             import book_web
@@ -1228,6 +1233,11 @@ class App(BaseHTTPRequestHandler):
                 return self.json(200,_node_call('/v1/curtain',{'action':data['action'],'pin':data.get('pin')},timeout=12))
             except Exception as exc:return self.json(400,{'error':str(exc)})
 
+        if urlparse(self.path).path.startswith('/api/ytr'):
+            if not self._require_endpoint('lo.use'):return
+            import radio_web
+            try:return radio_web.post(self,NODE_URL)
+            except Exception as exc:return self.json(400,{'error':str(exc)})
         if urlparse(self.path).path.startswith('/api/books'):
             if not self._require_endpoint('lo.use'):return
             import book_web

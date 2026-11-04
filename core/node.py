@@ -4101,11 +4101,16 @@ class API(BaseHTTPRequestHandler):
             if peer is not None:
                 if audio:
                     url=_copy_route(peer)+route
-                    request=urllib.request.Request(url,headers=FABRIC_IDENTITY.auth_headers_for_url(url))
+                    headers=FABRIC_IDENTITY.auth_headers_for_url(url)
+                    if self.headers.get('Range'):headers['Range']=self.headers['Range']
+                    request=urllib.request.Request(url,headers=headers)
                     context=FABRIC_IDENTITY.ssl_context_for_url(url) if url.startswith('https:') else None
-                    with urllib.request.urlopen(request,timeout=30,context=context) as response:
-                        self.send_response(200);self.send_header('Content-Type','audio/mp4')
-                        if response.headers.get('Content-Length'):self.send_header('Content-Length',response.headers['Content-Length'])
+                    try:response=urllib.request.urlopen(request,timeout=30,context=context)
+                    except urllib.error.HTTPError as exc:response=exc
+                    with response:
+                        self.send_response(response.status)
+                        for key in ('Content-Type','Content-Length','Content-Range','Accept-Ranges'):
+                            if response.headers.get(key):self.send_header(key,response.headers[key])
                         self.end_headers();shutil.copyfileobj(response,self.wfile,1024*1024)
                     return
                 result=_file_peer_json(peer,route) if payload is None else http_json(_copy_route(peer)+route,data=payload,timeout=15)
