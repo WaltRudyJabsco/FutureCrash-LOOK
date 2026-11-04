@@ -37,6 +37,8 @@ try:
     from core.browser_presentations import Presentations, candidates as _presentation_candidates
 except ImportError:
     from browser_presentations import Presentations, candidates as _presentation_candidates
+try:from core import video_library
+except ImportError:import video_library
 from endpoint_auth import EndpointAuth
 from intent_normalizer import resolve as resolve_intent
 ENDPOINT_AUTH = EndpointAuth()
@@ -65,27 +67,26 @@ def _video_label(row):
     return title
 
 def _broad_video_prompt(text):
-    low=" ".join(str(text or "").casefold().strip(" .!? ").split())
-    return bool(re.fullmatch(r"play(?: me)?(?: (?:a|any|some))? (?:movie|video)s?",low)) or low=="play something to watch"
+    return bool(video_library.intent(text))
 
-def _signal_video_choices(session):
-    try:
-        data=_node_call("/v1/media/fabric",timeout=8.0)
-        junk={'application support','caches','cache','node_modules','site-packages','library/developer','library/frameworks','library/python','contents/resources'}
-        def human_video(r):
-            path=str(r.get('path') or '').replace('\\','/').casefold()
-            return _video_row(r) and not any(part in path for part in junk) and int(r.get('bytes') or 0) >= 512*1024
-        videos=[r for r in (data.get("entries") or []) if human_video(r)] if isinstance(data,dict) else []
-    except Exception:
-        videos=[]
-    random.shuffle(videos); picks=videos[:3]
+def _signal_video_choices(session,listing=False,recent=False):
+    data=_node_call('/v1/media/videos',timeout=45.0)
+    if not isinstance(data,dict) or data.get('error'):raise RuntimeError('Video library unavailable; please retry')
+    videos=[row for row in data.get('entries',[]) if video_library.eligible(row)]
+    if recent:videos.sort(key=lambda row:float(row.get('mtime') or 0),reverse=True)
+    elif not listing:random.shuffle(videos)
+    picks=videos[:10 if listing else 3]
     if picks:
         with _SIGNAL_PENDING_MEDIA_LOCK:
-            _SIGNAL_PENDING_MEDIA[str(session or "signal")]=(time.time()+_SIGNAL_PENDING_MEDIA_TTL,videos,picks)
+            _SIGNAL_PENDING_MEDIA[str(session or 'signal')]=(time.time()+_SIGNAL_PENDING_MEDIA_TTL,videos,picks)
     return picks
+
 
 def _signal_pending_media(session,text):
     sid=str(session or "signal"); low=" ".join(str(text or "").casefold().strip(" .!? ").split())
+    if re.match(r"^(?:please )?(?:play|put on|shuffle|queue)\s+",low):
+        with _SIGNAL_PENDING_MEDIA_LOCK:_SIGNAL_PENDING_MEDIA.pop(sid,None)
+        return None
     with _SIGNAL_PENDING_MEDIA_LOCK:
         pending=_SIGNAL_PENDING_MEDIA.get(sid)
         if pending and pending[0] < time.time():
@@ -96,12 +97,12 @@ def _signal_pending_media(session,text):
         with _SIGNAL_PENDING_MEDIA_LOCK: _SIGNAL_PENDING_MEDIA.pop(sid,None)
         return {"cancelled":True}
     if low in {"m","more"}:
-        random.shuffle(videos); picks=videos[:3]
+        videos=videos[len(picks):]+videos[:len(picks)];picks=videos[:len(picks)]
         with _SIGNAL_PENDING_MEDIA_LOCK: _SIGNAL_PENDING_MEDIA[sid]=(time.time()+_SIGNAL_PENDING_MEDIA_TTL,videos,picks)
         return {"choices":picks}
     if low in {"r","random","surprise me","you choose","you pick","pick one","choose one","choose for me","pick for me","anything","whatever"}:
         row=random.choice(videos)
-    elif low in {"1","2","3"} and int(low)<=len(picks):
+    elif low.isdigit() and 1<=int(low)<=len(picks):
         row=picks[int(low)-1]
     else:
         # A title fragment is also a natural continuation of the pending choice.
@@ -113,7 +114,7 @@ def _signal_pending_media(session,text):
 
 def _signal_choice_text(picks, heading="What sounds good?"):
     lines=[heading]
-    for i,row in enumerate(picks[:3],1): lines.append(f"{i}  {_video_label(row)}")
+    for i,row in enumerate(picks,1): lines.append(f"{i}  {_video_label(row)}")
     lines += ["R  Surprise me","M  More"]
     return "\n".join(lines)
 
@@ -1372,6 +1373,9 @@ class App(BaseHTTPRequestHandler):
             media_node=str(d.get("media_node") or "").strip()
             media_endpoint=str(d.get("media_endpoint") or "").strip()
             session_id=str(d.get("session") or "").strip()[:120]
+            video_request=video_library.intent(prompt) if not files else None
+            if video_request:
+                with _SIGNAL_PENDING_MEDIA_LOCK:_SIGNAL_PENDING_MEDIA.pop(session_id or "signal",None)
             pending=_signal_pending_media(session_id,prompt) if not files else None
             if pending:
                 if pending.get("cancelled"):
@@ -1379,7 +1383,7 @@ class App(BaseHTTPRequestHandler):
                     _session_append(session_id,prompt,text)
                     return self.json(200,{"text":text,"signal":None,"visual":{"kind":"nochange"},"mode":self.mode,"model":"deterministic-media-choice","endpoint":"fabric","resolution":"media.choice.cancelled","files":[],"artifacts":[]})
                 if pending.get("choices"):
-                    text=_signal_choice_text(pending["choices"],"Three more:")
+                    text=_signal_choice_text(pending["choices"],"More videos:")
                     _session_append(session_id,prompt,text)
                     return self.json(200,{"text":text,"signal":None,"visual":{"kind":"nochange"},"mode":self.mode,"model":"deterministic-media-choice","endpoint":"fabric","resolution":"media.choice","files":[],"artifacts":[]})
                 row=pending.get("row")
@@ -1391,12 +1395,15 @@ class App(BaseHTTPRequestHandler):
                     text=f"Playing {_video_label(row)} on this device."
                     _session_append(session_id,prompt,text)
                     return self.json(200,{"text":text,"signal":None,"visual":{"kind":"nochange"},"mode":self.mode,"model":"deterministic-media-choice","endpoint":"fabric","resolution":"media.playback","files":[],"artifacts":[],"media":state})
-            if not files and _broad_video_prompt(prompt):
-                picks=_signal_video_choices(session_id)
+            if video_request:
+                picks=_signal_video_choices(session_id,listing=video_request['action']=='list',recent=video_request.get('recent',False))
                 if picks:
-                    text=_signal_choice_text(picks)
+                    text=_signal_choice_text(picks,'Videos in your Fabric library:' if video_request['action']=='list' else 'Pick a movie or video:')
                     _session_append(session_id,prompt,text)
                     return self.json(200,{"text":text,"signal":None,"visual":{"kind":"nochange"},"mode":self.mode,"model":"deterministic-media-choice","endpoint":"fabric","resolution":"media.choice","files":[],"artifacts":[]})
+                text='No playable videos were found in the current Fabric catalog. Check that the library computer and media drive are online.'
+                _session_append(session_id,prompt,text)
+                return self.json(200,{'text':text,'visual':{'kind':'nochange'},'resolution':'media.empty','files':[],'artifacts':[]})
             # Named built-in stations are semantic commands, not Fabric catalog queries.
             # Keep these ahead of the generic "play X" normalizer so a local sample
             # named "classical" cannot steal the command.

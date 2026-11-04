@@ -19,6 +19,8 @@ try:
 except ImportError:
     from browser_presentations import Presentations, candidates as presentation_candidates
 PRESENTATIONS=Presentations()
+try:from core import video_library
+except ImportError:import video_library
 from endpoint_auth import EndpointAuth
 ENDPOINT_AUTH=EndpointAuth()
 ENDPOINT_COOKIE="fcl_endpoint"
@@ -316,38 +318,32 @@ def _albert_media_fold(queue, query="media"):
     subtitle=" · ".join(x for x in (str(first.get("artist") or ""),str(first.get("album") or "")) if x)
     return {"type":result_type,"title":title,"subtitle":subtitle,"meta":f"media.play · {len(queue)} item(s)","badge":"live","kind":"things","media":{"node":str(first.get("node") or ""),"id":item_id,"index":0},"queue":queue,"note":f"Fabric media · {len(queue)} resolved item(s)","pipeline":{"intent":"media.play","source":"Fabric media catalog","target":"origin endpoint","effect":"browser playback"}}
 
-def _broad_video_choices(session):
-    try: entries=(node_json('/v1/media/fabric',timeout=4.0).get('entries') or [])
-    except Exception: return []
-    # Choices are an execution boundary, not a fuzzy search.  Require a known
-    # video filename extension so stale/bad MIME metadata can never offer source
-    # files such as .d/.ts as something to watch.
-    exts={'.mp4','.m4v','.mov','.mkv','.webm','.avi','.wmv','.flv','.vob','.mts','.m2ts'}
-    junk={'application support','caches','cache','node_modules','site-packages','library/developer','library/frameworks','library/python','contents/resources'}
-    def human_video(r):
-        if not isinstance(r,dict) or Path(str(r.get('path') or '')).suffix.casefold() not in exts: return False
-        path=str(r.get('path') or '').replace('\\','/').casefold()
-        if any(part in path for part in junk): return False
-        # Tiny clips inside software trees dominate broad random selection. Keep
-        # them searchable, but don't offer them as "something to watch".
-        return int(r.get('bytes') or 0) >= 512*1024
-    videos=[r for r in entries if human_video(r)]
-    random.shuffle(videos); picks=videos[:3]
+def _broad_video_choices(session,listing=False,recent=False):
+    data=node_json('/v1/media/videos',timeout=45.0)
+    if not isinstance(data,dict) or data.get('error'):raise RuntimeError('Video library unavailable; please retry')
+    videos=[row for row in data.get('entries',[]) if video_library.eligible(row)]
+    if recent:videos.sort(key=lambda row:float(row.get('mtime') or 0),reverse=True)
+    elif not listing:random.shuffle(videos)
+    picks=videos[:10 if listing else 3]
     if picks:
-        with _PENDING_CHOICES_LOCK: _PENDING_CHOICES[str(session or 'albert')]=(time.time()+300,videos,picks)
+        with _PENDING_CHOICES_LOCK:_PENDING_CHOICES[str(session or 'albert')]=(time.time()+300,videos,picks)
     return picks
+
 
 def action(text, session="", context=None):
     context=context or {}
     q=" ".join(str(text or "").strip().split()); low=q.casefold().strip(" .!?")
     sid=str(session or "albert")
+    video_request=video_library.intent(q)
+    if video_request or re.match(r"^(?:please )?(?:play|put on|shuffle|queue)\s+",low):
+        with _PENDING_CHOICES_LOCK:_PENDING_CHOICES.pop(sid,None)
     with _PENDING_CHOICES_LOCK: pending=_PENDING_CHOICES.get(sid)
     if pending and pending[0] < time.time():
         with _PENDING_CHOICES_LOCK: _PENDING_CHOICES.pop(sid,None)
         pending=None
     if pending:
         choose_random={"r","random","surprise me","you choose","you pick","pick one","choose one","choose for me","pick for me","anything","whatever"}
-        recognized=low in ({"1","2","3","m","more","never mind","cancel"} | choose_random)
+        recognized=low in ({"m","more","never mind","cancel"} | choose_random) or (low.isdigit() and 1<=int(low)<=len(pending[2]))
         if not recognized:
             # Do not leak a plausible reply to general cognition while a media
             # interaction is pending.  A unique title fragment is also valid.
@@ -355,29 +351,31 @@ def action(text, session="", context=None):
             if len(matches)==1:
                 with _PENDING_CHOICES_LOCK: _PENDING_CHOICES.pop(sid,None)
                 return _albert_media_fold([matches[0]],str(matches[0].get("title") or "video"))
-            return {"type":"answer","title":"Pick something to watch","meta":"Fabric media · choice","badge":"choose","kind":"things","text":"Choose 1–3, say ‘you choose’, ask for more, or cancel."}
+            return {"type":"answer","title":"Pick something to watch","meta":"Fabric media · choice","badge":"choose","kind":"things","text":"Choose a listed number, say ‘you choose’, ask for more, or cancel."}
         
         videos,picks=pending[1],pending[2]
         if low in {"never mind","cancel"}:
             with _PENDING_CHOICES_LOCK: _PENDING_CHOICES.pop(sid,None)
             return {"type":"answer","title":"Cancelled","meta":"Fabric media · choice","kind":"things","text":"Okay."}
         if low in {"m","more"}:
-            random.shuffle(videos); picks=videos[:3]
+            videos=videos[len(picks):]+videos[:len(picks)];picks=videos[:len(picks)]
             with _PENDING_CHOICES_LOCK: _PENDING_CHOICES[sid]=(time.time()+300,videos,picks)
             choices=[{"label":f"{i+1}  {Path(str(row.get('path') or '')).name or str(row.get('title') or row.get('name') or 'Video')}","value":str(i+1)} for i,row in enumerate(picks)]
             choices += [{"label":"R  Surprise me","value":"r"},{"label":"M  More","value":"m"}]
-            return {"type":"answer","title":"Three more","meta":"Fabric media · choice","badge":"choose","kind":"things","text":"Pick one, or let me choose.","clarification":{"choices":choices}}
+            return {"type":"answer","title":"More videos","meta":"Fabric media · choice","badge":"choose","kind":"things","text":"Pick one, or let me choose.","clarification":{"choices":choices}}
         row=random.choice(videos) if low in choose_random else picks[int(low)-1]
         with _PENDING_CHOICES_LOCK: _PENDING_CHOICES.pop(sid,None)
         return _albert_media_fold([row],str(row.get("title") or "video"))
-    broad_video=bool(re.fullmatch(r"play(?: me)?(?: (?:a|any|some))? (?:movie|video)s?",low)) or low=="play something to watch"
-    if broad_video:
-        picks=_broad_video_choices(sid)
+    if video_request:
+        try:picks=_broad_video_choices(sid,listing=video_request['action']=='list',recent=video_request.get('recent',False))
+        except Exception as exc:
+            return {'type':'answer','title':'Video library unavailable','text':str(exc),'kind':'things','badge':'retry'}
         if picks:
             choices=[{"label":f"{i+1}  {str(row.get('title') or row.get('name') or Path(str(row.get('path') or '')).name)}","value":str(i+1)} for i,row in enumerate(picks)]
             choices.append({"label":"R  Surprise me","value":"r"})
             choices.append({"label":"M  More","value":"m"})
-            return {"type":"answer","title":"Pick something to watch","meta":"Fabric media · choice","badge":"choose","kind":"things","text":"I found plenty. Pick one, or let me choose.","clarification":{"choices":choices},"pipeline":{"intent":"media.play","state":"pending choice","target":"origin endpoint"}}
+            return {"type":"answer","title":"Videos in your Fabric library" if video_request['action']=='list' else "Pick something to watch","meta":"Fabric media · choice","badge":"choose","kind":"things","text":"Pick a listed number or title, ask for more, or let me choose.","clarification":{"choices":choices},"pipeline":{"intent":"media.play","state":"pending choice","target":"origin endpoint"}}
+        return {'type':'answer','title':'No videos found','text':'No playable videos were found in the current Fabric catalog. Check that the library computer and media drive are online.','kind':'things'}
     if low in {"classics","classical","classical music","play classics","play classical","put on classical music"} or "all classical" in low:
         return {"type":"audio","title":"All Classical Radio","subtitle":"Portland · live","meta":"media.play · this endpoint","badge":"live","kind":"things","src":ALL_CLASSICAL,"note":"Fabric built-in · classics","pipeline":{"intent":"media.play","selector":"stream:all-classical","target":"origin endpoint","effect":"local"}}
     if low in {"arts","showcase","play arts","play arts channel","arts channel"} or "classic arts" in low or "arts showcase" in low:
@@ -412,7 +410,13 @@ def action(text, session="", context=None):
         for prefix in ('please ','play ','put on ','shuffle ','queue '):
             if query.casefold().startswith(prefix): query=query[len(prefix):].strip(); break
         try:
-            prepared=node_json('/v1/media/route',{"operation":"prepare","query":query},timeout=8.0)
+            try:from core.intent_normalizer import normalize
+            except ImportError:from intent_normalizer import normalize
+            intent=normalize(q) or {}
+            payload={key:intent[key] for key in ('query','kind','artist','selection','limit','shuffle','match_mode') if key in intent}
+            if not payload:payload={'query':query}
+            prepared=node_json('/v1/media/route',dict(payload,operation='prepare'),timeout=110.0)
+            if prepared.get('error'):raise RuntimeError(prepared['error'])
             state=prepared.get('prepared') or prepared.get('session') or prepared
             queue=(state.get('queue') if isinstance(state,dict) else None) or []
             if queue:
@@ -427,8 +431,8 @@ def action(text, session="", context=None):
                     # fold never depends on an already-issued URL or cookie behavior.
                     return _albert_media_fold(queue,query)
                 return {"type":"answer","title":title,"meta":f"media.prepare · {len(queue)} item(s)","badge":"prepared","kind":"things","text":"Fabric resolved the request, but this item has no stream identity for browser playback.","pipeline":{"intent":"media.play","source":"Fabric media catalog","target":"origin endpoint"}}
-        except Exception:
-            pass
+        except Exception as exc:
+            return {'type':'answer','title':'Playback unavailable','text':str(exc),'kind':'things','badge':'retry'}
     # Anything not handled by a deterministic fast path goes to the *same* LO
     # cognition/tool plane used elsewhere. Albert must never stop at a fake
     # "understood" receipt when Fabric can actually reason, search or use tools.

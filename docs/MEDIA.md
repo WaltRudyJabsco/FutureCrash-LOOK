@@ -6,6 +6,27 @@ Media is a Fabric capability with endpoint-local presentation.
 
 The Fabric catalog answers *what media exists and on which node*. A queue answers *what this endpoint will play now*. A playlist is a saved queue. Keeping these separate prevents one endpoint's browsing or playback from unexpectedly changing another endpoint.
 
+## Signal and Albert video playback
+
+Ask “play a movie from our library” for a video-only chooser, or “what movies
+are available to play?” for ten choices at a time. Pick a number or title, ask
+for **More**, or use **Surprise me**. A new named playback request replaces the
+pending chooser. “Play the Star Wars theatrical movie” still uses title search.
+An empty or unreachable video library reports that condition instead of falling
+back to a music search.
+
+The compact video catalog excludes system sounds, software resources, hidden
+entries and tiny clips, and collapses duplicate copies. It includes movies,
+episodes and personal videos; it does not infer film genre. The response is
+capped at 1,000 entries. “New movie” orders candidates by file modification time,
+not cinema release date.
+
+Both browser video players have a visible **Full screen** button with a touch
+sized target. Use **Exit full screen**, Escape, or the device’s native video
+controls to return. Browsers without native fullscreen use an expanded viewport.
+Signal keeps the video and controls in place during progress updates and ignores
+superseded stream tickets when switching items.
+
 ## Audio and video desks
 
 `lk mp [QUERY]` opens the audio desk: music, podcasts, recordings, audiobooks and
