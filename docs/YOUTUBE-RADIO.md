@@ -25,6 +25,20 @@ See [yt-dlp format selection](https://github.com/yt-dlp/yt-dlp#format-selection)
 
 ## Signal and Albert
 
+Paste a link and an instruction in the same message to add directly, for example:
+
+```text
+https://youtu.be/VIDEO_ID add this to YouTube Radio
+```
+
+“Please add LINK to YouTube Radio” and “save this to YTR LINK” also work.
+Signal and Albert confirm the queue owner and item after the owner acknowledges
+it. Repeated links are deduplicated. This prepares audio for later listening; it
+does not open a player or start playback. The destination is the browser's
+selected YTR owner, falling back to the host's CLI preference. Missing or multiple
+links prompt for one link in the same message; failed requests are not reported
+as successful additions.
+
 Type **`/ytr`** in either chat to open the browser player, or visit `/ytr` on
 that same host. `/ytr https://youtu.be/VIDEO_ID` opens the player with the link
 prefilled; press **Add to queue** to submit it. A link remains in the chat if

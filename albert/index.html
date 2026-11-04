@@ -362,6 +362,7 @@ async function removeSaved(id){await savedRequest({op:'delete',id});state.saved=
 function addProgress(text='Understanding…'){state.busy=true;statusLine('thinking');const id=addFold({type:'progress',title:'Albert',meta:'cognition',badge:'working',text,kind:'progress'});return id}
 function finishProgress(id){state.folds=state.folds.filter(x=>x.id!==id);state.busy=false;statusLine('local surface · ready');render()}
 async function askFabric(query,context={},targetFold=null){
+  if(FabricBrowserViews.radioAddCommand(query)){try{addFold({type:'answer',title:'YouTube Radio',text:await FabricBrowserViews.addRadio(FabricBrowserViews.radioAddCommand(query))})}catch(error){addFold({type:'answer',title:'YouTube Radio',text:error.message})}return}
   if(FabricBrowserViews.radioCommand(query)){const command=FabricBrowserViews.radioCommand(query);FabricBrowserViews.openRadio(command);addFold({type:'radio',title:'YouTube Radio',...command});return}
   if(FabricBrowserViews.booksCommand(query)){const command=FabricBrowserViews.booksCommand(query);FabricBrowserViews.openBooks(command);addFold({type:'books',title:'Mercury Reader',...command});return}
   if(FabricBrowserViews.fabricCommand(query)){FabricBrowserViews.openFabric();addFold({type:'fabric',title:'Fabric',badge:'read-only'});return}
