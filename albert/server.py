@@ -557,6 +557,10 @@ class Handler(BaseHTTPRequestHandler):
             return _proxy_media_item(self,node,item_id,head=True,browser=(path=='/api/media/browser'))
         self.send_response(404); self.send_header('Content-Length','0'); self.end_headers()
     def do_GET(self):
+        if urlparse(self.path).path=='/api/curtain':
+            if not self._require_endpoint('lo.use'):return
+            try:return self.send_json(200,node_json('/v1/curtain',{'action':'status'},timeout=5))
+            except Exception:return self.send_json(503,{'error':'Fabric node unavailable'})
         path=urlparse(self.path).path
 
         if path in {'/books','/reader'}:
@@ -630,6 +634,18 @@ class Handler(BaseHTTPRequestHandler):
         if not target.is_file(): return self.send_error(404)
         data=target.read_bytes(); self.send_response(200); self.send_header('Content-Type',mimetypes.guess_type(target.name)[0] or 'application/octet-stream'); self.send_header('Cache-Control','no-cache'); self.send_header('Content-Length',str(len(data))); self.end_headers(); self.wfile.write(data)
     def do_POST(self):
+        if urlparse(self.path).path=='/api/curtain':
+            if not self._require_endpoint('lo.use'):return
+            try:
+                if self.headers.get('Content-Type','').split(';')[0]!='application/json':raise ValueError('JSON required')
+                origin=self.headers.get('Origin')
+                if origin and urlparse(origin).netloc!=self.headers.get('Host'):raise ValueError('Same-origin request required')
+                size=int(self.headers.get('Content-Length') or 0)
+                if not 0<size<=1024:raise ValueError('Invalid request size')
+                data=json.loads(self.rfile.read(size))
+                if data.get('action') not in {'lock','unlock'}:raise ValueError('Use lock or unlock')
+                return self.send_json(200,node_json('/v1/curtain',{'action':data['action'],'pin':data.get('pin')},timeout=12))
+            except Exception as exc:return self.send_json(400,{'error':str(exc)})
 
         if urlparse(self.path).path.startswith('/api/books'):
             if not self._require_endpoint('lo.use'):return

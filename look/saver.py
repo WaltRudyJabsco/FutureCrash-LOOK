@@ -88,7 +88,7 @@ class SceneRun:
         if not self.scenes:raise ValueError('Enable at least one screensaver for Cycle')
         self.rng.shuffle(self.scenes)
         self.step=None;self.style=None
-        self.inverse_rows=set()
+        self.inverse_rows=set();self.captions=None
         self.color_revision=0;self.scene_offset=0;self.timeline_step=0
         self.cycling=self.settings['scene']=='cycle'
         self.offset=self.rng.random()*self.settings['interval'] if self.settings['independent'] else 0
@@ -131,7 +131,7 @@ class SceneRun:
             self.style=(paper,ink);self.step=step
         scene=self.scenes[(step+self.scene_offset)%len(self.scenes)]
         phase=elapsed+self.offset
-        lines=player_visuals.frame(player_visuals.NAMES.index(scene)+1,width,height,phase,True,self.seed)
+        lines=player_visuals.frame(player_visuals.NAMES.index(scene)+1,width,height,phase,True,self.seed,captions=self.captions)
         self.inverse_rows=player_visuals.flight_deck_inverse_rows(height,phase) if scene=='Flight Deck' else set()
         return scene,lines,self.style
 

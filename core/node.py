@@ -2225,6 +2225,22 @@ def _local_accept_watchdog(server):
         os._exit(70)
 
 
+def _curtain_request(data):
+    try:from . import curtain
+    except ImportError:import curtain
+    snapshot={'self':node_info(),'peers':PEERS.public()}
+    names=[]
+    for peer in snapshot['peers']:
+        name=peer.get('name') or ((peer.get('node') or {}).get('identity') or {}).get('name')
+        if name and name!=identity()['name'] and name not in names:names.append(name)
+    if data.get('action')=='lock':
+        _look_catalog_modules();import saver_text
+        data=dict(data,captions=list(saver_text.read()))
+    result=curtain.operate(data,identity()['name'],names,
+        lambda name,payload:http_json(_remote_url(snapshot,name,'/v1/curtain'),payload,timeout=4))
+    return result
+
+
 def _beacon_record(payload: dict) -> dict:
     """Record one synchronized Fabric beacon locally, idempotently."""
     bid = str(payload.get("id") or "")
@@ -4785,6 +4801,7 @@ class API(BaseHTTPRequestHandler):
                 except ImportError:import fabric_care
                 return self.sendj(200,fabric_care.backup_status(Path.home()))
             except (OSError,ValueError) as exc:return self.sendj(409,{'error':str(exc)})
+        if path == "/v1/curtain":return self.sendj(200,_curtain_request({"action":"status"}))
         if path == "/v1/maintenance/release":
             return self.sendj(200,maintenance.release_info())
         if path == "/v1/maintenance/status":
@@ -5193,6 +5210,9 @@ class API(BaseHTTPRequestHandler):
                 return self.sendj(400, {"ok":False,"error":"memory action must be add, merge, or sync"})
             except ValueError as exc:
                 return self.sendj(400, {"ok":False,"error":str(exc)})
+        if path == "/v1/curtain":
+            try:return self.sendj(200,_curtain_request(d))
+            except (ValueError,OSError,TypeError) as exc:return self.sendj(400,{'ok':False,'error':str(exc)})
         if path == "/v1/beacon":
             try:
                 if d.get("start_pulse"):

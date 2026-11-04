@@ -293,6 +293,12 @@ lk media [...]
   [media] Media library, queue, playlists, transport · alias: lk music
 lk player
   [media] Live LOOK miniplayer
+lk lock [setup|status]
+  [system] PIN curtain settings and actions (not an OS lock)
+lk lk
+  [system] Activate the Fabric PIN curtain
+lk unlock
+  [system] Dismiss Fabric curtains with your PIN
 lk saver [start|list|setup|text [reset]|NAME] [--display all|current] [--palette NAME] [--interval SECONDS] [--matching|--independent] [--invert|--no-invert] [--preview] [--seconds N] [--save]
   [media] Screensaver picker, previews, and settings
 lk sv [NAME|cycle] [OPTIONS]

@@ -1131,6 +1131,10 @@ class App(BaseHTTPRequestHandler):
         self.send_response(404); self.send_header("Content-Length","0"); self.end_headers()
 
     def do_GET(self):
+        if urlparse(self.path).path=='/api/curtain':
+            if not self._require_endpoint('lo.use'):return
+            try:return self.json(200,_node_call('/v1/curtain',{'action':'status'},timeout=5))
+            except Exception:return self.json(503,{'error':'Fabric node unavailable'})
         parsed=urlparse(self.path); path=parsed.path
 
         if path in {'/books','/reader'}:
@@ -1208,6 +1212,18 @@ class App(BaseHTTPRequestHandler):
         if path not in ("index.html","app.js","media-session.js","media-art.js","style.css","browser-views.js","fabric.html","fabric-dashboard.js"): return self.json(404,{"error":"not found"})
         p=ROOT/path; self.send_bytes(200,p.read_bytes(),mimetypes.guess_type(p.name)[0] or "application/octet-stream")
     def do_POST(self):
+        if urlparse(self.path).path=='/api/curtain':
+            if not self._require_endpoint('lo.use'):return
+            try:
+                if self.headers.get('Content-Type','').split(';')[0]!='application/json':raise ValueError('JSON required')
+                origin=self.headers.get('Origin')
+                if origin and urlparse(origin).netloc!=self.headers.get('Host'):raise ValueError('Same-origin request required')
+                size=int(self.headers.get('Content-Length') or 0)
+                if not 0<size<=1024:raise ValueError('Invalid request size')
+                data=json.loads(self.rfile.read(size))
+                if data.get('action') not in {'lock','unlock'}:raise ValueError('Use lock or unlock')
+                return self.json(200,_node_call('/v1/curtain',{'action':data['action'],'pin':data.get('pin')},timeout=12))
+            except Exception as exc:return self.json(400,{'error':str(exc)})
 
         if urlparse(self.path).path.startswith('/api/books'):
             if not self._require_endpoint('lo.use'):return
