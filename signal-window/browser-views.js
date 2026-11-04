@@ -437,14 +437,12 @@
       #lk-curtain canvas{position:absolute;inset:0;width:100%;height:100%}
       #lk-curtain form{box-sizing:border-box;position:absolute;bottom:8vh;left:50%;transform:translateX(-50%);width:min(90vw,420px);padding:20px;background:#101719ee;border:1px solid #9dbbd7;text-align:center}
       #lk-curtain input{width:8em;max-width:80%;padding:10px;background:#1d292d;color:#e6e6cf;border:1px solid #9dbbd7;font:20px monospace;text-align:center}
-      #lk-curtain button,#lk-curtain-launch{padding:9px 16px;background:#344348;color:#e6e6cf;border:1px solid #9dbbd7;border-radius:5px;cursor:pointer}
-      #lk-curtain-launch{position:fixed;right:12px;bottom:12px;z-index:1000;font:12px monospace}
+      #lk-curtain button{padding:9px 16px;background:#344348;color:#e6e6cf;border:1px solid #9dbbd7;border-radius:5px;cursor:pointer}
       #lk-curtain p{font:12px monospace;color:#e6e6cf}
     `;document.head.append(style);
     const layer=document.createElement('section');layer.id='lk-curtain';layer.setAttribute('aria-label','Fabric PIN curtain');
     layer.innerHTML='<canvas aria-hidden="true"></canvas><form><label for="lk-curtain-pin">LOOK CURTAIN · PIN</label><p>Ambient curtain · not an OS lock</p><input id="lk-curtain-pin" type="password" inputmode="numeric" pattern="[0-9]{4}" minlength="4" maxlength="4" autocomplete="off" aria-label="Four-digit PIN" required> <button>Unlock</button><p role="status"></p></form>';
     document.body.append(layer);
-    const launch=document.createElement('button');launch.id='lk-curtain-launch';launch.textContent='Lock Fabric';launch.title='Flight Deck PIN curtain';document.body.append(launch);
     const canvas=layer.querySelector('canvas'),ctx=canvas.getContext('2d'),form=layer.querySelector('form'),pin=layer.querySelector('input'),notice=layer.querySelector('[role=status]');
     let locked=false,configured=false,busy=false,frame=0,captions=[],previousFocus=null;
     const words=['LISTEN','ORBIT','AWAIT','SIGNAL','RETURN','DREAM','DRIFT','ALIGN'];
@@ -461,7 +459,7 @@
     function update(state){
       configured=!!state.configured;captions=state.captions||captions;
       const next=!!state.locked;if(next===locked)return;locked=next;
-      layer.style.display=locked?'block':'none';launch.hidden=locked;
+      layer.style.display=locked?'block':'none';
       if(locked){previousFocus=document.activeElement;pin.value='';pin.focus();if(!frame)frame=requestAnimationFrame(draw);}
       else{if(frame)cancelAnimationFrame(frame);frame=0;pin.value='';notice.textContent='';previousFocus?.focus?.();}
     }
@@ -474,13 +472,14 @@
       busy=true;try{const data=await request('lock');update(data);notice.textContent=data.ok?'':'Some nodes were unreachable. Run lk lock again when they reconnect.';}
       catch(error){alert(error.message);}finally{busy=false;}
     }
-    launch.onclick=cover;
     pin.addEventListener('input',()=>{if(/^[0-9]{4}$/.test(pin.value)&&!busy)form.requestSubmit();});
     form.onsubmit=async event=>{event.preventDefault();if(busy)return;busy=true;notice.textContent='Checking…';const value=pin.value;pin.value='';try{const data=await request('unlock',{pin:value});update(data);if(!data.ok)alert('This curtain opened, but some nodes were unreachable. Retry lk unlock when connected.');}catch(error){notice.textContent=error.message;pin.focus();}finally{busy=false;}};
     layer.addEventListener('keydown',event=>{if(event.key==='Escape'){event.preventDefault();pin.focus();}if(event.key==='Tab'){const button=form.querySelector('button');if(event.shiftKey&&document.activeElement===pin){event.preventDefault();button.focus();}else if(!event.shiftKey&&document.activeElement===button){event.preventDefault();pin.focus();}}});
     // Explicit commands only: do not infer locking from ordinary conversation.
     function command(target){const text=String(target?.value||'').trim().toLowerCase();return ['/lock','lk lk','/unlock','lk unlock'].includes(text)?text:null;}
-    document.addEventListener('keydown',event=>{const text=command(event.target);if(event.key!=='Enter'||event.shiftKey||!text)return;event.preventDefault();event.stopImmediatePropagation();event.target.value='';if(text.includes('unlock')){if(locked)pin.focus();}else cover();},true);
+    function consume(target){const text=command(target);if(!text)return false;target.value='';if(text.includes('unlock')){if(locked)pin.focus();}else cover();return true;}
+    window.LookCurtain={consume};
+    document.addEventListener('keydown',event=>{if(event.key!=='Enter'||event.shiftKey||!['input','ask'].includes(event.target.id)||!command(event.target))return;event.preventDefault();event.stopImmediatePropagation();consume(event.target);},true);
     async function poll(){try{if(!busy)update(await request());}catch(_){/* Keep the curtain visible during disconnection. */}finally{setTimeout(poll,1500);}}
     poll();
   }

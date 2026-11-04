@@ -1,5 +1,7 @@
 ## Unreleased — LOOK Saver and live Wiki images
 
+- Remove the floating browser Lock Fabric button; use `/lock` in Signal or Albert chat, including their normal submission paths.
+
 - Fix curtain PIN setup on Apple Python without scrypt; new portable PBKDF2 verifiers retain explicit format metadata. Four-digit PINs submit automatically in terminal, desktop and browser prompts.
 
 - Add Fabric PIN curtains: `lk lock` settings, `lk lk` activation, private PIN unlock, Flight Deck/Bridge desktop and Signal/Albert overlays, cached AI captions, and per-node delivery reports. This is an ambient curtain, not an OS lock.
