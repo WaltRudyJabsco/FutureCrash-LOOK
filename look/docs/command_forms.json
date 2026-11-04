@@ -692,6 +692,12 @@
     "LO context/token budget"
   ],
   [
+    "lk ytr",
+    "[URL|desk|list|clean|sync|resolve NUMBER --keep local|remote] [--node NODE]",
+    "media",
+    "YouTube Radio audio-only listen-later queue"
+  ],
+  [
     "lk ytd",
     "<URL> [--node NODE] [--to DIR] [--holding]",
     "media",

@@ -22,6 +22,11 @@ def youtube_url(value):
     return url
 
 
+def audio_options():
+    # Select a separate audio stream; never download the video just to discard it.
+    return ['-f','bestaudio','-x','--audio-format','m4a']
+
+
 class Downloads:
     def __init__(self,state=None,index=None,forget=None):
         self.state=Path(state or Path.home()/'.local/share/future-crash-look/downloads')
@@ -57,14 +62,15 @@ class Downloads:
                 except (OSError,ValueError): continue
             return sorted(rows,key=lambda row:row.get('created',0),reverse=True)
 
-    def create(self,url,directory=None,holding=False):
+    def create(self,url,directory=None,holding=False,audio=False):
+        if not isinstance(audio,bool):raise ValueError('audio must be boolean')
         url=youtube_url(url); binary('yt-dlp'); binary('ffmpeg')
         with self.lock:
             if sum(row['stage'] not in {'complete','failed','cancelled','expired'} for row in self.list())>=8:
                 raise RuntimeError('Download queue is full')
             job=uuid.uuid4().hex
             root=Path(directory).expanduser().resolve() if directory else Path.home()/'Downloads'/('LOOK-Holding' if holding else 'LOOK')
-            row=self.update(job,url=url,root=str(root),holding=bool(holding),expires_at=None,stage='queued',indexed=False,progress={})
+            row=self.update(job,url=url,audio=audio,root=str(root),holding=bool(holding),expires_at=None,stage='queued',indexed=False,progress={})
             threading.Thread(target=self.run,args=(job,),daemon=True).start()
             return row
 
@@ -77,7 +83,7 @@ class Downloads:
                 stage=root/('.look-ytd-stage-'+job); stage.mkdir()
                 argv=[binary('yt-dlp'),'--ignore-config','--no-playlist','--no-simulate','--no-overwrites','--newline','--no-colors',
                       '--progress','--write-info-json','--ffmpeg-location',binary('ffmpeg'),
-                      '-f','bv*[ext=mp4]+ba[ext=m4a]/b[ext=mp4]/b','--merge-output-format','mp4','-S','vcodec:h264,acodec:aac',
+                      *(audio_options() if row.get('audio') else ['-f','bv*[ext=mp4]+ba[ext=m4a]/b[ext=mp4]/b','--merge-output-format','mp4','-S','vcodec:h264,acodec:aac']),
                       '-P',str(stage),'-o','%(title).180B [%(id)s].%(ext)s',
                       '--progress-template','download:LOOK_PROGRESS:%(progress)j',
                       '--print','after_move:LOOK_FILE:%(filepath)j','--',row['url']]

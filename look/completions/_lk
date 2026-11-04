@@ -36,6 +36,7 @@ _lk() {
     'wiki:offline Kiwix references'
     'latin:offline Latin classroom'
     'bk:alias for books'
+    'ytr:YouTube Radio listen-later queue'
     'ytd:download videos on a Fabric node'
     'describe:searchable catalog description'
     'hidden:LOOK with hidden files shown'
@@ -121,6 +122,13 @@ _lk() {
     lock)
       _values 'curtain action' setup status lock unlock
       return
+      ;;
+    ytr)
+      if [[ ${words[CURRENT-1]} == --node ]]; then
+        _values 'queue owner' local "${(@f)$(_look_saved_hosts)}"
+      else
+        _values 'radio action' desk list clean sync resolve --node --keep --help
+      fi
       ;;
     saver|sv)
       case "$words[CURRENT-1]" in
