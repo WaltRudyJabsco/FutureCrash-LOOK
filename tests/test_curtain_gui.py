@@ -36,3 +36,14 @@ def test_cli_shortcut_and_private_pin(monkeypatch):
     assert calls[-1]==('lock',{})
     assert curtain_client.main([],'unlock')==0
     assert calls[-1]==('unlock',{'pin':'1234'})
+
+def test_desktop_submits_on_fourth_digit(app,monkeypatch):
+    monkeypatch.setattr(saver_gui,'SaverWindow',curtain_gui.CurtainWindow)
+    monkeypatch.setattr(curtain_client,'request',lambda *a,**k:{'locked':True})
+    control=curtain_gui.CurtainController(app);submitted=[]
+    monkeypatch.setattr(control,'unlock',lambda pin:submitted.append(pin))
+    try:
+        control.prompt();dialog=control.dialog
+        dialog.setTextValue('123');assert not submitted
+        dialog.setTextValue('1234');assert submitted==['1234']
+    finally:control.dismiss()

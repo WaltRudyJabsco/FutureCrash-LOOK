@@ -1,5 +1,7 @@
 ## Unreleased — LOOK Saver and live Wiki images
 
+- Fix curtain PIN setup on Apple Python without scrypt; new portable PBKDF2 verifiers retain explicit format metadata. Four-digit PINs submit automatically in terminal, desktop and browser prompts.
+
 - Add Fabric PIN curtains: `lk lock` settings, `lk lk` activation, private PIN unlock, Flight Deck/Bridge desktop and Signal/Albert overlays, cached AI captions, and per-node delivery reports. This is an ambient curtain, not an OS lock.
 
 - Flight Deck and Signal Bloom add cinematic status typography and orbital radar visuals. Bridge adds a charcoal/amber/green/blue palette. Optional `lk saver text` prepares fictional captions through Fabric for offline rendering.

@@ -38,6 +38,7 @@ class CurtainController(saver_gui.SaverController):
         dialog=QInputDialog(parent);self.dialog=dialog
         dialog.setWindowTitle('LOOK Curtain');dialog.setLabelText('Four-digit PIN · ambient curtain, not an OS lock')
         dialog.setTextEchoMode(QLineEdit.EchoMode.Password)
+        dialog.textValueChanged.connect(lambda text:dialog.accept() if len(text)==4 and text.isascii() and text.isdigit() else None)
         dialog.accepted.connect(lambda:self.unlock(dialog.textValue()))
         dialog.finished.connect(lambda *_:setattr(self,'dialog',None))
         dialog.open()

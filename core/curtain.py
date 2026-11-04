@@ -14,6 +14,8 @@ import uuid
 GUARD=threading.RLock()
 FAIL_LIMIT=5
 COOLDOWN=30
+PIN_KDF="pbkdf2-sha256"
+PIN_ITERATIONS=600000
 PROCESS=None
 
 
@@ -33,15 +35,19 @@ def save(state):
     os.replace(temporary,target)
 
 
-def pin_hash(pin,salt):
+def pin_hash(pin,salt,kdf=PIN_KDF):
     if not isinstance(pin,str) or not re.fullmatch(r'[0-9]{4}',pin):raise ValueError('Enter a four-digit PIN')
-    return hashlib.scrypt(pin.encode(),salt=bytes.fromhex(salt),n=16384,r=8,p=1).hex()
+    if kdf==PIN_KDF:return hashlib.pbkdf2_hmac('sha256',pin.encode(),bytes.fromhex(salt),PIN_ITERATIONS,dklen=64).hex()
+    if kdf=='scrypt':
+        if not hasattr(hashlib,'scrypt'):raise RuntimeError('This Python cannot verify the older PIN format; change the PIN from an updated node with scrypt support')
+        return hashlib.scrypt(pin.encode(),salt=bytes.fromhex(salt),n=16384,r=8,p=1).hex()
+    raise ValueError('Unsupported PIN format')
 
 
 def verify(state,pin):
     now=time.time()
     if state.get('retry_after',0)>now:raise ValueError('Too many attempts; try again in 30 seconds')
-    try:valid=hmac.compare_digest(pin_hash(pin,state['salt']),state['verifier'])
+    try:valid=hmac.compare_digest(pin_hash(pin,state['salt'],state.get('kdf','scrypt')),state['verifier'])
     except (ValueError,KeyError):valid=False
     if not valid:
         state['failures']=state.get('failures',0)+1
@@ -87,6 +93,8 @@ def apply(event):
     if type(event.get('locked')) is not bool:raise ValueError('Invalid curtain state')
     for key,length in [('salt',32),('verifier',128)]:
         if not isinstance(event.get(key),str) or not re.fullmatch('[0-9a-f]{'+str(length)+'}',event[key]):raise ValueError('Invalid PIN verifier')
+    kdf=event.get('kdf','scrypt')
+    if kdf not in {PIN_KDF,'scrypt'}:raise ValueError('Unsupported PIN format')
     with GUARD:
         state=load()
         if (revision,origin)<=(state.get('revision',0),state.get('origin','')):return {'ok':True,'stale':True,**public(state)}
@@ -94,7 +102,7 @@ def apply(event):
         state={key:event[key] for key in ('revision','origin','locked','salt','verifier')}
         captions=event.get('captions',[])
         if not isinstance(captions,list) or len(captions)>12 or any(not isinstance(text,str) or len(text)>48 or not re.fullmatch(r'[A-Z0-9 .,:!?/\-]+',text) for text in captions):raise ValueError('Invalid captions')
-        state.update(attempts,captions=captions)
+        state.update(attempts,captions=captions,kdf=kdf)
         save(state)
         result={'ok':True,**public(state)}
         if state['locked']:
@@ -113,12 +121,12 @@ def operate(data,origin,peers,send):
         if action=='setup':
             if state.get('locked'):raise ValueError('Unlock before changing the PIN')
             if state.get('verifier'):verify(state,data.get('old_pin'))
-            salt=os.urandom(16).hex();state.update(salt=salt,verifier=pin_hash(data.get('pin'),salt))
+            salt=os.urandom(16).hex();state.update(salt=salt,verifier=pin_hash(data.get('pin'),salt),kdf=PIN_KDF)
         elif not state.get('verifier'):raise ValueError('Set a PIN first: lk lock setup')
         elif action=='unlock':
             verify(state,data.get('pin'));save(state)
         event={key:state[key] for key in ('salt','verifier')}
-        event.update(revision=max(time.time_ns(),state.get('revision',0)+1),origin=origin,locked=action=='lock',captions=data.get('captions',state.get('captions',[])))
+        event.update(kdf=state.get('kdf','scrypt'),revision=max(time.time_ns(),state.get('revision',0)+1),origin=origin,locked=action=='lock',captions=data.get('captions',state.get('captions',[])))
         local=apply(event)
     def deliver(peer):
         try:return {'node':peer,**send(peer,{'action':'receive','event':event})}

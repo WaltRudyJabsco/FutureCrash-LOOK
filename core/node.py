@@ -5212,7 +5212,7 @@ class API(BaseHTTPRequestHandler):
                 return self.sendj(400, {"ok":False,"error":str(exc)})
         if path == "/v1/curtain":
             try:return self.sendj(200,_curtain_request(d))
-            except (ValueError,OSError,TypeError) as exc:return self.sendj(400,{'ok':False,'error':str(exc)})
+            except (ValueError,OSError,TypeError,RuntimeError) as exc:return self.sendj(400,{'ok':False,'error':str(exc)})
         if path == "/v1/beacon":
             try:
                 if d.get("start_pulse"):

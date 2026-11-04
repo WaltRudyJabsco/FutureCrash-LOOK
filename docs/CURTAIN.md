@@ -13,6 +13,7 @@ Use the operating system's lock screen when you need actual access protection.
 Run `lk lock`, then **P** to choose and repeat a four-digit PIN. The PIN verifier
 is distributed only to paired Fabric nodes, in private local files. Changing it
 requires the current PIN; unlock before changing it. PINs are never shell arguments.
+PIN entry submits automatically after the fourth digit; Enter is not needed.
 Five wrong attempts cause a 30-second cooldown on that node.
 
 The settings screen uses **L** lock, **U** unlock, **P** PIN, **G** prepare AI captions,
@@ -47,7 +48,7 @@ version does not replay old commands automatically to returning nodes. Open brow
 pages poll their host and retain the curtain if the connection drops. Local PIN
 verification works without other Fabric nodes, provided the local node is running.
 
-State is stored in `~/.config/look/curtain.json`, including a salted scrypt verifier,
+State is stored in `~/.config/look/curtain.json`, including a salted PBKDF2-SHA256 verifier (older scrypt records remain readable on supported Python runtimes),
 not the plaintext PIN. Treat it as private: a four-digit PIN has a small search
 space and this feature is not intended to resist an attacker. If you forget it,
 exit the curtain through your OS, stop the curtain process, remove this file only

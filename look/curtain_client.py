@@ -25,6 +25,26 @@ def request(action='status',**fields):
     return result
 
 
+def read_pin(prompt):
+    if not sys.stdin.isatty():return getpass.getpass(prompt)
+    fd=sys.stdin.fileno();prior=termios.tcgetattr(fd);digits=[]
+    try:
+        tty.setraw(fd)
+        sys.stdout.write(prompt);sys.stdout.flush()
+        while len(digits)<4:
+            key=sys.stdin.read(1)
+            if key in {'\x03','\x1b','\x04',''}:raise EOFError('PIN entry cancelled')
+            if key in {'\x7f','\b'} and digits:
+                digits.pop();sys.stdout.write('\b \b');sys.stdout.flush()
+            elif key in '0123456789' and key:
+                digits.append(key);sys.stdout.write('*');sys.stdout.flush()
+        return ''.join(digits)
+    finally:
+        # Discard queued paste/Enter bytes so they cannot answer the next prompt.
+        termios.tcsetattr(fd,termios.TCSAFLUSH,prior)
+        sys.stdout.write('\n');sys.stdout.flush()
+
+
 def main(args,command='lock'):
     parser=argparse.ArgumentParser(prog='lk '+command,description='Fabric PIN curtain (not an OS lock)')
     parser.add_argument('action',nargs='?',choices=('setup','status','lock','unlock'))
@@ -34,10 +54,10 @@ def main(args,command='lock'):
     try:
         fields={}
         if action=='setup':
-            if request().get('configured'):fields['old_pin']=getpass.getpass('Current PIN: ')
-            fields['pin']=getpass.getpass('New four-digit PIN: ')
-            if fields['pin']!=getpass.getpass('Repeat PIN: '):raise ValueError('PINs do not match')
-        elif action=='unlock':fields['pin']=getpass.getpass('PIN: ')
+            if request().get('configured'):fields['old_pin']=read_pin('Current PIN: ')
+            fields['pin']=read_pin('New four-digit PIN: ')
+            if fields['pin']!=read_pin('Repeat PIN: '):raise ValueError('PINs do not match')
+        elif action=='unlock':fields['pin']=read_pin('PIN: ')
         result=request(action,**fields)
         print('LOOK CURTAIN · '+('covered' if result.get('locked') else 'open'))
         for item in result.get('delivery',[]):
