@@ -29,7 +29,7 @@ def artwork(phase):
                         if path.is_file() and not path.is_symlink():rows.setdefault(ident,(row,path))
                 except (OSError,ValueError):continue
             _rows=sorted(rows.values(),key=lambda x:x[0].get('title',''));_stamp=stamp
-    return _rows[int(max(0,phase)//INTERVAL)%len(_rows)] if _rows else (None,None)
+    return _rows[int(phase//INTERVAL)%len(_rows)] if _rows else (None,None)
 
 @functools.lru_cache(maxsize=16)
 def colored_symbols(path,width,height):

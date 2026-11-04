@@ -104,9 +104,9 @@ class SaverWindow(QWidget):
             # Shared clock plus a display slot guarantees distinct artwork when
             # the collection has at least as many images as attached displays.
             slot=getattr(self,'museum_slot',0)
-            phase=elapsed+slot*20
+            phase=elapsed+(slot+self.controller.museum_step)*20
             import colorsys
-            hue=((int(elapsed//20)+self.run.color_revision)*.137+slot*.381966)%1
+            hue=((int(elapsed//20)+self.controller.museum_step+self.run.color_revision)*.137+slot*.381966)%1
             rgb=colorsys.hsv_to_rgb(hue,.30,.78)
             ink=QColor.fromRgbF(*rgb).name()
             paper=QColor.fromRgbF(*(v*.095 for v in rgb)).name()
@@ -130,7 +130,7 @@ class SaverWindow(QWidget):
                     brush.end();self.ascii_museum=art;self.ascii_museum_key=key
                 painter.drawPixmap(0,0,self.ascii_museum)
                 if elapsed<HINT_SECONDS:
-                    hint='C colors · V visual · Space/Escape exit'
+                    hint='←/→ artworks · C colors · V visual · Escape exit'
                     painter.fillRect(12,8,round(metrics.horizontalAdvance(hint))+20,30,QColor(paper))
                     painter.drawText(20,30,hint)
                 painter.end();return
@@ -150,7 +150,7 @@ class SaverWindow(QWidget):
                     caption=row.get('title','')+' · '+row.get('artist','')+' · '+row.get('museum','')
                     caption=metrics.elidedText(caption,Qt.TextElideMode.ElideRight,max(1,self.width()-40))
                     painter.drawText(20,self.height()-55,self.width()-40,45,Qt.AlignmentFlag.AlignCenter,caption)
-                    if elapsed<HINT_SECONDS:painter.drawText(20,30,'C colors · V visual · Space/Escape exit')
+                    if elapsed<HINT_SECONDS:painter.drawText(20,30,'←/→ artworks · C colors · V visual · Escape exit')
                     painter.end();return
         left=(self.width()-columns*cell_width)/2
         top=(self.height()-rows*cell_height)/2+metrics.ascent()
@@ -172,6 +172,8 @@ class SaverWindow(QWidget):
         if event.isAutoRepeat():return
         if event.key()==Qt.Key.Key_C:self.controller.change_visual(color=True)
         elif event.key()==Qt.Key.Key_V:self.controller.change_visual(color=False)
+        elif event.key() in {Qt.Key.Key_Left,Qt.Key.Key_Right}:
+            self.controller.change_museum(-1 if event.key()==Qt.Key.Key_Left else 1)
         elif event.key() in {Qt.Key.Key_Escape,Qt.Key.Key_Space}:self.controller.dismiss()
         else:event.ignore()
 
@@ -185,7 +187,7 @@ class SaverWindow(QWidget):
 class SaverController:
     def __init__(self,app,settings,*,preview=False,seconds=None,seed=None):
         self.app=app;self.settings=saver.validate(settings);self.preview=preview
-        self.started=time.monotonic();self.windows={};self.stopping=False
+        self.started=time.monotonic();self.windows={};self.stopping=False;self.museum_step=0
         import museum_cache
         self.museum_cache_stop=museum_cache.start() if self.settings['scene'] in {'Museum','ASCII Museum'} or any(name in self.settings['enabled'] for name in ('Museum','ASCII Museum')) else None
         self.presentation=MacPresentation() if not preview and app.platformName()=='cocoa' else None
@@ -201,6 +203,11 @@ class SaverController:
         app.screenRemoved.connect(lambda screen:self.reconcile(exclude=screen))
         self.timer=QTimer(app);self.timer.timeout.connect(self.tick);self.timer.start(FRAME_INTERVAL_MS)
         if seconds is not None:QTimer.singleShot(round(seconds*1000),self.dismiss)
+
+    def change_museum(self,direction):
+        # Step by a display set, preserving distinct slots across all monitors.
+        self.museum_step+=direction*max(1,len(self.windows))
+        for window in self.windows.values():window.update()
 
     def targets(self,exclude=None):
         screens=[screen for screen in self.app.screens() if screen is not exclude]

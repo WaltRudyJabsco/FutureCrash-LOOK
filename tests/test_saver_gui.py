@@ -178,3 +178,16 @@ def test_ascii_museum_uses_distinct_display_slots_and_cached_render(app,tmp_path
         assert phases[-1]>=20
         cached=window.ascii_museum.cacheKey();window.grab();assert cached==window.ascii_museum.cacheKey()
     finally:control.dismiss()
+
+
+def test_museum_arrow_keys_advance_display_sets(app,monkeypatch):
+    import museum_cache
+    monkeypatch.setattr(museum_cache,'start',lambda:None)
+    control=saver_gui.SaverController(app,dict(saver.defaults(),scene='Museum'),preview=True,seed=1)
+    try:
+        window=next(iter(control.windows.values()))
+        window.keyPressEvent(QKeyEvent(QEvent.Type.KeyPress,Qt.Key.Key_Right,Qt.KeyboardModifier.NoModifier))
+        assert control.museum_step==len(control.windows)
+        window.keyPressEvent(QKeyEvent(QEvent.Type.KeyPress,Qt.Key.Key_Left,Qt.KeyboardModifier.NoModifier))
+        assert control.museum_step==0 and not control.stopping
+    finally:control.dismiss()

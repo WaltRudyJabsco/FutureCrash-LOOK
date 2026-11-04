@@ -144,3 +144,16 @@ retain source identity, museum attribution, rights label, original record link
 and image checksum. Artwork URLs are restricted to those museum hosts, including
 redirects; arbitrary URLs or SVG uploads are not accepted. Artvee and The Last
 Museum are not scraped or represented as supported APIs in this release.
+
+## Assistant and saver controls
+
+LO's shared tool registry includes read-only `museum_search`, returning actual
+collection metadata, owner-scoped image links and the gallery route. Metadata
+alone is not a visual inspection of an artwork.
+
+In both Museum saver modes, Right advances to the next display set and Left goes
+back. Each set steps by the number of displays, keeping their artwork distinct
+when enough images are available. Escape exits; C changes colors; V changes the
+shared visualizer. Number Station (large held digits) and Prism Grid (diagonal
+bands, checkerboards and diamonds) are also available in the shared saver/player
+list. Enable them in an existing custom Cycle selection if desired.
