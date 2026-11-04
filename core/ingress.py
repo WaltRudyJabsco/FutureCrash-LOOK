@@ -51,12 +51,13 @@ HOP_HEADERS = {
 def _is_stream_path(path: str) -> bool:
     """Routes whose response bytes must never be buffered by the guard."""
     return (
-        path in {"/v1/infer/stream", "/v1/media/audio", "/v1/books/item", "/v1/books/audio", "/v1/books/cover", "/v1/books/image", "/v1/media/item", "/v1/media/browser", "/v1/media/cover", "/v1/media/artifact", "/v1/media/catalog", "/v1/media/fabric", "/v1/maintenance/bundle"}
+        path in {"/v1/museum/image", "/v1/infer/stream", "/v1/media/audio", "/v1/books/item", "/v1/books/audio", "/v1/books/cover", "/v1/books/image", "/v1/media/item", "/v1/media/browser", "/v1/media/cover", "/v1/media/artifact", "/v1/media/catalog", "/v1/media/fabric", "/v1/maintenance/bundle"}
         or path.startswith("/v1/artifacts/")
     )
 
 
 def _request_timeout(path: str, method: str, body: bytes | None, is_stream: bool) -> float:
+    if path=='/v1/museum/search' or path=='/v1/museum' and method=='POST':return 90.0
     if path in {'/v1/print','/v1/print/fabric'}:return 60.0
     if path == '/v1/words':return 90.0
     if path == '/v1/books/audio':return 180.0

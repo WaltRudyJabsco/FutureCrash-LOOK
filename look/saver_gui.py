@@ -8,7 +8,7 @@ import sys
 import time
 
 from PySide6.QtCore import Qt, QTimer
-from PySide6.QtGui import QColor, QCursor, QFont, QFontDatabase, QFontMetricsF, QPainter
+from PySide6.QtGui import QColor, QCursor, QFont, QFontDatabase, QFontMetricsF, QPainter, QPixmap
 from PySide6.QtWidgets import QApplication, QWidget
 
 import saver
@@ -100,6 +100,27 @@ class SaverWindow(QWidget):
         elapsed=max(0,time.monotonic()-self.controller.started)
         _scene,lines,(paper,ink)=self.run.sample(elapsed,columns,rows)
         painter.fillRect(self.rect(),QColor(paper));painter.setPen(QColor(ink))
+        if _scene=='Museum':
+            import museum_art
+            row,path=museum_art.artwork(elapsed+self.run.offset)
+            if path:
+                key=str(path)
+                if getattr(self,'museum_key',None)!=key:
+                    self.museum_pixmap=QPixmap(key);self.museum_key=key
+                if not self.museum_pixmap.isNull():
+                    painter.fillRect(self.rect(),QColor('#111820'))
+                    scaled_key=(key,self.width(),self.height())
+                    if getattr(self,'museum_scaled_key',None)!=scaled_key:
+                        self.museum_scaled=self.museum_pixmap.scaled(max(1,self.width()-40),max(1,self.height()-100),Qt.AspectRatioMode.KeepAspectRatio,Qt.TransformationMode.SmoothTransformation)
+                        self.museum_scaled_key=scaled_key
+                    image=self.museum_scaled
+                    painter.drawPixmap((self.width()-image.width())//2,20,image)
+                    painter.setPen(QColor('#eee8dd'))
+                    caption=row.get('title','')+' · '+row.get('artist','')+' · '+row.get('museum','')
+                    caption=metrics.elidedText(caption,Qt.TextElideMode.ElideRight,max(1,self.width()-40))
+                    painter.drawText(20,self.height()-55,self.width()-40,45,Qt.AlignmentFlag.AlignCenter,caption)
+                    if elapsed<HINT_SECONDS:painter.drawText(20,30,'V visual · Space/Escape exit')
+                    painter.end();return
         left=(self.width()-columns*cell_width)/2
         top=(self.height()-rows*cell_height)/2+metrics.ascent()
         for index,line in enumerate(lines):
