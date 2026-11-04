@@ -197,3 +197,48 @@ def test_saver_cache_bounded_verified_and_offline(tmp_path,monkeypatch):
     first= museum_art.artwork(0)[1];second=museum_art.artwork(museum_art.INTERVAL)[1]
     assert first.is_file() and second.is_file() and first!=second
     assert 'ASCII Museum' in player_visuals.NAMES
+
+
+def test_named_collections_do_not_duplicate_images(tmp_path,monkeypatch):
+    m=museum.Museum(tmp_path);monkeypatch.setattr(museum,'detail',lambda ident:art(ident));monkeypatch.setattr(museum,'fetch',lambda *a:JPEG)
+    m.save('aic-1');created=m.change({'action':'collection-create','name':'Quiet landscapes'});ident=created['active_collection']
+    with pytest.raises(ValueError):m.change({'action':'collection-create','name':'quiet landscapes'})
+    m.change({'action':'collection-add','collection':ident,'id':'aic-1'})
+    assert m.snapshot()['items'][0]['collections']==[ident]
+    assert len(list((tmp_path/'images').glob('*')))==1
+    assert museum.Museum(tmp_path).snapshot()['collections'][ident]['name']=='Quiet landscapes'
+    m.change({'action':'collection-remove','collection':ident,'id':'aic-1'})
+    assert m.snapshot()['items'][0]['collections']==[]
+
+
+def test_offline_catalog_keeps_metadata_and_reuses_saver_cache(tmp_path,monkeypatch):
+    import museum_library,museum_cache
+    monkeypatch.setattr(Path,'home',lambda:tmp_path)
+    rows=[dict(art('aic-'+str(n)),downloaded=True,sha256=museum.hashlib.sha256(JPEG).hexdigest(),collections=['landscape']) for n in (1,2)]
+    museum_library.remember('owner',{'items':rows,'collections':{'landscape':{'name':'Landscapes'}}})
+    museum_cache.store(rows[0],JPEG,'owner')
+    client=museum_desk.Client('owner');monkeypatch.setattr(client,'request',Mock(side_effect=ValueError('Owner offline')))
+    result=client.snapshot()
+    assert result['offline'] and len(result['items'])==2 and result['offline_count']==1
+    assert client.image(result['items'][0]).is_file()
+    assert not result['items'][1]['downloaded']
+    assert len(museum_library.view(result['items'],'collections','landscape',True))==1
+    assert not museum_library.snapshot('different-owner')['items']
+
+
+def test_shuffle_contains_every_work_once_and_preserves_input():
+    rows=[dict(id=str(n),title=str(n)) for n in range(20)]
+    result=museum_desk.sorted_artworks(rows,'Shuffle')
+    assert sorted(r['id'] for r in result)==sorted(r['id'] for r in rows)
+    assert rows[0]['id']=='0' and result is not rows
+
+
+def test_node_offline_catalog_and_cached_image(tmp_path,monkeypatch):
+    import museum_library
+    monkeypatch.setattr(Path,'home',lambda:tmp_path)
+    row=dict(art(),downloaded=True)
+    museum_library.remember('owner',{'items':[row]});path=museum_library.store_image('owner',row['id'],JPEG)
+    h=object.__new__(node.API);h.path='/v1/museum?target=owner';h._file_target=Mock(side_effect=ValueError('Owner offline'));h.sendj=lambda code,value:(code,value)
+    code,result=h._museum_request();assert code==200 and result['offline'] and result['items'][0]['available_offline']
+    h.path='/v1/museum/image?target=owner&id=aic-1';h._serve_file_range=lambda path,mime:(path,mime)
+    assert h._museum_request()[0]==path

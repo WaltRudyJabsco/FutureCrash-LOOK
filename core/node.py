@@ -4122,19 +4122,37 @@ class API(BaseHTTPRequestHandler):
         except Exception as exc:return self.sendj(400,{'ok':False,'error':str(exc)})
 
     def _museum_request(self,payload=None):
+        _look_catalog_modules();import museum_library
+        params=parse_qs(urlparse(self.path).query);owner=(params.get('target') or ['local'])[0]
         try:
             peer,_value=self._file_target();parsed=urlparse(self.path);params=parse_qs(parsed.query)
             image=parsed.path=='/v1/museum/image'
             ident=(params.get('id') or [''])[0]
             route=parsed.path+'?'+urllib.parse.urlencode({k:v[0] for k,v in params.items() if k in {'id','q','source','page'}})
             if peer is not None:
+                if payload is None and parsed.path=='/v1/museum':
+                    try:
+                        result=http_json(_copy_route(peer)+'/v1/museum',timeout=5)
+                        museum_library.remember(owner,result)
+                        result=museum_library.snapshot(owner,(params.get('q') or [''])[0],result)
+                    except urllib.error.HTTPError:raise
+                    except OSError:result=museum_library.snapshot(owner,(params.get('q') or [''])[0])
+                    return self.sendj(200,dict(result,ok=True,node=owner))
+                if image:
+                    cached=museum_library.image(owner,ident)
+                    if cached:return self._serve_file_range(cached,'image/jpeg')
                 if payload and payload.get('action')=='sync':
                     result=_file_peer_json(peer,'/v1/museum')
                     def download(row):
                         url=_copy_route(peer)+'/v1/museum/image?'+urllib.parse.urlencode({'id':row['id']})
                         req=urllib.request.Request(url,headers=FABRIC_IDENTITY.auth_headers_for_url(url))
                         with urllib.request.urlopen(req,timeout=30,context=FABRIC_IDENTITY.ssl_context_for_url(url)) as response:return response.read(20*1024*1024+1)
-                    result=_museum().start_sync(result['items'],download)
+                    rows=result['items']
+                    if 'ids' in payload:
+                        ids=payload['ids']
+                        if not isinstance(ids,list) or len(ids)>1000:raise ValueError('Choose up to 1000 works to keep offline')
+                        rows=[row for row in rows if row['id'] in ids]
+                    result=_museum().start_sync(rows,download,result.get('collections',{}))
                     return self.sendj(200,dict(result,ok=True,node=identity()['name']))
                 if payload and payload.get('action')=='pin':
                     ident=str(payload.get('id',''))
@@ -4151,12 +4169,9 @@ class API(BaseHTTPRequestHandler):
                 if image:
                     url=_copy_route(peer)+route
                     req=urllib.request.Request(url,headers=FABRIC_IDENTITY.auth_headers_for_url(url))
-                    with urllib.request.urlopen(req,timeout=30,context=FABRIC_IDENTITY.ssl_context_for_url(url)) as response:
-                        self.send_response(response.status)
-                        for key in ('Content-Type','Content-Length'):
-                            if response.headers.get(key):self.send_header(key,response.headers[key])
-                        self.end_headers();shutil.copyfileobj(response,self.wfile,65536)
-                    return
+                    with urllib.request.urlopen(req,timeout=15,context=FABRIC_IDENTITY.ssl_context_for_url(url)) as response:data=response.read(20*1024*1024+1)
+                    cached=museum_library.store_image(owner,ident,data)
+                    return self._serve_file_range(cached,'image/png' if data.startswith(b'\x89PNG') else 'image/jpeg')
                 if parsed.path=='/v1/museum/search':result=http_json(_copy_route(peer)+route,timeout=90)
                 else:result=_file_peer_json(peer,route) if payload is None else http_json(_copy_route(peer)+route,data=payload,timeout=90)
                 return self.sendj(200,result)
@@ -4171,8 +4186,17 @@ class API(BaseHTTPRequestHandler):
             elif parsed.path=='/v1/museum/search':
                 result=manager.search((params.get('source') or ['met'])[0],(params.get('q') or [''])[0],int((params.get('page') or ['1'])[0]))
             else:result=manager.snapshot((params.get('q') or [''])[0])
+            if payload is None and parsed.path=='/v1/museum':result=museum_library.snapshot('local',(params.get('q') or [''])[0],result)
             return self.sendj(200,dict(result,ok=True,node=identity()['name']))
-        except Exception as exc:return self.sendj(400,{'ok':False,'error':str(exc)})
+        except PermissionError as exc:return self.sendj(403,{'ok':False,'error':str(exc)})
+        except Exception as exc:
+            if payload is None and urlparse(self.path).path=='/v1/museum':
+                result=museum_library.snapshot(owner,(params.get('q') or [''])[0])
+                return self.sendj(200,dict(result,ok=True,node=owner,warning=str(exc)))
+            if payload is None and urlparse(self.path).path=='/v1/museum/image':
+                cached=museum_library.image(owner,(params.get('id') or [''])[0])
+                if cached:return self._serve_file_range(cached,'image/jpeg')
+            return self.sendj(400,{'ok':False,'error':str(exc)})
 
     def _radio_request(self, payload=None):
         try:
