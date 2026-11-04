@@ -28,7 +28,7 @@ class CurtainController(saver_gui.SaverController):
     def __init__(self,app):
         self.dialog=None;self.pending=None
         self.executor=concurrent.futures.ThreadPoolExecutor(max_workers=1)
-        settings=dict(saver.defaults(),scene='Flight Deck',palette='bridge',independent=False)
+        settings=saver.curtain_settings()
         super().__init__(app,settings)
         self.poll_timer=QTimer(app);self.poll_timer.timeout.connect(self.poll);self.poll_timer.start(500)
         self.poll()
