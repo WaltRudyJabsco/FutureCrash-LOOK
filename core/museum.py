@@ -3,6 +3,7 @@ from __future__ import annotations
 import hashlib
 import json
 import math
+import uuid
 import os
 from pathlib import Path
 import re
@@ -130,7 +131,7 @@ class Museum:
                 try:row['downloaded']=self.image(row['id']).is_file()
                 except ValueError:row['downloaded']=False
                 if not query or str(query).casefold() in ' '.join(str(row.get(k,'')) for k in ('title','artist','date','medium','culture','collection')).casefold():rows.append(row)
-            return {'items':sorted(rows,key=lambda x:x['title'].casefold()),'job':state.get('job',{}),'bytes':sum(x.get('bytes',0) for x in state['items'].values()),'limit_bytes':MAX_COLLECTION_BYTES}
+            return {'items':sorted(rows,key=lambda x:x['title'].casefold()),'job':state.get('job',{}),'bytes':sum(x.get('bytes',0) for x in state['items'].values()),'limit_bytes':MAX_COLLECTION_BYTES,'collections':state.get('collections',{})}
     def search(self,source,query,page=1):
         result=discover(source,query,page)
         with self.lock:
@@ -149,7 +150,7 @@ class Museum:
             total=sum(x.get('bytes',0) for x in state['items'].values())-old.get('bytes',0)+len(data)
             if total>MAX_COLLECTION_BYTES:raise ValueError('Museum collection reached its 3 GiB storage budget')
             atomic(self.root/'images'/(row['id']+'.jpg'),data)
-            result=dict(row,downloaded=True,bytes=len(data),sha256=hashlib.sha256(data).hexdigest(),collection=old.get('collection') or collection,added=old.get('added',time.time()),favorite=old.get('favorite',row.get('favorite',False)))
+            result=dict(row,downloaded=True,bytes=len(data),sha256=hashlib.sha256(data).hexdigest(),collection=old.get('collection') or collection,added=old.get('added',time.time()),favorite=old.get('favorite',row.get('favorite',False)),collections=old.get('collections',row.get('collections',[])))
             state['items'][row['id']]=result;self.write(state);return result
     def save(self,ident,collection='Personal collection'):
         identity(ident)
@@ -173,11 +174,15 @@ class Museum:
             self.stop.clear();state=self.read();state['job']={'state':'running','requested':count,'saved':0,'errors':[],'theme':'Starting'};self.write(state)
             self.worker=threading.Thread(target=self._pack,args=(count,),daemon=True);self.worker.start()
         return self.snapshot()
-    def start_sync(self,rows,loader):
+    def start_sync(self,rows,loader,collections=None):
         rows=[row for row in rows if row.get('downloaded')][:MAX_PACK_ITEMS]
         with self.lock:
             if self.worker and self.worker.is_alive():raise ValueError('A collection download is already running')
-            self.stop.clear();state=self.read();state['job']={'state':'running','requested':len(rows),'saved':0,'errors':[],'theme':'Copying from Fabric'};self.write(state)
+            self.stop.clear();state=self.read()
+            if collections:
+                for ident,value in list(collections.items())[:200]:
+                    if re.fullmatch('[a-f0-9]{32}',ident):state.setdefault('collections',{}).setdefault(ident,{'name':clean(value.get('name',''))[:80]})
+            state['job']={'state':'running','requested':len(rows),'saved':0,'errors':[],'theme':'Copying from Fabric'};self.write(state)
             def run():
                 saved=0;errors=[]
                 for row in rows:
@@ -222,8 +227,32 @@ class Museum:
     def _job(self,**fields):
         with self.lock:
             state=self.read();state['job'].update(fields);self.write(state)
+    def collection_change(self,data):
+        with self.lock:
+            state=self.read();collections=state.setdefault('collections',{})
+            action=data['action']
+            if action=='collection-create':
+                if len(collections)>=200:raise ValueError('The library supports up to 200 named collections')
+                name=clean(data.get('name','')).strip()
+                if not name or len(name)>80:raise ValueError('Choose a collection name of 1–80 characters')
+                if any(row['name'].casefold()==name.casefold() for row in collections.values()):raise ValueError('That collection already exists')
+                ident=uuid.uuid4().hex;collections[ident]={'name':name}
+            else:
+                ident=str(data.get('collection',''))
+                if ident not in collections:raise ValueError('Choose an existing collection')
+                row=state['items'].get(data.get('id',''))
+                if not row:raise ValueError('Save the artwork to the library first')
+                membership=set(row.get('collections',[]))
+                if action=='collection-add':membership.add(ident)
+                elif action=='collection-remove':membership.discard(ident)
+                else:raise ValueError('Unknown collection action')
+                row['collections']=sorted(membership)
+            self.write(state)
+        return dict(self.snapshot(),active_collection=ident)
+
     def change(self,data):
         action=data.get('action')
+        if action in {'collection-create','collection-add','collection-remove'}:return self.collection_change(data)
         if action=='save':self.save(data.get('id',''));return self.snapshot()
         if action=='favorite':return self.favorite(data.get('id',''))
         if action=='starter':return self.start_pack(data.get('count',1000))

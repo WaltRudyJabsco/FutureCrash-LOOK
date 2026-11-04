@@ -40,12 +40,30 @@ cancelled. A node restart marks unfinished work **interrupted**; start again to
 reuse completed downloads. Source failures or unavailable images can produce a
 partial pack. Completion is never inferred from the requested count.
 
+## Library and collections
+
+**Library** contains saved works on the selected owner. **Discover** searches the
+Met or Art Institute online, not your saved library. **Collections** are named
+groups of saved works; a work can belong to several without duplicating its image.
+**Favorites** is a quick personal selection. Starter-pack subject labels remain
+source metadata, separate from the named collections you create.
+
+The desk and web host remember the owner’s catalog. When that owner is offline,
+you can still browse its metadata and open images already saved or cached on this
+device, including the Museum saver cache. The offline indicator reports how many
+images are available; the offline-only filter hides unavailable originals.
+Discovery and changes to the owner require reconnection.
+
 ## Terminal controls
 
 - Arrows select artwork; Shift+Up/Down (or Page Up/Down) moves a visible page;
   Shift+Left/Right (or Home/End) jumps to the beginning/end. These work in the
   image viewer too, within downloaded works.
-- **F** (Shift+F): cycle Title, Artist, Century and Museum sorting without losing
+- **1/2/3/4**: Library, Discover, Collections, Favorites.
+- **c**: create a named collection; **m** adds/removes the selected saved work.
+- **o**: show only images available offline here.
+- **u**: keep the current view on this device, after confirmation.
+- **F** (Shift+F): cycle Title, Artist, Century, Museum and Shuffle sorting without losing
   the selected artwork. Century uses the supplied date, oldest first; unknown
   dates sort last. Discovery sorting applies to the current results page.
 - **Enter**: view a downloaded work; Left/Right (or Up/Down) cycle through
@@ -62,6 +80,9 @@ partial pack. Completion is never inferred from the requested count.
 **s** starts a slideshow of the current list or filtered search results. In the
 artwork view, Space pauses/resumes it; arrows step manually and Escape returns to
 the list. Slides advance every ten seconds and skip undownloaded discovery results.
+Choose **Shuffle** with F for random order: each work appears once per pass, then
+the next pass reshuffles without immediately repeating the last work. This also
+applies to a selected collection or filtered list.
 This differs from `lk museum slideshow` / `lk saver Museum`, which use the separate
 full-screen saver and the endpoint’s locally saved collection.
 
@@ -74,17 +95,23 @@ unavailable. Online search and mutations require the node service.
 
 ## Web gallery
 
-Open `/museum` in either chat. Collection, Discover, Favorites and Slideshow share
+Open `/museum` in either chat. Library, Discover, Collections, Favorites and Slideshow share
 the selected owner; the browser remembers its owner independently of the terminal.
 The page shows artist, date, source museum and downloaded status. Opening a work
 shows its description and museum record link. The web host's existing endpoint
 authorization protects the gallery and `/api/museum` gateway.
 
-**Keep offline** saves on the selected owner. **Copy to this host** copies one work
-to the computer serving Signal/Albert. **Copy collection to this host** performs a
-background, checksum-verified copy of up to 1000 saved works and switches the
-view to the local host. This is not a browser/phone download or a service-worker
-cache. A web browser still needs its Signal/Albert host reachable.
+**Save to owner** downloads to the displayed library owner. **Keep on this host**
+copies a work to the computer serving Signal/Albert. **Keep this view on this host**
+performs a background, checksum-verified copy of the currently filtered saved works,
+including their named collection memberships. It leaves the selected owner unchanged.
+The confirmation names the destination. This is not a browser/phone download or a
+service-worker cache: a web browser still needs its Signal/Albert host reachable.
+
+Use **New collection**, the collection selector and each card’s membership action
+to organize saved works. **Available offline on this host** filters cached images.
+**Shuffle slideshow** randomizes the current view, including a selected collection,
+with every work shown once before reshuffling.
 
 ## Offline copies and the shared saver
 

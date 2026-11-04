@@ -7,9 +7,10 @@ import museum_web
 from playwright.sync_api import sync_playwright
 OUT=ROOT/'artifacts/museum-browser';OUT.mkdir(parents=True,exist_ok=True)
 fixture=ROOT/'artifacts/museum-live';rows=json.loads((fixture/'catalog.json').read_text())['items']
-requests=[];errors=[];job={}
+requests=[];errors=[];job={};collections={};offline=False
+for index,row in enumerate(rows):row['available_offline']=index<2
 def respond(route):
-    global job
+    global job,collections,offline
     request=route.request;url=urlsplit(request.url);path=url.path
     if path=='/museum':return route.fulfill(content_type='text/html',body=museum_web.PAGE)
     if path=='/browser-views.js':return route.fulfill(content_type='text/javascript',body=(ROOT/'signal-window/browser-views.js').read_text())
@@ -19,11 +20,14 @@ def respond(route):
     if path in ('/api/museum','/api/museum/search'):
         if request.method=='POST':
             data=request.post_data_json;requests.append(data)
+            if data['action']=='collection-create':collections['test-collection']={'name':data['name']}
+            if data['action']=='collection-add':next(x for x in rows if x['id']==data['id']).setdefault('collections',[]).append(data['collection'])
+            if data['action']=='collection-remove':next(x for x in rows if x['id']==data['id'])['collections'].remove(data['collection'])
             if data['action']=='favorite':
                 row=next(x for x in rows if x['id']==data['id']);row['favorite']=not row.get('favorite')
             if data['action']=='starter':job={'state':'running','requested':data['count'],'saved':2,'theme':'landscape'}
             if data['action']=='cancel':job['state']='cancelled'
-        return route.fulfill(json={'ok':True,'node':'archive','items':rows,'job':job,'more':path.endswith('search')})
+        return route.fulfill(json={'ok':True,'node':'archive','items':rows,'job':job,'more':path.endswith('search'),'collections':collections,'active_collection':'test-collection','offline':offline,'offline_count':2})
     return route.fulfill(status=404,body='Not found')
 with sync_playwright() as p:
     browser=p.chromium.launch(channel='chrome',headless=True)
@@ -35,10 +39,21 @@ with sync_playwright() as p:
     page.screenshot(path=str(OUT/'desktop.png'),full_page=True)
     page.locator('.card .view').first.click();page.wait_for_selector('#detail:visible');assert page.locator('#title').inner_text();page.locator('#close').click()
     page.locator('.card .actions button',has_text='Favorite').first.click();page.locator('#favorites').click();page.wait_for_function("document.querySelectorAll('.card').length===1")
-    page.locator('#slideshow').click();page.wait_for_selector('#show:visible');assert page.locator('#slide-image').get_attribute('src').startswith('/api/museum/image')
+    page.locator('#slideshow').click();page.wait_for_selector('#show:visible');assert '/api/museum/image' in page.locator('#slide-image').get_attribute('src')
     page.locator('#slide-pause').click();assert page.locator('#slide-pause').inner_text()=='Play';page.locator('#slide-next').click();page.locator('#exit').click()
     page.locator('#discover').click();page.wait_for_selector('#source:visible');page.locator('#source').select_option('aic');page.locator('#query').fill('landscape');page.locator('#search button').click();page.wait_for_selector('#next:visible')
     page.locator('#saved').click();page.wait_for_function("document.querySelectorAll('.card').length>1")
+    page.once('dialog',lambda d:d.accept('Night Gallery'));page.locator('#new-collection').click();page.wait_for_function("document.querySelector('#collection-choice').options.length===1")
+    page.locator('#saved').click();page.wait_for_selector('.card')
+    page.once('dialog',lambda d:d.accept('1'));page.locator('.card .actions button',has_text='Add to collection').first.click()
+    page.locator('#collections').click();page.wait_for_function("document.querySelectorAll('.card').length===1")
+    page.locator('#shuffle').check();page.locator('#slideshow').click();page.wait_for_selector('#show:visible');page.locator('#exit').click()
+    assert page.evaluate("new Set(shuffleWorks([{id:'a'},{id:'b'},{id:'c'}]).map(x=>x.id)).size===3")
+    page.locator('#saved').click();page.wait_for_selector('.card')
+    offline=True;page.locator('#saved').click();page.wait_for_function("document.querySelector('#status').textContent.includes('Owner offline')")
+    page.locator('#offline-only').check();assert page.locator('.card').count()==2
+    assert page.locator('#new-collection').is_disabled()
+    page.locator('#offline-only').uncheck();offline=False;page.locator('#saved').click();page.wait_for_function("!document.querySelector('#new-collection').disabled")
     page.locator('summary').click();page.locator('#count').fill('10');page.once('dialog',lambda d:d.accept());page.locator('#starter').click();page.wait_for_selector('#job:visible')
     assert any(x.get('action')=='starter' and x['count']==10 for x in requests)
     page.locator('#job button').click();page.wait_for_function("document.querySelector('#job').textContent.includes('cancelled')")
