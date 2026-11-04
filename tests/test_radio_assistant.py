@@ -59,3 +59,8 @@ def test_museum_tool_returns_owner_scoped_image_link(monkeypatch):
     monkeypatch.setattr(museum_desk.Client,'snapshot',lambda self,query:{'items':[{'id':'aic-1','title':'Landscape'}]})
     result=json.loads(museum_assistant.run_tool('museum_search',{'query':'landscape'}))
     assert result['owner']=='owner' and 'target=owner' in result['items'][0]['image_path']
+
+
+def test_queue_noun_is_not_an_add_request():
+    assert radio_assistant.intent('show my YouTube Radio queue')=={'action':'list'}
+    assert radio_assistant.intent('what is in our YTR queue?')=={'action':'list'}

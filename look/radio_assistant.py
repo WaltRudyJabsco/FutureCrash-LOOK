@@ -9,6 +9,7 @@ def intent(prompt):
     if not re.search(r'\b(?:ytr|youtube\s+radio)\b',text,re.I):return None
     if re.search(r"\b(?:don't|do not|never|without|how (?:do|can|would)|explain)\b",text,re.I):return None
     if re.match(r'\s*(?:how|why|what happened|when|explain|did|does|is|was|I (?:asked|said|tried))\b',text,re.I):return None
+    if re.match(r'\s*(?:(?:can|could) you |please )*(?:list|show|what|which)\b',text,re.I):return {'action':'list'}
     if re.search(r'\b(?:add|queue|save|put)\b',text,re.I):
         urls=re.findall(r'https?://[^\s<>]+',text)
         if len(urls)!=1:return {'action':'add','error':'Paste exactly one YouTube link with your request to add it to YouTube Radio.'}
