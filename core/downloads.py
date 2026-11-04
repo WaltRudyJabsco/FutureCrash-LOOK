@@ -114,7 +114,7 @@ class Downloads:
                 if info_files:
                     if info_files[0].stat().st_size>16*1024*1024: raise ValueError('Video metadata exceeds 16 MB')
                     metadata=json.loads(info_files[0].read_text())
-                facts={key:metadata.get(key) for key in ('id','title','description','channel','uploader','tags','upload_date','webpage_url')}
+                facts={key:metadata.get(key) for key in ('id','title','description','channel','uploader','tags','upload_date','webpage_url','duration')}
                 # Keep only completed media and descriptive metadata; fragments
                 # and other temporary files are never published or cataloged.
                 owned=[final,*info_files]

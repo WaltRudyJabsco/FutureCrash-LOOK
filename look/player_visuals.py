@@ -844,7 +844,9 @@ def tape_echo_frame(width,height,phase,seed=0):
                 if 0<=x<width and 0<=y<height:canvas[y][x]='+'
     for x in range(width):
         y=int(height*.8+math.sin(x*.17-phase)*max(1,height*.08))
-        if 0<=y<height:canvas[y][x]='~'
+        # Keep the ribbon outside both reel faces, even in a five-row pane.
+        inside_reel=any(((x-center)/(radius*1.8+1))**2+((y-height*.43)/(radius+1))**2<=1 for center in centers)
+        if 0<=y<height and not inside_reel and canvas[y][x]==' ':canvas[y][x]='~'
     return [''.join(row) for row in canvas]
 
 

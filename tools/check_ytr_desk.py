@@ -21,9 +21,10 @@ sys.path.insert(0,sys.argv[1]+'/look')
 import ytr
 ui=types.SimpleNamespace(**runpy.run_path(sys.argv[1]+'/look/lk',run_name='radio_preview'))
 client=ytr.Client('preview',Path(sys.argv[2]))
-state={'node':'preview','items':[{'id':'a'*32,'bookmark_revision':0,'title':'A conversation worth keeping','url':'https://youtu.be/abcdefghijk','stage':'queued','position':0,'done':False},{'id':'b'*32,'bookmark_revision':0,'title':'The quiet science of deep space','url':'https://youtu.be/12345678901','stage':'queued','position':0,'done':False}]}
+state={'node':'preview','items':[{'id':'a'*32,'bookmark_revision':0,'title':'A conversation worth keeping','url':'https://youtu.be/abcdefghijk','stage':'queued','position':62,'duration':3723,'done':False},{'id':'b'*32,'bookmark_revision':0,'title':'The quiet science of deep space','url':'https://youtu.be/12345678901','stage':'queued','position':62,'duration':3723,'done':False}]}
 client.snapshot=lambda:state
 client.sync=lambda:None
+ytr.terminal_style.open_pane=lambda path: "Shell opened beside LOOK (test)"
 ytr.desk(client,ui)
 ''')
     master,slave=pty.openpty();fcntl.ioctl(slave,termios.TIOCSWINSZ,struct.pack('HHHH',24,86,0,0))
@@ -42,6 +43,9 @@ ytr.desk(client,ui)
     os.write(master,b'v');read(.5)
     capture=b''.join(chunks).decode(errors='replace')
     assert 'YOUTUBE RADIO' in capture and 'A conversation worth keeping' in capture,capture[-2000:]
+    os.write(master,b'W');read(.3)
+    assert b'Shell opened beside LOOK (test)' in b''.join(chunks)
+    assert '1:02 / 1:02:03' in capture
     os.write(master,b'q');read(.5);proc.wait(timeout=5);os.close(master)
     assert proc.returncode==0
     import pyte

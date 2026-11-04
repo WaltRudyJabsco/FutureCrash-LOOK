@@ -36,7 +36,13 @@ See [yt-dlp format selection](https://github.com/yt-dlp/yt-dlp#format-selection)
 - **O**: open the original video in the system browser.
 - **V**: toggle the shared Tape Echo animation.
 - **C**: clean finished and removed local audio copies.
+- **W** (Shift+W): open a sibling shell pane using the standard LOOK terminal controls.
 - **Q**: save position and close this player.
+
+Queue rows show saved position / total duration, with the current item updating live.
+Playback also shows a progress bar and remaining time. Unknown durations display
+an em dash until download metadata or the audio player provides a total. Existing
+downloads recover duration from their retained metadata without downloading again.
 
 Downloads and remote transfers run outside the input/render loop. The desk
 prepares the current and next audio copy on this endpoint. An item marked
