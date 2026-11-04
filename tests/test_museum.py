@@ -126,3 +126,42 @@ def test_remote_discovery_has_its_own_timeout_and_image_streaming(monkeypatch):
     assert h._museum_request()[0]==200
     assert call.call_args.kwargs['timeout']==90
     assert '/v1/museum/search?' in call.call_args.args[0]
+
+
+def test_collection_navigation_wraps_and_skips_online():
+    rows=[dict(id='aic-1',downloaded=True),dict(id='aic-2',downloaded=False),dict(id='aic-3',downloaded=True)]
+    assert museum_desk.adjacent_artwork(rows,0,1)==2
+    assert museum_desk.adjacent_artwork(rows,2,1)==0
+    assert museum_desk.adjacent_artwork(rows,0,-1)==2
+    assert museum_desk.adjacent_artwork([],0,1)==0
+
+
+def test_desk_native_thumbnail_and_viewer_navigation(monkeypatch,tmp_path):
+    from concurrent.futures import Future
+    from types import SimpleNamespace
+    rows=[dict(art('aic-'+str(n)),downloaded=True) for n in (1,2)]
+    paths={row['id']:tmp_path/(row['id']+'.jpg') for row in rows}
+    class Immediate:
+        def submit(self,fn,*args,**kwargs):
+            f=Future();f.set_result(fn(*args,**kwargs));return f
+        def shutdown(self,**kwargs):pass
+    native=Mock(enabled=True)
+    monkeypatch.setattr(museum_desk,'Background',Immediate)
+    monkeypatch.setattr(museum_desk,'NativePreviewController',lambda:native)
+    monkeypatch.setattr(museum_desk.sys,'stdin',SimpleNamespace(fileno=lambda:0))
+    monkeypatch.setattr(museum_desk.termios,'tcgetattr',lambda fd:[])
+    monkeypatch.setattr(museum_desk.termios,'tcsetattr',lambda *a:None)
+    monkeypatch.setattr(museum_desk.tty,'setcbreak',lambda fd:None)
+    monkeypatch.setattr(museum_desk.shutil,'get_terminal_size',lambda default:__import__('os').terminal_size((100,32)))
+    keys=iter(['', 'enter','right','','right','left',' ','esc','q'])
+    labels=[]
+    monkeypatch.setattr(museum_desk.terminal_style,'command_lines',lambda text,width:labels.append(text) or [text])
+    ui=SimpleNamespace(_read_tty_key=lambda *a:next(keys),_ansi_clip=lambda text,width:text[:width],_c=lambda text,color:text)
+    client=SimpleNamespace(node='local',snapshot=lambda:{'items':rows},image=lambda row:paths[row['id']])
+    assert museum_desk.desk(client,ui)==0
+    calls=[call.args for call in native.request.call_args_list]
+    assert any(path==paths['aic-1'] and col>1 for path,row,col,h,w in calls)
+    assert any(path==paths['aic-2'] and col==1 for path,row,col,h,w in calls)
+    assert all('Q quit' not in label and 'I image' not in label for label in labels)
+    assert any('q quit' in label and 'W shell pane' in label for label in labels)
+    native.close.assert_called_once()
