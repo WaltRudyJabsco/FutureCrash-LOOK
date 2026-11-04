@@ -43,3 +43,14 @@ def test_command_cards_use_reference(monkeypatch):
     receipt_desk.command_card('ytr')
     assert 'lk ytr' in call.call_args.kwargs['body']
     assert call.call_args.kwargs['kind']=='command'
+
+
+def test_original_transaction_command_remains_available(monkeypatch):
+    import importlib.machinery,importlib.util,sys
+    path=Path(__file__).resolve().parents[1]/'look/lk'
+    loader=importlib.machinery.SourceFileLoader('receipt_compat_lk',str(path));spec=importlib.util.spec_from_loader(loader.name,loader)
+    module=importlib.util.module_from_spec(spec);monkeypatch.setitem(sys.modules,loader.name,module);loader.exec_module(module)
+    legacy=Mock(return_value=0);monkeypatch.setattr(module,'receipts',legacy)
+    for args in (['lk','receipts','12'],['lk','receipts','transactions','12']):
+        monkeypatch.setattr(sys,'argv',args);assert module.main()==0
+    assert legacy.call_args.args==('12',) and legacy.call_count==2

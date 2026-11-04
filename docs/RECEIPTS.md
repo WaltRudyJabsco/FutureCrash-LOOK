@@ -1,7 +1,8 @@
 # Fabric receipt cards
 
 `lk receipts` is the human-readable archive for notable results, command cards,
-notes and release records. It complements diagnostic logs. Creating a card never
+notes and release records. It complements diagnostic logs. The original transaction log remains available as `lk receipts transactions [N]`,
+`lk receipt [N]`, or the backward-compatible `lk receipts N`. Creating a card never
 prints it. Cards are immutable; automatic queue/download events have stable keys
 so repeated observations do not create duplicate receipts.
 

@@ -21316,7 +21316,7 @@ _COMMANDS = [
     ("lk undo", "", "files", "Undo newest ready filesystem action"),
     ("lk undo list", "", "files", "Inspect undo history"),
     ("lk undo skip", "", "files", "Abandon newest blocked undo record"),
-    ("lk receipts", "[N]", "files", "Inspect transaction receipts"),
+    ("lk receipts transactions", "[N]", "files", "Inspect original transaction receipts; lk receipt [N] and lk receipts N remain supported"),
     # System
     ("lk system", "", "system", "System control surface"),
     ("lk doctor", "", "system", "Run LOOK diagnostics"),
@@ -22651,6 +22651,8 @@ _HIDDEN_COMMANDS = {'force'}
 def main():
     _safe_cwd(repair=True)
     if len(sys.argv)>=2 and sys.argv[1]=='receipts':
+        if len(sys.argv)>=3 and sys.argv[2].isdigit():return receipts(sys.argv[2])
+        if len(sys.argv)>=3 and sys.argv[2]=='transactions':return receipts(sys.argv[3] if len(sys.argv)>=4 else 30)
         import receipt_desk
         return receipt_desk.main(sys.argv[2:])
     if len(sys.argv)>=2 and sys.argv[1]=='work':
