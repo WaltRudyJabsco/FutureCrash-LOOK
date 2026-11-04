@@ -34,7 +34,7 @@ def test_fanout_trust_offline_cache_and_event_source():
     assert len(result['events'])==2 and len({e['id'] for e in result['events']})==2
     assert all('stranger' not in call for call in calls)
     assert dashboard.snapshot(lambda:pytest.fail('cache missed'),[],lambda p:'',fetch)==result
-    assert len(calls)==2
+    assert len(calls)==3
     dashboard._CACHE.clear()
 
 
@@ -61,3 +61,22 @@ def test_short_dashboard_url_redirects_to_shared_page(surface):
     handler.do_GET()
     handler.send_response.assert_called_once_with(302)
     handler.send_header.assert_called_once_with('Location','/fabric.html')
+
+
+@pytest.mark.parametrize('code,status',[(404,'update_required'),(501,'update_required'),(401,'authorization_required'),(403,'authorization_required'),(500,'telemetry_error')])
+def test_responding_peer_is_not_reported_offline(code,status):
+    from urllib.error import HTTPError
+    def fetch(url,timeout):raise HTTPError(url,code,'error',{},None)
+    row=dashboard.peer_snapshot({'name':'peer'},'https://peer',fetch)
+    assert row['reachable'] is True and row['telemetry_status']==status
+    assert 'services' not in row and 'activity' not in row
+
+
+def test_health_fallback_distinguishes_timeout_from_unreachable():
+    def fetch(url,timeout):
+        if url.endswith('/health'):return {'ok':True}
+        raise TimeoutError()
+    row=dashboard.peer_snapshot({'name':'peer'},'https://peer',fetch)
+    assert row['reachable'] and row['telemetry_status']=='telemetry_error'
+    row=dashboard.peer_snapshot({'name':'peer'},'https://peer',Mock(side_effect=OSError()))
+    assert not row['reachable'] and row['telemetry_status']=='unreachable'

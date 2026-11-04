@@ -56,8 +56,12 @@ with sync_playwright() as p:
     # Remote names are text, even when they look like markup.
     DATA['nodes'].append({'name': '<img src=x onerror=alert(1)>', 'reachable': False})
     page.get_by_role('button', name='Refresh now').click()
-    page.get_by_text('Telemetry unavailable.', exact=False).wait_for()
+    page.get_by_text('Cannot contact this computer.', exact=False).wait_for()
     assert page.locator('#nodes img').count() == 0
+    DATA['nodes'].append({'name': 'Old release', 'reachable': True, 'telemetry_status': 'update_required'})
+    page.get_by_role('button', name='Refresh now').click()
+    page.locator('#nodes').get_by_text('UPDATE NEEDED', exact=True).wait_for()
+    assert 'reporting' in page.locator('#coverage').inner_text()
     state['fail'] = True
     page.wait_for_timeout(100)
     page.get_by_role('button', name='Refresh now').click()

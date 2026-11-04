@@ -6,6 +6,12 @@
   const stamp=value=>value?new Date(Number(value)*1000).toLocaleString():'Unknown';
   async function json(path,timeout){const ctl=new AbortController(),timer=setTimeout(()=>ctl.abort(),timeout);try{const r=await fetch(path,{cache:'no-store',signal:ctl.signal});if(!r.ok)throw Error(r.status===403?'Authorize this browser in Signal or Albert first.':'Host returned '+r.status);return await r.json()}finally{clearTimeout(timer)}}
   function svg(tag,attrs){const el=document.createElementNS('http://www.w3.org/2000/svg',tag);for(const [k,v] of Object.entries(attrs))el.setAttribute(k,v);return el}
+  function telemetry(node){
+    const state=node.telemetry_status||(node.reachable?'ready':'unreachable');
+    const labels={ready:'REACHABLE',update_required:'UPDATE NEEDED',authorization_required:'ACCESS NEEDED',telemetry_error:'TELEMETRY ERROR',unreachable:'UNREACHABLE'};
+    const messages={update_required:'This computer is reachable, but its dashboard endpoint is unavailable. Update its LOOK installation.',authorization_required:'This computer responded, but denied telemetry access. Check Fabric pairing and authorization.',telemetry_error:'This computer responded, but its telemetry check failed. Retry or check its node service.',unreachable:'Cannot contact this computer. It may be asleep, offline, or disconnected from the Fabric.'};
+    return {state,label:labels[state]||'UNKNOWN',message:messages[state]||'Telemetry status unknown.'};
+  }
   function map(nodes){
     const root=svg('svg',{viewBox:'0 0 640 350',role:'img','aria-label':'Host and trusted Fabric peers'}),cx=320,cy=170;
     root.append(svg('circle',{cx,cy,r:115,class:'ring'}),svg('circle',{cx,cy,r:65,class:'ring'}));
@@ -16,15 +22,15 @@
       const g=svg('g',{class:node.reachable?'online':'offline'});
       g.append(svg('circle',{cx:x,cy:y,r:20,class:'orbit'}),svg('circle',{cx:x,cy:y,r:16,class:'node'}));
       const name=svg('text',{x,y:y+37,'text-anchor':'middle'});name.textContent=node.name.length>25?node.name.slice(0,23)+'…':node.name;
-      const label=svg('text',{x,y:y+52,'text-anchor':'middle',class:'sub'});label.textContent=node.reachable?(node.activity?.phase||'idle').toUpperCase():'UNKNOWN';g.append(name,label);root.append(g);
+      const label=svg('text',{x,y:y+52,'text-anchor':'middle',class:'sub'});label.textContent=telemetry(node).state==='ready'?(node.activity?.phase||'idle').toUpperCase():telemetry(node).label;g.append(name,label);root.append(g);
     });$('map').replaceChildren(root);
   }
   function nodeCards(nodes){
     const expanded=new Set([...$('nodes').querySelectorAll('article')].filter(card=>card.querySelector('details')?.open).map(card=>card.dataset.node));
     const cards=nodes.map(node=>{
       const card=text('article','','node-card'),head=text('div','','node-top'),title=text('div','');title.append(text('h2',node.name),text('p',[node.platform,node.architecture,node.local?'THIS HOST':'PEER'].filter(Boolean).join(' · '),'label'));
-      card.dataset.node=node.name;head.append(title,text('span',node.reachable?'REACHABLE':'UNKNOWN','badge'+(node.reachable?'':' unknown')));card.append(head);
-      if(!node.reachable){card.append(text('p','Telemetry unavailable. This peer may be offline or need an update.','warn'),text('p','Last advertisement: '+stamp(node.observed_at),'muted'));return card}
+      card.dataset.node=node.name;head.append(title,text('span',telemetry(node).label,'badge'+(telemetry(node).state==='ready'?'':' unknown')));card.append(head);
+      if(telemetry(node).state!=='ready'){card.append(text('p',telemetry(node).message,'warn'),text('p','Last advertisement: '+stamp(node.observed_at),'muted'));return card}
       card.append(text('p','Supervisor · '+(node.activity?.phase||'idle'),node.activity?.phase&&node.activity.phase!=='idle'?'good':'muted'));
       const services=text('div','','services');for(const [name,value] of Object.entries(node.services||{})){const state=value.state||'unknown';services.append(text('span',name+' · '+state,'service '+state.replace(/[^a-z]/g,'')))}card.append(services);if(node.runtime_ok===false)card.append(text('p','Runtime health needs attention','warn'));
       const models=text('div','','models'),resident=(node.models||[]).filter(m=>m.resident);models.append(text('div',(node.models||[]).length+' MODELS AVAILABLE · '+resident.length+' RESIDENT','label'));
@@ -42,11 +48,12 @@
     $('ticker').textContent=rows.slice(0,8).map(e=>new Date(e.ts*1000).toLocaleTimeString()+'  '+e.source+' · '+e.type+' / '+(e.phase||'')).join('     ／     ')||'No recent events observed';
   }
   function render(data){
-    const nodes=data.nodes||[],reachable=nodes.filter(n=>n.reachable),selected=$('filter').value;
+    const nodes=data.nodes||[],reachable=nodes.filter(n=>n.reachable),ready=reachable.filter(n=>telemetry(n).state==='ready'),selected=$('filter').value;
     $('nodeCount').textContent=reachable.length+' / '+nodes.length;
-    $('serviceCount').textContent=reachable.reduce((n,row)=>n+Object.values(row.services||{}).filter(s=>['running','active'].includes(s.state)).length,0);
-    $('modelCount').textContent=reachable.reduce((n,row)=>n+(row.models||[]).filter(m=>m.resident).length,0);
-    $('activeCount').textContent=reachable.filter(n=>n.activity?.phase&&n.activity.phase!=='idle').length;
+    $('serviceCount').textContent=ready.reduce((n,row)=>n+Object.values(row.services||{}).filter(s=>['running','active'].includes(s.state)).length,0);
+    $('modelCount').textContent=ready.reduce((n,row)=>n+(row.models||[]).filter(m=>m.resident).length,0);
+    $('activeCount').textContent=ready.filter(n=>n.activity?.phase&&n.activity.phase!=='idle').length;
+    $('coverage').textContent=ready.length+' of '+nodes.length+' nodes reporting service, model and activity data';
     $('host').textContent='HOST · '+data.host;map(nodes);nodeCards(nodes);
     const options=[text('option','All computers')];options[0].value='';for(const node of nodes){const option=text('option',node.name);option.value=node.name;options.push(option)}$('filter').replaceChildren(...options);$('filter').value=nodes.some(n=>n.name===selected)?selected:'';
     for(const event of data.events||[])events.set(event.id,event);
