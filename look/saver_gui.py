@@ -1,4 +1,4 @@
-"""Qt display edge for LOOK Saver; no audio, network, or lock-screen ownership."""
+"""Qt display edge for LOOK Saver; background artwork caching; no audio or lock-screen ownership."""
 from __future__ import annotations
 import hashlib
 import json
@@ -100,26 +100,57 @@ class SaverWindow(QWidget):
         elapsed=max(0,time.monotonic()-self.controller.started)
         _scene,lines,(paper,ink)=self.run.sample(elapsed,columns,rows)
         painter.fillRect(self.rect(),QColor(paper));painter.setPen(QColor(ink))
-        if _scene=='Museum':
+        if _scene in {'Museum','ASCII Museum'}:
+            # Shared clock plus a display slot guarantees distinct artwork when
+            # the collection has at least as many images as attached displays.
+            slot=getattr(self,'museum_slot',0)
+            phase=elapsed+slot*20
+            import colorsys
+            hue=((int(elapsed//20)+self.run.color_revision)*.137+slot*.381966)%1
+            rgb=colorsys.hsv_to_rgb(hue,.30,.78)
+            ink=QColor.fromRgbF(*rgb).name()
+            paper=QColor.fromRgbF(*(v*.095 for v in rgb)).name()
+            painter.fillRect(self.rect(),QColor(paper));painter.setPen(QColor(ink))
             import museum_art
-            row,path=museum_art.artwork(elapsed+self.run.offset)
+            row,path=museum_art.artwork(phase)
+            if path and _scene=='ASCII Museum':
+                key=(str(path),columns,rows,self.width(),self.height(),paper,ink)
+                if getattr(self,'ascii_museum_key',None)!=key:
+                    art=QPixmap(self.size());art.fill(QColor(paper));brush=QPainter(art);brush.setFont(self.font)
+                    symbols=museum_art.symbols(str(path),columns,max(1,rows-3))
+                    left=(self.width()-columns*cell_width)/2;top=metrics.ascent()
+                    ramp=' .:-=+*#%@'
+                    for y,line in enumerate(symbols):
+                        for x,char in enumerate(line):
+                            if char==' ':continue
+                            strength=.38+.62*max(0,ramp.find(char))/9
+                            brush.setPen(QColor.fromRgbF(*(v*strength for v in rgb)))
+                            brush.drawText(round(left+x*cell_width),round(top+y*cell_height),char)
+                    brush.setPen(QColor(ink));brush.drawText(20,self.height()-25,metrics.elidedText(row.get('title','')+' · '+row.get('artist',''),Qt.TextElideMode.ElideRight,max(1,self.width()-40)))
+                    brush.end();self.ascii_museum=art;self.ascii_museum_key=key
+                painter.drawPixmap(0,0,self.ascii_museum)
+                if elapsed<HINT_SECONDS:
+                    hint='C colors · V visual · Space/Escape exit'
+                    painter.fillRect(12,8,round(metrics.horizontalAdvance(hint))+20,30,QColor(paper))
+                    painter.drawText(20,30,hint)
+                painter.end();return
             if path:
                 key=str(path)
                 if getattr(self,'museum_key',None)!=key:
                     self.museum_pixmap=QPixmap(key);self.museum_key=key
                 if not self.museum_pixmap.isNull():
-                    painter.fillRect(self.rect(),QColor('#111820'))
+                    painter.fillRect(self.rect(),QColor(paper))
                     scaled_key=(key,self.width(),self.height())
                     if getattr(self,'museum_scaled_key',None)!=scaled_key:
                         self.museum_scaled=self.museum_pixmap.scaled(max(1,self.width()-40),max(1,self.height()-100),Qt.AspectRatioMode.KeepAspectRatio,Qt.TransformationMode.SmoothTransformation)
                         self.museum_scaled_key=scaled_key
                     image=self.museum_scaled
                     painter.drawPixmap((self.width()-image.width())//2,20,image)
-                    painter.setPen(QColor('#eee8dd'))
+                    painter.setPen(QColor(ink))
                     caption=row.get('title','')+' · '+row.get('artist','')+' · '+row.get('museum','')
                     caption=metrics.elidedText(caption,Qt.TextElideMode.ElideRight,max(1,self.width()-40))
                     painter.drawText(20,self.height()-55,self.width()-40,45,Qt.AlignmentFlag.AlignCenter,caption)
-                    if elapsed<HINT_SECONDS:painter.drawText(20,30,'V visual · Space/Escape exit')
+                    if elapsed<HINT_SECONDS:painter.drawText(20,30,'C colors · V visual · Space/Escape exit')
                     painter.end();return
         left=(self.width()-columns*cell_width)/2
         top=(self.height()-rows*cell_height)/2+metrics.ascent()
@@ -155,6 +186,8 @@ class SaverController:
     def __init__(self,app,settings,*,preview=False,seconds=None,seed=None):
         self.app=app;self.settings=saver.validate(settings);self.preview=preview
         self.started=time.monotonic();self.windows={};self.stopping=False
+        import museum_cache
+        self.museum_cache_stop=museum_cache.start() if self.settings['scene'] in {'Museum','ASCII Museum'} or any(name in self.settings['enabled'] for name in ('Museum','ASCII Museum')) else None
         self.presentation=MacPresentation() if not preview and app.platformName()=='cocoa' else None
         if self.presentation is not None:
             self.presentation.enter()
@@ -186,6 +219,7 @@ class SaverController:
                 identity=f'{screen.name()}:{screen.serialNumber()}:{index}'
                 offset=int.from_bytes(hashlib.sha256(identity.encode()).digest()[:8],'big') if self.settings['independent'] else 0
                 self.windows[screen]=SaverWindow(self,screen,self.seed+offset)
+        for index,screen in enumerate(targets):self.windows[screen].museum_slot=index
         if not targets:self.dismiss()
         elif self.presentation is not None:
             focused=self.windows.get(self.current) or next(iter(self.windows.values()))
@@ -207,6 +241,7 @@ class SaverController:
         self.stopping=True
         if self.presentation is not None:self.presentation.restore()
         if hasattr(self,'timer'):self.timer.stop()
+        if getattr(self,'museum_cache_stop',None):self.museum_cache_stop.set()
         for window in self.windows.values():window.removing=True;window.close()
         self.app.quit()
 

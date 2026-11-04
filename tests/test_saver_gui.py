@@ -160,3 +160,21 @@ def test_museum_draws_cached_artwork_in_existing_saver(app,tmp_path,monkeypatch)
     finally:
         control.timer.stop()
         for window in control.windows.values():window.removing=True;window.close()
+
+
+def test_ascii_museum_uses_distinct_display_slots_and_cached_render(app,tmp_path,monkeypatch):
+    from PySide6.QtGui import QImage,QColor
+    import museum_art,museum_cache
+    monkeypatch.setattr(museum_cache,'start',lambda:None)
+    path=tmp_path/'art.png';image=QImage(30,30,QImage.Format.Format_RGB32);image.fill(QColor('#8899aa'));image.save(str(path))
+    phases=[]
+    monkeypatch.setattr(museum_art,'artwork',lambda phase:phases.append(phase) or ({'title':'Art','artist':'Artist'},path))
+    monkeypatch.setattr(museum_art,'symbols',lambda *args:[' .:-=+*#%@']*5)
+    control=saver_gui.SaverController(app,dict(saver.defaults(),enabled=['ASCII Museum']),preview=True,seed=1)
+    try:
+        window=next(iter(control.windows.values()));window.museum_slot=0;window.grab()
+        first=window.ascii_museum_key;window.museum_slot=1;window.grab()
+        assert first[-2:]!=window.ascii_museum_key[-2:]
+        assert phases[-1]>=20
+        cached=window.ascii_museum.cacheKey();window.grab();assert cached==window.ascii_museum.cacheKey()
+    finally:control.dismiss()
