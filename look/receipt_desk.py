@@ -24,7 +24,7 @@ def command_card(command):
     path=Path(__file__).parent/'docs/command_help.json'
     help_text=json.loads(path.read_text()).get(name)
     if not help_text:raise ValueError('Unknown command; use a command name from lk commands')
-    return request('create',title='Command / lk '+name,body=help_text,kind='command',source='Installed LOOK command reference')
+    return request('create',title='Command / lk '+name,body=help_text.replace('|',' | '),kind='command',source='Installed LOOK command reference')
 
 def main(args):
     parser=argparse.ArgumentParser(prog='lk receipts',description='Digital receipt cards; print prepares a reviewed job, never sends paper automatically.')

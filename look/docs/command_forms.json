@@ -367,10 +367,10 @@
     "Abandon newest blocked undo record"
   ],
   [
-    "lk receipts",
+    "lk receipts transactions",
     "[N]",
     "files",
-    "Inspect transaction receipts"
+    "Inspect original transaction receipts; lk receipt [N] and lk receipts N remain supported"
   ],
   [
     "lk system",
