@@ -43,16 +43,24 @@ partial pack. Completion is never inferred from the requested count.
 ## Terminal controls
 
 - Arrows, Page Up/Down, Home/End: select artwork.
-- **Enter**: view a downloaded work; **I** switches native image/ASCII preview.
-- **D**: discover online; **T** changes Met/Art Institute source.
-- **/**: search the current collection or discovery view; **N/B** pages discovery.
-- **L**: return to the saved collection; **R** refreshes status.
-- **K**: keep the selected result offline on the owner.
-- **P**: copy a saved owner artwork to this endpoint.
-- **F**: toggle a saved work's favorite flag.
-- **A**: choose a starter download size (Enter cancels).
-- **W**: standard LOOK shell pane; **Q** quits; Escape leaves the artwork view.
+- **Enter**: view a downloaded work; Left/Right (or Up/Down) cycle through
+  downloaded works in the current list, wrapping at either end; **i** switches native image/ASCII preview.
+- **d**: discover online; **t** changes Met/Art Institute source.
+- **/**: search the current collection or discovery view; **n/b** pages discovery.
+- **l**: return to the saved collection; **r** refreshes status.
+- **k**: keep the selected result offline on the owner.
+- **p**: copy a saved owner artwork to this endpoint.
+- **f**: toggle a saved work's favorite flag.
+- **a**: choose a starter download size (Enter cancels).
+- **W**: standard LOOK shell pane; **q** quits; Escape leaves the artwork view.
 
+**s** starts a slideshow of the current list or filtered search results. In the
+artwork view, Space pauses/resumes it; arrows step manually and Escape returns to
+the list. Slides advance every ten seconds and skip undownloaded discovery results.
+This differs from `lk museum slideshow` / `lk saver Museum`, which use the separate
+full-screen saver and the endpoint’s locally saved collection.
+
+Moving through the list shows a thumbnail beside it (below it in narrow terminals).
 Kitty/iTerm use LOOK's existing native image preview. Other terminals get an ASCII
 preview using the existing image renderer (chafa/ffmpeg where available).
 The local collection can still be listed and viewed when the node service is
