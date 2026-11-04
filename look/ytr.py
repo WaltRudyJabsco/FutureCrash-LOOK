@@ -6,6 +6,7 @@ import hashlib
 import functools
 import re
 import json
+import math
 import os
 from pathlib import Path
 import shutil
@@ -201,6 +202,43 @@ class Player:
         if self.folder:shutil.rmtree(self.folder,ignore_errors=True)
 
 
+def seconds(value):
+    try:
+        number=float(value)
+        return max(0,number) if math.isfinite(number) else 0
+    except (TypeError,ValueError):return 0
+
+
+def clock_text(value):
+    total=int(seconds(value));hours,rest=divmod(total,3600);minutes,secs=divmod(rest,60)
+    return f'{hours}:{minutes:02d}:{secs:02d}' if hours else f'{minutes}:{secs:02d}'
+
+
+def timing(position,duration):
+    duration=seconds(duration);position=seconds(position)
+    return clock_text(position)+' / '+(clock_text(duration) if duration else '—')
+
+
+def progress_line(position,duration,width):
+    duration=seconds(duration);position=seconds(position)
+    if not duration:return 'Duration pending'
+    remaining=clock_text(max(0,duration-position))+' left'
+    cells=max(0,width-len(remaining)-3)
+    if cells<3:return remaining[:width]
+    filled=min(cells,int(cells*position/duration))
+    return '['+'━'*filled+'─'*(cells-filled)+'] '+remaining
+
+
+def queue_line(item,index,selected,width,clip,position=None):
+    prefix=('› ' if selected else '  ')+f'{index+1}. '+('✓ ' if item.get('done') else '')
+    stamp=timing(item.get('position',0) if position is None else position,item.get('duration'))
+    stamp+=' · '+('offline ready' if item.get('cached') else item.get('stage','queued'))
+    title=item.get('title',item['url'])
+    available=width-len(prefix)-len(stamp)-3
+    if available<4:return clip(prefix+stamp,width)
+    return prefix+clip(title,available)+' · '+stamp
+
+
 def terminal_frame(rows, footer):
     """Paint content and footer before clearing only the unused tail."""
     return '\033[H'+'\n'.join(line+'\033[K' for line in [*rows,*footer])+'\033[J'
@@ -210,7 +248,7 @@ def desk(client,ui):
     fd=sys.stdin.fileno();prior=termios.tcgetattr(fd)
     pool=concurrent.futures.ThreadPoolExecutor(max_workers=1)
     player=Player();state={'items':[]};selected=0;current=None;message='Connecting…';future=None;task='';playing=False;waiting=False
-    next_poll=0;last_bookmark=0;prefetched=set();visual=False;last_frame=None;started=time.monotonic();position=0
+    next_poll=0;last_bookmark=0;prefetched=set();visual=False;pane_help=False;last_frame=None;started=time.monotonic();position=0
     def submit(kind,fn,*args):
         nonlocal future,task
         task=kind;future=pool.submit(fn,*args)
@@ -240,12 +278,15 @@ def desk(client,ui):
                 future=None;next_poll=now+POLL_SECONDS
             items=state['items'];selected=max(0,min(selected,len(items)-1))
             if current and playing:
-                position=float(player.get('time-pos') or position)
+                reported=player.get('time-pos')
+                if reported is not None:position=seconds(reported)
+                duration=seconds(player.get('duration'))
+                if duration:current['duration']=duration
                 if player.get('eof-reached') and not future:
                     current['done']=True;checkpoint(True);playing=False
                     following=next((i+1 for i,item in enumerate(items) if item['id']==current['id']),len(items))
                     if following<len(items) and not future:
-                        current=dict(items[following]);selected=following;submit('play',client.prepare,current)
+                        current=dict(items[following]);position=current.get('position',0);selected=following;submit('play',client.prepare,current)
                 elif now-last_bookmark>=BOOKMARK_SECONDS and not future:
                     checkpoint();submit('sync',client.sync);last_bookmark=now
             if waiting and not future and current:
@@ -263,18 +304,21 @@ def desk(client,ui):
                     prefetched.add(candidate['id']);submit('prefetch',client.prepare,candidate)
             width,height=shutil.get_terminal_size((80,24));width=max(20,width-1)
             rows=['YOUTUBE RADIO · listen later',message,'']
-            if current:rows+=['▶ '+current.get('title',current['url']),f'{int(position)//60}:{int(position)%60:02d} · Space pause/resume · ←/→ seek','']
+            if current:rows+=['▶ '+current.get('title',current['url']),timing(position,current.get('duration'))+' · Space pause/resume · ←/→ seek',progress_line(position,current.get('duration'),width),'']
             if visual:rows+=player_visuals.frame(player_visuals.NAMES.index('Tape Echo')+1,width,min(7,max(2,height//4)),now-started,playing and not bool(player.get('pause')))
-            page=max(1,height-len(rows)-6);start=max(0,selected-page//2)
+            controls='Enter play · A add · Space pause · N next · U/D reorder · X remove · R retry · O original · C clean finished · V visual · W shell pane · Q save/quit'
+            if pane_help:controls+=' · '+' · '.join(terminal_style.pane_shortcuts())
+            footer=terminal_style.command_lines(controls,width)
+            page=max(1,height-len(rows)-len(footer)-1);start=max(0,selected-page//2)
             for i,item in list(enumerate(items))[start:start+page]:
-                cache='offline ready' if client.audio_path(item).is_file() else item.get('stage','queued')
-                rows.append(('› ' if i==selected else '  ')+f'{i+1}. '+('✓ ' if item.get('done') else '')+item.get('title',item['url'])+' · '+cache)
+                active=current and current['id']==item['id']
+                display=dict(item,duration=current.get('duration') or item.get('duration')) if active else item
+                rows.append(queue_line(display,i,i==selected,width,ui._ansi_clip,position if active else None))
             if not items:rows.append('A add a YouTube link · audio prepares on the queue owner')
             rendered=[]
             for index,row in enumerate(rows):
                 line=ui._ansi_clip(re.sub(r'[\x00-\x1f\x7f-\x9f]',' ',row),width)
                 rendered.append(ui._c(line,'1;34') if index==0 or row.startswith('› ') else line)
-            footer=terminal_style.command_lines('Enter play · A add · Space pause · N next · U/D reorder · X remove · R retry · O original · C clean finished · V visual · Q save/quit',width)
             frame=terminal_frame(rendered,footer)
             if frame!=last_frame:
                 sys.stdout.write(frame);sys.stdout.flush();last_frame=frame
@@ -282,6 +326,8 @@ def desk(client,ui):
             if key in {'q','Q','esc','\x03'}:break
             if key in {'up','down','pageup','pagedown','home','end'}:
                 selected=0 if key=='home' else len(items)-1 if key=='end' else max(0,min(len(items)-1,selected+{'up':-1,'down':1,'pageup':-page,'pagedown':page}[key]));continue
+            if key=='W':
+                message=terminal_style.open_pane(Path.cwd());pane_help=message.startswith('Shell opened beside LOOK');last_frame=None;continue
             if key in {'v','V'}:visual=not visual;continue
             if key==' ':player.command('cycle','pause');continue
             if key in {'left','right'}:player.command('seek',-10 if key=='left' else 10,'relative');continue
@@ -331,7 +377,7 @@ def main(argv=None,ui=None):
         if args.action not in {'desk','list'}:parser.error('Use a video URL, desk, list, clean or sync')
         if args.action=='list' or not sys.stdin.isatty():
             state=client.snapshot()
-            for i,item in enumerate(state['items'],1):print(i,item.get('title',item['url']),item.get('stage'),'cached' if item['cached'] else '')
+            for i,item in enumerate(state['items'],1):print(i,item.get('title',item['url']),timing(item.get('position'),item.get('duration')),item.get('stage'),'cached' if item['cached'] else '')
             return 0
         return desk(client,ui)
     except (OSError,ValueError) as exc:print('YouTube Radio · '+str(exc));return 1

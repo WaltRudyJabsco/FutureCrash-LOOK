@@ -32,6 +32,7 @@ class Radio:
         self.downloads = downloads
         self.root = Path(root or Path.home()/'.local/share/future-crash-look/radio')
         self.lock = threading.RLock()
+        self.durations = {}
 
     def read(self):
         try:
@@ -47,6 +48,28 @@ class Radio:
         os.chmod(temporary, 0o600)
         os.replace(temporary, self.root/'queue.json')
 
+    def duration(self, job):
+        value = job.get('metadata', {}).get('duration')
+        if value is not None:
+            return value
+        # Older receipts omitted duration, but retained the original sidecar.
+        key = job['id']
+        if key not in self.durations and job.get('stage') == 'complete':
+            self.durations[key] = None
+            folder = Path(job.get('directory', self.root/'audio')).resolve()
+            for entry in job.get('files', []):
+                path = Path(entry['path'])
+                try:
+                    if (path.name.endswith('.info.json') and not path.is_symlink()
+                            and path.resolve().parent == folder
+                            and folder.is_relative_to((self.root/'audio').resolve())
+                            and path.stat().st_size <= 16*1024*1024):
+                        self.durations[key] = json.loads(path.read_text()).get('duration')
+                        break
+                except (OSError, ValueError):
+                    continue
+        return self.durations.get(key)
+
     def snapshot(self):
         with self.lock:
             data = self.read()
@@ -54,7 +77,7 @@ class Radio:
                 try:
                     job = self.downloads.get(item['job'])
                     item.update(stage=job['stage'], title=job.get('metadata',{}).get('title') or item['url'],
-                                error=job.get('error',''), progress=job.get('progress',{}))
+                                error=job.get('error',''), progress=job.get('progress',{}), duration=self.duration(job))
                 except ValueError:
                     item.update(stage='failed', error='Download receipt missing')
             return data

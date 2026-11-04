@@ -127,7 +127,7 @@ from pathlib import Path
 assert sys.argv[sys.argv.index('-f')+1]=='bestaudio'
 assert '--merge-output-format' not in sys.argv
 stage=Path(sys.argv[sys.argv.index('-P')+1]);audio=stage/'episode.m4a';audio.write_bytes(b'audio')
-(stage/'episode.info.json').write_text(json.dumps({'title':'Episode'}))
+(stage/'episode.info.json').write_text(json.dumps({'title':'Episode','duration':123}))
 print('LOOK_FILE:'+json.dumps(str(audio)))
 ''');script.chmod(0o700)
     monkeypatch.setattr('core.downloads.binary',lambda _:str(script))
@@ -140,6 +140,7 @@ print('LOOK_FILE:'+json.dumps(str(audio)))
         time.sleep(.01)
     assert row['stage']=='complete',row
     assert Path(row['file']).suffix=='.m4a' and row['metadata']['title']=='Episode'
+    assert row['metadata']['duration']==123
 
 
 def test_footer_is_painted_before_clear_without_trailing_scroll():
@@ -147,3 +148,39 @@ def test_footer_is_painted_before_clear_without_trailing_scroll():
     assert frame=='\033[HYOUTUBE RADIO\033[K\nQueue\033[K\nEnter play\033[K\nQ quit\033[K\033[J'
     assert frame.count('\033[J')==1
     assert frame.index('Q quit')<frame.index('\033[J')
+
+
+def test_duration_backfill_and_queue_snapshot(tmp_path):
+    downloads=Downloads();radio=Radio(downloads,tmp_path)
+    item=radio.change({'action':'add','url':'https://youtu.be/abcdefghijk'})['items'][0]
+    folder=tmp_path/'audio'/'old';folder.mkdir(parents=True)
+    sidecar=folder/'episode.info.json';sidecar.write_text(json.dumps({'duration':3723}))
+    downloads.jobs[item['job']].update(stage='complete',directory=str(folder),files=[{'path':str(sidecar)}])
+    assert radio.snapshot()['items'][0]['duration']==3723
+    sidecar.unlink()
+    assert radio.snapshot()['items'][0]['duration']==3723
+
+
+def test_timing_and_bounded_progress():
+    assert ytr.timing(62,3723)=='1:02 / 1:02:03'
+    assert ytr.timing(0,None)=='0:00 / —'
+    assert ytr.progress_line(30,60,30).endswith('0:30 left')
+    for width in (5,20,80):
+        assert len(ytr.progress_line(200,100,width))<=width
+    assert ytr.seconds(float('nan'))==0
+    item={'url':'url','title':'Long title '*40,'position':62,'duration':100,'stage':'complete'}
+    row=ytr.queue_line(item,0,True,80,lambda text,width:text[:width])
+    assert '1:02 / 1:40' in row and len(row)<=80
+
+
+def test_tape_wave_does_not_overwrite_reel_outline():
+    import math
+    width,height=80,5
+    rows=player_visuals.tape_echo_frame(width,height,0)
+    radius=max(1,min(height*.32,width*.12))
+    for center in (width*.28,width*.72):
+        for i in range(100):
+            angle=i*math.tau/100
+            x=round(center+math.cos(angle)*radius*1.8)
+            y=round(height*.43+math.sin(angle)*radius)
+            if 0<=x<width and 0<=y<height:assert rows[y][x] in 'o+'
