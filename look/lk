@@ -8609,6 +8609,7 @@ _TOOL_POLICY = {
     "game_action":("all","action"),
     "audio_speak":("all","action"),
     "printers_list":("all","observation"),"printer_inspect":("all","observation"),"print_prepare":("workspace","mutation"),
+    "receipts_search":("all","observation"),
     "museum_search":("all","observation"),
     "radio_queue":("all","observation"),"radio_add":("workspace","action"),
     "books_shelf":("all","observation"),"books_lookup":("all","observation"),
@@ -8641,6 +8642,8 @@ def _lo_tools(profile):
     tools.extend(radio_assistant.tools())
     import museum_assistant
     tools.extend(museum_assistant.tools())
+    import receipt_desk
+    tools.extend(receipt_desk.tools())
     import printing
     tools.extend(printing.tools())
     tools.extend(_information_tools())
@@ -12454,6 +12457,10 @@ def ollama_chat(force_search=False, initial_prompt=None, allow_start=True, host_
                     elif name in {'printers_list','printer_inspect','print_prepare'}:
                         import printing
                         tool_content,_ok,_elapsed=_tool_transaction(name,args,lambda:printing.run_tool(name,args,workspace))
+                        if _ok:turn_successful_tools.add(name)
+                    elif name=='receipts_search':
+                        import receipt_desk
+                        tool_content,_ok,_elapsed=_tool_transaction(name,args,lambda:receipt_desk.run_tool(name,args))
                         if _ok:turn_successful_tools.add(name)
                     elif name=='museum_search':
                         import museum_assistant
@@ -21248,6 +21255,7 @@ def _file_find_command(args):
 # Canonical human-facing command grammar. Aliases are entry points, not separate implementations.
 # Keep internal worker commands out of this registry.
 _COMMANDS = [
+    ("lk receipts", "[list|show ID|create TITLE --body TEXT|command NAME|print ID --printer NAME] [--node OWNER] [--columns 32|48]", "system", "Shared digital receipt cards and reviewed print preparation"),
     ("lk work", "[DOCUMENT]", "files", "Read Markdown and open an inline interactive shell"),
     ('lh', '[PATH]', 'files', 'LOOK with hidden files shown'),
     ('lk hidden', '[PATH]', 'files', 'LOOK with hidden files shown'),
@@ -22642,6 +22650,9 @@ _HIDDEN_COMMANDS = {'force'}
 
 def main():
     _safe_cwd(repair=True)
+    if len(sys.argv)>=2 and sys.argv[1]=='receipts':
+        import receipt_desk
+        return receipt_desk.main(sys.argv[2:])
     if len(sys.argv)>=2 and sys.argv[1]=='work':
         import work_desk
         return work_desk.main(sys.argv[2:])

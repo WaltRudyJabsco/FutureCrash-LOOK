@@ -135,6 +135,13 @@ class Downloads:
                     self.index(row); self.update(job,stage='complete',indexed=True,catalog_state='locally indexed; available to live Fabric queries')
                 except Exception as exc:
                     self.update(job,stage='complete',indexed=False,catalog_state='indexing failed; use lk ytd index JOB',index_error=str(exc))
+                try:
+                    try:from . import receipt_cards
+                    except ImportError:import receipt_cards
+                    receipt_cards.create('Download complete / '+str(facts.get('title') or final.name),
+                        'Download completed.\n'+str(row.get('url',''))+'\nFile: '+str(destination/final.name),
+                        'download','Fabric downloader',event_key='download-complete:'+str(job))
+                except (OSError,ValueError) as exc:self.update(job,receipt_warning=str(exc))
             except Exception as exc:
                 if self.get(job).get('stage')!='cancelled': self.update(job,stage='failed',error=str(exc))
             finally:

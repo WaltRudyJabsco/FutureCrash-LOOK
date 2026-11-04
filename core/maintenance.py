@@ -399,6 +399,13 @@ def run_job(job):
         health(info.get('digest'), services=retired)
         if lk.exists(): subprocess.run([str(lk), 'ai', 'start'], capture_output=True, timeout=15)
         phase('healthy', release=(manifest or {}).get('release'), commit=(manifest or {}).get('commit'))
+        if manifest:
+            try:
+                local_json('/v1/receipts', {'action':'create','kind':'deployment','title':'LOOK update installed',
+                    'body':'Release: '+str(manifest.get('release',''))+'\nCommit: '+str(manifest.get('commit',''))+'\nMaintenance health checks passed.',
+                    'source':'Verified Fabric maintenance'})
+            except Exception as exc:print('Receipt archive unavailable: '+str(exc),flush=True)
+
     except Exception as exc:
         phase('rolling_back', error=str(exc))
         recovery_errors = []

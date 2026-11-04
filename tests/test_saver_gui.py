@@ -191,3 +191,9 @@ def test_museum_arrow_keys_advance_display_sets(app,monkeypatch):
         window.keyPressEvent(QKeyEvent(QEvent.Type.KeyPress,Qt.Key.Key_Left,Qt.KeyboardModifier.NoModifier))
         assert control.museum_step==0 and not control.stopping
     finally:control.dismiss()
+
+
+@pytest.fixture(autouse=True)
+def no_live_saver_downloads(monkeypatch):
+    import museum_cache
+    monkeypatch.setattr(museum_cache,'start',lambda:None)
