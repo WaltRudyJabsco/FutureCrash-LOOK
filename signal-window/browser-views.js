@@ -49,6 +49,15 @@
       cancel(){try{if(tab&&!tab.closed)tab.close()}catch{}tab=null}
     };
   }
+  function radioCommand(text){
+    const match=String(text||'').trim().match(/^\/ytr(?:\s+(https?:\/\/\S+))?$/i);
+    return match?{url:match[1]||''}:null;
+  }
+  function openRadio(command){
+    const url=new URL('/ytr',root.location.href);if(command?.url)url.searchParams.set('url',command.url);
+    try{root.open(url.href,'_blank','noopener')}catch{}
+    return url.href;
+  }
   function fabricCommand(text){return /^(?:\/(?:fabric|dash|dashboard)|(?:please\s+)?(?:show|open)(?:\s+(?:me|our|the))?\s+fabric(?:\s+(?:dash|dashboard|status))?)[.!?]?$/i.test(String(text||'').trim())}
   function openFabric(){
     const url=new URL('/fabric.html',root.location.href).href;
@@ -124,7 +133,7 @@
     try{root.open(url.href,'_blank','noopener')}catch{}
     return url.href;
   }
-  root.FabricBrowserViews={beginImage,imageArtifacts,imageRequest,fabricCommand,openFabric,booksCommand,openBooks,bookQuery,bookMatches,createBookAhead,bookPosition};
+  root.FabricBrowserViews={radioCommand,openRadio,beginImage,imageArtifacts,imageRequest,fabricCommand,openFabric,booksCommand,openBooks,bookQuery,bookMatches,createBookAhead,bookPosition};
 })(globalThis);
 
 

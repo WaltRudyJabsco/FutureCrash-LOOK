@@ -23,6 +23,38 @@ explicit retry behavior apply. A link with a playlist parameter adds only that
 video; account login and playlist imports are not part of this version.
 See [yt-dlp format selection](https://github.com/yt-dlp/yt-dlp#format-selection).
 
+## Signal and Albert
+
+Type **`/ytr`** in either chat to open the browser player, or visit `/ytr` on
+that same host. `/ytr https://youtu.be/VIDEO_ID` opens the player with the link
+prefilled; press **Add to queue** to submit it. A link remains in the chat if
+popup blocking prevents the new tab from opening.
+
+The browser defaults to the host's existing `lk ytr --node` preference. The
+**Queue owner** selector lists paired nodes; choose the same owner as your
+terminal to share its queue and bookmarks. This browser remembers your choice
+without changing the host's CLI preference. Playback happens on the browser's
+device; preparation and queue storage remain on the owner.
+
+The responsive player includes a compact tape-reel animation, native seek bar,
+play/pause, next, playback speed, position/total and remaining time. Queue rows
+show duration and saved position, with add, reorder, remove and retry controls.
+Finished audio advances to the next ready item. Mobile browsers may require a
+Play gesture and may suspend background playback according to their own rules.
+
+Positions synchronize while listening and when pausing
+or leaving the page in the background. Unsynchronized positions are
+retained in browser storage; on return, choose **Use saved position** or **Keep
+this device’s position**. Concurrent edits use the same revision checks as the
+CLI and cannot silently overwrite a newer bookmark. Browser storage must be
+available to retain unsynchronized positions. Unlike the terminal cache, this
+first web player needs its host and queue owner reachable for audio streaming.
+
+The page and its `/api/ytr` gateway use the host's existing endpoint authorization.
+Audio byte ranges pass through paired-node routing so seeking does not require
+retransmitting the entire recording. Opening the player does not start a download
+or playback automatically.
+
 ## The desk
 
 - **A**: paste or drag in a video URL at the prompt.
