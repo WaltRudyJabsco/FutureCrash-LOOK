@@ -697,3 +697,10 @@ Type `/dash` in Signal or Albert for the phone-friendly live Fabric dashboard:
 node constellation, services, resident models, operational event ticker, and
 backup/update receipts. It also opens directly at `/dash` on either host.
 [Dashboard and care details](docs/FABRIC-CARE.md#browser-observatory).
+
+### YouTube Radio
+
+`lk ytr URL` prepares audio for later; `lk ytr` opens the compact listening queue.
+[Queue ownership, offline playback and controls](docs/YOUTUBE-RADIO.md).
+Tape Echo and Deep Space Relay are shared animations for players, savers and
+the desktop curtain—not separate animation categories.

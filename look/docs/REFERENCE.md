@@ -235,6 +235,8 @@ lk web [...]
   [ai] Web-search key/status
 lk budget [...]
   [ai] LO context/token budget
+lk ytr [URL|desk|list|clean|sync|resolve NUMBER --keep local|remote] [--node NODE]
+  [media] YouTube Radio audio-only listen-later queue
 lk ytd <URL> [--node NODE] [--to DIR] [--holding]
   [media] Download a YouTube video on the selected node
 lk ytd find <QUERY> [--node NODE]

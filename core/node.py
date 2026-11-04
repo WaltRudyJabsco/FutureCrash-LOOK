@@ -2601,6 +2601,20 @@ def _downloads():
         return _DOWNLOAD_MANAGER
 
 
+_RADIO_MANAGER = None
+_RADIO_LOCK = threading.Lock()
+
+
+def _radio():
+    global _RADIO_MANAGER
+    with _RADIO_LOCK:
+        if _RADIO_MANAGER is None:
+            try:from .radio import Radio
+            except ImportError:from radio import Radio
+            _RADIO_MANAGER=Radio(_downloads())
+        return _RADIO_MANAGER
+
+
 def _local_file_search(query,limit=80):
     """Bounded local metadata + FTS5 search; file contents never cross the network."""
     if not LOOK_FILE_CATALOG.exists(): return {"schema":"fabric-file-search-v2","node":identity()["name"],"entries":[],"count":0}
@@ -4077,6 +4091,31 @@ class API(BaseHTTPRequestHandler):
             self.end_headers()
             shutil.copyfileobj(response,self.wfile,1024*1024)
 
+    def _radio_request(self, payload=None):
+        try:
+            peer,_value=self._file_target()
+            parsed=urlparse(self.path)
+            audio=parsed.path=='/v1/radio/audio'
+            item=(parse_qs(parsed.query).get('id') or [''])[0]
+            route='/v1/radio/audio?'+urllib.parse.urlencode({'id':item}) if audio else '/v1/radio'
+            if peer is not None:
+                if audio:
+                    url=_copy_route(peer)+route
+                    request=urllib.request.Request(url,headers=FABRIC_IDENTITY.auth_headers_for_url(url))
+                    context=FABRIC_IDENTITY.ssl_context_for_url(url) if url.startswith('https:') else None
+                    with urllib.request.urlopen(request,timeout=30,context=context) as response:
+                        self.send_response(200);self.send_header('Content-Type','audio/mp4')
+                        if response.headers.get('Content-Length'):self.send_header('Content-Length',response.headers['Content-Length'])
+                        self.end_headers();shutil.copyfileobj(response,self.wfile,1024*1024)
+                    return
+                result=_file_peer_json(peer,route) if payload is None else http_json(_copy_route(peer)+route,data=payload,timeout=15)
+                return self.sendj(200,result)
+            manager=_radio()
+            if audio:return self._serve_file_range(manager.audio_file(item),'audio/mp4')
+            state=manager.snapshot() if payload is None else manager.change(payload)
+            return self.sendj(200,dict(state,ok=True,node=identity()['name']))
+        except Exception as exc:return self.sendj(400,{'ok':False,'error':str(exc)})
+
     def _downloads_request(self, payload=None):
         try:
             peer,_value=self._file_target()
@@ -4763,6 +4802,7 @@ class API(BaseHTTPRequestHandler):
             try: from . import notifications
             except ImportError: import notifications
             return self.sendj(200,{'ok':True,'settings':notifications.settings()})
+        if path in {"/v1/radio","/v1/radio/audio"}: return self._radio_request()
         if path == "/v1/downloads" or path.startswith("/v1/downloads/"): return self._downloads_request()
         if path == "/v1/mercury/install/status":return self.sendj(200,mercury_install.status())
         if path == "/v1/mercury/status":
@@ -5118,6 +5158,7 @@ class API(BaseHTTPRequestHandler):
                 return self.sendj(200,result)
             except (ValueError,TypeError,OSError) as exc:
                 return self.sendj(400,{'ok':False,'error':str(exc)})
+        if path == "/v1/radio": return self._radio_request(d)
         if path == "/v1/downloads": return self._downloads_request(d)
         if path == "/v1/endpoints/fabric/allow":
             if getattr(self.server,"plane","local") != "local":

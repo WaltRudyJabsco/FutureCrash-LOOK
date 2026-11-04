@@ -623,3 +623,9 @@ inverse bands. Signal Bloom adds a slow orbital/radar sweep. Both use the shared
 visualizer registry, so they are available in Player, MP, TV, and LOOK Saver.
 Flight Deck's optional captions can be prepared with `lk saver text`; rendering
 uses the local cache or built-in phrases and never makes inference requests.
+
+## YouTube Radio
+
+`lk ytr URL` adds an audio-only listen-later item; `lk ytr` opens its compact desk.
+Choose a shared owner with `--node NODE`. See [YouTube Radio](YOUTUBE-RADIO.md)
+for offline caching, resume, queue controls and explicit bookmark conflict resolution.

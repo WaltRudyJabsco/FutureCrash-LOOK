@@ -5,7 +5,7 @@ import hashlib
 import json
 import random
 
-NAMES = ('Bars', 'Waves', 'Orbit', 'Tunnel', 'Stars', 'Plasma', 'Album Art', 'Black Hole', 'Rooftops', 'Spectrum', 'Moon Jelly', 'Firefly Garden', 'Clockwork Garden', 'Rain on Glass', 'Neon Reef', 'Aurora Loom', 'Paper Lanterns', 'Magnetic Field', 'Comet Trails', 'Orrery', 'Phosphor Rain', 'Kinetic Mobile', 'Haunted Hollow', 'Dune Sea', 'Harmonic Ink', 'Tide Pools', 'Switchyard', 'Flight Deck', 'Signal Bloom', 'Cycle')
+NAMES = ('Bars', 'Waves', 'Orbit', 'Tunnel', 'Stars', 'Plasma', 'Album Art', 'Black Hole', 'Rooftops', 'Spectrum', 'Moon Jelly', 'Firefly Garden', 'Clockwork Garden', 'Rain on Glass', 'Neon Reef', 'Aurora Loom', 'Paper Lanterns', 'Magnetic Field', 'Comet Trails', 'Orrery', 'Phosphor Rain', 'Kinetic Mobile', 'Haunted Hollow', 'Dune Sea', 'Harmonic Ink', 'Tide Pools', 'Switchyard', 'Flight Deck', 'Signal Bloom', 'Tape Echo', 'Deep Space Relay', 'Cycle')
 CYCLE_MODE = len(NAMES)
 CYCLE_INTERVAL_SECONDS = 10.0
 
@@ -86,6 +86,10 @@ def frame(mode, width, height, phase, playing=True, seed=0, *, captions=None):
             depth=(i*.618034+t*.18)%1
             point((width-1)/2+math.cos(angle)*depth*width*.65,
                   (height-1)/2+math.sin(angle)*depth*height*.65,'.+*'[min(2,int(depth*3))])
+    elif mode==30:
+        return deep_space_relay_frame(width,height,t,seed)
+    elif mode==29:
+        return tape_echo_frame(width,height,t,seed)
     elif mode==28:
         return signal_bloom_frame(width,height,t,seed)
     elif mode==27:
@@ -819,4 +823,49 @@ def signal_bloom_frame(width,height,phase,seed=0):
     label='S I G N A L   B L O O M'
     if height>3:
         for i,char in enumerate(label[:width]):canvas[0][max(0,(width-len(label))//2)+i]=char
+    return [''.join(row) for row in canvas]
+
+
+def tape_echo_frame(width,height,phase,seed=0):
+    """Two turning reels and drifting tape echoes; ambient, not measured PCM."""
+    canvas=[[' ']*width for _ in range(height)]
+    centers=(width*.28,width*.72)
+    radius=max(1,min(height*.32,width*.12))
+    for center in centers:
+        for i in range(100):
+            angle=i*math.tau/100
+            x=round(center+math.cos(angle)*radius*1.8)
+            y=round(height*.43+math.sin(angle)*radius)
+            if 0<=x<width and 0<=y<height:canvas[y][x]='o'
+        for spoke in range(3):
+            angle=phase*.65+spoke*math.tau/3
+            for step in range(int(radius)+1):
+                x=round(center+math.cos(angle)*step*1.8);y=round(height*.43+math.sin(angle)*step)
+                if 0<=x<width and 0<=y<height:canvas[y][x]='+'
+    for x in range(width):
+        y=int(height*.8+math.sin(x*.17-phase)*max(1,height*.08))
+        if 0<=y<height:canvas[y][x]='~'
+    return [''.join(row) for row in canvas]
+
+
+def deep_space_relay_frame(width,height,phase,seed=0):
+    """A calm fictional relay console with an orbital radar sweep."""
+    canvas=[[' ']*width for _ in range(height)]
+    def put(x,y,value):
+        for offset,char in enumerate(value):
+            if 0<=x+offset<width and 0<=y<height:canvas[y][x+offset]=char
+    labels=('DEEP SPACE RELAY','CARRIER ACQUIRED','LISTENING TO THE VOID','SIGNAL / RETURN')
+    put(max(0,(width-len(labels[0]))//2),0,labels[0])
+    cx=width*.5;cy=height*.5;radius=max(1,min(height*.3,width*.16))
+    for ring in (.4,.7,1):
+        for i in range(100):
+            angle=i*math.tau/100
+            put(round(cx+math.cos(angle)*radius*ring*2),round(cy+math.sin(angle)*radius*ring),'.')
+    angle=phase*.28
+    for step in range(int(radius*2)+1):
+        put(round(cx+math.cos(angle)*step),round(cy+math.sin(angle)*step*.5),'+')
+    for i in range(8):
+        a=i*2.399+seed;distance=(.2+(i%5)/6)*radius
+        put(round(cx+math.cos(a)*distance*2),round(cy+math.sin(a)*distance),'*' if math.sin(phase*.5+i)>.3 else '.')
+    label=labels[1+int(phase/12)%3];put(max(0,(width-len(label))//2),height-2,label)
     return [''.join(row) for row in canvas]

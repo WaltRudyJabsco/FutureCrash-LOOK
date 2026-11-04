@@ -21309,6 +21309,7 @@ _COMMANDS = [
     ("lk clean", "", "system", "Conservative maintenance surface"),
     ("lk web", "[...]", "ai", "Web-search key/status"),
     ("lk budget", "[...]", "ai", "LO context/token budget"),
+    ("lk ytr", "[URL|desk|list|clean|sync|resolve NUMBER --keep local|remote] [--node NODE]", "media", "YouTube Radio audio-only listen-later queue"),
     ("lk ytd", "<URL> [--node NODE] [--to DIR] [--holding]", "media", "Download a YouTube video on the selected node"),
     ("lk ytd find", "<QUERY> [--node NODE]", "media", "Find videos and choose one to download"),
     ("lk ytd status", "<JOB> [--node NODE] [--wait]", "media", "Inspect persistent download progress"),
@@ -22599,7 +22600,7 @@ def main():
         import command_help
         return command_help.show(sys.argv[2:])
     if len(sys.argv)>2 and any(flag in sys.argv[2:] for flag in ('--help','-h')):
-        if sys.argv[1] not in {'web','terminal','saver','sv','lock','unlock','lk','notes','tasks','reminders','ytd','describe','notifications'} and not (sys.argv[1] in {'media','music'} and sys.argv[2] in {'import','disc','rip','edit','storage'}):
+        if sys.argv[1] not in {'web','terminal','saver','sv','lock','unlock','lk','notes','tasks','reminders','ytd','ytr','describe','notifications'} and not (sys.argv[1] in {'media','music'} and sys.argv[2] in {'import','disc','rip','edit','storage'}):
             import command_help
             return command_help.show([word for word in sys.argv[1:] if word not in {'--help','-h'}])
     if len(sys.argv)>=2 and sys.argv[1] in {"notes","tasks","reminders"}:
@@ -22618,6 +22619,9 @@ def main():
     if len(sys.argv)>=2 and sys.argv[1]=='web':
         import web_desk
         return web_desk.main(sys.argv[2:],read_key=_read_tty_key)
+    if len(sys.argv)>=2 and sys.argv[1]=="ytr":
+        import ytr
+        return ytr.main(sys.argv[2:],ui=sys.modules[__name__])
     if len(sys.argv)>=2 and sys.argv[1]=="ytd":
         import ytd
         return ytd.main(sys.argv[2:])
