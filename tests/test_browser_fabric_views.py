@@ -133,7 +133,7 @@ const ids={};for(const id of ['nodes','care','status','careStatus','refresh'])id
 const offline='<img src=x onerror=alert(1)>';
 const ctx={URL,AbortController,Date,Promise,setTimeout,clearTimeout,setInterval:()=>{},document:{hidden:false,getElementById:id=>ids[id]||(ids[id]=new Element(id)),createElement:tag=>new Element(tag),createElementNS:(_,tag)=>new Element(tag),addEventListener:()=>{}},fetch:async path=>({ok:true,json:async()=>path.endsWith('/care')?{nodes:[{node:offline,errors:[{check:'release',error:'unreachable'}]}]}:{observed_at:Date.now()/1000,host:'host',nodes:[{name:'host',reachable:true,services:{},models:[]},{name:offline,reachable:false}],events:[]}})};
 vm.createContext(ctx);vm.runInContext(SOURCE,ctx);
-setImmediate(()=>{const strings=[];function visit(el){strings.push(el.textContent);for(const child of el.children)visit(child)}visit(ids.nodes);visit(ids.care);assert.ok(strings.includes(offline));assert.ok(strings.includes('Telemetry unavailable. This peer may be offline or need an update.'));assert.ok(strings.includes('Unknown'));assert.ok(ids.careStatus.textContent.includes('checks incomplete'));assert.ok(!ids.refresh.disabled)});
+setImmediate(()=>{const strings=[];function visit(el){strings.push(el.textContent);for(const child of el.children)visit(child)}visit(ids.nodes);visit(ids.care);assert.ok(strings.includes(offline));assert.ok(strings.includes('Cannot contact this computer. It may be asleep, offline, or disconnected from the Fabric.'));assert.ok(strings.includes('Unknown'));assert.ok(ids.careStatus.textContent.includes('checks incomplete'));assert.ok(!ids.refresh.disabled)});
 '''.replace('SOURCE',json.dumps(source))
     subprocess.run(['node','-e',script],check=True)
 

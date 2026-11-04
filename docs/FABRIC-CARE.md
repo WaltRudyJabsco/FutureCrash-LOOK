@@ -124,8 +124,12 @@ host. Your usual private network connection is still required away from home.
 
 The observatory shows a logical host/peer constellation, service states, resident
 models, supervisor phases, installed commits and a rolling operational event
-feed. Counts come from reachable nodes, not estimated activity. Unreachable or
-older peers without dashboard telemetry are marked unknown. Event timestamps are
+feed. Counts come from reachable nodes, not estimated activity. Peers whose dashboard endpoint returns 404/501 are marked **Update needed**,
+not offline. Authentication failures show **Access needed**; other responding
+errors show **Telemetry error**. A failed telemetry request also checks the
+node’s health endpoint before showing **Unreachable** (asleep, offline or a
+connection problem). The coverage line shows how many nodes supply metrics;
+missing telemetry never counts as a confirmed idle supervisor. Event timestamps are
 shown; old events are not presented as new work. Use the computer filter, Pause
 live, Focus and Full screen controls for a demo. Reduced-motion preferences are
 respected. On phones the panels stack and controls remain touch-sized.

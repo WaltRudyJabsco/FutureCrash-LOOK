@@ -2,6 +2,7 @@
 import concurrent.futures
 import threading
 import time
+from urllib.error import HTTPError
 
 CACHE_SECONDS = 8
 PEER_TIMEOUT = 2
@@ -31,6 +32,34 @@ def local_snapshot(ad, services, events):
     }
 
 
+
+def peer_snapshot(peer, base, fetch):
+    """A responding old endpoint is reachable; a timeout alone cannot prove offline."""
+    name = peer.get('name', 'Peer')
+    partial = {'name': name, 'local': False, 'events': [],
+               'observed_at': peer.get('node_seen_at')}
+    try:
+        row = fetch(base + '/v1/dashboard/local', timeout=PEER_TIMEOUT)
+        if not isinstance(row, dict) or not isinstance(row.get('services'), dict):
+            return dict(partial, reachable=True, telemetry_status='telemetry_error')
+        return dict(row, name=name, reachable=True, local=False, telemetry_status='ready')
+    except HTTPError as error:
+        status = ('update_required' if error.code in (404, 501) else
+                  'authorization_required' if error.code in (401, 403) else 'telemetry_error')
+        return dict(partial, reachable=True, telemetry_status=status)
+    except Exception:
+        # Separate a broken/slow telemetry handler from a machine we cannot contact.
+        try:
+            health = fetch(base + '/v1/health', timeout=PEER_TIMEOUT)
+            if not isinstance(health, dict):
+                raise ValueError('invalid health response')
+            return dict(partial, reachable=True, telemetry_status='telemetry_error')
+        except HTTPError:
+            return dict(partial, reachable=True, telemetry_status='telemetry_error')
+        except Exception:
+            return dict(partial, reachable=False, telemetry_status='unreachable')
+
+
 def snapshot(local, peers, peer_base, fetch):
     """One shared cache bounds fan-out even with several open browser tabs."""
     with _LOCK:
@@ -39,19 +68,11 @@ def snapshot(local, peers, peer_base, fetch):
         own = local()
         own['reachable'] = True
         own['local'] = True
+        own['telemetry_status'] = 'ready'
         targets = [p for p in peers if p.get('trusted') and peer_base(p)][:MAX_PEERS]
 
         def read(peer):
-            name = peer.get('name', 'Peer')
-            try:
-                row = fetch(peer_base(peer) + '/v1/dashboard/local', timeout=PEER_TIMEOUT)
-                if not isinstance(row, dict) or not isinstance(row.get('services'), dict):
-                    raise ValueError('unsupported telemetry')
-                return dict(row, name=name, reachable=True, local=False)
-            except Exception:
-                # An old node or transport failure is unknown, never a healthy idle node.
-                return {'name': name, 'reachable': False, 'local': False,
-                        'observed_at': peer.get('node_seen_at'), 'events': []}
+            return peer_snapshot(peer, peer_base(peer), fetch)
 
         with concurrent.futures.ThreadPoolExecutor(max_workers=8) as pool:
             nodes = [own, *pool.map(read, targets)]
