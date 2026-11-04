@@ -4885,6 +4885,14 @@ class API(BaseHTTPRequestHandler):
             return self.sendj(200, benchmark_guard_state())
         if path == "/v1/services":
             return self.sendj(200, {"services": managed_services()})
+        if path in {"/v1/dashboard", "/v1/dashboard/local"}:
+            try:from . import dashboard
+            except ImportError:import dashboard
+            def local_dashboard():
+                return dashboard.local_snapshot(advertisement(), managed_services(), FABRIC_STORE.recent_events())
+            if path.endswith('/local'):
+                return self.sendj(200,local_dashboard())
+            return self.sendj(200,dashboard.snapshot(local_dashboard,PEERS.public(),_peer_base,http_json))
         if path == "/v1/nodes":
             return self.sendj(200, {"self": node_info(), "peers": PEERS.public()})
         if path == "/v1/fabric/routes":

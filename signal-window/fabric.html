@@ -1,10 +1,118 @@
-<!doctype html><html lang="en"><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
-<title>Fabric dashboard</title><style>
-:root{color-scheme:light dark;font:16px/1.5 system-ui,sans-serif;background:#101713;color:#e3eee6}*{box-sizing:border-box}body{max-width:1100px;margin:auto;padding:24px}header{display:flex;align-items:center;justify-content:space-between;gap:16px}h1{font-size:1.7rem;margin:0}h2{font-size:1.15rem;margin:0 0 8px}p{margin:6px 0}.muted{color:#a8b6ac}.grid{display:grid;grid-template-columns:repeat(auto-fit,minmax(min(100%,290px),1fr));gap:16px;margin:22px 0}article{border:1px solid #46564a;border-radius:12px;padding:18px;background:#18231c;overflow-wrap:anywhere}.good{color:#a1dfb6}.warn{color:#f3ca83}.unknown{color:#bdc5c0}dl{display:grid;grid-template-columns:auto 1fr;gap:6px 16px}dt{color:#a8b6ac}dd{margin:0}button,a{color:inherit}button{padding:8px 16px;background:transparent;border:1px solid #718777;border-radius:8px;cursor:pointer}details{margin-top:12px}pre{white-space:pre-wrap;font:13px/1.4 ui-monospace,monospace}.note{border-left:3px solid #8eac96;padding-left:14px}a{color:#a6d2ff}
-@media(prefers-color-scheme:light){:root{background:#f7f4e9;color:#21342b}.muted,dt{color:#52665a}article{background:#fffdf6;border-color:#c2c9b8}.good{color:#236141}.warn{color:#875512}.unknown{color:#52665a}a{color:#1f5585}}
-</style><header><div><h1>Fabric</h1><p class="muted">Your computers · installed updates · essential backups</p></div><button id="refresh">Refresh</button></header>
-<p id="status" role="status">Connecting to this browser’s Fabric host…</p>
-<section class="grid" id="nodes" aria-label="Fabric computers"></section>
-<p id="careStatus" class="muted" role="status">Checking backup and update receipts…</p><section class="grid" id="care" aria-label="Updates and backups"></section>
-<p class="note">Read-only. Backup checks cover Fabric identity, Notes and settings; documents, photos and media are excluded. Matching installed releases do not mean the latest GitHub release. An unreachable computer’s state is unknown.</p>
-<script src="fabric-dashboard.js"></script></html>
+<!doctype html>
+<html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><meta name="theme-color" content="#101a25">
+<title>Fabric · Observatory</title>
+<style>
+:root{color-scheme:dark;--bg:#0b121b;--panel:#111e2b;--line:#2c4153;--ink:#e9f2f4;--muted:#9cb0bf;--blue:#83c9f4;--mint:#a2dcc3;--amber:#f0bf78;font:15px/1.5 system-ui,sans-serif;background:var(--bg);color:var(--ink)}
+*{box-sizing:border-box}
+body{margin:0;background:radial-gradient(ellipse at 70% 0,#20394a88,transparent 65%),var(--bg);min-height:100vh}
+button,a,select{font:inherit}
+button,select,.link{min-height:44px;background:#182b3b;color:var(--ink);border:1px solid #46647a;border-radius:6px;padding:9px 14px;cursor:pointer;text-decoration:none}
+button:hover,.link:hover{background:#24445a}
+button:focus-visible,a:focus-visible,select:focus-visible{outline:3px solid var(--amber);outline-offset:3px}
+button:disabled{opacity:.55;cursor:wait}
+a{color:var(--blue)}
+header,main,footer{max-width:1500px;margin:auto;padding:22px 30px}
+header{display:flex;align-items:center;justify-content:space-between;gap:16px;border-bottom:1px solid var(--line)}
+.brand{font:700 14px ui-monospace,monospace;letter-spacing:.17em}
+.brand b{color:var(--blue)}
+nav,.controls{display:flex;gap:8px;flex-wrap:wrap;align-items:center}
+.eyebrow,.label{font:11px ui-monospace,monospace;text-transform:uppercase;letter-spacing:.15em;color:var(--muted)}
+h1{font-size:clamp(2.3rem,6vw,4.8rem);font-weight:500;line-height:1.03;letter-spacing:-.055em;margin:14px 0}
+h1 em{font-style:normal;color:var(--blue)}
+h2{font-size:1.05rem;font-weight:550;margin:0}
+p{margin:8px 0}
+.muted{color:var(--muted)}
+.intro{display:flex;align-items:end;justify-content:space-between;gap:20px;padding:14px 0 25px}
+.intro p{max-width:540px}
+.live{font:12px ui-monospace,monospace;color:var(--mint)}
+.live:before{content:'';display:inline-block;width:7px;height:7px;border-radius:50%;background:currentColor;margin-right:8px;box-shadow:0 0 15px currentColor}
+.stats{display:grid;grid-template-columns:repeat(4,1fr);border:1px solid var(--line);border-radius:10px;overflow:hidden;margin-bottom:20px}
+.stat{padding:16px 22px;background:#11233288;border-right:1px solid var(--line)}
+.stat:last-child{border:0}
+.stat strong{font:400 35px ui-monospace,monospace;display:block;color:var(--ink)}
+.layout{display:grid;grid-template-columns:minmax(0,1.25fr) minmax(0,1fr);gap:20px}
+.panel{border:1px solid var(--line);border-radius:10px;overflow:hidden;background:linear-gradient(140deg,#162838aa,#101b27dd)}
+.panel-head{padding:17px 20px;border-bottom:1px solid var(--line);display:flex;justify-content:space-between;gap:10px;align-items:center}
+.map{position:relative;min-height:350px;background-image:radial-gradient(#5c7b8d44 1px,transparent 1px);background-size:22px 22px}
+.map svg{width:100%;height:350px;display:block}
+.map line{stroke:#39576e;stroke-width:1.5;stroke-dasharray:4 9}
+.map circle.ring{fill:none;stroke:#375568}
+.map circle.node{fill:#1c3546;stroke:var(--blue);stroke-width:2}
+.map .offline circle.node{stroke:#74818b;stroke-dasharray:4 3}
+.map text{fill:var(--ink);font:13px ui-monospace,monospace}
+.map .sub{fill:var(--muted);font-size:10px}
+.map .orbit{stroke:var(--mint);fill:none;stroke-width:1;transform-box:fill-box;transform-origin:center;animation:ripple 4s ease-out infinite}
+.map .offline .orbit{display:none}
+@keyframes ripple{0%{opacity:.6;transform:scale(.85)}
+100%{opacity:0;transform:scale(1.9)}
+}
+.map-note{padding:0 20px 16px;font-size:12px;color:var(--muted)}
+.ticker{display:flex;gap:18px;padding:12px 20px;border-top:1px solid var(--line);overflow:hidden;white-space:nowrap;font:12px ui-monospace,monospace;background:#0b1722}
+.ticker b{color:var(--mint);flex-shrink:0}
+.ticker-track{display:inline-block;animation:roll 35s linear infinite;min-width:100%}
+@keyframes roll{from{transform:translateX(0)}
+to{transform:translateX(-80%)}
+}
+.stream{height:350px;overflow:auto;overscroll-behavior:contain;padding:6px 18px}
+.event{display:grid;grid-template-columns:64px minmax(0,1fr);gap:13px;padding:12px 0;border-bottom:1px solid #2c415366;font:12px/1.5 ui-monospace,monospace}
+.event time{color:var(--muted)}
+.event strong{color:var(--blue);font-weight:500;display:block;overflow-wrap:anywhere}
+.event .kind{color:var(--mint)}
+.event[data-error=true] .kind{color:var(--amber)}
+.section-title{display:flex;justify-content:space-between;gap:15px;align-items:center;margin:28px 0 12px}
+.nodes,.care{display:grid;grid-template-columns:repeat(auto-fit,minmax(min(100%,300px),1fr));gap:16px}
+.node-card,.receipt{padding:20px;border:1px solid var(--line);border-radius:10px;background:var(--panel);overflow-wrap:anywhere}
+.node-top{display:flex;align-items:start;justify-content:space-between;gap:8px}
+.node-top h2{font-size:1.2rem}
+.badge{font:10px ui-monospace,monospace;color:var(--mint);border:1px solid #496d61;padding:4px 7px;border-radius:4px;white-space:nowrap}
+.badge.unknown{color:var(--amber);border-color:#796242}
+.services{display:flex;gap:7px;flex-wrap:wrap;margin:15px 0}
+.service{font:11px ui-monospace,monospace;padding:5px 8px;background:#1b2c3a;border-radius:4px;color:var(--muted)}
+.service.running,.service.active{color:var(--mint)}
+.service.failed,.service.stopped{color:var(--amber)}
+.models{border-top:1px solid var(--line);padding-top:12px;font:12px ui-monospace,monospace}
+.models p{margin:5px 0}
+.resident{color:var(--blue)}
+.receipt dl{display:grid;grid-template-columns:90px 1fr;gap:7px;font-size:13px}
+.receipt dt{color:var(--muted)}
+.receipt dd{margin:0}
+.warn{color:var(--amber)}
+.good{color:var(--mint)}
+footer{font-size:12px;color:var(--muted);border-top:1px solid var(--line);margin-top:25px}
+.error{color:var(--amber)}
+.paused *,.paused .ticker-track{animation-play-state:paused!important}
+.empty{padding:30px 20px;color:var(--muted)}
+body.theater header nav a{display:none}
+body.theater .intro{display:none}
+body.theater .layout{margin-top:20px}
+
+@media(max-width:800px){header,main,footer{padding:18px}
+.layout{grid-template-columns:1fr}
+.intro{align-items:start;flex-direction:column;gap:8px}
+.intro h1{margin:10px 0}
+.stats{grid-template-columns:repeat(2,1fr)}
+.stat:nth-child(2){border-right:0}
+.stat:nth-child(-n+2){border-bottom:1px solid var(--line)}
+.map,.map svg{min-height:280px;height:280px}
+.stream{height:260px}
+.map text{font-size:22px}
+.map .sub{font-size:17px}
+header{align-items:start}
+.brand{max-width:140px}
+.controls button{padding:8px 10px}
+.panel-head{padding:14px}
+.section-title{align-items:start;flex-direction:column}
+}
+
+@media(prefers-reduced-motion:reduce){*,*::before,*::after{animation:none!important;scroll-behavior:auto!important}
+}
+
+</style></head><body>
+<header><a class="brand" href="/" style="text-decoration:none;color:inherit">FUTURE CRASH <b>／ FABRIC</b></a><nav aria-label="Dashboard controls"><button id="pause" aria-pressed="false">Pause live</button><button id="theater" aria-pressed="false">Focus</button><button id="fullscreen">Full screen</button></nav></header>
+<main><section class="intro"><div><div class="eyebrow">A personal network. A shared intelligence.</div><h1>Your Fabric,<br><em>in motion.</em></h1><p class="muted">The computers, services and small acts of intelligence working together behind the scenes.</p></div><div><div id="connection" class="live">Connecting</div><p id="status" class="muted" role="status">Waiting for the host…</p><button id="refresh">Refresh now</button></div></section>
+<section class="stats" aria-label="Fabric at a glance"><div class="stat"><span class="label">Reachable nodes</span><strong id="nodeCount">—</strong></div><div class="stat"><span class="label">Running services</span><strong id="serviceCount">—</strong></div><div class="stat"><span class="label">Resident models</span><strong id="modelCount">—</strong></div><div class="stat"><span class="label">Active supervisors</span><strong id="activeCount">—</strong></div></section>
+<div class="layout"><section class="panel"><div class="panel-head"><h2>Fabric constellation</h2><span id="host" class="label">Host · —</span></div><div id="map" class="map" aria-label="Fabric node map"></div><div class="map-note">Host ↔ trusted peers · logical membership, not measured traffic</div><div class="ticker"><b>ON THE WIRE</b><span id="ticker" class="ticker-track">Awaiting observed events</span></div></section>
+<section class="panel"><div class="panel-head"><h2>Activity stream</h2><select id="filter" aria-label="Filter events by computer"><option value="">All computers</option></select></div><div id="events" class="stream" role="log" aria-live="off"><p class="empty">Waiting for real event telemetry…</p></div><div class="ticker"><b id="eventCount">0 OBSERVED</b><span class="muted">Recent operational events · newest first</span></div></section></div>
+<div class="section-title"><h2>The machines behind it</h2><span class="label">Live checks every 8 seconds</span></div><section id="nodes" class="nodes" aria-label="Computers and services"></section>
+<div class="section-title"><h2>Continuity & care</h2><span id="careStatus" class="muted" role="status">Checking essential backup receipts…</span></div><section id="care" class="care" aria-label="Updates and backups"></section>
+</main><footer><p>READ-ONLY OBSERVATORY · No commands run from this view. Chat text, file paths and event payloads are omitted. Device and model names remain visible.</p><p>Backup receipts cover Fabric identity, Notes and settings, not all documents or media. Matching bundles do not guarantee the latest GitHub release. Unreachable nodes are unknown, not idle.</p><a href="/">Return to this host’s chat ↗</a></footer><script src="fabric-dashboard.js"></script></body></html>

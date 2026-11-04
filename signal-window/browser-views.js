@@ -49,7 +49,7 @@
       cancel(){try{if(tab&&!tab.closed)tab.close()}catch{}tab=null}
     };
   }
-  function fabricCommand(text){return /^(?:\/fabric|(?:please\s+)?(?:show|open)(?:\s+(?:me|our|the))?\s+fabric(?:\s+(?:dash|dashboard|status))?)[.!?]?$/i.test(String(text||'').trim())}
+  function fabricCommand(text){return /^(?:\/(?:fabric|dash|dashboard)|(?:please\s+)?(?:show|open)(?:\s+(?:me|our|the))?\s+fabric(?:\s+(?:dash|dashboard|status))?)[.!?]?$/i.test(String(text||'').trim())}
   function openFabric(){
     const url=new URL('/fabric.html',root.location.href).href;
     try{root.open(url,'_blank','noopener')}catch{}
