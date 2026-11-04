@@ -24,17 +24,17 @@ museum_desk.desk(client,ui)
             if select.select([master],[],[],.1)[0]:
                 try:chunks.append(os.read(master,65536))
                 except OSError:break
-    read(1);os.write(master,b'\r');read(1)
+    read(1);list_capture=b''.join(chunks).decode(errors='replace');os.write(master,b'\r');read(1)
     capture=b''.join(chunks).decode(errors='replace');assert 'LOOK MUSEUM' in capture and 'CC0' in capture,capture[-2000:]
     os.write(master,b'\x1b');read(.4);os.write(master,b'W');read(.3);assert 'Shell opened beside LOOK (fixture)' in b''.join(chunks).decode(errors='replace')
     os.write(master,b'q');read(.3);proc.wait(timeout=3);assert proc.returncode==0;os.close(master)
     import pyte
     from PIL import Image,ImageDraw,ImageFont
-    screen=pyte.Screen(100,32);pyte.Stream(screen).feed(capture)
+    screen=pyte.Screen(100,32);pyte.Stream(screen).feed(list_capture)
     font=ImageFont.truetype('/System/Library/Fonts/Menlo.ttc',15);image=Image.new('RGB',(950,650),'#101923');draw=ImageDraw.Draw(image)
     for y in range(32):
         for x in range(100):
             cell=screen.buffer[y][x];color='#'+cell.fg if len(cell.fg)==6 else '#83c9f4' if cell.fg in ('blue','cyan') else '#d7e5ec'
             draw.text((16+x*9.1,12+y*19),cell.data,font=font,fill=color)
-    image.save(OUT/'desk.png')
+    image.save(OUT/'list.png')
 print('Terminal collection, image/ASCII preview, pane shortcut, quit and terminal restore passed')

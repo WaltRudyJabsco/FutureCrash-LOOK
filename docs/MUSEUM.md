@@ -42,7 +42,12 @@ partial pack. Completion is never inferred from the requested count.
 
 ## Terminal controls
 
-- Arrows, Page Up/Down, Home/End: select artwork.
+- Arrows select artwork; Shift+Up/Down (or Page Up/Down) moves a visible page;
+  Shift+Left/Right (or Home/End) jumps to the beginning/end. These work in the
+  image viewer too, within downloaded works.
+- **F** (Shift+F): cycle Title, Artist, Century and Museum sorting without losing
+  the selected artwork. Century uses the supplied date, oldest first; unknown
+  dates sort last. Discovery sorting applies to the current results page.
 - **Enter**: view a downloaded work; Left/Right (or Up/Down) cycle through
   downloaded works in the current list, wrapping at either end; **i** switches native image/ASCII preview.
 - **d**: discover online; **t** changes Met/Art Institute source.
@@ -60,7 +65,8 @@ the list. Slides advance every ten seconds and skip undownloaded discovery resul
 This differs from `lk museum slideshow` / `lk saver Museum`, which use the separate
 full-screen saver and the endpoint’s locally saved collection.
 
-Moving through the list shows a thumbnail beside it (below it in narrow terminals).
+Moving through the list shows a thumbnail and labeled artwork details beside it
+(below it in narrow terminals), with alternating rows and a theme-aware selection.
 Kitty/iTerm use LOOK's existing native image preview. Other terminals get an ASCII
 preview using the existing image renderer (chafa/ffmpeg where available).
 The local collection can still be listed and viewed when the node service is
