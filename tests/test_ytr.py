@@ -140,3 +140,10 @@ print('LOOK_FILE:'+json.dumps(str(audio)))
         time.sleep(.01)
     assert row['stage']=='complete',row
     assert Path(row['file']).suffix=='.m4a' and row['metadata']['title']=='Episode'
+
+
+def test_footer_is_painted_before_clear_without_trailing_scroll():
+    frame=ytr.terminal_frame(['YOUTUBE RADIO','Queue'],['Enter play','Q quit'])
+    assert frame=='\033[HYOUTUBE RADIO\033[K\nQueue\033[K\nEnter play\033[K\nQ quit\033[K\033[J'
+    assert frame.count('\033[J')==1
+    assert frame.index('Q quit')<frame.index('\033[J')

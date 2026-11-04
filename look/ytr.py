@@ -201,17 +201,24 @@ class Player:
         if self.folder:shutil.rmtree(self.folder,ignore_errors=True)
 
 
+def terminal_frame(rows, footer):
+    """Paint content and footer before clearing only the unused tail."""
+    return '\033[H'+'\n'.join(line+'\033[K' for line in [*rows,*footer])+'\033[J'
+
+
 def desk(client,ui):
     fd=sys.stdin.fileno();prior=termios.tcgetattr(fd)
     pool=concurrent.futures.ThreadPoolExecutor(max_workers=1)
     player=Player();state={'items':[]};selected=0;current=None;message='Connecting…';future=None;task='';playing=False;waiting=False
-    next_poll=0;last_bookmark=0;prefetched=set();visual=False;started=time.monotonic();position=0
+    next_poll=0;last_bookmark=0;prefetched=set();visual=False;last_frame=None;started=time.monotonic();position=0
     def submit(kind,fn,*args):
         nonlocal future,task
         task=kind;future=pool.submit(fn,*args)
     def checkpoint(done=False):
         if current:client.checkpoint(current,position,done or current.get('done',False))
     def prompt(label):
+        nonlocal last_frame
+        last_frame=None
         termios.tcsetattr(fd,termios.TCSADRAIN,prior)
         try:return input('\n'+label).strip().strip('\"\'')
         finally:tty.setcbreak(fd)
@@ -267,9 +274,11 @@ def desk(client,ui):
             for index,row in enumerate(rows):
                 line=ui._ansi_clip(re.sub(r'[\x00-\x1f\x7f-\x9f]',' ',row),width)
                 rendered.append(ui._c(line,'1;34') if index==0 or row.startswith('› ') else line)
-            print('\033[H'+'\n'.join(rendered)+'\033[J')
-            for line in terminal_style.command_lines('Enter play · A add · Space pause · N next · U/D reorder · X remove · R retry · O original · C clean finished · V visual · Q save/quit',width):print(line)
-            sys.stdout.flush();key=ui._read_tty_key(fd,.15)
+            footer=terminal_style.command_lines('Enter play · A add · Space pause · N next · U/D reorder · X remove · R retry · O original · C clean finished · V visual · Q save/quit',width)
+            frame=terminal_frame(rendered,footer)
+            if frame!=last_frame:
+                sys.stdout.write(frame);sys.stdout.flush();last_frame=frame
+            key=ui._read_tty_key(fd,.15)
             if key in {'q','Q','esc','\x03'}:break
             if key in {'up','down','pageup','pagedown','home','end'}:
                 selected=0 if key=='home' else len(items)-1 if key=='end' else max(0,min(len(items)-1,selected+{'up':-1,'down':1,'pageup':-page,'pagedown':page}[key]));continue

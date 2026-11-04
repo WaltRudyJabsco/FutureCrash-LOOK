@@ -35,7 +35,11 @@ ytr.desk(client,ui)
             if select.select([master],[],[],.1)[0]:
                 try:chunks.append(os.read(master,65536))
                 except OSError:break
-    read(2);os.write(master,b'v');read(.5)
+    read(2)
+    before=b''.join(chunks).count(b'\x1b[H')
+    read(.6)
+    assert b''.join(chunks).count(b'\x1b[H')==before, 'Unchanged desk keeps repainting'
+    os.write(master,b'v');read(.5)
     capture=b''.join(chunks).decode(errors='replace')
     assert 'YOUTUBE RADIO' in capture and 'A conversation worth keeping' in capture,capture[-2000:]
     os.write(master,b'q');read(.5);proc.wait(timeout=5);os.close(master)
