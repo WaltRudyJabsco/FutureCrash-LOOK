@@ -7,6 +7,8 @@ from pathlib import Path
 import os
 import re
 import threading
+import textwrap
+import unicodedata
 import shutil
 import sys
 import termios
@@ -30,6 +32,41 @@ def adjacent_artwork(items,index,step):
         candidate=(index+step*offset)%len(items)
         if items[candidate].get('downloaded'):return candidate
     return index
+
+SORTS=('Title','Artist','Century','Museum')
+SHIFT_KEYS={'shiftup':'pageup','shiftdown':'pagedown','shiftleft':'home','shiftright':'end'}
+
+def artwork_year(row):
+    date=row.get('date','')
+    century=re.search(r'(\d{1,2})(?:st|nd|rd|th) century',date,re.I)
+    year=re.search(r'(?<!\d)(\d{3,4})(?!\d)',date)
+    value=(int(century[1])-1)*100 if century else int(year[1]) if year else None
+    if value is not None and re.search(r'B\.?C\.?',date,re.I):value=-value
+    return value
+
+def sorted_artworks(items,mode):
+    def key(row):
+        title=row.get('title','').casefold()
+        if mode=='Century':
+            year=artwork_year(row)
+            return (year is None,year or 0,title)
+        field={'Artist':'artist','Museum':'museum'}.get(mode,'title')
+        value=row.get(field,'').casefold()
+        return (not bool(value),value,title)
+    return sorted(items,key=key)
+
+def navigate(index,key,count,page_size):
+    key=SHIFT_KEYS.get(key,key)
+    if key=='home':return 0
+    if key=='end':return max(0,count-1)
+    return max(0,min(max(0,count-1),index+{'up':-1,'down':1,'pageup':-page_size,'pagedown':page_size}.get(key,0)))
+
+def artwork_info(row,width):
+    lines=[]
+    for label,field in [('Title','title'),('Artist','artist'),('Date','date'),('Medium','medium'),('Museum','museum')]:
+        value=re.sub(r'[\x00-\x1f\x7f-\x9f]',' ',str(row.get(field) or 'Unknown'))
+        lines.extend(textwrap.wrap(label+': '+value,max(8,width))[:2])
+    return lines
 
 def preference(value=None):
     path=Path.home()/'.config/look/museum.json'
@@ -89,7 +126,7 @@ class Client:
 
 def desk(client,ui):
     fd=sys.stdin.fileno();prior=termios.tcgetattr(fd);pool=Background();native=NativePreviewController()
-    items=[];index=0;query='';source='met';page=1;discover=False;message='Loading collection…';future=pool.submit(client.snapshot);preview=None;image_job=None;image_id=None;ascii_mode=not native.enabled;dirty=True;last_size=None;previews={};failed_previews=set();loading_id=None;playing=False;next_slide=0
+    items=[];index=0;query='';source='met';page=1;discover=False;message='Loading collection…';future=pool.submit(client.snapshot);preview=None;image_job=None;image_id=None;ascii_mode=not native.enabled;dirty=True;last_size=None;previews={};failed_previews=set();loading_id=None;playing=False;next_slide=0;sort_mode=0;page_size=10;colors=terminal_style.list_colors()
     def prompt(label):
         native.frame_cleared();termios.tcsetattr(fd,termios.TCSADRAIN,prior)
         try:return input('\n'+label).strip()
@@ -99,7 +136,7 @@ def desk(client,ui):
         while True:
             if future and future.done():
                 try:
-                    result=future.result();items=result.get('items',items);index=min(index,max(0,len(items)-1));message=('Offline · local collection' if result.get('offline') else 'Collection on '+client.node)
+                    result=future.result();items=sorted_artworks(result.get('items',items),SORTS[sort_mode]);index=min(index,max(0,len(items)-1));message=('Offline · local collection' if result.get('offline') else 'Collection on '+client.node)
                     message+=' · '+str(len(items))+' works'
                     job=result.get('job',{})
                     if job.get('state'):message+=' · starter '+job['state']+' '+str(job.get('saved',0))+'/'+str(job.get('requested',0))+' · '+job.get('theme','')
@@ -121,8 +158,8 @@ def desk(client,ui):
             if size!=last_size:dirty=True;last_size=size
             if dirty:
                 native.frame_cleared()
-                art_count=0;thumbnail=None
-                lines=['LOOK MUSEUM · '+('Discover '+source if discover else 'Saved collection'),message,'']
+                art_count=0;thumbnail=None;row_indices={};side_lines={}
+                lines=['LOOK MUSEUM · '+('Discover '+source if discover else 'Saved collection')+' · Sort: '+SORTS[sort_mode],message,'']
                 art_rows=max(2,height-13)
                 if image_id:
                     row=next((x for x in items if x['id']==image_id),{})
@@ -136,27 +173,51 @@ def desk(client,ui):
                     controls='←/→ previous/next · Space slideshow/pause · i image/ASCII · Esc collection · W shell pane · q quit'
                     lines += [('Playing' if playing else 'Paused')+' · '+str(index+1)+'/'+str(len(items))+' · current list · 10 seconds/work']
                 else:
-                    page_size=max(1,height-12);start=max(0,index-page_size//2)
-                    thumbnail_cols=min(36,width//3) if width>=70 else width
-                    list_width=width-thumbnail_cols-3 if width>=70 else width
-                    if width<70:page_size=max(1,page_size-7)
-                    thumbnail=(4,list_width+3,min(12,page_size),thumbnail_cols) if width>=70 else (4+page_size,1,6,width)
-                    for n,row in list(enumerate(items))[start:start+page_size]:lines.append(ui._ansi_clip(('› ' if n==index else '  ')+row['title']+' · '+row.get('artist','')+(' · downloaded' if row.get('downloaded') else ' · online'),list_width))
+                    page_size=max(1,height-12);start=max(0,min(index-page_size//2,len(items)-page_size))
+                    wide=width>=70
+                    thumbnail_cols=min(42,width//2) if wide else width
+                    list_width=width-thumbnail_cols-3 if wide else width
+                    if not wide:page_size=max(1,page_size-10);start=max(0,min(index-page_size//2,len(items)-page_size))
+                    thumbnail=(4,list_width+3,max(2,min(10,page_size-8)),thumbnail_cols) if wide else (4+page_size,1,4,width)
+                    for n,row in list(enumerate(items))[start:start+page_size]:
+                        row_indices[len(lines)]=n
+                        lines.append(ui._ansi_clip(('› ' if n==index else '  ')+row['title'],list_width))
                     while len(lines)<3+page_size:lines.append('')
-                    if width<70:lines+=['']*6
+                    if not wide:lines+=['']*10
                     if preview and ascii_mode:
                         try:
-                            art=museum_art.colored_symbols(str(preview),thumbnail[3],thumbnail[2])
-                            for offset,line in enumerate(art):
-                                target=thumbnail[0]-1+offset
-                                lines[target]=lines[target].ljust(thumbnail[1]-1)+line
+                            for offset,line in enumerate(museum_art.colored_symbols(str(preview),thumbnail[3],thumbnail[2])):
+                                side_lines[thumbnail[0]-1+offset]=line
                         except Exception:pass
+                    if selected:
+                        detail_start=thumbnail[0]-1+thumbnail[2]+1
+                        for offset,line in enumerate(artwork_info(selected,thumbnail_cols)):
+                            target=detail_start+offset
+                            if target<len(lines):side_lines[target]=line
                     if not items:lines+=['No artwork here. d discovers museum art; a downloads a starter pack.']
-                    controls='↑↓ select · Enter view · s slideshow · i image/ASCII · d discover · / search · l collection · t source · n/b pages · k keep offline · p pin here · f favorite · a starter · r refresh · W shell pane · q quit'
+                    controls='↑↓ select · Shift+↑↓ page · Shift+←→ top/end · F sort · Enter view · s slideshow · i image/ASCII · d discover · / search · l collection · t source · n/b pages · k keep offline · p pin here · f favorite · a starter · r refresh · W shell pane · q quit'
                 footer=terminal_style.command_lines(controls,width)
                 lines=lines[:max(1,height-len(footer)-1)]
                 clean_lines=[str(line) if (image_id and 5<=n<5+art_count) or (not image_id and thumbnail and ascii_mode and thumbnail[0]-1<=n<thumbnail[0]-1+thumbnail[2]) else re.sub(r'[\x00-\x1f\x7f-\x9f]',' ',str(line)) for n,line in enumerate(lines)]
-                rendered=[ui._c(line,'1;34') if n==0 or line.startswith('› ') else line for n,line in enumerate(clean_lines)]
+                rendered=[]
+                for n,line in enumerate(clean_lines):
+                    if n in row_indices:
+                        row_number=row_indices[n]
+                        line=terminal_style.list_row(line,list_width+1,index=row_number,selected=row_number==index,colors=colors)
+                        if row_number!=index and row_number%2:
+                            palette=colors['_palette']
+                            bg=palette['background'];fg=palette['foreground']
+                            rgb=[round(int(bg[i:i+2],16)*.94+int(fg[i:i+2],16)*.06) for i in (1,3,5)]
+                            shade='\033[48;2;'+';'.join(map(str,rgb))+'m'
+                            plain=re.sub(r'\x1b\[[0-9;]*m','',line)
+                            cells=sum(0 if unicodedata.combining(c) else 2 if unicodedata.east_asian_width(c) in {'W','F'} else 1 for c in plain)
+                            line=shade+line.removesuffix('\033[0m')+' '*max(0,list_width-cells)+'\033[0m'
+                    elif n==0:line=ui._c(line,'1;34')
+                    if n in side_lines:
+                        # Cursor addressing keeps wide Unicode titles and ANSI styles
+                        # from displacing the independent preview/details column.
+                        line+='\033['+str(thumbnail[1])+'G'+side_lines[n]
+                    rendered.append(line)
                 sys.stdout.write('\033[H'+'\n'.join(ui._ansi_clip(line,width)+'\033[K' for line in rendered+footer)+'\033[J');sys.stdout.flush()
                 if preview and not ascii_mode:
                     if image_id:native.request(preview,6,1,art_rows,width)
@@ -167,10 +228,23 @@ def desk(client,ui):
             if key in ('q','Q','\x03'):break
             if not key:continue
             dirty=True
+            if key=='F':
+                selected_id=items[index]['id'] if items else None
+                sort_mode=(sort_mode+1)%len(SORTS);items=sorted_artworks(items,SORTS[sort_mode])
+                index=next((n for n,row in enumerate(items) if row['id']==selected_id),0)
+                continue
+            key=SHIFT_KEYS.get(key,key)
             if key=='W':message=terminal_style.open_pane(Path.cwd());continue
             if image_id:
                 if key in ('esc','\x1b'):image_id=None;playing=False;native.frame_cleared()
                 elif key in ('i','I'):ascii_mode=not ascii_mode
+                elif key in ('home','end','pageup','pagedown'):
+                    available=[row for row in items if row.get('downloaded')]
+                    position=next((n for n,row in enumerate(available) if row['id']==image_id),0)
+                    if available:
+                        image_id=available[navigate(position,key,len(available),page_size)]['id']
+                        index=next(n for n,row in enumerate(items) if row['id']==image_id)
+                        next_slide=time.monotonic()+SLIDE_SECONDS
                 elif key in ('left','right','up','down'):
                     index=adjacent_artwork(items,index,-1 if key in ('left','up') else 1);image_id=items[index]['id'];next_slide=time.monotonic()+SLIDE_SECONDS
                 elif key in (' ','s','S'):
@@ -178,13 +252,13 @@ def desk(client,ui):
                 continue
             if key in ('i','I'):ascii_mode=not ascii_mode;continue
             if key in ('up','down','home','end','pageup','pagedown'):
-                index=0 if key=='home' else len(items)-1 if key=='end' else max(0,min(len(items)-1,index+{'up':-1,'down':1,'pageup':-10,'pagedown':10}[key]));continue
+                index=navigate(index,key,len(items),page_size);continue
             if future:continue
             row=items[index] if items else None
             if key in ('enter','\r','\n','s','S') and row:
                 if not row.get('downloaded'):message='k keeps this work offline before viewing';continue
                 image_id=row['id'];playing=key in ('s','S');next_slide=time.monotonic()+SLIDE_SECONDS
-            elif key in ('k','K','p','P','f','F') and row:
+            elif key in ('k','K','p','P','f') and row:
                 action={'k':'save','p':'pin','f':'favorite'}[key.lower()];future=pool.submit(client.request,action,id=row['id']);discover=False
             elif key in ('a','A'):
                 value=prompt('Starter works (1–1000; up to 3 GiB on '+client.node+'; Enter cancels): ')

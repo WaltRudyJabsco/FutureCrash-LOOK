@@ -165,3 +165,18 @@ def test_desk_native_thumbnail_and_viewer_navigation(monkeypatch,tmp_path):
     assert all('Q quit' not in label and 'I image' not in label for label in labels)
     assert any('q quit' in label and 'W shell pane' in label for label in labels)
     native.close.assert_called_once()
+
+
+def test_shift_navigation_uses_visible_page_and_bounds():
+    for key,expected in [('shiftup',3),('shiftdown',17),('shiftleft',0),('shiftright',19)]:
+        assert museum_desk.navigate(10,key,20,7)==expected
+    assert museum_desk.navigate(0,'shiftup',20,7)==0
+    assert museum_desk.navigate(0,'shiftright',0,7)==0
+
+
+def test_sorting_dates_and_details():
+    rows=[dict(id='1',title='Zebra',artist='Alice',date='18th century'),dict(id='2',title='Apple',artist='Zoe',date='300 B.C.'),dict(id='3',title='Unknown',date='Undated')]
+    assert [r['id'] for r in museum_desk.sorted_artworks(rows,'Title')]==['2','3','1']
+    assert [r['id'] for r in museum_desk.sorted_artworks(rows,'Artist')]==['1','2','3']
+    assert [r['id'] for r in museum_desk.sorted_artworks(rows,'Century')]==['2','1','3']
+    assert all(len(line)<=24 for line in museum_desk.artwork_info(rows[0],24))
