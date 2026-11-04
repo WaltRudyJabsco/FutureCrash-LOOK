@@ -34,8 +34,8 @@ Press Enter, Escape, or click to open the masked PIN prompt. Cancel leaves the
 curtain up. **C** changes colors and **V** changes visuals. A successful unlock on
 any reachable node dismisses the others. OS-level app switching remains available.
 
-Open Signal and Albert pages show a **Lock Fabric** button, receive curtain state,
-and provide a masked unlock form. Explicit `/lock` or `lk lk` in their chat input
+Open Signal and Albert pages receive curtain state
+and provide a masked unlock form. There is no floating activation button. Explicit `/lock` or `lk lk` in their chat input
 activates the curtain; `/unlock` focuses its PIN field. Never put your PIN in chat.
 Reload existing browser pages once after installation to load the new integration.
 A browser page cannot cover other applications or enter fullscreen automatically.

@@ -393,7 +393,7 @@ function localCognition(raw){const q=raw.trim(),s=q.toLowerCase();
 }
 function extractThreshold(s){const m=s.match(/(?:over|above|exceeds?)\s*(\d+)\s*ms/);return m?`latency > ${m[1]} ms`:''}
 function sleep(ms){return new Promise(r=>setTimeout(r,ms))}
-function submit(){const q=ask.value.trim();if(!q&&!state.attachments.length)return;ask.value='';askFabric(q||'Please inspect the attached object(s).')}
+function submit(){if(window.LookCurtain?.consume(ask))return;const q=ask.value.trim();if(!q&&!state.attachments.length)return;ask.value='';askFabric(q||'Please inspect the attached object(s).')}
 ask.addEventListener('keydown',e=>{if(e.key==='Enter')submit()});
 // Paste/drop share one artifact path. Bytes stop at Albert's artifact edge; LO receives paths/references, never embedded blobs.
 ['dragenter','dragover'].forEach(ev=>dropzone.addEventListener(ev,e=>{e.preventDefault();dropzone.classList.add('drag')}));['dragleave','drop'].forEach(ev=>dropzone.addEventListener(ev,e=>{e.preventDefault();dropzone.classList.remove('drag')}));

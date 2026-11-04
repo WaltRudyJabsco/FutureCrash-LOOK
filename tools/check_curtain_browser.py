@@ -18,10 +18,11 @@ with sync_playwright() as p:
                 elif payload.get('pin')!='1234':return request.fulfill(status=400,json={'error':'Incorrect PIN'})
                 else:state['locked']=False
             return request.fulfill(json=state)
-        request.fulfill(content_type='text/html',body='<html><head><meta charset="utf-8"></head><body><textarea aria-label="chat"></textarea><script>'+script+'</script></body></html>')
+        request.fulfill(content_type='text/html',body='<html><head><meta charset="utf-8"></head><body><textarea id="input" aria-label="chat"></textarea><script>'+script+'</script></body></html>')
     page.route('http://curtain.test/**',route)
     page.goto('http://curtain.test/')
-    page.get_by_role('button',name='Lock Fabric',exact=True).click()
+    assert page.get_by_role('button',name='Lock Fabric',exact=True).count()==0
+    page.get_by_label('chat').fill('/lock');page.get_by_label('chat').press('Enter')
     page.wait_for_function("document.querySelector('#lk-curtain').style.display==='block'")
     field=page.get_by_label('Four-digit PIN',exact=True)
     field.fill('9999')
