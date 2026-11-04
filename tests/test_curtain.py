@@ -82,3 +82,17 @@ def test_three_node_unlock_converges_without_plaintext_pin(tmp_path,monkeypatch)
     run('c','unlock',pin='1234')
     assert not any(peer.public()['locked'] for peer in peers.values())
     assert all('pin' not in payload and 'pin' not in payload['event'] for payload in messages)
+
+def test_portable_setup_without_scrypt(monkeypatch):
+    monkeypatch.delattr(curtain.hashlib,'scrypt',raising=False)
+    request('setup',pin='1234');request('lock')
+    assert curtain.load()['kdf']=='pbkdf2-sha256'
+    assert not request('unlock',pin='1234')['locked']
+
+def test_legacy_scrypt_record_and_rotation():
+    if not hasattr(curtain.hashlib,'scrypt'):pytest.skip('Legacy scrypt unavailable')
+    request('setup',pin='1234');state=curtain.load()
+    state.pop('kdf');state['verifier']=curtain.pin_hash('1234',state['salt'],'scrypt');curtain.save(state)
+    request('setup',pin='5678',old_pin='1234')
+    assert curtain.load()['kdf']=='pbkdf2-sha256'
+    assert not request('unlock',pin='5678')['locked']

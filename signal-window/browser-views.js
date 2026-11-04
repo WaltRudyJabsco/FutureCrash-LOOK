@@ -475,6 +475,7 @@
       catch(error){alert(error.message);}finally{busy=false;}
     }
     launch.onclick=cover;
+    pin.addEventListener('input',()=>{if(/^[0-9]{4}$/.test(pin.value)&&!busy)form.requestSubmit();});
     form.onsubmit=async event=>{event.preventDefault();if(busy)return;busy=true;notice.textContent='Checking…';const value=pin.value;pin.value='';try{const data=await request('unlock',{pin:value});update(data);if(!data.ok)alert('This curtain opened, but some nodes were unreachable. Retry lk unlock when connected.');}catch(error){notice.textContent=error.message;pin.focus();}finally{busy=false;}};
     layer.addEventListener('keydown',event=>{if(event.key==='Escape'){event.preventDefault();pin.focus();}if(event.key==='Tab'){const button=form.querySelector('button');if(event.shiftKey&&document.activeElement===pin){event.preventDefault();button.focus();}else if(!event.shiftKey&&document.activeElement===button){event.preventDefault();pin.focus();}}});
     // Explicit commands only: do not infer locking from ordinary conversation.
