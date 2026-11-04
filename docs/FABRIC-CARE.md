@@ -2,16 +2,16 @@
 
 ## Browser dashboard
 
-In Signal or Albert, type **`/fabric`** or **“show fabric”** to open the same
+In Signal or Albert, type **`/dash`**, **`/fabric`** or **“show fabric”** to open the same
 read-only web dashboard in a new tab. This command bypasses inference. A link
 remains in the conversation if the browser blocks the tab. The dashboard uses
 the current surface's authenticated origin; it does not open a window on a
 remote compute node or require another login beyond normal endpoint approval.
 
-Node advertisements appear first, including their last successful contact and
-advertised inference/activity. Update and essential-backup receipts load
-separately; unreachable nodes stay unknown. Refresh checks both again, and the
-visible page checks once a minute, with overlapping checks prevented.
+Live node, service and activity checks appear first. Update and essential-backup
+receipts load separately; unreachable nodes stay unknown. Refresh checks both
+again. The visible page polls telemetry every eight seconds and care receipts
+once a minute, with overlapping checks prevented.
 The dashboard never starts maintenance or chooses an update source.
 
 Explicit image-generation requests also reserve a browser tab on submission.
@@ -114,3 +114,30 @@ Press **t** to pause/resume the tickers. Short values stay still. Noninteractive
 snapshots stay static. Tickers use the existing data and polling schedules;
 redrawing them does not make extra Fabric requests. The frame repaints without
 clearing to a blank screen between steps.
+
+## Browser observatory
+
+Open `/dash` on your existing Signal or Albert host, or type `/dash` in either
+chat. The standalone page reuses that browser’s authorization and the host’s
+paired Fabric connections. There is no new public service or third-party asset
+host. Your usual private network connection is still required away from home.
+
+The observatory shows a logical host/peer constellation, service states, resident
+models, supervisor phases, installed commits and a rolling operational event
+feed. Counts come from reachable nodes, not estimated activity. Unreachable or
+older peers without dashboard telemetry are marked unknown. Event timestamps are
+shown; old events are not presented as new work. Use the computer filter, Pause
+live, Focus and Full screen controls for a demo. Reduced-motion preferences are
+respected. On phones the panels stack and controls remain touch-sized.
+
+Status polls every eight seconds; essential backup receipts refresh separately
+once a minute. Hidden tabs stop polling. A shared host cache limits repeated
+peer requests across open tabs, with a two-second peer timeout and a sixteen-peer
+limit. The recent event display is bounded, not an archival audit log. No chat
+content, file paths or event payloads are sent to this page; device/model names,
+service states and event type/phase labels remain visible.
+
+`GET /v1/dashboard/local` supplies compact local telemetry to paired peers.
+`GET /v1/dashboard` combines those checks; both browser hosts proxy it through
+`GET /api/fabric/dashboard` with the existing `lo.use` authorization. Dashboard
+access performs read-only checks and never starts inference or media playback.

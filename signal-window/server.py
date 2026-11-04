@@ -1148,6 +1148,8 @@ class App(BaseHTTPRequestHandler):
             import book_web
             try:return book_web.handle(self,NODE_URL)
             except Exception as exc:return self.json(502,{'error':str(exc)})
+        if path in {'/dash','/dashboard'}:
+            self.send_response(302);self.send_header('Location','/fabric.html');self.end_headers();return
         if path=="/api/auth/status": return self._auth_status()
         if path=="/api/media/ticket": return self._media_ticket_request(parsed)
         if path in ("/",""):
@@ -1158,13 +1160,13 @@ class App(BaseHTTPRequestHandler):
                 self.send_response(303); self.send_header("Location","/"); self.send_header(*self._set_cookie(ENDPOINT_COOKIE,issued["token"],31536000 if issued.get("mode")=="trust" else 43200)); self.end_headers(); return
         if path.startswith("/api/"):
             scope="media.output" if path.startswith("/api/media") else "signal.view"
-            if path in {'/api/fabric','/api/fabric/care'}: scope='lo.use'
+            if path in {'/api/fabric','/api/fabric/care','/api/fabric/dashboard'}: scope='lo.use'
             if not self._media_ticket_allows(parsed) and not self._require_endpoint(scope): return
-        if path in {'/api/fabric','/api/fabric/care'}:
-            target='/v1/care' if path.endswith('/care') else '/v1/nodes'
+        if path in {'/api/fabric','/api/fabric/care','/api/fabric/dashboard'}:
+            target='/v1/dashboard' if path.endswith('/dashboard') else '/v1/care' if path.endswith('/care') else '/v1/nodes'
             value=_node_get(target,timeout=90 if target=='/v1/care' else 10)
             if not isinstance(value,dict): return self.json(503,{'error':'Fabric host unavailable'})
-            return self.json(200,value if target=='/v1/care' else {'ok':True,'nodes':value})
+            return self.json(200,value if target in {'/v1/care','/v1/dashboard'} else {'ok':True,'nodes':value})
         if self.path.startswith("/api/present/"):
             token=self.path.split("/api/present/",1)[1].split("?",1)[0]
             p=_present_get(token)

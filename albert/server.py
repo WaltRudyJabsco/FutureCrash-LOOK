@@ -577,6 +577,8 @@ class Handler(BaseHTTPRequestHandler):
             import book_web
             try:return book_web.handle(self,NODE)
             except Exception as exc:return self.send_json(502,{'error':str(exc)})
+        if path in {'/dash','/dashboard'}:
+            self.send_response(302);self.send_header('Location','/fabric.html');self.end_headers();return
         if path=='/api/auth/status': return self._auth_status()
         if path=='/api/media/ticket': return self._media_ticket_request(urlparse(self.path))
         if path in {'/health','/v1/health'}: return self.send_json(200,{"ok":True,"surface":"albert","version":"1.4.0","fabric":NODE})
@@ -592,6 +594,10 @@ class Handler(BaseHTTPRequestHandler):
             try: caps=node_json('/v1/capabilities')
             except Exception: caps={}
             return self.send_json(200,{"schema":"fabric-action-registry-v1","surface":"albert","tools":TOOLS,"node_capabilities":caps})
+        if path=='/api/fabric/dashboard':
+            if not self._require_endpoint('lo.use'): return
+            try: return self.send_json(200,node_json('/v1/dashboard',timeout=10))
+            except Exception: return self.send_json(503,{'error':'Fabric dashboard unavailable'})
         if path=='/api/fabric':
             if not self._require_endpoint('lo.use'): return
             try: return self.send_json(200,{"ok":True,"nodes":node_json('/v1/nodes'),"capabilities":node_json('/v1/capabilities')})

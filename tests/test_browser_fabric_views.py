@@ -105,7 +105,7 @@ const scope={URL,location:{href:'https://fabric.example/',origin:'https://fabric
  opens.push(args);const tab={closed:false,document:{body:{}},location:{replace:url=>navigations.push(url)},close(){this.closed=true}};tabs.push(tab);return tab;
 }};
 vm.createContext(scope);vm.runInContext(HELPER,scope);const view=scope.FabricBrowserViews;
-for(const query of ['/fabric','show fabric','Show our Fabric!','open the fabric dashboard'])assert.ok(view.fabricCommand(query));
+for(const query of ['/dash','/dashboard','/fabric','show fabric','Show our Fabric!','open the fabric dashboard'])assert.ok(view.fabricCommand(query));
 for(const query of ['show fabric settings and update everyone','how do I show fabric','play fabric'])assert.ok(!view.fabricCommand(query));
 assert.equal(view.openFabric(),'https://fabric.example/fabric.html');assert.deepEqual(opens[0],['https://fabric.example/fabric.html','_blank','noopener']);
 const ref={artifacts:[{type:'image/png',name:'reef.png',url:'/api/present/secret'}]};
@@ -128,12 +128,12 @@ def test_dashboard_renders_unknown_and_untrusted_names_as_text():
     source=(ROOT/'signal-window/fabric-dashboard.js').read_text()
     script=r'''
 const vm=require('vm'),assert=require('assert');
-class Element{constructor(tag){this.tag=tag;this.children=[];this.textContent='';}append(...children){this.children.push(...children)}replaceChildren(...children){this.children=children}}
+class Element{constructor(tag){this.tag=tag;this.children=[];this.textContent='';this.dataset={};this.value='';}setAttribute(){}querySelectorAll(){return []}append(...children){this.children.push(...children)}replaceChildren(...children){this.children=children}}
 const ids={};for(const id of ['nodes','care','status','careStatus','refresh'])ids[id]=new Element(id);
 const offline='<img src=x onerror=alert(1)>';
-const ctx={URL,AbortController,Date,Promise,setTimeout,clearTimeout,setInterval:()=>{},document:{hidden:false,getElementById:id=>ids[id],createElement:tag=>new Element(tag)},fetch:async path=>({ok:true,json:async()=>path.endsWith('/care')?{nodes:[{node:offline,errors:[{check:'release',error:'unreachable'}]}]}:{nodes:{self:{identity:{name:'host'}},peers:[{name:offline,node_error:'offline'}]}}})};
+const ctx={URL,AbortController,Date,Promise,setTimeout,clearTimeout,setInterval:()=>{},document:{hidden:false,getElementById:id=>ids[id]||(ids[id]=new Element(id)),createElement:tag=>new Element(tag),createElementNS:(_,tag)=>new Element(tag),addEventListener:()=>{}},fetch:async path=>({ok:true,json:async()=>path.endsWith('/care')?{nodes:[{node:offline,errors:[{check:'release',error:'unreachable'}]}]}:{observed_at:Date.now()/1000,host:'host',nodes:[{name:'host',reachable:true,services:{},models:[]},{name:offline,reachable:false}],events:[]}})};
 vm.createContext(ctx);vm.runInContext(SOURCE,ctx);
-setImmediate(()=>{const strings=[];function visit(el){strings.push(el.textContent);for(const child of el.children)visit(child)}visit(ids.nodes);visit(ids.care);assert.ok(strings.includes(offline));assert.ok(strings.includes('Unreachable at last check'));assert.ok(strings.includes('Unknown'));assert.ok(ids.careStatus.textContent.includes('could not be checked'));assert.ok(!ids.refresh.disabled)});
+setImmediate(()=>{const strings=[];function visit(el){strings.push(el.textContent);for(const child of el.children)visit(child)}visit(ids.nodes);visit(ids.care);assert.ok(strings.includes(offline));assert.ok(strings.includes('Telemetry unavailable. This peer may be offline or need an update.'));assert.ok(strings.includes('Unknown'));assert.ok(ids.careStatus.textContent.includes('checks incomplete'));assert.ok(!ids.refresh.disabled)});
 '''.replace('SOURCE',json.dumps(source))
     subprocess.run(['node','-e',script],check=True)
 
@@ -163,7 +163,7 @@ async function run(query){await askFabric(query)}
 const vm=require('vm'),assert=require('assert');const order=[];
 const tab={closed:false,document:{body:{}},location:{replace:url=>order.push('navigate')},close(){this.closed=true}};
 const ctx={URL,AbortController,setTimeout,clearTimeout,location:{href:'https://fabric.example/',origin:'https://fabric.example'},open:()=>{order.push('open');return tab},document:{createElement:()=>({})},fetch:async()=>{order.push('fetch');return {ok:true,json:async()=>({text:'Saved image',artifacts:[{name:'reef',type:'image/png',url:'/api/present/result'}]})}}};
-vm.createContext(ctx);vm.runInContext(HELPER,ctx);vm.runInContext(SETUP+'\n'+HANDLER,ctx);
+vm.createContext(ctx);vm.runInContext(HELPER,ctx);ctx.window={};vm.runInContext(SETUP+'\n'+HANDLER,ctx);
 (async()=>{await ctx.run('/fabric');assert.deepEqual(order,['open']);order.length=0;await ctx.run('generate a picture of a reef');assert.equal(order[0],'open');assert.ok(order.includes('fetch'));assert.ok(order.includes('navigate'))})().catch(error=>{console.error(error);process.exit(1)});
 '''.replace('HELPER',json.dumps(helper)).replace('SETUP',json.dumps(setup)).replace('HANDLER',json.dumps(handler))
     result=subprocess.run(['node','-e',script],capture_output=True,text=True)

@@ -690,3 +690,10 @@ Use `./install.sh --mercury=install`, or `--mercury=off` to skip it.
 See [Mercury setup and ownership](docs/MERCURY.md).
 
 Printer discovery, document jobs and optional receipt-printer profiles: [LK Print](docs/PRINTING.md).
+
+### Fabric observatory
+
+Type `/dash` in Signal or Albert for the phone-friendly live Fabric dashboard:
+node constellation, services, resident models, operational event ticker, and
+backup/update receipts. It also opens directly at `/dash` on either host.
+[Dashboard and care details](docs/FABRIC-CARE.md#browser-observatory).
