@@ -5,7 +5,7 @@ import hashlib
 import json
 import random
 
-NAMES = ('Bars', 'Waves', 'Orbit', 'Tunnel', 'Stars', 'Plasma', 'Album Art', 'Black Hole', 'Rooftops', 'Spectrum', 'Moon Jelly', 'Firefly Garden', 'Clockwork Garden', 'Rain on Glass', 'Neon Reef', 'Aurora Loom', 'Paper Lanterns', 'Magnetic Field', 'Comet Trails', 'Orrery', 'Phosphor Rain', 'Kinetic Mobile', 'Haunted Hollow', 'Dune Sea', 'Harmonic Ink', 'Tide Pools', 'Switchyard', 'Flight Deck', 'Signal Bloom', 'Tape Echo', 'Deep Space Relay', 'Museum', 'Cycle')
+NAMES = ('Bars', 'Waves', 'Orbit', 'Tunnel', 'Stars', 'Plasma', 'Album Art', 'Black Hole', 'Rooftops', 'Spectrum', 'Moon Jelly', 'Firefly Garden', 'Clockwork Garden', 'Rain on Glass', 'Neon Reef', 'Aurora Loom', 'Paper Lanterns', 'Magnetic Field', 'Comet Trails', 'Orrery', 'Phosphor Rain', 'Kinetic Mobile', 'Haunted Hollow', 'Dune Sea', 'Harmonic Ink', 'Tide Pools', 'Switchyard', 'Flight Deck', 'Signal Bloom', 'Tape Echo', 'Deep Space Relay', 'Museum', 'ASCII Museum', 'Number Station', 'Prism Grid', 'Cycle')
 CYCLE_MODE = len(NAMES)
 CYCLE_INTERVAL_SECONDS = 10.0
 
@@ -49,6 +49,37 @@ def active_mode(mode, elapsed, enabled=None):
     return mode
 
 
+DIGITS=('111101101101111','010110010010111','111001111100111','111001111001111','101101111001001','111100111001111','111100111101111','111001001001001','111101111101111','111101111001111')
+
+def cinema_frame(name,width,height,phase,seed):
+    """Slow geometric motion and held readings, rather than flashing noise."""
+    if name=='Prism Grid':
+        band=max(3,width//12);tile=max(3,min(width//8,height//3))
+        drift=int(phase*.8);panel=int(phase//12)%3
+        rows=[]
+        for y in range(height):
+            row=[]
+            for x in range(width):
+                if panel==0:filled=((x+y*2+drift)//band)%2
+                elif panel==1:filled=(x//tile+y//tile)%2
+                else:filled=(abs(x-width//2)+2*abs(y-height//2)+drift)//band%2
+                row.append('█' if filled else ' ')
+            rows.append(''.join(row))
+        return rows
+    canvas=[[' ']*width for _ in range(height)]
+    digits=f'{(int(phase//4)*17+seed)%1000:03d}'
+    scale=max(1,min(width//13,height//7));left=max(0,(width-11*scale)//2);top=max(0,(height-5*scale)//2)
+    for number,char in enumerate(digits):
+        glyph=DIGITS[int(char)]
+        for y in range(5*scale):
+            for x in range(3*scale):
+                px=left+number*4*scale+x;py=top+y
+                if px<width and py<height and glyph[(y//scale)*3+x//scale]=='1':canvas[py][px]='█'
+    for x in range(width):
+        canvas[0][x]='━' if (x+int(phase))%8<5 else ' '
+        canvas[-1][x]='━' if (x-int(phase))%8<5 else ' '
+    return [''.join(row) for row in canvas]
+
 def frame(mode, width, height, phase, playing=True, seed=0, *, captions=None):
     width=max(1,min(240,int(width))); height=max(1,min(80,int(height)))
     t=float(phase) if playing else 0.0
@@ -59,7 +90,9 @@ def frame(mode, width, height, phase, playing=True, seed=0, *, captions=None):
         x=int(x); y=int(y)
         if 0<=x<width and 0<=y<height: canvas[y][x]=char
 
-    if NAMES[mode]=='Museum':
+    if NAMES[mode] in {'Number Station','Prism Grid'}:
+        return cinema_frame(NAMES[mode],width,height,t,seed)
+    if NAMES[mode] in {'Museum','ASCII Museum'}:
         import museum_art
         return museum_art.frame(width,height,t)
     if mode==0:

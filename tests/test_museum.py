@@ -180,3 +180,20 @@ def test_sorting_dates_and_details():
     assert [r['id'] for r in museum_desk.sorted_artworks(rows,'Artist')]==['1','2','3']
     assert [r['id'] for r in museum_desk.sorted_artworks(rows,'Century')]==['2','1','3']
     assert all(len(line)<=24 for line in museum_desk.artwork_info(rows[0],24))
+
+
+def test_saver_cache_bounded_verified_and_offline(tmp_path,monkeypatch):
+    import museum_cache
+    monkeypatch.setattr(Path,'home',lambda:tmp_path)
+    monkeypatch.setattr(museum_cache,'MAX_WORKS',2)
+    for number in range(1,4):
+        row=dict(art('aic-'+str(number)),sha256=museum.hashlib.sha256(JPEG).hexdigest())
+        museum_cache.store(row,JPEG,'owner')
+    root=museum_cache.folder()
+    assert not (root/'aic-1.jpg').exists()
+    assert len(json.loads((root/'catalog.json').read_text())['items'])==2
+    with pytest.raises(ValueError,match='checksum'):museum_cache.store(row,b'wrong','owner')
+    museum_art._checked=0;museum_art._stamp=None
+    first= museum_art.artwork(0)[1];second=museum_art.artwork(museum_art.INTERVAL)[1]
+    assert first.is_file() and second.is_file() and first!=second
+    assert 'ASCII Museum' in player_visuals.NAMES

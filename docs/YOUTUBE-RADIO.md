@@ -134,3 +134,15 @@ animations in the relevant picker if an existing saved selection excludes them.
 lk saver 'Tape Echo' --preview
 lk saver 'Deep Space Relay' --preview
 ```
+
+## LO and shared assistant tools
+
+Terminal LO understands requests such as `add https://youtu.be/VIDEO_ID to YTR`
+and `show my YouTube Radio queue`. Explicit additions use the configured CLI
+queue owner, return the owner's add receipt, and never start playback. A missing
+or ambiguous link prompts for one URL; errors are not reported as successful
+queue additions. Read-only profiles may inspect the queue but cannot add items.
+
+The shared assistant registry exposes `radio_queue` and `radio_add`, so inference
+can discover this capability as well as the deterministic command path. These
+are radio operations, not filesystem mutations or music-library searches.

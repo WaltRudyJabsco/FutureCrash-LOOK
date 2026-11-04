@@ -100,11 +100,21 @@ local work, overwrite existing favorites, or require the remote owner for later
 viewing. Individual `pin ID` uses the same verified copying path. These are explicit
 snapshots, not continuous background replication.
 
-**Museum** is one entry in the existing shared visualizer/saver collection. The
-graphical saver displays full images with captions; terminal music visuals render
-ASCII versions from the same local collection. No network work runs in the saver
-or animation loop. Artwork changes every twenty seconds. Existing saved enabled-
-visual selections remain unchanged; enable Museum if a custom selection omits it.
+**Museum** shows original images; **ASCII Museum** gives them a muted, shaded
+text-art treatment. Both are entries in the shared visualizer/saver list.
+Each graphical display selects a different artwork and color treatment using a
+shared clock and display slot (distinct works require enough available images).
+Artwork changes every twenty seconds. C changes colors; V changes visualizer.
+
+The graphical saver prepares artwork from the configured Museum owner in a
+background worker. It warms twelve images, then rotates through the owner's
+collection, retaining at most 64 works / 256 MiB in
+`~/.cache/look/museum-saver/`. Downloads are checksum-verified. Cached and locally
+saved artwork remain usable offline; an empty cache needs the owner reachable
+once. Network requests never block the drawing loop. This disposable cache is
+not a pinned collection or a backup; use `lk museum sync` for a complete local copy.
+Existing custom enabled-visual selections stay unchanged; enable either Museum
+entry in the picker to include it in Cycle.
 
 ## Storage and backup
 
@@ -134,3 +144,16 @@ retain source identity, museum attribution, rights label, original record link
 and image checksum. Artwork URLs are restricted to those museum hosts, including
 redirects; arbitrary URLs or SVG uploads are not accepted. Artvee and The Last
 Museum are not scraped or represented as supported APIs in this release.
+
+## Assistant and saver controls
+
+LO's shared tool registry includes read-only `museum_search`, returning actual
+collection metadata, owner-scoped image links and the gallery route. Metadata
+alone is not a visual inspection of an artwork.
+
+In both Museum saver modes, Right advances to the next display set and Left goes
+back. Each set steps by the number of displays, keeping their artwork distinct
+when enough images are available. Escape exits; C changes colors; V changes the
+shared visualizer. Number Station (large held digits) and Prism Grid (diagonal
+bands, checkerboards and diamonds) are also available in the shared saver/player
+list. Enable them in an existing custom Cycle selection if desired.

@@ -1,3 +1,4 @@
+import pytest
 """Download lifecycle and catalog tests without fetching external media."""
 import json
 import os
@@ -240,3 +241,9 @@ def test_reported_download_typo_and_link_separator():
     assert ytd.explicit_download(prompt)=={'node':'local','url':'https://www.youtube.com/watch?v=IquUIgyZ3Fo'}
     assert ytd.explicit_download('download this to the 3090 https://youtu.be/example')['node']=='3090'
     assert ytd.explicit_download('do not donwload this -- https://youtu.be/example') is None
+
+
+@pytest.fixture(autouse=True)
+def isolated_receipt_archive(tmp_path,monkeypatch):
+    from core import receipt_cards
+    monkeypatch.setattr(receipt_cards,'root',lambda:tmp_path/'receipt-cards')

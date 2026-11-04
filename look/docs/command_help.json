@@ -1,4 +1,5 @@
 {
+  "receipts": "LOOK HELP · receipts\n\nCOMMAND FORMS\nlk receipts [list|show ID|create TITLE --body TEXT|command NAME|print ID --printer NAME] [--node OWNER] [--columns 32|48]\n  Shared digital receipt cards and reviewed print preparation\nlk receipts [N]\n  Inspect transaction receipts\n\nMore: lk help all · lk doc · man lk\nFor command-specific help: lk COMMAND --help or lk help COMMAND",
   "work": "LOOK HELP · work\n\nCOMMAND FORMS\nlk work [DOCUMENT]\n  Read Markdown and open an inline interactive shell\n\nMore: lk help all · lk doc · man lk\nFor command-specific help: lk COMMAND --help or lk help COMMAND",
   "lh": "LOOK HELP · lh\n\nCOMMAND FORMS\nlh [PATH]\n  LOOK with hidden files shown\n\nMore: lk help all · lk doc · man lk\nFor command-specific help: lk COMMAND --help or lk help COMMAND",
   "hidden": "LOOK HELP · hidden\n\nCOMMAND FORMS\nlk hidden [PATH]\n  LOOK with hidden files shown\n\nMore: lk help all · lk doc · man lk\nFor command-specific help: lk COMMAND --help or lk help COMMAND",
@@ -56,7 +57,6 @@
   "preview": "LOOK HELP · preview\n\nCOMMAND FORMS\nlk preview <PATH>\n  Preview outside terminal\n\nMore: lk help all · lk doc · man lk\nFor command-specific help: lk COMMAND --help or lk help COMMAND",
   "reveal": "LOOK HELP · reveal\n\nCOMMAND FORMS\nlk reveal <PATH>\n  Reveal in Finder/file manager\n\nUSAGE\nusage: lk reveal PATH\n\nMore: lk help all · lk doc · man lk\nFor command-specific help: lk COMMAND --help or lk help COMMAND",
   "undo": "LOOK HELP · undo\n\nCOMMAND FORMS\nlk undo\n  Undo newest ready filesystem action\nlk undo list\n  Inspect undo history\nlk undo skip\n  Abandon newest blocked undo record\n\nUSAGE\nusage: lk undo [list|skip]\n\nMore: lk help all · lk doc · man lk\nFor command-specific help: lk COMMAND --help or lk help COMMAND",
-  "receipts": "LOOK HELP · receipts\n\nCOMMAND FORMS\nlk receipts [N]\n  Inspect transaction receipts\n\nMore: lk help all · lk doc · man lk\nFor command-specific help: lk COMMAND --help or lk help COMMAND",
   "system": "LOOK HELP · system\n\nCOMMAND FORMS\nlk system\n  System control surface\n\nMore: lk help all · lk doc · man lk\nFor command-specific help: lk COMMAND --help or lk help COMMAND",
   "doctor": "LOOK HELP · doctor\n\nCOMMAND FORMS\nlk doctor\n  Run LOOK diagnostics\nlk doctor island\n  Audit single-node offline autonomy\n\nMore: lk help all · lk doc · man lk\nFor command-specific help: lk COMMAND --help or lk help COMMAND",
   "machine": "LOOK HELP · machine\n\nCOMMAND FORMS\nlk machine\n  Machine summary\n\nMore: lk help all · lk doc · man lk\nFor command-specific help: lk COMMAND --help or lk help COMMAND",

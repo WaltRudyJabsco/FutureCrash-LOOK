@@ -4104,6 +4104,23 @@ class API(BaseHTTPRequestHandler):
             self.end_headers()
             shutil.copyfileobj(response,self.wfile,1024*1024)
 
+    def _receipts_request(self,payload=None):
+        try:
+            peer,_value=self._file_target()
+            data=payload or {'action':'list'}
+            if peer is not None:
+                return self.sendj(200,http_json(_copy_route(peer)+'/v1/receipts',data=data,timeout=20))
+            try:from . import receipt_cards
+            except ImportError:import receipt_cards
+            action=data.get('action','list')
+            if action=='list':result={'items':receipt_cards.listing(data.get('q',''))}
+            elif action in {'create','show'}:
+                row=receipt_cards.create(data.get('title'),data.get('body'),data.get('kind','note'),data.get('source','')) if action=='create' else receipt_cards.get(data.get('id',''))
+                result={'receipt':row,'text':receipt_cards.render(row,int(data.get('columns',32)))}
+            else:raise ValueError('Unknown receipt action')
+            return self.sendj(200,dict(result,ok=True,node=identity()['name']))
+        except Exception as exc:return self.sendj(400,{'ok':False,'error':str(exc)})
+
     def _museum_request(self,payload=None):
         try:
             peer,_value=self._file_target();parsed=urlparse(self.path);params=parse_qs(parsed.query)
@@ -4184,6 +4201,15 @@ class API(BaseHTTPRequestHandler):
             manager=_radio()
             if audio:return self._serve_file_range(manager.audio_file(item),'audio/mp4')
             state=manager.snapshot() if payload is None else manager.change(payload)
+            if state.get('radio_added'):
+                try:
+                    try:from . import receipt_cards
+                    except ImportError:import receipt_cards
+                    added=state['radio_added'];row=next(r for r in state['items'] if r['id']==added['id'])
+                    receipt_cards.create('YouTube Radio / '+str(row.get('title') or row['id']),
+                        'Queued for listening. Playback has not started.\n'+str(row.get('url',''))+'\nListen: lk ytr',
+                        'queued','YouTube Radio queue owner',event_key='radio-queued:'+str(row['id']))
+                except (OSError,ValueError,KeyError,StopIteration) as exc:state['receipt_warning']=str(exc)
             return self.sendj(200,dict(state,ok=True,node=identity()['name']))
         except Exception as exc:return self.sendj(400,{'ok':False,'error':str(exc)})
 
@@ -4873,6 +4899,7 @@ class API(BaseHTTPRequestHandler):
             try: from . import notifications
             except ImportError: import notifications
             return self.sendj(200,{'ok':True,'settings':notifications.settings()})
+        if path=="/v1/receipts":return self._receipts_request()
         if path in {"/v1/museum","/v1/museum/search","/v1/museum/image"}: return self._museum_request()
         if path in {"/v1/radio","/v1/radio/audio"}: return self._radio_request()
         if path == "/v1/downloads" or path.startswith("/v1/downloads/"): return self._downloads_request()
@@ -5230,6 +5257,7 @@ class API(BaseHTTPRequestHandler):
                 return self.sendj(200,result)
             except (ValueError,TypeError,OSError) as exc:
                 return self.sendj(400,{'ok':False,'error':str(exc)})
+        if path == "/v1/receipts":return self._receipts_request(d)
         if path == "/v1/museum": return self._museum_request(d)
         if path == "/v1/radio": return self._radio_request(d)
         if path == "/v1/downloads": return self._downloads_request(d)

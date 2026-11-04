@@ -51,6 +51,10 @@ class ActionSpec:
 # independent from presentation lets LOOK, Signal, Albert, and future clients
 # reason over the same action vocabulary without duplicating policy.
 ACTION_SPECS = (
+    ActionSpec("receipts_search", "receipts", "read", "observation", ("receipt cards", "saved receipts", "command cards")),
+    ActionSpec("museum_search", "museum", "read", "observation", ("museum", "artwork collection", "our paintings")),
+    ActionSpec("radio_queue", "radio", "read", "observation", ("youtube radio", "ytr queue")),
+    ActionSpec("radio_add", "radio", "local_effect", "action", ("add to ytr", "queue youtube radio")),
     ActionSpec("web_search", "web", "read", "observation", ("web search", "search online", "headlines", "news", "latest")),
     ActionSpec("video_search", "web", "read", "observation", ("youtube", "find video")),
     ActionSpec("video_download", "web", "local_effect", "mutation", ("download video", "download youtube", "save video")),
@@ -140,6 +144,9 @@ FAMILY_TOOLS.setdefault('schedule',set()).update({'notebook_search','notebook_ca
 # Families may need adjacent capabilities to complete a natural request.  These
 # are still narrow enough to stop the model wandering into unrelated toolsets.
 FAMILY_NEIGHBORS = {
+    "receipts": {"receipts","printing"},
+    "museum": {"museum"},
+    "radio": {"radio"},
     "web": {"web", "browser", "speech", "display"},
     "weather": {"weather", "speech"},
     "files": {"files", "display", "image"},
@@ -235,6 +242,9 @@ def _rule_scores(text: str) -> dict[str, float]:
         scores[family]=max(scores.get(family,0.0),value)
 
     patterns=(
+        ("receipts", r"\b(receipt cards|saved receipts|command cards)\b", 1.0),
+        ("museum", r"\b(museum|artwork collection|our paintings)\b", 1.0),
+        ("radio", r"\b(ytr|youtube\s+radio)\b", 1.0),
         ("knowledge", r"\b(dictionary|thesaurus|synonyms?|antonyms?|spellcheck|spelling|define|definition|word meaning)\b", .97),
         ("games", r"\b(gtnw|chess|checkers|draughts|backgammon|tic tac toe|ttt|play a game|games?)\b", .995),
         ("weather", r"\b(weather|forecast|temperature|temp|rain(?:ing)?|snow(?:ing)?|wind(?:y)?|humidity|precipitation)\b", .995),

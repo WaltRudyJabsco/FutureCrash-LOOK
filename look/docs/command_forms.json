@@ -1,5 +1,11 @@
 [
   [
+    "lk receipts",
+    "[list|show ID|create TITLE --body TEXT|command NAME|print ID --printer NAME] [--node OWNER] [--columns 32|48]",
+    "system",
+    "Shared digital receipt cards and reviewed print preparation"
+  ],
+  [
     "lk work",
     "[DOCUMENT]",
     "files",
