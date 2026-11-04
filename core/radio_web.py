@@ -29,7 +29,7 @@ def handle(handler,node_url,payload=None):
             with urllib.request.urlopen(node_url+'/v1/nodes',timeout=5) as response:
                 peers=json.load(response).get('peers',[])
         except (OSError,ValueError):pass
-        return send(handler,200,{'owner':owner,'owners':['local',*[p['node'] for p in peers if p.get('trusted') and isinstance(p.get('node'),str)]]})
+        return send(handler,200,{'owner':owner,'owners':['local',*[p['name'] for p in peers if p.get('trusted') and isinstance(p.get('name'),str)]]})
     route={'/api/ytr':'/v1/radio','/api/ytr/audio':'/v1/radio/audio'}.get(parsed.path)
     if route is None:raise ValueError('Unknown radio route')
     if payload is not None:

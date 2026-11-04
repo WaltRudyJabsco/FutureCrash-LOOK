@@ -66,7 +66,7 @@ def test_radio_peer_preserves_partial_audio(monkeypatch):
 def test_defaults_follow_cli_owner(tmp_path,monkeypatch):
     monkeypatch.setattr(radio_web.Path,'home',lambda:tmp_path)
     folder=tmp_path/'.config/look';folder.mkdir(parents=True);(folder/'radio.json').write_text(json.dumps({'node':'studio'}))
-    response=Response(json.dumps({'peers':[{'node':'studio','trusted':True},{'node':'stranger','trusted':False}]}).encode())
+    response=Response(json.dumps({'peers':[{'name':'studio','node':{'identity':{'name':'studio'}},'trusted':True},{'name':'offline-laptop','node':None,'trusted':True},{'name':'stranger','node':None,'trusted':False}]}).encode())
     monkeypatch.setattr(radio_web.urllib.request,'urlopen',lambda *a,**k:response)
     h=handler('/api/ytr/config');radio_web.handle(h,'http://local')
-    assert json.loads(h.wfile.getvalue())=={'owner':'studio','owners':['local','studio']}
+    assert json.loads(h.wfile.getvalue())=={'owner':'studio','owners':['local','studio','offline-laptop']}
