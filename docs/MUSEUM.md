@@ -95,6 +95,12 @@ unavailable. Online search and mutations require the node service.
 
 ## Web gallery
 
+Open artwork supports Left/Right arrows and Previous/Next buttons, wrapping within
+that view's displayed collection, Favorites, search results or offline filter.
+The counter shows your position. Slideshow supports Left/Right, Space to pause/play,
+F for fullscreen and Escape to exit; buttons show the shortcuts. Text-entry fields
+retain their normal keyboard behavior.
+
 Background refresh preserves existing artwork elements rather than reloading images
 on each progress check. Only an active download shows a progress bar and Stop
 control. Complete, cancelled, interrupted and below-target jobs show a finished
