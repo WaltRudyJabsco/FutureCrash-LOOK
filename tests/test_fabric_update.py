@@ -116,3 +116,13 @@ def test_busy_sync_is_followed_until_finished(monkeypatch):
     values=iter([{'ok':True,'state':'sync already running'},{'ok':True,'peers':[]}])
     result=update.wait_for(lambda:next(values),lambda r:r.get('state')!='sync already running',120)
     assert result=={'ok':True,'peers':[]}
+
+
+def test_restart_disconnect_wrapped_as_runtime_error_is_retried(monkeypatch):
+    monkeypatch.setattr(update.time,'sleep',lambda _:None)
+    calls=iter([RuntimeError('node restarting'),OSError('connection refused'),{'state':'healthy','digest':'expected'}])
+    def read_status():
+        result=next(calls)
+        if isinstance(result,Exception):raise result
+        return result
+    assert update.wait_for(read_status,lambda r:r.get('digest')=='expected')['state']=='healthy'
