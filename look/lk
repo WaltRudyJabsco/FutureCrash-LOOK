@@ -21406,6 +21406,7 @@ _COMMANDS = [
     ("lk player", "", "media", "Live LOOK miniplayer"),
     ("lk lock", "[setup|status]", "system", "PIN curtain settings and actions (not an OS lock)"),
     ("lk lk", "", "system", "Activate the Fabric PIN curtain"),
+    ("lk lktl", "", "system", "They Live-inspired Fabric PIN curtain"),
     ("lk unlock", "", "system", "Dismiss Fabric curtains with your PIN"),
     ("lk saver", "[start|list|setup|text [reset]|NAME] [--display all|current] [--palette NAME] [--interval SECONDS] [--matching|--independent] [--invert|--no-invert] [--preview] [--seconds N] [--save]", "media", "Screensaver picker, previews, and settings"),
     ("lk sv", "[NAME|cycle] [OPTIONS]", "media", "Start saved ambient screensaver; Escape dismisses"),
@@ -22670,14 +22671,14 @@ def main():
         import command_help
         return command_help.show(sys.argv[2:])
     if len(sys.argv)>2 and any(flag in sys.argv[2:] for flag in ('--help','-h')):
-        if sys.argv[1] not in {'web','terminal','saver','sv','lock','unlock','lk','notes','tasks','reminders','ytd','ytr','museum','describe','notifications'} and not (sys.argv[1] in {'media','music'} and sys.argv[2] in {'import','disc','rip','edit','storage'}):
+        if sys.argv[1] not in {'web','terminal','saver','sv','lock','unlock','lk','lktl','notes','tasks','reminders','ytd','ytr','museum','describe','notifications'} and not (sys.argv[1] in {'media','music'} and sys.argv[2] in {'import','disc','rip','edit','storage'}):
             import command_help
             return command_help.show([word for word in sys.argv[1:] if word not in {'--help','-h'}])
     if len(sys.argv)>=2 and sys.argv[1] in {"notes","tasks","reminders"}:
         import notebook
         kind={"notes":None,"tasks":"task","reminders":"reminder"}[sys.argv[1]]
         return notebook.main(sys.argv[2:],kind=kind,read_key=_read_tty_key,hints=_media_hints)
-    if len(sys.argv)>=2 and sys.argv[1] in {'lock','unlock','lk'}:
+    if len(sys.argv)>=2 and sys.argv[1] in {'lock','unlock','lk','lktl'}:
         import curtain_client
         return curtain_client.main(sys.argv[2:],sys.argv[1])
     if len(sys.argv)>=2 and sys.argv[1] in {'saver','sv'}:

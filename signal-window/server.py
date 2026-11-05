@@ -1235,7 +1235,7 @@ class App(BaseHTTPRequestHandler):
                 if not 0<size<=1024:raise ValueError('Invalid request size')
                 data=json.loads(self.rfile.read(size))
                 if data.get('action') not in {'lock','unlock'}:raise ValueError('Use lock or unlock')
-                return self.json(200,_node_call('/v1/curtain',{'action':data['action'],'pin':data.get('pin')},timeout=12))
+                return self.json(200,_node_call('/v1/curtain',{'action':data['action'],'pin':data.get('pin'),'variant':data.get('variant','standard')},timeout=12))
             except Exception as exc:return self.json(400,{'error':str(exc)})
 
         if urlparse(self.path).path.startswith('/api/museum'):

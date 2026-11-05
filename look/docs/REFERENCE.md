@@ -303,6 +303,8 @@ lk lock [setup|status]
   [system] PIN curtain settings and actions (not an OS lock)
 lk lk
   [system] Activate the Fabric PIN curtain
+lk lktl
+  [system] They Live-inspired Fabric PIN curtain
 lk unlock
   [system] Dismiss Fabric curtains with your PIN
 lk saver [start|list|setup|text [reset]|NAME] [--display all|current] [--palette NAME] [--interval SECONDS] [--matching|--independent] [--invert|--no-invert] [--preview] [--seconds N] [--save]
@@ -1218,6 +1220,8 @@ target — URL, search WORDS, home, or list
 look/saver.py
 
 Parser arguments and recognized option tokens (grouped by handler):
+--curtain-set — use a named set for this desktop curtain; default restores Flight Deck
+--delete-set — delete a named set
 --display — current means the display under the pointer at launch
 --independent — independent scenes and colors across displays
 --interval — seconds per scene, 5–600
@@ -1226,7 +1230,9 @@ Parser arguments and recognized option tokens (grouped by handler):
 --palette
 --preview — open a small graphical preview
 --save — save supplied settings without launching
+--save-set — save the current enabled scenes as a named set
 --seconds — dismiss automatically after this many seconds
+--set — launch a named saver set
 selection — scene name, cycle, start, list, setup, or text [reset]
 
 LOCAL SPEECH INPUT

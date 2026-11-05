@@ -2,21 +2,36 @@
 import concurrent.futures
 import time
 from PySide6.QtCore import Qt,QTimer
-from PySide6.QtGui import QPainter,QColor
+from PySide6.QtGui import QPainter,QColor,QFont,QFontMetricsF
 from PySide6.QtWidgets import QApplication,QInputDialog,QLineEdit
 import curtain_client
 import saver
 import saver_gui
 
 
+THEY_LIVE_WORDS=('OBEY','CONSUME','REPRODUCE','SLEEP','CONFORM','SUBMIT','STAY ASLEEP','DO NOT QUESTION')
+THEY_LIVE_SECONDS=12
+
+def they_live_word(now,epoch):
+    return THEY_LIVE_WORDS[int(max(0,now-epoch)//THEY_LIVE_SECONDS)%len(THEY_LIVE_WORDS)]
+
+
 class CurtainWindow(saver_gui.SaverWindow):
     def paintEvent(self,event):
+        if self.controller.variant=='they-live':
+            painter=QPainter(self);painter.fillRect(self.rect(),QColor('white'));painter.setPen(QColor('black'))
+            text=they_live_word(time.time(),self.controller.variant_epoch)
+            font=QFont('Arial');font.setWeight(QFont.Weight.Black);font.setPixelSize(100)
+            metrics=QFontMetricsF(font)
+            scale=min(self.width()*.88/max(1,metrics.horizontalAdvance(text)),self.height()*.65/metrics.height())
+            font.setPixelSize(max(1,int(100*scale)));painter.setFont(font)
+            painter.drawText(self.rect(),Qt.AlignmentFlag.AlignCenter,text);painter.end();return
         super().paintEvent(event)
         painter=QPainter(self);painter.fillRect(12,12,min(570,self.width()-24),32,QColor('#101719'))
         painter.setPen(QColor('#e6e6cf'));painter.drawText(22,33,'LOOK CURTAIN · Enter/click: PIN · C colors · V visual');painter.end()
     def keyPressEvent(self,event):
         if event.isAutoRepeat():return
-        if event.key() in {Qt.Key.Key_C,Qt.Key.Key_V}:super().keyPressEvent(event)
+        if self.controller.variant!='they-live' and event.key() in {Qt.Key.Key_C,Qt.Key.Key_V}:super().keyPressEvent(event)
         else:self.controller.prompt()
     def mousePressEvent(self,event):self.controller.prompt()
     def closeEvent(self,event):
@@ -26,7 +41,7 @@ class CurtainWindow(saver_gui.SaverWindow):
 
 class CurtainController(saver_gui.SaverController):
     def __init__(self,app):
-        self.dialog=None;self.pending=None
+        self.dialog=None;self.pending=None;self.variant='standard';self.variant_epoch=0
         self.executor=concurrent.futures.ThreadPoolExecutor(max_workers=1)
         settings=saver.curtain_settings()
         super().__init__(app,settings)
@@ -51,6 +66,7 @@ class CurtainController(saver_gui.SaverController):
             if not self.pending.done():return
             try:
                 state=self.pending.result()
+                self.variant=state.get('variant','standard');self.variant_epoch=state.get('revision',0)/1e9
                 captions=tuple(state.get('captions',[]))
                 for window in self.windows.values():window.run.captions=captions
                 if not state.get('locked',True):self.dismiss();return

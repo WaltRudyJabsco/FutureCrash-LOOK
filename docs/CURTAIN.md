@@ -53,3 +53,16 @@ not the plaintext PIN. Treat it as private: a four-digit PIN has a small search
 space and this feature is not intended to resist an attacker. If you forget it,
 exit the curtain through your OS, stop the curtain process, remove this file only
 on affected nodes, then choose a fresh PIN using `lk lock setup`.
+
+## They Live Easter egg
+
+`lk lktl` activates a special curtain across reachable paired nodes: white screens,
+huge black lettering, and one ominous phrase held for twelve seconds. Open Signal
+and Albert pages follow the same mode; `/lktl` also starts it from either chat.
+The sequence uses the shared event time so attached displays and peers agree.
+Click or press a key to reveal the usual four-digit PIN prompt; `lk unlock` works
+as usual. This remains an ambient PIN curtain, not an operating-system lock.
+
+The special mode belongs to that lock event. It does not change saved saver sets,
+palettes or the normal curtain choice. The next `lk lk` or `/lock` uses your normal
+curtain again. Offline peers are reported by the existing delivery status.

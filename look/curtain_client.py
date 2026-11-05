@@ -52,7 +52,7 @@ def main(args,command='lock'):
     if opts.action is None and command=='lock':return picker()
     action=opts.action or ('unlock' if command=='unlock' else 'lock')
     try:
-        fields={}
+        fields={'variant':'they-live'} if command=='lktl' and action=='lock' else {}
         if action=='setup':
             if request().get('configured'):fields['old_pin']=read_pin('Current PIN: ')
             fields['pin']=read_pin('New four-digit PIN: ')
