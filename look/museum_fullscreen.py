@@ -16,7 +16,7 @@ def launch(owner,rows,index,playing=False):
 def main(payload):
     from PySide6.QtCore import Qt,QTimer
     from PySide6.QtGui import QPixmap,QCursor
-    from PySide6.QtWidgets import QApplication,QWidget,QVBoxLayout,QLabel,QInputDialog
+    from PySide6.QtWidgets import QMessageBox, QApplication,QWidget,QVBoxLayout,QLabel,QInputDialog
     from museum_desk import Client,Background
     app=QApplication.instance() or QApplication(['LOOK Museum']);client=Client(payload['owner'])
     class Viewer(QWidget):
@@ -26,7 +26,7 @@ def main(payload):
             self.setWindowTitle('LOOK Museum');self.setStyleSheet('background:#101719;color:#eeeeea')
             layout=QVBoxLayout(self);self.picture=QLabel();self.picture.setAlignment(Qt.AlignmentFlag.AlignCenter);self.picture.setMinimumSize(1,1);layout.addWidget(self.picture,1)
             self.info=QLabel();self.info.setWordWrap(True);layout.addWidget(self.info)
-            self.keys=QLabel('←/→ artwork · Space pause/play · F fullscreen · f favorite · p keep here · m collection · x removal/undo · Esc back');self.keys.setWordWrap(True);self.keys.setStyleSheet('color:#9dbbd7');layout.addWidget(self.keys)
+            self.keys=QLabel('←/→ artwork · Space pause/play · F fullscreen · f favorite · k keep here · m collection · x removal/undo · p print · Esc back');self.keys.setWordWrap(True);self.keys.setStyleSheet('color:#9dbbd7');layout.addWidget(self.keys)
             self.timer=QTimer(self);self.timer.timeout.connect(self.poll);self.timer.start(100)
             self.slides=QTimer(self);self.slides.timeout.connect(self.advance);self.slides.start(10000)
             self.setScreen(app.screenAt(QCursor.pos()) or app.primaryScreen())
@@ -51,7 +51,27 @@ def main(payload):
             if not self.future or not self.future.done():return
             try:
                 result=self.future.result()
-                if self.kind=='image':
+                self.future=None  # Modal dialogs run Qt timers; consume each result only once.
+                if self.kind=='print-printers':
+                    import printing
+                    rows=result.get('printers',[])
+                    rows.sort(key=lambda row:not any(r.get('profile',{}).get('kind')=='escpos' and not any(word in r.get('status','').lower() for word in ('paused','disabled','unavailable')) for r in row['routes']))
+                    if not rows:raise ValueError('No printers available')
+                    labels=[r['label'] for r in rows]
+                    choice,ok=QInputDialog.getItem(self,'Print artwork','Printer',labels,0,False)
+                    if ok:
+                        selected=rows[labels.index(choice)]
+                        row=dict(self.rows[self.index])
+                        def prepare():return printing.prepare_file(selected['id'],client.image(row))
+                        self.kind='print-plan';self.future=self.pool.submit(prepare);self.info.setText('Preparing print…');return
+                elif self.kind=='print-plan':
+                    import printing
+                    paper=(' · about %.1f cm of paper'%(result['estimated_paper_mm']/10)) if 'estimated_paper_mm' in result else ''
+                    answer=QMessageBox.question(self,'Print artwork',result['destination']+' · one copy'+paper+'\nPrint this artwork?',QMessageBox.StandardButton.Yes|QMessageBox.StandardButton.No,QMessageBox.StandardButton.No)
+                    self.kind='print-result';self.future=self.pool.submit(printing.request,'send' if answer==QMessageBox.StandardButton.Yes else 'discard',result['node'],ident=result['id'],confirm=True);return
+                elif self.kind=='print-result':
+                    self.info.setText('Print '+result.get('state','unknown')+' · '+result.get('receipt',{}).get('note',''));self.future=None;return
+                elif self.kind=='image':
                     self.image=QPixmap(str(result))
                     if self.image.isNull():raise ValueError('Image could not be decoded')
                     self.fit()
@@ -70,8 +90,11 @@ def main(payload):
                 self.index=(self.index+(-1 if event.key()==Qt.Key.Key_Left else 1))%len(self.rows);self.load();self.slides.start(10000);return
             if event.key()==Qt.Key.Key_Space:self.playing=not self.playing;self.label();return
             key=event.text();row=self.rows[self.index]
-            if key not in ('f','p','m','x'):return
-            self.playing=False;fields={'id':row['id']};action={'f':'favorite','p':'pin','x':'mark-removal'}.get(key)
+            if key in ('p','N'):
+                import printing
+                self.playing=False;self.kind='print-printers';self.future=self.pool.submit(printing.destinations);self.info.setText('Finding printers…');return
+            if key not in ('f','k','m','x'):return
+            self.playing=False;fields={'id':row['id']};action={'f':'favorite','k':'pin','x':'mark-removal'}.get(key)
             if key=='m':
                 # Collections come from the already cached owner catalog; no network in this dialog.
                 import museum_library

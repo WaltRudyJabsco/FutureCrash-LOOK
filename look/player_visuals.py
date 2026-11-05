@@ -5,7 +5,7 @@ import hashlib
 import json
 import random
 
-NAMES = ('Bars', 'Waves', 'Orbit', 'Tunnel', 'Stars', 'Plasma', 'Album Art', 'Black Hole', 'Rooftops', 'Spectrum', 'Moon Jelly', 'Firefly Garden', 'Clockwork Garden', 'Rain on Glass', 'Neon Reef', 'Aurora Loom', 'Paper Lanterns', 'Magnetic Field', 'Comet Trails', 'Orrery', 'Phosphor Rain', 'Kinetic Mobile', 'Haunted Hollow', 'Dune Sea', 'Harmonic Ink', 'Tide Pools', 'Switchyard', 'Flight Deck', 'Signal Bloom', 'Tape Echo', 'Deep Space Relay', 'Museum', 'ASCII Museum', 'Number Station', 'Prism Grid', 'Cycle')
+NAMES = ('Bars', 'Waves', 'Orbit', 'Tunnel', 'Stars', 'Plasma', 'Album Art', 'Black Hole', 'Rooftops', 'Spectrum', 'Moon Jelly', 'Firefly Garden', 'Clockwork Garden', 'Rain on Glass', 'Neon Reef', 'Aurora Loom', 'Paper Lanterns', 'Magnetic Field', 'Comet Trails', 'Orrery', 'Phosphor Rain', 'Kinetic Mobile', 'Haunted Hollow', 'Dune Sea', 'Harmonic Ink', 'Tide Pools', 'Switchyard', 'Flight Deck', 'Signal Bloom', 'Tape Echo', 'Deep Space Relay', 'Museum', 'ASCII Museum', 'Number Station', 'Prism Grid', 'Parallax Gates', 'Silk Current', 'Cycle')
 CYCLE_MODE = len(NAMES)
 CYCLE_INTERVAL_SECONDS = 10.0
 
@@ -90,6 +90,8 @@ def frame(mode, width, height, phase, playing=True, seed=0, *, captions=None):
         x=int(x); y=int(y)
         if 0<=x<width and 0<=y<height: canvas[y][x]=char
 
+    if NAMES[mode] in {'Parallax Gates','Silk Current'}:
+        return gallery_motion_frame(NAMES[mode],width,height,t,seed)
     if NAMES[mode] in {'Number Station','Prism Grid'}:
         return cinema_frame(NAMES[mode],width,height,t,seed)
     if NAMES[mode] in {'Museum','ASCII Museum'}:
@@ -907,3 +909,34 @@ def deep_space_relay_frame(width,height,phase,seed=0):
         put(round(cx+math.cos(a)*distance*2),round(cy+math.sin(a)*distance),'*' if math.sin(phase*.5+i)>.3 else '.')
     label=labels[1+int(phase/12)%3];put(max(0,(width-len(label))//2),height-2,label)
     return [''.join(row) for row in canvas]
+
+
+def gallery_motion_frame(name,width,height,phase,seed=0):
+    """Shared ambient geometry: slow motion stays readable on large displays."""
+    rows=[]
+    drift=phase*.24+seed*.017
+    for y in range(height):
+        ny=(2*y+1-height)/max(1,height)
+        row=[]
+        for x in range(width):
+            nx=(2*x+1-width)/max(1,width)
+            if name=='Parallax Gates':
+                # Nested square portals sway in depth, with broad gaps between ribs.
+                cx=.16*math.sin(drift);cy=.12*math.cos(drift*.7)
+                radius=max(abs(nx-cx),abs(ny-cy))
+                band=(radius*5-drift)%1
+                char='█' if band<.17 else '▓' if band<.23 else ' '
+                if abs(nx-cx)<.018 and radius>.3:char='│'
+            else:
+                # Three travelling ribbons retain negative space between their edges.
+                char=' '
+                for ribbon in range(3):
+                    center=.52*math.sin(nx*2.4+drift+ribbon*2.1)
+                    center+=.12*math.sin(nx*5-drift*.6+ribbon)
+                    distance=abs(ny-center)
+                    if distance<.035:char='━';break
+                    if distance<.095:char='▒'
+                    elif distance<.16 and char==' ':char='·'
+            row.append(char)
+        rows.append(''.join(row))
+    return rows

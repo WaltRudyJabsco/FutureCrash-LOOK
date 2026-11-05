@@ -1,5 +1,7 @@
 """Authenticated museum gallery shared by Signal and Albert."""
 import json
+import base64
+import re
 from pathlib import Path
 import urllib.parse
 import urllib.request
@@ -8,8 +10,44 @@ try:from .radio_web import send
 except ImportError:from radio_web import send
 
 
+def print_request(node_url,payload=None):
+    """Use the existing local Fabric gateway; browser input never supplies URLs/files."""
+    def request(path,value=None):
+        req=urllib.request.Request(node_url+path,data=None if value is None else json.dumps(value).encode(),headers={'Content-Type':'application/json'})
+        try:
+            with urllib.request.urlopen(req,timeout=60) as response:return json.load(response)
+        except urllib.error.HTTPError as exc:
+            try:detail=json.load(exc).get('error')
+            except (ValueError,AttributeError):detail=None
+            raise ValueError(detail or 'Print service returned HTTP '+str(exc.code)) from exc
+    if payload is not None and not isinstance(payload,dict):raise ValueError('Invalid print request')
+    if payload and payload.get('action') in {'send','discard'}:
+        if set(payload)-{'action','node','id','confirm'} or payload.get('confirm') is not True:raise ValueError('Explicit print confirmation required')
+        if not re.fullmatch(r'[a-f0-9]{32}',str(payload.get('id',''))):raise ValueError('Invalid print plan')
+        return request('/v1/print?'+urllib.parse.urlencode({'target':payload.get('node','local')}),{'action':payload['action'],'ident':payload['id'],'confirm':True})
+    catalog=request('/v1/print/fabric')
+    def usable(route):return not re.search(r'\b(disabled|paused|unavailable)\b',route.get('status',''),re.I)
+    printers=catalog.get('printers',[])
+    printers.sort(key=lambda row:not any(usable(r) and r.get('profile',{}).get('kind')=='escpos' for r in row['routes']))
+    if payload is None:return {'printers':printers,'errors':catalog.get('errors',[])}
+    if payload.get('action')!='prepare' or set(payload)-{'action','id','target','printer'}:raise ValueError('Unknown museum print action')
+    ident=str(payload.get('id',''))
+    if not re.fullmatch(r'(met|aic)-[1-9][0-9]{0,9}',ident):raise ValueError('Invalid artwork')
+    matches=[row for row in printers if row['id']==payload.get('printer')]
+    if len(matches)!=1:raise ValueError('Select a discovered printer')
+    destination=matches[0];routes=[r for r in destination['routes'] if usable(r)]
+    if not routes:raise ValueError('Printer is paused or unavailable')
+    route=sorted(routes,key=lambda r:(r['node']!=catalog.get('local_node'),r['node'],r['name']))[0]
+    url=node_url+'/v1/museum/image?'+urllib.parse.urlencode({'target':payload.get('target','local'),'id':ident})
+    with urllib.request.urlopen(url,timeout=45) as response:data=response.read(3*1024*1024+1)
+    if not 0<len(data)<=3*1024*1024:raise ValueError('Artwork exceeds the 3 MiB print limit')
+    plan=request('/v1/print?'+urllib.parse.urlencode({'target':route['node']}),{'action':'prepare','queue':route['name'],'data':base64.b64encode(data).decode(),'filename':ident+'.jpg','kind':'receipt-image' if route.get('profile',{}).get('kind')=='escpos' else 'document','options_value':{'copies':1}})
+    return dict(plan,destination=destination['label'])
+
+
 def handle(handler,node_url,payload=None):
     parsed=urllib.parse.urlsplit(handler.path)
+    if parsed.path=='/api/museum/print':return send(handler,200,print_request(node_url,payload))
     if parsed.path=='/museum':return send(handler,200,PAGE,'text/html; charset=utf-8')
     if parsed.path=='/api/museum/config':
         if payload is not None:raise ValueError('Configuration is read-only')
@@ -55,7 +93,7 @@ header{border-top:4px solid var(--brass)}header small{color:var(--brass);letter-
 <div class="actions"><select id="collection-choice" aria-label="Named collection" hidden></select><button id="new-collection">New collection</button><button id="featured">Download museum highlights</button><label><input id="rotation" type="checkbox"> Daily refill: 1,000 to explore + Favorites</label><label><input id="offline-only" type="checkbox"> Available offline on this host</label><label><input id="shuffle" type="checkbox"> Shuffle slideshow</label></div><form id="search"><input id="query" type="search" placeholder="Artist, subject, period…" aria-label="Search art"><select id="source" aria-label="Museum source" hidden><option value="met">The Met</option><option value="aic">Art Institute of Chicago</option></select><button class="primary">Search</button></form>
 <details><summary>Build starter library</summary><p>Chosen themes across painting, prints, sculpture, photography and decorative arts. Downloads only works marked public domain by the museum. Up to 20 MB per image; 3 GiB collection budget. Saved items are reused.</p><label>Works <input id="count" type="number" min="1" max="1000" value="1000"></label> <button id="starter">Build on selected owner</button></details>
 <div id="job" hidden></div><p id="status" role="status" aria-live="polite">Opening the collection…</p><div id="grid"></div><div class="actions"><button id="previous" hidden>Previous page</button><button id="next" hidden>Next page</button></div>
-</main><dialog id="detail"><div id="detail-content"><div class="actions"><button id="close">Close</button><button id="detail-prev" aria-label="Previous artwork">← Previous</button><button id="detail-next" aria-label="Next artwork">Next →</button><span id="detail-position" class="muted" aria-live="polite"></span></div><button id="detail-full">Fullscreen</button><div id="detail-actions" class="actions"></div><p id="detail-status" role="status"></p><img id="large" alt=""><h2 id="title"></h2><p id="credit"></p><p id="detail-text"></p><a id="origin" target="_blank" rel="noopener">View museum record ↗</a></div></dialog>
+</main><dialog id="print-dialog"><h2>Print artwork</h2><p id="print-title"></p><label>Printer <select id="print-printer"></select></label><p id="print-status" role="status"></p><div class="actions"><button id="print-review">Review print</button><button id="print-send" hidden>Print one copy</button><button id="print-close">Cancel</button></div></dialog><dialog id="detail"><div id="detail-content"><div class="actions"><button id="close">Close</button><button id="detail-prev" aria-label="Previous artwork">← Previous</button><button id="detail-next" aria-label="Next artwork">Next →</button><span id="detail-position" class="muted" aria-live="polite"></span></div><button id="detail-full">Fullscreen</button><div id="detail-actions" class="actions"></div><p id="detail-status" role="status"></p><img id="large" alt=""><h2 id="title"></h2><p id="credit"></p><p id="detail-text"></p><a id="origin" target="_blank" rel="noopener">View museum record ↗</a></div></dialog>
 <div id="show" hidden><img id="slide-image" alt=""><p id="slide-caption"></p><div id="slide-actions" class="actions"></div><p id="slide-status" role="status"></p><div class="actions"><button id="slide-prev" aria-keyshortcuts="ArrowLeft">← Previous</button><button id="slide-pause" aria-keyshortcuts="Space" title="Space: pause or play">Pause · Space</button><button id="slide-next" aria-keyshortcuts="ArrowRight">Next →</button><button id="full" aria-keyshortcuts="f">Fullscreen · F</button><button id="exit" aria-keyshortcuts="Escape">Exit · Esc</button></div></div>
 <script src="/browser-views.js"></script><script>
 'use strict';const $=id=>document.getElementById(id);let owner='local',mode='saved',items=[],page=1,more=false,busy=false,slides=[],slide=0,timer=null,requestNumber=0,collections={},collectionId="",offline=false,detailRow=null,detailRows=[],detailIndex=0;
@@ -80,8 +118,30 @@ function updateItems(rows){
 }
 function visible(){return items.filter(x=>(mode==='review'?!!x.removal_due:!x.removal_due)&&(mode!=='saved'||!x.favorite)&&(mode!=='favorites'||x.favorite)&&(mode!=='collections'||(x.collections||[]).includes(collectionId))&&(!$('offline-only').checked||x.available_offline))}
 function collectionChoices(){const select=$('collection-choice');select.replaceChildren();for(const [id,value] of Object.entries(collections)){const option=document.createElement('option');option.value=id;option.textContent=value.name;select.append(option)}if(!collections[collectionId])collectionId=Object.keys(collections)[0]||'';select.value=collectionId;select.hidden=mode!=='collections'}
+let printRow=null,printPlan=null,printAttempted=false,printBusy=false,printEpoch=0;
+async function printAPI(value){const response=await fetch('/api/museum/print',{method:value?'POST':'GET',headers:value?{'Content-Type':'application/json'}:{},body:value?JSON.stringify(value):undefined});const data=await response.json();if(!response.ok||data.error)throw Error(data.error||'Print unavailable');return data}
+async function openPrint(row){
+ if(printBusy)return;
+ if(document.fullscreenElement)await document.exitFullscreen();
+ if(timer){clearInterval(timer);timer=null;$('slide-pause').textContent='Play · Space'}
+ const epoch=++printEpoch;printRow={...row};printPlan=null;printAttempted=false;$('print-title').textContent=row.title;$('print-send').hidden=true;$('print-review').disabled=true;$('print-status').textContent='Finding printers…';$('print-dialog').showModal();
+ try{const data=await printAPI();if(epoch!==printEpoch)return;$('print-printer').replaceChildren();for(const printer of data.printers){const option=document.createElement('option');option.value=printer.id;option.textContent=printer.label;$('print-printer').append(option)}$('print-review').disabled=!data.printers.length;$('print-status').textContent=data.printers.length?'Choose a printer, then review. Nothing has printed.':'No printers available.'}catch(e){if(epoch===printEpoch)$('print-status').textContent=e.message}
+}
+async function discardPrint(){if(printPlan&&!printAttempted){const plan=printPlan;printPlan=null;await printAPI({action:'discard',node:plan.node,id:plan.id,confirm:true})}}
+$('print-printer').onchange=()=>{discardPrint().catch(e=>$('print-status').textContent=e.message);$('print-send').hidden=true;$('print-status').textContent='Review this destination before printing.'};
+$('print-review').onclick=async()=>{const button=$('print-review');printBusy=true;$('print-close').disabled=true;button.disabled=true;$('print-printer').disabled=true;try{await discardPrint();printPlan=await printAPI({action:'prepare',target:owner,id:printRow.id,printer:$('print-printer').value});printAttempted=false;$('print-status').textContent=printPlan.destination+' · one copy · '+(printPlan.estimated_paper_mm!==undefined?'about '+(printPlan.estimated_paper_mm/10).toFixed(1)+' cm of paper · 25 cm limit':'document printer')+' · Ready for your confirmation.';$('print-send').hidden=false;$('print-send').disabled=false}catch(e){$('print-status').textContent=e.message}finally{printBusy=false;$('print-close').disabled=false;button.disabled=false;$('print-printer').disabled=false}};
+$('print-send').onclick=async()=>{
+ if(!printPlan||printAttempted||printBusy)return;
+ printAttempted=true;printBusy=true;
+ for(const id of ['print-send','print-review','print-printer','print-close'])$(id).disabled=true;
+ try{const result=await printAPI({action:'send',node:printPlan.node,id:printPlan.id,confirm:true});$('print-status').textContent=(result.state==='queued'?'Sent to printer queue. ':'Check printer job status: '+result.state+'. ')+(result.receipt?.note||'');$('print-send').hidden=true}
+ catch(e){$('print-status').textContent=e.message+' · Check printer jobs before retrying.'}
+ finally{printBusy=false;for(const id of ['print-review','print-printer','print-close'])$(id).disabled=false}
+};
+$('print-close').onclick=()=>{if(printBusy)return;printEpoch++;discardPrint().catch(()=>{});$('print-dialog').close()};$('print-dialog').addEventListener('cancel',e=>{if(printBusy){e.preventDefault();return}printEpoch++;discardPrint().catch(()=>{})});
 function renderActions(row,controls){
  controls.replaceChildren();function button(label,action,accessible=label,pressed=null){const b=document.createElement('button');b.textContent=label;b.setAttribute('aria-label',accessible);b.title=accessible;if(pressed!==null)b.setAttribute('aria-pressed',String(pressed));b.onclick=async()=>{b.disabled=true;if(timer){clearInterval(timer);timer=null;$('slide-pause').textContent='Play · Space'}try{await action()}catch(e){status(e.message)}finally{b.disabled=false;if(detailRow)renderActions(detailRow,$('detail-actions'));if(!$('show').hidden&&slides.length)renderActions(slides[slide],$('slide-actions'))}};controls.append(b)}
+ button('Print',()=>openPrint(row),'Print this artwork');
  if(!offline&&!row.downloaded&&!row.removal_due)button('Save to '+owner,async()=>{await api('',{action:'save',id:row.id});row.downloaded=true;status('Downloaded on '+owner);draw()});
  if(row.downloaded&&!offline){button('👍',async()=>{await api('',{action:'favorite',id:row.id});row.favorite=!row.favorite;if(row.favorite)delete row.removal_due;draw()},row.favorite?'Remove from Favorites':'Add to Favorites',!!row.favorite);if(owner!=='local')button('Keep on this host',async()=>{await api('',{action:'pin',id:row.id});status('Copied to this browser host for offline use—not to the phone/browser storage.')})}
  if(row.downloaded&&!offline&&Object.keys(collections).length){button(mode==='collections'?'Remove from collection':'Add to collection',async()=>{
@@ -144,7 +204,7 @@ function shuffleWorks(rows,last=''){const result=[...rows];for(let i=result.leng
 function nextSlide(){const last=slides[slide]?.id;slides=slides.filter(row=>!row.removal_due);if(!slides.length){exit();status('No kept works remain in this slideshow');return}slide=slides.findIndex(row=>row.id===last);slide++;if(slide>=slides.length&&$('shuffle').checked){slides=shuffleWorks(slides,last);slide=0}showSlide()}
 function startTimer(){clearInterval(timer);timer=setInterval(nextSlide,15000);$('slide-pause').textContent='Pause · Space'}
 function exit(){clearInterval(timer);timer=null;$('show').hidden=true;if(document.fullscreenElement)document.exitFullscreen().catch(()=>{})}
-$('slideshow').onclick=()=>{slides=visible().filter(x=>x.downloaded||x.available_offline);if($('shuffle').checked)slides=shuffleWorks(slides);if(!slides.length)return status('Download artwork first; the slideshow uses only saved images.');slide=0;$('show').hidden=false;showSlide();startTimer()};$('slide-prev').onclick=()=>{slide--;showSlide()};$('slide-next').onclick=nextSlide;$('slide-pause').onclick=()=>{if(timer){clearInterval(timer);timer=null;$('slide-pause').textContent='Play · Space'}else startTimer()};$('exit').onclick=exit;$('full').onclick=()=>{if(document.fullscreenElement){document.exitFullscreen().catch(e=>status(e.message));return}if($('show').requestFullscreen)$('show').requestFullscreen().catch(e=>status(e.message))};document.addEventListener('keydown',e=>{if(e.key==='Escape')exit();
+$('slideshow').onclick=()=>{slides=visible().filter(x=>x.downloaded||x.available_offline);if($('shuffle').checked)slides=shuffleWorks(slides);if(!slides.length)return status('Download artwork first; the slideshow uses only saved images.');slide=0;$('show').hidden=false;showSlide();startTimer()};$('slide-prev').onclick=()=>{slide--;showSlide()};$('slide-next').onclick=nextSlide;$('slide-pause').onclick=()=>{if(timer){clearInterval(timer);timer=null;$('slide-pause').textContent='Play · Space'}else startTimer()};$('exit').onclick=exit;$('full').onclick=()=>{if(document.fullscreenElement){document.exitFullscreen().catch(e=>status(e.message));return}if($('show').requestFullscreen)$('show').requestFullscreen().catch(e=>status(e.message))};document.addEventListener('keydown',e=>{if($('print-dialog').open)return;if(e.key==='Escape')exit();
  if(e.code==='Space'&&!$('show').hidden&&!['INPUT','SELECT','TEXTAREA'].includes(e.target.tagName)&&!e.target.isContentEditable){e.preventDefault();if(!e.repeat)$('slide-pause').click();return}
  if(!['INPUT','SELECT','TEXTAREA'].includes(e.target.tagName)&&!e.target.isContentEditable&&(e.key==='ArrowLeft'||e.key==='ArrowRight')){
   if($('detail').open){e.preventDefault();moveDetail(e.key==='ArrowRight'?1:-1)}

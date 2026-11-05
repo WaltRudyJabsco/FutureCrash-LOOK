@@ -27,7 +27,7 @@ from look_renderer import NativePreviewController
 BASE='http://127.0.0.1:7332'
 MAX_IMAGE_BYTES=20*1024*1024
 SLIDE_SECONDS=10
-LIST_CONTROLS='1 To explore · 2 Discover · 3 Collections · 4 Favorites · 5 Removal review · 6 All works · x mark/undo removal · u keep view here · o offline only · c new collection · m add/remove · ↑↓ select · Shift+↑↓ page · Shift+←→ top/end · F sort · Enter view · s slideshow · i image/ASCII · d discover · / search · l library · t source · n/b pages · k save to owner · p keep here · f thumbs up/favorite · a build starter library · h museum highlights · j daily refill · r refresh · W shell pane · q quit'
+LIST_CONTROLS='1 To explore · 2 Discover · 3 Collections · 4 Favorites · 5 Removal review · 6 All works · x mark/undo removal · u keep view here · o offline only · c new collection · m add/remove · ↑↓ select · Shift+↑↓ page · Shift+←→ top/end · F sort · Enter view · s slideshow · i image/ASCII · d discover · / search · l library · t source · n/b pages · K save to owner · k keep here · f thumbs up/favorite · a build starter library · h museum highlights · j daily refill · r refresh · p print · W shell pane · q quit'
 
 def adjacent_artwork(items,index,step):
     """Cycle within the visible collection, skipping works not downloaded yet."""
@@ -212,7 +212,7 @@ def desk(client,ui):
                         except Exception:lines+=['Image preview unavailable']
                     else:lines+=['']*art_rows
                     lines += [row.get('museum','')+' · CC0'+(' · ★ Favorite' if row.get('favorite') else '')+(' · Removal: '+time.strftime('%b %d %H:%M',time.localtime(row['removal_due'])) if row.get('removal_due') else '')]
-                    controls='←/→ previous/next · Space slideshow/pause · F fullscreen · f thumbs up/favorite · p keep here · m collection · x mark/undo removal · i image/ASCII · Esc collection · W shell pane · q quit'
+                    controls='←/→ previous/next · Space slideshow/pause · F fullscreen · f thumbs up/favorite · k keep here · m collection · x mark/undo removal · i image/ASCII · Esc collection · p print · W shell pane · q quit'
                     lines += [('Playing' if playing else 'Paused')+' · '+str(index+1)+'/'+str(len(items))+' · current list · 10 seconds/work']
                 else:
                     page_size=max(1,height-len(terminal_style.command_lines(LIST_CONTROLS,width))-5);start=max(0,min(index-page_size//2,len(items)-page_size))
@@ -270,11 +270,23 @@ def desk(client,ui):
             if key in ('q','Q','\x03'):break
             if not key:continue
             dirty=True
-            if key in ('f','p','k','x') and items:
+            if key in ('p','N') and items:
+                playing=False
+                native.frame_cleared()
+                termios.tcsetattr(fd,termios.TCSADRAIN,prior)
+                try:
+                    import printing
+                    path=client.image(items[index])
+                    printing.selected_file(path,ui,prefer_receipt=True)
+                    message='Returned from printing'
+                except Exception as error:message='Print: '+str(error)
+                finally:tty.setcbreak(fd);native.frame_cleared();dirty=True
+                continue
+            if key in ('f','k','K','x') and items:
                 if future:continue
                 if offline:message='Reconnect to '+client.node+' to change this work';continue
                 row=items[index];playing=False
-                future=pool.submit(client.change,{'f':'favorite','p':'pin','k':'save','x':'mark-removal'}[key],id=row['id']);continue
+                future=pool.submit(client.change,{'f':'favorite','k':'pin','K':'save','x':'mark-removal'}[key],id=row['id']);continue
             if (not image_id and key in ('1','2','3','4','5','6','o','c')) or key=='m':
                 if future:continue
                 if key=='c':
@@ -338,14 +350,10 @@ def desk(client,ui):
             if future:continue
             row=items[index] if items else None
             if key in ('enter','\r','\n','s','S') and row:
-                if not row.get('downloaded'):message=('Original unavailable offline; reconnect to '+client.node if offline else 'k saves this work to '+client.node+' before viewing');continue
+                if not row.get('downloaded'):message=('Original unavailable offline; reconnect to '+client.node if offline else 'K saves this work to '+client.node+' before viewing');continue
                 image_id=row['id'];playing=key in ('s','S');shuffle_cycle=False
                 if playing and SORTS[sort_mode]=='Shuffle':items=items[index:]+items[:index];index=0;shuffle_cycle=True
                 next_slide=time.monotonic()+SLIDE_SECONDS
-            elif key in ('k','K','p','P','f') and row:
-
-                if offline:message='Reconnect to '+client.node+' for this action';continue
-                action={'k':'save','p':'pin','f':'favorite'}[key.lower()];future=pool.submit(client.change,action,id=row['id']);discover=False
             elif key=='u':
                 if offline:message='Reconnect to '+client.node+' to copy artwork';continue
                 ids=[r['id'] for r in items if r.get('downloaded')]
