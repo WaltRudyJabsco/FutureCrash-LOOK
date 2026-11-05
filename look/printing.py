@@ -129,6 +129,11 @@ def selected_file(path,ui,prefer_receipt=False,default_style="image"):
             value,cancelled=prompt_line('Rotate clockwise 0/90 [0]: ')
             if cancelled:return 0
             options['rotation']=int(value.strip() or '0')
+        value,cancelled=prompt_line('Paper allowance: receipt 1 ft / banner 10 ft [receipt]: ')
+        if cancelled:return 0
+        mode=value.strip().lower() or 'receipt'
+        if mode not in {'receipt','banner'}:raise ValueError('Choose receipt or banner')
+        if mode=='banner':options['paper_limit_mm']=3048
         plan=prepare_file(choice['id'],source,**options)
         display(plan)
         answer,cancelled=prompt_line('Print '+source.name+' on '+plan['destination']+' via '+plan['node']+'? [p prints · Enter/Esc cancels] ')
@@ -139,7 +144,7 @@ def selected_file(path,ui,prefer_receipt=False,default_style="image"):
         result=request('send',plan['node'],ident=plan['id'],confirm=True)
         display(result)
         prompt_line('Enter returns to LOOK. ')
-        return 0 if result.get('state')=='queued' else 1
+        return 0 if result.get('state') in {'queued','submitting','printing'} else 1
     except KeyboardInterrupt:
         if plan:
             # Only discard an unsent draft. Never attempt a second submission.
@@ -157,6 +162,9 @@ def parser():
     result=argparse.ArgumentParser(prog='lk print',description='Fabric printers and reviewed print plans; nothing prints during discovery/preparation.')
     result.add_argument('--json',action='store_true',help='Machine-readable result')
     sub=result.add_subparsers(dest='action')
+    sub.add_parser('setup',help='Install offline pyfiglet and image rendering for this account')
+    for kind in ('banner','fortune'):
+        item=sub.add_parser(kind);item.add_argument('text');item.add_argument('--font',default='standard',choices=['standard','small','slant','banner','big']);item.add_argument('--printer');item.add_argument('--paper-limit-mm',type=float,default=304.8)
     item=sub.add_parser('completion');item.add_argument('--confirm',action='store_true');item.add_argument('--node',default='local')
     for action in ['list','discover']:
         item=sub.add_parser(action);item.add_argument('--node',default='all' if action=='list' else 'local')
@@ -168,7 +176,7 @@ def parser():
     item=sub.add_parser('bluetooth',help='Register an observed MXW01 Bluetooth receipt printer on its owner');item.add_argument('queue');item.add_argument('--address',required=True);item.add_argument('--adapter',required=True);item.add_argument('--label',default='Tiny Printer');item.add_argument('--confirm',action='store_true');item.add_argument('--node',default='local')
     item=sub.add_parser('profile');item.add_argument('queue');item.add_argument('--kind',choices=['document','escpos'],required=True);item.add_argument('--width',type=int,default=384);item.add_argument('--columns',type=int,default=32);item.add_argument('--image-mode',choices=['raster','column24'],default='raster');item.add_argument('--max-receipt-bytes',type=int,default=None,help='Device-specific encoded receipt limit; 0 disables');item.add_argument('--confirm',action='store_true');item.add_argument('--node',default='local')
     for action in ['file','text','receipt']:
-        item=sub.add_parser(action);item.add_argument('content',nargs='?' if action=='receipt' else None);item.add_argument('--image');item.add_argument('--printer');item.add_argument('--node',default='auto');item.add_argument('--copies',type=int,default=1);item.add_argument('--style',choices=['image','ascii']);item.add_argument('--rotation',type=int,choices=[0,90]);item.add_argument('--pages');item.add_argument('--media');item.add_argument('--sides',choices=['one-sided','two-sided-long-edge','two-sided-short-edge'])
+        item=sub.add_parser(action);item.add_argument('content',nargs='?' if action=='receipt' else None);item.add_argument('--image');item.add_argument('--printer');item.add_argument('--node',default='auto');item.add_argument('--paper-limit-mm',type=float);item.add_argument('--copies',type=int,default=1);item.add_argument('--style',choices=['image','ascii']);item.add_argument('--rotation',type=int,choices=[0,90]);item.add_argument('--pages');item.add_argument('--media');item.add_argument('--sides',choices=['one-sided','two-sided-long-edge','two-sided-short-edge'])
     item=sub.add_parser('quick',help='Send one text receipt/document immediately to a named printer')
     item.add_argument('content');item.add_argument('--printer',required=True)
     for action in ['inspect','send','discard']:
@@ -217,6 +225,15 @@ def main(args,ui=None):
         return desk(ui)
     selected=parser().parse_args(args or ['list']);value=vars(selected);action=value.pop('action');node=value.pop('node','all');as_json=value.pop('json',False)
     try:
+        if action=='setup':
+            import print_design
+            print(print_design.setup());return 0
+        if action in {'banner','fortune'}:
+            result=design(value['text'],kind=action,font=value['font'],queue=value['printer'],paper_limit_mm=value['paper_limit_mm'])
+            if 'ascii_preview' in result and not as_json:print(result['ascii_preview'])
+            elif as_json:print(json.dumps(result))
+            else:display(result)
+            return 0
         if action in {'options','jobs','nickname'} and not value.get('queue') or action in {'file','text','receipt'} and not value.get('printer'):
             if not sys.stdin.isatty() or not sys.stdout.isatty():raise ValueError('Choose a printer; run lk print in a terminal or pass --printer/queue')
             from print_desk import pick
@@ -248,17 +265,54 @@ def main(args,ui=None):
     except (OSError,ValueError,RuntimeError) as error:print('LOOK Print: '+str(error));return 1
 
 
+def design(text,kind='banner',font='standard',queue=None,paper_limit_mm=304.8):
+    import print_design
+    if queue is None:
+        if kind=='banner':return {'kind':kind,'font':font,'ascii_preview':print_design.banner(text,font),'fonts':print_design.FONTS}
+        _,details=print_design.render(text,kind,font,artwork=print_design.museum_artwork());return details
+    from print_destinations import choose,route
+    catalog=destinations();destination=choose(catalog,queue);selected=route(destination,catalog.get('local_node',''))
+    profile=selected.get('profile',{});receipt=profile.get('kind')=='escpos'
+    if kind=='fortune':paper_limit_mm=304.8
+    image,details=print_design.render(text,kind,font,profile.get('width',384) if receipt else 576,artwork=print_design.museum_artwork() if kind=='fortune' else None)
+    result=_request('prepare',selected['node'],queue=selected['name'],data=base64.b64encode(image).decode(),filename=kind+'.png',kind='receipt-image' if receipt else 'document',options_value={'copies':1,'paper_limit_mm':paper_limit_mm})
+    result.update(destination=destination['label'],design=details)
+    result['send_command']='lk print send '+result['id']+' --node '+result['node']+' --confirm'
+    return result
+
+
 def tools():
     fields={'node':{'type':'string','description':'Optional exact owner; default auto selects an enabled route'},'queue':{'type':'string','description':'Stable physical printer ID or unique friendly name from discovery; an exact queue works with an explicit owner'}}
     return [
+        {'type':'function','function':{'name':'banner_render','description':'Render offline FIGlet lettering for a banner preview. No printing. Fonts: standard, small, slant, banner, big.','parameters':{'type':'object','properties':{'text':{'type':'string','maxLength':120},'font':{'type':'string','enum':['standard','small','slant','banner','big']}},'required':['text'],'additionalProperties':False}}},
+        {'type':'function','function':{'name':'print_design','description':'Prepare or explicitly print a banner or fortune-cookie slip. For fortunes write an original, thoughtful/playful fortune of one to three short lines (prefer under 90 characters); renderer adds random lucky numbers and a saved Museum artwork with credit; no new outside downloads. Landscape artwork rotates independently of the upright fortune text. Banner is large FIGlet lettering sideways along the roll. Discover the exact friendly printer label first. send defaults false; set true only for an explicit current request to print to that named printer. One attempt per turn. Longer banners require an explicitly requested banner allowance. Never claim physical appearance from a receipt.','parameters':{'type':'object','properties':{'text':{'type':'string','maxLength':140},'kind':{'type':'string','enum':['banner','fortune']},'font':{'type':'string','enum':['standard','small','slant','banner','big']},'queue':{'type':'string'},'paper_limit_mm':{'type':'number','minimum':1,'maximum':3048},'send':{'type':'boolean'}},'required':['text','kind','queue'],'additionalProperties':False}}},
         {'type':'function','function':{'name':'print_text','description':'Print one short recipe, list, note or receipt immediately ONLY when the user explicitly requests printing to a named printer in this message. Discover its exact friendly label first. Read actual Notes content before printing it. Automatically formats for the destination. One copy, at most 8000 characters; no automatic retry. Report spooler acceptance, never physical delivery. Use print_prepare for previews, files, or unclear requests.','parameters':{'type':'object','properties':{'queue':{'type':'string','description':'Exact friendly printer label present in the user request'},'text':{'type':'string','maxLength':8000}},'required':['queue','text'],'additionalProperties':False}}},
         {'type':'function','function':{'name':'printers_list','description':'List physical printers once across the trusted Fabric, with stable ID, friendly name and underlying queue routes. No setup or printing.','parameters':{'type':'object','properties':{},'additionalProperties':False}}},
         {'type':'function','function':{'name':'printer_inspect','description':'Inspect printer options or jobs on an exact owner/queue.','parameters':{'type':'object','properties':dict(fields,view={'type':'string','enum':['options','jobs']}),'required':['queue'],'additionalProperties':False}}},
-        {'type':'function','function':{'name':'print_prepare','description':'Prepare a text/document/receipt job for user review, NEVER send paper. Return immutable plan, options and confirmation command. Choose a physical printer from discovery; automatic routing hides its underlying queues. Export DOCX/manuscripts to PDF before preparing.','parameters':{'type':'object','properties':dict(fields,path={'type':'string'},text={'type':'string'},receipt={'type':'boolean','description':'True for a configured ESC/POS receipt destination; false for document printers'},copies={'type':'integer','minimum':1,'maximum':20},style={'type':'string','enum':['image','ascii']},rotation={'type':'integer','enum':[0,90]},pages={'type':'string'},media={'type':'string'},sides={'type':'string','enum':['one-sided','two-sided-long-edge','two-sided-short-edge']}),'required':['queue'],'additionalProperties':False}}}]
+        {'type':'function','function':{'name':'print_prepare','description':'Prepare a text/document/receipt job for user review, NEVER send paper. Return immutable plan, options and confirmation command. Choose a physical printer from discovery; automatic routing hides its underlying queues. Export DOCX/manuscripts to PDF before preparing.','parameters':{'type':'object','properties':dict(fields,path={'type':'string'},text={'type':'string'},receipt={'type':'boolean','description':'True for a configured ESC/POS receipt destination; false for document printers'},copies={'type':'integer','minimum':1,'maximum':20},style={'type':'string','enum':['image','ascii']},rotation={'type':'integer','enum':[0,90]},paper_limit_mm={'type':'number','minimum':1,'maximum':3048,'description':'Explicit paper allowance in mm; default 304.8 (one foot). Larger values are deliberate banner jobs.'},pages={'type':'string'},media={'type':'string'},sides={'type':'string','enum':['one-sided','two-sided-long-edge','two-sided-short-edge']}),'required':['queue'],'additionalProperties':False}}}]
 
 
 def run_tool(tool,args,workspace,prompt='',turn=None):
     value=dict(args)
+    if tool=='banner_render':
+        if set(value)-{'text','font'}:raise ValueError('Only text and font are supported')
+        return json.dumps(design(**value))
+    if tool=='print_design':
+        if set(value)-{'text','kind','font','queue','paper_limit_mm','send'}:raise ValueError('Unsupported design option')
+        send=value.pop('send',False)
+        if type(send) is not bool:raise ValueError('send must be boolean')
+        if send:
+            if not isinstance(value.get('queue'),str) or not explicit_print(prompt,value['queue']):raise ValueError('Ask explicitly to print to a named printer')
+            if turn is None or turn.get('print_attempted'):raise ValueError('Only one print attempt per user message')
+            if value.get('paper_limit_mm',304.8)>304.8 and not re.search(r'\b(banner|feet|foot|ticker)\b',prompt,re.I):raise ValueError('Ask explicitly for a longer banner allowance')
+            turn['print_attempted']=True
+        result=design(**value)
+        if send:
+            if result['destination'].casefold()!=value['queue'].casefold():
+                request('discard',result['node'],ident=result['id'],confirm=True)
+                raise ValueError('Use the exact friendly printer name')
+            result=dict(request('send',result['node'],ident=result['id'],confirm=True),destination=result['destination'],design=result['design'])
+        return json.dumps(result)
     if tool=='print_text':
         if set(value)!={'queue','text'} or not isinstance(value['queue'],str) or not explicit_print(prompt,value['queue']):
             raise ValueError('Ask explicitly to print to a named printer; previews and questions do not send paper')

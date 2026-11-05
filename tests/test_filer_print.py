@@ -61,7 +61,7 @@ def test_file_review_requires_explicit_print_or_discards(tmp_path,monkeypatch,an
     plan={'id':'a'*32,'node':'tower','destination':'Little Printer'}
     monkeypatch.setattr(printing,'prepare_file',lambda *a,**kw:plan)
     monkeypatch.setattr(printing,'display',Mock())
-    replies=iter([('',False),(answer,cancelled),('',False)])
+    replies=iter([('',False),('',False),(answer,cancelled),('',False)])
     monkeypatch.setattr(renderer,'prompt_line',lambda *a,**kw:next(replies))
     request=Mock(return_value={'state':'queued'});monkeypatch.setattr(printing,'request',request)
     assert printing.selected_file(source,Mock())==0

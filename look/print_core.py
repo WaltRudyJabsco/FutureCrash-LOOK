@@ -21,8 +21,9 @@ from urllib.parse import urlsplit
 MAX_INPUT_BYTES=3*1024*1024
 MAX_PENDING_BYTES=32*1024*1024
 MAX_IMAGE_PIXELS=16_000_000
-MAX_RASTER_HEIGHT=4096
-MAX_RECEIPT_MM=250
+MAX_RASTER_HEIGHT=24384
+MAX_RECEIPT_MM=304.8
+MAX_BANNER_MM=3048
 RECEIPT_DOTS_PER_MM=8
 RECEIPT_LINE_DOTS=30
 RECEIPT_FEED_LINES=3
@@ -207,7 +208,7 @@ def add_queue(queue,uri,driver='everywhere',confirm=False):
 
 def options(queue):
     queue=require_queue(queue)
-    if profiles().get(queue,{}).get('transport')=='mxw01-ble':return {'queue':queue,'options':'transport/Transport: *Bluetooth-LE\nwidth/Image-width: *384-dots\ncopies/Copies: *1 2-20-within-length-limit\nlength/Maximum-length: *6.4-cm'}
+    if profiles().get(queue,{}).get('transport')=='mxw01-ble':return {'queue':queue,'options':'transport/Transport: *Bluetooth-LE\nwidth/Image-width: *384-dots\ncopies/Copies: *1 2-20-within-length-limit\nlength/Maximum-length: *30.48-cm'}
     return {'queue':queue,'options':run(['lpoptions','-p',queue,'-l'])}
 def jobs(queue):
     queue=require_queue(queue)
@@ -227,11 +228,15 @@ def cancel(queue,job,confirm=False):
 
 def print_options(value):
     value=value or {}
-    if not isinstance(value,dict) or set(value)-{'copies','pages','media','sides','style','rotation'}:raise ValueError('Unsupported print options')
+    if not isinstance(value,dict) or set(value)-{'copies','pages','media','sides','style','rotation','paper_limit_mm'}:raise ValueError('Unsupported print options')
     result={};copies=value.get('copies',1)
     if type(copies) is not int or not 1<=copies<=20:raise ValueError('Copies must be 1–20')
     result['copies']=copies
-    if value.get('style','image') not in {'image','ascii'}:raise ValueError('Choose image or ascii print style')
+    if 'paper_limit_mm' in value:
+        limit=value['paper_limit_mm']
+        if type(limit) not in (int,float) or not 1<=limit<=MAX_BANNER_MM:raise ValueError('Paper allowance must be 1–3048 mm')
+        result['paper_limit_mm']=limit
+    if value.get('style','image') not in ('image','ascii'):raise ValueError('Choose image or ascii print style')
     if type(value.get('rotation',0)) is not int or value.get('rotation',0) not in (0,90):raise ValueError('Choose rotation 0 or 90')
     if value.get('style')=='ascii':result['style']='ascii'
     if value.get('rotation'):result['rotation']=90
@@ -259,6 +264,22 @@ def receipt_text(text,columns):
         lines=['\n'.join(textwrap.wrap(line.expandtabs(4),columns) or ['']) for line in text.splitlines()]
         return ('\n'.join(lines)+'\n\n\n').encode('cp437',errors='strict')
     except UnicodeEncodeError as error:raise ValueError('This receipt text needs unsupported characters; use a raster image or a document printer') from error
+
+
+def receipt_banner(text,width,style='image',rotation=0):
+    """Render literal monospaced lines before rotating; preserve ASCII-art spacing."""
+    from PIL import Image,ImageDraw,ImageFont
+    if not text.strip() or any(ord(c)<32 and c not in '\n\t\r' or ord(c)==127 for c in text):raise ValueError('Use plain text without terminal color/control codes')
+    text=text.expandtabs(4);lines=text.splitlines()
+    font_path=Path('/usr/share/fonts/truetype/dejavu/DejaVuSansMono.ttf')
+    font=ImageFont.truetype(str(font_path),20) if font_path.is_file() else ImageFont.load_default(size=20)
+    cell=max(1,round(font.getlength('M')));height=26*len(lines)+16;length=cell*max(map(len,lines))+16
+    if length*height>MAX_IMAGE_PIXELS:raise ValueError('Banner text is too large')
+    canvas=Image.new('L',(length,height),255);draw=ImageDraw.Draw(canvas)
+    for y,line in enumerate(lines):
+        for x,letter in enumerate(line):draw.text((8+x*cell,8+y*26),letter,font=font,fill=0)
+    out=io.BytesIO();canvas.save(out,format='PNG')
+    return receipt_bitmap(out.getvalue(),width,rotation=rotation)
 
 
 def receipt_bitmap(data,width,style="image",rotation=0):
@@ -334,18 +355,19 @@ class Spool:
         if not isinstance(filename,str) or len(filename)>200 or any(ord(c)<32 for c in filename):raise ValueError('Invalid print title')
         profile=profiles().get(queue,{'kind':'document'})
         selected_options=print_options(options_value)
+        paper_limit=selected_options.get('paper_limit_mm',MAX_RECEIPT_MM)
         render_options={key:selected_options[key] for key in ('style','rotation') if key in selected_options}
-        if render_options and kind!='receipt-image' and not (kind=='document' and Path(filename).suffix.casefold() in {'.png','.jpg','.jpeg'}):raise ValueError('Style and rotation apply to images only')
+        if render_options and kind not in {'receipt-image','receipt-text'} and not (kind=='document' and Path(filename).suffix.casefold() in {'.png','.jpg','.jpeg'}):raise ValueError('Style and rotation apply to images only')
         if profile.get('transport')=='mxw01-ble':
             import print_mxw01
             print_mxw01.validate(profile)
-            if set(selected_options)-{'copies','style','rotation'}:raise ValueError('Tiny Bluetooth printing does not support document options')
-            if kind=='receipt-text':image=print_mxw01.text_image(data.decode('utf-8'))
+            if set(selected_options)-{'copies','style','rotation','paper_limit_mm'}:raise ValueError('Tiny Bluetooth printing does not support document options')
+            if kind=='receipt-text':image=receipt_banner(data.decode('utf-8'),384,**render_options) if render_options else print_mxw01.text_image(data.decode('utf-8'))
             elif kind=='receipt-image':image=receipt_bitmap(data,384,**render_options)
             else:raise ValueError('Tiny Bluetooth printer accepts receipt text or images; use a document printer for PDF')
             payload,dots=print_mxw01.encode(image)
             dots*=selected_options['copies']
-            if dots>print_mxw01.MAX_ROWS:raise ValueError('Copies exceed the 6.4 cm total Tiny Printer job limit; reduce copies or image height')
+            if dots/RECEIPT_DOTS_PER_MM>paper_limit:raise ValueError(f'Print needs {dots/RECEIPT_DOTS_PER_MM:.1f} mm; allowance is {paper_limit:g} mm. Reduce copies or explicitly choose a larger banner allowance.')
             payload*=selected_options['copies'];paper_mm=dots/RECEIPT_DOTS_PER_MM
         elif kind=='document':
             if profile.get('kind')=='escpos':raise ValueError('Use receipt text/image with this ESC/POS queue; PDF is not printer command data')
@@ -358,25 +380,26 @@ class Spool:
                 image=receipt_bitmap(data,1200,**render_options);out=io.BytesIO();image.save(out,format='PNG');payload=out.getvalue()
         elif kind in {'receipt-text','receipt-image'}:
             if profile.get('kind')!='escpos':raise ValueError('Configure this verified receipt queue with profile --kind escpos first')
-            if set(selected_options)-{'copies','style','rotation'}:raise ValueError('Receipt jobs do not support document page/media/sides options')
-            if kind=='receipt-text':
+            if set(selected_options)-{'copies','style','rotation','paper_limit_mm'}:raise ValueError('Receipt jobs do not support document page/media/sides options')
+            if kind=='receipt-text' and not render_options:
                 rendered=receipt_text(data.decode('utf-8'),profile['columns'])
                 dots=rendered.count(b'\n')*RECEIPT_LINE_DOTS
             else:
-                rendered,dots=encode_receipt_image(receipt_bitmap(data,profile['width'],**render_options),profile.get('image_mode','raster'))
+                rendered,dots=encode_receipt_image(receipt_banner(data.decode('utf-8'),profile['width'],**render_options) if kind=='receipt-text' else receipt_bitmap(data,profile['width'],**render_options),profile.get('image_mode','raster'))
             paper_mm=dots/RECEIPT_DOTS_PER_MM*selected_options['copies']
-            if paper_mm>MAX_RECEIPT_MM:
-                raise ValueError(f'Receipt would use about {paper_mm/10:.1f} cm of paper; limit is {MAX_RECEIPT_MM/10:g} cm per job. Shorten the selection or crop the image.')
+            if paper_mm>paper_limit:
+                raise ValueError(f'Receipt would use about {paper_mm/10:.1f} cm of paper; limit is {paper_limit/10:g} cm per job. Shorten the selection or crop the image.')
             # Set line spacing explicitly so the estimate does not depend on device defaults.
-            payload=rendered if kind=='receipt-image' and profile.get('image_mode')=='column24' else b'\x1b@\x1b3'+bytes([RECEIPT_LINE_DOTS])+rendered
+            payload=rendered if (kind=='receipt-image' or render_options) and profile.get('image_mode')=='column24' else b'\x1b@\x1b3'+bytes([RECEIPT_LINE_DOTS])+rendered
         else:raise ValueError('Unsupported print kind')
         if kind.startswith('receipt-'):
             limit=receipt_byte_limit(profile)
-            if limit and len(payload)*selected_options['copies']>limit:
+            transfer_bytes=len(payload) if profile.get('transport')=='mxw01-ble' else len(payload)*selected_options['copies']
+            if limit and transfer_bytes>limit:
                 raise ValueError(f'Receipt exceeds this printer’s {limit:,}-byte transfer limit. Use a smaller image or shorter text; nothing was sent.')
         ident=uuid.uuid4().hex
         meta={'id':ident,'queue':queue,'title':filename,'kind':kind,'options':selected_options,'profile':profile,'bytes':len(payload),'sha256':hashlib.sha256(payload).hexdigest(),'state':'prepared','expires_in_seconds':PLAN_LIFETIME,'note':'Not sent. Review printer/options and use lk print send ID --confirm. Spooler acceptance does not prove physical printing.'}
-        if kind.startswith('receipt-'):meta.update(estimated_paper_mm=paper_mm,max_paper_mm=print_mxw01.MAX_ROWS/RECEIPT_DOTS_PER_MM if profile.get('transport')=='mxw01-ble' else MAX_RECEIPT_MM)
+        if kind.startswith('receipt-'):meta.update(estimated_paper_mm=paper_mm,max_paper_mm=paper_limit)
         if kind=='receipt-text' or kind=='document' and Path(filename).suffix.casefold()=='.txt':
             meta['text_preview']=data.decode('utf-8')[:2000];meta['preview_truncated']=len(data.decode('utf-8'))>2000
         with self.connect() as db:
@@ -394,8 +417,16 @@ class Spool:
 
     def inspect(self,ident):
         created,state,meta,_,receipt=self.get(ident)
-        value=dict(json.loads(meta),state=state,created=created,receipt=json.loads(receipt))
-        if state!='prepared':value['note']='State: '+state+'. Check the receipt and printer jobs; this plan cannot be sent again.'
+        decoded=json.loads(receipt)
+        if state in {'submitting','printing'} and decoded.get('started'):
+            import print_mxw01
+            if time.time()-decoded['started']>print_mxw01.SESSION_SECONDS+60:
+                with self.connect() as db:db.execute("UPDATE jobs SET state='uncertain',payload=NULL WHERE id=? AND state IN ('submitting','printing')",(ident,))
+                state='uncertain'
+                decoded['note']='Worker did not report completion in time. Inspect physical output; no automatic retry.'
+        value=dict(json.loads(meta),state=state,created=created,receipt=decoded)
+        if state in {'submitting','printing'}:value['note']='Accepted by the printer owner; processing in background. Check job status; do not resend.'
+        elif state!='prepared':value['note']='State: '+state+'. Check the receipt and printer jobs; this plan cannot be sent again.'
         return value
 
     def discard(self,ident,confirm=False):
@@ -421,8 +452,36 @@ class Spool:
         args+=['--','-']
         with self.connect() as db:
             db.execute('BEGIN IMMEDIATE')
-            cursor=db.execute("UPDATE jobs SET state='submitting' WHERE id=? AND state='prepared'",(ident,))
+            cursor=db.execute("UPDATE jobs SET state='submitting',receipt=? WHERE id=? AND state='prepared'",(json.dumps({'started':time.time()}),ident))
             if not cursor.rowcount:return self.inspect(ident)
+        if meta['profile'].get('transport')=='mxw01-ble':
+            import print_mxw01
+            if len(payload)>print_mxw01.SYNC_ROWS*print_mxw01.ROW_BYTES:
+                try:
+                    subprocess.Popen([sys.executable,str(Path(__file__).resolve()),'--bluetooth-job',ident],
+                                     stdin=subprocess.DEVNULL,stdout=subprocess.DEVNULL,stderr=subprocess.DEVNULL,
+                                     start_new_session=True,close_fds=True)
+                except OSError as error:
+                    with self.connect() as db:db.execute("UPDATE jobs SET state='uncertain',receipt=?,payload=NULL WHERE id=?",(json.dumps({'error':str(error),'note':'Worker did not start; this plan will not retry.'}),ident))
+                return self.inspect(ident)
+        return self.finish(ident,meta,payload,args)
+
+    def bluetooth_job(self,ident):
+        # A detached owner worker survives HTTP disconnects. Claim once; never replay.
+        with self.connect() as db:
+            db.execute('BEGIN IMMEDIATE')
+            if not db.execute("UPDATE jobs SET state='printing' WHERE id=? AND state='submitting'",(ident,)).rowcount:return self.inspect(ident)
+        _,_,raw,payload,_=self.get(ident);meta=json.loads(raw)
+        try:
+            if meta['profile'].get('transport')!='mxw01-ble':raise ValueError('Not a Bluetooth job')
+            if profiles().get(meta['queue'])!=meta['profile']:raise ValueError('Printer profile changed before worker started')
+            if not payload or hashlib.sha256(payload).hexdigest()!=meta['sha256']:raise ValueError('Print payload changed')
+        except ValueError as error:
+            with self.connect() as db:db.execute("UPDATE jobs SET state='uncertain',receipt=?,payload=NULL WHERE id=?",(json.dumps({'error':str(error),'note':'Nothing sent by this worker; no automatic retry.'}),ident))
+            return self.inspect(ident)
+        return self.finish(ident,meta,payload,[])
+
+    def finish(self,ident,meta,payload,args):
         try:
             if meta['profile'].get('transport')=='mxw01-ble':
                 import print_mxw01
@@ -462,3 +521,8 @@ def local(payload=None):
     if action=='send':return Spool().send(**value)
     if action=='discard':return Spool().discard(**value)
     raise ValueError('Unknown print operation')
+
+
+if __name__=='__main__':
+    if len(sys.argv)!=3 or sys.argv[1]!='--bluetooth-job':raise SystemExit('Internal printer worker')
+    Spool().bluetooth_job(sys.argv[2])

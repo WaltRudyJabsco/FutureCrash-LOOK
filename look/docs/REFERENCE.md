@@ -335,6 +335,12 @@ lk print receipt [TEXT|-|--image FILE] [--printer PRINTER] [--node NODE]
   [files] Prepare ESC/POS text or dithered raster art; explicit receipt profile required
 lk print quick TEXT|- --printer "NAME"
   [files] Immediately print one short text job on a named Fabric printer
+lk print setup
+  [files] Install offline pyfiglet lettering and fortune rendering
+lk print banner TEXT [--font FONT] [--printer NAME] [--paper-limit-mm MM]
+  [files] Preview ASCII lettering or prepare a sideways print banner
+lk print fortune TEXT [--printer NAME]
+  [files] Prepare a fortune slip with lucky numbers and saved Museum artwork
 lk print send ID [--node NODE] [--confirm]
   [files] Review or explicitly submit a prepared job once; never auto-retry uncertain printing
 lk print inspect ID [--node NODE]
@@ -1012,6 +1018,7 @@ Parser arguments and recognized option tokens (grouped by handler):
 --confirm
 --copies
 --driver
+--font
 --image
 --image-mode
 --json
@@ -1022,6 +1029,7 @@ Parser arguments and recognized option tokens (grouped by handler):
 --media
 --node
 --pages
+--paper-limit-mm
 --printer
 --queues — Show underlying owner/queue routes
 --rotation
@@ -1034,6 +1042,7 @@ ident
 job
 label
 queue
+text
 
 look/lk
 usage: lk access [list|personal|add PATH [read|write]|remove PATH|clear]

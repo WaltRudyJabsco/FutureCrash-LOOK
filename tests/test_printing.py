@@ -269,9 +269,9 @@ def test_receipt_length_limit_counts_wrapping_blank_lines_and_copies(spool,monke
     def plan(text,copies=1):return spool.prepare('desk',text.encode(),'selection.txt','receipt-text',{'copies':copies})
     short=plan('A paragraph to keep.')
     assert short['estimated_paper_mm']==11.25
-    assert short['max_paper_mm']==250
-    for text,copies in [('line\n'*70,1),('x'*4000,1),('line\n'*35,2),('x\n'+'\n'*70,1)]:
-        with pytest.raises(ValueError,match='25 cm'):plan(text,copies)
+    assert short['max_paper_mm']==core.MAX_RECEIPT_MM
+    for text,copies in [('line\n'*90,1),('x'*4000,1),('line\n'*45,2),('x\n'+'\n'*90,1)]:
+        with pytest.raises(ValueError,match='30.48 cm'):plan(text,copies)
     assert plan('line\n'*64)['estimated_paper_mm']<=250
 
 
@@ -279,7 +279,7 @@ def test_receipt_image_length_includes_feed(spool,monkeypatch):
     from PIL import Image
     import io
     monkeypatch.setattr(core,'profiles',lambda:{'desk':{'kind':'escpos','width':576,'columns':48}})
-    output=io.BytesIO();Image.new('RGB',(576,2000),'white').save(output,format='PNG')
+    output=io.BytesIO();Image.new('RGB',(576,2500),'white').save(output,format='PNG')
     with pytest.raises(ValueError,match='crop'):spool.prepare('desk',output.getvalue(),'art.png','receipt-image')
 
 
@@ -366,3 +366,12 @@ def test_document_image_transforms_remain_local_and_reviewed(spool,monkeypatch):
     assert plan['options']=={'copies':2,'style':'ascii','rotation':90}
     with spool.connect() as db:payload=db.execute('select payload from jobs where id=?',(plan['id'],)).fetchone()[0]
     assert payload.startswith(b'\x89PNG') and not execute.called
+
+
+def test_sideways_literal_text_banner_preserves_whitespace():
+    text='##   ##\n  ###  \n##   ##'
+    normal=core.receipt_banner(text,384)
+    sideways=core.receipt_banner(text,384,rotation=90)
+    assert normal.height==sideways.width or abs(normal.height-sideways.width)<8
+    assert sideways.height>0 and sideways.getextrema()[0]==0
+    with pytest.raises(ValueError):core.receipt_banner('\x1b[31mRED',384,rotation=90)
