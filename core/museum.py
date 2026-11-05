@@ -16,6 +16,10 @@ MAX_IMAGE_BYTES=20*1024*1024
 MAX_JSON_BYTES=8*1024*1024
 MAX_COLLECTION_BYTES=3*1024*1024*1024
 MAX_PACK_ITEMS=1000
+REMOVAL_GRACE_SECONDS=48*60*60
+REFILL_INTERVAL=24*60*60
+REFILL_TARGET=1000
+REFILL_DAILY_LIMIT=100
 REQUEST_INTERVAL=.3
 SEARCH_BUDGET_SECONDS=45
 SOURCES=('met','aic')
@@ -146,7 +150,7 @@ class Museum:
                 try:row['downloaded']=self.image(row['id']).is_file()
                 except ValueError:row['downloaded']=False
                 if not query or str(query).casefold() in ' '.join(str(row.get(k,'')) for k in ('title','artist','date','medium','culture','collection')).casefold():rows.append(row)
-            return {'items':sorted(rows,key=lambda x:x['title'].casefold()),'job':state.get('job',{}),'bytes':sum(x.get('bytes',0) for x in state['items'].values()),'limit_bytes':MAX_COLLECTION_BYTES,'collections':state.get('collections',{})}
+            return {'items':sorted(rows,key=lambda x:x['title'].casefold()),'job':state.get('job',{}),'bytes':sum(x.get('bytes',0) for x in state['items'].values()),'limit_bytes':MAX_COLLECTION_BYTES,'collections':state.get('collections',{}),'rotation':state.get('rotation',{'enabled':False,'target':REFILL_TARGET})}
     def search(self,source,query,page=1):
         result=discover(source,query,page)
         with self.lock:
@@ -166,20 +170,98 @@ class Museum:
             if total>MAX_COLLECTION_BYTES:raise ValueError('Museum collection reached its 3 GiB storage budget')
             atomic(self.root/'images'/(row['id']+'.jpg'),data)
             result=dict(row,downloaded=True,bytes=len(data),sha256=hashlib.sha256(data).hexdigest(),collection=old.get('collection') or collection,added=old.get('added',time.time()),favorite=old.get('favorite',row.get('favorite',False)),collections=old.get('collections',row.get('collections',[])))
+            for key in ('removal_due','removed_at'):
+                result.pop(key,None)
+                if key in old:result[key]=old[key]
             state['items'][row['id']]=result;self.write(state);return result
     def save(self,ident,collection='Personal collection'):
         identity(ident)
         with self.lock:
             old=self.read()['items'].get(ident)
+            if old and old.get('removal_due'):raise ValueError('Artwork marked for removal; undo that choice before downloading again')
             if old and (self.root/'images'/(ident+'.jpg')).is_file():return old
             row=self.cache.get(ident)
         row=row or detail(ident)
         return self.store(row,fetch(row['image_url'],MAX_IMAGE_BYTES),collection)
+    def rotation(self,enabled):
+        if type(enabled) is not bool:raise ValueError('Choose whether daily refill is enabled')
+        with self.lock:
+            state=self.read();state['rotation']={**state.get('rotation',{}),'enabled':enabled,'target':REFILL_TARGET}
+            self.write(state)
+        return self.snapshot()
+
+    def maintain(self):
+        self.expire_removals()
+        with self.lock:
+            state=self.read();settings=state.get('rotation',{})
+            if not settings.get('enabled') or time.time()<settings.get('next_check',0):return
+            if self.worker and self.worker.is_alive():return
+            kept=sum(not row.get('removal_due') and (self.root/'images'/(ident+'.jpg')).is_file() for ident,row in state['items'].items())
+            count=min(REFILL_DAILY_LIMIT,max(0,REFILL_TARGET-kept))
+            settings.update(next_check=time.time()+REFILL_INTERVAL,last_checked=time.time());state['rotation']=settings
+            if count:
+                state['job']={'state':'running','kind':'refill','requested':count,'saved':0,'errors':[],'theme':'Daily fresh artwork'}
+            self.write(state)
+            if not count:return
+            self.stop.clear();self.worker=threading.Thread(target=self._refill,args=(count,),daemon=True);self.worker.start()
+
+    def _refill(self,count):
+        saved=0;errors=[]
+        try:
+            # Rotate the first subject each day so refills do not always favor landscapes.
+            offset=int(time.time()//REFILL_INTERVAL)%len(THEMES)
+            themes=THEMES[offset:]+THEMES[:offset]
+            for page in range(1,6):
+                for theme in themes:
+                    for source in SOURCES:
+                        with self.lock:
+                            if not self.read().get('rotation',{}).get('enabled'):self.stop.set()
+                        if self.stop.is_set() or saved>=count:break
+                        try:rows=self.search(source,theme,page)['items']
+                        except (OSError,ValueError) as exc:errors.append(source+': '+str(exc));continue
+                        for row in rows:
+                            if self.stop.is_set() or saved>=count:break
+                            with self.lock:
+                                if row['id'] in self.read()['items']:continue
+                            try:self.save(row['id'],'Daily discovery');saved+=1
+                            except (OSError,ValueError) as exc:
+                                if 'storage budget' in str(exc):raise
+                                errors.append(row['id']+': '+str(exc))
+                            self._job(saved=saved,errors=errors[-20:],theme=theme)
+                    if self.stop.is_set() or saved>=count:break
+                if self.stop.is_set() or saved>=count:break
+            self._job(state='cancelled' if self.stop.is_set() else 'complete' if saved>=count else 'partial',saved=saved,errors=errors[-20:])
+        except Exception as exc:self._job(state='failed',saved=saved,errors=(errors+[str(exc)])[-20:])
+
+    def mark_removal(self,ident):
+        identity(ident)
+        with self.lock:
+            state=self.read();row=state['items'].get(ident)
+            if row is None:raise ValueError('Save this work before marking it for removal')
+            if row.get('removal_due'):
+                row.pop('removal_due',None);row.pop('removed_at',None)
+            else:row.update(removal_due=time.time()+REMOVAL_GRACE_SECONDS,favorite=False)
+            self.write(state)
+        return self.snapshot()
+
+    def expire_removals(self,now=None):
+        now=time.time() if now is None else now
+        with self.lock:
+            state=self.read();changed=False
+            for ident,row in state['items'].items():
+                if not row.get('removal_due') or row.get('removed_at') or row['removal_due']>now:continue
+                identity(ident);path=self.root/'images'/(ident+'.jpg')
+                path.unlink(missing_ok=True)
+                row.update(downloaded=False,bytes=0,removed_at=now);changed=True
+            if changed:self.write(state)
+
     def favorite(self,ident):
         with self.lock:
             state=self.read()
             if ident not in state['items']:raise ValueError('Download this work before favoriting it')
-            row=state['items'][ident];row['favorite']=not row.get('favorite',False);self.write(state)
+            row=state['items'][ident];row['favorite']=not row.get('favorite',False)
+            if row['favorite']:row.pop('removal_due',None);row.pop('removed_at',None)
+            self.write(state)
         return self.snapshot()
     def start_pack(self,count=1000):
         count=int(count)
@@ -317,6 +399,8 @@ class Museum:
         action=data.get('action')
         if action in {'collection-create','collection-add','collection-remove'}:return self.collection_change(data)
         if action=='save':self.save(data.get('id',''));return self.snapshot()
+        if action=='rotation':return self.rotation(data.get('enabled'))
+        if action=='mark-removal':return self.mark_removal(data.get('id',''))
         if action=='favorite':return self.favorite(data.get('id',''))
         if action=='featured':return self.start_featured(data.get('count',500),data.get('source','both'))
         if action=='starter':return self.start_pack(data.get('count',1000))

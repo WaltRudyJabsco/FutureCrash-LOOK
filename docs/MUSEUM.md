@@ -217,3 +217,44 @@ Download progress refreshes every five seconds in the terminal and web gallery.
 Bars show saved/reused works against the requested target, with per-museum counts
 for highlights. Partial jobs keep their actual percentage; source errors remain
 visible. Pressing h again during a highlights job shows its existing progress.
+
+## Curate while viewing
+
+Artwork and slideshow views keep the selected image visible while you curate:
+**f** favorites it, **p** keeps a copy here, **m** adds/removes collection membership,
+and **x** marks it for removal or undoes that choice. Actions pause playback so
+an advancing slideshow cannot move the target underneath you. **c** still creates
+a collection from the desk; name it, then use **m** on any saved work.
+
+**F while viewing** opens a native fullscreen image window on the display under
+the pointer. It uses the installed saver graphics runtime (`lk saver setup` if
+needed), fits the whole image without cropping, and supports arrows, Space, f/p/m/x,
+F to toggle windowed/fullscreen, and Escape to return. Shift+F in the list continues
+to change sorting. Browser artwork details and slideshows have Fullscreen buttons
+and the F shortcut, plus the same curation actions as the grid. Browser fullscreen
+availability depends on the browser/device.
+
+## Removal review and daily discovery
+
+Thumbs-down (**x**, or the browser button) hides a work from normal browsing and
+schedules removal of its image **on the library owner after 48 hours**. It clears
+its favorite flag. **5 / Removal review** shows marked works; x/Undo removal cancels
+the deadline. Favoriting a marked work also cancels removal. The catalog record and
+collection memberships remain, preventing starter packs, highlights and refills
+from silently downloading rejected artwork again. After expiry, undo allows a
+new explicit download; it cannot recover deleted image bytes by itself.
+
+The node checks deadlines once a minute while running. If it was offline at the
+deadline, cleanup occurs when it next starts. Independently kept copies, caches on
+other devices and existing backups are not erased by this owner-local action.
+
+**j** in the desk, **Daily refill** in the browser, or
+`lk museum rotation on --node YOUR_OWNER` enables daily discovery on that owner.
+Use `off` to disable it. Fresh installations leave this option off. Once enabled,
+it checks about once every 24 hours and fills toward **1,000 kept images**, adding
+at most **100 new works per day**. It never deletes artwork to enforce that target,
+never evicts favorites, respects the 3 GiB budget, and skips every existing catalog
+ID, including rejected works. It searches the starter subjects with a rotating
+first subject; refills are discoveries, not popularity-ranked selections. Partial
+jobs and source errors use the same progress display. The schedule persists across
+restarts and waits for any active download job to finish.
