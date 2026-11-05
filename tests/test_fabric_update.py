@@ -103,3 +103,16 @@ def test_remote_local_upkeep_still_requires_browser_authorization():
         server=load(surface);handler=server.Handler.__new__(server.Handler)
         handler.path='/api/fabric/update';handler._require_endpoint=Mock(return_value=False)
         handler.do_POST();handler._require_endpoint.assert_called_once_with('lo.use')
+
+
+def test_partial_receipt_remains_structured_for_reporting():
+    receipt={'state':'partial','steps':[{'label':'Backup','state':'needs_setup'}]}
+    with pytest.raises(update.ReceiptError) as error:update.wait_for(lambda:receipt,lambda r:r.get('state')=='complete')
+    assert error.value.receipt==receipt and str(error.value)=='Backup: needs_setup'
+
+
+def test_busy_sync_is_followed_until_finished(monkeypatch):
+    monkeypatch.setattr(update.time,'sleep',lambda _:None)
+    values=iter([{'ok':True,'state':'sync already running'},{'ok':True,'peers':[]}])
+    result=update.wait_for(lambda:next(values),lambda r:r.get('state')!='sync already running',120)
+    assert result=={'ok':True,'peers':[]}
