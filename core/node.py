@@ -2618,6 +2618,13 @@ def _radio():
 _MUSEUM_MANAGER = None
 _MUSEUM_LOCK = threading.Lock()
 
+def _museum_retention_loop():
+    while True:
+        try:_museum().maintain()
+        except Exception as exc:print('Museum retention: '+str(exc),file=sys.stderr)
+        time.sleep(60)
+
+
 def _museum():
     global _MUSEUM_MANAGER
     with _MUSEUM_LOCK:
@@ -7627,6 +7634,7 @@ def main():
     threading.Thread(target=job_worker_loop,name="fabric-jobs",daemon=True).start()
     threading.Thread(target=_decision_expiry_loop,name="fabric-decisions",daemon=True).start()
     _downloads()
+    threading.Thread(target=_museum_retention_loop,name='museum-retention',daemon=True).start()
     threading.Thread(target=_notebook_loop,name='fabric-notebook',daemon=True).start()
     threading.Thread(target=_mercury_loop,name='fabric-mercury',daemon=True).start()
     JOB_WAKE.set()

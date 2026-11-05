@@ -157,7 +157,7 @@ def test_desk_native_thumbnail_and_viewer_navigation(monkeypatch,tmp_path):
     labels=[]
     monkeypatch.setattr(museum_desk.terminal_style,'command_lines',lambda text,width:labels.append(text) or [text])
     ui=SimpleNamespace(_read_tty_key=lambda *a:next(keys),_ansi_clip=lambda text,width:text[:width],_c=lambda text,color:text)
-    client=SimpleNamespace(node='local',snapshot=lambda:{'items':rows},image=lambda row:paths[row['id']])
+    client=SimpleNamespace(node='local',snapshot=lambda query='':{'items':rows},image=lambda row:paths[row['id']])
     assert museum_desk.desk(client,ui)==0
     calls=[call.args for call in native.request.call_args_list]
     assert any(path==paths['aic-1'] and col>1 for path,row,col,h,w in calls)
@@ -318,3 +318,45 @@ def test_job_progress_truthful_partial_and_bounded():
     assert 'met: 50' in text and 'aic: 200' in text
     assert museum_desk.job_progress({})==''
     assert '100%' in museum_desk.job_progress({'state':'complete','saved':1,'requested':1})
+
+
+def test_removal_grace_undo_expiry_and_no_redownload(tmp_path,monkeypatch):
+    m=museum.Museum(tmp_path);m.store(art(),JPEG);m.favorite('aic-1')
+    monkeypatch.setattr(museum.time,'time',lambda:1000)
+    row=m.mark_removal('aic-1')['items'][0]
+    assert row['removal_due']==1000+48*3600 and not row['favorite']
+    m.expire_removals(row['removal_due']-1);assert m.image('aic-1').exists()
+    m.favorite('aic-1');assert not m.snapshot()['items'][0].get('removal_due')
+    row=m.mark_removal('aic-1')['items'][0];m.expire_removals(row['removal_due'])
+    assert m.snapshot()['items'][0]['removed_at'] and not m.snapshot()['items'][0]['downloaded']
+    with pytest.raises(ValueError,match='undo'):m.save('aic-1')
+    m.mark_removal('aic-1');assert not m.snapshot()['items'][0].get('removal_due')
+
+
+def test_removal_is_owner_local_and_review_is_reversible(tmp_path):
+    import museum_library
+    row=dict(art(),removal_due=2000)
+    m=museum.Museum(tmp_path);m.store(row,JPEG)
+    assert not m.snapshot()['items'][0].get('removal_due')
+    assert museum_library.view([row])==[]
+    assert museum_library.view([row],'review')==[row]
+
+
+def test_daily_refill_opt_in_limit_and_persistent_schedule(tmp_path,monkeypatch):
+    m=museum.Museum(tmp_path);called=Mock();monkeypatch.setattr(m,'_refill',called)
+    m.maintain();assert not called.called
+    m.rotation(True);m.maintain();m.worker.join(2)
+    called.assert_called_once_with(100)
+    m.maintain();called.assert_called_once()
+    assert m.read()['rotation']['next_check']>time.time()
+    m.rotation(False);assert not m.snapshot()['rotation']['enabled']
+
+
+def test_refill_preserves_rejections_and_existing_records(tmp_path,monkeypatch):
+    m=museum.Museum(tmp_path);m.store(art('aic-1'),JPEG);m.mark_removal('aic-1');m.rotation(True)
+    monkeypatch.setattr(m,'search',lambda *args:{'items':[art('aic-1'),art('aic-2')]})
+    monkeypatch.setattr(museum,'detail',lambda ident:art(ident));monkeypatch.setattr(museum,'fetch',lambda *args:JPEG)
+    m._refill(1)
+    state=m.read();assert state['items']['aic-1']['removal_due']
+    assert state['items']['aic-2']['collection']=='Daily discovery'
+    assert state['job']['saved']==1

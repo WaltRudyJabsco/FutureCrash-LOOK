@@ -25,6 +25,10 @@ def respond(route):
             if data['action']=='collection-remove':next(x for x in rows if x['id']==data['id'])['collections'].remove(data['collection'])
             if data['action']=='favorite':
                 row=next(x for x in rows if x['id']==data['id']);row['favorite']=not row.get('favorite')
+            if data['action']=='mark-removal':
+                row=next(x for x in rows if x['id']==data['id'])
+                if row.get('removal_due'):row.pop('removal_due')
+                else:row['removal_due']=2000000000
             if data['action']=='featured':job={'state':'running','kind':'featured','requested':1000,'saved':2,'counts':{'met':1,'aic':1}}
             if data['action']=='starter':job={'state':'running','requested':data['count'],'saved':2,'theme':'landscape'}
             if data['action']=='cancel':job['state']='cancelled'
@@ -38,9 +42,15 @@ with sync_playwright() as p:
     assert page.locator('.card').count()==len(rows)
     assert page.evaluate("FabricBrowserViews.museumCommand('/museum')")
     page.screenshot(path=str(OUT/'desktop.png'),full_page=True)
-    page.locator('.card .view').first.click();page.wait_for_selector('#detail:visible');assert page.locator('#title').inner_text();page.locator('#close').click()
+    page.locator('.card .view').first.click();page.wait_for_selector('#detail:visible');assert page.locator('#title').inner_text()
+    assert page.locator('#detail-actions button',has_text='Favorite').count()==1
+    page.locator('#detail-full').click();page.wait_for_function('document.fullscreenElement!==null');page.locator('#detail-full').click();page.wait_for_function('document.fullscreenElement===null')
+    page.locator('#detail-actions button',has_text='Thumbs down').click();page.wait_for_selector('#detail-actions button:has-text("Undo removal")')
+    page.locator('#detail-actions button',has_text='Undo removal').click();page.wait_for_selector('#detail-actions button:has-text("Thumbs down")')
+    page.locator('#close').click()
     page.locator('.card .actions button',has_text='Favorite').first.click();page.locator('#favorites').click();page.wait_for_function("document.querySelectorAll('.card').length===1")
     page.locator('#slideshow').click();page.wait_for_selector('#show:visible');assert '/api/museum/image' in page.locator('#slide-image').get_attribute('src')
+    assert page.locator('#slide-actions button',has_text='Favorite').count()==1
     page.locator('#slide-pause').click();assert page.locator('#slide-pause').inner_text()=='Play';page.locator('#slide-next').click();page.locator('#exit').click()
     page.locator('#discover').click();page.wait_for_selector('#source:visible');page.locator('#source').select_option('aic');page.locator('#query').fill('landscape');page.locator('#search button').click();page.wait_for_selector('#next:visible')
     page.locator('#saved').click();page.wait_for_function("document.querySelectorAll('.card').length>1")
