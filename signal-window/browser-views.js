@@ -479,13 +479,24 @@
     layer.innerHTML='<canvas aria-hidden="true"></canvas><form><label for="lk-curtain-pin">LOOK CURTAIN · PIN</label><p>Ambient curtain · not an OS lock</p><input id="lk-curtain-pin" type="password" inputmode="numeric" pattern="[0-9]{4}" minlength="4" maxlength="4" autocomplete="off" aria-label="Four-digit PIN" required> <button>Unlock</button><p role="status"></p></form>';
     document.body.append(layer);
     const canvas=layer.querySelector('canvas'),ctx=canvas.getContext('2d'),form=layer.querySelector('form'),pin=layer.querySelector('input'),notice=layer.querySelector('[role=status]');
-    let locked=false,configured=false,busy=false,frame=0,captions=[],variant="standard",variantEpoch=0,previousFocus=null;
+    let locked=false,configured=false,busy=false,frame=0,captions=[],variant="standard",variantEpoch=0,shutdownStart=null,shutdownImage=null,previousFocus=null;
     const words=['LISTEN','ORBIT','AWAIT','SIGNAL','RETURN','DREAM','DRIFT','ALIGN'];
+    const phrases=['OBEY','CONSUME','REPRODUCE','SLEEP','CONFORM','SUBMIT','STAY ASLEEP','DO NOT QUESTION'];
+    function shufflePhrases(){for(let i=phrases.length-1;i>0;i--){const j=Math.floor(Math.random()*(i+1));[phrases[i],phrases[j]]=[phrases[j],phrases[i]];}}
+    shufflePhrases();
     function draw(stamp){
+      if(shutdownStart!==null){
+        const progress=Math.min(1,(stamp-shutdownStart)/650),w=canvas.width,h=canvas.height;
+        const sx=progress<.65?1:Math.max(0,(1-(progress-.65)/.35)**2),sy=progress<.65?Math.max(.004,(1-progress/.65)**2):.004;
+        ctx.fillStyle='#000';ctx.fillRect(0,0,w,h);
+        if(progress<.65)ctx.drawImage(shutdownImage,w*(1-sx)/2,h*(1-sy)/2,w*sx,h*sy);
+        else if(progress<1){ctx.fillStyle='#fff';ctx.fillRect(w*(1-sx)/2,h*(1-sy)/2,w*sx,h*sy);}
+        if(progress<1){frame=requestAnimationFrame(draw);return;}
+        shutdownStart=null;shutdownImage=null;layer.style.display='none';frame=0;previousFocus?.focus?.();return;
+      }
       if(!locked){frame=0;return;}
       const w=canvas.width=innerWidth,h=canvas.height=innerHeight,page=Math.floor(stamp/8000),ink=['#ebc47a','#b5d6a4','#9dbbd7'][Math.floor(stamp/20000)%3],inverse=page%2;
       if(variant==='they-live'){
-        const phrases=['OBEY','CONSUME','REPRODUCE','SLEEP','CONFORM','SUBMIT','STAY ASLEEP','DO NOT QUESTION'];
         const text=phrases[Math.floor(Math.max(0,Date.now()-variantEpoch)/12000)%phrases.length];
         ctx.fillStyle='#fff';ctx.fillRect(0,0,w,h);ctx.fillStyle='#000';ctx.textAlign='center';ctx.textBaseline='middle';ctx.font='900 100px Arial, sans-serif';
         const size=Math.max(1,Math.min(h*.6,100*w*.88/ctx.measureText(text).width));ctx.font=`900 ${size}px Arial, sans-serif`;ctx.fillText(text,w/2,h/2);
@@ -503,6 +514,11 @@
       if(priorVariant!==variant)form.style.display=variant==='they-live'?'none':'';
       configured=!!state.configured;captions=state.captions||captions;
       const next=!!state.locked;if(next===locked)return;locked=next;
+      if(!locked&&variant==='they-live'&&!matchMedia('(prefers-reduced-motion: reduce)').matches){
+        shutdownImage=document.createElement('canvas');shutdownImage.width=canvas.width;shutdownImage.height=canvas.height;
+        shutdownImage.getContext('2d').drawImage(canvas,0,0);shutdownStart=performance.now();form.style.display='none';pin.value='';notice.textContent='';return;
+      }
+      if(locked){shutdownStart=null;shutdownImage=null;shufflePhrases();}
       layer.style.display=locked?'block':'none';
       if(locked){previousFocus=document.activeElement;pin.value='';form.style.display=variant==='they-live'?'none':'';if(variant!=='they-live')pin.focus();else{layer.tabIndex=-1;layer.focus();}if(!frame)frame=requestAnimationFrame(draw);}
       else{if(frame)cancelAnimationFrame(frame);frame=0;pin.value='';notice.textContent='';previousFocus?.focus?.();}
