@@ -4189,6 +4189,13 @@ class API(BaseHTTPRequestHandler):
             if payload is None and parsed.path=='/v1/museum':result=museum_library.snapshot('local',(params.get('q') or [''])[0],result)
             return self.sendj(200,dict(result,ok=True,node=identity()['name']))
         except PermissionError as exc:return self.sendj(403,{'ok':False,'error':str(exc)})
+        except urllib.error.HTTPError as exc:
+            message='Museum owner returned HTTP '+str(exc.code)
+            try:
+                detail=json.loads(exc.read(65536))
+                if isinstance(detail,dict) and isinstance(detail.get('error'),str):message=detail['error'][:2000]
+            except (ValueError,OSError):pass
+            return self.sendj(exc.code,{'ok':False,'error':message})
         except Exception as exc:
             if payload is None and urlparse(self.path).path=='/v1/museum':
                 result=museum_library.snapshot(owner,(params.get('q') or [''])[0])
