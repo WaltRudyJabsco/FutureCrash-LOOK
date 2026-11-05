@@ -137,3 +137,21 @@ cursor. Save the surrounding note separately with Ctrl-S. **Escape** cancels
 request, generation or review without changing your draft. Generated links must
 come from discovered targets; the composer does not execute tools or shell
 commands. This command is in the built-in Notes editor, not external Vim editors.
+
+## Ask from LO, Albert or Signal
+
+The shared assistant tool `notebook_home_draft` uses the same composer as Ctrl-G
+in Notes. For example: “Add a friendly entry linking to Museum and Mercury Reader
+to my Home note.” The tool returns the draft and exact revision-checked
+`notebook_update` arguments. An explicit add/save request authorizes the assistant
+to append; asking only for a draft or preview does not. Success must come from an
+actual update receipt. The entry is appended to Home, since chat has no editor
+cursor. Unrelated text and metadata remain unchanged, and the normal notebook
+sync mechanism distributes the revision.
+
+When the composer asks which project you mean, the assistant relays the question
+and passes your answer as `clarification` alongside the original request. It must
+not invent the answer. Concurrent edits require a fresh draft; replaying an old
+append cannot duplicate the entry. Missing, deleted or conflicted Home notes are
+reported without being recreated or reconciled by drafting. Workspace authority
+is required to save; conservative/read-only sessions can prepare a draft only.
