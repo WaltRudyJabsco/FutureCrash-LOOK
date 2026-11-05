@@ -89,7 +89,7 @@ def use_set(settings,name):
 
 def store_set(settings,name):
     name=name.strip()
-    result=dict(settings,sets={**settings['sets'],name:list(settings['enabled'])},active_set=name)
+    result=dict(settings,scene='cycle',sets={**settings['sets'],name:list(settings['enabled'])},active_set=name)
     return validate(result)
 
 

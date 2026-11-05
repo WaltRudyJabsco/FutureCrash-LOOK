@@ -214,7 +214,7 @@ def test_set_cli_and_curtain_selection(settings_file,monkeypatch):
 def test_sets_menu_load_and_save(settings_file,monkeypatch):
     answers=iter(['n','My set']);monkeypatch.setattr('builtins.input',lambda _:next(answers))
     settings,notice=saver.sets_menu(dict(saver.defaults(),enabled=['Stars']))
-    assert settings['sets']['My set']==['Stars']
+    assert settings['sets']['My set']==['Stars'] and settings['scene']=='cycle'
     answers=iter(['l','3'])
     settings,notice=saver.sets_menu(settings)
     assert settings['scene']=='cycle' and settings['active_set']=='My set'
