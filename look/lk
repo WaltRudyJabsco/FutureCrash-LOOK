@@ -8350,9 +8350,25 @@ def _lo_radio_direct(prompt,profile,events=None):
     return answer
 
 
+def _lo_fortune_direct(prompt,profile,events=None):
+    import fortune_assistant
+    if fortune_assistant.intent(prompt) is None:return None
+    status='ok'
+    if events:events.emit('tool_start',tool='print_design')
+    try:answer=fortune_assistant.execute(prompt,_tool_allowed('print_design',profile))
+    except (OSError,RuntimeError,ValueError) as error:answer='Fortune: '+str(error);status='failed'
+    print(answer)
+    if events:
+        events.emit('intent_routed',family='printing',families=['printing'],confidence=1.0,source='rules')
+        events.emit('tool_end',tool='print_design',ok=status=='ok')
+        events.emit('response',text=answer)
+        events.emit('request_done',status=status,rounds=0,tool_calls=1,prompt_tokens=0,output_tokens=0,load_ms=0)
+    return answer
+
+
 def _lo_printers_direct(prompt,events=None):
     text=' '.join(str(prompt).strip().strip(' .!?').casefold().split())
-    if not re.fullmatch(r'(?:show|list) (?:our |my |the |available )?printers|(?:what|which) printers(?: (?:do we have|are available|are on (?:the |our )?fabric))?',text):return None
+    if not re.fullmatch(r'(?:available printers|list printers please)|(?:show|list) (?:our |my |the |available )?printers|(?:what|which) printers(?: (?:do we have|are available|are on (?:the |our )?fabric))?',text):return None
     import printing
     try:
         value=printing.request('list','all');rows=value.get('printers',[])
@@ -11154,7 +11170,8 @@ def ollama_chat(force_search=False, initial_prompt=None, allow_start=True, host_
             initial_prompt=None
 
     if initial_prompt and not force_search and not selected_paths:
-        printer_answer=_lo_printers_direct(initial_prompt,events)
+        printer_answer=_lo_fortune_direct(initial_prompt,profile,events)
+        if printer_answer is None:printer_answer=_lo_printers_direct(initial_prompt,events)
         if printer_answer is not None:
             _save_recent_exchange(initial_prompt,printer_answer)
             if one_shot:return 0
@@ -11764,6 +11781,7 @@ def ollama_chat(force_search=False, initial_prompt=None, allow_start=True, host_
         turn_proposed_action = None
         turn_successful_tools=set()
         print_turn={}
+        last_print_result=None
 
         # Terminal drag/drop becomes first-class resource context. Finder and most Linux
         # terminals paste escaped/quoted paths into the input line; normalize them here.
@@ -11935,7 +11953,8 @@ def ollama_chat(force_search=False, initial_prompt=None, allow_start=True, host_
                 continue
 
         if not turn_force_search and not selected_paths:
-            printer_answer=_lo_printers_direct(prompt,events)
+            printer_answer=_lo_fortune_direct(prompt,profile,events)
+            if printer_answer is None:printer_answer=_lo_printers_direct(prompt,events)
             if printer_answer is not None:
                 book_context.clear();messages.append({'role':'assistant','content':printer_answer})
                 _ai_foreground(False,'lo')
@@ -12467,7 +12486,11 @@ def ollama_chat(force_search=False, initial_prompt=None, allow_start=True, host_
                     elif name in {'printers_list','printer_inspect','print_prepare','print_text','banner_render','print_design'}:
                         import printing
                         tool_content,_ok,_elapsed=_tool_transaction(name,args,lambda:printing.run_tool(name,args,workspace,prompt,print_turn))
-                        if _ok:turn_successful_tools.add(name)
+                        if _ok:
+                            turn_successful_tools.add(name)
+                            if name in {'print_design','print_text','print_prepare'}:
+                                try:last_print_result=json.loads(tool_content)
+                                except (ValueError,TypeError):pass
                     elif name=='receipts_search':
                         import receipt_desk
                         tool_content,_ok,_elapsed=_tool_transaction(name,args,lambda:receipt_desk.run_tool(name,args))
@@ -12712,6 +12735,11 @@ def ollama_chat(force_search=False, initial_prompt=None, allow_start=True, host_
                 candidate_final=_truthful_dispatch_summary(candidate_final)
                 message={"role":"assistant","content":candidate_final,"thinking":"","tool_calls":[]}
 
+            if not _split_ollama_thinking(message)[1] and last_print_result:
+                import printing
+                message=dict(message,content=printing.design_summary(last_print_result))
+            elif not _split_ollama_thinking(message)[1] and print_turn.get('print_attempted'):
+                message=dict(message,content='The print attempt did not return a usable result. Check printer jobs before retrying; I cannot confirm completion.')
             messages.append(message)
             # Thinking was already presented live according to the selected display mode.
             final=_split_ollama_thinking(message)[1]

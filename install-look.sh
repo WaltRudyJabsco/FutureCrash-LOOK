@@ -410,6 +410,7 @@ install_file "$ROOT/look/museum_cache.py" "$HOME/.local/share/look/museum_cache.
 install_file "$ROOT/look/museum_fullscreen.py" "$HOME/.local/share/look/museum_fullscreen.py"
 install_file "$ROOT/look/radio_assistant.py" "$HOME/.local/share/look/radio_assistant.py"
 install_file "$ROOT/look/receipt_desk.py" "$HOME/.local/share/look/receipt_desk.py"
+install_file "$ROOT/look/fortune_assistant.py" "$HOME/.local/share/look/fortune_assistant.py"
 install_file "$ROOT/look/print_design.py" "$HOME/.local/share/look/print_design.py"
 echo "  Optional offline banner lettering and fortune rendering (pyfiglet + Pillow)"
 run python3 "$HOME/.local/share/look/print_design.py" --setup || echo "  Lettering setup unavailable; run lk print setup later."

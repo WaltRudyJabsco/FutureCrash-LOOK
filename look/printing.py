@@ -281,6 +281,16 @@ def design(text,kind='banner',font='standard',queue=None,paper_limit_mm=304.8):
     return result
 
 
+def design_summary(result):
+    state=result.get('state','unknown');label=result.get('destination',result.get('queue','printer'))
+    receipt=result.get('receipt') or {};ident=result.get('id','')
+    subject={'fortune':'Fortune','banner':'Banner'}.get(result.get('design',{}).get('kind'),'Print job')
+    if state in {'submitting','printing'}:return subject+' accepted by '+label+'; printing on its owner in the background. Job '+ident+'.'
+    if state=='queued':return subject+' sent to '+label+'. '+receipt.get('note','Check the physical output.')+' Job '+ident+'.'
+    if state=='prepared':return subject+' prepared, not printed. '+result.get('send_command','Review job '+ident+'.')
+    return subject+' status: '+state+'. '+receipt.get('error',receipt.get('note','Check printer jobs; do not resend automatically.'))+' Job '+ident+'.'
+
+
 def tools():
     fields={'node':{'type':'string','description':'Optional exact owner; default auto selects an enabled route'},'queue':{'type':'string','description':'Stable physical printer ID or unique friendly name from discovery; an exact queue works with an explicit owner'}}
     return [
