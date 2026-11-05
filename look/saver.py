@@ -251,6 +251,7 @@ def picker(ui):
     settings=load();names=('cycle',*SCENES);index=names.index(settings['scene'])
     fd=sys.stdin.fileno();old=termios.tcgetattr(fd)
     notice='Enter starts · A saves · Preview leaves settings unchanged'
+    editing_members=bool(settings['active_set'] and settings['scene']=='cycle')
     last_preview=None;preview=None;started=time.monotonic()
     try:
         tty.setcbreak(fd);sys.stdout.write('\033[?25l')
@@ -258,17 +259,20 @@ def picker(ui):
             width,height=ui.shutil.get_terminal_size((90,30));width=max(20,width)
             controls=ui._media_hints('↑↓ select · Shift-arrows page/ends · Space enable · s sets · P preview · Enter start · A save · D displays · M matching/independent · C colors · I invert · -/+ interval · G setup graphics · q/Esc back',width).splitlines()
             page=max(1,height-len(controls)-8);index=max(0,min(index,len(names)-1));top=(index//page)*page
-            selected=names[index];settings['scene']=selected
+            selected=names[index]
+            # Editing the cycle must not silently turn the hovered member into
+            # the sole launch scene. Preview can still inspect that member.
+            settings['scene']='cycle' if editing_members else selected
             signature=(selected,tuple(settings['enabled']),settings['palette'],settings['inversions'],settings['interval'])
             if signature!=last_preview:
-                try:preview=SceneRun(settings,17)
+                try:preview=SceneRun(dict(settings,scene=selected),17)
                 except ValueError:preview=None
                 last_preview=signature;started=time.monotonic()
             preview_width=min(60,width//2) if width>=90 else 0
             preview_lines=preview.sample(time.monotonic()-started,preview_width,page)[1] if preview and preview_width else []
             left_width=width-preview_width-3 if preview_width else width
             frame=[ui._c('LOOK SAVER','1;36')+' · ambient visuals · Escape dismisses',
-                   f"Set: {settings['active_set'] or 'Custom'} · Curtain: {settings['curtain_set'] or 'Flight Deck'} · Displays: {settings['display']} · {'independent' if settings['independent'] else 'matching'} scenes",
+                   f"Launch: {settings['scene']} · Set: {settings['active_set'] or 'Custom'} · Curtain: {settings['curtain_set'] or 'Flight Deck'} · Displays: {settings['display']} · {'independent' if settings['independent'] else 'matching'} scenes",
                    f"Colors: {settings['palette']} · inversions: {'occasional' if settings['inversions'] else 'off'} · {settings['interval']:g}s per scene"]
             colors=terminal_style.list_colors()
             for line in range(page):
@@ -295,11 +299,13 @@ def picker(ui):
             elif key=='s':
                 termios.tcsetattr(fd,termios.TCSADRAIN,old);sys.stdout.write('\033[?25h\033[0m')
                 try:
-                    settings,notice=sets_menu(settings);index=names.index(settings['scene'])
+                    settings,notice=sets_menu(settings);index=names.index(settings['scene']);editing_members=settings['scene']=='cycle'
                 except (OSError,ValueError,EOFError) as exc:notice=str(exc)
                 finally:tty.setcbreak(fd);sys.stdout.write('\033[?25l')
             elif key==' ' and selected!='cycle':
+                editing_members=True;settings['scene']='cycle'
                 settings['active_set']=None
+                notice='Editing cycle members · A saves cycle · Enter starts cycle'
                 if selected in settings['enabled']:settings['enabled'].remove(selected)
                 else:settings['enabled'].append(selected)
             elif key in {'a','A'}:
@@ -318,7 +324,7 @@ def picker(ui):
                         print(f'Install {QT_PACKAGE} into {runtime_path().parent.parent}?')
                         if input('Install isolated graphics runtime? [y/N] ').strip().casefold()=='y':setup();notice='Graphics runtime ready'
                     else:
-                        code=launch(settings,preview=key in {'p','P'})
+                        code=launch(dict(settings,scene=selected) if key in {'p','P'} else settings,preview=key in {'p','P'})
                         notice='Back from saver · A saves this selection' if code==0 else 'Graphics could not start · run lk sv from your desktop for details'
                 except (OSError,ValueError,subprocess.SubprocessError) as exc:notice=str(exc)
                 finally:tty.setcbreak(fd);sys.stdout.write('\033[?25l')

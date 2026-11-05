@@ -116,7 +116,9 @@ def test_gui_without_qt_does_not_prevent_command_help():
 
 
 @pytest.mark.parametrize('size',[(80,24),(110,32)])
-def test_picker_controls_save_preview_and_return(settings_file,monkeypatch,size):
+@pytest.mark.parametrize('named_set',[False,True])
+def test_picker_controls_save_preview_and_return(settings_file,monkeypatch,size,named_set):
+    if named_set:saver.save(saver.use_set(saver.defaults(),'Cinematics'))
     import importlib.machinery
     import importlib.util
     loader=importlib.machinery.SourceFileLoader('lk_saver_ui',str(ROOT/'look/lk'))
@@ -138,7 +140,11 @@ def test_picker_controls_save_preview_and_return(settings_file,monkeypatch,size)
     launch=Mock(return_value=0);monkeypatch.setattr(saver,'launch',launch)
     assert saver.picker(ui)==0
     value=saver.load()
-    assert value['scene']=='Bars' and 'Bars' not in value['enabled']
+    assert value['scene']=='cycle'
+    assert ('Bars' in value['enabled'])==named_set
+    assert launch.call_args_list[0].args[0]['scene']=='Bars'
+    assert launch.call_args_list[1].args[0]['scene']=='cycle'
+    assert set(saver.SceneRun(value,42).scenes)==set(value['enabled'])
     assert value['display']=='current' and not value['independent'] and not value['inversions']
     assert value['interval']==25 and value['palette']=='neon'
     assert [call.kwargs['preview'] for call in launch.call_args_list]==[True,False]
