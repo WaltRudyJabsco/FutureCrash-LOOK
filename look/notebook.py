@@ -40,6 +40,28 @@ FABRIC_ACTIONS={
  'wiki':('Wiki',('wiki',),(),'Which article? Use a wiki: link to bookmark it.'),
 }
 
+# Only reviewed, non-destructive entry points belong in the portable link catalog.
+FABRIC_ACTIONS.update({
+ 'files':('File browser',('--interactive',),(),'Browse local and Fabric files.'),
+ 'tasks':('Tasks',('tasks',),('notebook_list',),'Review your tasks.'),
+ 'reminders':('Reminders',('reminders',),('notebook_list',),'Review scheduled reminders.'),
+ 'mp':('Music library',('mp',),(),'Browse music and manage the queue.'),
+ 'player':('Music player',('player',),(),'View playback controls.'),
+ 'tv':('Video library',('tv',),(),'Browse movies and videos.'),
+ 'visualizers':('Visualizers',('visualizers',),(),'Choose music and saver animations.'),
+ 'terminal':('Terminal themes',('terminal',),(),'Preview colors and adjust terminal appearance.'),
+ 'lock':('Curtain settings',('lock',),(),'Configure the Fabric PIN curtain.'),
+ 'web':('Web desk',('web',),(),'Browse web tools.'),
+ 'words':('Dictionary',('words',),(),'Look up words.'),
+ 'latin':('Latin',('latin',),(),'Explore Latin words and references.'),
+ 'games':('Games',('games',),(),'Choose a terminal game.'),
+ 'commands':('Command reference',('commands',),(),'Browse and search LOOK commands.'),
+ 'system':('System overview',('system',),(),'Inspect computer status.'),
+ 'ai':('AI settings',('ai',),(),'Inspect local AI and its settings.'),
+ 'albert':('Albert',('albert',),(),'Open the Albert web interface.'),
+})
+
+
 def action_catalog(action_id=None):
     if action_id is not None and action_id not in FABRIC_ACTIONS:raise ValueError('Unknown Fabric action')
     return [dict(id=key,label=value[0],link='look:'+key,command='lk '+' '.join(value[1]),
@@ -48,7 +70,7 @@ def action_catalog(action_id=None):
 
 
 def home_template():
-    links='\n'.join('- ['+row['label']+']('+row['link']+')' for row in action_catalog() if row['id']!='notes')
+    links='\n'.join('- ['+row['label']+']('+row['link']+')' for row in action_catalog() if row['id'] in {'museum','books','ytr','print','saver','wiki'})
     return ('# My Fabric\n\nYour editable starting page. Use numbered links to open a tool and return here when finished.\n\n'
             '## Places\n'+links+'\n\n## Projects\n'
             'Add project notes with Ctrl-K, then Ctrl-N to choose a note. Paste a Mercury project link or a directory here too.\n\n'
@@ -484,7 +506,7 @@ def insert_link(store,fd,read_key):
             values,cursors,replace,active=forms[mode]
             continue
         if key=='\x01' and mode=='link':
-            chosen=choose_link(fd,read_key,[(row['label'],row['link']) for row in action_catalog()],'FABRIC TOOLS')
+            chosen=choose_action(fd,read_key)
             if chosen:
                 values=[chosen,action_catalog(chosen[5:])[0]['label']];cursors=list(map(len,values));replace=[True,True];active=1
             continue
@@ -793,6 +815,47 @@ def related_notes(store,row):
     return [(item['title'],'note:'+item['id'])
             for item in store.list(include_done=True)
             if item['id']!=row['id'] and any(link==target for _,link in extract_links(item['body']))]
+
+
+def choose_action(fd,read_key):
+    """Search the same reviewed catalog exposed to notes and the assistant."""
+    query=''; selected=0; digits=''
+    while True:
+        rows=[row for row in action_catalog() if all(term in
+              (row['label']+' '+row['id']+' '+row['question']).casefold()
+              for term in query.casefold().split())]
+        selected=max(0,min(selected,len(rows)-1))
+        width,height=shutil.get_terminal_size((100,30)); width=max(1,width-1)
+        page=max(1,height-7); top=(selected//page)*page
+        colors=terminal_style.list_colors()
+        lines=['FABRIC TOOLS · '+str(len(rows))+' available', 'Search: '+query+'█']
+        for index,row in enumerate(rows[top:top+page],top):
+            text=('› ' if index==selected else '  ')+str(index+1)+'. '+row['label']+' · '+row['link']
+            clipped=dialog_line(text,width)
+            lines.append(('\033[7m'+clipped+RESET) if index==selected else colors['GRAY']+clipped+RESET)
+        if not rows: lines.append('No matching tools · Backspace to adjust search')
+        detail=rows[selected]['question'] if rows else ''
+        lines.extend(['',dialog_line(detail,width),command_hints(dialog_line('↑↓/Tab select · PgUp/PgDn page · Home/End jump',width)),
+                      command_hints(dialog_line('Enter choose · Esc back · type search or number '+digits,width))])
+        sys.stdout.write('\033[2J\033[H'+'\r\n'.join(lines)+'\033[J');sys.stdout.flush()
+        key=read_key(fd,None)
+        if key in {'esc','\x03'}:return None
+        if key in {'enter','\r','\n'} and rows:
+            index=int(digits)-1 if digits else selected
+            if 0<=index<len(rows):return rows[index]['link']
+            digits=''
+        elif key in {'down','\t'}:selected=min(len(rows)-1,selected+1);digits=''
+        elif key=='up':selected=max(0,selected-1);digits=''
+        elif key in {'pageup','shiftup'}:selected=max(0,selected-page);digits=''
+        elif key in {'pagedown','shiftdown'}:selected=min(len(rows)-1,selected+page);digits=''
+        elif key in {'home','shiftleft'}:selected=0;digits=''
+        elif key in {'end','shiftright'}:selected=len(rows)-1;digits=''
+        elif key in {'\b','\x7f'}:
+            if digits:digits=digits[:-1]
+            else:query=query[:-1];selected=0
+        elif len(key)==1 and key.isdigit():digits=(digits+key)[-6:]
+        elif key.startswith('paste:'):query+=' '.join(safe_text(key[6:]).split());selected=0;digits=''
+        elif len(key)==1 and key.isprintable():query+=key;selected=0;digits=''
 
 
 def choose_link(fd,read_key,links,label='NOTE LINKS'):
