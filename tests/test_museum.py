@@ -360,3 +360,18 @@ def test_refill_preserves_rejections_and_existing_records(tmp_path,monkeypatch):
     state=m.read();assert state['items']['aic-1']['removal_due']
     assert state['items']['aic-2']['collection']=='Daily discovery'
     assert state['job']['saved']==1
+
+
+def test_favorites_free_discovery_slots_and_remain_saved(tmp_path,monkeypatch):
+    import museum_library
+    m=museum.Museum(tmp_path);m.store(art('aic-1'),JPEG);m.store(art('aic-2'),JPEG)
+    m.favorite('aic-1');rows=m.snapshot()['items']
+    assert [r['id'] for r in museum_library.view(rows)]==['aic-2']
+    assert [r['id'] for r in museum_library.view(rows,'favorites')]==['aic-1']
+    assert len(museum_library.view(rows,'all'))==2
+    monkeypatch.setattr(museum,'REFILL_TARGET',2)
+    calls=Mock();monkeypatch.setattr(m,'_refill',calls)
+    m.rotation(True);m.maintain();m.worker.join(2)
+    calls.assert_called_once_with(1)
+    assert m.image('aic-1').exists()
+    m.favorite('aic-1');assert len(museum_library.view(m.snapshot()['items']))==2

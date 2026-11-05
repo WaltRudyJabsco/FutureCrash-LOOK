@@ -638,8 +638,8 @@ After that grace period the owner removes the downloaded file, preserving its
 Gutenberg ID in an exclusion list so automatic refill never chooses it again.
 Manual imports are protected. A rejected file changed on disk is also preserved.
 
-**Daily refill** lets you choose the library owner and target count (normally
-1,000). It is off until enabled and downloads only on that owner, into its configured
+**Daily refill** lets you choose the library owner and target undecided count (normally
+1,000), in addition to Favorites. It is off until enabled and downloads only on that owner, into its configured
 books folder under `Gutenberg Starter 1000`. The existing starter selection is
 reused when available; fresh installations use English text entries from the
 Gutenberg bulk catalog, excluding obvious periodicals and duplicate title/author
@@ -669,3 +669,25 @@ lk books refill off --node OWNER
 Use `lk books list --json` for IDs. Refill status includes the last run, number
 added, and recent download errors. Collections, exclusions, and refill settings
 are stored with the owner's shelf catalog, alongside its existing backup data.
+
+
+### Thumbs up and the discovery pool
+
+**To explore** is the default shelf: books you have not yet chosen to keep or
+reject. Compact **👍** and **👎** buttons sit below each title, beside Collections.
+Each has an accessible label, a tooltip, and a touch-sized target.
+
+**👍** moves a book into **Favorites** and out of To explore. Its file, collections,
+and reading position stay intact. Choose Favorites from the view selector to see
+your reading shelf; use **All books** to see both groups. Removing a favorite
+returns it to the pool. Collections can contain either favorites or undecided books.
+Thumbs-up also cancels a pending removal; thumbs-down clears the favorite mark and
+starts the existing 48-hour undo window.
+
+Daily refill now maintains the configured number of undecided books **plus** your
+Favorites. Thus 100 favorites and a target of 1,000 can mean 1,100 saved books.
+It skips every already-owned Gutenberg ID, including favorites, and rejected IDs.
+The next daily run fills newly available slots; rating a book does not start an
+immediate download. Terminal **f** toggles Favorites; **s** cycles the views.
+`lk books favorite BOOK_ID` and `lk books unfavorite BOOK_ID` provide the same
+owner-routed actions. `lk books list --json` still includes both groups.

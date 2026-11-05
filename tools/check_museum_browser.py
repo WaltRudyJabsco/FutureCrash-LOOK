@@ -73,21 +73,25 @@ with sync_playwright() as p:
     page.locator('#detail-prev').click();assert page.locator('#title').inner_text()==rows[0]['title']
     page.keyboard.press('ArrowLeft');assert page.locator('#title').inner_text()==rows[-1]['title']
     page.locator('#detail-next').click();assert page.locator('#title').inner_text()==rows[0]['title']
-    assert page.locator('#detail-actions button',has_text='Favorite').count()==1
+    assert page.locator('#detail-actions').get_by_role('button',name='Add to Favorites',exact=True).count()==1
     page.locator('#detail-full').click();page.wait_for_function('document.fullscreenElement!==null');page.locator('#detail-full').click();page.wait_for_function('document.fullscreenElement===null')
-    page.locator('#detail-actions button',has_text='Thumbs down').click();page.wait_for_selector('#detail-actions button:has-text("Undo removal")')
-    page.locator('#detail-actions button',has_text='Undo removal').click();page.wait_for_selector('#detail-actions button:has-text("Thumbs down")')
+    page.locator('#detail-actions').get_by_role('button',name='Thumbs down · remove in 48h',exact=True).click();page.wait_for_selector('#detail-actions button[aria-label="Undo removal"]')
+    page.locator('#detail-actions').get_by_role('button',name='Undo removal',exact=True).click();page.wait_for_selector('#detail-actions button[aria-label="Thumbs down · remove in 48h"]')
     page.locator('#close').click()
-    page.locator('.card .actions button',has_text='Favorite').first.click();page.locator('#favorites').click();page.wait_for_function("document.querySelectorAll('.card').length===1")
+    page.locator('.card .actions').get_by_role('button',name='Add to Favorites',exact=True).first.click();page.locator('#favorites').click();page.wait_for_function("document.querySelectorAll('.card').length===1")
     page.locator('.card .view').first.click()
     assert page.locator('#detail-next').is_disabled()
     page.keyboard.press('ArrowRight');assert page.locator('#detail-position').inner_text()=='1 / 1'
     page.locator('#close').click()
     page.locator('#slideshow').click();page.wait_for_selector('#show:visible');assert '/api/museum/image' in page.locator('#slide-image').get_attribute('src')
-    assert page.locator('#slide-actions button',has_text='Favorite').count()==1
+    assert page.locator('#slide-actions').get_by_role('button',name='Remove from Favorites',exact=True).count()==1
     page.keyboard.press('Space');assert page.locator('#slide-pause').inner_text()=='Play · Space'
     page.keyboard.press('Space');assert page.locator('#slide-pause').inner_text()=='Pause · Space'
     page.locator('#slide-pause').click();assert page.locator('#slide-pause').inner_text()=='Play · Space';page.locator('#slide-next').click();page.locator('#exit').click()
+    page.locator('#saved').click();page.wait_for_function("document.querySelectorAll('.card').length===items.length-1")
+    page.locator('#all').click();page.wait_for_function("document.querySelectorAll('.card').length===items.length")
+    page.locator('.card .actions').get_by_role('button',name='Remove from Favorites',exact=True).click()
+    page.wait_for_function("!items.some(x=>x.favorite)")
     page.locator('#discover').click();page.wait_for_selector('#source:visible');page.locator('#source').select_option('aic');page.locator('#query').fill('landscape');page.locator('#search button').click();page.wait_for_selector('#next:visible')
     page.locator('#saved').click();page.wait_for_function("document.querySelectorAll('.card').length>1")
     page.once('dialog',lambda d:d.accept('Night Gallery'));page.locator('#new-collection').click();page.wait_for_function("document.querySelector('#collection-choice').options.length===1")

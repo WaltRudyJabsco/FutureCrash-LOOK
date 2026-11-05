@@ -272,3 +272,19 @@ ID, including rejected works. It searches the starter subjects with a rotating
 first subject; refills are discoveries, not popularity-ranked selections. Partial
 jobs and source errors use the same progress display. The schedule persists across
 restarts and waits for any active download job to finish.
+
+
+### Favorites and a fresh discovery pool
+
+The default **To explore** view hides favorites and rejected works. **👍** saves
+an artwork to **Favorites**; removing that mark returns it to the pool. **All works**
+shows favorites and undecided artwork together. Collections remain independent.
+The browser uses compact, accessible thumb buttons in cards, detail, and slideshow
+controls. In the terminal, **f** toggles favorites, **1** opens To explore,
+**4** opens Favorites, and **6** opens All works. **x** retains the 48-hour removal
+and undo behavior.
+
+Daily refill targets 1,000 undecided works in addition to favorites. Favorites stay
+on disk and remain excluded from duplicate downloads. The existing maximum of
+100 additions per daily run and 3 GiB collection budget still apply, including
+favorite images. Rating does not trigger an immediate download.

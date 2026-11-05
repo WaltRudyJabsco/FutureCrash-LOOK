@@ -1060,6 +1060,18 @@
     "Add a book to a collection; terminal C toggles membership"
   ],
   [
+    "lk books favorite",
+    "BOOK_ID [--node NODE]",
+    "media",
+    "Save to Favorites and free a discovery slot; unfavorite returns it"
+  ],
+  [
+    "lk books unfavorite",
+    "BOOK_ID [--node NODE]",
+    "media",
+    "Return a book from Favorites to the discovery pool"
+  ],
+  [
     "lk books reject",
     "BOOK_ID [--node NODE]",
     "media",
@@ -1075,7 +1087,7 @@
     "lk books refill",
     "[on [COUNT]|off] [--node NODE]",
     "media",
-    "Inspect or configure daily Gutenberg starter refill on its owner"
+    "Inspect or configure daily Gutenberg discovery refill on its owner"
   ],
   [
     "lk books discover",

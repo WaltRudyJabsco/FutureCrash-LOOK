@@ -36,7 +36,7 @@ nav,.preferences,.masthead{display:flex;align-items:center;gap:8px;flex-wrap:wra
 #items button:nth-child(even){background:var(--panel);border-left-color:#b9a786}
 #items button:nth-child(3n){border-left-color:#9aaca0}
 #items button:nth-child(5n){border-left-color:#b49a94}
-.book-card{border-bottom:1px solid var(--line);padding-bottom:8px}.book-card:nth-child(even){background:var(--panel)}#items .book-card:nth-child(even)>button{background:var(--panel);border-left-color:#b9a786}#items .book-card:nth-child(3n)>button{border-left-color:#9aaca0}#items .book-card:nth-child(5n)>button{border-left-color:#b49a94}.book-actions{display:flex;gap:12px;align-items:center;flex-wrap:wrap;padding:0 18px;font:14px system-ui}.book-actions details{max-width:100%}.book-actions label{display:block}#items .book-actions button{width:auto;padding:5px 10px;border:1px solid var(--line);font-size:13px;margin:0}.book-actions summary{cursor:pointer;color:var(--accent)}
+.book-card{border-bottom:1px solid var(--line);padding-bottom:8px}.book-card:nth-child(even){background:var(--panel)}#items .book-card:nth-child(even)>button{background:var(--panel);border-left-color:#b9a786}#items .book-card:nth-child(3n)>button{border-left-color:#9aaca0}#items .book-card:nth-child(5n)>button{border-left-color:#b49a94}.book-actions{display:flex;gap:12px;align-items:center;flex-wrap:wrap;padding:0 18px;font:14px system-ui}.book-actions details{max-width:100%}.book-actions label{display:block}#items .book-actions button{width:auto;padding:5px 10px;border:1px solid var(--line);font-size:13px;margin:0}#items .book-actions .rating{width:44px;min-height:44px;padding:5px;text-align:center;font-size:20px}.rating[aria-pressed=true]{background:var(--highlight);border-color:var(--accent)}.book-actions summary{cursor:pointer;color:var(--accent)}
 #reader[hidden],#library[hidden],#cover[hidden]{display:none}
 #reader-head{position:sticky;top:0;z-index:2;background:var(--paper);border-bottom:1px solid var(--line);padding:8px 0 12px}
 .book-heading{display:flex;gap:14px;align-items:center;margin:10px 0}
@@ -150,7 +150,7 @@ figcaption{font:14px/1.5 system-ui;color:var(--muted);margin-top:10px}
 <section id="reader-options" aria-label="Reading controls">
 <div class="controls-heading"><strong>Reading controls</strong><button id="controls-close" aria-label="Close reading controls">Done</button></div>
 <div id="reader-appearance"></div>
-<nav aria-label="Book organization"><button id="book-collect">Add to collection…</button><button id="book-reject">Thumbs down</button></nav>
+<nav aria-label="Book organization"><button id="book-favorite" aria-label="Add to Favorites" title="Add to Favorites">👍</button><button id="book-collect">Add to collection…</button><button id="book-reject">Thumbs down</button></nav>
 <nav>
 <select id="chapters" aria-label="Chapter">
 </select>
@@ -191,7 +191,7 @@ figcaption{font:14px/1.5 system-ui;color:var(--muted);margin-top:10px}
 <button type="submit" value="shelf">Search shelf</button>
 <button type="submit" value="gutenberg">Search Gutenberg</button>
 </form>
-<div class="shelf-tools"><label id="sort-label" for="shelf-sort">Sort shelf</label><select id="shelf-sort"><option value="title">Title · A–Z</option><option value="author">Author · A–Z</option><option value="opened">Last opened</option><option value="added">Date added</option></select><label id="collection-label" for="collection-filter">Collection</label><select id="collection-filter"><option value="all">All books</option><option value="rejected">Pending removals</option></select><button id="collection-new">New collection…</button><button id="refill-settings">Daily refill…</button><span id="result-count"></span></div>
+<div class="shelf-tools"><label id="sort-label" for="shelf-sort">Sort shelf</label><select id="shelf-sort"><option value="title">Title · A–Z</option><option value="author">Author · A–Z</option><option value="opened">Last opened</option><option value="added">Date added</option></select><label id="collection-label" for="collection-filter">View</label><select id="collection-filter"><option value="pool">To explore</option><option value="favorites">Favorites</option><option value="all">All books</option><option value="rejected">Pending removals</option></select><button id="collection-new">New collection…</button><button id="refill-settings">Daily refill…</button><span id="result-count"></span></div>
 <div id="items">
 </div>
 <button id="load-more" hidden>Load more books</button>
@@ -213,7 +213,7 @@ def handle(handler,node_url,payload=None):
     query={k:v[0] for k,v in query.items() if k in allowed}
     route={'':'/v1/books/fabric','read':'/v1/books/read','audio':'/v1/books/audio','voices':'/v1/books/voices','cover':'/v1/books/cover','image':'/v1/books/image','discover':'/v1/books/discover','discovery-cover':'/v1/books/discovery-cover'}.get(action)
     if payload is not None:
-        if action not in {'progress','fetch','reject','restore','collection','collect','refill'}:raise ValueError('Unknown Books action')
+        if action not in {'progress','fetch','reject','restore','collection','collect','refill','favorite'}:raise ValueError('Unknown Books action')
         route='/v1/books'
         payload=dict(payload,action=action)
     if route is None:raise ValueError('Unknown Books route')
