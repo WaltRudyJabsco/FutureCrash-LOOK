@@ -18,12 +18,12 @@ def test_exact_user_request_discovers_generates_submits_once(monkeypatch,lk,caps
     monkeypatch.setattr(lk,'_cognition_module',lambda:cognition)
     listing=Mock(return_value={'printers':[{'label':'Tiny Printer'}]});monkeypatch.setattr(printing,'destinations',listing)
     generate=Mock(return_value='A small kindness will find its way back to you.');monkeypatch.setattr(fortune,'generate',generate)
-    submit=Mock(return_value=json.dumps({'state':'submitting','id':'abc','destination':'Tiny Printer','design':{'kind':'fortune'}}));monkeypatch.setattr(printing,'run_tool',submit)
+    submit=Mock(return_value=json.dumps({'state':'queued','id':'abc','destination':'Tiny Printer','design':{'kind':'fortune'}}));monkeypatch.setattr(printing,'run_tool',submit)
     result=lk._lo_fortune_direct('print me a fortune on tiny printer','workspace')
-    assert 'accepted by Tiny Printer' in result and 'abc' in result
+    assert 'sent to Tiny Printer' in result and 'abc' in result
     listing.assert_called_once();generate.assert_called_once();submit.assert_called_once()
     assert submit.call_args.args[1]['queue']=='Tiny Printer' and submit.call_args.args[1]['send'] is True
-    assert 'accepted' in capsys.readouterr().out
+    assert 'sent' in capsys.readouterr().out
 
 
 def test_failure_stops_before_printing_and_reports_reason(monkeypatch,lk):
@@ -55,3 +55,13 @@ def test_generator_validates_model_output(monkeypatch):
     assert infer.call_args.kwargs['think'] is False
     infer.return_value={'message':{'content':'too long '*30}}
     with pytest.raises(ValueError,match='Nothing printed'):fortune.generate()
+
+
+def test_direct_waits_for_background_failure(monkeypatch):
+    monkeypatch.setattr(printing,'destinations',lambda:{'printers':[{'label':'Tiny Printer'}]})
+    monkeypatch.setattr(fortune,'generate',lambda:'Kindness finds its way home.')
+    monkeypatch.setattr(printing,'run_tool',lambda *a:json.dumps({'id':'a','node':'owner','state':'submitting'}))
+    inspect=Mock(return_value={'id':'a','state':'failed','receipt':{'error':'Wake the printer; no print data sent'}})
+    monkeypatch.setattr(printing,'request',inspect);monkeypatch.setattr(fortune.time,'sleep',lambda _:None)
+    with pytest.raises(RuntimeError,match='Wake the printer'):fortune.execute('print me a fortune on tiny printer')
+    inspect.assert_called_once_with('inspect','owner',ident='a')

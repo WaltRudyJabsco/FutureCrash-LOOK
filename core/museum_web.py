@@ -118,7 +118,9 @@ function updateItems(rows){
 }
 function visible(){return items.filter(x=>(mode==='review'?!!x.removal_due:!x.removal_due)&&(mode!=='saved'||!x.favorite)&&(mode!=='favorites'||x.favorite)&&(mode!=='collections'||(x.collections||[]).includes(collectionId))&&(!$('offline-only').checked||x.available_offline))}
 function collectionChoices(){const select=$('collection-choice');select.replaceChildren();for(const [id,value] of Object.entries(collections)){const option=document.createElement('option');option.value=id;option.textContent=value.name;select.append(option)}if(!collections[collectionId])collectionId=Object.keys(collections)[0]||'';select.value=collectionId;select.hidden=mode!=='collections'}
-let printRow=null,printPlan=null,printAttempted=false,printBusy=false,printEpoch=0;
+let printRow=null,printPlan=null,printAttempted=false,printBusy=false,printEpoch=0,printPoll=null;
+function printStatus(result){const pending=['submitting','printing'].includes(result.state);$('print-status').textContent=(pending?'Accepted; waiting for printer delivery. ':'Print '+result.state+'. ')+(result.receipt?.error||result.receipt?.note||result.note||'')}
+function watchPrint(plan,epoch){clearTimeout(printPoll);printPoll=setTimeout(async()=>{if(epoch!==printEpoch||!$('print-dialog').open)return;try{const result=await printAPI({action:'inspect',node:plan.node,id:plan.id,confirm:true});if(epoch!==printEpoch)return;printStatus(result);if(['submitting','printing'].includes(result.state))watchPrint(plan,epoch)}catch(e){if(epoch===printEpoch)$('print-status').textContent=e.message+' · Use Check status; do not resend.'}},1500)}
 async function printAPI(value){const response=await fetch('/api/museum/print',{method:value?'POST':'GET',headers:value?{'Content-Type':'application/json'}:{},body:value?JSON.stringify(value):undefined});const data=await response.json();if(!response.ok||data.error)throw Error(data.error||'Print unavailable');return data}
 async function openPrint(row){
  if(printBusy)return;
@@ -134,12 +136,12 @@ $('print-send').onclick=async()=>{
  if(!printPlan||printAttempted||printBusy)return;
  printAttempted=true;printBusy=true;
  for(const id of ['print-send','print-review','print-printer','print-close','print-style','print-rotation','print-copies','print-allowance'])$(id).disabled=true;
- try{const result=await printAPI({action:'send',node:printPlan.node,id:printPlan.id,confirm:true});$('print-status').textContent=(result.state==='queued'?'Sent to printer queue. ':['submitting','printing'].includes(result.state)?'Printing on the owner in background. ':'Check printer job status: '+result.state+'. ')+(result.receipt?.note||'');$('print-send').hidden=true;$('print-check').hidden=false}
+ try{const result=await printAPI({action:'send',node:printPlan.node,id:printPlan.id,confirm:true});printStatus(result);if(['submitting','printing'].includes(result.state))watchPrint(printPlan,printEpoch);$('print-send').hidden=true;$('print-check').hidden=false}
  catch(e){$('print-status').textContent=e.message+' · Check printer jobs before retrying.'}
  finally{printBusy=false;for(const id of ['print-review','print-printer','print-close','print-style','print-rotation','print-copies','print-allowance'])$(id).disabled=false}
 };
-$('print-check').onclick=async()=>{if(!printPlan||printBusy)return;try{const result=await printAPI({action:'inspect',node:printPlan.node,id:printPlan.id,confirm:true});$('print-status').textContent='Print '+result.state+' · '+(result.receipt?.note||result.note||'')}catch(e){$('print-status').textContent=e.message}};
-$('print-close').onclick=()=>{if(printBusy)return;printEpoch++;discardPrint().catch(()=>{});$('print-dialog').close()};$('print-dialog').addEventListener('cancel',e=>{if(printBusy){e.preventDefault();return}printEpoch++;discardPrint().catch(()=>{})});
+$('print-check').onclick=async()=>{if(!printPlan||printBusy)return;try{const result=await printAPI({action:'inspect',node:printPlan.node,id:printPlan.id,confirm:true});printStatus(result)}catch(e){$('print-status').textContent=e.message}};
+$('print-close').onclick=()=>{if(printBusy)return;printEpoch++;clearTimeout(printPoll);discardPrint().catch(()=>{});$('print-dialog').close()};$('print-dialog').addEventListener('cancel',e=>{if(printBusy){e.preventDefault();return}printEpoch++;clearTimeout(printPoll);discardPrint().catch(()=>{})});
 function renderActions(row,controls){
  controls.replaceChildren();function button(label,action,accessible=label,pressed=null){const b=document.createElement('button');b.textContent=label;b.setAttribute('aria-label',accessible);b.title=accessible;if(pressed!==null)b.setAttribute('aria-pressed',String(pressed));b.onclick=async()=>{b.disabled=true;if(timer){clearInterval(timer);timer=null;$('slide-pause').textContent='Play · Space'}try{await action()}catch(e){status(e.message)}finally{b.disabled=false;if(detailRow)renderActions(detailRow,$('detail-actions'));if(!$('show').hidden&&slides.length)renderActions(slides[slide],$('slide-actions'))}};controls.append(b)}
  button('Print',()=>openPrint(row),'Print this artwork');

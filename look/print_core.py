@@ -492,7 +492,8 @@ class Spool:
                 state='queued' if match else 'uncertain'
                 receipt={'job':match[1] if match else None,'output':output,'note':'Accepted by CUPS; physical delivery is not verified.' if match else 'No job ID verified. Check lk print jobs; do not resend automatically.'}
         except (OSError,RuntimeError,subprocess.SubprocessError) as error:
-            state='uncertain';receipt={'error':str(error),'note':'Submission may have reached the printer. Inspect jobs and physical output; this plan will not be resent.'}
+            state='failed' if getattr(error,'nothing_sent',False) else 'uncertain'
+            receipt={'error':str(error),'note':'No print data sent. Wake/check the printer, then request a new job.' if state=='failed' else 'Submission may have reached the printer. Inspect jobs and physical output; this plan will not be resent.'}
         meta.pop('text_preview',None);meta.pop('preview_truncated',None)
         with self.connect() as db:db.execute('UPDATE jobs SET state=?,receipt=?,meta=?,payload=NULL WHERE id=?',(state,json.dumps(receipt),json.dumps(meta),ident))
         return self.inspect(ident)

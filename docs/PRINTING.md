@@ -356,3 +356,11 @@ submits once using the existing explicit-print guard. The model does not decide
 whether the printer exists or whether to ask for redundant confirmation. Missing
 printers, failed generation and submission errors produce an explicit result.
 Bare follow-ups such as “immediately” do not replay an earlier print attempt.
+
+
+Tiny Printer may stop accepting Bluetooth connections while asleep even if its
+light is on. A connection failure before a print request is now marked failed
+with “No print data sent”; wake/power-cycle it near its owner before requesting a
+new job. Existing failed jobs never resume automatically. Fortune commands wait
+briefly for background results, and the Museum web print dialog refreshes status
+automatically while open. An accepted job is not a delivery confirmation.
