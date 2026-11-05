@@ -167,7 +167,7 @@
 (async function(){
   if(typeof document==='undefined'||!document.getElementById?.('books-app'))return;
   const $=id=>document.getElementById(id),audio=$('audio');
-  let libraryGeneration=0,shelfQuery='',discovery=null,sortOrder='title';
+  let libraryGeneration=0,shelfQuery='',discovery=null,sortOrder='title',collectionFilter='all',collectionNames=[];
   try{sortOrder=localStorage.getItem('look-books-shelf-sort')||'title'}catch{}
   if(!['title','author','opened','added'].includes(sortOrder))sortOrder='title';
   let catalog=[],book=null,model=null,chapter=0,paragraph=0,generation=0,lastSave=0,saving=Promise.resolve();
@@ -326,7 +326,7 @@
     if(playbackIntent){status('Preparing narration…');await audio.play().catch(()=>{if(mine===generation){playbackIntent=false;syncTransport();status('Tap Play to continue listening.')}})}
   }
   async function open(row){
-    ++libraryGeneration;dismissDrawer();playbackIntent=false;requestedPosition=null;ahead.clear();audio.pause();if(book)save();book=row;model=null;content=null;const mine=++generation;
+    ++libraryGeneration;dismissDrawer();playbackIntent=false;requestedPosition=null;ahead.clear();audio.pause();if(book)save();book=row;$('book-reject').hidden=!row.starter_managed&&!row.removal_due;$('book-reject').textContent=row.removal_due?'Undo removal':'Thumbs down';model=null;content=null;const mine=++generation;
     status('Loading narration voices…');
     let options;try{options=await api('/voices?'+params())}catch{options={voices:[]}}
     if(mine!==generation)return;
@@ -356,6 +356,25 @@
     }
     return '';
   }
+  async function curate(row,action,extra={}){
+    return api('/'+action+'?'+new URLSearchParams({target:row.node||'local'}),{id:row.id,...extra});
+  }
+  async function rejectBook(row){
+    const action=row.removal_due?'restore':'reject';
+    if(action==='reject'&&!confirm('Hide “'+row.title+'” now and remove its downloaded file after 48 hours? You can undo in Pending removals. It will not be chosen for automatic refill again.'))return;
+    await curate(row,action);await shelf(shelfQuery);
+    status(action==='restore'?'Book restored.':'Hidden · undo within 48 hours in Pending removals.');
+  }
+  function collectionOptions(){
+    const select=$('collection-filter');
+    select.replaceChildren(...[['all','All books'],['rejected','Pending removals'],...collectionNames.map(n=>['c:'+n,n])].map(([value,label])=>{const o=document.createElement('option');o.value=value;o.textContent=label;return o}));
+    if(![...select.options].some(o=>o.value===collectionFilter))collectionFilter='all';select.value=collectionFilter;
+  }
+  async function addCollection(row){
+    const name=prompt('Collection name'+(collectionNames.length?' · existing: '+collectionNames.join(', '):''));
+    if(!name?.trim())return;
+    await curate(row,'collect',{name:name.trim(),selected:true});await shelf(shelfQuery);status('Added to '+name.trim());
+  }
   function show(rows,discover=false){
     $('result-count').textContent=rows.length+(discover?(rows.length===1?' result':' results'):(rows.length===1?' book':' books'));
     $('items').replaceChildren(...rows.map(row=>{
@@ -374,12 +393,21 @@
         img.src=discover?'/api/books/discovery-cover?id='+id:'/api/books/cover?'+new URLSearchParams({target:row.node||'local',id:row.id});
         img.onerror=()=>{img.remove();thumb.textContent='BOOK'};thumb.append(img);b.prepend(thumb);
       }
-      return b;
+      if(discover)return b;
+      const card=document.createElement('div');card.className='book-card';card.append(b);
+      const actions=document.createElement('div');actions.className='book-actions';card.append(actions);
+      const detail=document.createElement('details'),summary=document.createElement('summary');summary.textContent='Collections'+(row.collections?.length?' · '+row.collections.join(', '):'');detail.append(summary);
+      detail.addEventListener('toggle',()=>{if(!detail.open||detail.dataset.ready)return;detail.dataset.ready='true';
+      for(const name of collectionNames){const label=document.createElement('label'),check=document.createElement('input');check.type='checkbox';check.checked=(row.collections||[]).includes(name);label.append(check,document.createTextNode(' '+name));detail.append(label);check.onchange=()=>curate(row,'collect',{name,selected:check.checked}).then(()=>shelf(shelfQuery)).catch(e=>status(e.message))}
+      detail.append(button('New collection…',()=>addCollection(row)));});actions.append(detail);
+      if(row.starter_managed||row.removal_due)actions.append(button(row.removal_due?'Undo removal':'Thumbs down',()=>rejectBook(row)));
+      if(row.removal_due){const due=document.createElement('small');due.textContent='Removal after '+new Date(row.removal_due*1000).toLocaleString();actions.append(due)}
+      return card;
     }));
   }
   function shelfRows(){
     const terms=shelfQuery.toLocaleLowerCase().split(/\s+/).filter(Boolean);
-    return catalog.filter(row=>terms.every(term=>(row.title+' '+(row.author||'')).toLocaleLowerCase().includes(term))).sort((a,b)=>{
+    return catalog.filter(row=>(collectionFilter==='rejected'?!!row.removal_due:!row.removal_due)&&(collectionFilter.startsWith('c:')?(row.collections||[]).includes(collectionFilter.slice(2)):true)).filter(row=>terms.every(term=>(row.title+' '+(row.author||'')).toLocaleLowerCase().includes(term))).sort((a,b)=>{
       const title=()=>String(a.title).localeCompare(String(b.title),undefined,{numeric:true,sensitivity:'base'});
       if(sortOrder==='opened')return (b.reading?.updated||0)-(a.reading?.updated||0)||title();
       if(sortOrder==='added')return (b.added||0)-(a.added||0)||title();
@@ -389,13 +417,14 @@
   }
   function libraryControls(isShelf){
     $('shelf-sort').hidden=$('sort-label').hidden=!isShelf;
+    for(const id of ['collection-label','collection-filter','collection-new','refill-settings'])$(id).hidden=!isShelf;
     $('shelf').setAttribute('aria-pressed',String(isShelf));$('discover').setAttribute('aria-pressed',String(!isShelf));
     $('load-more').hidden=true;
   }
-  function renderShelf(){const rows=shelfRows();show(rows);status(rows.length?'Choose a book or continue reading.':'No matching book on your Fabric shelf. Use Search Gutenberg to find new books.')}
+  function renderShelf(){const rows=shelfRows();show(rows);status(rows.length?'Choose a book or continue reading.':collectionFilter==='rejected'?'No books pending removal.':collectionFilter.startsWith('c:')?'This collection is empty. Choose All books, then use Collections on a title.':'No matching book on your Fabric shelf. Use Search Gutenberg to find new books.')}
   async function shelf(query=''){
     const mine=++libraryGeneration;discovery=null;shelfQuery=query;libraryView();libraryControls(true);status('Loading Fabric shelf…');
-    const value=await api();if(mine!==libraryGeneration)return;catalog=value.entries||[];renderShelf();
+    const value=await api();if(mine!==libraryGeneration)return;catalog=value.entries||[];collectionNames=[...new Set([...(value.collections||[]),...catalog.flatMap(r=>r.collections||[])])].sort();collectionOptions();renderShelf();
     if(value.errors?.length)status('Some book owners are unavailable. Showing the reachable shelf.');
   }
   async function discoverMode(mode,subject='',query='',more=false){
@@ -412,7 +441,7 @@
     status('Project Gutenberg · '+label+' · '+(rows.length?(mode==='subjects'?'Choose a subject.':'Select a title to download; dimmed titles are already on your shelf.'):'No matching books.')+(shelfValue.errors?.length?' Some book owners are unavailable; ownership checks are incomplete.':''));
   }
   async function resume(query=''){
-    await shelf();const match=FabricBrowserViews.bookMatches(query,catalog);
+    await shelf();const match=FabricBrowserViews.bookMatches(query,catalog.filter(r=>!r.removal_due));
     const rows=match.entries.filter(row=>query||!row.reading?.finished).sort((a,b)=>(b.reading?.updated||0)-(a.reading?.updated||0));
     if(match.status==='suggestions'){show(rows);status('Closest books on your Fabric shelf — choose the one you meant.');return}
     if(!rows.length){status('No matching book on your Fabric shelf. Use Search Gutenberg to find new books.');return}
@@ -420,6 +449,23 @@
     if(!query&&!rows[0].reading?.updated){show(rows);status('Choose a book to begin reading.');return}
     await open(rows[0]);
   }
+  $('collection-filter').onchange=()=>{collectionFilter=$('collection-filter').value;renderShelf()};
+  $('collection-new').onclick=async()=>{try{
+    const name=prompt('New collection name');if(!name?.trim())return;
+    const owners=[...new Set(catalog.map(r=>r.node||'local'))];const target=owners.length>1?prompt('Library owner: '+owners.join(', '),owners[0]):owners[0]||'local';if(!target)return;
+    if(owners.length&&!owners.includes(target))throw Error('Choose a listed library owner');
+    await api('/collection?'+new URLSearchParams({target}),{name:name.trim()});collectionFilter='c:'+name.trim();await shelf();
+  }catch(e){status(e.message)}};
+  $('refill-settings').onclick=async()=>{try{
+    const owners=[...new Set(catalog.map(r=>r.node||'local'))];const target=owners.length>1?prompt('Library owner: '+owners.join(', '),owners[0]):owners[0]||'local';if(!target)return;
+    if(owners.length&&!owners.includes(target))throw Error('Choose a listed library owner');
+    const text=prompt('Daily starter refill on '+target+': target book count (1–10000), or 0 to turn off. Downloads stay on this owner.','1000');if(text===null)return;
+    const count=Number(text);if(!Number.isInteger(count)||count<0||count>10000)throw Error('Choose 0–10000');
+    if(!confirm(count?'Keep up to '+count+' books on '+target+' with daily Gutenberg downloads? Rejected IDs stay excluded.':'Disable daily refill on '+target+'?'))return;
+    await api('/refill?'+new URLSearchParams({target}),{enabled:count>0,target:count||1000});status(count?'Daily refill enabled on '+target:'Daily refill disabled');
+  }catch(e){status(e.message)}};
+  $('book-collect').onclick=()=>{if(book)addCollection(book).catch(e=>status(e.message))};
+  $('book-reject').onclick=()=>{if(book)rejectBook(book).catch(e=>status(e.message))};
   $('shelf-sort').value=sortOrder;
   $('shelf-sort').onchange=()=>{sortOrder=$('shelf-sort').value;try{localStorage.setItem('look-books-shelf-sort',sortOrder)}catch{}renderShelf()};
   $('discover').onclick=()=>discoverMode('popular').catch(e=>status(e.message));

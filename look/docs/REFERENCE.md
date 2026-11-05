@@ -353,6 +353,16 @@ lk words [desk|status|setup|lookup WORD|spell TEXT|find PATTERN|add WORD] [--lan
   [web] Persistent offline word desk, thesaurus, spelling, clipboard and W shell panes
 lk wiki [shelf|status|setup|catalog QUERY|fetch ID|jobs|cancel ID|configure|search QUERY|article PATH] [--online|--offline] [--open-link URI] [--node NODE] [--archive FILE] [--root PATH] [--confirm] [--json]
   [web] Live/saved Wikipedia; colored links, inline images, hints and W shell panes
+lk books collections [NAME] [--node NODE]
+  [media] List collections or create a named book collection
+lk books collect BOOK_ID NAME [--node NODE]
+  [media] Add a book to a collection; terminal C toggles membership
+lk books reject BOOK_ID [--node NODE]
+  [media] Hide a starter book with 48-hour undo before removal; exclude it from refill
+lk books restore BOOK_ID [--node NODE]
+  [media] Undo a pending book removal
+lk books refill [on [COUNT]|off] [--node NODE]
+  [media] Inspect or configure daily Gutenberg starter refill on its owner
 lk books discover [popular|new|subjects|surprise|subject NAME] [--json]
   [media] Browse Project Gutenberg without downloading books
 lk books listen FILE [--chapter N] [--paragraph N]

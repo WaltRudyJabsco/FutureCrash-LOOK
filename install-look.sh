@@ -407,6 +407,7 @@ install_file "$ROOT/look/book_assistant.py" "$HOME/.local/share/look/book_assist
 install_file "$ROOT/look/force_player.py" "$HOME/.local/share/look/force_player.py"
 install_file "$ROOT/look/books.py" "$HOME/.local/share/look/books.py"
 install_file "$ROOT/look/book_core.py" "$HOME/.local/share/look/book_core.py"
+install_file "$ROOT/look/book_starter.py" "$HOME/.local/share/look/book_starter.py"
 install_file "$ROOT/look/media_core.py" "$HOME/.local/share/look/media_core.py"
 install_file "$ROOT/look/media_storage.py" "$HOME/.local/share/look/media_storage.py"
 install_file "$ROOT/look/media_offline.py" "$HOME/.local/share/look/media_offline.py"

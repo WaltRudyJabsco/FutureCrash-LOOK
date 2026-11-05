@@ -21,6 +21,7 @@ STATUSES=('To Read','Reading','Finished')
 MAX_METADATA_BYTES=2*1024*1024
 MAX_DOWNLOAD_BYTES=100*1024*1024
 MAX_SCAN_FILES=10000
+REMOVAL_GRACE_SECONDS=48*3600
 GUTENBERG='https://www.gutenberg.org/ebooks/search.opds/'
 
 
@@ -122,7 +123,66 @@ class Shelf:
 
     def catalog(self):
         data=self.load()
-        return {'entries':[dict(r,gutenberg_id=gutenberg_id(r),reading=data.get('reading',{}).get(r['id'],{})) for r in data['entries']],'root':str(self.root)}
+        return {'entries':[dict(r,gutenberg_id=gutenberg_id(r),starter_managed=self.managed(r),reading=data.get('reading',{}).get(r['id'],{})) for r in data['entries']],'root':str(self.root),'collections':data.get('collections',[]),'refill':data.get('refill',{'enabled':False,'target':1000})}
+
+    def managed(self,row):
+        if row.get('starter_managed'):return True
+        # Adopt the previously downloaded starter without treating manual imports
+        # as disposable starter content.
+        path=Path(row.get('path',''))
+        return (path.parent==self.root/'Gutenberg Starter 1000' and
+                path.name=='pg'+gutenberg_id(row)+'.epub' and bool(gutenberg_id(row)))
+
+    def curate(self,action,ident=None,name=None,selected=True):
+        if action=='collection' or action=='collect':
+            if not isinstance(name,str) or not name.strip() or len(name)>80 or clean(name)!=name:
+                raise ValueError('Collection names need 1–80 printable characters')
+            name=name.strip()
+        if type(selected) is not bool:raise ValueError('Choose true or false for membership')
+        with self.edit() as data:
+            names=data.setdefault('collections',[])
+            if action=='collection':
+                if name not in names:
+                    if len(names)>=200:raise ValueError('Collection limit reached')
+                    names.append(name)
+                return {'collections':names}
+            row=next((r for r in data['entries'] if r['id']==ident),None)
+            if row is None:raise ValueError('Book no longer on this shelf; refresh')
+            if action=='collect':
+                if name not in names:
+                    if len(names)>=200:raise ValueError('Collection limit reached')
+                    names.append(name)
+                members=set(row.get('collections',[]))
+                if selected:members.add(name)
+                else:members.discard(name)
+                row['collections']=sorted(members)
+            elif action=='reject':
+                if not self.managed(row):raise ValueError('Automatic removal is limited to starter downloads; manual books are preserved')
+                row.setdefault('removal_due',time.time()+REMOVAL_GRACE_SECONDS)
+                row.setdefault('removal_digest',row['id'])
+                data.setdefault('rejected_gutenberg',{})[gutenberg_id(row)]={'title':row['title'],'rejected_at':time.time()}
+            elif action=='restore':
+                row.pop('removal_due',None);row.pop('removal_digest',None)
+                data.setdefault('rejected_gutenberg',{}).pop(gutenberg_id(row),None)
+            else:raise ValueError('Unknown book curation action')
+            return {'book':row}
+
+    def purge_rejected(self,now=None):
+        now=time.time() if now is None else now;removed=[]
+        if not self.root.is_dir():return removed
+        if not any(r.get('removal_due') and r['removal_due']<=now for r in self.load()['entries']):return removed
+        with self.edit() as data:
+            for row in list(data['entries']):
+                if not row.get('removal_due') or row['removal_due']>now or not self.managed(row):continue
+                path=Path(row['path'])
+                if not path.resolve().is_relative_to(self.root.resolve()) or path.is_symlink():
+                    raise ValueError('Rejected book escaped its library')
+                if path.exists():
+                    if digest(path)!=row.get('removal_digest',row['id']):raise ValueError('Rejected book changed on disk; preserving it')
+                    path.unlink()
+                data.setdefault('rejected_gutenberg',{}).setdefault(gutenberg_id(row),{'title':row['title'],'rejected_at':now})
+                data['entries'].remove(row);removed.append(gutenberg_id(row))
+        return removed
 
     def scan(self):
         if not self.root.is_dir():return dict(self.catalog(),warnings=['Books folder is empty or not mounted'])
@@ -143,7 +203,7 @@ class Shelf:
                     prior=prior or by_id.get(ident,{})
                     row=dict(facts,id=ident,path=str(path),bytes=stat.st_size,mtime_ns=stat.st_mtime_ns,added=prior.get('added',time.time()),status='To Read',shelf='',position='')
                     # User edits survive rescans; source bytes and names are never rewritten.
-                    for key in ('title','author','status','shelf','position','source_url','gutenberg_id'):
+                    for key in ('title','author','status','shelf','position','source_url','gutenberg_id','collections','removal_due','removal_digest','starter_managed'):
                         if key in prior:row[key]=prior[key]
                     rows.append(row)
                 except (OSError,ValueError,KeyError,zipfile.BadZipFile,ET.ParseError) as exc:
