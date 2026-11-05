@@ -137,7 +137,7 @@ def test_workspace_clears_old_screen_and_saves_multiline_capture(tmp_path,monkey
 
 def test_notebook_help_returns_without_losing_filter_or_records(tmp_path,terminal,capsys):
     store=Notebook(tmp_path); store.create('Apple note')
-    keys=iter(['a','H','esc','esc','q'])
+    keys=iter(['a','H','pagedown','esc','esc','q'])
     notebook.workspace(store,None,lambda *args:next(keys),lambda text,width:text[:width])
     output=capsys.readouterr().out
     assert 'File (P)' in output and 'Remind (R)' in output

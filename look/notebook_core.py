@@ -19,6 +19,8 @@ MAX_REVISIONS = 20_000
 SYNC_BATCH = 128
 SYNC_BYTES = 4 * 1024 * 1024  # Leave room for the inventory inside ingress's 8 MiB limit.
 KINDS = {'note', 'task', 'reminder'}
+# One identity across trusted peers; concurrent offline edits use normal conflicts.
+HOME_NOTE_ID = uuid.uuid5(uuid.NAMESPACE_URL, 'look:notebook:home:v1').hex
 ID_PATTERN = re.compile(r'^[a-f0-9]{32}$')
 
 
@@ -227,6 +229,19 @@ class Notebook:
               'type':lambda row:(row['kind'],row['title'].casefold(),row['id'])}
         if sort not in keys: raise ValueError('Unknown notebook sort')
         return sorted(result,key=keys[sort])
+
+    def ensure_home(self, text):
+        """Create once under the store lock; never overwrite edits or a tombstone."""
+        with self.locked():
+            rows=self._import_edits(self._read())
+            heads=self.heads(rows).get(HOME_NOTE_ID,[])
+            if heads:
+                self._project(rows)
+                return False
+            data={'title':'Home','body':text,'kind':'note','project':'Fabric',
+                  'status':'open','due':None,'remind_at':None,'target':'all'}
+            rows.append(self._revision(HOME_NOTE_ID,data,[]));self._project(rows)
+            return True
 
     def create(self,text,kind='note',project='Inbox',due=None,remind_at=None,target='all'):
         text=str(text).strip()

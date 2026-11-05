@@ -23,6 +23,7 @@ _lk() {
 
   local -a top
   top=(
+    'notes:notes workspace and Fabric Home'
     'doc:full offline command and keyboard reference'
     'tldr:short offline command examples'
     'lock:PIN curtain settings'
@@ -119,6 +120,10 @@ _lk() {
   fi
 
   case "$words[2]" in
+    notes)
+      _values 'notebook action' home actions list show edit new file done delete snooze resolve sync
+      return
+      ;;
     lock)
       _values 'curtain action' setup status lock unlock
       return
