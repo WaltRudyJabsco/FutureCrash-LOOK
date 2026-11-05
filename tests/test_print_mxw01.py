@@ -96,9 +96,15 @@ for line in sys.stdin:
  if line=='connect':print('Connection successful',flush=True)
  elif line=='mtu 128':print('MTU was exchanged successfully: {mtu}',flush=True)
  elif line=='characteristics':
-  for handle,uuid in [('0x000a','ae01'),('0x000f','ae03'),('0x0044','ae3c')]:print('char value handle{separator}'+handle+', uuid{separator}0000'+uuid+'-0000-1000-8000-00805f9b34fb',flush=True)
+  for handle,uuid in [('0x000a','ae01'),('0x000c','ae02'),('0x000f','ae03'),('0x0044','ae3c')]:print('char value handle{separator}'+handle+', uuid{separator}0000'+uuid+'-0000-1000-8000-00805f9b34fb',flush=True)
+ elif line.startswith('char-desc'):print('handle: 0x000d, uuid: 00002902-0000-1000-8000-00805f9b34fb',flush=True)
+ elif line.startswith('char-write-req'):print('Characteristic value was written successfully',flush=True)
  elif line.startswith('char-write-cmd'):
   with open({str(log)!r},'a') as out:out.write(json.dumps(line.split())+'\\n')
+  packet=bytes.fromhex(line.split()[2])
+  if line.split()[1]=='0x000a' and packet[2] in (0xa9,0xad):
+   code=0xa9 if packet[2]==0xa9 else 0xaa
+   print('Notification handle = 0x000c value: 22 21 '+format(code,'02x')+' 00 01 00 00 00',flush=True)
  elif line=='exit':break
 ''');tool.chmod(0o755)
     monkeypatch.setattr(mx.shutil,'which',lambda _:str(tool));monkeypatch.setattr(mx,'WRITE_DELAY',.001)
@@ -112,3 +118,26 @@ for line in sys.stdin:
         assert bytes.fromhex(''.join(s[2] for s in lines if s[1]=='0x000f'))==payload
         assert all(len(bytes.fromhex(s[2]))<=mtu-3 for s in lines)
         assert len([s for s in lines if s[1]=='0x000a'])==3
+
+
+def test_notification_survives_split_reads_and_uses_declared_length():
+    session=object.__new__(mx.Session)
+    session.notifications=[];session.notification_buffer=b''
+    session.capture(b'Notification handle = 0x000c value: 22 21 aa 00 03 ')
+    assert not session.notifications
+    session.capture(b'00 00 7f 7f 00\r\n')
+    assert session.notifications==[(0xaa,b'\x00\x7f\x7f')]
+
+
+def test_completion_required_and_bad_checksum_is_uncertain(home,monkeypatch):
+    session=Mock();session.connect.return_value=('a','b');session.mtu=128
+    monkeypatch.setattr(mx,'Session',lambda _:session)
+    payload=bytes(48*100)
+    session.notification.side_effect=[b'\x00',RuntimeError('missing completion')]
+    with pytest.raises(RuntimeError,match='missing completion'):mx.transmit(PROFILE,payload)
+    session.close.assert_called_once()
+    session.notification.side_effect=[b'\x00',b'\x00\x01\x01']
+    with pytest.raises(RuntimeError,match='checksum mismatch'):mx.transmit(PROFILE,payload)
+    session.notification.side_effect=[b'\x00',b'\x00\x00\x00']
+    result=mx.transmit(PROFILE,payload)
+    assert result['completion_acknowledged'] and result['checksum_verified']
