@@ -26,6 +26,9 @@ MAX_SETTINGS_BYTES=65536
 MIN_INTERVAL=5
 MAX_INTERVAL=600
 DEFAULT_INTERVAL=20
+MAX_SETS=32
+STARTER_SETS={'Cinematics':['Flight Deck','Number Station','Prism Grid','Deep Space Relay','Orbit'],
+              'Cute':['Neon Reef','Paper Lanterns','Moon Jelly','Firefly Garden','Tide Pools']}
 QT_PACKAGE='PySide6-Essentials==6.10.3'
 SCENES=tuple(name for name in player_visuals.NAMES if name not in {'Cycle','Album Art'})
 PALETTES=('auto',*terminal_style.THEMES)
@@ -37,7 +40,8 @@ def runtime_path():return Path.home()/'.local/share/look/saver-runtime/bin/pytho
 
 def defaults():
     return dict(schema=SCHEMA,scene='cycle',enabled=list(SCENES),display='all',
-                interval=DEFAULT_INTERVAL,palette='auto',independent=True,inversions=True)
+                interval=DEFAULT_INTERVAL,palette='auto',independent=True,inversions=True,
+                sets={name:list(scenes) for name,scenes in STARTER_SETS.items()},active_set=None,curtain_set=None)
 
 
 def scene_name(value):
@@ -64,7 +68,76 @@ def validate(value):
         raise ValueError(f'Cycle interval must be {MIN_INTERVAL}–{MAX_INTERVAL} seconds')
     for key in ('independent','inversions'):
         if not isinstance(result[key],bool):raise ValueError('Invalid '+key+' setting')
+    sets=result['sets']
+    if not isinstance(sets,dict) or len(sets)>MAX_SETS:raise ValueError('Too many saver sets')
+    cleaned={}
+    for name,scenes in sets.items():
+        if not isinstance(name,str) or not name.strip() or len(name)>48 or any(ord(c)<32 for c in name):raise ValueError('Invalid set name')
+        if not isinstance(scenes,list) or not scenes or len(scenes)>len(SCENES) or any(scene not in SCENES for scene in scenes):raise ValueError('Invalid scenes in set '+name)
+        cleaned[name]=list(dict.fromkeys(scenes))
+    result['sets']=cleaned
+    for key in ('active_set','curtain_set'):
+        if result[key] is not None and result[key] not in cleaned:raise ValueError('Unknown saver set')
     return result
+
+
+def use_set(settings,name):
+    settings=validate(settings)
+    if name not in settings['sets']:raise ValueError('Unknown saver set: '+name)
+    return dict(settings,scene='cycle',enabled=list(settings['sets'][name]),active_set=name)
+
+
+def store_set(settings,name):
+    name=name.strip()
+    result=dict(settings,scene='cycle',sets={**settings['sets'],name:list(settings['enabled'])},active_set=name)
+    return validate(result)
+
+
+def delete_set(settings,name):
+    result=validate(settings)
+    if name not in result['sets']:raise ValueError('Unknown saver set: '+name)
+    del result['sets'][name]
+    for key in ('active_set','curtain_set'):
+        if result[key]==name:result[key]=None
+    return result
+
+
+def curtain_settings():
+    settings=load()
+    if settings['curtain_set']:
+        return use_set(settings,settings['curtain_set'])
+    return dict(defaults(),scene='Flight Deck',palette='bridge',independent=False)
+
+
+def sets_menu(settings):
+    """Cooked input keeps naming accessible without adding another editor."""
+    print('\033[2J\033[HLOOK SAVER · Saved sets')
+    names=list(settings['sets'])
+    for index,name in enumerate(names,1):
+        print(f'\033[34m{index}\033[0m  {name} · '+', '.join(settings['sets'][name]))
+    print('\nUse Space in the picker to select members, then save a named set here.')
+    print('\033[34mn\033[0m save selection · \033[34ml\033[0m load · \033[34mk\033[0m use for curtain · \033[34md\033[0m delete · Enter back')
+    action=input('Action: ').strip().lower()
+    if not action:return settings,'Back from sets'
+    if action=='n':
+        name=input('Set name (blank cancels): ').strip()
+        if not name:return settings,'Cancelled'
+        if name in settings['sets'] and input('Replace this set? [y/N] ').strip().lower()!='y':return settings,'Cancelled'
+        result=store_set(settings,name)
+    elif action in {'l','k','d'}:
+        choice=input('Set number'+(' (0 restores Flight Deck)' if action=='k' else '')+': ').strip()
+        if action=='k' and choice=='0':result=dict(settings,curtain_set=None)
+        else:
+            if not choice.isdigit() or not 1<=int(choice)<=len(names):raise ValueError('Choose a listed set number')
+            name=names[int(choice)-1]
+            if action=='l':result=use_set(settings,name)
+            elif action=='k':result=dict(settings,curtain_set=name)
+            else:
+                if input('Delete '+name+'? [y/N] ').strip().lower()!='y':return settings,'Cancelled'
+                result=delete_set(settings,name)
+    else:raise ValueError('Choose n, l, k or d')
+    save(result)
+    return result,'Saved · saver/curtain choices apply on next launch'
 
 
 def load():
@@ -183,7 +256,7 @@ def picker(ui):
         tty.setcbreak(fd);sys.stdout.write('\033[?25l')
         while True:
             width,height=ui.shutil.get_terminal_size((90,30));width=max(20,width)
-            controls=ui._media_hints('↑↓ select · Shift-arrows page/ends · Space enable · P preview · Enter start · A save · D displays · M matching/independent · C colors · I invert · -/+ interval · G setup graphics · q/Esc back',width).splitlines()
+            controls=ui._media_hints('↑↓ select · Shift-arrows page/ends · Space enable · s sets · P preview · Enter start · A save · D displays · M matching/independent · C colors · I invert · -/+ interval · G setup graphics · q/Esc back',width).splitlines()
             page=max(1,height-len(controls)-8);index=max(0,min(index,len(names)-1));top=(index//page)*page
             selected=names[index];settings['scene']=selected
             signature=(selected,tuple(settings['enabled']),settings['palette'],settings['inversions'],settings['interval'])
@@ -195,7 +268,7 @@ def picker(ui):
             preview_lines=preview.sample(time.monotonic()-started,preview_width,page)[1] if preview and preview_width else []
             left_width=width-preview_width-3 if preview_width else width
             frame=[ui._c('LOOK SAVER','1;36')+' · ambient visuals · Escape dismisses',
-                   f"Displays: {settings['display']} · {'independent' if settings['independent'] else 'matching'} scenes",
+                   f"Set: {settings['active_set'] or 'Custom'} · Curtain: {settings['curtain_set'] or 'Flight Deck'} · Displays: {settings['display']} · {'independent' if settings['independent'] else 'matching'} scenes",
                    f"Colors: {settings['palette']} · inversions: {'occasional' if settings['inversions'] else 'off'} · {settings['interval']:g}s per scene"]
             colors=terminal_style.list_colors()
             for line in range(page):
@@ -219,7 +292,14 @@ def picker(ui):
             elif key in {'pagedown','shiftdown'}:index+=page
             elif key in {'home','shiftleft'}:index=0
             elif key in {'end','shiftright'}:index=len(names)-1
+            elif key=='s':
+                termios.tcsetattr(fd,termios.TCSADRAIN,old);sys.stdout.write('\033[?25h\033[0m')
+                try:
+                    settings,notice=sets_menu(settings);index=names.index(settings['scene'])
+                except (OSError,ValueError,EOFError) as exc:notice=str(exc)
+                finally:tty.setcbreak(fd);sys.stdout.write('\033[?25l')
             elif key==' ' and selected!='cycle':
+                settings['active_set']=None
                 if selected in settings['enabled']:settings['enabled'].remove(selected)
                 else:settings['enabled'].append(selected)
             elif key in {'a','A'}:
@@ -258,6 +338,10 @@ def main(args,*,ui=None,quick=False):
     parser.add_argument('--invert',action=argparse.BooleanOptionalAction,default=None,help='occasional inverted colors')
     parser.add_argument('--preview',action='store_true',help='open a small graphical preview')
     parser.add_argument('--seconds',type=float,help='dismiss automatically after this many seconds')
+    parser.add_argument('--set',dest='set_name',help='launch a named saver set')
+    parser.add_argument('--save-set',help='save the current enabled scenes as a named set')
+    parser.add_argument('--curtain-set',help='use a named set for this desktop curtain; default restores Flight Deck')
+    parser.add_argument('--delete-set',help='delete a named set')
     parser.add_argument('--save',action='store_true',help='save supplied settings without launching')
     options=parser.parse_args(args)
     try:
@@ -274,6 +358,13 @@ def main(args,*,ui=None,quick=False):
             if ui is None:raise ValueError('Picker needs the LOOK terminal interface')
             return picker(ui)
         settings=load()
+        if action=='sets':
+            for name,scenes in settings['sets'].items():print(name+' · '+', '.join(scenes))
+            return 0
+        if options.set_name:settings=use_set(settings,options.set_name)
+        if options.save_set:settings=store_set(settings,options.save_set)
+        if options.delete_set:settings=delete_set(settings,options.delete_set)
+        if options.curtain_set is not None:settings['curtain_set']=None if options.curtain_set=='default' else options.curtain_set
         if action and action!='start':settings['scene']=scene_name(action)
         for key in ('display','interval','palette'):
             if getattr(options,key) is not None:settings[key]=getattr(options,key)
@@ -283,7 +374,7 @@ def main(args,*,ui=None,quick=False):
         if options.invert is not None:settings['inversions']=options.invert
         if options.seconds is not None and (not math.isfinite(options.seconds) or not 0<options.seconds<=86400):raise ValueError('Seconds must be positive and at most 86400')
         settings=validate(settings)
-        if options.save:save(settings);print('Saver settings saved');return 0
+        if options.save or options.save_set or options.delete_set or options.curtain_set is not None:save(settings);print('Saver settings saved');return 0
         return launch(settings,preview=options.preview,seconds=options.seconds)
     except (OSError,ValueError,RuntimeError,ImportError,subprocess.SubprocessError) as exc:
         print('LOOK SAVER · '+str(exc),file=sys.stderr);return 1

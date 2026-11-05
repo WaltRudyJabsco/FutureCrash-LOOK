@@ -172,3 +172,50 @@ def test_matching_controls_remain_synchronized():
     for run in (one,two):
         run.sample(10,40,20);run.next_scene();run.next_color()
     assert one.sample(11,40,20)==two.sample(11,40,20)
+
+
+def test_saved_sets_preserve_existing_selection_and_roundtrip(settings_file):
+    old=dict(schema=1,scene='Stars',enabled=['Stars'],palette='paper')
+    settings_file.write_text(json.dumps(old))
+    value=saver.load()
+    assert value['scene']=='Stars' and value['enabled']==['Stars']
+    assert value['curtain_set'] is None
+    value=saver.store_set(value,'Quiet')
+    value=saver.use_set(value,'Cinematics')
+    assert value['scene']=='cycle' and 'Number Station' in value['enabled']
+    saver.save(value)
+    assert saver.load()['sets']['Quiet']==['Stars']
+    assert set(saver.SceneRun(value,1).scenes)==set(value['sets']['Cinematics'])
+
+
+def test_set_validation_and_deletion(settings_file):
+    for name in ('', 'x'*49, 'bad\nname'):
+        with pytest.raises(ValueError):saver.store_set(saver.defaults(),name)
+    with pytest.raises(ValueError):saver.store_set(dict(saver.defaults(),enabled=[]),'Empty')
+    value=saver.use_set(saver.defaults(),'Cute');value['curtain_set']='Cute'
+    result=saver.delete_set(value,'Cute')
+    assert result['active_set'] is None and result['curtain_set'] is None
+    assert 'Cute' in value['sets']
+
+
+def test_set_cli_and_curtain_selection(settings_file,monkeypatch):
+    launch=Mock(return_value=0);monkeypatch.setattr(saver,'launch',launch)
+    assert saver.main(['--set','Cinematics'])==0
+    assert launch.call_args.args[0]['active_set']=='Cinematics'
+    assert not settings_file.exists()
+    assert saver.main(['--curtain-set','Cute'])==0
+    assert saver.curtain_settings()['enabled']==saver.STARTER_SETS['Cute']
+    assert saver.main(['--curtain-set','default'])==0
+    assert saver.curtain_settings()['scene']=='Flight Deck'
+    assert saver.main(['--curtain-set','missing'])==1
+    assert saver.load()['curtain_set'] is None
+
+
+def test_sets_menu_load_and_save(settings_file,monkeypatch):
+    answers=iter(['n','My set']);monkeypatch.setattr('builtins.input',lambda _:next(answers))
+    settings,notice=saver.sets_menu(dict(saver.defaults(),enabled=['Stars']))
+    assert settings['sets']['My set']==['Stars'] and settings['scene']=='cycle'
+    answers=iter(['l','3'])
+    settings,notice=saver.sets_menu(settings)
+    assert settings['scene']=='cycle' and settings['active_set']=='My set'
+    assert saver.load()==settings

@@ -111,3 +111,35 @@ returns new sessions to built-in captions. Setup requires no new AI provider.
 For synchronized Flight Deck curtains, use `lk lock` for settings and `lk lk` to
 activate. See [Fabric PIN curtain](CURTAIN.md) for setup, browser controls and
 offline behavior. The ordinary saver retains its immediate dismissal keys.
+
+## Saved sets
+
+Open `lk saver` and press **s** for Saved sets. Use Space in the main picker to
+select the animations you want, then **s → n** to name and save that selection.
+The sets screen lists each set and its members: **l** loads a set, **k** chooses
+one for the desktop PIN curtain, and **d** deletes one after confirmation.
+Saving an existing name asks before replacing it. Loading a set selects Cycle;
+`lk sv` then runs that saved selection. Edit its members with Space and save under
+the same name to update it, or a different name to make another set.
+
+Two editable starting sets are provided: **Cinematics** (Flight Deck, Number
+Station, Prism Grid, Deep Space Relay, Orbit) and **Cute** (Neon Reef, Paper
+Lanterns, Moon Jelly, Firefly Garden, Tide Pools). Existing enabled animations,
+colors and display settings are preserved until you choose a set.
+
+```sh
+lk saver sets
+lk sv --set Cinematics
+lk saver --set Cute --save
+lk saver --save-set 'My selection'
+lk saver --curtain-set Cinematics
+lk saver --curtain-set default
+lk saver --delete-set 'My selection'
+```
+
+Sets contain animation choices; palette, interval and display options remain
+independent. Settings live in this device's `~/.config/look/saver.json`. The
+saver and desktop PIN curtain can use different sets. Changes apply on their
+next launch; they do not alter an active curtain or the browser curtain, and do
+not synchronize preferences to other devices. The default curtain remains Flight
+Deck with the Bridge palette until a curtain set is explicitly selected.
