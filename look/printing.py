@@ -188,6 +188,7 @@ def display(result):
     elif 'id' in result and 'state' in result:
         print('PRINT PLAN · '+result['state']+' · '+result.get('title',''))
         print('Printer: '+result['queue']+' @ '+result.get('node','local')+' · '+result['kind']+' · '+str(result['bytes'])+' bytes')
+        if 'estimated_paper_mm' in result:print(f"Paper: about {result['estimated_paper_mm']/10:.1f} cm · limit {result['max_paper_mm']/10:g} cm")
         print('Options: '+', '.join(k+'='+str(v) for k,v in result['options'].items()))
         print(result['note'])
         if result.get('text_preview'):print('Text preview'+(' (truncated)' if result.get('preview_truncated') else '')+':\n'+result['text_preview'])

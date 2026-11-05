@@ -22,6 +22,10 @@ MAX_INPUT_BYTES=3*1024*1024
 MAX_PENDING_BYTES=32*1024*1024
 MAX_IMAGE_PIXELS=16_000_000
 MAX_RASTER_HEIGHT=4096
+MAX_RECEIPT_MM=250
+RECEIPT_DOTS_PER_MM=8
+RECEIPT_LINE_DOTS=30
+RECEIPT_FEED_LINES=3
 COMMAND_TIMEOUT=20
 PLAN_LIFETIME=24*60*60
 QUEUE_PATTERN=r'[A-Za-z0-9_][A-Za-z0-9_.-]{0,126}'
@@ -252,10 +256,18 @@ class Spool:
         elif kind in {'receipt-text','receipt-image'}:
             if profile.get('kind')!='escpos':raise ValueError('Configure this verified receipt queue with profile --kind escpos first')
             if set(selected_options)!={'copies'}:raise ValueError('Receipt jobs do not support document page/media/sides options')
-            payload=b'\x1b@'+(receipt_text(data.decode('utf-8'),profile['columns']) if kind=='receipt-text' else receipt_image(data,profile['width']))
+            rendered=receipt_text(data.decode('utf-8'),profile['columns']) if kind=='receipt-text' else receipt_image(data,profile['width'])
+            dots=(rendered.count(b'\n')*RECEIPT_LINE_DOTS if kind=='receipt-text'
+                  else int.from_bytes(rendered[6:8],'little')+RECEIPT_FEED_LINES*RECEIPT_LINE_DOTS)
+            paper_mm=dots/RECEIPT_DOTS_PER_MM*selected_options['copies']
+            if paper_mm>MAX_RECEIPT_MM:
+                raise ValueError(f'Receipt would use about {paper_mm/10:.1f} cm of paper; limit is {MAX_RECEIPT_MM/10:g} cm per job. Shorten the selection or crop the image.')
+            # Set line spacing explicitly so the estimate does not depend on device defaults.
+            payload=b'\x1b@\x1b3'+bytes([RECEIPT_LINE_DOTS])+rendered
         else:raise ValueError('Unsupported print kind')
         ident=uuid.uuid4().hex
         meta={'id':ident,'queue':queue,'title':filename,'kind':kind,'options':selected_options,'profile':profile,'bytes':len(payload),'sha256':hashlib.sha256(payload).hexdigest(),'state':'prepared','expires_in_seconds':PLAN_LIFETIME,'note':'Not sent. Review printer/options and use lk print send ID --confirm. Spooler acceptance does not prove physical printing.'}
+        if kind.startswith('receipt-'):meta.update(estimated_paper_mm=paper_mm,max_paper_mm=MAX_RECEIPT_MM)
         if kind=='receipt-text' or kind=='document' and Path(filename).suffix.casefold()=='.txt':
             meta['text_preview']=data.decode('utf-8')[:2000];meta['preview_truncated']=len(data.decode('utf-8'))>2000
         with self.connect() as db:

@@ -73,7 +73,7 @@ def test_receipt_profile_control_codes_and_unicode(spool,monkeypatch):
     with pytest.raises(ValueError,match='profile'):spool.prepare('receipt',b'hello','note.txt','receipt-text')
     core.configure_profile('receipt','escpos',384,32,True)
     draft=spool.prepare('receipt',b'hello','note.txt','receipt-text')
-    assert spool.get(draft['id'])[3]==b'\x1b@hello\n\n\n'
+    assert spool.get(draft['id'])[3]==b'\x1b@\x1b3\x1ehello\n\n\n'
     with pytest.raises(ValueError,match='control'):core.receipt_text('hi\x1bp',32)
     with pytest.raises(ValueError,match='unsupported characters'):core.receipt_text('hello 🌞',32)
     with pytest.raises(ValueError,match='PDF'):spool.prepare('receipt',b'%PDF-1.4','x.pdf')
@@ -262,3 +262,22 @@ def test_quick_cli_reads_stdin(monkeypatch):
 @pytest.mark.parametrize('prompt', ['Print this recipe on Little Printer', 'Can you print my shopping list on Little Printer?', 'Make a recipe and send it to the Little Printer'])
 def test_explicit_quick_print_phrases(prompt):
     assert printing.explicit_print(prompt,'Little Printer')
+
+
+def test_receipt_length_limit_counts_wrapping_blank_lines_and_copies(spool,monkeypatch):
+    monkeypatch.setattr(core,'profiles',lambda:{'desk':{'kind':'escpos','width':576,'columns':48}})
+    def plan(text,copies=1):return spool.prepare('desk',text.encode(),'selection.txt','receipt-text',{'copies':copies})
+    short=plan('A paragraph to keep.')
+    assert short['estimated_paper_mm']==11.25
+    assert short['max_paper_mm']==250
+    for text,copies in [('line\n'*70,1),('x'*4000,1),('line\n'*35,2),('x\n'+'\n'*70,1)]:
+        with pytest.raises(ValueError,match='25 cm'):plan(text,copies)
+    assert plan('line\n'*64)['estimated_paper_mm']<=250
+
+
+def test_receipt_image_length_includes_feed(spool,monkeypatch):
+    from PIL import Image
+    import io
+    monkeypatch.setattr(core,'profiles',lambda:{'desk':{'kind':'escpos','width':576,'columns':48}})
+    output=io.BytesIO();Image.new('RGB',(576,2000),'white').save(output,format='PNG')
+    with pytest.raises(ValueError,match='crop'):spool.prepare('desk',output.getvalue(),'art.png','receipt-image')
