@@ -1015,6 +1015,7 @@ Parser arguments and recognized option tokens (grouped by handler):
 --json
 --json — Machine-readable result
 --kind
+--max-receipt-bytes — Device-specific encoded receipt limit; 0 disables
 --media
 --node
 --pages

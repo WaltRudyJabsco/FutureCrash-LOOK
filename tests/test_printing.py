@@ -316,3 +316,28 @@ def test_column_profile_spools_without_reset_and_estimates_padding(spool,monkeyp
     assert payload.startswith(b'\x1b3\x18\x1b*\x21')
     assert plan['estimated_paper_mm']==(48+90)/8
     assert plan['profile']['image_mode']=='column24'
+
+
+def test_receipt_byte_ceiling_rejects_before_spooling(spool,monkeypatch):
+    from PIL import Image
+    import io
+    profile={'kind':'escpos','width':576,'columns':48,'image_mode':'column24','max_receipt_bytes':4096}
+    monkeypatch.setattr(core,'profiles',lambda:{'desk':profile})
+    execute=Mock();monkeypatch.setattr(core,'run',execute)
+    data=io.BytesIO();Image.new('RGB',(576,384),'white').save(data,format='PNG')
+    with pytest.raises(ValueError,match='transfer limit'):spool.prepare('desk',data.getvalue(),'wave.png','receipt-image')
+    with spool.connect() as db:assert db.execute('select count(*) from jobs').fetchone()[0]==0
+    profile['width']=192
+    plan=spool.prepare('desk',data.getvalue(),'wave.png','receipt-image')
+    assert plan['bytes']<=4096 and plan['state']=='prepared'
+    with pytest.raises(ValueError,match='transfer limit'):spool.prepare('desk',data.getvalue(),'wave.png','receipt-image',{'copies':2})
+    assert not execute.called
+
+
+def test_receipt_byte_ceiling_configuration_preserved(spool):
+    core.configure_profile('receipt','escpos',192,48,True,'column24',4096)
+    core.nickname('receipt','Little Printer',True)
+    core.configure_profile('receipt','escpos',192,48,True,'column24')
+    assert core.profiles()['receipt']['max_receipt_bytes']==4096
+    for invalid in (-1,True,'4096',core.MAX_INPUT_BYTES+1):
+        with pytest.raises(ValueError):core.configure_profile('receipt',max_receipt_bytes=invalid)

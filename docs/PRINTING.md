@@ -223,3 +223,11 @@ clients; it does not add a separate web print button or bypass job confirmation.
 Museum supports **p** (or **Shift+N**) from its terminal list and viewers, and a
 **Print** button in the web gallery. The receipt printer is suggested first;
 users can choose any discovered printer and review before sending one copy.
+
+For portable printers with unverified large transfers, an owner can set
+`profile --max-receipt-bytes N` alongside the verified image width and encoder.
+This optional ceiling counts encoded bytes across all copies before a plan is
+stored; it complements the paper-length limit. Oversized jobs fail without
+printing or retrying. Omitting the option preserves a configured ceiling; zero
+explicitly disables it. A byte ceiling is a precaution, not a diagnosis of USB
+flow control or proof that a larger print will succeed.

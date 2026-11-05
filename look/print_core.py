@@ -144,13 +144,24 @@ def nickname(queue,label,confirm=False):
     return {'applied':True,'queue':queue,'profile':update_profile(queue,{'label':label})}
 
 
-def configure_profile(queue,kind='document',width=384,columns=32,confirm=False,image_mode='raster'):
+def receipt_byte_limit(profile):
+    """Optional device-specific ceiling; paper length alone cannot bound a transfer."""
+    limit=profile.get('max_receipt_bytes',0)
+    if type(limit) is not int or not 0<=limit<=MAX_INPUT_BYTES:
+        raise ValueError('Receipt byte limit must be 0 (unlimited) through 3 MiB')
+    return limit
+
+
+def configure_profile(queue,kind='document',width=384,columns=32,confirm=False,image_mode='raster',max_receipt_bytes=None):
     queue=require_queue(queue)
     if kind not in {'document','escpos'}:raise ValueError('Choose document or escpos')
     if type(width) is not int or not 128<=width<=832 or width%8:raise ValueError('Printable width must be 128–832 dots in multiples of 8; check the printer manual')
     if type(columns) is not int or not 16<=columns<=80:raise ValueError('Columns must be 16–80')
     if image_mode not in {'raster','column24'}:raise ValueError('Choose raster or column24 image mode')
     value={'kind':kind,'width':width,'columns':columns}
+    if max_receipt_bytes is not None:
+        receipt_byte_limit({'max_receipt_bytes':max_receipt_bytes})
+        value['max_receipt_bytes']=max_receipt_bytes
     if image_mode!='raster':value['image_mode']=image_mode
     elif 'image_mode' in profiles().get(queue,{}):value['image_mode']='raster'
     if confirm is not True:return {'applied':False,'queue':queue,'proposed_profile':dict(profiles().get(queue,{}),**value)}
@@ -299,6 +310,10 @@ class Spool:
             # Set line spacing explicitly so the estimate does not depend on device defaults.
             payload=rendered if kind=='receipt-image' and profile.get('image_mode')=='column24' else b'\x1b@\x1b3'+bytes([RECEIPT_LINE_DOTS])+rendered
         else:raise ValueError('Unsupported print kind')
+        if kind.startswith('receipt-'):
+            limit=receipt_byte_limit(profile)
+            if limit and len(payload)*selected_options['copies']>limit:
+                raise ValueError(f'Receipt exceeds this printer’s {limit:,}-byte transfer limit. Use a smaller image or shorter text; nothing was sent.')
         ident=uuid.uuid4().hex
         meta={'id':ident,'queue':queue,'title':filename,'kind':kind,'options':selected_options,'profile':profile,'bytes':len(payload),'sha256':hashlib.sha256(payload).hexdigest(),'state':'prepared','expires_in_seconds':PLAN_LIFETIME,'note':'Not sent. Review printer/options and use lk print send ID --confirm. Spooler acceptance does not prove physical printing.'}
         if kind.startswith('receipt-'):meta.update(estimated_paper_mm=paper_mm,max_paper_mm=MAX_RECEIPT_MM)
