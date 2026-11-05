@@ -85,8 +85,9 @@ def test_partial_bluetooth_send_never_retried(home,monkeypatch):
     spool.send(p['id'],True);assert send.call_count==1
 
 
+@pytest.mark.parametrize('separator',[': ', ' = '])
 @pytest.mark.parametrize('mtu',[23,128])
-def test_transport_negotiates_before_data_and_preserves_every_byte(home,monkeypatch,mtu):
+def test_transport_negotiates_before_data_and_preserves_every_byte(home,monkeypatch,mtu,separator):
     log=home/'writes.jsonl';tool=home/'gatttool'
     tool.write_text('#!/usr/bin/env python3\n'+f'''import sys,json
 print('[LE]>',flush=True)
@@ -95,7 +96,7 @@ for line in sys.stdin:
  if line=='connect':print('Connection successful',flush=True)
  elif line=='mtu 128':print('MTU was exchanged successfully: {mtu}',flush=True)
  elif line=='characteristics':
-  for handle,uuid in [('0x000a','ae01'),('0x000f','ae03'),('0x0044','ae3c')]:print('char value handle = '+handle+', uuid = 0000'+uuid+'-0000-1000-8000-00805f9b34fb',flush=True)
+  for handle,uuid in [('0x000a','ae01'),('0x000f','ae03'),('0x0044','ae3c')]:print('char value handle{separator}'+handle+', uuid{separator}0000'+uuid+'-0000-1000-8000-00805f9b34fb',flush=True)
  elif line.startswith('char-write-cmd'):
   with open({str(log)!r},'a') as out:out.write(json.dumps(line.split())+'\\n')
  elif line=='exit':break
