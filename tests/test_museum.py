@@ -157,7 +157,7 @@ def test_desk_native_thumbnail_and_viewer_navigation(monkeypatch,tmp_path):
     labels=[]
     monkeypatch.setattr(museum_desk.terminal_style,'command_lines',lambda text,width:labels.append(text) or [text])
     ui=SimpleNamespace(_read_tty_key=lambda *a:next(keys),_ansi_clip=lambda text,width:text[:width],_c=lambda text,color:text)
-    client=SimpleNamespace(node='local',snapshot=lambda:{'items':rows},image=lambda row:paths[row['id']])
+    client=SimpleNamespace(node='local',snapshot=lambda query='':{'items':rows},image=lambda row:paths[row['id']])
     assert museum_desk.desk(client,ui)==0
     calls=[call.args for call in native.request.call_args_list]
     assert any(path==paths['aic-1'] and col>1 for path,row,col,h,w in calls)
