@@ -156,8 +156,14 @@ class Shelf:
                 if selected:members.add(name)
                 else:members.discard(name)
                 row['collections']=sorted(members)
+            elif action=='favorite':
+                row['favorite']=selected
+                if selected:
+                    row.pop('removal_due',None);row.pop('removal_digest',None)
+                    data.setdefault('rejected_gutenberg',{}).pop(gutenberg_id(row),None)
             elif action=='reject':
                 if not self.managed(row):raise ValueError('Automatic removal is limited to starter downloads; manual books are preserved')
+                row['favorite']=False
                 row.setdefault('removal_due',time.time()+REMOVAL_GRACE_SECONDS)
                 row.setdefault('removal_digest',row['id'])
                 data.setdefault('rejected_gutenberg',{})[gutenberg_id(row)]={'title':row['title'],'rejected_at':time.time()}
@@ -203,7 +209,7 @@ class Shelf:
                     prior=prior or by_id.get(ident,{})
                     row=dict(facts,id=ident,path=str(path),bytes=stat.st_size,mtime_ns=stat.st_mtime_ns,added=prior.get('added',time.time()),status='To Read',shelf='',position='')
                     # User edits survive rescans; source bytes and names are never rewritten.
-                    for key in ('title','author','status','shelf','position','source_url','gutenberg_id','collections','removal_due','removal_digest','starter_managed'):
+                    for key in ('title','author','status','shelf','position','source_url','gutenberg_id','collections','favorite','removal_due','removal_digest','starter_managed'):
                         if key in prior:row[key]=prior[key]
                     rows.append(row)
                 except (OSError,ValueError,KeyError,zipfile.BadZipFile,ET.ParseError) as exc:

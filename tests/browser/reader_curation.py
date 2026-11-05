@@ -23,6 +23,7 @@ def route(r):
   if path.endswith('/collect'):
    if d.get('selected',True):row['collections'].append(d['name'])
    else:row['collections'].remove(d['name'])
+  if path.endswith('/favorite'):row['favorite']=d['selected']
   if path.endswith('/reject'):row['removal_due']=time.time()+172800
   if path.endswith('/restore'):row.pop('removal_due',None)
   return r.fulfill(json={'ok':True})
@@ -33,6 +34,14 @@ with sync_playwright() as p:
  page.goto('https://reader.test/reader');page.wait_for_selector('.book-card')
  assert page.locator('.book-card').count()==2
  assert page.get_by_role('button',name='Thumbs down',exact=True).count()==1 # manual imports have no discard control
+ card=page.locator('.book-card').filter(has_text='Persuasion')
+ card.get_by_role('button',name='Add to Favorites',exact=True).click()
+ page.wait_for_function("document.querySelectorAll('.book-card').length===1")
+ page.locator('#collection-filter').select_option('favorites')
+ assert page.locator('.book-card').count()==1
+ page.locator('.book-card').get_by_role('button',name='Remove from Favorites',exact=True).click()
+ page.wait_for_function("document.querySelectorAll('.book-card').length===0")
+ page.locator('#collection-filter').select_option('pool')
  page.once('dialog',lambda d:d.accept('Weekend'));page.locator('#collection-new').click()
  page.wait_for_function("document.querySelector('#collection-filter').value==='c:Weekend'")
  page.locator('#collection-filter').select_option('all');page.locator('.book-card').filter(has_text='Persuasion').locator('summary').click()
@@ -45,6 +54,7 @@ with sync_playwright() as p:
  page.locator('#collection-filter').select_option('all')
  out=Path('artifacts/reader-curation');out.mkdir(parents=True,exist_ok=True)
  page.screenshot(path=str(out/'desktop.png'),full_page=True)
+ page.set_viewport_size({'width':820,'height':1180});page.screenshot(path=str(out/'ipad.png'),full_page=True)
  page.set_viewport_size({'width':390,'height':844});page.screenshot(path=str(out/'phone.png'),full_page=True)
  assert page.evaluate('document.documentElement.scrollWidth<=innerWidth')
  page.locator('.book-card').filter(has_text='A book to reconsider').locator('button').first.click()

@@ -52,4 +52,4 @@ def snapshot(owner,query='',result=None):
     return dict(result,items=rows,offline=offline,owner=owner,collections=result.get('collections',{}),offline_count=sum(r['available_offline'] for r in rows))
 
 def view(rows,mode='library',collection=None,offline_only=False):
-    return [r for r in rows if (bool(r.get('removal_due')) if mode=='review' else not r.get('removal_due')) and (mode!='favorites' or r.get('favorite')) and (mode!='collections' or collection and collection in r.get('collections',[])) and (not offline_only or r.get('available_offline'))]
+    return [r for r in rows if (bool(r.get('removal_due')) if mode=='review' else not r.get('removal_due')) and (mode!='library' or not r.get('favorite')) and (mode!='favorites' or r.get('favorite')) and (mode!='collections' or collection and collection in r.get('collections',[])) and (not offline_only or r.get('available_offline'))]

@@ -123,3 +123,33 @@ def test_download_checks_public_domain_and_publishes_valid_epub(shelf,tmp_path,m
     with pytest.raises(ValueError,match='public-domain'):book_starter.fetch(shelf,{'id':'790'})
     assert not (path.parent/'pg790.epub').exists()
     assert not list(path.parent.glob('*.part'))
+
+
+def test_favorites_leave_pool_survive_scan_and_restore_rejection(shelf):
+    ident=row(shelf)['id'];shelf.curate('reject',ident)
+    shelf.curate('favorite',ident,selected=True)
+    assert not row(shelf).get('removal_due') and '123' not in shelf.load()['rejected_gutenberg']
+    assert books.rows_for(shelf.catalog())==[]
+    assert len(books.rows_for(shelf.catalog(),shelf='Favorites'))==1
+    assert len(books.rows_for(shelf.catalog(),shelf='All'))==1
+    shelf.scan();assert row(shelf)['favorite']
+    shelf.curate('favorite',ident,selected=False)
+    assert len(books.rows_for(shelf.catalog()))==1
+    shelf.curate('favorite',ident,selected=True);shelf.curate('reject',ident)
+    assert not row(shelf)['favorite']
+
+
+def test_refill_preserves_favorites_and_counts_only_undecided(shelf,tmp_path,monkeypatch):
+    monkeypatch.setattr(book_starter,'folder',lambda:tmp_path/'refill')
+    saved=row(shelf);shelf.curate('favorite',saved['id'],selected=True)
+    book_starter.configure(shelf,True,1)
+    monkeypatch.setattr(book_starter,'plan',lambda:[{'id':'123','title':'A Book','author':'An Author'},{'id':'789','title':'Fresh','author':'B'}])
+    calls=[]
+    def fetch(s,r):
+        calls.append(r['id']);return epub(s.root/'Gutenberg Starter 1000'/('pg'+r['id']+'.epub'),title=r['title'])
+    monkeypatch.setattr(book_starter,'fetch',fetch)
+    assert book_starter.run(shelf)['added']==1
+    assert calls==['789'] and len(shelf.load()['entries'])==2
+    assert book_starter.pool_count(shelf.load())==1
+    assert Path(saved['path']).exists()
+    assert book_starter.run(shelf)['added']==0

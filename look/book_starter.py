@@ -72,6 +72,11 @@ def fetch(shelf,row):
         finally:part.unlink(missing_ok=True)
     raise ValueError(str(error))
 
+def pool_count(data):
+    # Favorites stay on disk but no longer occupy a discovery slot. Pending
+    # removals count until expiry so the existing 48-hour grace stays intact.
+    return sum(not r.get('favorite') for r in data['entries'])
+
 def run(shelf=None):
     shelf=shelf or book_core.Shelf()
     root=folder();root.mkdir(parents=True,exist_ok=True)
@@ -84,10 +89,10 @@ def run(shelf=None):
         with shelf.edit() as data:data['refill'].update(last_attempt=time.time(),state='running',added=0,error='')
         added=0;errors=[];failure=''
         try:
-            if len(shelf.load()['entries'])>=settings.get('target',1000):return {'state':'complete','added':0,'removed':removed}
+            if pool_count(shelf.load())>=settings.get('target',1000):return {'state':'complete','added':0,'removed':removed}
             for row in plan():
                 data=shelf.load();settings=data.get('refill',{})
-                if not settings.get('enabled') or len(data['entries'])>=settings.get('target',1000):break
+                if not settings.get('enabled') or pool_count(data)>=settings.get('target',1000):break
                 ident=str(row['id'])
                 known={book_core.gutenberg_id(r) for r in data['entries']}
                 if ident in known or ident in data.get('rejected_gutenberg',{}):continue
@@ -105,7 +110,7 @@ def run(shelf=None):
                     for entry in current['entries']:
                         if entry['path']==str(path):entry.update(gutenberg_id=ident,source_url='https://www.gutenberg.org/ebooks/'+ident,starter_managed=True)
                     added+=1;current['refill']['added']=added
-            return {'state':'complete' if len(shelf.load()['entries'])>=settings.get('target',1000) else 'partial','added':added,'removed':removed,'errors':errors}
+            return {'state':'complete' if pool_count(shelf.load())>=settings.get('target',1000) else 'partial','added':added,'removed':removed,'errors':errors}
         except Exception as exc:
             failure=str(exc);raise
         finally:

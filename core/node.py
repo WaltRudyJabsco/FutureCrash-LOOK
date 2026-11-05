@@ -4025,7 +4025,7 @@ class API(BaseHTTPRequestHandler):
             elif payload.get('action')=='scan':value=shelf.scan()
             elif payload.get('action')=='fetch':value={'book':shelf.fetch(payload.get('url',''))}
             elif payload.get('action')=='update':value={'book':shelf.update(payload.get('id'),payload.get('fields'))}
-            elif payload.get('action') in {'reject','restore','collection','collect'}:
+            elif payload.get('action') in {'reject','restore','collection','collect','favorite'}:
                 value=shelf.curate(payload['action'],payload.get('id'),payload.get('name'),payload.get('selected',True))
             elif payload.get('action')=='refill':
                 import book_starter

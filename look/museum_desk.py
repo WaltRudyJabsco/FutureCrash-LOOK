@@ -27,7 +27,7 @@ from look_renderer import NativePreviewController
 BASE='http://127.0.0.1:7332'
 MAX_IMAGE_BYTES=20*1024*1024
 SLIDE_SECONDS=10
-LIST_CONTROLS='1 Library · 2 Discover · 3 Collections · 4 Favorites · 5 Removal review · x mark/undo removal · u keep view here · o offline only · c new collection · m add/remove · ↑↓ select · Shift+↑↓ page · Shift+←→ top/end · F sort · Enter view · s slideshow · i image/ASCII · d discover · / search · l library · t source · n/b pages · k save to owner · p keep here · f favorite · a build starter library · h museum highlights · j daily refill · r refresh · W shell pane · q quit'
+LIST_CONTROLS='1 To explore · 2 Discover · 3 Collections · 4 Favorites · 5 Removal review · 6 All works · x mark/undo removal · u keep view here · o offline only · c new collection · m add/remove · ↑↓ select · Shift+↑↓ page · Shift+←→ top/end · F sort · Enter view · s slideshow · i image/ASCII · d discover · / search · l library · t source · n/b pages · k save to owner · p keep here · f thumbs up/favorite · a build starter library · h museum highlights · j daily refill · r refresh · W shell pane · q quit'
 
 def adjacent_artwork(items,index,step):
     """Cycle within the visible collection, skipping works not downloaded yet."""
@@ -172,7 +172,7 @@ def desk(client,ui):
                         updated={row['id']:row for row in library};items=[updated.get(row['id'],row) for row in prior_items]
                     index=next((n for n,row in enumerate(items) if row['id']==prior_id),min(index,max(0,len(items)-1)))
                     message=('Owner offline · cached catalog · '+str(result.get('offline_count',0))+' images here' if offline else 'Library owner: '+client.node)
-                    message+=' · '+str(len(items))+' works'+(' · Daily refill ON (target 1000)' if result.get('rotation',{}).get('enabled') else '')+(' · '+result['notice'] if result.get('notice') else '')
+                    message+=' · '+str(len(items))+' works'+(' · Daily refill ON (1000 to explore + favorites)' if result.get('rotation',{}).get('enabled') else '')+(' · '+result['notice'] if result.get('notice') else '')
                     job=result.get('job',{})
                     if job.get('state'):message+=' · job '+job['state']+' '+str(job.get('saved',0))+'/'+str(job.get('requested',0))+' · '+job.get('theme','')
                 except Exception as exc:
@@ -212,7 +212,7 @@ def desk(client,ui):
                         except Exception:lines+=['Image preview unavailable']
                     else:lines+=['']*art_rows
                     lines += [row.get('museum','')+' · CC0'+(' · ★ Favorite' if row.get('favorite') else '')+(' · Removal: '+time.strftime('%b %d %H:%M',time.localtime(row['removal_due'])) if row.get('removal_due') else '')]
-                    controls='←/→ previous/next · Space slideshow/pause · F fullscreen · f favorite · p keep here · m collection · x mark/undo removal · i image/ASCII · Esc collection · W shell pane · q quit'
+                    controls='←/→ previous/next · Space slideshow/pause · F fullscreen · f thumbs up/favorite · p keep here · m collection · x mark/undo removal · i image/ASCII · Esc collection · W shell pane · q quit'
                     lines += [('Playing' if playing else 'Paused')+' · '+str(index+1)+'/'+str(len(items))+' · current list · 10 seconds/work']
                 else:
                     page_size=max(1,height-len(terminal_style.command_lines(LIST_CONTROLS,width))-5);start=max(0,min(index-page_size//2,len(items)-page_size))
@@ -275,7 +275,7 @@ def desk(client,ui):
                 if offline:message='Reconnect to '+client.node+' to change this work';continue
                 row=items[index];playing=False
                 future=pool.submit(client.change,{'f':'favorite','p':'pin','k':'save','x':'mark-removal'}[key],id=row['id']);continue
-            if (not image_id and key in ('1','2','3','4','5','o','c')) or key=='m':
+            if (not image_id and key in ('1','2','3','4','5','6','o','c')) or key=='m':
                 if future:continue
                 if key=='c':
                     if offline:message='Reconnect to '+client.node+' to edit collections';continue
@@ -296,7 +296,7 @@ def desk(client,ui):
                         future=pool.submit(client.change,action,id=row['id'],collection=chosen);continue
                     collection_id=chosen
                 if key=='o':offline_only=not offline_only
-                else:view={'1':'library','2':'discover','3':'collections','4':'favorites','5':'review'}[key];discover=view=='discover'
+                else:view={'1':'library','2':'discover','3':'collections','4':'favorites','5':'review','6':'all'}[key];discover=view=='discover'
                 image_id=None;index=0
                 if discover:future=pool.submit(client.request,suffix='/search',source=source,q=query or 'landscape',page=1)
                 else:future=pool.submit(client.snapshot,query)
@@ -354,7 +354,7 @@ def desk(client,ui):
                 if prompt('Copy '+str(len(ids))+' works from '+client.node+' to THIS device? Type yes: ').casefold()=='yes':future=pool.submit(client.change,'sync',ids=ids)
             elif key=='j':
                 if offline:message='Reconnect to '+client.node+' to configure daily refill';continue
-                answer=prompt('Daily refill on '+client.node+': keep about 1000 works, up to 100 new/day. Type on or off: ').lower()
+                answer=prompt('Daily refill on '+client.node+': keep about 1000 undecided works plus Favorites, up to 100 new/day. Type on or off: ').lower()
                 if answer in ('on','off'):future=pool.submit(client.change,'rotation',enabled=answer=='on')
             elif key=='h':
                 if offline:message='Reconnect to '+client.node+' to download highlights';continue

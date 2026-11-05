@@ -196,7 +196,7 @@ class Museum:
             state=self.read();settings=state.get('rotation',{})
             if not settings.get('enabled') or time.time()<settings.get('next_check',0):return
             if self.worker and self.worker.is_alive():return
-            kept=sum(not row.get('removal_due') and (self.root/'images'/(ident+'.jpg')).is_file() for ident,row in state['items'].items())
+            kept=sum(not row.get('favorite') and not row.get('removal_due') and (self.root/'images'/(ident+'.jpg')).is_file() for ident,row in state['items'].items())
             count=min(REFILL_DAILY_LIMIT,max(0,REFILL_TARGET-kept))
             settings.update(next_check=time.time()+REFILL_INTERVAL,last_checked=time.time());state['rotation']=settings
             if count:
