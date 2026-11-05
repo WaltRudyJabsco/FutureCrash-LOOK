@@ -145,7 +145,11 @@ jobs above 25 cm, including all copies and trailing feed. Text uses explicit
 Oversize content is rejected, never silently truncated. It never operates a cash drawer or cutter.
 Image preparation needs Pillow: it composites transparency on white, scales to
 the configured maximum width, dithers to monochrome, and generates bounded
-ESC/POS **GS v 0** raster data. This is a legacy compatibility command, not a
+ESC/POS image data. The default `raster` mode uses **GS v 0**;
+`profile --image-mode column24` selects **ESC * mode 33**, with 24-dot vertical
+bands, explicit band spacing, white padding at the bottom and no leading reset.
+Use the mode verified on the physical printer; do not infer graphics support
+from successful text or built-in QR output. These are compatibility commands, not a
 universal printer protocol. Only use it on a model confirmed to support it.
 Document PDF jobs are refused on an ESC/POS profile. Raw CUPS queues are legacy
 and may be unavailable in newer print stacks; this first version has no direct
