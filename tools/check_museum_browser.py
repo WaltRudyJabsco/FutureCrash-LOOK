@@ -68,21 +68,47 @@ with sync_playwright() as p:
         assert page.locator('#job button').count()==0
     page.screenshot(path=str(OUT/'desktop.png'),full_page=True)
     page.locator('.card .view').first.click();page.wait_for_selector('#detail:visible');assert page.locator('#title').inner_text()
+    assert page.locator('#title').inner_text()==rows[0]['title']
+    page.keyboard.press('ArrowRight');assert page.locator('#title').inner_text()==rows[1]['title']
+    page.locator('#detail-prev').click();assert page.locator('#title').inner_text()==rows[0]['title']
+    page.keyboard.press('ArrowLeft');assert page.locator('#title').inner_text()==rows[-1]['title']
+    page.locator('#detail-next').click();assert page.locator('#title').inner_text()==rows[0]['title']
     assert page.locator('#detail-actions button',has_text='Favorite').count()==1
     page.locator('#detail-full').click();page.wait_for_function('document.fullscreenElement!==null');page.locator('#detail-full').click();page.wait_for_function('document.fullscreenElement===null')
     page.locator('#detail-actions button',has_text='Thumbs down').click();page.wait_for_selector('#detail-actions button:has-text("Undo removal")')
     page.locator('#detail-actions button',has_text='Undo removal').click();page.wait_for_selector('#detail-actions button:has-text("Thumbs down")')
     page.locator('#close').click()
     page.locator('.card .actions button',has_text='Favorite').first.click();page.locator('#favorites').click();page.wait_for_function("document.querySelectorAll('.card').length===1")
+    page.locator('.card .view').first.click()
+    assert page.locator('#detail-next').is_disabled()
+    page.keyboard.press('ArrowRight');assert page.locator('#detail-position').inner_text()=='1 / 1'
+    page.locator('#close').click()
     page.locator('#slideshow').click();page.wait_for_selector('#show:visible');assert '/api/museum/image' in page.locator('#slide-image').get_attribute('src')
     assert page.locator('#slide-actions button',has_text='Favorite').count()==1
-    page.locator('#slide-pause').click();assert page.locator('#slide-pause').inner_text()=='Play';page.locator('#slide-next').click();page.locator('#exit').click()
+    page.keyboard.press('Space');assert page.locator('#slide-pause').inner_text()=='Play · Space'
+    page.keyboard.press('Space');assert page.locator('#slide-pause').inner_text()=='Pause · Space'
+    page.locator('#slide-pause').click();assert page.locator('#slide-pause').inner_text()=='Play · Space';page.locator('#slide-next').click();page.locator('#exit').click()
     page.locator('#discover').click();page.wait_for_selector('#source:visible');page.locator('#source').select_option('aic');page.locator('#query').fill('landscape');page.locator('#search button').click();page.wait_for_selector('#next:visible')
     page.locator('#saved').click();page.wait_for_function("document.querySelectorAll('.card').length>1")
     page.once('dialog',lambda d:d.accept('Night Gallery'));page.locator('#new-collection').click();page.wait_for_function("document.querySelector('#collection-choice').options.length===1")
     page.locator('#saved').click();page.wait_for_selector('.card')
     page.once('dialog',lambda d:d.accept('1'));page.locator('.card .actions button',has_text='Add to collection').first.click()
-    page.locator('#collections').click();page.wait_for_function("document.querySelectorAll('.card').length===1")
+    page.once('dialog',lambda d:d.accept('1'));page.locator('.card .actions button',has_text='Add to collection').nth(2).click()
+    page.locator('#collections').click();page.wait_for_function("document.querySelectorAll('.card').length===2")
+    page.locator('.card .view').first.click();page.keyboard.press('ArrowRight')
+    assert page.locator('#title').inner_text()==rows[2]['title']
+    page.keyboard.press('ArrowRight');assert page.locator('#title').inner_text()==rows[0]['title']
+    page.locator('#close').click()
+    page.locator('#slideshow').click();page.wait_for_selector('#show:visible')
+    first_caption=page.locator('#slide-caption').inner_text()
+    page.keyboard.press('ArrowRight');assert page.locator('#slide-caption').inner_text()!=first_caption
+    page.keyboard.press('ArrowLeft');assert page.locator('#slide-caption').inner_text()==first_caption
+    page.locator('#slide-next').focus();page.keyboard.press('Space')
+    assert page.locator('#slide-pause').inner_text()=='Play · Space'
+    assert page.locator('#slide-caption').inner_text()==first_caption
+    page.keyboard.press('f');page.wait_for_function('document.fullscreenElement!==null')
+    page.keyboard.press('f');page.wait_for_function('document.fullscreenElement===null')
+    page.keyboard.press('Escape');page.wait_for_selector('#show',state='hidden')
     page.locator('#shuffle').check();page.locator('#slideshow').click();page.wait_for_selector('#show:visible');page.locator('#exit').click()
     assert page.evaluate("new Set(shuffleWorks([{id:'a'},{id:'b'},{id:'c'}]).map(x=>x.id)).size===3")
     page.locator('#saved').click();page.wait_for_selector('.card')
