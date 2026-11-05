@@ -86,9 +86,9 @@ def discovered_devices():
 
 
 def catalog():
+    warning=''
     try:output=run(['lpstat','-p'])
-    except RuntimeError as error:
-        return {'printers':[],'available':False,'warning':str(error),'setup':'lk print discover; use system printer settings to install/enable CUPS'}
+    except RuntimeError as error:output='';warning=str(error)
     rows=[];configured=profiles()
     try:
         connections={match[1]:match[2] for line in run(['lpstat','-v']).splitlines() if (match:=re.match(r'device for (\S+): (.+)',line))}
@@ -98,7 +98,18 @@ def catalog():
     for line in output.splitlines():
         match=re.match(r'printer (\S+) (.*)',line)
         if match:rows.append({'name':match[1],'status':match[2],'profile':configured.get(match[1],{'kind':'document'}),'device':device(connections.get(match[1],''),observed)})
-    return {'printers':rows,'available':True}
+    for queue,profile in configured.items():
+        if profile.get('transport')!='mxw01-ble':continue
+        import print_mxw01
+        try:
+            print_mxw01.validate(profile)
+            status='configured Bluetooth; connects when printing' if shutil.which('gatttool') else 'unavailable: install BlueZ gatttool on owner'
+        except ValueError as error:status='unavailable: '+str(error)
+        rows=[row for row in rows if row['name']!=queue]
+        rows.append({'name':queue,'status':status,'profile':profile,'device':{'keys':['bluetooth:'+profile.get('address','').upper()],'label':profile.get('label',queue),'source':'configured-bluetooth-address'}})
+    result={'printers':rows,'available':bool(rows) or not warning}
+    if warning:result.update(warning=warning,setup='lk print discover; use system printer settings to install/enable CUPS, or lk print bluetooth --help for an observed MXW01')
+    return result
 
 
 def require_queue(queue):
@@ -168,6 +179,18 @@ def configure_profile(queue,kind='document',width=384,columns=32,confirm=False,i
     return {'applied':True,'queue':queue,'profile':update_profile(queue,value)}
 
 
+def add_bluetooth(queue,address,adapter,label='Tiny Printer',confirm=False):
+    import print_mxw01
+    name(queue)
+    if not isinstance(label,str) or not label.strip() or len(label)>80 or any(ord(c)<32 for c in label):raise ValueError('Use a short printable nickname')
+    value={'kind':'escpos','transport':'mxw01-ble','address':str(address).upper(),'adapter':adapter,'label':label.strip(),'width':384,'columns':30}
+    print_mxw01.validate(value)
+    if any(row['name']==queue for row in catalog()['printers']):raise ValueError('Destination already exists; choose a new name')
+    if confirm is not True:return {'applied':False,'queue':queue,'proposed_profile':value,'note':'Registers this printer on this owner only; no pairing or printing. Requires Linux BlueZ gatttool and Pillow.'}
+    if not shutil.which('gatttool'):raise RuntimeError('Install Linux BlueZ gatttool on the printer owner first')
+    return {'applied':True,'queue':queue,'profile':update_profile(queue,value)}
+
+
 def add_queue(queue,uri,driver='everywhere',confirm=False):
     name(queue)
     if not isinstance(uri,str) or any(ord(c)<33 for c in uri):raise ValueError('Invalid printer URI')
@@ -183,13 +206,20 @@ def add_queue(queue,uri,driver='everywhere',confirm=False):
 
 
 def options(queue):
-    queue=require_queue(queue);return {'queue':queue,'options':run(['lpoptions','-p',queue,'-l'])}
+    queue=require_queue(queue)
+    if profiles().get(queue,{}).get('transport')=='mxw01-ble':return {'queue':queue,'options':'transport/Transport: *Bluetooth-LE\nwidth/Image-width: *384-dots\ncopies/Copies: *1\nlength/Maximum-length: *6.4-cm'}
+    return {'queue':queue,'options':run(['lpoptions','-p',queue,'-l'])}
 def jobs(queue):
-    queue=require_queue(queue);return {'queue':queue,'jobs':run(['lpstat','-W','all','-o',queue])}
+    queue=require_queue(queue)
+    if profiles().get(queue,{}).get('transport')=='mxw01-ble':
+        with Spool().connect() as db:rows=db.execute('SELECT id,state,meta FROM jobs ORDER BY created DESC LIMIT 100').fetchall()
+        return {'queue':queue,'jobs':'\n'.join(ident+' '+state+' '+json.loads(meta)['title'] for ident,state,meta in rows if json.loads(meta)['queue']==queue)}
+    return {'queue':queue,'jobs':run(['lpstat','-W','all','-o',queue])}
 
 
 def cancel(queue,job,confirm=False):
     queue=require_queue(queue)
+    if profiles().get(queue,{}).get('transport')=='mxw01-ble':raise ValueError('Bluetooth jobs cannot be recalled after transmission; discard an unsent plan by its ID')
     if not isinstance(job,str) or not re.fullmatch(re.escape(queue)+r'-[0-9]+',job):raise ValueError('Use the exact queue-N job ID')
     if confirm is not True:return {'cancelled':False,'job':job,'note':'Confirm to request cancellation; pages already printed cannot be recalled.'}
     run(['cancel',job]);return {'job':job,'state':'cancellation_requested'}
@@ -289,7 +319,15 @@ class Spool:
         if not isinstance(filename,str) or len(filename)>200 or any(ord(c)<32 for c in filename):raise ValueError('Invalid print title')
         profile=profiles().get(queue,{'kind':'document'})
         selected_options=print_options(options_value)
-        if kind=='document':
+        if profile.get('transport')=='mxw01-ble':
+            import print_mxw01
+            print_mxw01.validate(profile)
+            if selected_options!={'copies':1}:raise ValueError('Tiny Bluetooth printing supports one copy per reviewed job')
+            if kind=='receipt-text':image=print_mxw01.text_image(data.decode('utf-8'))
+            elif kind=='receipt-image':image=receipt_bitmap(data,384)
+            else:raise ValueError('Tiny Bluetooth printer accepts receipt text or images; use a document printer for PDF')
+            payload,dots=print_mxw01.encode(image);paper_mm=dots/RECEIPT_DOTS_PER_MM
+        elif kind=='document':
             if profile.get('kind')=='escpos':raise ValueError('Use receipt text/image with this ESC/POS queue; PDF is not printer command data')
             suffix=Path(filename).suffix.casefold()
             if suffix not in {'.txt','.pdf','.png','.jpg','.jpeg'}:raise ValueError('Print PDF, UTF-8 text, PNG or JPEG; export DOCX/EPUB/Mercury manuscripts to PDF first')
@@ -316,7 +354,7 @@ class Spool:
                 raise ValueError(f'Receipt exceeds this printer’s {limit:,}-byte transfer limit. Use a smaller image or shorter text; nothing was sent.')
         ident=uuid.uuid4().hex
         meta={'id':ident,'queue':queue,'title':filename,'kind':kind,'options':selected_options,'profile':profile,'bytes':len(payload),'sha256':hashlib.sha256(payload).hexdigest(),'state':'prepared','expires_in_seconds':PLAN_LIFETIME,'note':'Not sent. Review printer/options and use lk print send ID --confirm. Spooler acceptance does not prove physical printing.'}
-        if kind.startswith('receipt-'):meta.update(estimated_paper_mm=paper_mm,max_paper_mm=MAX_RECEIPT_MM)
+        if kind.startswith('receipt-'):meta.update(estimated_paper_mm=paper_mm,max_paper_mm=print_mxw01.MAX_ROWS/RECEIPT_DOTS_PER_MM if profile.get('transport')=='mxw01-ble' else MAX_RECEIPT_MM)
         if kind=='receipt-text' or kind=='document' and Path(filename).suffix.casefold()=='.txt':
             meta['text_preview']=data.decode('utf-8')[:2000];meta['preview_truncated']=len(data.decode('utf-8'))>2000
         with self.connect() as db:
@@ -335,7 +373,7 @@ class Spool:
     def inspect(self,ident):
         created,state,meta,_,receipt=self.get(ident)
         value=dict(json.loads(meta),state=state,created=created,receipt=json.loads(receipt))
-        if state!='prepared':value['note']='State: '+state+'. Check the receipt and CUPS jobs; this plan cannot be sent again.'
+        if state!='prepared':value['note']='State: '+state+'. Check the receipt and printer jobs; this plan cannot be sent again.'
         return value
 
     def discard(self,ident,confirm=False):
@@ -364,12 +402,16 @@ class Spool:
             cursor=db.execute("UPDATE jobs SET state='submitting' WHERE id=? AND state='prepared'",(ident,))
             if not cursor.rowcount:return self.inspect(ident)
         try:
-            output=run(args,payload)
-            match=re.search(r'request id is ('+re.escape(meta['queue'])+r'-[0-9]+)\b',output)
-            state='queued' if match else 'uncertain'
-            receipt={'job':match[1] if match else None,'output':output,'note':'Accepted by CUPS; physical delivery is not verified.' if match else 'No job ID verified. Check lk print jobs; do not resend automatically.'}
+            if meta['profile'].get('transport')=='mxw01-ble':
+                import print_mxw01
+                receipt=print_mxw01.transmit(meta['profile'],payload);receipt['job']=ident;state='queued'
+            else:
+                output=run(args,payload)
+                match=re.search(r'request id is ('+re.escape(meta['queue'])+r'-[0-9]+)\b',output)
+                state='queued' if match else 'uncertain'
+                receipt={'job':match[1] if match else None,'output':output,'note':'Accepted by CUPS; physical delivery is not verified.' if match else 'No job ID verified. Check lk print jobs; do not resend automatically.'}
         except (OSError,RuntimeError,subprocess.SubprocessError) as error:
-            state='uncertain';receipt={'error':str(error),'note':'Submission may have reached CUPS. Inspect jobs; this plan will not be resent.'}
+            state='uncertain';receipt={'error':str(error),'note':'Submission may have reached the printer. Inspect jobs and physical output; this plan will not be resent.'}
         meta.pop('text_preview',None);meta.pop('preview_truncated',None)
         with self.connect() as db:db.execute('UPDATE jobs SET state=?,receipt=?,meta=?,payload=NULL WHERE id=?',(state,json.dumps(receipt),json.dumps(meta),ident))
         return self.inspect(ident)
@@ -386,6 +428,7 @@ def local(payload=None):
     if action=='jobs':return jobs(value['queue'])
     if action=='cancel':return cancel(**value)
     if action=='add':return add_queue(**value)
+    if action=='bluetooth':return add_bluetooth(**value)
     if action=='profile':return configure_profile(**value)
     if action=='nickname':return nickname(**value)
     if action=='prepare':

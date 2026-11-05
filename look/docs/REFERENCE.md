@@ -1006,6 +1006,8 @@ USAGE AND OPTIONS
 look/printing.py
 
 Parser arguments and recognized option tokens (grouped by handler):
+--adapter
+--address
 --columns
 --confirm
 --copies
@@ -1015,6 +1017,7 @@ Parser arguments and recognized option tokens (grouped by handler):
 --json
 --json — Machine-readable result
 --kind
+--label
 --max-receipt-bytes — Device-specific encoded receipt limit; 0 disables
 --media
 --node
