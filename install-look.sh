@@ -371,6 +371,7 @@ install_file "$ROOT/look/destination_history.py" "$HOME/.local/share/look/destin
 install_file "$ROOT/look/ytr.py" "$HOME/.local/share/look/ytr.py"
 install_file "$ROOT/look/ytd.py" "$HOME/.local/share/look/ytd.py"
 install_file "$ROOT/look/notebook.py" "$HOME/.local/share/look/notebook.py"
+install_file "$ROOT/look/note_composer.py" "$HOME/.local/share/look/note_composer.py"
 install_file "$ROOT/look/work_desk.py" "$HOME/.local/share/look/work_desk.py"
 install_file "$ROOT/look/clipboard_shelf.py" "$HOME/.local/share/look/clipboard_shelf.py"
 install_file "$ROOT/look/notebook_markdown.py" "$HOME/.local/share/look/notebook_markdown.py"

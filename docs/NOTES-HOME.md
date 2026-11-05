@@ -117,3 +117,23 @@ Alongside `notes`, `museum`, `books`, `ytr`, `print`, `saver` and `wiki`, the
 same catalog. These are reviewed entry points, not arbitrary `lk` commands with
 arguments. Existing Home notes are not rewritten; new Home notes retain the
 small starter menu. Add whichever tools suit your own page.
+
+## Ask the Fabric at your cursor
+
+In the built-in Notes editor, press **Ctrl-G**. Describe the entry you want in
+ordinary language. **Ctrl-D** starts existing local dictation; Ctrl-C finishes
+speech. You can edit the transcript before **Ctrl-S** sends the request.
+
+The composer uses the Fabric inference router, your nearby draft text, the
+reviewed tool catalog, note titles/IDs and the local Mercury server's project
+catalog. It sends no manuscript bodies. A reachable tool-capable Fabric model is
+required; local inference can work offline when available. If the Mercury
+server is unavailable, its projects are not guessed. The composer does not know
+which manuscript is currently active; ambiguous requests can produce a question
+for you to answer by typing or dictating.
+
+Review and edit the proposed entry, then **Ctrl-S** inserts it at the original
+cursor. Save the surrounding note separately with Ctrl-S. **Escape** cancels
+request, generation or review without changing your draft. Generated links must
+come from discovered targets; the composer does not execute tools or shell
+commands. This command is in the built-in Notes editor, not external Vim editors.
