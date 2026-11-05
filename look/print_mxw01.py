@@ -13,12 +13,16 @@ import time
 
 WIDTH=384
 ROW_BYTES=WIDTH//8
-MAX_ROWS=512
+MAX_PAPER_MM=3048  # Explicit banner ceiling; not a measured hardware capability.
+DOTS_PER_MM=8
+MAX_ROWS=int(MAX_PAPER_MM*DOTS_PER_MM)
+SYNC_ROWS=512
 FEED_ROWS=16
 CHUNK_BYTES=ROW_BYTES
 WRITE_DELAY=.03
-SESSION_SECONDS=90
-COMPLETION_SECONDS=30
+SESSION_SECONDS=1800
+COMPLETION_SECONDS=60
+MIN_PRINT_MM_PER_SECOND=5  # Generous completion allowance for a long physical feed.
 CONTROL_UUID='0000ae01-0000-1000-8000-00805f9b34fb'
 NOTIFY_UUID='0000ae02-0000-1000-8000-00805f9b34fb'
 DATA_UUID='0000ae03-0000-1000-8000-00805f9b34fb'
@@ -48,7 +52,7 @@ def command(code,data):
 def encode(image):
     from PIL import Image
     if image.width>WIDTH or image.height+FEED_ROWS>MAX_ROWS:
-        raise ValueError('Tiny Bluetooth receipt is too tall; use a shorter selection or smaller image (6.4 cm limit)')
+        raise ValueError('Tiny Bluetooth receipt is too tall; use a shorter selection or smaller image (configured banner job limit)')
     canvas=Image.new('1',(WIDTH,image.height+FEED_ROWS),1);canvas.paste(image,(0,0))
     # MXW01 puts the leftmost black pixel in the low bit, unlike ESC/POS.
     reverse=bytes(int(f'{value^255:08b}'[::-1],2) for value in range(256))
@@ -65,7 +69,7 @@ def text_image(text):
     lines=[]
     for line in text.expandtabs(4).splitlines():lines.extend(textwrap.wrap(line,columns,replace_whitespace=False) or [''])
     height=16+26*max(1,len(lines))
-    if height+FEED_ROWS>MAX_ROWS:raise ValueError('Tiny Bluetooth receipt is too long; shorten the text (6.4 cm limit)')
+    if height+FEED_ROWS>MAX_ROWS:raise ValueError('Tiny Bluetooth receipt is too long; shorten the text (configured banner job limit)')
     image=Image.new('1',(WIDTH,height),1);draw=ImageDraw.Draw(image)
     for index,line in enumerate(lines):draw.text((8,8+index*26),line,font=font,fill=0)
     return image
@@ -179,7 +183,8 @@ def transmit(profile,payload):
             if not accepted or accepted[0]!=0:raise RuntimeError('Printer rejected image; no image data sent')
             for offset in range(0,len(payload),CHUNK_BYTES):session.write(data,payload[offset:offset+CHUNK_BYTES])
             session.write(control,command(0xad,b'\x00'))
-            completed=session.notification(0xaa,COMPLETION_SECONDS)
+            completion_timeout=max(COMPLETION_SECONDS,rows/DOTS_PER_MM/MIN_PRINT_MM_PER_SECOND+15)
+            completed=session.notification(0xaa,completion_timeout)
             if not completed or completed[0]!=0:raise RuntimeError('Printer reported incomplete output; no automatic retry')
             checksum_verified=False
             if len(completed)==3 and completed[1]==completed[2]:

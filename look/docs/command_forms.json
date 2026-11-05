@@ -994,6 +994,24 @@
     "Immediately print one short text job on a named Fabric printer"
   ],
   [
+    "lk print setup",
+    "",
+    "files",
+    "Install offline pyfiglet lettering and fortune rendering"
+  ],
+  [
+    "lk print banner",
+    "TEXT [--font FONT] [--printer NAME] [--paper-limit-mm MM]",
+    "files",
+    "Preview ASCII lettering or prepare a sideways print banner"
+  ],
+  [
+    "lk print fortune",
+    "TEXT [--printer NAME]",
+    "files",
+    "Prepare a fortune slip with lucky numbers and saved Museum artwork"
+  ],
+  [
     "lk print send",
     "ID [--node NODE] [--confirm]",
     "files",

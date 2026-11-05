@@ -8608,7 +8608,7 @@ _TOOL_POLICY = {
     "list_processes":("all","observation"),"listening_ports":("all","observation"),"system_snapshot":("all","observation"),
     "game_action":("all","action"),
     "audio_speak":("all","action"),
-    "printers_list":("all","observation"),"printer_inspect":("all","observation"),"print_prepare":("workspace","mutation"),"print_text":("workspace","action"),
+    "banner_render":("all","observation"),"print_design":("workspace","action"),"printers_list":("all","observation"),"printer_inspect":("all","observation"),"print_prepare":("workspace","mutation"),"print_text":("workspace","action"),
     "receipts_search":("all","observation"),
     "museum_search":("all","observation"),
     "radio_queue":("all","observation"),"radio_add":("workspace","action"),
@@ -11867,7 +11867,7 @@ def ollama_chat(force_search=False, initial_prompt=None, allow_start=True, host_
         else:
             messages.append({"role":"system","content":(
                 "RESOURCE SCOPE: unqualified open/play/find requests default to the operator's local world. "
-                "Fabric printers use printers_list/printer_inspect. To print a to-do list from Notes, use notebook_search/list/read for its actual body, then print_prepare with that text and the chosen receipt destination; do not substitute a guessed list. When the current user explicitly asks to print to a named printer, use print_text with its friendly label and the requested short text; this sends one copy. Otherwise print_prepare creates a review plan only; return its confirmation command. Do not automatically retry a print_text submission. For recipes format a title, ingredients and concise steps; preserve quantities. Never invent the contents of an existing note. Never claim physical printing from a spooler receipt. Export DOCX/manuscripts to PDF first. "
+                "Fabric printers use printers_list/printer_inspect. Use banner_render for offline ASCII lettering previews. Use print_design for banners or fortune-cookie slips: author an original concise fortune (one to three lines, ideally under 90 characters); the renderer adds lucky numbers and an existing Museum artwork with title/artist credit. Set send=true only when asked to print to that exact named printer; otherwise prepare a review. Fortunes are compact; banners are sideways large lettering.  To print a to-do list from Notes, use notebook_search/list/read for its actual body, then print_prepare with that text and the chosen receipt destination; do not substitute a guessed list. When the current user explicitly asks to print to a named printer, use print_text with its friendly label and the requested short text; this sends one copy. Otherwise print_prepare creates a review plan only; return its confirmation command. Do not automatically retry a print_text submission. For recipes format a title, ingredients and concise steps; preserve quantities. Never invent the contents of an existing note. Never claim physical printing from a spooler receipt. Export DOCX/manuscripts to PDF first. "
                 "Museum is the Fabric artwork collection. Use museum_search for actual artworks and image links; do not guess folders or claim to see an image from metadata. "
                 "YouTube Radio (YTR / lk ytr) is the shared listen-later queue. Use radio_queue to inspect it and radio_add for explicitly requested YouTube links; adding never starts playback. "
                 "Mercury Reader is the built-in Fabric EPUB/PDF library. For books and saved reading positions use books_shelf/books_lookup; never guess a media folder or substitute music search. Reader links are relative to the current Signal/Albert browser host; lk books is the terminal shelf. Book lookups do not launch or start narration. "
@@ -12464,7 +12464,7 @@ def ollama_chat(force_search=False, initial_prompt=None, allow_start=True, host_
                             tool_content,_ok,_elapsed=_tool_transaction(
                                 name,args,lambda: _run_system_inspection_tool(name,args))
                         if _ok: turn_successful_tools.add(name)
-                    elif name in {'printers_list','printer_inspect','print_prepare','print_text'}:
+                    elif name in {'printers_list','printer_inspect','print_prepare','print_text','banner_render','print_design'}:
                         import printing
                         tool_content,_ok,_elapsed=_tool_transaction(name,args,lambda:printing.run_tool(name,args,workspace,prompt,print_turn))
                         if _ok:turn_successful_tools.add(name)
@@ -21432,6 +21432,9 @@ _COMMANDS = [
     ("lk print text", "TEXT|- [--printer PRINTER] [--node NODE]", "files", "Prepare UTF-8 text for a document printer"),
     ("lk print receipt", "[TEXT|-|--image FILE] [--printer PRINTER] [--node NODE]", "files", "Prepare ESC/POS text or dithered raster art; explicit receipt profile required"),
     ("lk print quick", 'TEXT|- --printer "NAME"', "files", "Immediately print one short text job on a named Fabric printer"),
+    ("lk print setup", "", "files", "Install offline pyfiglet lettering and fortune rendering"),
+    ("lk print banner", "TEXT [--font FONT] [--printer NAME] [--paper-limit-mm MM]", "files", "Preview ASCII lettering or prepare a sideways print banner"),
+    ("lk print fortune", "TEXT [--printer NAME]", "files", "Prepare a fortune slip with lucky numbers and saved Museum artwork"),
     ("lk print send", "ID [--node NODE] [--confirm]", "files", "Review or explicitly submit a prepared job once; never auto-retry uncertain printing"),
     ("lk print inspect", "ID [--node NODE]", "files", "Inspect a print plan or spooler acceptance receipt"),
     ("lk print discard", "ID [--node NODE] [--confirm]", "files", "Discard unsent print content"),

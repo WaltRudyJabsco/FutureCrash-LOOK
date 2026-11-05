@@ -63,3 +63,10 @@ def test_image_options_forwarded_to_owner(gateway):
     calls,_=gateway
     museum_web.print_request('http://local',{'action':'prepare','id':'aic-1','printer':'receipt','options':{'copies':2,'style':'ascii','rotation':90}})
     assert calls[-1][1]['options_value']=={'copies':2,'style':'ascii','rotation':90}
+
+
+def test_background_print_status_is_readable(gateway):
+    calls,_=gateway
+    museum_web.print_request('http://local',{'action':'inspect','node':'archive','id':'a'*32,'confirm':True})
+    assert calls[-1][1]['action']=='inspect'
+    assert '/v1/print?' in calls[-1][0]

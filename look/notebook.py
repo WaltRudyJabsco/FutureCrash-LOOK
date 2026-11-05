@@ -35,7 +35,7 @@ FABRIC_ACTIONS={
  'museum':('Museum',('museum',),('museum_search',),'Which artist, title or subject?'),
  'books':('Mercury Reader',('books',),('books_shelf','books_lookup'),'Which book would you like?'),
  'ytr':('YouTube Radio',('ytr',),('radio_queue','radio_add'),'Show the queue, or add a supplied YouTube URL without playback?'),
- 'print':('Printers',('print',),('printers_list','printer_inspect','print_prepare'),'Which document and printer? Prepare a review before sending paper.'),
+ 'print':('Printers',('print',),('printers_list','printer_inspect','print_prepare','banner_render','print_design'),'Which document and printer? Prepare a review before sending paper.'),
  'saver':('Saver settings',('saver',),(),'Choose a saver or saved set in the terminal picker.'),
  'wiki':('Wiki',('wiki',),(),'Which article? Use a wiki: link to bookmark it.'),
 }

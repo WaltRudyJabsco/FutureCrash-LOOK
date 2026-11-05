@@ -48,7 +48,7 @@ def test_raster_bit_order_padding_and_limits():
     payload,rows=mx.encode(image)
     assert rows==18 and payload[0]==1 and payload[48]==128
     assert payload[96:]==bytes(16*48)
-    with pytest.raises(ValueError):mx.encode(Image.new('1',(384,512),1))
+    with pytest.raises(ValueError):mx.encode(Image.new('1',(384,mx.MAX_ROWS),1))
     assert mx.command(0xa9,bytes([56,0,48,0])).hex().startswith('2221a900040038003000')
 
 
@@ -56,7 +56,7 @@ def test_text_image_bounds_and_visible_ink():
     image=mx.text_image('Tiny Printer\nA short note')
     payload,rows=mx.encode(image)
     assert any(payload) and rows<mx.MAX_ROWS
-    with pytest.raises(ValueError):mx.text_image('line\n'*100)
+    with pytest.raises(ValueError):mx.text_image('line\n'*1000)
     with pytest.raises(ValueError):mx.text_image('escape\x1b')
 
 
@@ -66,7 +66,7 @@ def test_shared_spool_review_send_once_and_receipt(home,monkeypatch):
     send=Mock(return_value={'transport':'mxw01-ble','note':'Transmitted; verify physical output'})
     monkeypatch.setattr(mx,'transmit',send)
     spool=core.Spool();plan=spool.prepare('tiny',b'Hello Tiny','note.txt','receipt-text')
-    assert plan['state']=='prepared' and plan['max_paper_mm']==64 and not send.called
+    assert plan['state']=='prepared' and plan['max_paper_mm']==core.MAX_RECEIPT_MM and not send.called
     assert spool.send(plan['id'])['state']=='prepared' and not send.called
     result=spool.send(plan['id'],True)
     assert result['state']=='queued' and result['receipt']['transport']=='mxw01-ble'
@@ -74,7 +74,7 @@ def test_shared_spool_review_send_once_and_receipt(home,monkeypatch):
     assert not core.run.called
     assert 'queued' in core.jobs('tiny')['jobs']
     assert spool.prepare('tiny',b'note','n.txt','receipt-text',{'copies':2})['estimated_paper_mm']>0
-    with pytest.raises(ValueError):spool.prepare('tiny',b'note','n.txt','receipt-text',{'copies':20})
+    with pytest.raises(ValueError):spool.prepare('tiny',b'line\n'*10,'n.txt','receipt-text',{'copies':20})
     with pytest.raises(ValueError):spool.prepare('tiny',b'%PDF-1','x.pdf','document')
 
 
@@ -142,3 +142,39 @@ def test_completion_required_and_bad_checksum_is_uncertain(home,monkeypatch):
     session.notification.side_effect=[b'\x00',b'\x00\x00\x00']
     result=mx.transmit(PROFILE,payload)
     assert result['completion_acknowledged'] and result['checksum_verified']
+
+
+def test_long_job_detaches_and_worker_claims_only_once(home,monkeypatch):
+    monkeypatch.setattr(core,'require_queue',lambda _: 'tiny');monkeypatch.setattr(core,'profiles',lambda:{'tiny':PROFILE})
+    launch=Mock();monkeypatch.setattr(core.subprocess,'Popen',launch)
+    send=Mock(return_value={'completion_acknowledged':True});monkeypatch.setattr(mx,'transmit',send)
+    spool=core.Spool();output=io.BytesIO();Image.new('1',(384,1600),1).save(output,format='PNG')
+    plan=spool.prepare('tiny',output.getvalue(),'long.png','receipt-image')
+    assert plan['estimated_paper_mm']>64
+    assert spool.send(plan['id'],True)['state']=='submitting'
+    assert launch.call_args.kwargs['start_new_session'] and not send.called
+    spool.send(plan['id'],True);assert launch.call_count==1
+    assert spool.bluetooth_job(plan['id'])['state']=='queued'
+    spool.bluetooth_job(plan['id']);assert send.call_count==1
+
+
+def test_explicit_banner_allowance_and_exact_row_bound(home,monkeypatch):
+    monkeypatch.setattr(core,'require_queue',lambda _: 'tiny');monkeypatch.setattr(core,'profiles',lambda:{'tiny':PROFILE})
+    output=io.BytesIO();Image.new('1',(384,3000),1).save(output,format='PNG')
+    spool=core.Spool()
+    with pytest.raises(ValueError,match='allowance'):spool.prepare('tiny',output.getvalue(),'banner.png','receipt-image')
+    p=spool.prepare('tiny',output.getvalue(),'banner.png','receipt-image',{'paper_limit_mm':3048})
+    assert p['estimated_paper_mm']==377 and p['max_paper_mm']==3048
+    mx.encode(Image.new('1',(384,mx.MAX_ROWS-mx.FEED_ROWS),1))
+    with pytest.raises(ValueError):mx.encode(Image.new('1',(384,mx.MAX_ROWS-mx.FEED_ROWS+1),1))
+    for bad in [0,3049,float('nan'),True]:
+        with pytest.raises(ValueError):core.print_options({'paper_limit_mm':bad})
+
+
+def test_long_worker_failure_is_not_retried(home,monkeypatch):
+    monkeypatch.setattr(core,'require_queue',lambda _: 'tiny');monkeypatch.setattr(core,'profiles',lambda:{'tiny':PROFILE})
+    monkeypatch.setattr(core.subprocess,'Popen',Mock())
+    transmit=Mock(side_effect=RuntimeError('lost link'));monkeypatch.setattr(mx,'transmit',transmit)
+    spool=core.Spool();p=spool.prepare('tiny',b'line\n'*25,'long.txt','receipt-text')
+    spool.send(p['id'],True);assert spool.bluetooth_job(p['id'])['state']=='uncertain'
+    spool.bluetooth_job(p['id']);spool.send(p['id'],True);assert transmit.call_count==1

@@ -140,7 +140,7 @@ lk print receipt --image sketch.png --printer receipt --node OWNER
 a common wider profile is 576 dots/48 columns, but verify the actual model. Text
 uses CP437, wraps to configured columns, rejects control sequences and unsupported
 characters, and feeds a few lines. Receipt plans estimate paper length and reject
-jobs above 25 cm, including all copies and trailing feed. Text uses explicit
+jobs above their allowance (one foot by default), including all copies and trailing feed. Text uses explicit
 30-dot line spacing at 8 dots/mm; raster estimates use the rendered image height.
 Oversize content is rejected, never silently truncated. It never operates a cash drawer or cutter.
 Image preparation needs Pillow: it composites transparency on white, scales to
@@ -222,7 +222,7 @@ clients; it does not add a separate web print button or bypass job confirmation.
 
 Museum supports **p** (or **Shift+N**) from its terminal list and viewers, and a
 **Print** button in the web gallery. The receipt printer is suggested first;
-users can choose any discovered printer and review before sending one copy.
+users can choose any discovered printer, style, rotation, copies and paper allowance, then review before sending.
 
 For portable printers with unverified large transfers, an owner can set
 `profile --max-receipt-bytes N` alongside the verified image width and encoder.
@@ -253,9 +253,12 @@ advertise misleading Classic support. Each connection negotiates and verifies
 MTU before any print data, and bounds every write to that MTU. Text is rasterized
 locally; images use the same 384-dot monochrome format. No vendor app is needed.
 
-This initial transport accepts 1–20 copies within a maximum **6.4 cm** per reviewed job,
-including feed margin, so synchronous Fabric requests stay bounded. Longer text
-or images are rejected before printing. PDF goes to a document printer. Listing
+This initial transport accepts 1–20 copies within a maximum **30.48 cm (one foot)** per reviewed job,
+including feed margin. This is a software default. An explicit banner allowance
+can raise the job limit up to 3048 mm (ten feet); actual hardware capability and
+remaining roll length are not automatically known. Over-allowance jobs are
+rejected before printing. Long Bluetooth jobs run in a detached owner worker
+and keep a durable status, so HTTP timeouts cannot interrupt delivery. PDF goes to a document printer. Listing
 shows a configured Bluetooth destination, not a live claim that the device is
 awake. Sending requires the printer to be powered on and in range. A per-device
 lock prevents overlapping jobs; a failed or uncertain attempt is never resent
@@ -284,14 +287,63 @@ lk print file artwork.jpg --printer "Tiny Printer" --style ascii --rotation 90 -
 This prepares a plan, never sends it immediately. Use the returned send command
 only after reviewing the destination and estimated paper usage.
 
-## Next: text slips and fortunes (design, not a new command yet)
+## Lettering and fortune keepsakes
 
-Use the existing shared text-print preparation and explicit-send path for all
-services. The AI authors the text (for example a short original fortune); the
-renderer owns a consistent printed style. Planned styles: plain note, compact
-receipt, and fortune. Each needs restrained rules/ornaments, readable typography,
-optional source/title, white space between slips, and a clear end marker. Keep
-text separate from decoration and account for both in the paper estimate. Never
-assume an automatic cutter: feed/tear behavior belongs to the printer profile.
-A future “print me a fortune” action should generate and validate the text first,
-then use the named destination and the same bounded, non-retrying job pipeline.
+`lk print setup` installs pinned pyfiglet and Pillow into this account's isolated
+lettering directory. The workstation installer offers this setup too. Rendering
+is offline after setup; missing dependencies produce a setup instruction instead
+of a hidden download. `toilet` remains optional and can still feed plain text
+into the receipt pipeline.
+
+```sh
+lk print banner "HAPPY BIRTHDAY" --font small
+lk print banner "HAPPY BIRTHDAY" --font small --printer "Tiny Printer" --paper-limit-mm 3048
+lk print fortune "A small kindness will find its way back to you." --printer "Tiny Printer"
+```
+
+Without a printer, banner prints a terminal preview. With a printer, both commands
+prepare a reviewed job; use the returned send command to send it. Fonts are
+standard, small, slant, banner and big. Banners fill the printable width and run
+sideways along the roll; their estimated length includes all content.
+
+A fortune is one to three short upright lines plus six random lucky numbers for
+fun. Below it is a randomly chosen accessible saved Museum artwork, excluding
+removal-marked works, with title/artist/date/museum credit. Landscape artwork
+rotates clockwise; portrait artwork stays upright. Metadata remains upright.
+The image is fitted within the normal receipt allowance, with no new external
+art downloads. If no saved artwork is accessible, preparation explains that
+nothing printed rather than silently omitting the artwork. Tiny text may need
+to be shortened for narrower printers.
+
+LO, Signal and Albert share `banner_render` (read-only preview) and `print_design`
+(preparation or explicit printing). The AI writes an original, concise fortune;
+the renderer provides its layout and numbers. Examples: “Show a small-font banner
+saying Happy Birthday” or “Print me a fortune on Tiny Printer.” Printing requires
+an explicit current request naming the exact discovered printer; unclear requests
+create review plans. One print attempt per message applies across text/design
+printing, including failures. Fortunes stay within the normal allowance; a longer
+banner allowance must be deliberate. No physical appearance is inferred from a
+job receipt.
+
+## Deliberate banners
+
+The printer options offer **Receipt: up to 1 foot** and **Banner: up to 10 feet**.
+These are software allowances, not verified hardware or roll-length claims.
+Copies, raster content and feed spacing all count toward the selected allowance;
+existing device-specific encoded-byte limits remain in force (including Rongta's
+conservative thumbnail setting). A failed or disconnected print never restarts
+itself. Long Bluetooth jobs immediately return an owner job ID; use **Check
+status** in the web print dialog or `lk print inspect ID --node OWNER` to see
+completion. A worker that never reports completion becomes uncertain, not retryable.
+
+Literal ASCII lettering can be piped into a sideways receipt without wrapping
+away its spaces. Supply plain output without ANSI color codes:
+
+```sh
+toilet 'HAPPY BIRTHDAY' | lk print receipt - --printer "Tiny Printer" --rotation 90 --paper-limit-mm 3048
+```
+
+This only prepares a plan. Review the estimated length and then use its explicit
+send command. `--paper-limit-mm` also accepts intermediate allowances, for example
+609.6 for two feet. A ruler needs physical scale calibration before it is suitable
+for measurements; raster sizing and printer mechanics can affect its scale.
