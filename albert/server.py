@@ -21,6 +21,8 @@ except ImportError:
 PRESENTATIONS=Presentations()
 try:from core import video_library
 except ImportError:import video_library
+try:from core.albert_expression import describe as describe_expression
+except ImportError:from albert_expression import describe as describe_expression
 from endpoint_auth import EndpointAuth
 ENDPOINT_AUTH=EndpointAuth()
 ENDPOINT_COOKIE="fcl_endpoint"
@@ -94,7 +96,18 @@ def _load_lo_engine():
 def _load_threads():
     try:
         raw=json.loads(THREAD_FILE.read_text()) if THREAD_FILE.exists() else {}
-        return {str(k):(float(v.get("stamp") or 0),list(v.get("rows") or [])) for k,v in raw.items() if isinstance(v,dict)}
+        result={}
+        for key,value in raw.items():
+            if not isinstance(value,dict):continue
+            rows=[]
+            for index,row in enumerate(value.get('rows') or []):
+                if not isinstance(row,dict):continue
+                row=dict(row)
+                # Stable migration IDs let two browsers dismiss the same old turn.
+                row.setdefault('id',hashlib.sha256((str(key)+':'+str(index)+':'+json.dumps(row,sort_keys=True)).encode()).hexdigest()[:32])
+                rows.append(row)
+            result[str(key)]=(float(value.get('stamp') or 0),rows)
+        return result
     except Exception:
         return {}
 
@@ -190,7 +203,7 @@ def places_result(query):
     if not places: return None
     return {'type':'places','title':query[:80].title(),'meta':'OpenStreetMap · Nominatim','badge':'verified','kind':'things','text':f"{len(places)} place"+('' if len(places)==1 else 's')+' found.','places':places,'evidence':[{'class':'PLACES','source':'OpenStreetMap · Nominatim','confidence':'DIRECT','verified':True}],'sources':['OpenStreetMap contributors · Nominatim'],'prompt':'map '+query}
 
-def _session_history(session_id):
+def _session_rows(session_id):
     session_id=str(session_id or 'main')[:120]
     now=time.time()
     with _SESSION_LOCK:
@@ -200,14 +213,30 @@ def _session_history(session_id):
         row=_SESSIONS.get(session_id)
         return list(row[1]) if row else []
 
-def _session_append(session_id,user_text,assistant_text):
+def _session_history(session_id):
+    return [{"role":row['role'],"content":row['content']} for row in _session_rows(session_id)]
+
+
+def _session_dismiss(session_id,ids):
+    if not isinstance(ids,list) or not ids or len(ids)>40 or any(not isinstance(x,str) or not re.fullmatch(r'[a-f0-9]{32}',x) for x in ids):
+        raise ValueError('Choose valid thread turn IDs')
     session_id=str(session_id or 'main')[:120]
     with _SESSION_LOCK:
+        stamp,rows=_SESSIONS.get(session_id,(time.time(),[]))
+        kept=[row for row in rows if row.get('id') not in ids]
+        _SESSIONS[session_id]=(stamp,kept);_save_threads()
+    return {'ok':True,'removed':len(rows)-len(kept)}
+
+def _session_append(session_id,user_text,assistant_text):
+    session_id=str(session_id or 'main')[:120]
+    turn_id=secrets.token_hex(16)
+    with _SESSION_LOCK:
         rows=list(_SESSIONS.get(session_id,(0,[]))[1])
-        if user_text: rows.append({"role":"user","content":str(user_text)[:12000]})
-        if assistant_text: rows.append({"role":"assistant","content":str(assistant_text)[:12000]})
+        if user_text: rows.append({"id":turn_id,"role":"user","content":str(user_text)[:12000]})
+        if assistant_text: rows.append({"id":turn_id,"role":"assistant","content":str(assistant_text)[:12000]})
         _SESSIONS[session_id]=(time.time(),rows[-40:])
         _save_threads()
+    return [turn_id]
 
 def _trust_evidence(reply):
     receipts=list(reply.get("receipts") or [])
@@ -301,8 +330,8 @@ def cognition_json(text, session="", selected_paths=None):
         # Tool protocol is machinery, never paper. A model that narrates a call
         # instead of executing it has not completed the user's request.
         raise RuntimeError("cognition returned unexecuted tool protocol")
-    _session_append(sid,text,answer)
-    return {"text":answer,"lo_events":list(result.get("events") or []),"provenance":result.get("provenance"),"receipts":list(result.get("receipts") or []),"route":result.get("route")}
+    thread_ids=_session_append(sid,text,answer)
+    return {"thread_ids":thread_ids,"thread_session":sid,"text":answer,"lo_events":list(result.get("events") or []),"provenance":result.get("provenance"),"receipts":list(result.get("receipts") or []),"route":result.get("route")}
 
 def _albert_media_fold(queue, query="media"):
     queue=list(queue or [])
@@ -462,13 +491,14 @@ def action(text, session="", context=None):
         evidence=_trust_evidence(reply)
         return {
             "type":"answer",
+            "thread_ids":reply.get("thread_ids",[]),"thread_session":reply.get("thread_session"),
             "title":"LOOK Games" if is_game else "Albert",
             "meta":"",
             "badge":"ready" if is_game else ("verified" if any(x.get("verified") for x in evidence) else "inference"),
             "kind":"things",
             "text":text,
             "evidence":evidence,
-            "signal":{"mode":"response","seed":hashlib.sha256(text.encode()).hexdigest()[:24]},
+            "signal":describe_expression(q,text),
             "pipeline":pipeline,
             "artifacts":[PRESENTATIONS.present(path) for path in presentation_candidates(text,events)],
         }
@@ -598,7 +628,7 @@ class Handler(BaseHTTPRequestHandler):
         if path=='/api/thread':
             if not self._require_endpoint('lo.use'): return
             sid=str(parse_qs(urlparse(self.path).query).get('session',['main'])[0] or 'main')[:120]
-            return self.send_json(200,{"ok":True,"session":sid,"turns":_session_history(sid)})
+            return self.send_json(200,{"ok":True,"session":sid,"turns":_session_rows(sid)})
         if path in {'/v1/actions','/api/capabilities'}:
             if not self._require_endpoint('lo.use'): return
             try: caps=node_json('/v1/capabilities')
@@ -688,6 +718,17 @@ class Handler(BaseHTTPRequestHandler):
                 return book_web.handle(self,NODE,payload)
             except Exception as exc:return self.send_json(400,{'error':str(exc)})
         path=urlparse(self.path).path
+        if path=='/api/thread/dismiss':
+            if not self._require_endpoint('lo.use'):return
+            try:
+                if self.headers.get('Content-Type','').split(';')[0]!='application/json':raise ValueError('JSON required')
+                origin=self.headers.get('Origin')
+                if origin and urlparse(origin).netloc!=self.headers.get('Host'):raise ValueError('Same-origin request required')
+                size=int(self.headers.get('Content-Length') or 0)
+                if not 0<size<=8192:raise ValueError('Invalid dismissal request size')
+                payload=json.loads(self.rfile.read(size))
+                return self.send_json(200,_session_dismiss(payload.get('session'),payload.get('ids')))
+            except (ValueError,TypeError,AttributeError) as exc:return self.send_json(400,{'ok':False,'error':str(exc)})
         if path=='/api/notebook/answer':
             if not self._require_endpoint('lo.use'): return
             try:

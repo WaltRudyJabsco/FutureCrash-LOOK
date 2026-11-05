@@ -120,6 +120,13 @@
     "Clear memory"
   ],
   [
+    "lknh",
+    "",
+    "files",
+    "Open your editable Fabric Home note",
+    "lk notes home"
+  ],
+  [
     "lkn",
     "[TEXT|ACTION] [OPTIONS]",
     "files",

@@ -253,3 +253,9 @@ The views redraw to fit the terminal after panes open or close. Shift-W stays
 ordinary text inside note editors and URL/bookmark prompts. In a launched web
 browser, the browser owns its keys; quit back to the desk to use Shift-W.
 Without Kitty or tmux, LOOK explains the requirement and stays in your view.
+
+## Fabric Home
+
+`lknh` (or `lk notes home`) opens your editable Home note. Plain `lkn` keeps
+opening the workspace. See [Home links and AI pathways](NOTES-HOME.md) for the
+portable tool picker, stable links, command blocks and offline behavior.

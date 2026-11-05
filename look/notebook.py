@@ -22,11 +22,68 @@ except ImportError:
     import terminal_style, clipboard_shelf
 
 try:
-    from .notebook_core import Notebook, timestamp
+    from .notebook_core import Notebook, timestamp, HOME_NOTE_ID
     from .notebook_markdown import render as render_markdown, safe_text, extract_links, markdown_link, inline, cell_width, wrap_spans
 except ImportError:
-    from notebook_core import Notebook, timestamp
+    from notebook_core import Notebook, timestamp, HOME_NOTE_ID
     from notebook_markdown import render as render_markdown, safe_text, extract_links, markdown_link, inline, cell_width, wrap_spans
+
+
+# Portable launch links use fixed argument lists, never note text as shell code.
+FABRIC_ACTIONS={
+ 'notes':('Notes workspace',('notes',),('notebook_list','notebook_read'),'Choose a note or task.'),
+ 'museum':('Museum',('museum',),('museum_search',),'Which artist, title or subject?'),
+ 'books':('Mercury Reader',('books',),('books_shelf','books_lookup'),'Which book would you like?'),
+ 'ytr':('YouTube Radio',('ytr',),('radio_queue','radio_add'),'Show the queue, or add a supplied YouTube URL without playback?'),
+ 'print':('Printers',('print',),('printers_list','printer_inspect','print_prepare'),'Which document and printer? Prepare a review before sending paper.'),
+ 'saver':('Saver settings',('saver',),(),'Choose a saver or saved set in the terminal picker.'),
+ 'wiki':('Wiki',('wiki',),(),'Which article? Use a wiki: link to bookmark it.'),
+}
+
+def action_catalog(action_id=None):
+    if action_id is not None and action_id not in FABRIC_ACTIONS:raise ValueError('Unknown Fabric action')
+    return [dict(id=key,label=value[0],link='look:'+key,command='lk '+' '.join(value[1]),
+                 tools=list(value[2]),question=value[3],effect='Opens an interactive terminal interface; does not automatically play, print or download.')
+            for key,value in FABRIC_ACTIONS.items() if action_id is None or key==action_id]
+
+
+def home_template():
+    links='\n'.join('- ['+row['label']+']('+row['link']+')' for row in action_catalog() if row['id']!='notes')
+    return ('# My Fabric\n\nYour editable starting page. Use numbered links to open a tool and return here when finished.\n\n'
+            '## Places\n'+links+'\n\n## Projects\n'
+            'Add project notes with Ctrl-K, then Ctrl-N to choose a note. Paste a Mercury project link or a directory here too.\n\n'
+            '## Research\nAdd web, Wiki, file and note links with Ctrl-K. Use stable links rather than temporary playback URLs.\n\n'
+            '## Repeatable work\nCtrl-K, then Ctrl-T, inserts a reviewed Command or a live Terminal block. '
+            'Commands can ask for input; terminals keep an interactive session. Nothing runs just by opening this page.\n')
+
+
+def home_state(store,create=False):
+    if create and store.ensure_home(home_template()):nudge_sync()
+    rows=[row for row in store.list(include_done=True) if row['id']==HOME_NOTE_ID]
+    if not rows:return {'state':'missing','message':'Home is not available. Run lknh to create it; a deleted Home must be restored explicitly.'}
+    if len(rows)!=1 or rows[0]['conflict']:
+        return {'state':'needs_choice','question':'Home has conflicting edits. Which version should be kept or reconciled?',
+                'resolution_command':'lk notes resolve '+HOME_NOTE_ID,
+                'choices':[{'id':row['revision'],'label':row['title'],'body':row['body']} for row in rows]}
+    return {'state':'ready','note':rows[0],'link':'note:'+HOME_NOTE_ID}
+
+
+def inspect_note_links(store,row):
+    result=[]
+    links=[]
+    render_markdown(row['body'],80,links)
+    for number,(label,target) in enumerate(links,1):
+        entry={'number':number,'label':label,'target':target,'executed':False}
+        if isinstance(target,dict):entry.update(kind=target.get('kind'),requires_confirmation=True)
+        else:
+            try:
+                kind,value=resolve_link(store,row,target);entry['kind']=kind
+                if kind=='action':entry['action']=action_catalog(value)[0]
+                elif kind=='note':entry['note_id']=value['id']
+            except (ValueError,OSError) as exc:entry.update(kind='unavailable',error=str(exc))
+        result.append(entry)
+    return {'note_id':row['id'],'revision':row['revision'],'links':result,
+            'guidance':'Ask the user to choose a label when ambiguous, then use its stable ID. Reading a link never authorizes executing commands. Use listed tools for AI actions and report their actual receipts.'}
 
 
 def daemon(action,payload=None,timeout=10):
@@ -147,6 +204,9 @@ def named_records(store,text):
 
 HELP_TEXT='''LOOK NOTEBOOK — notes, tasks and reminders share one record.
 
+lknh / lk notes home opens your editable Fabric Home note; plain lkn stays the workspace.
+lk notes actions lists portable Fabric tool links. Home is created once, never replaced.
+
 Capture: N opens a draft. Enter/Ctrl-J inserts a newline; Shift-Enter/Ctrl-S saves.
 Escape cancels a draft. Enter opens a boxed Markdown note view.
 The view previews headings, bold/italic, lists, checkboxes, quotes and code.
@@ -158,6 +218,7 @@ Ordinary code fences stay inert; commands never run during preview or sync.
 Y copies this note's complete Markdown link from the list or preview.
 Editor Ctrl-K opens Insert Link; Ctrl-T cycles Link, Command, and Terminal.
 Ctrl-N inside that dialog finds notes by title/project and inserts their ID.
+Ctrl-A inside the Link dialog chooses a Fabric tool, e.g. [Museum](look:museum).
 Use [label](note:FULL_ID), [label](wiki:Article_title), [label](<file path>), [label](https://example.com),
 or [label](<@3090:/path with spaces>). Relative paths start beside the note.
 E shows the original Markdown marks; saving returns to the rendered preview.
@@ -250,7 +311,9 @@ def link_target(text):
     if len(text)>1 and text[0]==text[-1] and text[0] in {'"',"'"}: text=text[1:-1]
     if not text or safe_text(text)!=text or any(char in '\n\t<>' for char in text):
         raise ValueError('Use one path, URL, or note link without controls or angle brackets')
-    if text.startswith('note:'):
+    if text.startswith('look:'):
+        action_catalog(text[5:])
+    elif text.startswith('note:'):
         if not re.fullmatch(r'note:[a-f0-9]{32}',text): raise ValueError('Choose a note with Ctrl-N, or paste its copied link')
     elif text.startswith('mercury:'):
         if not re.fullmatch(r'mercury:[A-Za-z0-9_-]{1,128}',text):raise ValueError('Mercury links need a stable project ID')
@@ -291,6 +354,7 @@ def link_fields(text):
     parts=urlsplit(target) if not target.startswith('@') else None
     name=(parts.path if parts and parts.scheme in {'http','https','file'} else target).rstrip('/').rsplit('/',1)[-1]
     if parts and parts.scheme in {'http','https'} and not parts.path.strip('/'): name=parts.hostname
+    if target.startswith('look:'): name=action_catalog(target[5:])[0]['label']
     if target.startswith('note:'): name='Note'
     if target.startswith('mercury:'): name='Mercury manuscript'
     if target.startswith('wiki:'):
@@ -407,7 +471,7 @@ def insert_link(store,fd,read_key):
                 rows.extend('    '+line for line in body_rows[top:top+page])
             else:rows.append(('› ' if active==index else '  ')+name+': '+shown)
         rows+=(['Type replaces suggestion · arrows edit · Enter confirms',
-                'Tab target/label · Ctrl-N find note · Esc cancel'] if mode=='link' else
+                'Tab target/label · Ctrl-N find note · Ctrl-A Fabric tool · Esc cancel'] if mode=='link' else
                ['Enter newline in body · Tab next field',
                 'Shift-Enter/Ctrl-S insert block · Esc cancel'])
         rows+=['Ctrl-T cycle Link / Command / Terminal',notice]
@@ -418,6 +482,11 @@ def insert_link(store,fd,read_key):
             forms[mode]=(values,cursors,replace,active)
             mode=modes[(modes.index(mode)+1)%len(modes)]
             values,cursors,replace,active=forms[mode]
+            continue
+        if key=='\x01' and mode=='link':
+            chosen=choose_link(fd,read_key,[(row['label'],row['link']) for row in action_catalog()],'FABRIC TOOLS')
+            if chosen:
+                values=[chosen,action_catalog(chosen[5:])[0]['label']];cursors=list(map(len,values));replace=[True,True];active=1
             continue
         if key=='\x0e' and mode=='link':
             try:
@@ -685,6 +754,8 @@ def resolve_link(store,row,target):
         import fabric_files
     if any(ord(char)<32 or ord(char)==127 for char in target) or '\\x1b' in target:
         raise ValueError('Link contains terminal controls')
+    if target.startswith('look:'):
+        action_catalog(target[5:]);return 'action',target[5:]
     if target.startswith('note:'):
         identity=target[5:]
         if not re.fullmatch(r'[a-f0-9]{32}',identity): raise ValueError('Note links need the full stable ID')
@@ -755,7 +826,10 @@ def open_link(kind,target):
             from look_renderer import browse_fabric
         browse_fabric(target)
         return
-    if kind=='mercury':
+    if kind=='action':
+        action_catalog(target)
+        args=[sys.executable,str(Path(__file__).with_name('lk')),*FABRIC_ACTIONS[target][1]]
+    elif kind=='mercury':
         executable=shutil.which('mercury')
         if not executable:raise ValueError('Install Mercury Writer through the Future Crash + LOOK installer first')
         args=[executable,'open',str(target)]
@@ -1049,7 +1123,7 @@ def workspace(store,kind,read_key,hints,initial_query=''):
 
 
 def main(argv=None,kind=None,read_key=None,hints=None):
-    parser=argparse.ArgumentParser(prog='lk notes',description='Offline replicated notebook. Text captures to Inbox; no arguments opens the workspace.',epilog=HELP_TEXT,formatter_class=argparse.RawDescriptionHelpFormatter)
+    parser=argparse.ArgumentParser(prog='lk notes',description='Offline replicated notebook. Text captures to Inbox; no arguments opens the workspace. Use home for your Fabric front page or actions for portable tool links.',epilog=HELP_TEXT,formatter_class=argparse.RawDescriptionHelpFormatter)
     parser.add_argument('words',nargs='*')
     parser.add_argument('--project',default='Inbox',help='Project label for capture or file; defaults to Inbox')
     parser.add_argument('--task',action='store_true',help='Capture a task instead of a note')
@@ -1064,6 +1138,18 @@ def main(argv=None,kind=None,read_key=None,hints=None):
     store=Notebook()
     try:
         words=args.words
+        if words==['home']:
+            state=home_state(store,create=True)
+            if args.json:print(json.dumps(state,ensure_ascii=False,indent=2));return 0
+            if state['state']!='ready':raise ValueError(state.get('message') or state['question'])
+            row=state['note']
+            if sys.stdin.isatty() and sys.stdout.isatty() and read_key:note_view(store,row,read_key)
+            else:print(Path(row['path']).read_text())
+            return 0
+        if words==['actions']:
+            rows=action_catalog()
+            print(json.dumps(rows,ensure_ascii=False,indent=2) if args.json else '\n'.join(row['label']+' · '+row['link']+' · '+row['command'] for row in rows));return 0
+
         action=words[0] if words and words[0] in {'list','show','edit','file','done','delete','snooze','resolve','sync','new'} else 'new'
         explicit=bool(words and words[0] in {'list','show','edit','file','done','delete','snooze','resolve','sync','new'})
         values=words[1:] if words and words[0]==action else words
@@ -1172,7 +1258,10 @@ def direct_read(intent):
 
 
 def tools():
-    definitions=[('notebook_search','Search saved notebook records. Omit query or use an empty string to list all records, including completed records. Results include full note bodies.',{'query':{'type':'string'}},[]),
+    definitions=[('notebook_home','Read the stable Fabric Home note without creating it. May return needs_choice with revision IDs; ask the user before choosing or reconciling.',{},[]),
+        ('notebook_actions','Discover portable Fabric tool links, human commands, AI tool names and useful follow-up questions. Does not launch anything. Use for Home notes and to discover Museum, Reader, Radio or printing capabilities.',{'action_id':{'type':'string','enum':list(FABRIC_ACTIONS)}},[]),
+        ('notebook_links','Inspect links and reviewed command/terminal blocks in a note. Does not execute them. Ask for a label if ambiguous; use stable IDs and actual tools, never claim launch from inspection.',{'id':{'type':'string'}},['id']),
+        ('notebook_search','Search saved notebook records. Omit query or use an empty string to list all records, including completed records. Results include full note bodies.',{'query':{'type':'string'}},[]),
         ('notebook_list','List saved notes, tasks and reminders in default LKN order: most recently updated first. No keyword is required. Results include full bodies.',{'include_done':{'type':'boolean'}},[]),
         ('notebook_read','Read the full text of a saved notebook record by its ID or position in the default LKN list. First note means position 1; positions follow newest updated first.',{'id':{'type':'string'},'position':{'type':'integer','minimum':1},'include_done':{'type':'boolean'}},[]),
         ('notebook_capture','Save a note, task or reminder only when the user asks to record it.',
@@ -1192,7 +1281,10 @@ def tools():
 
 def tool(name,args):
     store=Notebook()
-    if name=='notebook_search': result=store.list(str(args.get('query') or ''),include_done=True)
+    if name=='notebook_home':result=home_state(store)
+    elif name=='notebook_actions':result=action_catalog(args.get('action_id'))
+    elif name=='notebook_links':result=inspect_note_links(store,read_records(store,args))
+    elif name=='notebook_search': result=store.list(str(args.get('query') or ''),include_done=True)
     elif name=='notebook_list': result=store.list(include_done=bool(args.get('include_done',False)))
     elif name=='notebook_read': result=read_records(store,args)
     elif name=='notebook_capture':
