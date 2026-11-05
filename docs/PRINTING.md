@@ -139,7 +139,10 @@ lk print receipt --image sketch.png --printer receipt --node OWNER
 384 dots/32 columns are an editable example, not a guarantee for all 58 mm devices;
 a common wider profile is 576 dots/48 columns, but verify the actual model. Text
 uses CP437, wraps to configured columns, rejects control sequences and unsupported
-characters, and feeds a few lines. It never operates a cash drawer or cutter.
+characters, and feeds a few lines. Receipt plans estimate paper length and reject
+jobs above 25 cm, including all copies and trailing feed. Text uses explicit
+30-dot line spacing at 8 dots/mm; raster estimates use the rendered image height.
+Oversize content is rejected, never silently truncated. It never operates a cash drawer or cutter.
 Image preparation needs Pillow: it composites transparency on white, scales to
 the configured maximum width, dithers to monochrome, and generates bounded
 ESC/POS **GS v 0** raster data. This is a legacy compatibility command, not a
