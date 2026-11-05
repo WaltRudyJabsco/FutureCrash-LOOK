@@ -1,5 +1,6 @@
 """Optional isolated browser smoke check; requires Playwright and Google Chrome."""
 import json
+import time
 from pathlib import Path
 from playwright.sync_api import sync_playwright
 repo=Path(__file__).resolve().parents[1]
@@ -14,7 +15,7 @@ with sync_playwright() as p:
         if request.request.url.endswith('/api/curtain'):
             payload=request.request.post_data_json if request.request.method=='POST' else None
             if payload:
-                if payload['action']=='lock':state['locked']=True
+                if payload['action']=='lock':state.update(locked=True,variant=payload.get('variant','standard'),revision=time.time_ns())
                 elif payload.get('pin')!='1234':return request.fulfill(status=400,json={'error':'Incorrect PIN'})
                 else:state['locked']=False
             return request.fulfill(json=state)
@@ -37,6 +38,22 @@ with sync_playwright() as p:
     page.wait_for_function("document.querySelector('#lk-curtain').style.display==='block'")
     state['locked']=False
     page.wait_for_function("document.querySelector('#lk-curtain').style.display==='none'")
+    page.get_by_label('chat').fill('/lktl');page.get_by_label('chat').press('Enter')
+    page.wait_for_function("document.querySelector('#lk-curtain').style.display==='block'")
+    assert state['variant']=='they-live'
+    assert not field.is_visible()
+    page.wait_for_timeout(100)
+    assert page.evaluate("Array.from(document.querySelector('#lk-curtain canvas').getContext('2d').getImageData(0,0,1,1).data)")==[255,255,255,255]
+    page.screenshot(path=str(out/'they-live-phone.png'))
+    page.set_viewport_size({'width':1280,'height':800});page.wait_for_timeout(100)
+    page.screenshot(path=str(out/'they-live-desktop.png'))
+    page.locator('#lk-curtain canvas').click(position={'x':10,'y':10})
+    assert field.is_visible()
+    field.fill('1234')
+    page.wait_for_function("document.querySelector('#lk-curtain').style.display==='none'")
+    page.get_by_label('chat').fill('/lock');page.get_by_label('chat').press('Enter')
+    page.wait_for_function("document.querySelector('#lk-curtain').style.display==='block'")
+    assert state['variant']=='standard' and field.is_visible()
     assert not errors,errors
     print('Browser checks passed: wrong PIN, masking/clearing, unlock, shortcut, remote unlock, desktop/mobile rendering')
     browser.close()

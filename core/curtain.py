@@ -60,7 +60,7 @@ def public(state=None):
     state=load() if state is None else state
     return {'configured':bool(state.get('verifier')),'locked':state.get('locked',False),
             'revision':state.get('revision',0),'origin':state.get('origin',''),
-            'captions':state.get('captions',[]),
+            'captions':state.get('captions',[]),'variant':state.get('variant','standard'),
             'notice':'Ambient PIN curtain; not an operating-system lock'}
 
 
@@ -95,6 +95,8 @@ def apply(event):
         if not isinstance(event.get(key),str) or not re.fullmatch('[0-9a-f]{'+str(length)+'}',event[key]):raise ValueError('Invalid PIN verifier')
     kdf=event.get('kdf','scrypt')
     if kdf not in {PIN_KDF,'scrypt'}:raise ValueError('Unsupported PIN format')
+    variant=event.get('variant','standard')
+    if variant not in {'standard','they-live'}:raise ValueError('Invalid curtain variant')
     with GUARD:
         state=load()
         if (revision,origin)<=(state.get('revision',0),state.get('origin','')):return {'ok':True,'stale':True,**public(state)}
@@ -102,7 +104,7 @@ def apply(event):
         state={key:event[key] for key in ('revision','origin','locked','salt','verifier')}
         captions=event.get('captions',[])
         if not isinstance(captions,list) or len(captions)>12 or any(not isinstance(text,str) or len(text)>48 or not re.fullmatch(r'[A-Z0-9 .,:!?/\-]+',text) for text in captions):raise ValueError('Invalid captions')
-        state.update(attempts,captions=captions,kdf=kdf)
+        state.update(attempts,captions=captions,kdf=kdf,variant=variant)
         save(state)
         result={'ok':True,**public(state)}
         if state['locked']:
@@ -126,7 +128,7 @@ def operate(data,origin,peers,send):
         elif action=='unlock':
             verify(state,data.get('pin'));save(state)
         event={key:state[key] for key in ('salt','verifier')}
-        event.update(kdf=state.get('kdf','scrypt'),revision=max(time.time_ns(),state.get('revision',0)+1),origin=origin,locked=action=='lock',captions=data.get('captions',state.get('captions',[])))
+        event.update(variant=data.get('variant','standard') if action=='lock' else state.get('variant','standard'),kdf=state.get('kdf','scrypt'),revision=max(time.time_ns(),state.get('revision',0)+1),origin=origin,locked=action=='lock',captions=data.get('captions',state.get('captions',[])))
         local=apply(event)
     def deliver(peer):
         try:return {'node':peer,**send(peer,{'action':'receive','event':event})}

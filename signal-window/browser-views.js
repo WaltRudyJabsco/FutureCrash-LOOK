@@ -479,11 +479,18 @@
     layer.innerHTML='<canvas aria-hidden="true"></canvas><form><label for="lk-curtain-pin">LOOK CURTAIN · PIN</label><p>Ambient curtain · not an OS lock</p><input id="lk-curtain-pin" type="password" inputmode="numeric" pattern="[0-9]{4}" minlength="4" maxlength="4" autocomplete="off" aria-label="Four-digit PIN" required> <button>Unlock</button><p role="status"></p></form>';
     document.body.append(layer);
     const canvas=layer.querySelector('canvas'),ctx=canvas.getContext('2d'),form=layer.querySelector('form'),pin=layer.querySelector('input'),notice=layer.querySelector('[role=status]');
-    let locked=false,configured=false,busy=false,frame=0,captions=[],previousFocus=null;
+    let locked=false,configured=false,busy=false,frame=0,captions=[],variant="standard",variantEpoch=0,previousFocus=null;
     const words=['LISTEN','ORBIT','AWAIT','SIGNAL','RETURN','DREAM','DRIFT','ALIGN'];
     function draw(stamp){
       if(!locked){frame=0;return;}
       const w=canvas.width=innerWidth,h=canvas.height=innerHeight,page=Math.floor(stamp/8000),ink=['#ebc47a','#b5d6a4','#9dbbd7'][Math.floor(stamp/20000)%3],inverse=page%2;
+      if(variant==='they-live'){
+        const phrases=['OBEY','CONSUME','REPRODUCE','SLEEP','CONFORM','SUBMIT','STAY ASLEEP','DO NOT QUESTION'];
+        const text=phrases[Math.floor(Math.max(0,Date.now()-variantEpoch)/12000)%phrases.length];
+        ctx.fillStyle='#fff';ctx.fillRect(0,0,w,h);ctx.fillStyle='#000';ctx.textAlign='center';ctx.textBaseline='middle';ctx.font='900 100px Arial, sans-serif';
+        const size=Math.max(1,Math.min(h*.6,100*w*.88/ctx.measureText(text).width));ctx.font=`900 ${size}px Arial, sans-serif`;ctx.fillText(text,w/2,h/2);
+        ctx.textBaseline='alphabetic';frame=requestAnimationFrame(draw);return;
+      }
       ctx.fillStyle='#101719';ctx.fillRect(0,0,w,h);ctx.fillStyle=ink;ctx.fillRect(0,20,w,48);
       ctx.fillStyle='#101719';ctx.font='bold 18px monospace';ctx.textAlign='center';ctx.fillText('FLIGHT DECK / FABRIC WATCH',w/2,50);
       if(inverse){ctx.fillStyle=ink;ctx.fillRect(0,h*.22,w,h*.32);}
@@ -492,27 +499,31 @@
       frame=requestAnimationFrame(draw);
     }
     function update(state){
+      const priorVariant=variant;variant=state.variant||'standard';variantEpoch=Number(state.revision||0)/1e6;
+      if(priorVariant!==variant)form.style.display=variant==='they-live'?'none':'';
       configured=!!state.configured;captions=state.captions||captions;
       const next=!!state.locked;if(next===locked)return;locked=next;
       layer.style.display=locked?'block':'none';
-      if(locked){previousFocus=document.activeElement;pin.value='';pin.focus();if(!frame)frame=requestAnimationFrame(draw);}
+      if(locked){previousFocus=document.activeElement;pin.value='';form.style.display=variant==='they-live'?'none':'';if(variant!=='they-live')pin.focus();else{layer.tabIndex=-1;layer.focus();}if(!frame)frame=requestAnimationFrame(draw);}
       else{if(frame)cancelAnimationFrame(frame);frame=0;pin.value='';notice.textContent='';previousFocus?.focus?.();}
     }
     async function request(action,fields={}){
       const response=await fetch('/api/curtain',{method:action?'POST':'GET',headers:action?{'Content-Type':'application/json'}:{},body:action?JSON.stringify({action,...fields}):undefined,signal:AbortSignal.timeout(15000)});
       const data=await response.json();if(!response.ok||data.error)throw Error(data.error||'Curtain unavailable');return data;
     }
-    async function cover(){
+    async function cover(variant="standard"){
       if(busy)return;if(!configured){alert('Choose your four-digit PIN first in a terminal: lk lock setup');return;}
-      busy=true;try{const data=await request('lock');update(data);notice.textContent=data.ok?'':'Some nodes were unreachable. Run lk lock again when they reconnect.';}
+      busy=true;try{const data=await request('lock',{variant});update(data);notice.textContent=data.ok?'':'Some nodes were unreachable. Run lk lock again when they reconnect.';}
       catch(error){alert(error.message);}finally{busy=false;}
     }
     pin.addEventListener('input',()=>{if(/^[0-9]{4}$/.test(pin.value)&&!busy)form.requestSubmit();});
     form.onsubmit=async event=>{event.preventDefault();if(busy)return;busy=true;notice.textContent='Checking…';const value=pin.value;pin.value='';try{const data=await request('unlock',{pin:value});update(data);if(!data.ok)alert('This curtain opened, but some nodes were unreachable. Retry lk unlock when connected.');}catch(error){notice.textContent=error.message;pin.focus();}finally{busy=false;}};
-    layer.addEventListener('keydown',event=>{if(event.key==='Escape'){event.preventDefault();pin.focus();}if(event.key==='Tab'){const button=form.querySelector('button');if(event.shiftKey&&document.activeElement===pin){event.preventDefault();button.focus();}else if(!event.shiftKey&&document.activeElement===button){event.preventDefault();pin.focus();}}});
+    function revealPin(){form.style.display='';pin.focus();}
+    layer.addEventListener('click',()=>{if(locked&&variant==='they-live')revealPin();});
+    layer.addEventListener('keydown',event=>{if(variant==='they-live'&&form.style.display==='none'){event.preventDefault();revealPin();return;}if(event.key==='Escape'){event.preventDefault();pin.focus();}if(event.key==='Tab'){const button=form.querySelector('button');if(event.shiftKey&&document.activeElement===pin){event.preventDefault();button.focus();}else if(!event.shiftKey&&document.activeElement===button){event.preventDefault();pin.focus();}}});
     // Explicit commands only: do not infer locking from ordinary conversation.
-    function command(target){const text=String(target?.value||'').trim().toLowerCase();return ['/lock','lk lk','/unlock','lk unlock'].includes(text)?text:null;}
-    function consume(target){const text=command(target);if(!text)return false;target.value='';if(text.includes('unlock')){if(locked)pin.focus();}else cover();return true;}
+    function command(target){const text=String(target?.value||'').trim().toLowerCase();return ['/lock','lk lk','/lktl','lk lktl','/unlock','lk unlock'].includes(text)?text:null;}
+    function consume(target){const text=command(target);if(!text)return false;target.value='';if(text.includes('unlock')){if(locked)revealPin();}else cover(text.includes('lktl')?'they-live':'standard');return true;}
     window.LookCurtain={consume};
     document.addEventListener('keydown',event=>{if(event.key!=='Enter'||event.shiftKey||!['input','ask'].includes(event.target.id)||!command(event.target))return;event.preventDefault();event.stopImmediatePropagation();consume(event.target);},true);
     async function poll(){try{if(!busy)update(await request());}catch(_){/* Keep the curtain visible during disconnection. */}finally{setTimeout(poll,1500);}}

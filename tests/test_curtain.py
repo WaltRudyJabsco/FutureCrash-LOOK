@@ -96,3 +96,13 @@ def test_legacy_scrypt_record_and_rotation():
     request('setup',pin='5678',old_pin='1234')
     assert curtain.load()['kdf']=='pbkdf2-sha256'
     assert not request('unlock',pin='5678')['locked']
+
+
+def test_they_live_variant_propagates_and_normal_lock_resets():
+    request('setup',pin='1234');events=[]
+    result=curtain.operate({'action':'lock','variant':'they-live'},'test-node',['peer'],lambda peer,data:events.append(data['event']) or {'ok':True})
+    assert result['variant']=='they-live' and events[0]['variant']=='they-live'
+    assert request('unlock',pin='1234')['locked'] is False
+    assert request('lock')['variant']=='standard'
+    with pytest.raises(ValueError,match='variant'):request('lock',variant='invalid')
+    assert request('status')['variant']=='standard'
