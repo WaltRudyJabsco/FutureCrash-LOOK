@@ -61,13 +61,19 @@ def main(payload):
                     choice,ok=QInputDialog.getItem(self,'Print artwork','Printer',labels,0,False)
                     if ok:
                         selected=rows[labels.index(choice)]
+                        style,ok=QInputDialog.getItem(self,'Print artwork','Style',['image','ascii'],0,False)
+                        if not ok:return
+                        rotation,ok=QInputDialog.getItem(self,'Print artwork','Rotation',['0','90'],0,False)
+                        if not ok:return
+                        copies,ok=QInputDialog.getInt(self,'Print artwork','Copies',1,1,20)
+                        if not ok:return
                         row=dict(self.rows[self.index])
-                        def prepare():return printing.prepare_file(selected['id'],client.image(row))
+                        def prepare():return printing.prepare_file(selected['id'],client.image(row),style=style,rotation=int(rotation),copies=copies)
                         self.kind='print-plan';self.future=self.pool.submit(prepare);self.info.setText('Preparing print…');return
                 elif self.kind=='print-plan':
                     import printing
                     paper=(' · about %.1f cm of paper'%(result['estimated_paper_mm']/10)) if 'estimated_paper_mm' in result else ''
-                    answer=QMessageBox.question(self,'Print artwork',result['destination']+' · one copy'+paper+'\nPrint this artwork?',QMessageBox.StandardButton.Yes|QMessageBox.StandardButton.No,QMessageBox.StandardButton.No)
+                    answer=QMessageBox.question(self,'Print artwork',result['destination']+' · '+str(result['options']['copies'])+' copies'+paper+'\nPrint this artwork?',QMessageBox.StandardButton.Yes|QMessageBox.StandardButton.No,QMessageBox.StandardButton.No)
                     self.kind='print-result';self.future=self.pool.submit(printing.request,'send' if answer==QMessageBox.StandardButton.Yes else 'discard',result['node'],ident=result['id'],confirm=True);return
                 elif self.kind=='print-result':
                     self.info.setText('Print '+result.get('state','unknown')+' · '+result.get('receipt',{}).get('note',''));self.future=None;return

@@ -109,7 +109,7 @@ def prepare_file(queue,path,node='auto',receipt=None,**options):
     return dict(result,destination=label)
 
 
-def selected_file(path,ui,prefer_receipt=False):
+def selected_file(path,ui,prefer_receipt=False,default_style="image"):
     """Foreground file-manager handoff: choose, review, explicitly print, return."""
     from print_desk import pick
     from look_renderer import prompt_line
@@ -118,7 +118,18 @@ def selected_file(path,ui,prefer_receipt=False):
         source=printable_file(path)
         choice=pick(ui,prefer_receipt=True) if prefer_receipt else pick(ui)
         if not choice:return 0
-        plan=prepare_file(choice['id'],source)
+        options={}
+        value,cancelled=prompt_line('Copies [1]: ')
+        if cancelled:return 0
+        options['copies']=int(value.strip() or '1')
+        if source.suffix.casefold() in {'.png','.jpg','.jpeg'}:
+            value,cancelled=prompt_line('Print style image/ascii ['+default_style+']: ')
+            if cancelled:return 0
+            options['style']=value.strip().lower() or default_style
+            value,cancelled=prompt_line('Rotate clockwise 0/90 [0]: ')
+            if cancelled:return 0
+            options['rotation']=int(value.strip() or '0')
+        plan=prepare_file(choice['id'],source,**options)
         display(plan)
         answer,cancelled=prompt_line('Print '+source.name+' on '+plan['destination']+' via '+plan['node']+'? [p prints · Enter/Esc cancels] ')
         if cancelled or answer.strip().casefold()!='p':
@@ -157,7 +168,7 @@ def parser():
     item=sub.add_parser('bluetooth',help='Register an observed MXW01 Bluetooth receipt printer on its owner');item.add_argument('queue');item.add_argument('--address',required=True);item.add_argument('--adapter',required=True);item.add_argument('--label',default='Tiny Printer');item.add_argument('--confirm',action='store_true');item.add_argument('--node',default='local')
     item=sub.add_parser('profile');item.add_argument('queue');item.add_argument('--kind',choices=['document','escpos'],required=True);item.add_argument('--width',type=int,default=384);item.add_argument('--columns',type=int,default=32);item.add_argument('--image-mode',choices=['raster','column24'],default='raster');item.add_argument('--max-receipt-bytes',type=int,default=None,help='Device-specific encoded receipt limit; 0 disables');item.add_argument('--confirm',action='store_true');item.add_argument('--node',default='local')
     for action in ['file','text','receipt']:
-        item=sub.add_parser(action);item.add_argument('content',nargs='?' if action=='receipt' else None);item.add_argument('--image');item.add_argument('--printer');item.add_argument('--node',default='auto');item.add_argument('--copies',type=int,default=1);item.add_argument('--pages');item.add_argument('--media');item.add_argument('--sides',choices=['one-sided','two-sided-long-edge','two-sided-short-edge'])
+        item=sub.add_parser(action);item.add_argument('content',nargs='?' if action=='receipt' else None);item.add_argument('--image');item.add_argument('--printer');item.add_argument('--node',default='auto');item.add_argument('--copies',type=int,default=1);item.add_argument('--style',choices=['image','ascii']);item.add_argument('--rotation',type=int,choices=[0,90]);item.add_argument('--pages');item.add_argument('--media');item.add_argument('--sides',choices=['one-sided','two-sided-long-edge','two-sided-short-edge'])
     item=sub.add_parser('quick',help='Send one text receipt/document immediately to a named printer')
     item.add_argument('content');item.add_argument('--printer',required=True)
     for action in ['inspect','send','discard']:
@@ -243,7 +254,7 @@ def tools():
         {'type':'function','function':{'name':'print_text','description':'Print one short recipe, list, note or receipt immediately ONLY when the user explicitly requests printing to a named printer in this message. Discover its exact friendly label first. Read actual Notes content before printing it. Automatically formats for the destination. One copy, at most 8000 characters; no automatic retry. Report spooler acceptance, never physical delivery. Use print_prepare for previews, files, or unclear requests.','parameters':{'type':'object','properties':{'queue':{'type':'string','description':'Exact friendly printer label present in the user request'},'text':{'type':'string','maxLength':8000}},'required':['queue','text'],'additionalProperties':False}}},
         {'type':'function','function':{'name':'printers_list','description':'List physical printers once across the trusted Fabric, with stable ID, friendly name and underlying queue routes. No setup or printing.','parameters':{'type':'object','properties':{},'additionalProperties':False}}},
         {'type':'function','function':{'name':'printer_inspect','description':'Inspect printer options or jobs on an exact owner/queue.','parameters':{'type':'object','properties':dict(fields,view={'type':'string','enum':['options','jobs']}),'required':['queue'],'additionalProperties':False}}},
-        {'type':'function','function':{'name':'print_prepare','description':'Prepare a text/document/receipt job for user review, NEVER send paper. Return immutable plan, options and confirmation command. Choose a physical printer from discovery; automatic routing hides its underlying queues. Export DOCX/manuscripts to PDF before preparing.','parameters':{'type':'object','properties':dict(fields,path={'type':'string'},text={'type':'string'},receipt={'type':'boolean','description':'True for a configured ESC/POS receipt destination; false for document printers'},copies={'type':'integer','minimum':1,'maximum':20},pages={'type':'string'},media={'type':'string'},sides={'type':'string','enum':['one-sided','two-sided-long-edge','two-sided-short-edge']}),'required':['queue'],'additionalProperties':False}}}]
+        {'type':'function','function':{'name':'print_prepare','description':'Prepare a text/document/receipt job for user review, NEVER send paper. Return immutable plan, options and confirmation command. Choose a physical printer from discovery; automatic routing hides its underlying queues. Export DOCX/manuscripts to PDF before preparing.','parameters':{'type':'object','properties':dict(fields,path={'type':'string'},text={'type':'string'},receipt={'type':'boolean','description':'True for a configured ESC/POS receipt destination; false for document printers'},copies={'type':'integer','minimum':1,'maximum':20},style={'type':'string','enum':['image','ascii']},rotation={'type':'integer','enum':[0,90]},pages={'type':'string'},media={'type':'string'},sides={'type':'string','enum':['one-sided','two-sided-long-edge','two-sided-short-edge']}),'required':['queue'],'additionalProperties':False}}}]
 
 
 def run_tool(tool,args,workspace,prompt='',turn=None):

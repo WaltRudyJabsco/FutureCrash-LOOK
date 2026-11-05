@@ -73,7 +73,8 @@ def test_shared_spool_review_send_once_and_receipt(home,monkeypatch):
     spool.send(plan['id'],True);assert send.call_count==1
     assert not core.run.called
     assert 'queued' in core.jobs('tiny')['jobs']
-    with pytest.raises(ValueError):spool.prepare('tiny',b'note','n.txt','receipt-text',{'copies':2})
+    assert spool.prepare('tiny',b'note','n.txt','receipt-text',{'copies':2})['estimated_paper_mm']>0
+    with pytest.raises(ValueError):spool.prepare('tiny',b'note','n.txt','receipt-text',{'copies':20})
     with pytest.raises(ValueError):spool.prepare('tiny',b'%PDF-1','x.pdf','document')
 
 

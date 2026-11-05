@@ -57,3 +57,9 @@ def test_paper_limit_error_survives_gateway(monkeypatch):
     def fail(*args,**kwargs):raise urllib.error.HTTPError('http://local',400,'Bad request',{},io.BytesIO(b'{"error":"Receipt exceeds 25 cm"}'))
     monkeypatch.setattr(museum_web.urllib.request,'urlopen',fail)
     with pytest.raises(ValueError,match='25 cm'):museum_web.print_request('http://local')
+
+
+def test_image_options_forwarded_to_owner(gateway):
+    calls,_=gateway
+    museum_web.print_request('http://local',{'action':'prepare','id':'aic-1','printer':'receipt','options':{'copies':2,'style':'ascii','rotation':90}})
+    assert calls[-1][1]['options_value']=={'copies':2,'style':'ascii','rotation':90}

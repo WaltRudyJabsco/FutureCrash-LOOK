@@ -48,9 +48,14 @@ with sync_playwright() as p:
     page.locator('.card').first.get_by_role('button',name='Print this artwork').click()
     page.wait_for_function("!document.querySelector('#print-review').disabled")
     assert page.locator('#print-printer').input_value()=='receipt'
+    page.locator('#print-style').select_option('ascii')
+    page.locator('#print-rotation').select_option('90')
+    page.locator('#print-copies').fill('2')
     page.locator('#print-review').click();page.wait_for_selector('#print-send:visible')
     assert '6.1 cm' in page.locator('#print-status').inner_text()
     assert '6.4 cm limit' in page.locator('#print-status').inner_text()
+    assert print_requests[0]['options']=={'copies':2,'style':'ascii','rotation':90}
+    page.screenshot(path=str(OUT/'print-options.png'))
     assert [x['action'] for x in print_requests]==['prepare']
     page.keyboard.press('ArrowRight');page.keyboard.press('Space')
     assert page.locator('#print-dialog').is_visible()

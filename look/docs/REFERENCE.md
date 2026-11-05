@@ -1024,7 +1024,9 @@ Parser arguments and recognized option tokens (grouped by handler):
 --pages
 --printer
 --queues — Show underlying owner/queue routes
+--rotation
 --sides
+--style
 --uri
 --width
 content
