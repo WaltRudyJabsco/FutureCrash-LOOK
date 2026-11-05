@@ -25,6 +25,7 @@ def respond(route):
             if data['action']=='collection-remove':next(x for x in rows if x['id']==data['id'])['collections'].remove(data['collection'])
             if data['action']=='favorite':
                 row=next(x for x in rows if x['id']==data['id']);row['favorite']=not row.get('favorite')
+            if data['action']=='featured':job={'state':'running','kind':'featured','requested':1000,'saved':2,'counts':{'met':1,'aic':1}}
             if data['action']=='starter':job={'state':'running','requested':data['count'],'saved':2,'theme':'landscape'}
             if data['action']=='cancel':job['state']='cancelled'
         return route.fulfill(json={'ok':True,'node':'archive','items':rows,'job':job,'more':path.endswith('search'),'collections':collections,'active_collection':'test-collection','offline':offline,'offline_count':2})
@@ -54,6 +55,8 @@ with sync_playwright() as p:
     page.locator('#offline-only').check();assert page.locator('.card').count()==2
     assert page.locator('#new-collection').is_disabled()
     page.locator('#offline-only').uncheck();offline=False;page.locator('#saved').click();page.wait_for_function("!document.querySelector('#new-collection').disabled")
+    page.once('dialog',lambda d:d.accept());page.locator('#featured').click();page.wait_for_selector('#job:visible')
+    assert any(x.get('action')=='featured' and x['count']==500 and x['source']=='both' for x in requests)
     page.locator('summary').click();page.locator('#count').fill('10');page.once('dialog',lambda d:d.accept());page.locator('#starter').click();page.wait_for_selector('#job:visible')
     assert any(x.get('action')=='starter' and x['count']==10 for x in requests)
     page.locator('#job button').click();page.wait_for_function("document.querySelector('#job').textContent.includes('cancelled')")

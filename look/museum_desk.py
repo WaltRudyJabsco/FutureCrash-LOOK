@@ -27,7 +27,7 @@ from look_renderer import NativePreviewController
 BASE='http://127.0.0.1:7332'
 MAX_IMAGE_BYTES=20*1024*1024
 SLIDE_SECONDS=10
-LIST_CONTROLS='1 Library · 2 Discover · 3 Collections · 4 Favorites · u keep view here · o offline only · c new collection · m add/remove · ↑↓ select · Shift+↑↓ page · Shift+←→ top/end · F sort · Enter view · s slideshow · i image/ASCII · d discover · / search · l library · t source · n/b pages · k save to owner · p keep here · f favorite · a build starter library · r refresh · W shell pane · q quit'
+LIST_CONTROLS='1 Library · 2 Discover · 3 Collections · 4 Favorites · u keep view here · o offline only · c new collection · m add/remove · ↑↓ select · Shift+↑↓ page · Shift+←→ top/end · F sort · Enter view · s slideshow · i image/ASCII · d discover · / search · l library · t source · n/b pages · k save to owner · p keep here · f favorite · a build starter library · h museum highlights · r refresh · W shell pane · q quit'
 
 def adjacent_artwork(items,index,step):
     """Cycle within the visible collection, skipping works not downloaded yet."""
@@ -315,6 +315,9 @@ def desk(client,ui):
                 if not ids:message='No saved works in this view';continue
                 if client.node=='local':message='These works are already on this device';continue
                 if prompt('Copy '+str(len(ids))+' works from '+client.node+' to THIS device? Type yes: ').casefold()=='yes':future=pool.submit(client.change,'sync',ids=ids)
+            elif key=='h':
+                if offline:message='Reconnect to '+client.node+' to download highlights';continue
+                if prompt('Download up to 500 Met Highlights + 500 Art Institute Featured on '+client.node+'? Existing images reused; 3 GiB budget. Type yes: ').casefold()=='yes':future=pool.submit(client.change,'featured',count=500,source='both')
             elif key in ('a','A'):
                 if offline:message='Reconnect to '+client.node+' to build the library';continue
                 value=prompt('Build starter library: works (1–1000; downloads up to 3 GiB on '+client.node+'; Enter cancels): ')
@@ -335,11 +338,11 @@ def desk(client,ui):
 
 def main(argv=None,ui=None):
     parser=argparse.ArgumentParser(prog='lk museum',description='An offline art collection from museum open-access sources')
-    parser.add_argument('action',nargs='?',default='desk',choices=('desk','list','search','save','pin','sync','starter','status','cancel','slideshow'))
+    parser.add_argument('action',nargs='?',default='desk',choices=('desk','list','search','save','pin','sync','starter','featured','status','cancel','slideshow'))
     parser.add_argument('value',nargs='?',default='')
     parser.add_argument('--node',help='Remember the collection owner on this endpoint')
-    parser.add_argument('--source',choices=('met','aic'),default='met')
-    parser.add_argument('--count',type=int,default=1000);parser.add_argument('--page',type=int,default=1);parser.add_argument('--json',action='store_true')
+    parser.add_argument('--source',choices=('met','aic','both'),default=None)
+    parser.add_argument('--count',type=int,default=None);parser.add_argument('--page',type=int,default=1);parser.add_argument('--json',action='store_true')
     args=parser.parse_args(argv);client=Client(preference(args.node))
     try:
         if args.action=='slideshow':
@@ -347,16 +350,18 @@ def main(argv=None,ui=None):
             return saver.main(['Museum'],ui=ui,quick=True)
         if args.action=='desk' and sys.stdin.isatty():return desk(client,ui)
         if args.action in ('desk','list','status'):result=client.snapshot(args.value)
-        elif args.action=='search':result=client.request(suffix='/search',q=args.value,source=args.source,page=args.page)
+        elif args.action=='search':result=client.request(suffix='/search',q=args.value,source=args.source or 'met',page=args.page)
         elif args.action in ('save','pin'):result=client.request(args.action,id=args.value)
         elif args.action=='sync':result=client.request('sync')
-        elif args.action=='starter':result=client.request('starter',count=args.count)
+        elif args.action=='starter':result=client.request('starter',count=args.count if args.count is not None else 1000)
+        elif args.action=='featured':result=client.request('featured',count=args.count if args.count is not None else 500,source=args.source or 'both')
         else:result=client.request('cancel')
         if args.json:print(json.dumps(result,ensure_ascii=False,indent=2))
         else:
             for row in result.get('items',[]):print(row['id'],row['title'],'·',row.get('artist',''),'·','downloaded' if row.get('downloaded') else 'online')
             if result.get('job'):
-                job=result['job'];print('Starter pack:',job.get('state'),str(job.get('saved',0))+'/'+str(job.get('requested',0)),job.get('theme',''))
+                job=result['job'];print('Download:',job.get('state'),str(job.get('saved',0))+'/'+str(job.get('requested',0)),job.get('theme',''))
+                if job.get('counts'):print('By museum:',', '.join(name+': '+str(count) for name,count in job['counts'].items()))
                 for error in job.get('errors',[])[-3:]:print('Source issue:',error)
         return 0
     except (OSError,ValueError) as exc:print('Museum · '+str(exc));return 1
