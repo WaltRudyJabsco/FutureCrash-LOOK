@@ -16,7 +16,7 @@ def respond(route):
     if path=='/browser-views.js':return route.fulfill(content_type='text/javascript',body=(ROOT/'signal-window/browser-views.js').read_text())
     if path=='/api/museum/config':return route.fulfill(json={'owner':'archive','owners':['local','archive']})
     if path=='/api/museum/image':
-        ident=parse_qs(url.query)['id'][0];return route.fulfill(content_type='image/jpeg',body=(fixture/'collection/images'/(ident+'.jpg')).read_bytes())
+        ident=parse_qs(url.query)['id'][0];ident=rows[0]['id'] if ident=='met-999999999' else ident;return route.fulfill(content_type='image/jpeg',body=(fixture/'collection/images'/(ident+'.jpg')).read_bytes())
     if path in ('/api/museum','/api/museum/search'):
         if request.method=='POST':
             data=request.post_data_json;requests.append(data)
@@ -41,6 +41,31 @@ with sync_playwright() as p:
     page.wait_for_function("[...document.querySelectorAll('.card img')].every(i=>i.complete&&i.naturalWidth>0)")
     assert page.locator('.card').count()==len(rows)
     assert page.evaluate("FabricBrowserViews.museumCommand('/museum')")
+    # A finished job must not replace images or refetch no-store artwork on polls.
+    job={'state':'partial','requested':1000,'saved':707,'errors':['Source unavailable']}
+    page.evaluate("window.firstImage=document.querySelector('.card img');window.firstCard=document.querySelector('.card');window.gridChanges=[];new MutationObserver(events=>gridChanges.push(...events)).observe(document.querySelector('#grid'),{childList:true,subtree:true})")
+    image_requests=[]
+    page.on('request',lambda request:image_requests.append(request.url) if '/api/museum/image?' in request.url else None)
+    for _ in range(3):page.evaluate('pollMuseum()')
+    assert page.evaluate("firstImage===document.querySelector('.card img')&&firstCard===document.querySelector('.card')")
+    assert page.evaluate('gridChanges.length===0')
+    assert not image_requests,image_requests
+    assert page.locator('#job progress').count()==0
+    assert '707 of 1,000' in page.locator('#job').inner_text()
+    assert 'No download is currently running' in page.locator('#job').inner_text()
+    # Newly saved work is appended without replacing existing artwork.
+    extra=dict(rows[0],id='met-999999999',title='New arrival')
+    rows.append(extra);page.evaluate('pollMuseum()')
+    assert page.locator('.card').count()==len(rows)
+    assert page.evaluate("firstImage===document.querySelector('.card img')")
+    rows.pop();page.evaluate('pollMuseum()')
+    # A running job has a progress bar and Stop; terminal states have neither.
+    job={'state':'running','requested':1000,'saved':707}
+    page.evaluate('pollMuseum()');assert page.locator('#job progress').count()==1
+    for state in ('cancelled','interrupted','complete','partial'):
+        job['state']=state;page.evaluate('pollMuseum()')
+        assert page.locator('#job progress').count()==0
+        assert page.locator('#job button').count()==0
     page.screenshot(path=str(OUT/'desktop.png'),full_page=True)
     page.locator('.card .view').first.click();page.wait_for_selector('#detail:visible');assert page.locator('#title').inner_text()
     assert page.locator('#detail-actions button',has_text='Favorite').count()==1
