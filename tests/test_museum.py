@@ -310,3 +310,11 @@ def test_remote_museum_error_preserves_owner_message(monkeypatch):
     monkeypatch.setattr(node,'http_json',Mock(side_effect=error))
     code,result=h._museum_request({'action':'featured'})
     assert code==400 and result['error']=='A collection download is already running'
+
+
+def test_job_progress_truthful_partial_and_bounded():
+    text=museum_desk.job_progress({'state':'partial','saved':250,'requested':1000,'counts':{'met':50,'aic':200}},80)
+    assert '25%' in text and '250/1000' in text and 'partial' in text
+    assert 'met: 50' in text and 'aic: 200' in text
+    assert museum_desk.job_progress({})==''
+    assert '100%' in museum_desk.job_progress({'state':'complete','saved':1,'requested':1})
