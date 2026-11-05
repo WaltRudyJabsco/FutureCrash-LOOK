@@ -56,7 +56,7 @@ def lookup(query='',catalog=None,book_ids=None):
     if catalog is None:
         import books
         catalog=books.catalog()
-    rows=catalog.get('entries',[])
+    rows=[row for row in catalog.get('entries',[]) if not row.get('removal_due')]
     if book_ids is not None:rows=[row for row in rows if row['id'] in book_ids]
     result=matches(query,rows);unique={}
     for row in sorted(result['entries'],key=lambda r:(r.get('offline',False),-r.get('reading',{}).get('updated',0))):unique.setdefault(row['id'],row)

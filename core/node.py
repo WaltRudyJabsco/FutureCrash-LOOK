@@ -2622,6 +2622,11 @@ def _museum_retention_loop():
     while True:
         try:_museum().maintain()
         except Exception as exc:print('Museum retention: '+str(exc),file=sys.stderr)
+        try:
+            _look_catalog_modules()
+            import book_starter
+            book_starter.tick()
+        except Exception as exc:print('Book retention: '+str(exc),file=sys.stderr)
         time.sleep(60)
 
 
@@ -3998,19 +4003,19 @@ class API(BaseHTTPRequestHandler):
         try:
             if fabric:
                 local=self._books_shelf().catalog();name=identity()['name']
-                entries=[dict(row,node=name) for row in local['entries']];errors=[]
+                entries=[dict(row,node=name) for row in local['entries']];errors=[];collections=set(local.get('collections',[]))
                 peers=[p for p in PEERS.public() if p.get('trusted') and _peer_bases(p)]
                 def read(peer):
                     owner=peer.get('name')
                     try:
                         value=_file_peer_json(peer,'/v1/books')
-                        return [dict(row,node=owner) for row in value.get('entries',[])],None
-                    except Exception as exc:return [],{'node':owner,'error':str(exc)}
+                        return [dict(row,node=owner) for row in value.get('entries',[])],value.get('collections',[]),None
+                    except Exception as exc:return [],[],{'node':owner,'error':str(exc)}
                 with concurrent.futures.ThreadPoolExecutor(max_workers=4) as pool:
-                    for rows,error in pool.map(read,peers):
-                        entries.extend(rows)
+                    for rows,names,error in pool.map(read,peers):
+                        entries.extend(rows);collections.update(names)
                         if error:errors.append(error)
-                return self.sendj(200,{'ok':True,'entries':entries,'errors':errors})
+                return self.sendj(200,{'ok':True,'entries':entries,'errors':errors,'collections':sorted(collections)})
             peer,_=self._file_target()
             if peer is not None:
                 value=_file_peer_json(peer,'/v1/books') if payload is None else http_json(_copy_route(peer)+'/v1/books',data=payload,timeout=45)
@@ -4020,6 +4025,11 @@ class API(BaseHTTPRequestHandler):
             elif payload.get('action')=='scan':value=shelf.scan()
             elif payload.get('action')=='fetch':value={'book':shelf.fetch(payload.get('url',''))}
             elif payload.get('action')=='update':value={'book':shelf.update(payload.get('id'),payload.get('fields'))}
+            elif payload.get('action') in {'reject','restore','collection','collect'}:
+                value=shelf.curate(payload['action'],payload.get('id'),payload.get('name'),payload.get('selected',True))
+            elif payload.get('action')=='refill':
+                import book_starter
+                value={'refill':book_starter.configure(shelf,payload.get('enabled'),payload.get('target',1000))}
             elif payload.get('action')=='progress':
                 import book_audio
                 row,path=shelf.item(payload.get('id'));fields=payload.get('fields')

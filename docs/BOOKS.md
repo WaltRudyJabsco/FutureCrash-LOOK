@@ -622,3 +622,50 @@ resizing, or restoring them does not restart narration or change the current boo
 ![Desktop playback controls](screenshots/mercury-reader-desktop-transport.png)
 
 ![Desktop quiet reading with settings hidden](screenshots/mercury-reader-desktop-quiet.png)
+
+
+### Curating the starter library
+
+Mercury Reader now has a **Collection** filter, **New collection**, and a
+**Collections** menu on each shelf title. A book can belong to several named
+collections without copying its file. In the reader, open **Controls** to add the
+current book to a collection. Reading state and saved listening positions stay
+independent of collection membership.
+
+**Thumbs down** hides an automatically downloaded starter book immediately.
+Choose **Pending removals** and **Undo removal** within 48 hours to restore it.
+After that grace period the owner removes the downloaded file, preserving its
+Gutenberg ID in an exclusion list so automatic refill never chooses it again.
+Manual imports are protected. A rejected file changed on disk is also preserved.
+
+**Daily refill** lets you choose the library owner and target count (normally
+1,000). It is off until enabled and downloads only on that owner, into its configured
+books folder under `Gutenberg Starter 1000`. The existing starter selection is
+reused when available; fresh installations use English text entries from the
+Gutenberg bulk catalog, excluding obvious periodicals and duplicate title/author
+pairs. This is a starter selection, not a ranking of the greatest books.
+
+The node checks retention every minute and starts at most one refill per day.
+Pending removals count toward the target until their files are removed; the next
+daily refill supplies replacements. A missing media drive pauses work without
+creating a substitute library. A failed download is recorded for inspection and
+retried on a later daily run. This does not automatically copy all books to every
+endpoint; existing **Keep offline** remains available for selected books.
+
+In `lk books`: **s** cycles shelves/collections, **c** creates a collection,
+**C** adds/removes the selected book from a named collection, and **x** marks a
+starter book for removal or restores it from Pending removals.
+
+```sh
+lk books collections "Weekend reading"
+lk books collect BOOK_ID "Weekend reading" --node OWNER
+lk books reject BOOK_ID --node OWNER
+lk books restore BOOK_ID --node OWNER
+lk books refill on 1000 --node OWNER
+lk books refill --node OWNER
+lk books refill off --node OWNER
+```
+
+Use `lk books list --json` for IDs. Refill status includes the last run, number
+added, and recent download errors. Collections, exclusions, and refill settings
+are stored with the owner's shelf catalog, alongside its existing backup data.

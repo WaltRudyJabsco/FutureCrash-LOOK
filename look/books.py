@@ -56,7 +56,7 @@ def rows_for(value,query='',shelf='All'):
     for row in value.get('entries',[]):
         key=row['id']
         if key not in groups or (groups[key].get('offline') and not row.get('offline')) or (bool(groups[key].get('offline'))==bool(row.get('offline')) and row.get('reading',{}).get('updated',0)>groups[key].get('reading',{}).get('updated',0)):groups[key]=row
-    rows=[r for r in groups.values() if shelf=='All' or shelf in {r.get('status'),r.get('shelf')}]
+    rows=[r for r in groups.values() if (bool(r.get('removal_due')) if shelf=='Pending removals' else not r.get('removal_due')) and (shelf in {'All','Pending removals'} or shelf in {r.get('status'),r.get('shelf')} or shelf in r.get('collections',[]))]
     terms=query.casefold().split()
     return sorted((r for r in rows if all(t in ' '.join(str(r.get(k,'')) for k in ('title','author','shelf','format')).casefold() for t in terms)),key=lambda r:(r.get('author','').casefold(),r.get('title','').casefold()))
 
@@ -140,7 +140,7 @@ def desk(ui,query='',owner=None):
             if sort_reverse:visible=list(reversed(visible))
             index=max(0,min(index,max(0,len(visible)-1)));chosen=visible[index] if visible else None
             owned_gutenberg={book_core.gutenberg_id(r):r for r in value.get('entries',[]) if book_core.gutenberg_id(r)}
-            controls='↑↓ move · Shift-arrows page/ends · Enter '+('import book' if results is not None else 'read')+' · a read aloud · o system reader · / search · s shelves · m reading state · e edit · i import · g Gutenberg · d discover · I preview · M image/ASCII · k keep offline · y copy link · R scan/refresh · G reverse · P clipboard · W shell pane · Esc back'
+            controls='↑↓ move · Shift-arrows page/ends · Enter '+('import book' if results is not None else 'read')+' · a read aloud · o system reader · / search · s shelves/collections · c new collection · C add/remove collection · x thumbs down/undo · m reading state · e edit · i import · g Gutenberg · d discover · I preview · M image/ASCII · k keep offline · y copy link · R scan/refresh · G reverse · P clipboard · W shell pane · Esc back'
             if width<80 and not help_visible:controls='↑↓ select · Enter open · / search · W pane · ? help · Esc back'
             else:controls+=' · ? help'
             if pane_help or help_visible:controls+=' · '+' · '.join(terminal_style.pane_shortcuts())
@@ -215,8 +215,21 @@ def desk(ui,query='',owner=None):
                     import clipboard_shelf
                     clipboard_shelf.show(fd=fd);last_frame=None
                 elif key=='s':
-                    shelves=['All',*book_core.STATUSES]+sorted({r.get('shelf') for r in value.get('entries',[]) if r.get('shelf')})
+                    shelves=['All','Pending removals',*book_core.STATUSES]+sorted(set(value.get('collections',[]))|{name for r in value.get('entries',[]) for name in r.get('collections',[])}|{r.get('shelf') for r in value.get('entries',[]) if r.get('shelf')})
                     shelf=shelves[((shelves.index(shelf) if shelf in shelves else -1)+1)%len(shelves)];results=None;index=0
+                elif key=='c':
+                    name=ask('New collection name')
+                    if name:request('collection',node=owner,name=name);value=catalog();notice='Created '+name
+                elif key=='C' and chosen and results is None:
+                    name=ask('Collection name · existing: '+', '.join(value.get('collections',[])))
+                    if name:
+                        selected=name not in chosen.get('collections',[])
+                        request('collect',node=chosen.get('node',owner),id=chosen['id'],name=name,selected=selected)
+                        value=catalog();notice=('Added to ' if selected else 'Removed from ')+name
+                elif key=='x' and chosen and results is None:
+                    action='restore' if chosen.get('removal_due') else 'reject'
+                    if action=='restore' or (ask('Hide and delete this starter download after 48 hours? Undo in Pending removals · y/N') or '').casefold()=='y':
+                        request(action,node=chosen.get('node',owner),id=chosen['id']);value=catalog();notice='Restored' if action=='restore' else 'Pending removal · 48 hours to undo'
                 elif key=='d':
                     mode=ask('Discover · p popular · n new arrivals · s subjects · r surprise me','p')
                     if mode:
@@ -285,7 +298,7 @@ def desk(ui,query='',owner=None):
 
 def main(args,ui):
     parser=argparse.ArgumentParser(prog='lk books',description='Fabric EPUB/PDF shelf; bk is an alias. Files stay on their owner; opening remote books makes a verified local cache copy.')
-    parser.add_argument('action',nargs='?',default='shelf',choices=['shelf','list','scan','import','search','discover','fetch','reader','listen','voices','speech-setup'])
+    parser.add_argument('action',nargs='?',default='shelf',choices=['shelf','list','scan','import','search','discover','fetch','reader','listen','voices','speech-setup','refill','collections','reject','restore','collect'])
     parser.add_argument('values',nargs='*',help='reader: status/install/native-install/auto/bookokrat/system; listen: FILE; other actions: query or path')
     parser.add_argument('--node',default=None,help='Library owner; defaults to configured media destination')
     parser.add_argument('--json',action='store_true')
@@ -308,6 +321,20 @@ def main(args,ui):
                 finally:termios.tcsetattr(fd,termios.TCSADRAIN,old)
                 return 0
             print(json.dumps(value,ensure_ascii=False,indent=2));return 0
+        if selected.action=='refill':
+            if selected.values:
+                if selected.values[0] not in {'on','off'} or len(selected.values)>2:raise ValueError('Use lk books refill on [COUNT] or off --node OWNER')
+                value=request('refill',node=owner,enabled=selected.values[0]=='on',target=int(selected.values[1]) if len(selected.values)>1 else 1000)
+            else:value=request(node=owner).get('refill',{'enabled':False,'target':1000})
+            print(json.dumps(value,indent=2));return 0
+        if selected.action=='collections':
+            value=request('collection',node=owner,name=' '.join(selected.values)) if selected.values else catalog()
+            print(json.dumps({'collections':value.get('collections',[])},ensure_ascii=False,indent=2));return 0
+        if selected.action in {'reject','restore','collect'}:
+            if not selected.values:raise ValueError('Choose a book ID from lk books list --json')
+            fields={'id':selected.values[0]}
+            if selected.action=='collect':fields['name']=' '.join(selected.values[1:])
+            print(json.dumps(request(selected.action,node=owner,**fields),ensure_ascii=False,indent=2));return 0
         if selected.action=='reader':
             choice=selected.values[0] if selected.values else 'status'
             if len(selected.values)>1:raise ValueError('Choose reader status, install, native-install, auto, bookokrat or system')
