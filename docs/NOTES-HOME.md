@@ -80,3 +80,40 @@ impression changes its variation. Gentle opacity motion respects reduced-motion
 preferences; the matrix is an illustration, not a data display. This first version
 has an extensible visual vocabulary, not model training or learned preferences.
 Signal's expression system is unchanged.
+
+## More tools in the link picker
+
+In the note editor, press Ctrl-K, then Ctrl-A to browse all 24 supported Fabric
+launch links. Type to filter names, destinations and descriptions. Use arrows or
+Tab to select, Page Up/Down (or Shift-Up/Down) to move a page, and Home/End
+(or Shift-Left/Right) to jump to either end. Enter inserts the selected link;
+Escape returns without inserting. Number then Enter also selects a listed tool.
+The footer uses the current theme's key highlights.
+
+Alongside `notes`, `museum`, `books`, `ytr`, `print`, `saver` and `wiki`, the
+`look:` catalog now includes:
+
+| Destination | Opens |
+|---|---|
+| `look:files` | File browser |
+| `look:tasks` | Tasks |
+| `look:reminders` | Reminders |
+| `look:mp` | Music library |
+| `look:player` | Music player |
+| `look:tv` | Video library |
+| `look:visualizers` | Visualizer picker |
+| `look:terminal` | Terminal themes |
+| `look:lock` | PIN curtain settings |
+| `look:web` | Web desk |
+| `look:words` | Dictionary |
+| `look:latin` | Latin reference |
+| `look:games` | Games |
+| `look:commands` | Searchable command reference |
+| `look:system` | System overview |
+| `look:ai` | AI settings |
+| `look:albert` | Albert in your browser |
+
+`lk notes actions --json` and the assistant's `notebook_actions` tool expose the
+same catalog. These are reviewed entry points, not arbitrary `lk` commands with
+arguments. Existing Home notes are not rewritten; new Home notes retain the
+small starter menu. Add whichever tools suit your own page.

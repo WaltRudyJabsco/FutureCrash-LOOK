@@ -118,3 +118,25 @@ def test_home_note_numbered_link_requires_activation_and_returns(tmp_path,termin
     if activate:launch.assert_called_once_with('action','museum')
     else:launch.assert_not_called()
     assert notebook.home_state(store)['note']['revision']==row['revision']
+
+@pytest.mark.parametrize('keys,expected',[
+    (list('theme')+['enter'],'look:terminal'),
+    (['end','enter'],'look:albert'),
+    (['shiftright','shiftleft','enter'],'look:notes'),
+    (list('no-such-tool')+['esc'],None),
+    (['pagedown','pageup','enter'],'look:notes'),
+    (['paste:queue','enter'],'look:ytr'),
+])
+def test_action_picker_search_navigation_and_cancel(keys,expected,capsys):
+    events=iter(keys)
+    assert notebook.choose_action(5,lambda *args:next(events))==expected
+    output=capsys.readouterr().out
+    assert 'FABRIC TOOLS' in output and 'Esc' in output
+
+
+def test_action_catalog_expansion_is_read_only_and_home_stays_small():
+    rows=notebook.action_catalog()
+    assert len(rows)==24
+    assert {'files','tasks','terminal','commands','albert','visualizers'} <= {row['id'] for row in rows}
+    assert notebook.home_template().count('](look:')==6
+    assert all(row['question'] and row['command'].startswith('lk ') for row in rows)
