@@ -59,7 +59,11 @@ on affected nodes, then choose a fresh PIN using `lk lock setup`.
 `lk lktl` activates a special curtain across reachable paired nodes: white screens,
 huge black lettering, and one ominous phrase held for twelve seconds. Open Signal
 and Albert pages follow the same mode; `/lktl` also starts it from either chat.
-The sequence uses the shared event time so attached displays and peers agree.
+Each desktop shuffles its phrase order independently; attached displays use different
+slots, so up to eight monitors on that desktop show distinct phrases. Browser pages
+shuffle independently too; separate devices may occasionally choose the same word.
+Successful unlock closes with a brief CRT collapse to a line and point. Incorrect
+PINs leave the curtain intact. Browsers honor reduced-motion preferences.
 Click or press a key to reveal the usual four-digit PIN prompt; `lk unlock` works
 as usual. This remains an ambient PIN curtain, not an operating-system lock.
 
