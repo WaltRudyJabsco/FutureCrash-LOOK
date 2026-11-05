@@ -145,7 +145,7 @@ def wait_for(read_status,accept,timeout=JOB_TIMEOUT):
             last=read_status()
             if accept(last):return last
             if last.get('state') in {'failed','rolled_back','partial','incomplete'}:raise ReceiptError(last)
-        except OSError:pass
+        except (OSError,RuntimeError):pass
         time.sleep(POLL_SECONDS)
     raise TimeoutError('No verified completion receipt before timeout: '+str(last))
 
@@ -211,7 +211,14 @@ def local_work(step):
             value=wait_for(lambda:fabric_care.backup_status(Path.home())['job'],lambda r:r.get('state')=='complete' and r.get('verified'))
             return value
         step('Essential-state backup and restore check',essential)
-    else:step('Essential-state backup',lambda:{'state':'not_configured','hint':'lk fabric backup add'})
+    else:
+        def shared_backup():
+            snapshot=node.http_json('http://127.0.0.1:7332/v1/nodes',timeout=8)
+            report=fabric_care.inspect(snapshot,get)
+            coverage=next((r.get('backup',{}) for r in report['nodes'] if r['node']==report['local']),{})
+            if coverage.get('verified_recently'):return {'verified':True,'verified_at':coverage['verified_at'],'owner':coverage.get('owner'),'scope':'Shared essential-state backup receipt'}
+            return {'state':'not_configured','hint':'lk fabric backup add'}
+        step('Essential-state backup coverage',shared_backup)
     for name in ('books','museum'):
         helper=Path.home()/'.local/bin'/('fcl-'+name+'-backup')
         if not helper.is_file():
@@ -244,14 +251,18 @@ def fabric_work(job,step):
             if row.get('release',{}).get('digest')==release['digest']:continue
             def update(target=target):
                 if staged and target=='local':maintenance.schedule('update',data=prepared(release['digest']),expected=release['digest'])
-                else:post(target,'/v1/maintenance/update',{'source':source,'digest':release['digest'],'prepared':staged,'confirm':True})
+                else:
+                    # The target can restart before its acceptance response arrives.
+                    # Its digest-specific receipt is the completion authority.
+                    try:post(target,'/v1/maintenance/update',{'source':source,'digest':release['digest'],'prepared':staged,'confirm':True})
+                    except (OSError,RuntimeError):pass
                 result=wait_for(lambda:get(target,'/v1/maintenance/status'),lambda r:r.get('state')=='healthy' and r.get('digest')==release['digest'],420)
                 services=get(target,'/v1/services').get('services',{})
                 albert=services.get('albert',{})
                 if albert.get('managed') and albert.get('state') in {'running','active'}:post(target,'/v1/services/action',{'service':'albert','action':'restart','confirm':True})
                 return result
             step(name+' runtime update',update)
-    for row in report['nodes']:
+    for row in sorted(report['nodes'],key=lambda r:not r.get('backup',{}).get('configured')):
         name=row['node'];target='local' if name==local else name
         def upkeep(target=target):
             accepted=post(target,'/v1/upkeep',{})
