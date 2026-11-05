@@ -71,3 +71,11 @@ def test_request_dictation_uses_original_terminal_state(terminal,monkeypatch):
     keys=iter(['\x04','\x13'])
     assert notebook.capture_note(5,lambda *a:next(keys),assistant=False,speech_state=['cooked'])=='Add Museum'
     speech.assert_called_once_with(5,['cooked'])
+
+
+def test_current_project_never_guessed(monkeypatch):
+    infer=Mock(side_effect=AssertionError('Must clarify before inference'))
+    monkeypatch.setattr(composer,'infer',infer)
+    rows=[{'label':'Mercury: One','target':'mercury:one'},{'label':'Mercury: Two','target':'mercury:two'}]
+    result=composer.draft('Add my current Mercury project','',rows,Event())
+    assert 'question' in result and 'Mercury: One' in result['question'] and 'Mercury: Two' in result['question']
