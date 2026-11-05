@@ -184,3 +184,31 @@ when enough images are available. Escape exits; C changes colors; V changes the
 shared visualizer. Number Station (large held digits) and Prism Grid (diagonal
 bands, checkerboards and diamonds) are also available in the shared saver/player
 list. Enable them in an existing custom Cycle selection if desired.
+
+## Museum-selected highlights
+
+Press **h** in the terminal desk or **Download museum highlights** in the web
+gallery to build two named collections on the displayed library owner:
+
+- **Met Highlights:** objects flagged `isHighlight` by the Met.
+- **Art Institute Featured:** works flagged `is_boosted` by the Art Institute.
+
+Each targets up to 500 downloadable public-domain works in source search order.
+These are museum-selected highlights, not a measured visitor-popularity ranking.
+The selection methods are documented by the [Met](https://metmuseum.github.io/)
+and [Art Institute](https://api.artic.edu/docs/).
+
+```sh
+lk museum featured
+lk museum featured --source met --count 500
+lk museum featured --source aic --count 500
+lk museum status
+lk museum cancel
+```
+
+The existing 3 GiB library budget applies. Existing images, favorites and other
+collection memberships are preserved. Rerunning reuses the same named collections
+and images. Progress counts include reused works, and report the actual total per
+source. A shortfall is marked partial; source errors remain visible. No unrelated
+works are added to fill a quota. Open Collections after refreshing to browse,
+shuffle or keep an offline copy of either selection.

@@ -242,3 +242,51 @@ def test_node_offline_catalog_and_cached_image(tmp_path,monkeypatch):
     code,result=h._museum_request();assert code==200 and result['offline'] and result['items'][0]['available_offline']
     h.path='/v1/museum/image?target=owner&id=aic-1';h._serve_file_range=lambda path,mime:(path,mime)
     assert h._museum_request()[0]==path
+
+
+def test_featured_queries_use_museum_flags(monkeypatch):
+    from urllib.parse import urlsplit,parse_qs
+    urls=[]
+    def get(url):
+        urls.append(url)
+        return {'objectIDs':[1,2],'total':45} if 'metmuseum' in url else {'data':[{'id':3}],'pagination':{'total_pages':1}}
+    monkeypatch.setattr(museum,'get_json',get)
+    assert museum.featured_ids('met',1)==(['met-1','met-2'],True)
+    assert parse_qs(urlsplit(urls[-1]).query)['isHighlight']==['true']
+    assert museum.featured_ids('aic',1)==(['aic-3'],False)
+    params=json.loads(parse_qs(urlsplit(urls[-1]).query)['params'][0])
+    assert {'term':{'is_boosted':True}} in params['query']['bool']['filter']
+    assert {'term':{'is_public_domain':True}} in params['query']['bool']['filter']
+
+
+def test_featured_named_collections_reuse_images_and_report_shortfall(tmp_path,monkeypatch):
+    m=museum.Museum(tmp_path)
+    monkeypatch.setattr(museum,'detail',lambda ident:art(ident))
+    fetch=Mock(return_value=JPEG);monkeypatch.setattr(museum,'fetch',fetch)
+    monkeypatch.setattr(museum,'featured_ids',lambda source,page:([source+'-1',source+'-1'],False))
+    m.save('met-1');m.favorite('met-1')
+    m.start_featured(2);m.worker.join(3)
+    result=m.snapshot()
+    assert result['job']['state']=='partial' and result['job']['saved']==2
+    assert result['job']['counts']=={'met':1,'aic':1}
+    assert len(result['collections'])==2 and fetch.call_count==2
+    assert all(len(row['collections'])==1 for row in result['items'])
+    assert next(row for row in result['items'] if row['id']=='met-1')['favorite']
+    m.start_featured(1);m.worker.join(3)
+    assert m.snapshot()['job']['state']=='complete'
+    assert len(m.snapshot()['collections'])==2 and fetch.call_count==2
+
+
+def test_featured_errors_cancel_and_validation(tmp_path,monkeypatch):
+    m=museum.Museum(tmp_path)
+    for count in (0,501):
+        with pytest.raises(ValueError):m.start_featured(count)
+    with pytest.raises(ValueError):m.start_featured(1,'elsewhere')
+    def offline(*args):raise OSError('source offline')
+    monkeypatch.setattr(museum,'featured_ids',offline)
+    m.start_featured(1);m.worker.join(3)
+    assert m.snapshot()['job']['state']=='partial' and len(m.snapshot()['job']['errors'])==2
+    def cancel(*args):m.stop.set();return ['met-1'],True
+    monkeypatch.setattr(museum,'featured_ids',cancel)
+    m.start_featured(1,'met');m.worker.join(3)
+    assert m.snapshot()['job']['state']=='cancelled'

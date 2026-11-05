@@ -99,6 +99,21 @@ def discover(source,query,page=1,limit=20):
     return {'items':rows,'more':more,'page':page,'source':source,'query':query}
 
 
+FEATURED_NAMES={'met':'Met Highlights','aic':'Art Institute Featured'}
+FEATURED_PAGE_SIZE=40
+FEATURED_MAX_PAGES=250
+
+def featured_ids(source,page):
+    if source not in SOURCES:raise ValueError('Choose met or aic')
+    if source=='met':
+        params=dict(q='*',isHighlight='true',hasImages='true',offset=(page-1)*FEATURED_PAGE_SIZE,limit=FEATURED_PAGE_SIZE)
+        data=get_json('https://collectionapi.metmuseum.org/public/collection/v1.1/search?'+urllib.parse.urlencode(params))
+        return ['met-'+str(x) for x in data.get('objectIDs',[])],page*FEATURED_PAGE_SIZE<int(data.get('total',0))
+    params=dict(page=page,limit=FEATURED_PAGE_SIZE,query={'bool':{'filter':[{'term':{'is_boosted':True}},{'term':{'is_public_domain':True}},{'exists':{'field':'image_id'}}]}},fields=['id'])
+    data=get_json('https://api.artic.edu/api/v1/artworks/search?'+urllib.parse.urlencode({'params':json.dumps(params,separators=(',',':'))}))
+    return ['aic-'+str(x['id']) for x in data.get('data',[])],page<int(data.get('pagination',{}).get('total_pages',page))
+
+
 def atomic(path,data):
     path.parent.mkdir(parents=True,exist_ok=True)
     temp=path.with_name('.'+path.name+'.'+str(threading.get_ident())+'.tmp')
@@ -174,6 +189,51 @@ class Museum:
             self.stop.clear();state=self.read();state['job']={'state':'running','requested':count,'saved':0,'errors':[],'theme':'Starting'};self.write(state)
             self.worker=threading.Thread(target=self._pack,args=(count,),daemon=True);self.worker.start()
         return self.snapshot()
+    def start_featured(self,count=500,source='both'):
+        count=int(count)
+        if not 1<=count<=500:raise ValueError('Featured size must be 1–500 per museum')
+        if source not in (*SOURCES,'both'):raise ValueError('Choose met, aic or both')
+        sources=SOURCES if source=='both' else (source,)
+        with self.lock:
+            if self.worker and self.worker.is_alive():raise ValueError('A collection download is already running')
+            state=self.read();collections=state.setdefault('collections',{});groups={}
+            for name in sources:
+                ident=uuid.uuid5(uuid.NAMESPACE_URL,'look-museum-featured:'+name).hex
+                if ident not in collections and len(collections)>=200:raise ValueError('The library supports up to 200 named collections')
+                collections.setdefault(ident,{'name':FEATURED_NAMES[name],'selection':'Museum highlights' if name=='met' else 'Museum-boosted search results'})
+                groups[name]=ident
+            self.stop.clear();state['job']={'state':'running','kind':'featured','requested':count*len(sources),'saved':0,'counts':{},'errors':[],'theme':'Museum selections'};self.write(state)
+            self.worker=threading.Thread(target=self._featured,args=(count,groups),daemon=True);self.worker.start()
+        return self.snapshot()
+
+    def _featured(self,count,groups):
+        errors=[];counts={name:0 for name in groups}
+        try:
+            for source,collection in groups.items():
+                seen=set()
+                for page in range(1,FEATURED_MAX_PAGES+1):
+                    if self.stop.is_set() or counts[source]>=count:break
+                    try:ids,more=featured_ids(source,page)
+                    except (OSError,ValueError) as exc:errors.append(source+': '+str(exc));break
+                    for ident in ids:
+                        if self.stop.is_set() or counts[source]>=count:break
+                        if ident in seen:continue
+                        seen.add(ident)
+                        try:
+                            self.save(ident,FEATURED_NAMES[source])
+                            with self.lock:
+                                state=self.read();row=state['items'][ident]
+                                row['collections']=sorted(set(row.get('collections',[]))|{collection});self.write(state)
+                            counts[source]+=1
+                        except (OSError,ValueError) as exc:
+                            if 'storage budget' in str(exc):raise
+                            errors.append(ident+': '+str(exc))
+                        self._job(saved=sum(counts.values()),counts=dict(counts),errors=errors[-20:],theme=FEATURED_NAMES[source])
+                    if not more:break
+            total=sum(counts.values())
+            self._job(state='cancelled' if self.stop.is_set() else 'complete' if total==count*len(groups) else 'partial',saved=total,counts=counts,errors=errors[-20:])
+        except Exception as exc:self._job(state='failed',errors=(errors+[str(exc)])[-20:])
+
     def start_sync(self,rows,loader,collections=None):
         rows=[row for row in rows if row.get('downloaded')][:MAX_PACK_ITEMS]
         with self.lock:
@@ -255,6 +315,7 @@ class Museum:
         if action in {'collection-create','collection-add','collection-remove'}:return self.collection_change(data)
         if action=='save':self.save(data.get('id',''));return self.snapshot()
         if action=='favorite':return self.favorite(data.get('id',''))
+        if action=='featured':return self.start_featured(data.get('count',500),data.get('source','both'))
         if action=='starter':return self.start_pack(data.get('count',1000))
         if action=='cancel':self.stop.set();return self.snapshot()
         raise ValueError('Unknown museum action')
