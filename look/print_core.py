@@ -207,7 +207,7 @@ def add_queue(queue,uri,driver='everywhere',confirm=False):
 
 def options(queue):
     queue=require_queue(queue)
-    if profiles().get(queue,{}).get('transport')=='mxw01-ble':return {'queue':queue,'options':'transport/Transport: *Bluetooth-LE\nwidth/Image-width: *384-dots\ncopies/Copies: *1\nlength/Maximum-length: *6.4-cm'}
+    if profiles().get(queue,{}).get('transport')=='mxw01-ble':return {'queue':queue,'options':'transport/Transport: *Bluetooth-LE\nwidth/Image-width: *384-dots\ncopies/Copies: *1 2-20-within-length-limit\nlength/Maximum-length: *6.4-cm'}
     return {'queue':queue,'options':run(['lpoptions','-p',queue,'-l'])}
 def jobs(queue):
     queue=require_queue(queue)
@@ -227,10 +227,14 @@ def cancel(queue,job,confirm=False):
 
 def print_options(value):
     value=value or {}
-    if not isinstance(value,dict) or set(value)-{'copies','pages','media','sides'}:raise ValueError('Unsupported print options')
+    if not isinstance(value,dict) or set(value)-{'copies','pages','media','sides','style','rotation'}:raise ValueError('Unsupported print options')
     result={};copies=value.get('copies',1)
     if type(copies) is not int or not 1<=copies<=20:raise ValueError('Copies must be 1–20')
     result['copies']=copies
+    if value.get('style','image') not in {'image','ascii'}:raise ValueError('Choose image or ascii print style')
+    if type(value.get('rotation',0)) is not int or value.get('rotation',0) not in (0,90):raise ValueError('Choose rotation 0 or 90')
+    if value.get('style')=='ascii':result['style']='ascii'
+    if value.get('rotation'):result['rotation']=90
     if value.get('pages'):
         if not isinstance(value['pages'],str) or not re.fullmatch(r'[1-9][0-9]{0,5}(?:-[1-9][0-9]{0,5})?(?:,[1-9][0-9]{0,5}(?:-[1-9][0-9]{0,5})?)*',value['pages']):raise ValueError('Use page ranges such as 1-3,5')
         for part in value['pages'].split(','):
@@ -257,16 +261,27 @@ def receipt_text(text,columns):
     except UnicodeEncodeError as error:raise ValueError('This receipt text needs unsupported characters; use a raster image or a document printer') from error
 
 
-def receipt_bitmap(data,width):
+def receipt_bitmap(data,width,style="image",rotation=0):
     try:from PIL import Image,ImageOps
     except ImportError as error:raise RuntimeError('Receipt image preparation needs Pillow; text receipts work without it') from error
     with Image.open(io.BytesIO(data)) as source:
         if source.width*source.height>MAX_IMAGE_PIXELS:raise ValueError('Receipt image is too large')
         image=ImageOps.exif_transpose(source).convert('RGBA')
         paper=Image.new('RGBA',image.size,'white');paper.alpha_composite(image);image=paper.convert('L')
+        if rotation:image=image.rotate(-rotation,expand=True)
         height=max(1,round(image.height*min(width,image.width)/image.width))
         if height>MAX_RASTER_HEIGHT:raise ValueError('Receipt image is too tall; crop it first')
         image=image.resize((min(width,image.width),height))
+        if style=='ascii':
+            from PIL import ImageDraw,ImageFont
+            font=ImageFont.load_default(size=10)
+            cell_width=max(1,round(font.getlength('M')));cell_height=12
+            cols=max(1,image.width//cell_width);rows=max(1,height//cell_height)
+            samples=image.resize((cols,rows));art=Image.new('L',image.size,255);draw=ImageDraw.Draw(art)
+            ramp='@%#*+=-:. '
+            for y in range(rows):
+                for x in range(cols):draw.text((x*cell_width,y*cell_height),ramp[samples.getpixel((x,y))*9//255],font=font,fill=0)
+            image=art
         padded=Image.new('L',((image.width+7)//8*8,height),255);padded.paste(image)
         return padded.convert('1')
 
@@ -319,14 +334,19 @@ class Spool:
         if not isinstance(filename,str) or len(filename)>200 or any(ord(c)<32 for c in filename):raise ValueError('Invalid print title')
         profile=profiles().get(queue,{'kind':'document'})
         selected_options=print_options(options_value)
+        render_options={key:selected_options[key] for key in ('style','rotation') if key in selected_options}
+        if render_options and kind!='receipt-image' and not (kind=='document' and Path(filename).suffix.casefold() in {'.png','.jpg','.jpeg'}):raise ValueError('Style and rotation apply to images only')
         if profile.get('transport')=='mxw01-ble':
             import print_mxw01
             print_mxw01.validate(profile)
-            if selected_options!={'copies':1}:raise ValueError('Tiny Bluetooth printing supports one copy per reviewed job')
+            if set(selected_options)-{'copies','style','rotation'}:raise ValueError('Tiny Bluetooth printing does not support document options')
             if kind=='receipt-text':image=print_mxw01.text_image(data.decode('utf-8'))
-            elif kind=='receipt-image':image=receipt_bitmap(data,384)
+            elif kind=='receipt-image':image=receipt_bitmap(data,384,**render_options)
             else:raise ValueError('Tiny Bluetooth printer accepts receipt text or images; use a document printer for PDF')
-            payload,dots=print_mxw01.encode(image);paper_mm=dots/RECEIPT_DOTS_PER_MM
+            payload,dots=print_mxw01.encode(image)
+            dots*=selected_options['copies']
+            if dots>print_mxw01.MAX_ROWS:raise ValueError('Copies exceed the 6.4 cm total Tiny Printer job limit; reduce copies or image height')
+            payload*=selected_options['copies'];paper_mm=dots/RECEIPT_DOTS_PER_MM
         elif kind=='document':
             if profile.get('kind')=='escpos':raise ValueError('Use receipt text/image with this ESC/POS queue; PDF is not printer command data')
             suffix=Path(filename).suffix.casefold()
@@ -334,14 +354,16 @@ class Spool:
             if suffix=='.pdf' and not data.startswith(b'%PDF-'):raise ValueError('Invalid PDF header')
             if suffix=='.txt':data.decode('utf-8')
             payload=data
+            if render_options:
+                image=receipt_bitmap(data,1200,**render_options);out=io.BytesIO();image.save(out,format='PNG');payload=out.getvalue()
         elif kind in {'receipt-text','receipt-image'}:
             if profile.get('kind')!='escpos':raise ValueError('Configure this verified receipt queue with profile --kind escpos first')
-            if set(selected_options)!={'copies'}:raise ValueError('Receipt jobs do not support document page/media/sides options')
+            if set(selected_options)-{'copies','style','rotation'}:raise ValueError('Receipt jobs do not support document page/media/sides options')
             if kind=='receipt-text':
                 rendered=receipt_text(data.decode('utf-8'),profile['columns'])
                 dots=rendered.count(b'\n')*RECEIPT_LINE_DOTS
             else:
-                rendered,dots=encode_receipt_image(receipt_bitmap(data,profile['width']),profile.get('image_mode','raster'))
+                rendered,dots=encode_receipt_image(receipt_bitmap(data,profile['width'],**render_options),profile.get('image_mode','raster'))
             paper_mm=dots/RECEIPT_DOTS_PER_MM*selected_options['copies']
             if paper_mm>MAX_RECEIPT_MM:
                 raise ValueError(f'Receipt would use about {paper_mm/10:.1f} cm of paper; limit is {MAX_RECEIPT_MM/10:g} cm per job. Shorten the selection or crop the image.')

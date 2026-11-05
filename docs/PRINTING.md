@@ -253,10 +253,45 @@ advertise misleading Classic support. Each connection negotiates and verifies
 MTU before any print data, and bounds every write to that MTU. Text is rasterized
 locally; images use the same 384-dot monochrome format. No vendor app is needed.
 
-This initial transport accepts one copy and a maximum **6.4 cm** per reviewed job,
+This initial transport accepts 1–20 copies within a maximum **6.4 cm** per reviewed job,
 including feed margin, so synchronous Fabric requests stay bounded. Longer text
 or images are rejected before printing. PDF goes to a document printer. Listing
 shows a configured Bluetooth destination, not a live claim that the device is
 awake. Sending requires the printer to be powered on and in range. A per-device
 lock prevents overlapping jobs; a failed or uncertain attempt is never resent
-automatically. “Transmitted” means the data was sent, not that paper was verified.
+automatically. The driver waits for completion and checks the image checksum when reported; this confirms protocol delivery, not physical appearance.
+
+
+## Image print options
+
+Museum's terminal, fullscreen and browser print dialogs offer Image/ASCII,
+0°/90° clockwise rotation and copies before preparing a reviewed job. Terminal
+ASCII viewing defaults to ASCII printing. Change any web option and review again
+before sending. Review reports the combined estimated paper length; limits and
+printer-specific transfer ceilings still apply. Tiny Printer copies are one
+bounded raster job with blank spacing, not independent automatic retries.
+
+ASCII prints are rendered as dark characters on white paper, independent of the
+terminal's colors. Rotation happens before sizing to the configured print width;
+rotating a landscape image can therefore use more paper and show more detail.
+The original artwork is never modified. Document printers receive a rendered PNG
+when an image transformation is requested. PDF rotation is not supported here.
+
+```sh
+lk print file artwork.jpg --printer "Tiny Printer" --style ascii --rotation 90 --copies 1
+```
+
+This prepares a plan, never sends it immediately. Use the returned send command
+only after reviewing the destination and estimated paper usage.
+
+## Next: text slips and fortunes (design, not a new command yet)
+
+Use the existing shared text-print preparation and explicit-send path for all
+services. The AI authors the text (for example a short original fortune); the
+renderer owns a consistent printed style. Planned styles: plain note, compact
+receipt, and fortune. Each needs restrained rules/ornaments, readable typography,
+optional source/title, white space between slips, and a clear end marker. Keep
+text separate from decoration and account for both in the paper estimate. Never
+assume an automatic cutter: feed/tear behavior belongs to the printer profile.
+A future “print me a fortune” action should generate and validate the text first,
+then use the named destination and the same bounded, non-retrying job pipeline.

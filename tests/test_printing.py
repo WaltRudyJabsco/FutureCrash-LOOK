@@ -341,3 +341,28 @@ def test_receipt_byte_ceiling_configuration_preserved(spool):
     assert core.profiles()['receipt']['max_receipt_bytes']==4096
     for invalid in (-1,True,'4096',core.MAX_INPUT_BYTES+1):
         with pytest.raises(ValueError):core.configure_profile('receipt',max_receipt_bytes=invalid)
+
+
+def test_image_rotation_and_ascii_are_rendered_before_encoding():
+    from PIL import Image,ImageDraw
+    image=Image.new('RGB',(80,40),'white');ImageDraw.Draw(image).rectangle((0,0,39,39),fill='black')
+    out=io.BytesIO();image.save(out,format='PNG');data=out.getvalue()
+    original=core.receipt_bitmap(data,80)
+    rotated=core.receipt_bitmap(data,80,rotation=90)
+    ascii_image=core.receipt_bitmap(data,80,style='ascii')
+    assert original.size==(80,40) and rotated.size==(40,80)
+    assert ascii_image.size==original.size and ascii_image.tobytes()!=original.tobytes()
+    assert core.receipt_bitmap(data,80).tobytes()==original.tobytes()
+    for invalid in ({'rotation':45},{'rotation':True},{'style':'bad'},{'copies':0}):
+        with pytest.raises(ValueError):core.print_options(invalid)
+
+
+def test_document_image_transforms_remain_local_and_reviewed(spool,monkeypatch):
+    from PIL import Image
+    out=io.BytesIO();Image.new('RGB',(80,40),'black').save(out,format='JPEG')
+    monkeypatch.setattr(core,'profiles',lambda:{})
+    execute=Mock();monkeypatch.setattr(core,'run',execute)
+    plan=spool.prepare('desk',out.getvalue(),'art.jpg',options_value={'style':'ascii','rotation':90,'copies':2})
+    assert plan['options']=={'copies':2,'style':'ascii','rotation':90}
+    with spool.connect() as db:payload=db.execute('select payload from jobs where id=?',(plan['id'],)).fetchone()[0]
+    assert payload.startswith(b'\x89PNG') and not execute.called
