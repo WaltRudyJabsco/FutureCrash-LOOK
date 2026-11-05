@@ -33,7 +33,9 @@ def github_latest():
 def clients():
     try:from . import node
     except ImportError:import node
-    get=lambda target,path:node._target_get('127.0.0.1',7332,target,path)
+    def get(target,path):
+        if target=='local':return node.http_json('http://127.0.0.1:7332'+path,timeout=60 if path=='/v1/media/fabric' else 15)
+        return node._target_get('127.0.0.1',7332,target,path)
     post=lambda target,path,data:node._target_post('127.0.0.1',7332,target,path,data,timeout=40)
     return node,get,post
 
@@ -130,13 +132,19 @@ def start(kind='fabric',source='',review=''):
             job.update(state='failed',error=str(exc));maintenance.atomic_json(path,job);raise
         return job
 
+class ReceiptError(ValueError):
+    def __init__(self,receipt):
+        self.receipt=receipt
+        details=[s['label']+': '+s['state'] for s in receipt.get('steps',[]) if s['state'] not in {'verified','skipped'}]
+        super().__init__('; '.join(details) or str(receipt.get('error') or receipt.get('state')))
+
 def wait_for(read_status,accept,timeout=JOB_TIMEOUT):
     deadline=time.monotonic()+timeout;last=None
     while time.monotonic()<deadline:
         try:
             last=read_status()
             if accept(last):return last
-            if last.get('state') in {'failed','rolled_back','partial','incomplete'}:raise ValueError(str(last))
+            if last.get('state') in {'failed','rolled_back','partial','incomplete'}:raise ReceiptError(last)
         except OSError:pass
         time.sleep(POLL_SECONDS)
     raise TimeoutError('No verified completion receipt before timeout: '+str(last))
@@ -156,7 +164,9 @@ def worker(kind,identifier):
                 if result.get('state') in {'disabled','not running'}:record['state']='skipped'
                 if result.get('state')=='not_configured':record['state']='needs_setup'
                 if result.get('state') in {'queued','running','staged','sync already running'}:record['state']='pending'
-        except Exception as exc:record.update(state='failed',error=str(exc))
+        except Exception as exc:
+            record.update(state='failed',error=str(exc))
+            if isinstance(exc,ReceiptError):record['result']=exc.receipt
         record['finished']=time.time();maintenance.atomic_json(path,job);return record
     try:
         if kind=='local':local_work(step)
@@ -169,8 +179,10 @@ def worker(kind,identifier):
 def local_work(step):
     node,get,post=clients()
     sys.path.insert(0,str(Path.home()/'.local/share/look'))
-    step('Notes revision synchronization',lambda:post('local','/v1/notebook/sync',{}))
-    step('Mercury manuscript synchronization',lambda:post('local','/v1/mercury/sync',{}))
+    def synchronize(path):
+        return wait_for(lambda:post('local',path,{}),lambda r:r.get('state')!='sync already running',120)
+    step('Notes revision synchronization',lambda:synchronize('/v1/notebook/sync'))
+    step('Mercury manuscript synchronization',lambda:synchronize('/v1/mercury/sync'))
     import book_core,books,museum_library,museum_desk
     def scan_books():
         shelf=book_core.Shelf()
