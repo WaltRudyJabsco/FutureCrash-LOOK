@@ -285,7 +285,7 @@ def design_summary(result):
     state=result.get('state','unknown');label=result.get('destination',result.get('queue','printer'))
     receipt=result.get('receipt') or {};ident=result.get('id','')
     subject={'fortune':'Fortune','banner':'Banner'}.get(result.get('design',{}).get('kind'),'Print job')
-    if state in {'submitting','printing'}:return subject+' accepted by '+label+'; printing on its owner in the background. Job '+ident+'.'
+    if state in {'submitting','printing'}:return subject+' accepted by '+label+'; delivery is not yet confirmed. Check lk print inspect '+ident+' --node '+str(result.get('node','local'))+'.'
     if state=='queued':return subject+' sent to '+label+'. '+receipt.get('note','Check the physical output.')+' Job '+ident+'.'
     if state=='prepared':return subject+' prepared, not printed. '+result.get('send_command','Review job '+ident+'.')
     return subject+' status: '+state+'. '+receipt.get('error',receipt.get('note','Check printer jobs; do not resend automatically.'))+' Job '+ident+'.'

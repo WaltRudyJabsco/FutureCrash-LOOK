@@ -19,7 +19,7 @@ def respond(route):
     if path=='/api/museum/print':
         if request.method=='GET':return route.fulfill(json={'printers':[{'id':'receipt','label':'Little Printer'},{'id':'office','label':'Office'}]})
         data=request.post_data_json;print_requests.append(data)
-        return route.fulfill(json={'id':'a'*32,'node':'archive','destination':'Little Printer' if data.get('printer')=='receipt' else 'Office','estimated_paper_mm':61,'max_paper_mm':304.8,'state':'submitting' if data.get('action')=='send' else 'queued'})
+        return route.fulfill(json={'id':'a'*32,'node':'archive','destination':'Little Printer' if data.get('printer')=='receipt' else 'Office','estimated_paper_mm':61,'max_paper_mm':304.8,'state':'submitting' if data.get('action')=='send' else 'failed' if data.get('action')=='inspect' else 'queued','receipt':{'error':'Wake the printer; no print data sent'} if data.get('action')=='inspect' else {}})
     if path=='/api/museum/image':
         ident=parse_qs(url.query)['id'][0];ident=rows[0]['id'] if ident=='met-999999999' else ident;return route.fulfill(content_type='image/jpeg',body=(fixture/'collection/images'/(ident+'.jpg')).read_bytes())
     if path in ('/api/museum','/api/museum/search'):
@@ -59,9 +59,9 @@ with sync_playwright() as p:
     assert [x['action'] for x in print_requests]==['prepare']
     page.keyboard.press('ArrowRight');page.keyboard.press('Space')
     assert page.locator('#print-dialog').is_visible()
-    page.locator('#print-send').click();page.wait_for_function("document.querySelector('#print-status').textContent.includes('Printing on the owner')")
+    page.locator('#print-send').click();page.wait_for_function("document.querySelector('#print-status').textContent.includes('Accepted; waiting')")
     assert [x['action'] for x in print_requests]==['prepare','send']
-    page.locator('#print-check').click();page.wait_for_function("document.querySelector('#print-status').textContent.includes('Print queued')")
+    page.wait_for_function("document.querySelector('#print-status').textContent.includes('Wake the printer')")
     assert [x['action'] for x in print_requests]==['prepare','send','inspect']
     page.locator('#print-close').click()
     page.locator('.card').first.get_by_role('button',name='Print this artwork').click()

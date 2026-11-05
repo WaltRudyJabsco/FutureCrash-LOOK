@@ -29,6 +29,10 @@ DATA_UUID='0000ae03-0000-1000-8000-00805f9b34fb'
 ANSI=re.compile(rb'\x1b\[[0-9;]*[A-Za-z]')
 
 
+class PrintNotStarted(RuntimeError):
+    nothing_sent=True
+
+
 def validate(profile):
     if not re.fullmatch(r'(?:[0-9A-Fa-f]{2}:){5}[0-9A-Fa-f]{2}',str(profile.get('address',''))):
         raise ValueError('Use the observed Bluetooth printer address')
@@ -174,10 +178,14 @@ def transmit(profile,payload):
     with (root/('bluetooth-'+key+'.lock')).open('a') as lock:
         try:fcntl.flock(lock,fcntl.LOCK_EX|fcntl.LOCK_NB)
         except BlockingIOError:raise RuntimeError('Bluetooth printer is busy; this job was not sent')
-        session=Session(profile)
+        session=None;print_started=False
         try:
-            control,data=session.connect();rows=len(payload)//ROW_BYTES
+            session=Session(profile)
+            try:control,data=session.connect()
+            except (OSError,RuntimeError) as error:raise PrintNotStarted('Tiny Printer connection failed. Wake or power-cycle it near its owner, then request a new job. No print data sent. Details: '+str(error)) from error
+            rows=len(payload)//ROW_BYTES
             session.write(control,command(0xb1,b'\x00'))
+            print_started=True
             session.write(control,command(0xa9,rows.to_bytes(2,'little')+bytes([ROW_BYTES,0])))
             accepted=session.notification(0xa9)
             if not accepted or accepted[0]!=0:raise RuntimeError('Printer rejected image; no image data sent')
@@ -191,4 +199,8 @@ def transmit(profile,payload):
                 if completed[1]!=crc8(payload):raise RuntimeError('Printer image checksum mismatch; output may be partial. No automatic retry')
                 checksum_verified=True
             return {'transport':'mxw01-ble','rows':rows,'mtu':session.mtu,'completion_acknowledged':True,'checksum_verified':checksum_verified,'note':'Printer acknowledged completion; confirm physical appearance. This job will not be resent automatically.'}
-        finally:session.close()
+        except (OSError,RuntimeError) as error:
+            if not print_started and not isinstance(error,PrintNotStarted):raise PrintNotStarted('Print did not start: '+str(error)) from error
+            raise
+        finally:
+            if session is not None:session.close()

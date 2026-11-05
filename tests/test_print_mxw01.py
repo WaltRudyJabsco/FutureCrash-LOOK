@@ -178,3 +178,16 @@ def test_long_worker_failure_is_not_retried(home,monkeypatch):
     spool=core.Spool();p=spool.prepare('tiny',b'line\n'*25,'long.txt','receipt-text')
     spool.send(p['id'],True);assert spool.bluetooth_job(p['id'])['state']=='uncertain'
     spool.bluetooth_job(p['id']);spool.send(p['id'],True);assert transmit.call_count==1
+
+
+def test_connection_failure_is_definitely_not_printed(home,monkeypatch):
+    session=Mock();session.connect.side_effect=RuntimeError('Bluetooth response timed out')
+    monkeypatch.setattr(mx,'Session',lambda _:session)
+    with pytest.raises(mx.PrintNotStarted,match='No print data sent'):
+        mx.transmit(PROFILE,bytes(48*20))
+    session.write.assert_not_called();session.close.assert_called_once()
+    monkeypatch.setattr(core,'require_queue',lambda _: 'tiny');monkeypatch.setattr(core,'profiles',lambda:{'tiny':PROFILE})
+    spool=core.Spool();p=spool.prepare('tiny',b'note','n.txt','receipt-text')
+    result=spool.send(p['id'],True)
+    assert result['state']=='failed' and 'Wake' in result['receipt']['note']
+    spool.send(p['id'],True);assert session.connect.call_count==2

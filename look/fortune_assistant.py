@@ -3,6 +3,7 @@ import json
 from pathlib import Path
 import re
 import sys
+import time
 
 
 def intent(prompt):
@@ -36,6 +37,12 @@ def execute(prompt,allowed=True):
     label=matches[0]['label']
     value=generate()
     result=json.loads(printing.run_tool('print_design',{'kind':'fortune','text':value,'queue':label,'send':True},Path.home(),prompt,{}))
+    deadline=time.monotonic()+40
+    while result.get('state') in {'submitting','printing'} and time.monotonic()<deadline:
+        time.sleep(1)
+        try:checked=printing.request('inspect',result.get('node','local'),ident=result['id'])
+        except (OSError,RuntimeError,ValueError) as error:raise RuntimeError('Could not verify job '+result['id']+'. Check printer jobs before retrying; delivery is unknown. '+str(error)) from error
+        result=dict(checked,destination=label,design=result.get('design',{}))
     summary=printing.design_summary(result)
     if result.get('state') not in {'queued','submitting','printing'}:raise RuntimeError(summary)
     return summary
