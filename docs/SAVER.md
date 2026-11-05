@@ -143,3 +143,8 @@ saver and desktop PIN curtain can use different sets. Changes apply on their
 next launch; they do not alter an active curtain or the browser curtain, and do
 not synchronize preferences to other devices. The default curtain remains Flight
 Deck with the Bridge palette until a curtain set is explicitly selected.
+
+Editing members with Space keeps the launch mode on Cycle when saving or starting.
+Preview still shows the highlighted member without replacing the cycle. The picker
+shows the launch mode explicitly; loading a named set also keeps cycle mode while
+browsing its members.
