@@ -294,6 +294,9 @@ Only s explicitly saves a clip as a note for normal Fabric Notebook sync.
 Kitty: Option/Alt-Shift-W switches panes; Ctrl-Shift-W closes the focused pane.
 tmux uses Ctrl-B then O to switch; exit closes the shell. W stays text in editors.
 
+Editor Ctrl-G asks the Fabric to draft an entry at your cursor. Type or Ctrl-D
+dictate the request, Ctrl-S submit, then review/edit and Ctrl-S insert. Esc cancels.
+The note is saved separately; links are discovered, never executed by drafting.
 Editor Ctrl-D starts local dictation; Ctrl-C finishes and inserts at the caret.
 Review/edit the transcript before saving. Shift-D remains an ordinary capital D.
 Run lk transcribe setup once on this computer before microphone dictation.
@@ -601,10 +604,36 @@ def dictate_for_editor(fd,previous):
         sys.stdout.write('\033[>1u\033[?2004h');sys.stdout.flush()
 
 
-def capture_note(fd,read_key,initial_text='',label='NEW NOTE',store=None):
+def compose_entry(store,fd,read_key,text,cursor,previous):
+    from concurrent.futures import ThreadPoolExecutor
+    from threading import Event
+    try:from . import note_composer
+    except ImportError:import note_composer
+    request=capture_note(fd,read_key,label='ASK FABRIC',assistant=False,speech_state=previous,submit='request')
+    if not request or not request.strip():return None
+    rows,warning=note_composer.candidates(store,action_catalog())
+    context=text[max(0,cursor-3000):cursor]+' [INSERT HERE] '+text[cursor:cursor+3000]
+    while True:
+        cancel=Event();pool=ThreadPoolExecutor(max_workers=1)
+        future=pool.submit(note_composer.draft,request,context,rows,cancel)
+        try:
+            sys.stdout.write('\033[2J\033[HASK FABRIC · drafting locally/on your Fabric…\r\n'+safe_text(warning)+'\r\n'+command_hints('Esc cancel'));sys.stdout.flush()
+            while not future.done():
+                if read_key(fd,.1) in {'esc','\x03'}:cancel.set();return None
+            result=future.result()
+        finally:pool.shutdown(wait=False,cancel_futures=True)
+        if 'question' in result:
+            answer=capture_note(fd,read_key,label='ANSWER FABRIC',assistant=False,speech_state=previous,submit='reply',initial_notice=result['question'])
+            if not answer:return None
+            request+='\nClarification: '+result['question']+'\nAnswer: '+answer
+            continue
+        return capture_note(fd,read_key,initial_text=result['body'],label='REVIEW ENTRY',store=store,assistant=False,speech_state=previous,submit='insert')
+
+
+def capture_note(fd,read_key,initial_text='',label='NEW NOTE',store=None,assistant=True,speech_state=None,initial_notice='',submit='save'):
     """Paste and ordinary Enter never submit a draft."""
     previous=termios.tcgetattr(fd)
-    text=safe_text(initial_text); cursor=len(text); notice=''
+    text=safe_text(initial_text); cursor=len(text); notice=initial_notice
     try:
         tty.setraw(fd)
         sys.stdout.write('\033[>1u\033[?2004h')
@@ -620,9 +649,9 @@ def capture_note(fd,read_key,initial_text='',label='NEW NOTE',store=None):
             top=max(0,cursor_row-page+1)
             visible=rows[top:top+page]
             heading=(label+' · ')[:max(1,width-1)]
-            actions='Enter newline · Shift-Enter/Ctrl-S save · Esc cancel'[:max(0,width-1-len(heading))]
+            actions=('Enter newline · Shift-Enter/Ctrl-S '+submit+' · Esc cancel')[:max(0,width-1-len(heading))]
             frame=[KEY_CYAN+heading+'\033[0m'+command_hints(actions),
-                   command_hints('Ctrl-Y clipboard · Ctrl-D dictate · Ctrl-K insert action · Alt-arrows words/paragraphs'[:max(1,width-1)]),
+                   command_hints(('Ctrl-Y clipboard · Ctrl-D dictate · Ctrl-K link'+(' · Ctrl-G ask AI' if assistant else ''))[:max(1,width-1)]),
                    *notice_rows]
             if boxed:
                 frame.extend(['┌'+'─'*columns+'┐',*['│'+line.ljust(columns)+'│' for line in visible],'└'+'─'*columns+'┘'])
@@ -631,6 +660,15 @@ def capture_note(fd,read_key,initial_text='',label='NEW NOTE',store=None):
             key=read_key(fd,None)
             if key in {'esc','\x03'}: return None
             if key in {'shiftenter','\x13'}: return text
+            if key=='\x07' and assistant:
+                try:
+                    entry=compose_entry(store,fd,read_key,text,cursor,previous)
+                    if entry:
+                        text=text[:cursor]+entry+text[cursor:];cursor+=len(entry)
+                        notice='AI entry inserted · edit freely · Ctrl-S saves the note'
+                    else:notice='AI cancelled · draft unchanged'
+                except (OSError,ValueError,RuntimeError) as exc:notice='AI: '+str(exc)+' · draft unchanged'
+                continue
             if key=='\x19':
                 try:
                     pasted=clipboard_shelf.show(insert=True,fd=fd)
@@ -641,7 +679,7 @@ def capture_note(fd,read_key,initial_text='',label='NEW NOTE',store=None):
                 continue
             if key=='\x04':
                 try:
-                    spoken=dictate_for_editor(fd,previous)
+                    spoken=dictate_for_editor(fd,speech_state if speech_state is not None else previous)
                     text,cursor=insert_dictation(text,cursor,spoken)
                     notice='Dictation inserted · edit freely · Ctrl-S saves' if spoken.strip() else 'No speech inserted · draft unchanged'
                 except KeyboardInterrupt:notice='Dictation cancelled · draft unchanged'
