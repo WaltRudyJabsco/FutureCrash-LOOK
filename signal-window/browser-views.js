@@ -84,9 +84,9 @@
     try{root.open(url.href,'_blank','noopener')}catch{}
     return url.href;
   }
-  function fabricCommand(text){return /^(?:\/(?:fabric|dash|dashboard)|(?:please\s+)?(?:show|open)(?:\s+(?:me|our|the))?\s+fabric(?:\s+(?:dash|dashboard|status))?)[.!?]?$/i.test(String(text||'').trim())}
-  function openFabric(){
-    const url=new URL('/fabric.html',root.location.href).href;
+  function fabricCommand(text){return /^(?:\/(?:fabric(?:\s+update)?|dash|dashboard)|(?:please\s+)?(?:show|open)(?:\s+(?:me|our|the))?\s+fabric(?:\s+(?:dash|dashboard|status))?)[.!?]?$/i.test(String(text||'').trim())}
+  function openFabric(text=""){
+    const url=new URL('/fabric.html'+(/\bfabric\s+update\b/i.test(text)?'?update=1':''),root.location.href).href;
     try{root.open(url,'_blank','noopener')}catch{}
     return url;
   }
