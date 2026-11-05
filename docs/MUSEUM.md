@@ -95,6 +95,14 @@ unavailable. Online search and mutations require the node service.
 
 ## Web gallery
 
+Background refresh preserves existing artwork elements rather than reloading images
+on each progress check. Only an active download shows a progress bar and Stop
+control. Complete, cancelled, interrupted and below-target jobs show a finished
+summary; for example, 707 of 1,000 is a result count, not an active download.
+Source errors remain available under Source details. The paper gallery uses brass
+navigation and progress accents with blue links and search controls.
+
+
 Open `/museum` in either chat. Library, Discover, Collections, Favorites and Slideshow share
 the selected owner; the browser remembers its owner independently of the terminal.
 The page shows artist, date, source museum and downloaded status. Opening a work
