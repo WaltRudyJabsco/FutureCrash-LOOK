@@ -231,3 +231,32 @@ stored; it complements the paper-length limit. Oversized jobs fail without
 printing or retrying. Omitting the option preserves a configured ceiling; zero
 explicitly disables it. A byte ceiling is a precaution, not a diagnosis of USB
 flow control or proof that a larger print will succeed.
+
+
+## MXW01 Bluetooth receipt printers
+
+An observed MXW01 can be registered on its Linux owner with:
+
+```sh
+lk print bluetooth pocket --address AA:BB:CC:DD:EE:FF --adapter hci0 --label "Tiny Printer"
+```
+
+Use the address and adapter discovered on your own computer. This first shows a
+configuration preview; repeat with `--confirm` to save it. Registration does not
+pair, print, create a CUPS queue, or change another printer. The owner needs
+BlueZ `gatttool` and Pillow. Other Fabric nodes need no Bluetooth driver.
+
+The destination appears in the shared printer picker for Museum, Notes and
+selected text/image files. Existing USB printers retain their names and profiles.
+Tiny Printer uses explicit Low Energy connections because some MXW01 devices
+advertise misleading Classic support. Each connection negotiates and verifies
+MTU before any print data, and bounds every write to that MTU. Text is rasterized
+locally; images use the same 384-dot monochrome format. No vendor app is needed.
+
+This initial transport accepts one copy and a maximum **6.4 cm** per reviewed job,
+including feed margin, so synchronous Fabric requests stay bounded. Longer text
+or images are rejected before printing. PDF goes to a document printer. Listing
+shows a configured Bluetooth destination, not a live claim that the device is
+awake. Sending requires the printer to be powered on and in range. A per-device
+lock prevents overlapping jobs; a failed or uncertain attempt is never resent
+automatically. “Transmitted” means the data was sent, not that paper was verified.

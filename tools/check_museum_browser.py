@@ -19,7 +19,7 @@ def respond(route):
     if path=='/api/museum/print':
         if request.method=='GET':return route.fulfill(json={'printers':[{'id':'receipt','label':'Little Printer'},{'id':'office','label':'Office'}]})
         data=request.post_data_json;print_requests.append(data)
-        return route.fulfill(json={'id':'a'*32,'node':'archive','destination':'Little Printer' if data.get('printer')=='receipt' else 'Office','estimated_paper_mm':61,'state':'queued'})
+        return route.fulfill(json={'id':'a'*32,'node':'archive','destination':'Little Printer' if data.get('printer')=='receipt' else 'Office','estimated_paper_mm':61,'max_paper_mm':64,'state':'queued'})
     if path=='/api/museum/image':
         ident=parse_qs(url.query)['id'][0];ident=rows[0]['id'] if ident=='met-999999999' else ident;return route.fulfill(content_type='image/jpeg',body=(fixture/'collection/images'/(ident+'.jpg')).read_bytes())
     if path in ('/api/museum','/api/museum/search'):
@@ -50,6 +50,7 @@ with sync_playwright() as p:
     assert page.locator('#print-printer').input_value()=='receipt'
     page.locator('#print-review').click();page.wait_for_selector('#print-send:visible')
     assert '6.1 cm' in page.locator('#print-status').inner_text()
+    assert '6.4 cm limit' in page.locator('#print-status').inner_text()
     assert [x['action'] for x in print_requests]==['prepare']
     page.keyboard.press('ArrowRight');page.keyboard.press('Space')
     assert page.locator('#print-dialog').is_visible()
