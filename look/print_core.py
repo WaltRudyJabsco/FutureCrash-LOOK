@@ -202,6 +202,7 @@ def receipt_text(text,columns):
     import textwrap
     if not isinstance(text,str) or not text.strip():raise ValueError('Receipt text is empty')
     if any(ord(c)<32 and c not in '\n\t' or ord(c)==127 for c in text):raise ValueError('Receipt text cannot contain printer control codes')
+    text=text.translate(str.maketrans({'’':"'",'‘':"'",'“':'"','”':'"','–':'-','—':'--','…':'...','\u00a0':' '}))
     try:
         lines=['\n'.join(textwrap.wrap(line.expandtabs(4),columns) or ['']) for line in text.splitlines()]
         return ('\n'.join(lines)+'\n\n\n').encode('cp437',errors='strict')

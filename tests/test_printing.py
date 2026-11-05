@@ -110,7 +110,8 @@ def test_read_only_lo_profile_and_print_route(lk,monkeypatch):
     conservative={t['function']['name'] for t in lk._lo_tools('conservative')}
     assert {'printers_list','printer_inspect'}<=conservative and 'print_prepare' not in conservative
     workspace={t['function']['name'] for t in lk._lo_tools('workspace')}
-    assert 'print_prepare' in workspace and 'print_send' not in workspace
+    assert {'print_prepare','print_text'} <= workspace and 'print_send' not in workspace
+    assert 'print_text' not in conservative
     route=cognition.analyze('print this document on the receipt printer',use_openjev=False)
     assert route.primary=='printing'
 
@@ -217,3 +218,47 @@ def test_unverified_job_id_never_claims_queued(spool,monkeypatch):
     assert result['state']=='uncertain' and result['receipt']['job'] is None
     assert 'text_preview' not in result and spool.get(draft['id'])[3] is None
     assert spool.send(draft['id'],True)['state']=='uncertain' and execute.call_count==1
+
+
+@pytest.mark.parametrize('prompt', ["Do not print on Little Printer", "How do I print on Little Printer?", "Preview this for Little Printer", "What can I print on Little Printer?", "I asked it to print on Little Printer", "Print this on Epson", "Can Little Printer print recipes?", "Send me information about Little Printer", "Don’t print on Little Printer"])
+def test_quick_tool_requires_current_explicit_named_print(prompt,tmp_path,monkeypatch):
+    call=Mock();monkeypatch.setattr(printing,'quick_text',call)
+    with pytest.raises(ValueError):printing.run_tool('print_text',{'queue':'Little Printer','text':'Eggs'},tmp_path,prompt,{})
+    call.assert_not_called()
+
+
+def test_quick_tool_one_submission_per_turn_even_after_error(tmp_path,monkeypatch):
+    call=Mock(side_effect=RuntimeError('response lost'));monkeypatch.setattr(printing,'quick_text',call)
+    turn={};args={'queue':'Little Printer','text':'Eggs'}
+    with pytest.raises(RuntimeError):printing.run_tool('print_text',args,tmp_path,'Please print eggs on Little Printer',turn)
+    with pytest.raises(ValueError,match='Only one'):printing.run_tool('print_text',args,tmp_path,'Please print eggs on Little Printer',turn)
+    assert call.call_count==1
+
+
+def test_quick_receipt_pins_owner_and_one_copy(monkeypatch):
+    monkeypatch.setattr(printing,'destinations',lambda:{'printers':[{'id':'usb1','label':'Little Printer','routes':[{'name':'usb','node':'owner','status':'idle','profile':{'kind':'escpos'}}]}]})
+    prepare=Mock(return_value={'id':'plan','node':'owner'});send=Mock(return_value={'state':'queued'})
+    monkeypatch.setattr(printing,'prepare',prepare);monkeypatch.setattr(printing,'request',send)
+    assert printing.quick_text('Little Printer','Recipe',exact_label=True)['state']=='queued'
+    prepare.assert_called_once_with('usb','owner',text='Recipe',receipt=True,copies=1)
+    send.assert_called_once_with('send','owner',ident='plan',confirm=True)
+    with pytest.raises(ValueError):printing.quick_text('Printer','Recipe',exact_label=True)
+    with pytest.raises(ValueError):printing.quick_text('Little Printer','x'*8001)
+
+
+def test_receipt_typography_keeps_quantities_and_blocks_control_codes():
+    assert core.receipt_text('Chef’s recipe — ½ cup',48).decode('cp437').startswith("Chef's recipe -- ½ cup")
+    with pytest.raises(ValueError):core.receipt_text('bad\x1b@',48)
+
+
+def test_quick_cli_reads_stdin(monkeypatch):
+    import io
+    monkeypatch.setattr(printing.sys,'stdin',io.StringIO('Eggs\nMilk'))
+    call=Mock(return_value={'state':'queued'});monkeypatch.setattr(printing,'quick_text',call)
+    assert printing.main(['quick','-','--printer','Little Printer'])==0
+    call.assert_called_once_with('Little Printer','Eggs\nMilk')
+
+
+@pytest.mark.parametrize('prompt', ['Print this recipe on Little Printer', 'Can you print my shopping list on Little Printer?', 'Make a recipe and send it to the Little Printer'])
+def test_explicit_quick_print_phrases(prompt):
+    assert printing.explicit_print(prompt,'Little Printer')

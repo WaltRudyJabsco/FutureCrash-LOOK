@@ -8608,7 +8608,7 @@ _TOOL_POLICY = {
     "list_processes":("all","observation"),"listening_ports":("all","observation"),"system_snapshot":("all","observation"),
     "game_action":("all","action"),
     "audio_speak":("all","action"),
-    "printers_list":("all","observation"),"printer_inspect":("all","observation"),"print_prepare":("workspace","mutation"),
+    "printers_list":("all","observation"),"printer_inspect":("all","observation"),"print_prepare":("workspace","mutation"),"print_text":("workspace","action"),
     "receipts_search":("all","observation"),
     "museum_search":("all","observation"),
     "radio_queue":("all","observation"),"radio_add":("workspace","action"),
@@ -11763,6 +11763,7 @@ def ollama_chat(force_search=False, initial_prompt=None, allow_start=True, host_
         turn_evidence = []
         turn_proposed_action = None
         turn_successful_tools=set()
+        print_turn={}
 
         # Terminal drag/drop becomes first-class resource context. Finder and most Linux
         # terminals paste escaped/quoted paths into the input line; normalize them here.
@@ -11866,7 +11867,7 @@ def ollama_chat(force_search=False, initial_prompt=None, allow_start=True, host_
         else:
             messages.append({"role":"system","content":(
                 "RESOURCE SCOPE: unqualified open/play/find requests default to the operator's local world. "
-                "Fabric printers use printers_list/printer_inspect. To print a to-do list from Notes, use notebook_search/list/read for its actual body, then print_prepare with that text and the chosen receipt destination; do not substitute a guessed list. print_prepare creates a review plan only, never sends paper. Return the confirmation command; do not run it yourself. Never claim physical printing from a spooler receipt. Export DOCX/manuscripts to PDF first. "
+                "Fabric printers use printers_list/printer_inspect. To print a to-do list from Notes, use notebook_search/list/read for its actual body, then print_prepare with that text and the chosen receipt destination; do not substitute a guessed list. When the current user explicitly asks to print to a named printer, use print_text with its friendly label and the requested short text; this sends one copy. Otherwise print_prepare creates a review plan only; return its confirmation command. Do not automatically retry a print_text submission. For recipes format a title, ingredients and concise steps; preserve quantities. Never invent the contents of an existing note. Never claim physical printing from a spooler receipt. Export DOCX/manuscripts to PDF first. "
                 "Museum is the Fabric artwork collection. Use museum_search for actual artworks and image links; do not guess folders or claim to see an image from metadata. "
                 "YouTube Radio (YTR / lk ytr) is the shared listen-later queue. Use radio_queue to inspect it and radio_add for explicitly requested YouTube links; adding never starts playback. "
                 "Mercury Reader is the built-in Fabric EPUB/PDF library. For books and saved reading positions use books_shelf/books_lookup; never guess a media folder or substitute music search. Reader links are relative to the current Signal/Albert browser host; lk books is the terminal shelf. Book lookups do not launch or start narration. "
@@ -12463,9 +12464,9 @@ def ollama_chat(force_search=False, initial_prompt=None, allow_start=True, host_
                             tool_content,_ok,_elapsed=_tool_transaction(
                                 name,args,lambda: _run_system_inspection_tool(name,args))
                         if _ok: turn_successful_tools.add(name)
-                    elif name in {'printers_list','printer_inspect','print_prepare'}:
+                    elif name in {'printers_list','printer_inspect','print_prepare','print_text'}:
                         import printing
-                        tool_content,_ok,_elapsed=_tool_transaction(name,args,lambda:printing.run_tool(name,args,workspace))
+                        tool_content,_ok,_elapsed=_tool_transaction(name,args,lambda:printing.run_tool(name,args,workspace,prompt,print_turn))
                         if _ok:turn_successful_tools.add(name)
                     elif name=='receipts_search':
                         import receipt_desk
@@ -21430,6 +21431,7 @@ _COMMANDS = [
     ("lk print file", "FILE [--printer PRINTER] [--node NODE] [--pages 1-3,5] [--copies N] [--media MEDIA] [--sides SIDES]", "files", "Prepare a bounded document job; export manuscripts to PDF first"),
     ("lk print text", "TEXT|- [--printer PRINTER] [--node NODE]", "files", "Prepare UTF-8 text for a document printer"),
     ("lk print receipt", "[TEXT|-|--image FILE] [--printer PRINTER] [--node NODE]", "files", "Prepare ESC/POS text or dithered raster art; explicit receipt profile required"),
+    ("lk print quick", 'TEXT|- --printer "NAME"', "files", "Immediately print one short text job on a named Fabric printer"),
     ("lk print send", "ID [--node NODE] [--confirm]", "files", "Review or explicitly submit a prepared job once; never auto-retry uncertain printing"),
     ("lk print inspect", "ID [--node NODE]", "files", "Inspect a print plan or spooler acceptance receipt"),
     ("lk print discard", "ID [--node NODE] [--confirm]", "files", "Discard unsent print content"),

@@ -1,7 +1,8 @@
-"""Fabric printing CLI and bounded assistant hooks. No model tool sends paper."""
+"""Fabric printing CLI and bounded assistant hooks. Explicit text-print requests can submit one bounded job."""
 import argparse
 import base64
 import json
+import re
 from pathlib import Path
 import sys
 import fabric_files
@@ -53,6 +54,32 @@ def prepare(queue,node='auto',path=None,text=None,receipt=False,**options):
     result=request('prepare',node,queue=queue,data=base64.b64encode(data).decode(),filename=title,kind=kind,options_value=options)
     result['send_command']='lk print send '+result['id']+' --node '+result.get('node',node)+' --confirm'
     return result
+
+
+MAX_QUICK_TEXT = 8000
+
+
+def quick_text(queue, text, exact_label=False):
+    """Resolve once and pin the owner before preparing and submitting one copy."""
+    from print_destinations import choose, route
+    if not isinstance(text,str) or not text.strip() or len(text)>MAX_QUICK_TEXT:
+        raise ValueError('Quick printing accepts 1–8,000 characters; use a reviewed plan for longer documents')
+    catalog=destinations();destination=choose(catalog,queue)
+    if exact_label and destination['label'].casefold()!=queue.casefold():
+        raise ValueError('Use the exact friendly printer name from discovery')
+    selected=route(destination,catalog.get('local_node',''))
+    plan=prepare(selected['name'],selected['node'],text=text,
+                 receipt=selected.get('profile',{}).get('kind')=='escpos',copies=1)
+    return dict(request('send',plan['node'],ident=plan['id'],confirm=True),destination=destination['label'])
+
+
+def explicit_print(prompt, label):
+    text=' '.join(str(prompt or '').casefold().replace('’',"'").split())
+    label=' '.join(label.casefold().split())
+    if not label or not re.search(r'(?<!\w)'+re.escape(label)+r'(?!\w)',text):return False
+    if re.match(r'^(?:what|why|when|where|did|does|is|was|i (?:said|asked|tried)|(?:can|could|would|should) (?!you\b))\b',text):return False
+    if re.search(r"\b(?:don't|do not|never|without|not yet|preview|draft|explain|how|can i|could i|should i)\b",text):return False
+    return bool(re.search(r'\bprint\b',text) or re.search(r'\bsend\b.*\bto (?:the )?'+re.escape(label)+r'(?!\w)',text))
 
 
 def printable_file(path):
@@ -130,6 +157,8 @@ def parser():
     item=sub.add_parser('profile');item.add_argument('queue');item.add_argument('--kind',choices=['document','escpos'],required=True);item.add_argument('--width',type=int,default=384);item.add_argument('--columns',type=int,default=32);item.add_argument('--confirm',action='store_true');item.add_argument('--node',default='local')
     for action in ['file','text','receipt']:
         item=sub.add_parser(action);item.add_argument('content',nargs='?' if action=='receipt' else None);item.add_argument('--image');item.add_argument('--printer');item.add_argument('--node',default='auto');item.add_argument('--copies',type=int,default=1);item.add_argument('--pages');item.add_argument('--media');item.add_argument('--sides',choices=['one-sided','two-sided-long-edge','two-sided-short-edge'])
+    item=sub.add_parser('quick',help='Send one text receipt/document immediately to a named printer')
+    item.add_argument('content');item.add_argument('--printer',required=True)
     for action in ['inspect','send','discard']:
         item=sub.add_parser(action);item.add_argument('ident');item.add_argument('--node',default='local')
         if action!='inspect':item.add_argument('--confirm',action='store_true')
@@ -194,6 +223,10 @@ def main(args,ui=None):
             if content=='-' and action!='file':content=sys.stdin.buffer.read(MAX_INPUT_BYTES+1).decode('utf-8')
             options={k:v for k,v in value.items() if v is not None}
             result=prepare_file(queue,content,node,**options) if action=='file' else prepare(queue,node,path=image,text=None if image else content,receipt=action=='receipt',**options)
+        elif action=='quick':
+            content=value['content']
+            if content=='-':content=sys.stdin.read(MAX_QUICK_TEXT+1)
+            result=quick_text(value['printer'],content)
         else:result=request(action or 'list',node,**value)
         if queues:result=dict(result,printers=result.get('queues',[]))
         if as_json:print(json.dumps(result,ensure_ascii=False,indent=2))
@@ -205,13 +238,21 @@ def main(args,ui=None):
 def tools():
     fields={'node':{'type':'string','description':'Optional exact owner; default auto selects an enabled route'},'queue':{'type':'string','description':'Stable physical printer ID or unique friendly name from discovery; an exact queue works with an explicit owner'}}
     return [
+        {'type':'function','function':{'name':'print_text','description':'Print one short recipe, list, note or receipt immediately ONLY when the user explicitly requests printing to a named printer in this message. Discover its exact friendly label first. Read actual Notes content before printing it. Automatically formats for the destination. One copy, at most 8000 characters; no automatic retry. Report spooler acceptance, never physical delivery. Use print_prepare for previews, files, or unclear requests.','parameters':{'type':'object','properties':{'queue':{'type':'string','description':'Exact friendly printer label present in the user request'},'text':{'type':'string','maxLength':8000}},'required':['queue','text'],'additionalProperties':False}}},
         {'type':'function','function':{'name':'printers_list','description':'List physical printers once across the trusted Fabric, with stable ID, friendly name and underlying queue routes. No setup or printing.','parameters':{'type':'object','properties':{},'additionalProperties':False}}},
         {'type':'function','function':{'name':'printer_inspect','description':'Inspect printer options or jobs on an exact owner/queue.','parameters':{'type':'object','properties':dict(fields,view={'type':'string','enum':['options','jobs']}),'required':['queue'],'additionalProperties':False}}},
         {'type':'function','function':{'name':'print_prepare','description':'Prepare a text/document/receipt job for user review, NEVER send paper. Return immutable plan, options and confirmation command. Choose a physical printer from discovery; automatic routing hides its underlying queues. Export DOCX/manuscripts to PDF before preparing.','parameters':{'type':'object','properties':dict(fields,path={'type':'string'},text={'type':'string'},receipt={'type':'boolean','description':'True for a configured ESC/POS receipt destination; false for document printers'},copies={'type':'integer','minimum':1,'maximum':20},pages={'type':'string'},media={'type':'string'},sides={'type':'string','enum':['one-sided','two-sided-long-edge','two-sided-short-edge']}),'required':['queue'],'additionalProperties':False}}}]
 
 
-def run_tool(tool,args,workspace):
+def run_tool(tool,args,workspace,prompt='',turn=None):
     value=dict(args)
+    if tool=='print_text':
+        if set(value)!={'queue','text'} or not isinstance(value['queue'],str) or not explicit_print(prompt,value['queue']):
+            raise ValueError('Ask explicitly to print to a named printer; previews and questions do not send paper')
+        if turn is None or turn.get('print_attempted'):
+            raise ValueError('Only one quick print attempt per user message; inspect jobs before requesting another')
+        turn['print_attempted']=True
+        return json.dumps(quick_text(value['queue'],value['text'],exact_label=True))
     if tool=='printers_list':return json.dumps(request('list','all'))
     if tool=='printer_inspect':
         if set(value)-{'view','node','queue'}:raise ValueError('Printer inspection accepts only owner, queue and options/jobs view')

@@ -151,19 +151,33 @@ print dialogs can be added as separate adapters after identifying the hardware.
 
 ## LO and integration hooks
 
-“LO, print this to-do list from Notes on the Little Printer” is the intended
-workflow: LO reads the actual Notes body through notebook search/list/read, chooses
-the discovered nickname and owner, and prepares receipt text for review. It never
-invents a replacement list or marks tasks complete. Notes are not modified by
-printing. The model-driven phrasing still depends on the selected model following
-the provided tools; the underlying Notes read and print-plan hooks are tested.
+Say “print my shopping list from Notes on Little Printer” in LO, Albert or
+Signal. The assistant discovers the named destination, reads the actual note,
+and uses `print_text` to submit one copy. A generated recipe can likewise be
+printed with its title, ingredients and steps. Notes are never modified by printing.
 
-Ask LO “what printers are available?” for observed queues and owners. Model tools
-`printers_list` and `printer_inspect` read capabilities/jobs; `print_prepare`
-stages text or workspace-contained files in workspace-or-higher profiles. It does
-not send paper. LO returns the exact confirmation command, which can also be run
-as an explicit `lk print ...` line inside terminal LO. Read-only profiles never
-upload document contents. No printer-submit or setup tool is exposed to a model.
+For a direct terminal command:
+
+```sh
+lk print quick "Remember the milk" --printer "Little Printer"
+printf 'Shopping list\nEggs\nMilk\n' | lk print quick - --printer "Little Printer"
+```
+
+`quick` explicitly sends one copy, automatically selecting document or ESC/POS
+format from the printer profile. It accepts at most 8,000 characters. No default
+printer, driver or device nickname is installed for other users.
+
+The shared `print_text` model tool requires workspace-or-higher access and a
+current explicit print/send request containing the exact discovered printer
+label. Questions and previews do not authorize printing. The host permits only
+one attempt per user message, including after uncertain failures. It returns
+CUPS acceptance, not proof that paper emerged. Model interpretation still depends
+on the chosen model; use the direct command if it asks unnecessary questions.
+
+`printers_list` and `printer_inspect` remain read-only. `print_prepare` stages
+text or workspace-contained files for review and returns a confirmation command;
+it never sends paper. File printing and longer documents retain that review path.
+Read-only profiles cannot upload or print, and models cannot configure printers.
 
 Other applications can use `printing.prepare` or the paired Fabric API:
 `GET /v1/print`, `GET /v1/print/fabric`, `POST /v1/print` with `action` matching the
