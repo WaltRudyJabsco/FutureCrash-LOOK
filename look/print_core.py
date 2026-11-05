@@ -144,12 +144,15 @@ def nickname(queue,label,confirm=False):
     return {'applied':True,'queue':queue,'profile':update_profile(queue,{'label':label})}
 
 
-def configure_profile(queue,kind='document',width=384,columns=32,confirm=False):
+def configure_profile(queue,kind='document',width=384,columns=32,confirm=False,image_mode='raster'):
     queue=require_queue(queue)
     if kind not in {'document','escpos'}:raise ValueError('Choose document or escpos')
     if type(width) is not int or not 128<=width<=832 or width%8:raise ValueError('Printable width must be 128–832 dots in multiples of 8; check the printer manual')
     if type(columns) is not int or not 16<=columns<=80:raise ValueError('Columns must be 16–80')
+    if image_mode not in {'raster','column24'}:raise ValueError('Choose raster or column24 image mode')
     value={'kind':kind,'width':width,'columns':columns}
+    if image_mode!='raster':value['image_mode']=image_mode
+    elif 'image_mode' in profiles().get(queue,{}):value['image_mode']='raster'
     if confirm is not True:return {'applied':False,'queue':queue,'proposed_profile':dict(profiles().get(queue,{}),**value)}
     return {'applied':True,'queue':queue,'profile':update_profile(queue,value)}
 
@@ -213,7 +216,7 @@ def receipt_text(text,columns):
     except UnicodeEncodeError as error:raise ValueError('This receipt text needs unsupported characters; use a raster image or a document printer') from error
 
 
-def receipt_image(data,width):
+def receipt_bitmap(data,width):
     try:from PIL import Image,ImageOps
     except ImportError as error:raise RuntimeError('Receipt image preparation needs Pillow; text receipts work without it') from error
     with Image.open(io.BytesIO(data)) as source:
@@ -224,9 +227,38 @@ def receipt_image(data,width):
         if height>MAX_RASTER_HEIGHT:raise ValueError('Receipt image is too tall; crop it first')
         image=image.resize((min(width,image.width),height))
         padded=Image.new('L',((image.width+7)//8*8,height),255);padded.paste(image)
-        # ESC/POS GS v 0 uses a set bit for black; Pillow mode 1 uses it for white.
-        raster=bytes(byte^255 for byte in padded.convert('1').tobytes());stride=padded.width//8
-        return b'\x1dv0\x00'+stride.to_bytes(2,'little')+height.to_bytes(2,'little')+raster+b'\n\n\n'
+        return padded.convert('1')
+
+
+def encode_receipt_image(image,mode='raster'):
+    """Encode the same monochrome bitmap in the device's configured wire format."""
+    if mode=='raster':
+        raster=bytes(byte^255 for byte in image.tobytes())
+        payload=b'\x1dv0\x00'+(image.width//8).to_bytes(2,'little')+image.height.to_bytes(2,'little')+raster+b'\n\n\n'
+        return payload,image.height+RECEIPT_FEED_LINES*RECEIPT_LINE_DOTS
+    if mode!='column24':raise ValueError('Unsupported receipt image mode')
+    # Keep reset out of this path: the successful portable-printer probe omitted it.
+    # Each LF advances exactly one 24-dot band; restore text spacing afterward.
+    band_height=24
+    payload=bytearray(b'\x1b3'+bytes([band_height]))
+    pixels=image.load()
+    for top in range(0,image.height,band_height):
+        payload.extend(b'\x1b*\x21'+image.width.to_bytes(2,'little'))
+        for x in range(image.width):
+            for offset in range(0,band_height,8):
+                value=0
+                for bit in range(8):
+                    y=top+offset+bit
+                    if y<image.height and pixels[x,y]==0:value|=128>>bit
+                payload.append(value)
+        payload.append(10)
+    payload.extend(b'\x1b3'+bytes([RECEIPT_LINE_DOTS])+b'\n'*RECEIPT_FEED_LINES)
+    dots=((image.height+band_height-1)//band_height)*band_height+RECEIPT_FEED_LINES*RECEIPT_LINE_DOTS
+    return bytes(payload),dots
+
+
+def receipt_image(data,width):
+    return encode_receipt_image(receipt_bitmap(data,width))[0]
 
 
 class Spool:
@@ -256,14 +288,16 @@ class Spool:
         elif kind in {'receipt-text','receipt-image'}:
             if profile.get('kind')!='escpos':raise ValueError('Configure this verified receipt queue with profile --kind escpos first')
             if set(selected_options)!={'copies'}:raise ValueError('Receipt jobs do not support document page/media/sides options')
-            rendered=receipt_text(data.decode('utf-8'),profile['columns']) if kind=='receipt-text' else receipt_image(data,profile['width'])
-            dots=(rendered.count(b'\n')*RECEIPT_LINE_DOTS if kind=='receipt-text'
-                  else int.from_bytes(rendered[6:8],'little')+RECEIPT_FEED_LINES*RECEIPT_LINE_DOTS)
+            if kind=='receipt-text':
+                rendered=receipt_text(data.decode('utf-8'),profile['columns'])
+                dots=rendered.count(b'\n')*RECEIPT_LINE_DOTS
+            else:
+                rendered,dots=encode_receipt_image(receipt_bitmap(data,profile['width']),profile.get('image_mode','raster'))
             paper_mm=dots/RECEIPT_DOTS_PER_MM*selected_options['copies']
             if paper_mm>MAX_RECEIPT_MM:
                 raise ValueError(f'Receipt would use about {paper_mm/10:.1f} cm of paper; limit is {MAX_RECEIPT_MM/10:g} cm per job. Shorten the selection or crop the image.')
             # Set line spacing explicitly so the estimate does not depend on device defaults.
-            payload=b'\x1b@\x1b3'+bytes([RECEIPT_LINE_DOTS])+rendered
+            payload=rendered if kind=='receipt-image' and profile.get('image_mode')=='column24' else b'\x1b@\x1b3'+bytes([RECEIPT_LINE_DOTS])+rendered
         else:raise ValueError('Unsupported print kind')
         ident=uuid.uuid4().hex
         meta={'id':ident,'queue':queue,'title':filename,'kind':kind,'options':selected_options,'profile':profile,'bytes':len(payload),'sha256':hashlib.sha256(payload).hexdigest(),'state':'prepared','expires_in_seconds':PLAN_LIFETIME,'note':'Not sent. Review printer/options and use lk print send ID --confirm. Spooler acceptance does not prove physical printing.'}

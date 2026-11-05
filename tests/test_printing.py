@@ -281,3 +281,38 @@ def test_receipt_image_length_includes_feed(spool,monkeypatch):
     monkeypatch.setattr(core,'profiles',lambda:{'desk':{'kind':'escpos','width':576,'columns':48}})
     output=io.BytesIO();Image.new('RGB',(576,2000),'white').save(output,format='PNG')
     with pytest.raises(ValueError,match='crop'):spool.prepare('desk',output.getvalue(),'art.png','receipt-image')
+
+
+def test_column_image_roundtrip_and_partial_last_band():
+    from PIL import Image
+    image=Image.new('1',(64,53),1)
+    for y in range(image.height):
+        for x in range(image.width):
+            if x in (0,63) or y in (0,52) or x==y:image.putpixel((x,y),0)
+    encoded,dots=core.encode_receipt_image(image,'column24')
+    assert encoded[:3]==b'\x1b3\x18'
+    restored=Image.new('1',(64,72),1);position=3
+    for top in range(0,72,24):
+        assert encoded[position:position+5]==b'\x1b*\x21\x40\x00';position+=5
+        for x in range(64):
+            for offset in range(0,24,8):
+                value=encoded[position];position+=1
+                for bit in range(8):
+                    if value & (128>>bit):restored.putpixel((x,top+offset+bit),0)
+        assert encoded[position]==10;position+=1
+    assert encoded[position:]==b'\x1b3\x1e\n\n\n'
+    assert restored.crop((0,0,64,53)).tobytes()==image.tobytes()
+    assert all(restored.getpixel((x,y)) for y in range(53,72) for x in range(64))
+    assert dots==72+90
+
+
+def test_column_profile_spools_without_reset_and_estimates_padding(spool,monkeypatch):
+    import io
+    from PIL import Image
+    monkeypatch.setattr(core,'profiles',lambda:{'desk':{'kind':'escpos','width':384,'columns':32,'image_mode':'column24'}})
+    output=io.BytesIO();Image.new('1',(64,25),1).save(output,format='PNG')
+    plan=spool.prepare('desk',output.getvalue(),'thumbnail.png','receipt-image')
+    payload=spool.get(plan['id'])[3]
+    assert payload.startswith(b'\x1b3\x18\x1b*\x21')
+    assert plan['estimated_paper_mm']==(48+90)/8
+    assert plan['profile']['image_mode']=='column24'
