@@ -98,7 +98,7 @@ class Session:
         if self.mtu<CHUNK_BYTES+3:raise RuntimeError('Printer negotiated too small a Bluetooth packet; nothing printed')
         self.send('characteristics')
         reply=self.wait(rb'([\s\S]*0000ae3c-0000-1000-8000-00805f9b34fb)')
-        found=dict((uuid.decode(),handle.decode()) for handle,uuid in re.findall(rb'char value handle = (0x[0-9a-f]+), uuid = ([0-9a-f-]+)',reply.group(0)))
+        found=dict((uuid.decode(),handle.decode()) for handle,uuid in re.findall(rb'char value handle\s*[:=]\s*(0x[0-9a-f]+), uuid\s*[:=]\s*([0-9a-f-]+)',reply.group(0)))
         if CONTROL_UUID not in found or DATA_UUID not in found:raise RuntimeError('Printer does not expose MXW01 control/data channels')
         return found[CONTROL_UUID],found[DATA_UUID]
 
