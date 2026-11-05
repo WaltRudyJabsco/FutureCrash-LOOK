@@ -347,3 +347,12 @@ This only prepares a plan. Review the estimated length and then use its explicit
 send command. `--paper-limit-mm` also accepts intermediate allowances, for example
 609.6 for two feet. A ruler needs physical scale calibration before it is suitable
 for measurements; raster sizing and printer mechanics can affect its scale.
+
+
+Named fortune requests such as “print me a fortune on tiny printer” take a
+narrow direct route shared by LO, Signal and Albert. It discovers the friendly
+printer name case-insensitively, generates a short fortune through Fabric, then
+submits once using the existing explicit-print guard. The model does not decide
+whether the printer exists or whether to ask for redundant confirmation. Missing
+printers, failed generation and submission errors produce an explicit result.
+Bare follow-ups such as “immediately” do not replay an earlier print attempt.
