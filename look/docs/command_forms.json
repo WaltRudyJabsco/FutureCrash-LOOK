@@ -988,6 +988,12 @@
     "Prepare ESC/POS text or dithered raster art; explicit receipt profile required"
   ],
   [
+    "lk print quick",
+    "TEXT|- --printer \"NAME\"",
+    "files",
+    "Immediately print one short text job on a named Fabric printer"
+  ],
+  [
     "lk print send",
     "ID [--node NODE] [--confirm]",
     "files",
