@@ -219,3 +219,7 @@ takes text files as receipt text and PNG/JPEG as monochrome raster art. PDF need
 a document printer. Other application formats, including manuscript projects,
 need export to PDF first. This is also the reusable file hook for Albert/Signal
 clients; it does not add a separate web print button or bypass job confirmation.
+
+Museum supports **p** (or **Shift+N**) from its terminal list and viewers, and a
+**Print** button in the web gallery. The receipt printer is suggested first;
+users can choose any discovered printer and review before sending one copy.

@@ -8,7 +8,7 @@ import print_details
 from notebook_markdown import safe_text
 
 
-def screen(ui,select=False,node='auto'):
+def screen(ui,select=False,node='auto',prefer_receipt=False):
     if ui is None:raise ValueError('Open the printer desk through lk print')
     fd=sys.stdin.fileno();old=termios.tcgetattr(fd);selected=0;detail=None;notice='';offset=0
     def refresh():
@@ -18,6 +18,7 @@ def screen(ui,select=False,node='auto'):
             owner=value.get('local_node') if node=='local' else node
             rows=[dict(row,routes=[route for route in row['routes'] if route['node']==owner]) for row in rows]
             rows=[row for row in rows if row['routes']]
+        if prefer_receipt:rows.sort(key=lambda row:not any(route.get('profile',{}).get('kind')=='escpos' and not any(word in route.get('status','').lower() for word in ('disabled','paused','unavailable')) for route in row['routes']))
         return rows,value.get('errors',[])
     try:
         tty.setcbreak(fd)
@@ -87,5 +88,5 @@ def screen(ui,select=False,node='auto'):
         sys.stdout.write('\x1b[0m\x1b[2J\x1b[H');sys.stdout.flush()
 
 
-def pick(ui,node='auto'):return screen(ui,select=True,node=node)
+def pick(ui,node='auto',prefer_receipt=False):return screen(ui,select=True,node=node,prefer_receipt=prefer_receipt)
 def desk(ui):screen(ui);return 0

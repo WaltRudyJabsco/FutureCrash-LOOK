@@ -109,14 +109,14 @@ def prepare_file(queue,path,node='auto',receipt=None,**options):
     return dict(result,destination=label)
 
 
-def selected_file(path,ui):
+def selected_file(path,ui,prefer_receipt=False):
     """Foreground file-manager handoff: choose, review, explicitly print, return."""
     from print_desk import pick
     from look_renderer import prompt_line
     plan=None
     try:
         source=printable_file(path)
-        choice=pick(ui)
+        choice=pick(ui,prefer_receipt=True) if prefer_receipt else pick(ui)
         if not choice:return 0
         plan=prepare_file(choice['id'],source)
         display(plan)

@@ -7,11 +7,12 @@ with tempfile.TemporaryDirectory() as folder:
     driver.write_text('''import sys,runpy,types,json
 from pathlib import Path
 sys.path.insert(0,sys.argv[1]+'/look')
-import museum_desk
+import museum_desk,printing
 root=Path(sys.argv[1]);state=json.loads((root/'artifacts/museum-live/catalog.json').read_text())
 ui=types.SimpleNamespace(**runpy.run_path(str(root/'look/lk'),run_name='museum_smoke'))
 client=museum_desk.Client('local');client.snapshot=lambda *a:state
 client.image=lambda row:root/'artifacts/museum-live/collection/images'/(row['id']+'.jpg')
+printing.selected_file=lambda path,ui,prefer_receipt=False:print('PRINT_REVIEW '+path.stem+' '+str(prefer_receipt),flush=True)
 museum_desk.terminal_style.open_pane=lambda path:'Shell opened beside LOOK (fixture)'
 museum_desk.desk(client,ui)
 ''')
@@ -24,8 +25,10 @@ museum_desk.desk(client,ui)
             if select.select([master],[],[],.1)[0]:
                 try:chunks.append(os.read(master,65536))
                 except OSError:break
-    read(1);list_capture=b''.join(chunks).decode(errors='replace');os.write(master,b'\r');read(1)
+    read(1);list_capture=b''.join(chunks).decode(errors='replace');os.write(master,b'p');read(.3);os.write(master,b'\r');read(1)
     capture=b''.join(chunks).decode(errors='replace');assert 'LOOK MUSEUM' in capture and 'CC0' in capture,capture[-2000:]
+    os.write(master,b'p');read(.3)
+    assert b''.join(chunks).count(b'PRINT_REVIEW ')==2
     os.write(master,b'\x1b');read(.4);os.write(master,b'W');read(.3);assert 'Shell opened beside LOOK (fixture)' in b''.join(chunks).decode(errors='replace')
     os.write(master,b'q');read(.3);proc.wait(timeout=3);assert proc.returncode==0;os.close(master)
     import pyte

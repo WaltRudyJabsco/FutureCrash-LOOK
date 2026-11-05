@@ -148,3 +148,12 @@ Editing members with Space keeps the launch mode on Cycle when saving or startin
 Preview still shows the highlighted member without replacing the cycle. The picker
 shows the launch mode explicitly; loading a named set also keeps cycle mode while
 browsing its members.
+
+### Parallax Gates and Silk Current
+
+These two shared animations work in both music visualizers and screensavers.
+**Parallax Gates** moves broad, nested geometric portals through the display;
+**Silk Current** traces three flowing ribbons with shaded edges. They follow the
+existing palette, per-display variation and saver-set settings. Select either
+in `lk saver` or add it to a saved set; existing sets are preserved. These are
+ambient animations, not measurements of the music waveform.

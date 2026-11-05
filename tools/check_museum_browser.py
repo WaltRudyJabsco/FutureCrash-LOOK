@@ -7,6 +7,7 @@ import museum_web
 from playwright.sync_api import sync_playwright
 OUT=ROOT/'artifacts/museum-browser';OUT.mkdir(parents=True,exist_ok=True)
 fixture=ROOT/'artifacts/museum-live';rows=json.loads((fixture/'catalog.json').read_text())['items']
+print_requests=[]
 requests=[];errors=[];job={};collections={};offline=False
 for index,row in enumerate(rows):row['available_offline']=index<2
 def respond(route):
@@ -15,6 +16,10 @@ def respond(route):
     if path=='/museum':return route.fulfill(content_type='text/html',body=museum_web.PAGE)
     if path=='/browser-views.js':return route.fulfill(content_type='text/javascript',body=(ROOT/'signal-window/browser-views.js').read_text())
     if path=='/api/museum/config':return route.fulfill(json={'owner':'archive','owners':['local','archive']})
+    if path=='/api/museum/print':
+        if request.method=='GET':return route.fulfill(json={'printers':[{'id':'receipt','label':'Little Printer'},{'id':'office','label':'Office'}]})
+        data=request.post_data_json;print_requests.append(data)
+        return route.fulfill(json={'id':'a'*32,'node':'archive','destination':'Little Printer' if data.get('printer')=='receipt' else 'Office','estimated_paper_mm':61,'state':'queued'})
     if path=='/api/museum/image':
         ident=parse_qs(url.query)['id'][0];ident=rows[0]['id'] if ident=='met-999999999' else ident;return route.fulfill(content_type='image/jpeg',body=(fixture/'collection/images'/(ident+'.jpg')).read_bytes())
     if path in ('/api/museum','/api/museum/search'):
@@ -40,6 +45,25 @@ with sync_playwright() as p:
     page.route('http://test.local/**',respond);page.goto('http://test.local/museum');page.wait_for_selector('.card img')
     page.wait_for_function("[...document.querySelectorAll('.card img')].every(i=>i.complete&&i.naturalWidth>0)")
     assert page.locator('.card').count()==len(rows)
+    page.locator('.card').first.get_by_role('button',name='Print this artwork').click()
+    page.wait_for_function("!document.querySelector('#print-review').disabled")
+    assert page.locator('#print-printer').input_value()=='receipt'
+    page.locator('#print-review').click();page.wait_for_selector('#print-send:visible')
+    assert '6.1 cm' in page.locator('#print-status').inner_text()
+    assert [x['action'] for x in print_requests]==['prepare']
+    page.keyboard.press('ArrowRight');page.keyboard.press('Space')
+    assert page.locator('#print-dialog').is_visible()
+    page.locator('#print-send').click();page.wait_for_function("document.querySelector('#print-status').textContent.includes('Sent to printer')")
+    assert [x['action'] for x in print_requests]==['prepare','send']
+    page.locator('#print-close').click()
+    page.locator('.card').first.get_by_role('button',name='Print this artwork').click()
+    page.wait_for_function("!document.querySelector('#print-review').disabled")
+    page.locator('#print-printer').select_option('office')
+    page.locator('#print-review').click();page.wait_for_selector('#print-send:visible')
+    page.locator('#print-close').click()
+    page.wait_for_function("!document.querySelector('#print-dialog').open")
+    assert [x['action'] for x in print_requests]==['prepare','send','prepare','discard']
+
     assert page.evaluate("FabricBrowserViews.museumCommand('/museum')")
     # A finished job must not replace images or refetch no-store artwork on polls.
     job={'state':'partial','requested':1000,'saved':707,'errors':['Source unavailable']}
@@ -74,7 +98,11 @@ with sync_playwright() as p:
     page.keyboard.press('ArrowLeft');assert page.locator('#title').inner_text()==rows[-1]['title']
     page.locator('#detail-next').click();assert page.locator('#title').inner_text()==rows[0]['title']
     assert page.locator('#detail-actions').get_by_role('button',name='Add to Favorites',exact=True).count()==1
-    page.locator('#detail-full').click();page.wait_for_function('document.fullscreenElement!==null');page.locator('#detail-full').click();page.wait_for_function('document.fullscreenElement===null')
+    page.locator('#detail-full').click();page.wait_for_function('document.fullscreenElement!==null')
+    page.locator('#detail-actions').get_by_role('button',name='Print this artwork').click()
+    page.wait_for_function("document.fullscreenElement===null&&document.querySelector('#print-dialog').open")
+    page.locator('#print-close').click()
+
     page.locator('#detail-actions').get_by_role('button',name='Thumbs down · remove in 48h',exact=True).click();page.wait_for_selector('#detail-actions button[aria-label="Undo removal"]')
     page.locator('#detail-actions').get_by_role('button',name='Undo removal',exact=True).click();page.wait_for_selector('#detail-actions button[aria-label="Thumbs down · remove in 48h"]')
     page.locator('#close').click()

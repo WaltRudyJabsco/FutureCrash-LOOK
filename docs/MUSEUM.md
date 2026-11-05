@@ -71,8 +71,8 @@ Discovery and changes to the owner require reconnection.
 - **d**: discover online; **t** changes Met/Art Institute source.
 - **/**: search the current collection or discovery view; **n/b** pages discovery.
 - **l**: return to the saved collection; **r** refreshes status.
-- **k**: keep the selected result offline on the owner.
-- **p**: copy a saved owner artwork to this endpoint.
+- **K**: save the selected result on the library owner.
+- **k**: copy a saved owner artwork to this endpoint.
 - **f**: toggle a saved work's favorite flag.
 - **a**: choose a starter download size (Enter cancels).
 - **W**: standard LOOK shell pane; **q** quits; Escape leaves the artwork view.
@@ -235,7 +235,7 @@ visible. Pressing h again during a highlights job shows its existing progress.
 ## Curate while viewing
 
 Artwork and slideshow views keep the selected image visible while you curate:
-**f** favorites it, **p** keeps a copy here, **m** adds/removes collection membership,
+**f** favorites it, **k** keeps a copy here, **m** adds/removes collection membership,
 and **x** marks it for removal or undoes that choice. Actions pause playback so
 an advancing slideshow cannot move the target underneath you. **c** still creates
 a collection from the desk; name it, then use **m** on any saved work.
@@ -288,3 +288,17 @@ Daily refill targets 1,000 undecided works in addition to favorites. Favorites s
 on disk and remain excluded from duplicate downloads. The existing maximum of
 100 additions per daily run and 3 GiB collection budget still apply, including
 favorite images. Rating does not trigger an immediate download.
+
+## Print an artwork
+
+Press **p** in the terminal list, artwork viewer or fullscreen viewer to print
+that work. **Shift+N** also works, matching LOOK's file-print shortcut. **k** keeps
+an offline copy here; **K** saves a discovered work on the library owner.
+In the web gallery, use **Print** on a card, in the viewer or in the slideshow.
+
+The chooser prefers an available receipt printer, while keeping all discovered
+printers available. Review the destination and estimated paper length, then
+explicitly print one copy. Receipt images use the printer's configured encoder
+and the existing 25 cm limit. Opening the chooser or reviewing a plan prints
+nothing; cancel discards an unsent plan. Printer errors are never retried
+silently. Current file input limit is 3 MiB; larger artwork needs a smaller export.
