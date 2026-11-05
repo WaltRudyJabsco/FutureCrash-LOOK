@@ -290,3 +290,31 @@ def test_featured_errors_cancel_and_validation(tmp_path,monkeypatch):
     monkeypatch.setattr(museum,'featured_ids',cancel)
     m.start_featured(1,'met');m.worker.join(3)
     assert m.snapshot()['job']['state']=='cancelled'
+
+
+def test_featured_repeat_reports_active_job(tmp_path):
+    m=museum.Museum(tmp_path);state=m.read()
+    state['job']={'state':'running','kind':'featured','saved':123,'requested':1000};m.write(state)
+    m.worker=Mock();m.worker.is_alive.return_value=True
+    result=m.start_featured()
+    assert result['job']['saved']==123
+    assert m.read()==state
+
+
+def test_remote_museum_error_preserves_owner_message(monkeypatch):
+    import urllib.error
+    h=object.__new__(node.API);h.path='/v1/museum?target=owner'
+    h._file_target=lambda:({},None);h.sendj=lambda code,value:(code,value)
+    monkeypatch.setattr(node,'_copy_route',lambda peer:'https://owner')
+    error=urllib.error.HTTPError('https://owner',400,'Bad Request',{},io.BytesIO(b'{"error":"A collection download is already running"}'))
+    monkeypatch.setattr(node,'http_json',Mock(side_effect=error))
+    code,result=h._museum_request({'action':'featured'})
+    assert code==400 and result['error']=='A collection download is already running'
+
+
+def test_job_progress_truthful_partial_and_bounded():
+    text=museum_desk.job_progress({'state':'partial','saved':250,'requested':1000,'counts':{'met':50,'aic':200}},80)
+    assert '25%' in text and '250/1000' in text and 'partial' in text
+    assert 'met: 50' in text and 'aic: 200' in text
+    assert museum_desk.job_progress({})==''
+    assert '100%' in museum_desk.job_progress({'state':'complete','saved':1,'requested':1})

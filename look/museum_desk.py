@@ -131,9 +131,18 @@ class Client:
         temporary=path.with_suffix('.tmp');temporary.write_bytes(data);os.replace(temporary,path);return path
 
 
+def job_progress(job,width=80):
+    if not job.get('state'):return ''
+    saved=max(0,int(job.get('saved',0)));total=max(1,int(job.get('requested',1)))
+    ratio=min(1,saved/total);cells=max(5,min(24,width//4));filled=int(ratio*cells)
+    counts=' · '.join(name+': '+str(count) for name,count in job.get('counts',{}).items())
+    return '['+'█'*filled+'░'*(cells-filled)+'] '+str(round(ratio*100))+'% · '+str(saved)+'/'+str(total)+' · '+job['state']+(' · '+counts if counts else '')
+
+
 def desk(client,ui):
     fd=sys.stdin.fileno();prior=termios.tcgetattr(fd);pool=Background();native=NativePreviewController()
     items=[];index=0;query='';source='met';page=1;discover=False;message='Loading collection…';future=pool.submit(client.snapshot);preview=None;image_job=None;image_id=None;ascii_mode=not native.enabled;dirty=True;last_size=None;previews={};failed_previews=set();loading_id=None;playing=False;next_slide=0;sort_mode=0;page_size=10;colors=terminal_style.list_colors();library=[];collections={};view='library';collection_id=None;offline_only=False;offline=False;shuffle_cycle=False
+    job={};progress_future=None;next_progress=0
     def prompt(label):
         native.frame_cleared();termios.tcsetattr(fd,termios.TCSADRAIN,prior)
         try:return input('\n'+label).strip()
@@ -141,6 +150,18 @@ def desk(client,ui):
     try:
         tty.setcbreak(fd);sys.stdout.write('\033[?1049h')
         while True:
+            if progress_future and progress_future.done():
+                try:
+                    progress=progress_future.result()
+                    if progress.get('offline'):message='Owner offline · progress may be stale'
+                    else:
+                        job=progress.get('job',{})
+                        if job.get('errors'):message='Source issue: '+job['errors'][-1]
+                        if job.get('state')!='running' and not discover and future is None:future=pool.submit(client.snapshot,query)
+                except Exception as exc:message='Progress unavailable: '+str(exc)
+                progress_future=None;dirty=True
+            if job.get('state')=='running' and progress_future is None and time.monotonic()>=next_progress:
+                progress_future=pool.submit(client.snapshot);next_progress=time.monotonic()+5
             if future and future.done():
                 try:
                     result=future.result();library=result.get('items',library);collections=result.get('collections',collections);offline=result.get('offline',False)
@@ -176,7 +197,7 @@ def desk(client,ui):
             if dirty:
                 native.frame_cleared()
                 art_count=0;thumbnail=None;row_indices={};side_lines={}
-                lines=['LOOK MUSEUM · '+('Discover '+source if discover else view.title()+(' / '+collections.get(collection_id,{}).get('name','Choose a collection') if view=='collections' else ''))+' · Sort: '+SORTS[sort_mode],message,'']
+                lines=['LOOK MUSEUM · '+('Discover '+source if discover else view.title()+(' / '+collections.get(collection_id,{}).get('name','Choose a collection') if view=='collections' else ''))+' · Sort: '+SORTS[sort_mode],message,job_progress(job,width)]
                 art_rows=max(2,height-13)
                 if image_id:
                     row=next((x for x in items if x['id']==image_id),{})

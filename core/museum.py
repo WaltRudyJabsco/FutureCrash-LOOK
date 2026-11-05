@@ -195,7 +195,10 @@ class Museum:
         if source not in (*SOURCES,'both'):raise ValueError('Choose met, aic or both')
         sources=SOURCES if source=='both' else (source,)
         with self.lock:
-            if self.worker and self.worker.is_alive():raise ValueError('A collection download is already running')
+            if self.worker and self.worker.is_alive():
+                job=self.read().get('job',{})
+                if job.get('kind')=='featured':return self.snapshot()
+                raise ValueError('A collection download is already running; refresh to see progress')
             state=self.read();collections=state.setdefault('collections',{});groups={}
             for name in sources:
                 ident=uuid.uuid5(uuid.NAMESPACE_URL,'look-museum-featured:'+name).hex

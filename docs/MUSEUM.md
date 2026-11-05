@@ -212,3 +212,8 @@ and images. Progress counts include reused works, and report the actual total pe
 source. A shortfall is marked partial; source errors remain visible. No unrelated
 works are added to fill a quota. Open Collections after refreshing to browse,
 shuffle or keep an offline copy of either selection.
+
+Download progress refreshes every five seconds in the terminal and web gallery.
+Bars show saved/reused works against the requested target, with per-museum counts
+for highlights. Partial jobs keep their actual percentage; source errors remain
+visible. Pressing h again during a highlights job shows its existing progress.
