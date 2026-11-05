@@ -90,6 +90,28 @@ def home_state(store,create=False):
     return {'state':'ready','note':rows[0],'link':'note:'+HOME_NOTE_ID}
 
 
+def draft_home_entry(store,request,clarification=''):
+    """Prepare an append against one revision; no note changes occur here."""
+    if not isinstance(request,str) or not request.strip() or len(request)>8000:
+        raise ValueError('Describe the Home entry in 1–8000 characters')
+    if not isinstance(clarification,str) or len(clarification)>4000:
+        raise ValueError('Clarification must be text up to 4000 characters')
+    state=home_state(store)
+    if state['state']!='ready':return dict(state,saved=False)
+    try:from . import note_composer
+    except ImportError:import note_composer
+    from threading import Event
+    row=state['note'];rows,warning=note_composer.candidates(store,action_catalog())
+    instruction=request+('\nAnswer: '+clarification if clarification else '')
+    result=note_composer.draft(instruction,row['body'][-6000:]+'\n[APPEND HERE]',rows,Event())
+    if 'question' in result:return dict(result,state='needs_clarification',saved=False,warning=warning)
+    return {'state':'draft','saved':False,'entry':result['body'],'warning':warning,
+            'home_id':row['id'],'revision':row['revision'],'link':'note:'+row['id'],
+            'apply_tool':'notebook_update','apply_args':{'id':row['id'],'revision':row['revision'],
+                'append_text':'\n'+result['body']},
+            'guidance':'Show the proposed entry. If the user requested adding it, use these exact apply_args; if only drafting or previewing, wait. Only a successful update receipt means saved. A stale revision requires rereading and redrafting.'}
+
+
 def inspect_note_links(store,row):
     result=[]
     links=[]
@@ -1359,7 +1381,8 @@ def direct_read(intent):
 
 
 def tools():
-    definitions=[('notebook_home','Read the stable Fabric Home note without creating it. May return needs_choice with revision IDs; ask the user before choosing or reconciling.',{},[]),
+    definitions=[('notebook_home_draft','Compose an entry with verified links for the Fabric Home note using the same AI composer as Notes. Does not save. For requests to add something to Home: call this, present the entry, then notebook_update with returned apply_args. If the user only asks for a preview, do not save. Relay clarification questions; call again with the original request and the human clarification.',{'request':{'type':'string'},'clarification':{'type':'string'}},['request']),
+        ('notebook_home','Read the stable Fabric Home note without creating it. May return needs_choice with revision IDs; ask the user before choosing or reconciling.',{},[]),
         ('notebook_actions','Discover portable Fabric tool links, human commands, AI tool names and useful follow-up questions. Does not launch anything. Use for Home notes and to discover Museum, Reader, Radio or printing capabilities.',{'action_id':{'type':'string','enum':list(FABRIC_ACTIONS)}},[]),
         ('notebook_links','Inspect links and reviewed command/terminal blocks in a note. Does not execute them. Ask for a label if ambiguous; use stable IDs and actual tools, never claim launch from inspection.',{'id':{'type':'string'}},['id']),
         ('notebook_search','Search saved notebook records. Omit query or use an empty string to list all records, including completed records. Results include full note bodies.',{'query':{'type':'string'}},[]),
@@ -1382,7 +1405,8 @@ def tools():
 
 def tool(name,args):
     store=Notebook()
-    if name=='notebook_home':result=home_state(store)
+    if name=='notebook_home_draft':result=draft_home_entry(store,args.get('request',''),args.get('clarification',''))
+    elif name=='notebook_home':result=home_state(store)
     elif name=='notebook_actions':result=action_catalog(args.get('action_id'))
     elif name=='notebook_links':result=inspect_note_links(store,read_records(store,args))
     elif name=='notebook_search': result=store.list(str(args.get('query') or ''),include_done=True)

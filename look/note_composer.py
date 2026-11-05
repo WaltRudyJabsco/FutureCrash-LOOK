@@ -60,7 +60,10 @@ def draft(request,context,rows,cancel):
     raw=result.get('message',{}).get('content','')
     if not isinstance(raw,str) or len(raw)>MAX_REPLY:raise ValueError('AI response was too large or invalid')
     raw=re.sub(r'^```(?:json)?\s*|\s*```$','',raw.strip())
-    return validate(json.loads(raw),rows)
+    # Some local models append commentary after the JSON. Only the first
+    # structured object is eligible for validation; trailing prose is never inserted.
+    value,_=json.JSONDecoder().raw_decode(raw)
+    return validate(value,rows)
 
 
 def validate(value,rows):
@@ -83,8 +86,16 @@ def validate(value,rows):
             output.append(nb.make_link(label,rows[i]['target']))
         elif isinstance(part.get('text'),str):
             text=nb.safe_text(part['text'])
-            # Generated prose cannot create Markdown actions or hidden targets.
-            output.append(re.sub(r'([\\`\[\]<>])',r'\\\1',text))
+            # Accept a model's inline Markdown only for exact catalog targets.
+            # Everything else stays literal, including executable fence syntax.
+            allowed={row['target'] for row in rows}
+            escape=lambda value:re.sub(r'([\\`\[\]<>])',r'\\\1',value)
+            start=0
+            for match in re.finditer(r'\[([^\]\n]+)\]\(<?([^\s<>]+)>?\)',text):
+                if match[2] not in allowed:continue
+                output.append(escape(text[start:match.start()]))
+                output.append(nb.make_link(match[1],match[2]));start=match.end()
+            output.append(escape(text[start:]))
         else:raise ValueError('Invalid entry segment')
     body=''.join(output).strip()
     if not body or len(body)>MAX_REPLY:raise ValueError('AI returned an empty or oversized entry')

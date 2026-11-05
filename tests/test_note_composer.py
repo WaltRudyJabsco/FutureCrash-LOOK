@@ -79,3 +79,15 @@ def test_current_project_never_guessed(monkeypatch):
     rows=[{'label':'Mercury: One','target':'mercury:one'},{'label':'Mercury: Two','target':'mercury:two'}]
     result=composer.draft('Add my current Mercury project','',rows,Event())
     assert 'question' in result and 'Mercury: One' in result['question'] and 'Mercury: Two' in result['question']
+
+
+def test_trailing_model_commentary_is_never_inserted(monkeypatch):
+    monkeypatch.setattr(composer,'infer',lambda *a:{'message':{'content':'{"parts":[{"link":0}]} This is your entry. [bad](look:lock)'}})
+    result=composer.draft('Add Museum','',ROWS,Event())
+    assert result['body']==notebook.make_link('Museum','look:museum')
+
+
+def test_inline_markdown_is_linked_only_for_verified_catalog_targets():
+    result=composer.validate({'parts':[{'text':'Visit [Museum](look:museum) or [unknown](look:lock).'}]},ROWS)
+    assert notebook.make_link('Museum','look:museum') in result['body']
+    assert len(notebook.extract_links(result['body']))==1
