@@ -1132,6 +1132,11 @@ class App(BaseHTTPRequestHandler):
         self.send_response(404); self.send_header("Content-Length","0"); self.end_headers()
 
     def do_GET(self):
+        if urlparse(self.path).path=='/api/fabric/update':
+            if not self._require_endpoint('lo.use'):return
+            import fabric_update
+            try:return fabric_update.web(self,NODE_URL)
+            except Exception as exc:return self.json(400,{'error':str(exc)})
         if urlparse(self.path).path=='/api/curtain':
             if not self._require_endpoint('lo.use'):return
             try:return self.json(200,_node_call('/v1/curtain',{'action':'status'},timeout=5))
@@ -1225,6 +1230,11 @@ class App(BaseHTTPRequestHandler):
         if path not in ("index.html","app.js","media-session.js","media-art.js","style.css","browser-views.js","fabric.html","fabric-dashboard.js"): return self.json(404,{"error":"not found"})
         p=ROOT/path; self.send_bytes(200,p.read_bytes(),mimetypes.guess_type(p.name)[0] or "application/octet-stream")
     def do_POST(self):
+        if urlparse(self.path).path=='/api/fabric/update':
+            if not self._require_endpoint('lo.use'):return
+            import fabric_update
+            try:return fabric_update.web(self,NODE_URL,mutating=True)
+            except Exception as exc:return self.json(400,{'error':str(exc)})
         if urlparse(self.path).path=='/api/curtain':
             if not self._require_endpoint('lo.use'):return
             try:

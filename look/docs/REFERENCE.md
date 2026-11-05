@@ -423,6 +423,8 @@ lk ttt [0p|1p|2p]
   [meta] Tic-Tac-Toe alias
 lk gtnw
   [meta] Global Thermonuclear War alias
+lk fabric update [check|run|status] [SOURCE] [--yes] [--json]
+  [fabric] Review and run runtime updates, library synchronization and configured backups; durable receipt
 lk fabric care [status|ensure|backup|sync SOURCE] [--yes] [--json]
   [fabric] Check releases and verified essential backups; run configured upkeep
 lk fabric backup [add|configure|drives|status [--json]|inventory|run|restore DIR]

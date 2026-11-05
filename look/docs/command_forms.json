@@ -1261,6 +1261,12 @@
     "Global Thermonuclear War alias"
   ],
   [
+    "lk fabric update",
+    "[check|run|status] [SOURCE] [--yes] [--json]",
+    "fabric",
+    "Review and run runtime updates, library synchronization and configured backups; durable receipt"
+  ],
+  [
     "lk fabric care",
     "[status|ensure|backup|sync SOURCE] [--yes] [--json]",
     "fabric",

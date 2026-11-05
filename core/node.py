@@ -1516,7 +1516,7 @@ def _maintenance_update(data):
     if len(expected)!=64 or any(c not in "0123456789abcdef" for c in expected): raise ValueError("approved release digest required")
     if maintenance.release_info().get("digest")==expected: return {"ok":True,"state":"healthy","unchanged":True}
     snap={"self":{**advertisement(),"name":identity()["name"]},"peers":PEERS.public()}
-    url=_remote_url(snap,source,"/v1/maintenance/bundle")
+    url=_remote_url(snap,source,"/v1/maintenance/bundle"+("?prepared="+expected if data.get("prepared") is True else ""))
     req=urllib.request.Request(url,headers=FABRIC_IDENTITY.auth_headers_for_url(url))
     context=FABRIC_IDENTITY.ssl_context_for_url(url) if url.startswith("https://") else None
     kwargs={"timeout":30}
@@ -4299,6 +4299,23 @@ class API(BaseHTTPRequestHandler):
         except Exception as exc:
             return self.sendj(400, {"ok": False, "error": str(exc)})
 
+    def _fabric_update(self,payload=None,local_job=False):
+        try:
+            try:from . import fabric_update
+            except ImportError:import fabric_update
+            if not local_job and (getattr(self.server,'plane','local')!='local' or self.headers.get('X-Fabric-Node')):
+                raise PermissionError('Fabric-wide update is local-control only')
+            if local_job:value=fabric_update.start('local') if payload is not None else fabric_update.status('local')
+            elif payload is not None:
+                if payload.get('confirm') is not True:raise PermissionError('Review and confirm the update plan')
+                value=fabric_update.start(review=payload.get('review',''))
+            else:
+                query=parse_qs(urlparse(self.path).query)
+                value=fabric_update.plan((query.get('source') or [''])[0]) if query.get('plan')==['1'] else fabric_update.status()
+            return self.sendj(200,value)
+        except PermissionError as exc:return self.sendj(403,{'error':str(exc)})
+        except (OSError,ValueError,RuntimeError) as exc:return self.sendj(409,{'error':str(exc)})
+
     def _care(self,payload=None):
         try:
             try:from . import fabric_care
@@ -4306,6 +4323,11 @@ class API(BaseHTTPRequestHandler):
             if getattr(self.server,'plane','local')!='local' or self.headers.get('X-Fabric-Node'):
                 raise PermissionError('Fabric-wide care is local-control only')
             data=payload or {};operation=data.get('operation','status')
+            if operation=='update':
+                try:from . import fabric_update
+                except ImportError:import fabric_update
+                plan=fabric_update.plan(data.get('source',''))
+                return self.sendj(200,fabric_update.start(review=plan['review']))
             get=lambda target,path:_target_get('127.0.0.1',7332,target,path)
             post=lambda target,path,data:_target_post('127.0.0.1',7332,target,path,data)
             result=fabric_care.operate(operation,data.get('source',''),{'self':node_info(),'peers':PEERS.public()},get,post)
@@ -4981,6 +5003,8 @@ class API(BaseHTTPRequestHandler):
         if path == '/v1/media/artwork/settings':
             _look_catalog_modules();import media_cover_lookup
             return self.sendj(200,{'enabled':media_cover_lookup.enabled(),'node':identity()['name']})
+        if path == "/v1/fabric-update":return self._fabric_update()
+        if path == "/v1/upkeep":return self._fabric_update(local_job=True)
         if path == "/v1/care":return self._care()
         if path == "/v1/recovery/status":
             try:
@@ -4997,7 +5021,12 @@ class API(BaseHTTPRequestHandler):
                 return self.sendj(200,maintenance.receipt(job) if job else maintenance.status())
             except (OSError,ValueError): return self.sendj(404,{"error":"maintenance job not found"})
         if path == "/v1/maintenance/bundle":
-            try: _,payload=maintenance.bundle()
+            try:
+                prepared=(parse_qs(urlparse(self.path).query).get('prepared') or [''])[0]
+                if prepared:
+                    import fabric_update
+                    payload=fabric_update.prepared(prepared)
+                else:_,payload=maintenance.bundle()
             except (OSError,ValueError) as exc: return self.sendj(409,{"error":str(exc)})
             self.send_response(200)
             self.send_header("Content-Type","application/zip")
@@ -5521,6 +5550,8 @@ class API(BaseHTTPRequestHandler):
                 result["state"]=load_curator_state()
                 return self.sendj(200 if result.get("ok") else 409,result)
             return self.sendj(200,{"ok":True,"state":state,"plan":curator_plan(profile)})
+        if path == "/v1/fabric-update":return self._fabric_update(d)
+        if path == "/v1/upkeep":return self._fabric_update(d,local_job=True)
         if path == "/v1/care":return self._care(d)
         if path == "/v1/recovery/run":
             try:
@@ -7597,6 +7628,22 @@ def main():
                 path="/v1/maintenance/release" if a.command=="release" else "/v1/maintenance/status"
                 if a.args and a.command=="maintenance": path+="?job="+urllib.parse.quote(a.args[0])
                 print(json.dumps(_target_get(a.host,a.port,a.node,path),indent=2)); return 0
+            if a.command=="update" and (not a.args or a.args[0] in {'check','run','status'}):
+                try:from . import fabric_update
+                except ImportError:import fabric_update
+                action=a.args[0] if a.args else 'check'
+                if action=='status':result=http_json(_daemon_url(a.host,a.port,'/v1/fabric-update'),timeout=15)
+                else:
+                    source=a.args[1] if len(a.args)>1 else ''
+                    result=http_json(_daemon_url(a.host,a.port,'/v1/fabric-update')+'?plan=1&source='+urllib.parse.quote(source),timeout=150)
+                    if action=='run' or a.yes:
+                        if not a.yes:
+                            print(fabric_update.describe(result))
+                            if not sys.stdin.isatty() or input('Run this plan? [y/N] ').strip().lower()!='y':return 0
+                        result=http_json(_daemon_url(a.host,a.port,'/v1/fabric-update'),{'review':result['review'],'confirm':True},timeout=15)
+                print(json.dumps(result,indent=2) if a.json else fabric_update.describe(result))
+                if result.get('state') in {'queued','running'}:print('Follow progress: lk fabric update status or the Observatory')
+                return 0
             if a.command=="update":
                 if len(a.args)<2: ap.error("update requires SOURCE TARGET [TARGET ...]")
                 source=a.args[0]; targets=a.args[1:]

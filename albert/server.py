@@ -591,6 +591,11 @@ class Handler(BaseHTTPRequestHandler):
             return _proxy_media_item(self,node,item_id,head=True,browser=(path=='/api/media/browser'))
         self.send_response(404); self.send_header('Content-Length','0'); self.end_headers()
     def do_GET(self):
+        if urlparse(self.path).path=='/api/fabric/update':
+            if not self._require_endpoint('lo.use'):return
+            import fabric_update
+            try:return fabric_update.web(self,NODE)
+            except Exception as exc:return self.send_json(400,{'error':str(exc)})
         if urlparse(self.path).path=='/api/curtain':
             if not self._require_endpoint('lo.use'):return
             try:return self.send_json(200,node_json('/v1/curtain',{'action':'status'},timeout=5))
@@ -684,6 +689,11 @@ class Handler(BaseHTTPRequestHandler):
         if not target.is_file(): return self.send_error(404)
         data=target.read_bytes(); self.send_response(200); self.send_header('Content-Type',mimetypes.guess_type(target.name)[0] or 'application/octet-stream'); self.send_header('Cache-Control','no-cache'); self.send_header('Content-Length',str(len(data))); self.end_headers(); self.wfile.write(data)
     def do_POST(self):
+        if urlparse(self.path).path=='/api/fabric/update':
+            if not self._require_endpoint('lo.use'):return
+            import fabric_update
+            try:return fabric_update.web(self,NODE,mutating=True)
+            except Exception as exc:return self.send_json(400,{'error':str(exc)})
         if urlparse(self.path).path=='/api/curtain':
             if not self._require_endpoint('lo.use'):return
             try:

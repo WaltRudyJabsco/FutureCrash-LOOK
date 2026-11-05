@@ -75,5 +75,15 @@
   document.addEventListener('visibilitychange',()=>{if(!document.hidden){refresh();care()}});
   setInterval(refresh,POLL_MS);setInterval(care,CARE_MS);
   setInterval(()=>{if(last&&!paused&&Date.now()-last>30000)$('connection').textContent='STALE · LAST SNAPSHOT '+Math.floor((Date.now()-last)/1000)+'s AGO'},1000);
+  let updatePlan=null,updateBusy=false;
+  function updateText(value){
+    if(value.source)return 'Plan: '+(value.source.node||value.source.kind)+' · '+(value.source.commit||'').slice(0,7)+'\nGitHub: '+value.github.state+'\n'+value.scope+'\n'+value.nodes.map(n=>n.node+': '+(n.release?.commit?.slice(0,7)||'offline / unknown')).join('\n');
+    return 'Fabric update: '+value.state+'\n'+(value.steps||[]).map(s=>s.label+': '+s.state+(s.error?' · '+s.error:'')).join('\n')+(value.error?'\n'+value.error:'');
+  }
+  async function updateStatus(){if(updateBusy||updatePlan||document.hidden)return;try{const value=await json('/api/fabric/update',15000);if(value.state!=='idle')$('updateReceipt').textContent=updateText(value)}catch(e){$('updateReceipt').textContent=e.message}}
+  $('updateCheck').onclick=async()=>{updateBusy=true;updatePlan=null;$('updateRun').disabled=true;$('updateReceipt').textContent='Checking trusted nodes, GitHub and backup receipts…';try{updatePlan=await json('/api/fabric/update?plan=1&source='+encodeURIComponent($('updateSource').value.trim()),150000);$('updateReceipt').textContent=updateText(updatePlan);$('updateRun').disabled=false}catch(e){$('updateReceipt').textContent=e.message}finally{updateBusy=false}};
+  $('updateRun').onclick=async()=>{if(!updatePlan||!confirm('Run this reviewed Fabric plan? It may restart services, synchronize configured libraries, and run existing backups.'))return;updateBusy=true;$('updateRun').disabled=true;try{const response=await fetch('/api/fabric/update',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({confirm:true,review:updatePlan.review})});const value=await response.json();if(!response.ok)throw Error(value.error||'Update request failed');$('updateReceipt').textContent=updateText(value);updatePlan=null}catch(e){$('updateReceipt').textContent=e.message}finally{updateBusy=false}};
+  setInterval(updateStatus,5000);updateStatus();
+  if(new URLSearchParams(location.search).get('update')==='1')$('updateCheck').click();
   refresh();care();
 })();

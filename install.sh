@@ -151,6 +151,7 @@ retire_stale_macos_node_listener
 mkdir -p "$HOME/.local/share/future-crash-look/core" "$HOME/.local/bin"
 install -m 0755 "$ROOT/core/node.py" "$HOME/.local/share/future-crash-look/core/node.py"
 install -m 0644 "$ROOT/core/fabric_packet.py" "$HOME/.local/share/future-crash-look/core/fabric_packet.py"
+install -m 0644 "$ROOT/core/fabric_update.py" "$HOME/.local/share/future-crash-look/core/fabric_update.py"
 install -m 0644 "$ROOT/core/fabric_care.py" "$HOME/.local/share/future-crash-look/core/fabric_care.py"
 install -m 0644 "$ROOT/core/book_web.py" "$HOME/.local/share/future-crash-look/core/book_web.py"
 install -m 0644 "$ROOT/core/browser_presentations.py" "$HOME/.local/share/future-crash-look/core/browser_presentations.py"

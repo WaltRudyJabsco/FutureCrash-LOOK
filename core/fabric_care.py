@@ -12,6 +12,7 @@ BACKUP_MAX_AGE=24*3600
 def intent(text):
     low=' '.join(str(text).casefold().split()).strip(' .!?')
     low=re.sub(r'^(?:please |can you |could you )','',low)
+    if low in {'/fabric update','update our fabric','update the fabric','update my fabric','update fabric'}:return {'operation':'update'}
     context=bool(re.search(r'\b(fabric|computers|nodes|devices)\b',low) or re.search(r"\b(we|we're|we are)\b",low))
     if not context:return None
     backup=bool(re.search(r'\b(backups?|back up|backed up)\b',low))
@@ -29,7 +30,7 @@ def intent(text):
 def tools():
     return [
       {'type':'function','function':{'name':'fabric_status','description':'Check trusted Fabric nodes, installed releases, updater receipts and restore-tested essential-state backups. Read-only; reports explicit Mercury coverage in restore-tested receipts. Does not check GitHub; other documents/media are excluded.','parameters':{'type':'object','properties':{}}}},
-      {'type':'function','function':{'name':'fabric_maintain','description':'Only after an explicit upkeep request: run already configured backups, synchronize installed runtime from a named trusted source, or ensure backups and inspect releases. No new drive setup, firmware, package upgrades, GitHub downloads or arbitrary shell. Accepted jobs remain pending until receipts verify completion.','parameters':{'type':'object','properties':{'operation':{'type':'string','enum':['backup','sync','ensure']},'source':{'type':'string','description':'Required for synchronization; local or a trusted node name explicitly named by the user.'}},'required':['operation']}}}
+      {'type':'function','function':{'name':'fabric_maintain','description':'Only after an explicit upkeep request: run already configured backups, synchronize installed runtime from a named trusted source, or ensure backups and inspect releases. Update runs the unified reviewed-runtime, library and configured-backup workflow, including GitHub main checks. No new drive setup, firmware, package upgrades or arbitrary shell. Accepted jobs remain pending until receipts verify completion.','parameters':{'type':'object','properties':{'operation':{'type':'string','enum':['backup','sync','ensure','update']},'source':{'type':'string','description':'Required for synchronization; local or a trusted node name explicitly named by the user.'}},'required':['operation']}}}
     ]
 
 
@@ -159,6 +160,10 @@ def operate(operation,source,snapshot,get,post):
 
 
 def describe(report):
+    if report.get('id') and 'steps' in report:
+        try:from . import fabric_update
+        except ImportError:import fabric_update
+        return fabric_update.describe(report)+'\nFollow progress: lk fabric update status or /fabric update in the Observatory.'
     lines=['Fabric check · installed releases '+('match' if report.get('releases_match') else 'differ or cannot all be checked')]
     for row in report.get('nodes') or []:
         release=row.get('release') or {};backup=row.get('backup') or {};update=row.get('update') or {}
