@@ -90,12 +90,12 @@ def render(value,kind='banner',font_name='standard',width=384,artwork=None):
             art.thumbnail((width,1600))
             factor=min(width/art.width,1600/art.height)
             art=art.resize((max(1,round(art.width*factor)),max(1,round(art.height*factor))))
-            caption_font=font(max(10,round(width/32)));caption=[]
-            columns=max(12,int((width-16)/caption_font.getlength('M')))
+            caption_font=font(max(16,round(width/16)));caption=[]
+            columns=max(1,int((width-16)/caption_font.getlength('M')))
             for key in ('title','artist','date','museum'):
                 clean=' '.join(str(row.get(key) or '').split())[:250]
                 if clean:caption.extend(textwrap.wrap(clean,columns)[:3])
-            caption_step=round(width/22);canvas=Image.new('L',(width,image.height+art.height+24+len(caption)*caption_step),255)
+            caption_step=caption_font.getbbox('Ag')[3]+4;canvas=Image.new('L',(width,image.height+art.height+24+len(caption)*caption_step),255)
             canvas.paste(image,(0,0));canvas.paste(art,((width-art.width)//2,image.height+8));draw=ImageDraw.Draw(canvas)
             for i,line in enumerate(caption):draw.text((8,image.height+art.height+16+i*caption_step),line,font=caption_font,fill=0)
             image=canvas;details['artwork']={key:row.get(key,'') for key in ('id','title','artist','date','museum')};details['artwork_rotation']=90 if rotated else 0
