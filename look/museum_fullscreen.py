@@ -70,7 +70,7 @@ def main(payload):
                         allowance,ok=QInputDialog.getItem(self,'Print artwork','Paper allowance',['Receipt: up to 1 foot','Banner: up to 10 feet'],0,False)
                         if not ok:return
                         row=dict(self.rows[self.index])
-                        def prepare():return printing.prepare_file(selected['id'],client.image(row),style=style,rotation=int(rotation),copies=copies,paper_limit_mm=3048 if allowance.startswith("Banner") else 304.8)
+                        def prepare():return printing.prepare_file(selected['id'],client.image(row),caption=printing.artwork_caption(row),style=style,rotation=int(rotation),copies=copies,paper_limit_mm=3048 if allowance.startswith("Banner") else 304.8)
                         self.kind='print-plan';self.future=self.pool.submit(prepare);self.info.setText('Preparing print…');return
                 elif self.kind=='print-plan':
                     import printing

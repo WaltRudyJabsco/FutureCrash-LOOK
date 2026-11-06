@@ -277,7 +277,7 @@ def desk(client,ui):
                 try:
                     import printing
                     path=client.image(items[index])
-                    printing.selected_file(path,ui,prefer_receipt=True,default_style="ascii" if ascii_mode else "image")
+                    printing.selected_file(path,ui,prefer_receipt=True,default_style="ascii" if ascii_mode else "image",caption=printing.artwork_caption(items[index]))
                     message='Returned from printing'
                 except Exception as error:message='Print: '+str(error)
                 finally:tty.setcbreak(fd);native.frame_cleared();dirty=True

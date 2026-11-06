@@ -109,7 +109,10 @@ def prepare_file(queue,path,node='auto',receipt=None,**options):
     return dict(result,destination=label)
 
 
-def selected_file(path,ui,prefer_receipt=False,default_style="image"):
+def artwork_caption(row):
+    return [' '.join(str(row.get(key) or '').split())[:250] for key in ('title','artist','date','museum')]
+
+def selected_file(path,ui,prefer_receipt=False,default_style="image",caption=None):
     """Foreground file-manager handoff: choose, review, explicitly print, return."""
     from print_desk import pick
     from look_renderer import prompt_line
@@ -118,7 +121,7 @@ def selected_file(path,ui,prefer_receipt=False,default_style="image"):
         source=printable_file(path)
         choice=pick(ui,prefer_receipt=True) if prefer_receipt else pick(ui)
         if not choice:return 0
-        options={}
+        options={'caption':caption} if caption else {}
         value,cancelled=prompt_line('Copies [1]: ')
         if cancelled:return 0
         options['copies']=int(value.strip() or '1')
