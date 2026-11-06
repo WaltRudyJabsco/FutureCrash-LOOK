@@ -52,11 +52,12 @@ def generate():
     return value
 
 
-def execute(prompt,allowed=True,pending=None):
+def execute(prompt,allowed=True,pending=None,progress=None):
     request=intent(prompt)
     if request is None:return None
     if not allowed:raise ValueError('This access profile cannot print. Use the workspace profile.')
     import printing
+    if progress:progress('Finding printer…')
     rows=printing.destinations().get('printers',[])
     wanted=request['printer'].casefold()
     if not wanted:
@@ -73,8 +74,13 @@ def execute(prompt,allowed=True,pending=None):
     matches=[row for row in rows if ' '.join(row['label'].casefold().split())==wanted]
     if len(matches)!=1:raise ValueError('No unique printer named '+request['printer']+'. Available: '+', '.join(row['label'] for row in rows)+'. Nothing printed.')
     label=matches[0]['label']
+    if progress:
+        progress('Preparing fortune cookie…' if request['kind']=='fortune-cookie' else 'Writing fortune…')
     value=None if request['kind']=='fortune-cookie' else generate()
-    result=json.loads(printing.run_tool('print_design',{'kind':request['kind'],'text':value,'queue':label,'send':True},Path.home(),'print a '+request['kind'].replace('-',' ')+' on '+label,{}))
+    if progress and request['kind']=='fortune':progress('Preparing illustrated card…')
+    result=json.loads(printing.run_tool('print_design',{'kind':request['kind'],'text':value,'queue':label,'send':True},Path.home(),'print a '+request['kind'].replace('-',' ')+' on '+label,{'progress':progress} if progress else {}))
+    if progress and result.get('state') in {'submitting','printing'}:
+        progress('Job accepted. Waiting for '+label+'…')
     deadline=time.monotonic()+40
     while result.get('state') in {'submitting','printing'} and time.monotonic()<deadline:
         time.sleep(1)
