@@ -96,7 +96,9 @@ def render(value,kind='banner',font_name='solid',width=384,artwork=None):
             raise ValueError('Shorten the fortune to fit this printer')
         numbers=sorted(secrets.SystemRandom().sample(range(1,50),6))
         lucky='Lucky: '+' '.join(f'{n:02d}' for n in numbers)
-        image=markdown_bitmap('### '+value+'\n<center>'+lucky+'</center>',width,2438)
+        # Keep the pocket slip compact while preserving the illustrated card layout.
+        scale=0.75 if kind=='fortune-cookie' else 1.0
+        image=markdown_bitmap('### '+value+'\n<center>'+lucky+'</center>',width,2438,type_scale=scale)
         details={'kind':kind,'text':value,'lines':lines,'lucky_numbers':numbers,'note':'Random numbers for fun, not a lottery prediction.'}
         if kind=='fortune' and artwork is not None:
             from PIL import ImageOps
@@ -138,7 +140,7 @@ def is_receipt_markdown(body):
     return bool(re.search(r'^(?:#{1,6}\s|<center>|- |\* )|\*\*[^*\n]+\*\*|(?<!\w)[*_][^*_\s\n][^*_\n]*[*_](?!\w)',body,re.M|re.I))
 
 
-def markdown_bitmap(body,width,max_height):
+def markdown_bitmap(body,width,max_height,*,type_scale=1.0):
     """Lay out local text only. Links and embedded HTML never execute."""
     import re
     from functools import lru_cache
@@ -162,7 +164,7 @@ def markdown_bitmap(body,width,max_height):
         level=len(heading[1]) if heading else 0
         if heading:line=heading[2]
         elif line.startswith(('- ','* ')):line='• '+line[2:]
-        size=max(10,round(width*([24,42,36,32,29,27,25][level])/384))
+        size=max(10,round(width*([24,42,36,32,29,27,25][level])*type_scale/384))
         advance=round(size*1.36)
         if not line:
             y+=advance//2
