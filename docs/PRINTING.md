@@ -364,3 +364,5 @@ with “No print data sent”; wake/power-cycle it near its owner before request
 new job. Existing failed jobs never resume automatically. Fortune commands wait
 briefly for background results, and the Museum web print dialog refreshes status
 automatically while open. An accepted job is not a delivery confirmation.
+
+For a formatted thermal slip, use `lk print file recipe.md --printer "Tiny Printer"` and review the returned plan, or copy the Markdown and run `lk print clip`. On receipts, `# Title` centers a large heading, `## Ingredients` makes a smaller heading, and `- item` makes a bullet. Use `**bold**`, `*italic*`, or a single line wrapped in `<center>…</center>`. Formatting is local and the paper estimate includes wrapped lines.

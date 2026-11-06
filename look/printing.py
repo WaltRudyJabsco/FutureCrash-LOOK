@@ -46,7 +46,7 @@ def prepare(queue,node='auto',path=None,text=None,receipt=False,**options):
         if not source.is_file() or source.stat().st_size>MAX_INPUT_BYTES:raise ValueError('Choose a file up to 3 MiB')
         with source.open('rb') as stream:data=stream.read(MAX_INPUT_BYTES+1)
         title=source.name
-        kind=('receipt-text' if source.suffix.casefold()=='.txt' else 'receipt-image') if receipt else 'document'
+        kind=('receipt-text' if source.suffix.casefold() in {'.txt','.md','.markdown'} else 'receipt-image') if receipt else 'document'
     else:
         data=str(text).encode('utf-8');title='LOOK receipt.txt' if receipt else 'LOOK text.txt'
         kind='receipt-text' if receipt else 'document'
@@ -115,7 +115,7 @@ def explicit_print(prompt, label):
 def printable_file(path):
     source=Path(path).expanduser().resolve()
     if not source.is_file():raise ValueError('Choose one regular file to print; folders are not printable')
-    if source.suffix.casefold() not in {'.pdf','.txt','.png','.jpg','.jpeg'}:raise ValueError('Print PDF, UTF-8 text, PNG or JPEG; export other documents/manuscripts to PDF first')
+    if source.suffix.casefold() not in {'.pdf','.txt','.md','.markdown','.png','.jpg','.jpeg'}:raise ValueError('Print PDF, UTF-8 text, PNG or JPEG; export other documents/manuscripts to PDF first')
     if not 0<source.stat().st_size<=MAX_INPUT_BYTES:raise ValueError('Choose a nonempty file up to 3 MiB')
     return source
 

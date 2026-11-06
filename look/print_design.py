@@ -146,3 +146,63 @@ def museum_artwork():
 if __name__=='__main__':
     if sys.argv[1:]!=['--setup']:raise SystemExit('Use lk print setup')
     print(setup())
+
+
+def is_receipt_markdown(body):
+    import re
+    return bool(re.search(r'^(?:#{1,6}\s|<center>|- |\* )|\*\*[^*\n]+\*\*|(?<!\w)[*_][^*_\s\n][^*_\n]*[*_](?!\w)',body,re.M|re.I))
+
+
+def markdown_bitmap(body,width,max_height):
+    """Lay out local text only. Links and embedded HTML never execute."""
+    import re
+    from functools import lru_cache
+    from PIL import Image,ImageDraw,ImageFont
+    if not body.strip() or len(body)>32000 or any(ord(c)<32 and c not in '\r\n\t' for c in body):
+        raise ValueError('Choose up to 32,000 characters of plain Markdown text.')
+    margin=max(4,width//48)
+    usable=width-2*margin
+    y=margin
+    rows=[]
+    @lru_cache(None)
+    def face(size,bold,italic):
+        suffix={(False,False):'',(True,False):'-Bold',(False,True):'-Oblique',(True,True):'-BoldOblique'}[bold,italic]
+        try:return ImageFont.truetype('DejaVuSans'+suffix+'.ttf',size)
+        except OSError:return font(size)
+    for line in body.splitlines():
+        line=line.strip()
+        centered=line.lower().startswith('<center>') and line.lower().endswith('</center>')
+        if centered:line=line[8:-9].strip()
+        heading=re.match(r'^(#{1,6})\s+(.*)',line)
+        level=len(heading[1]) if heading else 0
+        if heading:line=heading[2]
+        elif line.startswith(('- ','* ')):line='• '+line[2:]
+        size=max(10,round(width*([24,42,36,32,29,27,25][level])/384))
+        advance=round(size*1.36)
+        if not line:
+            y+=advance//2
+            continue
+        row=[];x=0
+        for chunk in re.split(r'(\*\*[^*]+\*\*|__[^_]+__|(?<!\w)\*[^*]+\*(?!\w)|(?<!\w)_[^_]+_(?!\w))',line):
+            bold=chunk.startswith(('**','__')) and len(chunk)>4
+            italic=not bold and len(chunk)>2 and chunk[0] in '*_' and chunk[-1]==chunk[0]
+            chunk=chunk[2:-2] if bold else chunk[1:-1] if italic else chunk
+            style=face(size,bool(heading or bold),italic)
+            for word in re.findall(r'\s+|\S+',chunk):
+                if word.isspace():word=' '
+                if x and x+style.getlength(word)>usable:
+                    rows.append((row,x,y,centered or level==1));row=[];x=0;y+=advance
+                if not x and word==' ':continue
+                for ch in word:
+                    w=style.getlength(ch)
+                    if x+w>usable:
+                        rows.append((row,x,y,centered or level==1));row=[];x=0;y+=advance
+                    row.append((x,ch,style));x+=w
+        if row:rows.append((row,x,y,centered or level==1));y+=advance
+        if y+margin>max_height:raise ValueError('Formatted receipt exceeds the paper allowance; choose a shorter passage.')
+    if y+margin>max_height:raise ValueError('Formatted receipt exceeds the paper allowance.')
+    image=Image.new('L',(width,y+margin),255);draw=ImageDraw.Draw(image)
+    for row,length,top,center in rows:
+        left=(width-length)/2 if center else margin
+        for offset,ch,style in row:draw.text((left+offset,top),ch,font=style,fill=0)
+    return image
