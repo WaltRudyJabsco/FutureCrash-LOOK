@@ -28,7 +28,7 @@ def screen(ui,select=False,node='auto',prefer_receipt=False):
             width,height=ui.shutil.get_terminal_size((100,30));width=max(24,width);height=max(10,height)
             selected=max(0,min(selected,max(0,len(rows)-1)));chosen=rows[selected] if rows else None
             hints=[('↑↓','choose'),('Tab','next'),('Enter','select' if select else 'options')]
-            if not select:hints += [('o','options'),('j','jobs'),('r','routes'),('n','nickname'),('R','refresh')]
+            if not select:hints += [('c','print clipboard'),('o','options'),('j','jobs'),('r','routes'),('n','nickname'),('R','refresh')]
             hints += [('PgUp/PgDn','scroll'),('q/Esc','back' if detail else 'close')]
             if detail:hints=[('↑↓','scroll'),('PgUp/PgDn','page'),('q/Esc','back')]
             footer=clipboard_shelf.command_rows(hints,width,ui.terminal_style.list_colors())
@@ -44,7 +44,7 @@ def screen(ui,select=False,node='auto',prefer_receipt=False):
                     if not row.get('identity_verified'):label+=' · identity unverified'
                     frame.append(ui.terminal_style.list_row(safe_text(label),width,index,index==selected,ui.terminal_style.list_colors()))
                 if not rows:frame.append('No configured printers visible. Use system printer settings or lk print discover.')
-            message=notice or ('Read-only details; printer defaults remain in system settings.' if detail else 'Some owners/spoolers unavailable; list may be incomplete.' if errors else 'Select a printer; queues are managed underneath. Nothing prints here.')
+            message=notice or ('Read-only details; printer defaults remain in system settings.' if detail else 'Some owners/spoolers unavailable; list may be incomplete.' if errors else 'Select a printer; queues are managed underneath. Press c to review copied text.')
             frame+=['']*max(0,height-len(footer)-len(frame)-1);frame+=footer+[safe_text(message)]
             sys.stdout.write(ui._terminal_frame_payload('\n'.join(ui._ansi_clip(line,width) for line in frame)));sys.stdout.flush()
             key=ui._read_tty_key(fd)
@@ -62,6 +62,11 @@ def screen(ui,select=False,node='auto',prefer_receipt=False):
             elif key in {'home','shiftleft'}:selected=0
             elif key in {'end','shiftright'}:selected=len(rows)-1
             elif key=='R':rows,errors=refresh();notice='Refreshed'
+            elif chosen and key=='c' and not select:
+                termios.tcsetattr(fd,termios.TCSADRAIN,old)
+                try:notice=printing.clipboard_print(ui,chosen['id'])
+                except (OSError,ValueError,RuntimeError) as error:notice=str(error)
+                finally:tty.setcbreak(fd)
             elif chosen and key in {'enter','\r','\n','o','j','r','n'}:
                 if select and key in {'enter','\r','\n'}:return chosen
                 try:
