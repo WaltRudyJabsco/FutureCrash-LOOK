@@ -4,6 +4,7 @@
 and close; Shift-number or x removes a saved item. Enter previews; Esc returns.
 Shift-Z opens the shelf from supported LOOK workspaces. Saved history stays on
 this computer; s explicitly saves one clip as a normal synced note.
+On the receiving computer, press f in the shelf or run `lk clip shared`. Press a number to copy that shared clip; r refreshes the synced list. Local capture can be off on either end.
 Shortcut keys and numbered slots use blue, with subdued gray action labels.
 The command footer wraps to the terminal width.
 

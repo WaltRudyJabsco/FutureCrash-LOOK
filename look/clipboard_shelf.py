@@ -382,7 +382,14 @@ def share_note(text):
     return row
 
 
-def show(*, insert=False, fd=None, reader=None, shelf=None):
+def shared_clips():
+    try:from .notebook_core import Notebook
+    except ImportError:from notebook_core import Notebook
+    notes=Notebook().list(kind='note')
+    return [(n['id'],n['body']) for n in notes if n['project']=='Clipboard'][:HISTORY_LIMIT]
+
+
+def show(*, insert=False, fd=None, reader=None, shelf=None, shared=False):
     fd = sys.stdin.fileno() if fd is None else fd
     reader = reader or read_key
     owned = shelf is None
@@ -399,7 +406,7 @@ def show(*, insert=False, fd=None, reader=None, shelf=None):
         ensure_watcher()
         # Freeze numbered slots while this popup owns input. New copies are
         # still captured in the background, but cannot move a target mid-keypress.
-        rows = shelf.rows()
+        rows = shared_clips() if shared else shelf.rows()
         while True:
             selected = max(0, min(selected, len(rows)-1))
             width, height = shutil.get_terminal_size((90, 26))
@@ -407,13 +414,17 @@ def show(*, insert=False, fd=None, reader=None, shelf=None):
             colors = terminal_style.list_colors()
             state = 'capture '+capture_description(shelf)
             lines = [colors['CYAN']+'CLIPBOARD SHELF'+ '\033[0m · '+state+' · local text only']
-            if not shelf.enabled:
+            if shared:
+                lines=[colors['CYAN']+'FABRIC CLIPS'+'\033[0m · shared through Notes']
+            if not shared and not shelf.enabled:
                 lines += command_rows([('e','enables background text history on this computer.')],width,colors)
                 lines += ['Copied text may include secrets. History stays local; s saves one item as a synced note.']
             action = 'insert' if insert else 'copy & close'
             controls=command_rows([('1–9,0',action),('Shift-number','remove'),('↑↓','move'),('Enter','preview'),
-                ('x','remove'),('e','capture on/off'),('a','add clipboard'),('s','save to Notes/Fabric'),
+                ('x','remove'),('e','capture on/off'),('a','add clipboard'),('s','share to Fabric'),('f','Fabric clips'),
                 ('Esc','list' if expanded else 'back')],width,colors)
+            if shared:
+                controls=command_rows([('1–9,0',action),('↑↓','move'),('Enter','preview'),('r','refresh'),('f','local clips'),('Esc','back')],width,colors)
             page=max(1,height-len(lines)-len(controls)-2)
             if expanded and rows:
                 content = wrap_cells(safe_text(rows[selected][1]).expandtabs(4), width)
@@ -427,7 +438,7 @@ def show(*, insert=False, fd=None, reader=None, shelf=None):
                     line = command_inks(colors)[0]+prefix+colors['WHITE']+clip_line(summary, max(0,width-len(prefix)))
                     lines.append(terminal_style.list_row(line, width, index, index == selected, colors))
                 if not rows:
-                    lines += ['No saved clips yet. a adds the current clipboard; e requests automatic capture.']
+                    lines += ['No shared clips yet. Press s on a local clip to share it.' if shared else 'No saved clips yet. a adds the current clipboard; e requests automatic capture.']
             lines += controls
             lines += [safe_text(notice)]
             frame = [fit_styled(line, width) for line in lines]
@@ -456,6 +467,14 @@ def show(*, insert=False, fd=None, reader=None, shelf=None):
                 scroll = max(0,scroll+(-page if key == 'pageup' else page)); continue
             if key in {'\r','\n','enter'} and rows:
                 expanded = not expanded; scroll = 0; continue
+            if key=='f' or (shared and key=='r'):
+                try:
+                    next_shared=not shared if key=='f' else True
+                    rows=shared_clips() if next_shared else shelf.rows()
+                    shared=next_shared;selected=0;expanded=False;scroll=0;notice=''
+                except (OSError,ValueError,sqlite3.Error) as exc:notice='Could not load shared clips: '+str(exc)
+                continue
+            if shared and (key in {'e','a','x','s'} or removal_slot(key) is not None):continue
             if key == 'e':
                 if not shelf.enabled and backend() is None:
                     notice = 'Clipboard unavailable: install wl-clipboard (Wayland) or xclip (X11).'
@@ -503,7 +522,7 @@ def show(*, insert=False, fd=None, reader=None, shelf=None):
 
 def main(argv=None):
     parser = argparse.ArgumentParser(prog='lk clip', description=__doc__)
-    parser.add_argument('action', nargs='?', choices=['on','off','status','clear','add'])
+    parser.add_argument('action', nargs='?', choices=['on','off','status','clear','add','shared'])
     parser.add_argument('--watch', action='store_true', help=argparse.SUPPRESS)
     parser.add_argument('--capture-stdin',action='store_true',help=argparse.SUPPRESS)
     args = parser.parse_args(argv)
@@ -511,10 +530,10 @@ def main(argv=None):
         capture_stdin();return 0
     if args.watch:
         watch(); return 0
-    if not args.action:
+    if not args.action or args.action=='shared':
         if not sys.stdin.isatty():
             parser.error('Open the shelf in a terminal; use lk clip status for a text report')
-        show(); return 0
+        show(shared=args.action=='shared'); return 0
     shelf = Shelf()
     try:
         if args.action == 'on':

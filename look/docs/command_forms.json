@@ -141,9 +141,9 @@
   ],
   [
     "lk clip",
-    "[on|off|status|clear|add]",
+    "[shared|on|off|status|clear|add]",
     "files",
-    "Ten-slot local text clipboard shelf; opt-in capture"
+    "Local clipboard history and explicitly shared Fabric clips"
   ],
   [
     "lk tasks",
