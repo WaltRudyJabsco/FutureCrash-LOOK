@@ -20127,7 +20127,7 @@ def _media_player_render(visualizer=0,visual_elapsed=0,*,accent=None,run=None,sh
                 f"Shuffle {'on' if snap['session'].get('shuffle') else 'off'}  ·  "
                 f"Repeat {snap['session'].get('repeat','off')}")
         eq=_media_player_visualizer(entry,snap["state"],inner)
-        player_controls="space play/pause · ←/→ seek 10s · p/n previous/next · s shuffle · r repeat · Q queue · O reset audio · v visuals · V choose visuals · x stop · q/Esc close player"
+        player_controls="space play/pause · ←/→ seek 10s · p/n previous/next · P print track · s shuffle · r repeat · Q queue · O reset audio · v visuals · V choose visuals · x stop · q/Esc close player"
         raw_body=[
             f"{artist} — {title}" if artist else title, album, eq or "",
             f"{time_text}  {bar}",
@@ -20183,6 +20183,19 @@ def _media_player_queue_render(snap,offset=0):
     return '\n'.join(lines)
 
 
+def _media_song_receipt(fd,old):
+    import printing
+    snap=_media_status_snapshot(read_only=True) or {}
+    entry=dict(snap.get('entry') or {})
+    if not entry or snap.get('state')=='stopped':return 'Play a track to print its receipt.'
+    entry['title']=entry.get('title') or _media_entry_label(entry)
+    termios.tcsetattr(fd,termios.TCSADRAIN,old)
+    try:
+        return printing.song_receipt(sys.modules[__name__],entry,_media_cover_path)
+    except (OSError,RuntimeError,ValueError) as error:return 'Print: '+str(error)
+    finally:tty.setcbreak(fd)
+
+
 def media_player(initial_visualizer=0):
     """Tiny live view over MediaSession; closing it never stops playback."""
     if not (sys.stdin.isatty() and sys.stdout.isatty()):
@@ -20233,6 +20246,7 @@ def media_player(initial_visualizer=0):
                     run+=1
                 else:visual_started+=time.monotonic()-opened
                 sys.stdout.write("\033[2J")
+            elif key=="P": notice=_media_song_receipt(fd,old)
             elif key=="O": _,notice=_media_reset_audio()
             elif key==" ": _media_control_session("toggle")
             elif key=="n": _media_control_session("next")
@@ -20426,6 +20440,7 @@ def _media_player_library(initial_query="",media_kind="audio"):
                 left_w=width-right_w-3 if right_w else width
                 controls="↑↓ select · Shift-arrows page/ends · Tab mark · A select all · Y keep offline · E edit · R refresh · C clear marks · Enter play · B add queue · D hide dir · W shell pane · L library · Q queue/back"
                 extra=("O open with · T Apple TV · " if media_kind=="video" else "O reset audio · ")+"F sort · G reverse · / search · v visuals · V choose visuals · M image/ASCII · Esc back/clear/exit"
+                if media_kind=="audio":extra+=" · P print playing track"
                 if pane_help:extra+=" · "+" · ".join(terminal_style.pane_shortcuts())
                 footer=_media_hints(controls,width)+"\n"+_media_hints(extra,width)
                 list_rows=max(1,height-12-len(footer.splitlines()))
@@ -20585,6 +20600,10 @@ def _media_player_library(initial_query="",media_kind="audio"):
                     if key=="F":sort_mode=(sort_mode+1)%len(MEDIA_FIND_SORTS)
                     else:reverse_sort=not reverse_sort
                     idx=0;notice="Sort: "+MEDIA_FIND_SORTS[sort_mode]+(" · reversed" if reverse_sort else "")
+                continue
+            if key=="P" and media_kind=="audio":
+                native_preview.invalidate()
+                notice=_media_song_receipt(fd,old)
                 continue
             if key=="O" and media_kind=="audio":
                 _,notice=_media_reset_audio();continue

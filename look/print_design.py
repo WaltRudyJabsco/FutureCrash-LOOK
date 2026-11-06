@@ -94,18 +94,9 @@ def render(value,kind='banner',font_name='solid',width=384,artwork=None):
         original_columns=max(1,int((width-24)/original_face.getlength('M')))
         if len(value)>90 and len(textwrap.wrap(value,original_columns))>3:
             raise ValueError('Shorten the fortune to fit this printer')
-        step=face.getbbox('Ag')[3]+inset
         numbers=sorted(secrets.SystemRandom().sample(range(1,50),6))
         lucky='Lucky: '+' '.join(f'{n:02d}' for n in numbers)
-        number_face=font(max(6,round(width/16)))
-        divider=inset+len(lines)*step
-        lucky_y=divider+inset
-        height=lucky_y+number_face.getbbox(lucky)[3]+inset
-        image=Image.new('L',(width,height),255);draw=ImageDraw.Draw(image)
-        for i,line in enumerate(lines):
-            draw.text(((width-draw.textlength(line,font=face))/2,inset+i*step),line,font=face,fill=0)
-        draw.line((width//3,divider,2*width//3,divider),fill=128,width=1)
-        draw.text(((width-draw.textlength(lucky,font=number_face))/2,lucky_y),lucky,font=number_face,fill=0)
+        image=markdown_bitmap('### '+value+'\n<center>'+lucky+'</center>',width,2438)
         details={'kind':kind,'text':value,'lines':lines,'lucky_numbers':numbers,'note':'Random numbers for fun, not a lottery prediction.'}
         if kind=='fortune' and artwork is not None:
             from PIL import ImageOps
@@ -119,15 +110,9 @@ def render(value,kind='banner',font_name='solid',width=384,artwork=None):
             art.thumbnail((width,1600))
             factor=min(width/art.width,1600/art.height)
             art=art.resize((max(1,round(art.width*factor)),max(1,round(art.height*factor))))
-            caption_font=font(max(16,round(width/16)));caption=[]
-            columns=max(1,int((width-16)/caption_font.getlength('M')))
-            for key in ('title','artist','date','museum'):
-                clean=' '.join(str(row.get(key) or '').split())[:250]
-                if clean:caption.extend(textwrap.wrap(clean,columns)[:3])
-            caption_step=caption_font.getbbox('Ag')[3]+4;canvas=Image.new('L',(width,image.height+art.height+24+len(caption)*caption_step),255)
-            canvas.paste(image,(0,0));canvas.paste(art,((width-art.width)//2,image.height+8));draw=ImageDraw.Draw(canvas)
-            for i,line in enumerate(caption):draw.text((8,image.height+art.height+16+i*caption_step),line,font=caption_font,fill=0)
-            image=canvas;details['artwork']={key:row.get(key,'') for key in ('id','title','artist','date','museum')};details['artwork_rotation']=90 if rotated else 0
+            credit=credit_bitmap([row.get(key) for key in ('title','artist','date','museum')],width)
+            image=stack_receipt(width,image,art,credit)
+            details['artwork']={key:row.get(key,'') for key in ('id','title','artist','date','museum')};details['artwork_rotation']=90 if rotated else 0
     else:raise ValueError('Choose banner, fortune or fortune-cookie')
     out=io.BytesIO();image.save(out,format='PNG')
     return out.getvalue(),details
@@ -206,3 +191,37 @@ def markdown_bitmap(body,width,max_height):
         left=(width-length)/2 if center else margin
         for offset,ch,style in row:draw.text((left+offset,top),ch,font=style,fill=0)
     return image
+
+
+def stack_receipt(width,*parts):
+    from PIL import Image
+    parts=[part for part in parts if part is not None]
+    canvas=Image.new('L',(width,sum(part.height for part in parts)),255)
+    y=0
+    for part in parts:
+        canvas.paste(part,((width-part.width)//2,y))
+        y+=part.height
+    return canvas
+
+
+def credit_bitmap(fields,width):
+    lines=[' '.join(str(value).split())[:250] for value in fields if value and str(value).strip()]
+    if not lines:return None
+    lines[0]='### '+lines[0]
+    return markdown_bitmap('\n'.join(lines),width,8192)
+
+
+def song_bitmap(entry,cover,width):
+    from PIL import Image,ImageOps
+    def field(key):return ' '.join(str(entry.get(key) or '').split())[:250]
+    lines=['# '+(field('title') or 'Untitled track')]
+    if field('artist'):lines.append('**'+field('artist')+'**')
+    if field('album'):lines.append('*'+field('album')+'*')
+    info=markdown_bitmap('\n'.join(lines),width,8192)
+    art=None
+    if cover:
+        with Image.open(cover) as source:
+            if source.width*source.height>16_000_000:raise ValueError('Album cover is too large')
+            art=ImageOps.exif_transpose(source).convert('L')
+            art.thumbnail((width,width))
+    return stack_receipt(width,info,art)
