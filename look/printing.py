@@ -233,7 +233,9 @@ def main(args,ui=None):
             print(print_design.setup());return 0
         if action in {'banner','fortune','fortune-cookie'}:
             result=design(value['text'],kind=action,font=value['font'],queue=value['printer'],paper_limit_mm=value['paper_limit_mm'])
-            if 'ascii_preview' in result and not as_json:print(result['ascii_preview'])
+            if 'ascii_preview' in result and not as_json:
+                print(result['ascii_preview'])
+                print('Preview only. Add --printer "PRINTER NAME" to review a print job, then run the send command shown.',file=sys.stderr)
             elif as_json:print(json.dumps(result))
             else:display(result)
             return 0
