@@ -11171,6 +11171,8 @@ def ollama_chat(force_search=False, initial_prompt=None, allow_start=True, host_
             initial_prompt=None
 
     if initial_prompt and not force_search and not selected_paths:
+        import fortune_assistant
+        initial_prompt=fortune_assistant.follow_up(initial_prompt,conversation_history or [])
         printer_answer=_lo_fortune_direct(initial_prompt,profile,events,None if one_shot else fortune_printers)
         if printer_answer is None:printer_answer=_lo_printers_direct(initial_prompt,events)
         if printer_answer is not None:

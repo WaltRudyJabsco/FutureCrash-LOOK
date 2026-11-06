@@ -84,3 +84,13 @@ def test_cookie_preview_needs_only_text_and_lucky_numbers(monkeypatch):
     assert result['lines']==['Small wonders await.']
     assert len(set(result['lucky_numbers']))==6
     assert 'artwork' not in result
+
+
+def test_signal_fortune_menu_and_typo(monkeypatch):
+    monkeypatch.setattr(printing,'destinations',lambda:{'printers':[{'label':'Brother'},{'label':'Tiny Printer'}]})
+    menu=fortune.execute('/fortune')
+    history=[{'role':'user','content':'/fortune'},{'role':'assistant','content':menu}]
+    for reply in ('1','Tiny Printer'):
+        assert fortune.follow_up(reply,history)=='print a fortune on Tiny Printer'
+    assert fortune.intent('print a forutne on tiny printer')=={'printer':'tiny printer','kind':'fortune'}
+    assert fortune.follow_up('1',history+[{'role':'assistant','content':'Something else'}])=='1'
