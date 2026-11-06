@@ -166,7 +166,7 @@ def parser():
     result.add_argument('--json',action='store_true',help='Machine-readable result')
     sub=result.add_subparsers(dest='action')
     sub.add_parser('setup',help='Install offline pyfiglet and image rendering for this account')
-    for kind in ('banner','fortune'):
+    for kind in ('banner','fortune','fortune-cookie'):
         item=sub.add_parser(kind);item.add_argument('text');item.add_argument('--font',default='standard',choices=['standard','small','slant','banner','big']);item.add_argument('--printer');item.add_argument('--paper-limit-mm',type=float,default=304.8)
     item=sub.add_parser('completion');item.add_argument('--confirm',action='store_true');item.add_argument('--node',default='local')
     for action in ['list','discover']:
@@ -231,7 +231,7 @@ def main(args,ui=None):
         if action=='setup':
             import print_design
             print(print_design.setup());return 0
-        if action in {'banner','fortune'}:
+        if action in {'banner','fortune','fortune-cookie'}:
             result=design(value['text'],kind=action,font=value['font'],queue=value['printer'],paper_limit_mm=value['paper_limit_mm'])
             if 'ascii_preview' in result and not as_json:print(result['ascii_preview'])
             elif as_json:print(json.dumps(result))
@@ -272,11 +272,11 @@ def design(text,kind='banner',font='standard',queue=None,paper_limit_mm=304.8):
     import print_design
     if queue is None:
         if kind=='banner':return {'kind':kind,'font':font,'ascii_preview':print_design.banner(text,font),'fonts':print_design.FONTS}
-        _,details=print_design.render(text,kind,font,artwork=print_design.museum_artwork());return details
+        _,details=print_design.render(text,kind,font,artwork=print_design.museum_artwork() if kind=='fortune' else None);return details
     from print_destinations import choose,route
     catalog=destinations();destination=choose(catalog,queue);selected=route(destination,catalog.get('local_node',''))
     profile=selected.get('profile',{});receipt=profile.get('kind')=='escpos'
-    if kind=='fortune':paper_limit_mm=304.8
+    if kind in ('fortune','fortune-cookie'):paper_limit_mm=304.8
     image,details=print_design.render(text,kind,font,profile.get('width',384) if receipt else 576,artwork=print_design.museum_artwork() if kind=='fortune' else None)
     result=_request('prepare',selected['node'],queue=selected['name'],data=base64.b64encode(image).decode(),filename=kind+'.png',kind='receipt-image' if receipt else 'document',options_value={'copies':1,'paper_limit_mm':paper_limit_mm})
     result.update(destination=destination['label'],design=details)
@@ -287,7 +287,7 @@ def design(text,kind='banner',font='standard',queue=None,paper_limit_mm=304.8):
 def design_summary(result):
     state=result.get('state','unknown');label=result.get('destination',result.get('queue','printer'))
     receipt=result.get('receipt') or {};ident=result.get('id','')
-    subject={'fortune':'Fortune','banner':'Banner'}.get(result.get('design',{}).get('kind'),'Print job')
+    subject={'fortune':'Fortune','fortune-cookie':'Fortune cookie','banner':'Banner'}.get(result.get('design',{}).get('kind'),'Print job')
     if state in {'submitting','printing'}:return subject+' accepted by '+label+'; delivery is not yet confirmed. Check lk print inspect '+ident+' --node '+str(result.get('node','local'))+'.'
     if state=='queued':return subject+' sent to '+label+'. '+receipt.get('note','Check the physical output.')+' Job '+ident+'.'
     if state=='prepared':return subject+' prepared, not printed. '+result.get('send_command','Review job '+ident+'.')
@@ -298,7 +298,7 @@ def tools():
     fields={'node':{'type':'string','description':'Optional exact owner; default auto selects an enabled route'},'queue':{'type':'string','description':'Stable physical printer ID or unique friendly name from discovery; an exact queue works with an explicit owner'}}
     return [
         {'type':'function','function':{'name':'banner_render','description':'Render offline FIGlet lettering for a banner preview. No printing. Fonts: standard, small, slant, banner, big.','parameters':{'type':'object','properties':{'text':{'type':'string','maxLength':120},'font':{'type':'string','enum':['standard','small','slant','banner','big']}},'required':['text'],'additionalProperties':False}}},
-        {'type':'function','function':{'name':'print_design','description':'Prepare or explicitly print a banner or fortune-cookie slip. For fortunes write an original, thoughtful/playful fortune of one to three short lines (prefer under 90 characters); renderer adds random lucky numbers and a saved Museum artwork with credit; no new outside downloads. Landscape artwork rotates independently of the upright fortune text. Banner is large FIGlet lettering sideways along the roll. Discover the exact friendly printer label first. send defaults false; set true only for an explicit current request to print to that named printer. One attempt per turn. Longer banners require an explicitly requested banner allowance. Never claim physical appearance from a receipt.','parameters':{'type':'object','properties':{'text':{'type':'string','maxLength':140},'kind':{'type':'string','enum':['banner','fortune']},'font':{'type':'string','enum':['standard','small','slant','banner','big']},'queue':{'type':'string'},'paper_limit_mm':{'type':'number','minimum':1,'maximum':3048},'send':{'type':'boolean'}},'required':['text','kind','queue'],'additionalProperties':False}}},
+        {'type':'function','function':{'name':'print_design','description':'Prepare or explicitly print a banner or fortune-cookie slip. For fortunes write an original, thoughtful/playful fortune of one to three short lines (prefer under 90 characters); both include lucky numbers. Choose fortune-cookie for a short text slip or fortune for the illustrated card with a saved Museum artwork and credit; no new outside downloads. Landscape artwork rotates independently of the upright fortune text. Banner is large FIGlet lettering sideways along the roll. Discover the exact friendly printer label first. send defaults false; set true only for an explicit current request to print to that named printer. One attempt per turn. Longer banners require an explicitly requested banner allowance. Never claim physical appearance from a receipt.','parameters':{'type':'object','properties':{'text':{'type':'string','maxLength':140},'kind':{'type':'string','enum':['banner','fortune','fortune-cookie']},'font':{'type':'string','enum':['standard','small','slant','banner','big']},'queue':{'type':'string'},'paper_limit_mm':{'type':'number','minimum':1,'maximum':3048},'send':{'type':'boolean'}},'required':['text','kind','queue'],'additionalProperties':False}}},
         {'type':'function','function':{'name':'print_text','description':'Print one short recipe, list, note or receipt immediately ONLY when the user explicitly requests printing to a named printer in this message. Discover its exact friendly label first. Read actual Notes content before printing it. Automatically formats for the destination. One copy, at most 8000 characters; no automatic retry. Report spooler acceptance, never physical delivery. Use print_prepare for previews, files, or unclear requests.','parameters':{'type':'object','properties':{'queue':{'type':'string','description':'Exact friendly printer label present in the user request'},'text':{'type':'string','maxLength':8000}},'required':['queue','text'],'additionalProperties':False}}},
         {'type':'function','function':{'name':'printers_list','description':'List physical printers once across the trusted Fabric, with stable ID, friendly name and underlying queue routes. No setup or printing.','parameters':{'type':'object','properties':{},'additionalProperties':False}}},
         {'type':'function','function':{'name':'printer_inspect','description':'Inspect printer options or jobs on an exact owner/queue.','parameters':{'type':'object','properties':dict(fields,view={'type':'string','enum':['options','jobs']}),'required':['queue'],'additionalProperties':False}}},

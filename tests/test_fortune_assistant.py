@@ -65,3 +65,22 @@ def test_direct_waits_for_background_failure(monkeypatch):
     monkeypatch.setattr(printing,'request',inspect);monkeypatch.setattr(fortune.time,'sleep',lambda _:None)
     with pytest.raises(RuntimeError,match='Wake the printer'):fortune.execute('print me a fortune on tiny printer')
     inspect.assert_called_once_with('inspect','owner',ident='a')
+
+
+@pytest.mark.parametrize(('words','kind'), [('fortune cookie','fortune-cookie'),('fortune','fortune')])
+def test_request_preserves_layout_when_choosing_printer(words, kind, monkeypatch):
+    monkeypatch.setattr(printing,'destinations',lambda:{'printers':[{'label':'Tiny Printer'}]})
+    pending={}
+    fortune.execute('print me a '+words,pending=pending)
+    prompt='print me a '+words+' on Tiny Printer'
+    assert pending['tiny printer']==prompt
+    assert fortune.intent(prompt)=={'printer':'Tiny Printer','kind':kind}
+
+
+def test_cookie_preview_needs_only_text_and_lucky_numbers(monkeypatch):
+    import print_design
+    monkeypatch.setattr(print_design,'museum_artwork',Mock(side_effect=AssertionError('unexpected artwork lookup')))
+    result=printing.design('Small wonders await.',kind='fortune-cookie')
+    assert result['lines']==['Small wonders await.']
+    assert len(set(result['lucky_numbers']))==6
+    assert 'artwork' not in result

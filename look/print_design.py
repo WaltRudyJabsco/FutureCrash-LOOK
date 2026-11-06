@@ -65,7 +65,7 @@ def render(value,kind='banner',font_name='standard',width=384,artwork=None):
         if height>24368:raise ValueError('Banner exceeds ten feet; shorten the text or choose a smaller font')
         image=image.resize((width,height),Image.Resampling.NEAREST)
         details={'kind':kind,'text':value,'font':font_name,'ascii_preview':lettering}
-    elif kind=='fortune':
+    elif kind in ('fortune','fortune-cookie'):
         value=' '.join(text(value,140).split());face=font(max(10,round(width/24)))
         columns=max(1,int((width-24)/face.getlength('M')))
         lines=textwrap.wrap(value,columns)
@@ -78,7 +78,7 @@ def render(value,kind='banner',font_name='standard',width=384,artwork=None):
         lucky='Lucky: '+' '.join(f'{n:02d}' for n in numbers);small=font(max(9,round(width/32)))
         draw.text(((width-draw.textlength(lucky,font=small))/2,y+step//2),lucky,font=small,fill=0)
         details={'kind':kind,'text':value,'lines':lines,'lucky_numbers':numbers,'note':'Random numbers for fun, not a lottery prediction.'}
-        if artwork is not None:
+        if kind=='fortune' and artwork is not None:
             from PIL import ImageOps
             raw,row=artwork
             with Image.open(io.BytesIO(raw)) as source:
@@ -99,7 +99,7 @@ def render(value,kind='banner',font_name='standard',width=384,artwork=None):
             canvas.paste(image,(0,0));canvas.paste(art,((width-art.width)//2,image.height+8));draw=ImageDraw.Draw(canvas)
             for i,line in enumerate(caption):draw.text((8,image.height+art.height+16+i*caption_step),line,font=caption_font,fill=0)
             image=canvas;details['artwork']={key:row.get(key,'') for key in ('id','title','artist','date','museum')};details['artwork_rotation']=90 if rotated else 0
-    else:raise ValueError('Choose banner or fortune')
+    else:raise ValueError('Choose banner, fortune or fortune-cookie')
     out=io.BytesIO();image.save(out,format='PNG')
     return out.getvalue(),details
 

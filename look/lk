@@ -11440,10 +11440,10 @@ def ollama_chat(force_search=False, initial_prompt=None, allow_start=True, host_
             continue
 
         if fortune_printers:
-            label=fortune_printers.get(prompt.casefold().strip(' .!?'))
+            fortune_command=fortune_printers.get(prompt.casefold().strip(' .!?'))
             fortune_printers.clear()
-            if label and not force_search and not selected_paths:
-                prompt='print me a fortune on '+label
+            if fortune_command and not force_search and not selected_paths:
+                prompt=fortune_command
 
         if not force_search:
             download_answer=_lo_download_direct(prompt,profile,events)
@@ -11892,7 +11892,7 @@ def ollama_chat(force_search=False, initial_prompt=None, allow_start=True, host_
         else:
             messages.append({"role":"system","content":(
                 "RESOURCE SCOPE: unqualified open/play/find requests default to the operator's local world. "
-                "Fabric printers use printers_list/printer_inspect. Use banner_render for offline ASCII lettering previews. Use print_design for banners or fortune-cookie slips: author an original concise fortune (one to three lines, ideally under 90 characters); the renderer adds lucky numbers and an existing Museum artwork with title/artist credit. Set send=true only when asked to print to that exact named printer; otherwise prepare a review. Fortunes are compact; banners are sideways large lettering.  To print a to-do list from Notes, use notebook_search/list/read for its actual body, then print_prepare with that text and the chosen receipt destination; do not substitute a guessed list. When the current user explicitly asks to print to a named printer, use print_text with its friendly label and the requested short text; this sends one copy. Otherwise print_prepare creates a review plan only; return its confirmation command. Do not automatically retry a print_text submission. For recipes format a title, ingredients and concise steps; preserve quantities. Never invent the contents of an existing note. Never claim physical printing from a spooler receipt. Export DOCX/manuscripts to PDF first. "
+                "Fabric printers use printers_list/printer_inspect. Use banner_render for offline ASCII lettering previews. Use print_design for banners or fortune-cookie slips: author an original concise fortune (one to three lines, ideally under 90 characters); use kind fortune-cookie for the short slip with lucky numbers, or fortune for the card with lucky numbers and credited Museum artwork. Set send=true only when asked to print to that exact named printer; otherwise prepare a review. Fortunes are compact; banners are sideways large lettering.  To print a to-do list from Notes, use notebook_search/list/read for its actual body, then print_prepare with that text and the chosen receipt destination; do not substitute a guessed list. When the current user explicitly asks to print to a named printer, use print_text with its friendly label and the requested short text; this sends one copy. Otherwise print_prepare creates a review plan only; return its confirmation command. Do not automatically retry a print_text submission. For recipes format a title, ingredients and concise steps; preserve quantities. Never invent the contents of an existing note. Never claim physical printing from a spooler receipt. Export DOCX/manuscripts to PDF first. "
                 "Museum is the Fabric artwork collection. Use museum_search for actual artworks and image links; do not guess folders or claim to see an image from metadata. "
                 "YouTube Radio (YTR / lk ytr) is the shared listen-later queue. Use radio_queue to inspect it and radio_add for explicitly requested YouTube links; adding never starts playback. "
                 "Mercury Reader is the built-in Fabric EPUB/PDF library. For books and saved reading positions use books_shelf/books_lookup; never guess a media folder or substitute music search. Reader links are relative to the current Signal/Albert browser host; lk books is the terminal shelf. Book lookups do not launch or start narration. "

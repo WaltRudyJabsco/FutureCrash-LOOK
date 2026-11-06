@@ -8,10 +8,10 @@ import time
 
 def intent(prompt):
     text=' '.join(str(prompt or '').strip().split())
-    if re.fullmatch(r'(?:a )?fortune(?:,? please)?[.!?]?',text,re.I):
-        return {'printer':''}
-    match=re.fullmatch(r'(?:please\s+|(?:can|could|would) you\s+)?print\s+(?:me\s+)?(?:a\s+)?(?:fortune|fortune cookie)(?:\s+(?:on|to|with)\s+(?:the\s+)?(.+?))?[.!?]?',text,re.I)
-    return {'printer':(match.group(1) or '').rstrip('.!?')} if match else None
+    bare=re.fullmatch(r'(?:a )?(fortune(?: cookie)?)(?:,? please)?[.!?]?',text,re.I)
+    if bare:return {'printer':'','kind':bare[1].lower().replace(' ','-')}
+    match=re.fullmatch(r'(?:please\s+|(?:can|could|would) you\s+)?print\s+(?:me\s+)?(?:a\s+)?(fortune(?: cookie)?)(?:\s+(?:on|to|with)\s+(?:the\s+)?(.+?))?[.!?]?',text,re.I)
+    return {'printer':(match.group(2) or '').rstrip('.!?'),'kind':match[1].lower().replace(' ','-')} if match else None
 
 
 def generate():
@@ -36,14 +36,16 @@ def execute(prompt,allowed=True,pending=None):
     if not wanted:
         labels=[row['label'] for row in rows]
         if not labels:return 'No Fabric printers are available for a fortune.'
-        if pending is None:return 'To print an illustrated fortune, say “print me a fortune on '+labels[0]+'.”'
-        pending.update({label.casefold():label for label in labels})
-        return 'I’ll write the fortune. To print one illustrated card, reply with a printer name: '+', '.join(labels)+'.'
+        name=request['kind'].replace('-',' ')
+        command='print me a '+name+' on '
+        if pending is None:return 'To print, say “'+command+labels[0]+'.”'
+        pending.update({label.casefold():command+label for label in labels})
+        return 'I’ll write the fortune. To print one '+name+', reply with a printer name: '+', '.join(labels)+'.'
     matches=[row for row in rows if ' '.join(row['label'].casefold().split())==wanted]
     if len(matches)!=1:raise ValueError('No unique printer named '+request['printer']+'. Available: '+', '.join(row['label'] for row in rows)+'. Nothing printed.')
     label=matches[0]['label']
     value=generate()
-    result=json.loads(printing.run_tool('print_design',{'kind':'fortune','text':value,'queue':label,'send':True},Path.home(),prompt,{}))
+    result=json.loads(printing.run_tool('print_design',{'kind':request['kind'],'text':value,'queue':label,'send':True},Path.home(),prompt,{}))
     deadline=time.monotonic()+40
     while result.get('state') in {'submitting','printing'} and time.monotonic()<deadline:
         time.sleep(1)
