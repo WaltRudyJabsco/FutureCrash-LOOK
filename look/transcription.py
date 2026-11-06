@@ -143,6 +143,42 @@ except Exception as exc:
 """
 
 
+def _capture_program():
+    if sys.platform.startswith('linux') and shutil.which('parecord') and shutil.which('pactl'):
+        return PULSE_CAPTURE_PROGRAM
+    return CAPTURE_PROGRAM
+
+
+# PulseAudio/PipeWire desktops already provide a WAV recorder. Choose a physical
+# input when the default is a playback monitor, without changing desktop routing.
+PULSE_CAPTURE_PROGRAM = r"""
+import os,signal,subprocess,sys,time
+from pathlib import Path
+def pactl(*args):
+    return subprocess.check_output(['pactl',*args],text=True,timeout=5)
+source=pactl('get-default-source').strip()
+if not source or source.endswith('.monitor'):
+    names=[row.split()[1] for row in pactl('list','short','sources').splitlines() if len(row.split())>=2]
+    inputs=[name for name in names if not name.endswith('.monitor')]
+    if len(inputs)!=1:raise SystemExit('Choose a microphone in desktop Sound settings.')
+    source=inputs[0]
+parent=os.getppid()
+started=time.monotonic()
+with subprocess.Popen(['parecord','--device='+source,'--rate=16000','--channels=1','--format=s16le','--file-format=wav',sys.argv[1]],start_new_session=True) as capture:
+    try:
+        print('Recording microphone · Ctrl-C finishes',file=sys.stderr,flush=True)
+        if len(sys.argv)>2:Path(sys.argv[3]).touch()
+        while capture.poll() is None:
+            if os.getppid()!=parent or (len(sys.argv)>2 and (Path(sys.argv[2]).exists() or time.monotonic()-started>=1800)):break
+            time.sleep(.1)
+        if capture.poll() not in (None,0):raise SystemExit('Desktop microphone capture failed.')
+    except KeyboardInterrupt:pass
+    finally:
+        if capture.poll() is None:capture.send_signal(signal.SIGINT)
+        try:capture.wait(timeout=5)
+        except subprocess.TimeoutExpired:capture.kill();capture.wait();raise SystemExit('Desktop recorder failed to finish.')
+"""
+
 def speech_process(command):
     process=subprocess.Popen(command,stdout=subprocess.PIPE,text=True,env=offline_env(),start_new_session=True)
     try:
@@ -164,7 +200,7 @@ def recorded_dictation(model=None):
     with tempfile.TemporaryDirectory(prefix='look-dictate-') as temporary:
         path=Path(temporary)/'recording.wav'
         try:
-            speech_process([str(python),'-c',CAPTURE_PROGRAM,str(path)])
+            speech_process([str(python),'-c',_capture_program(),str(path)])
             with wave.open(str(path),'rb') as audio:
                 if not audio.getnframes():return ''
             print('Transcribing local recording…',file=sys.stderr)
@@ -238,7 +274,7 @@ def _key_worker():
     os.close(fd)
     audio=Path(name)
     try:
-        command=[str(root()/'venv/bin/python'),'-c',CAPTURE_PROGRAM,name,str(folder/'stop'),str(folder/'ready')]
+        command=[str(root()/'venv/bin/python'),'-c',_capture_program(),name,str(folder/'stop'),str(folder/'ready')]
         with subprocess.Popen(command) as capture:
             while capture.poll() is None and not (folder/'ready').exists():time.sleep(.05)
             if (folder/'ready').exists():_key_state(folder,'Recording.')
