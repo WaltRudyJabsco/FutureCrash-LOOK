@@ -65,3 +65,20 @@ def test_design_prepares_real_render_with_pinned_route(monkeypatch):
     assert result['design']['artwork']['id']=='aic-1'
     assert request.call_args.args==('prepare','owner')
     assert request.call_args.kwargs['kind']=='receipt-image'
+
+
+def test_interactive_banner_picker_preserves_text_and_confirms_once(monkeypatch):
+    from unittest.mock import Mock
+    import printing, print_desk, look_renderer
+    for stream in (printing.sys.stdin,printing.sys.stdout):
+        monkeypatch.setattr(stream,'isatty',lambda:True)
+    answers=iter([('p',False),('yes',False)])
+    monkeypatch.setattr(look_renderer,'prompt_line',lambda prompt:next(answers))
+    monkeypatch.setattr(print_desk,'pick',lambda ui,prefer_receipt:{'id':'tiny'})
+    plan=Mock(return_value={'id':'abc','node':'owner','destination':'Tiny Printer','design':{'kind':'banner'}})
+    monkeypatch.setattr(printing,'design',plan)
+    send=Mock(return_value={'state':'queued','id':'abc'})
+    monkeypatch.setattr(printing,'request',send)
+    assert printing.main(['banner','hello','--font','small'])==0
+    plan.assert_called_once_with('hello',kind='banner',font='small',queue='tiny',paper_limit_mm=304.8)
+    send.assert_called_once_with('send','owner',ident='abc',confirm=True)
