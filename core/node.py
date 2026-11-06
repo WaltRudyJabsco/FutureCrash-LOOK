@@ -7636,13 +7636,23 @@ def main():
                 else:
                     source=a.args[1] if len(a.args)>1 else ''
                     result=http_json(_daemon_url(a.host,a.port,'/v1/fabric-update')+'?plan=1&source='+urllib.parse.quote(source),timeout=150)
-                    if action=='run' or a.yes:
-                        if not a.yes:
+                    submit=action=='run' or a.yes
+                    if not a.yes and (not a.args or action=='run'):
+                        if not a.json:
                             print(fabric_update.describe(result))
-                            if not sys.stdin.isatty() or input('Run this plan? [y/N] ').strip().lower()!='y':return 0
+                            print('To run the update: lk fabric update run --yes')
+                        if a.json or not sys.stdin.isatty():
+                            if a.json:print(json.dumps(result,indent=2))
+                            return 0
+                        try:answer=input('Run this plan now? [y/N] ')
+                        except (EOFError,KeyboardInterrupt):
+                            print();return 0
+                        if answer.strip().casefold() not in {'y','yes'}:return 0
+                        submit=True
+                    if submit:
                         result=http_json(_daemon_url(a.host,a.port,'/v1/fabric-update'),{'review':result['review'],'confirm':True},timeout=15)
                 print(json.dumps(result,indent=2) if a.json else fabric_update.describe(result))
-                if result.get('state') in {'queued','running'}:print('Follow progress: lk fabric update status or the Observatory')
+                if not a.json and result.get('state') in {'queued','running'}:print('Follow progress: lk fabric update status or the Observatory')
                 return 0
             if a.command=="update":
                 if len(a.args)<2: ap.error("update requires SOURCE TARGET [TARGET ...]")
