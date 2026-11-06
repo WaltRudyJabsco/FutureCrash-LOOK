@@ -66,16 +66,18 @@ def encode(image):
 def text_image(text):
     from PIL import Image,ImageDraw,ImageFont
     if any(ord(c)<32 and c not in '\n\t\r' or ord(c)==127 for c in text):raise ValueError('Control characters are not printable')
+    text_size=24
+    line_step=text_size+4
     candidates=('/usr/share/fonts/truetype/dejavu/DejaVuSansMono.ttf','/usr/share/fonts/TTF/DejaVuSansMono.ttf')
-    font=next((ImageFont.truetype(p,20) for p in candidates if Path(p).is_file()),None)
-    if font is None:font=ImageFont.load_default(size=20)
+    font=next((ImageFont.truetype(p,text_size) for p in candidates if Path(p).is_file()),None)
+    if font is None:font=ImageFont.load_default(size=text_size)
     columns=max(1,int((WIDTH-16)/font.getlength('M')))
     lines=[]
     for line in text.expandtabs(4).splitlines():lines.extend(textwrap.wrap(line,columns,replace_whitespace=False) or [''])
-    height=16+26*max(1,len(lines))
+    height=16+line_step*max(1,len(lines))
     if height+FEED_ROWS>MAX_ROWS:raise ValueError('Tiny Bluetooth receipt is too long; shorten the text (configured banner job limit)')
     image=Image.new('1',(WIDTH,height),1);draw=ImageDraw.Draw(image)
-    for index,line in enumerate(lines):draw.text((8,8+index*26),line,font=font,fill=0)
+    for index,line in enumerate(lines):draw.text((8,8+index*line_step),line,font=font,fill=0)
     return image
 
 
