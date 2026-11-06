@@ -391,6 +391,7 @@ def run_tool(tool,args,workspace,prompt='',turn=None):
             if result['destination'].casefold()!=value['queue'].casefold():
                 request('discard',result['node'],ident=result['id'],confirm=True)
                 raise ValueError('Use the exact friendly printer name')
+            if turn.get('progress'):turn['progress']('Sending to '+result['destination']+'…')
             result=dict(request('send',result['node'],ident=result['id'],confirm=True),destination=result['destination'],design=result['design'])
         return json.dumps(result)
     if tool=='print_text':

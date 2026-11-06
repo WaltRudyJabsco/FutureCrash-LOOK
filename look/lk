@@ -3491,7 +3491,8 @@ def _activity(label):
 
 class _ActivityHandle:
     """Start/stop spinner for streaming waits; disappears on first model event."""
-    def __init__(self,label):
+    def __init__(self,label,hint="· Ctrl-C cancel"):
+        self.hint=hint
         self.label=label; self.stop=threading.Event(); self.worker=None
     def start(self):
         if not sys.stdout.isatty(): return self
@@ -3511,7 +3512,7 @@ class _ActivityHandle:
                     status="just a little longer…"
                 else:
                     status=f"still working · {self.label}"
-                sys.stdout.write(f"\r\033[2K{_c(frames[i%4],'36')} {_c(status,'2')} {_c('· Ctrl-C cancel','2')}")
+                sys.stdout.write(f"\r\033[2K{_c(frames[i%4],'36')} {_c(status,'2')} {_c(self.hint,'2')}")
                 sys.stdout.flush(); i+=1; self.stop.wait(.12)
         self.worker=threading.Thread(target=animate,daemon=True); self.worker.start()
         return self
@@ -8355,8 +8356,21 @@ def _lo_fortune_direct(prompt,profile,events=None,pending=None):
     if fortune_assistant.intent(prompt) is None:return None
     status='ok'
     if events:events.emit('tool_start',tool='print_design')
-    try:answer=fortune_assistant.execute(prompt,_tool_allowed('print_design',profile),pending)
+    spinner=None
+    progress=None
+    if sys.stdout.isatty() and not events:
+        print(_lo_label('lo','35'),flush=True)
+        def progress(message):
+            nonlocal spinner
+            if spinner:spinner.finish()
+            spinner=_ActivityHandle(message,hint='').start()
+    try:answer=fortune_assistant.execute(prompt,_tool_allowed('print_design',profile),pending,progress)
     except (OSError,RuntimeError,ValueError) as error:answer='Fortune: '+str(error);status='failed'
+    except KeyboardInterrupt:
+        if not progress:raise
+        answer='Stopped waiting. If submission began, check lk print jobs before retrying.';status='interrupted'
+    finally:
+        if spinner:spinner.finish()
     print(answer)
     if events:
         events.emit('intent_routed',family='printing',families=['printing'],confidence=1.0,source='rules')
@@ -11173,7 +11187,7 @@ def ollama_chat(force_search=False, initial_prompt=None, allow_start=True, host_
     if initial_prompt and not force_search and not selected_paths:
         import fortune_assistant
         initial_prompt=fortune_assistant.follow_up(initial_prompt,conversation_history or [])
-        printer_answer=_lo_fortune_direct(initial_prompt,profile,events,None if one_shot else fortune_printers)
+        printer_answer=_lo_fortune_direct(initial_prompt,profile,events) if one_shot else None
         if printer_answer is None:printer_answer=_lo_printers_direct(initial_prompt,events)
         if printer_answer is not None:
             _save_recent_exchange(initial_prompt,printer_answer)
@@ -11446,6 +11460,13 @@ def ollama_chat(force_search=False, initial_prompt=None, allow_start=True, host_
             fortune_printers.clear()
             if fortune_command and not force_search and not selected_paths:
                 prompt=fortune_command
+
+        if not force_search and not selected_paths and not one_shot:
+            answer=_lo_fortune_direct(prompt,profile,events,fortune_printers)
+            if answer is not None:
+                _save_recent_exchange(prompt,answer)
+                messages.extend([{'role':'user','content':prompt},{'role':'assistant','content':answer}])
+                continue
 
         if not force_search:
             download_answer=_lo_download_direct(prompt,profile,events)
