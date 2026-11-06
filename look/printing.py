@@ -409,3 +409,32 @@ def run_tool(tool,args,workspace,prompt='',turn=None):
         value['path']=str(path)
         return json.dumps(prepare_file(**value))
     return json.dumps(prepare(**value))
+
+
+def song_receipt(ui,entry,cover_path):
+    from print_desk import pick
+    from print_destinations import route
+    from print_design import song_bitmap
+    from look_renderer import prompt_line
+    import io
+    choice=pick(ui,prefer_receipt=True)
+    if not choice:return 'Cancelled.'
+    selected=route(choice,destinations().get('local_node',''))
+    profile=selected.get('profile',{})
+    receipt=profile.get('kind')=='escpos'
+    width=profile.get('width',384) if receipt else 576
+    cover=cover_path(entry)
+    card=song_bitmap(entry,cover,width)
+    out=io.BytesIO()
+    card.save(out,format='PNG')
+    plan=_request('prepare',selected['node'],queue=selected['name'],data=base64.b64encode(out.getvalue()).decode(),filename='Now playing.png',kind='receipt-image' if receipt else 'document',options_value={'copies':1})
+    print('Track receipt · '+entry['title']+' · '+choice['label'])
+    if not cover:print('Text only · album cover unavailable')
+    if 'estimated_paper_mm' in plan:print(f"Estimated paper: {plan['estimated_paper_mm']/10:.1f} cm")
+    try:answer,cancel=prompt_line('Print one track receipt? [y yes · Enter/Esc cancel] ')
+    except (KeyboardInterrupt,EOFError):answer,cancel='',True
+    if cancel or answer.strip().casefold() not in {'y','yes'}:
+        request('discard',selected['node'],ident=plan['id'],confirm=True)
+        return 'Cancelled.'
+    result=request('send',selected['node'],ident=plan['id'],confirm=True)
+    return design_summary(dict(result,destination=choice['label']))

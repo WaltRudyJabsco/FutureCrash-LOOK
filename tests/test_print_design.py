@@ -82,3 +82,21 @@ def test_interactive_banner_picker_preserves_text_and_confirms_once(monkeypatch)
     assert printing.main(['banner','hello','--font','small'])==0
     plan.assert_called_once_with('hello',kind='banner',font='small',queue='tiny',paper_limit_mm=304.8)
     send.assert_called_once_with('send','owner',ident='abc',confirm=True)
+
+
+@pytest.mark.parametrize('answer,action',[('y','send'),('','discard')])
+def test_song_receipt_uses_track_and_cover_before_confirm(tmp_path,monkeypatch,answer,action):
+    import base64,print_desk,look_renderer
+    cover=tmp_path/'cover.png'
+    Image.new('L',(80,80),64).save(cover)
+    entry={'title':'Quiet Hours','artist':'A Quartet','album':'Evening'}
+    choice={'label':'Tiny Printer','routes':[{'name':'tiny','node':'owner','profile':{'kind':'escpos','width':384}}]}
+    monkeypatch.setattr(print_desk,'pick',lambda *a,**k:choice)
+    monkeypatch.setattr(printing,'destinations',lambda:{})
+    prepare=Mock(return_value={'id':'one','estimated_paper_mm':20});monkeypatch.setattr(printing,'_request',prepare)
+    submit=Mock(return_value={'state':'queued','id':'one'});monkeypatch.setattr(printing,'request',submit)
+    monkeypatch.setattr(look_renderer,'prompt_line',lambda prompt:(answer,False))
+    printing.song_receipt(None,entry,lambda track:cover)
+    img=Image.open(io.BytesIO(base64.b64decode(prepare.call_args.kwargs['data'])))
+    assert img.width==384 and img.height>80 and img.getpixel((192,img.height-1))==64
+    submit.assert_called_once_with(action,'owner',ident='one',confirm=True)

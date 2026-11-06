@@ -366,3 +366,5 @@ briefly for background results, and the Museum web print dialog refreshes status
 automatically while open. An accepted job is not a delivery confirmation.
 
 For a formatted thermal slip, use `lk print file recipe.md --printer "Tiny Printer"` and review the returned plan, or copy the Markdown and run `lk print clip`. On receipts, `# Title` centers a large heading, `## Ingredients` makes a smaller heading, and `- item` makes a bullet. Use `**bold**`, `*italic*`, or a single line wrapped in `<center>…</center>`. Formatting is local and the paper estimate includes wrapped lines.
+
+Press **P** in either `lk player` or `lk mp` to print the currently playing track. Choose a printer, review the paper estimate and press **y**. The receipt includes the song title, artist, album and available cover art. Fortunes, Museum credits and track receipts share the Markdown typography.

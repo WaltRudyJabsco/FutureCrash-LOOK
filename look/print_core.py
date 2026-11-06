@@ -310,19 +310,8 @@ def receipt_bitmap(data,width,style="image",rotation=0,caption=None):
                 for x in range(cols):draw.text((x*cell_width,y*cell_height),ramp[samples.getpixel((x,y))*9//255],font=font,fill=0)
             image=art
         if caption:
-            import textwrap
-            from PIL import ImageDraw
-            from print_design import font
-            face=font(max(16,round(width/16)))
-            columns=max(1,int((width-16)/face.getlength('M')))
-            lines=[line for field in caption for line in textwrap.wrap(field,columns)]
-            step=face.getbbox('Ag')[3]+4
-            canvas=Image.new('1',(width,height+16+step*len(lines)),1)
-            canvas.paste(image.convert('1'),((width-image.width)//2,0))
-            draw=ImageDraw.Draw(canvas)
-            for index,line in enumerate(lines):
-                draw.text((8,height+6+index*step),line,font=face,fill=0)
-            return canvas
+            from print_design import credit_bitmap,stack_receipt
+            return stack_receipt(width,image.convert('1'),credit_bitmap(caption,width)).convert('1')
         padded=Image.new('L',((image.width+7)//8*8,height),255);padded.paste(image)
         return padded.convert('1')
 
@@ -377,10 +366,13 @@ class Spool:
         selected_options=print_options(options_value)
         paper_limit=selected_options.get('paper_limit_mm',MAX_RECEIPT_MM)
         render_options={key:selected_options[key] for key in ('style','rotation','caption') if key in selected_options}
+        preview_text=None
+        if kind=='receipt-text' or kind=='document' and Path(filename).suffix.casefold() in {'.txt','.md','.markdown'}:
+            preview_text=data.decode('utf-8')
         if kind=='receipt-text' and not render_options:
             from print_design import is_receipt_markdown, markdown_bitmap
-            body=data.decode('utf-8')
-            if Path(filename).suffix.lower() in {'.md','.markdown'} or is_receipt_markdown(body):
+            body=preview_text
+            if Path(filename).suffix.lower() in {'.md','.markdown'} or is_receipt_markdown(body) or profile.get('transport')=='mxw01-ble':
                 width=profile.get('width',384)
                 bitmap=markdown_bitmap(body,width,int(paper_limit*RECEIPT_DOTS_PER_MM/selected_options['copies']))
                 out=io.BytesIO()
@@ -431,8 +423,8 @@ class Spool:
         ident=uuid.uuid4().hex
         meta={'id':ident,'queue':queue,'title':filename,'kind':kind,'options':selected_options,'profile':profile,'bytes':len(payload),'sha256':hashlib.sha256(payload).hexdigest(),'state':'prepared','expires_in_seconds':PLAN_LIFETIME,'note':'Not sent. Review printer/options and use lk print send ID --confirm. Spooler acceptance does not prove physical printing.'}
         if kind.startswith('receipt-'):meta.update(estimated_paper_mm=paper_mm,max_paper_mm=paper_limit)
-        if kind=='receipt-text' or kind=='document' and Path(filename).suffix.casefold()=='.txt':
-            meta['text_preview']=data.decode('utf-8')[:2000];meta['preview_truncated']=len(data.decode('utf-8'))>2000
+        if preview_text is not None:
+            meta['text_preview']=preview_text[:2000];meta['preview_truncated']=len(preview_text)>2000
         with self.connect() as db:
             db.execute('BEGIN IMMEDIATE')
             pending=db.execute('SELECT COALESCE(SUM(length(payload)),0) FROM jobs').fetchone()[0]
