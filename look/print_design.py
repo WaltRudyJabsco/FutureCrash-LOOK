@@ -53,11 +53,29 @@ def font(size):
     path=next((Path(p) for p in candidates if Path(p).is_file()),None)
     return ImageFont.truetype(str(path),size) if path else ImageFont.load_default(size=size)
 
-def render(value,kind='banner',font_name='standard',width=384,artwork=None):
+def banner_preview(value,font_name):
+    if font_name=='solid':return ' '.join(text(value,120).split())
+    return banner(value,font_name)
+
+def render(value,kind='banner',font_name='solid',width=384,artwork=None):
     dependencies()
     from PIL import Image,ImageDraw
     if type(width) is not int or not 96<=width<=1200:raise ValueError('Unsupported print width')
-    if kind=='banner':
+    if kind=='banner' and font_name=='solid':
+        from PIL import ImageFont
+        lettering=banner_preview(value,font_name)
+        size=round(width*0.85)
+        try:face=ImageFont.truetype('DejaVuSans-Bold.ttf',size)
+        except OSError:face=font(size)
+        left,top,right,bottom=face.getbbox(lettering)
+        margin=max(4,width//24)
+        length=right-left+2*margin
+        if length>24368:raise ValueError('Banner exceeds ten feet; shorten the text')
+        canvas=Image.new('L',(length,width),255)
+        ImageDraw.Draw(canvas).text((margin-left,(width-(bottom-top))//2-top),lettering,font=face,fill=0)
+        image=canvas.transpose(Image.Transpose.ROTATE_270)
+        details={'kind':kind,'text':value,'font':font_name,'ascii_preview':lettering}
+    elif kind=='banner':
         from print_core import receipt_banner
         lettering=banner(value,font_name)
         image=receipt_banner(lettering,1200,rotation=90)
