@@ -377,6 +377,16 @@ class Spool:
         selected_options=print_options(options_value)
         paper_limit=selected_options.get('paper_limit_mm',MAX_RECEIPT_MM)
         render_options={key:selected_options[key] for key in ('style','rotation','caption') if key in selected_options}
+        if kind=='receipt-text' and not render_options:
+            from print_design import is_receipt_markdown, markdown_bitmap
+            body=data.decode('utf-8')
+            if Path(filename).suffix.lower() in {'.md','.markdown'} or is_receipt_markdown(body):
+                width=profile.get('width',384)
+                bitmap=markdown_bitmap(body,width,int(paper_limit*RECEIPT_DOTS_PER_MM/selected_options['copies']))
+                out=io.BytesIO()
+                bitmap.save(out,format='PNG')
+                data=out.getvalue()
+                kind='receipt-image'
         if 'caption' in render_options and kind=='receipt-text':raise ValueError('Captions apply to images only')
         if render_options and kind not in {'receipt-image','receipt-text'} and not (kind=='document' and Path(filename).suffix.casefold() in {'.png','.jpg','.jpeg'}):raise ValueError('Style and rotation apply to images only')
         if profile.get('transport')=='mxw01-ble':
@@ -393,9 +403,9 @@ class Spool:
         elif kind=='document':
             if profile.get('kind')=='escpos':raise ValueError('Use receipt text/image with this ESC/POS queue; PDF is not printer command data')
             suffix=Path(filename).suffix.casefold()
-            if suffix not in {'.txt','.pdf','.png','.jpg','.jpeg'}:raise ValueError('Print PDF, UTF-8 text, PNG or JPEG; export DOCX/EPUB/Mercury manuscripts to PDF first')
+            if suffix not in {'.txt','.md','.markdown','.pdf','.png','.jpg','.jpeg'}:raise ValueError('Print PDF, UTF-8 text, PNG or JPEG; export DOCX/EPUB/Mercury manuscripts to PDF first')
             if suffix=='.pdf' and not data.startswith(b'%PDF-'):raise ValueError('Invalid PDF header')
-            if suffix=='.txt':data.decode('utf-8')
+            if suffix in {'.txt','.md','.markdown'}:data.decode('utf-8')
             payload=data
             if render_options:
                 image=receipt_bitmap(data,1200,**render_options);out=io.BytesIO();image.save(out,format='PNG');payload=out.getvalue()
