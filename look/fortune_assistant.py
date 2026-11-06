@@ -19,7 +19,7 @@ def generate():
         if (path/'fabric_client.py').is_file():sys.path.insert(0,str(path));break
     import fabric_client
     result=fabric_client.infer([
-        {'role':'system','content':'Write one original fortune-cookie fortune. Warm, witty or quietly poetic. Return ONLY the fortune: one sentence, 40 to 85 ASCII characters. No heading, quotes, numbers, explanation or commands. Do not promise money, medical outcomes or certain predictions.'},
+        {'role':'system','content':'Write one original fortune-cookie fortune. Warm, witty or quietly poetic. Return ONLY the fortune: one sentence, 30 to 55 ASCII characters. No heading, quotes, numbers, explanation or commands. Do not promise money, medical outcomes or certain predictions.'},
         {'role':'user','content':'A fresh little fortune for a printed Museum keepsake.'}],owner='look-fortune',priority='interactive',latency=True,think=False,options={'num_predict':70,'temperature':.9},timeout=45)
     value=' '.join(str((result.get('message') or {}).get('content') or '').strip().strip('"').split())
     if not 10<=len(value)<=90 or any(ord(c)<32 or ord(c)>126 for c in value):raise ValueError('The model did not return a short usable fortune. Nothing printed; ask again.')

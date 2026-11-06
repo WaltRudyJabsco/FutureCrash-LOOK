@@ -84,17 +84,28 @@ def render(value,kind='banner',font_name='solid',width=384,artwork=None):
         image=image.resize((width,height),Image.Resampling.NEAREST)
         details={'kind':kind,'text':value,'font':font_name,'ascii_preview':lettering}
     elif kind in ('fortune','fortune-cookie'):
-        value=' '.join(text(value,140).split());face=font(max(10,round(width/24)))
-        columns=max(1,int((width-24)/face.getlength('M')))
+        value=' '.join(text(value,140).split())
+        face=font(max(8,round(width/14)))
+        inset=max(4,round(width/40))
+        columns=max(1,int((width-2*inset)/face.getlength('M')))
         lines=textwrap.wrap(value,columns)
-        if len(lines)>3:raise ValueError('Shorten the fortune to fit one to three lines on this printer')
-        step=round(width/16);height=24+step*(len(lines)+2)
-        image=Image.new('L',(width,height),255);draw=ImageDraw.Draw(image)
-        for i,line in enumerate(lines):draw.text(((width-draw.textlength(line,font=face))/2,10+i*step),line,font=face,fill=0)
-        y=12+len(lines)*step;draw.line((width//3,y,2*width//3,y),fill=128,width=1)
+        # Preserve the existing content limit while letting larger type use more rows.
+        original_face=font(max(10,round(width/24)))
+        original_columns=max(1,int((width-24)/original_face.getlength('M')))
+        if len(value)>90 and len(textwrap.wrap(value,original_columns))>3:
+            raise ValueError('Shorten the fortune to fit this printer')
+        step=face.getbbox('Ag')[3]+inset
         numbers=sorted(secrets.SystemRandom().sample(range(1,50),6))
-        lucky='Lucky: '+' '.join(f'{n:02d}' for n in numbers);small=font(max(9,round(width/32)))
-        draw.text(((width-draw.textlength(lucky,font=small))/2,y+step//2),lucky,font=small,fill=0)
+        lucky='Lucky: '+' '.join(f'{n:02d}' for n in numbers)
+        number_face=font(max(6,round(width/16)))
+        divider=inset+len(lines)*step
+        lucky_y=divider+inset
+        height=lucky_y+number_face.getbbox(lucky)[3]+inset
+        image=Image.new('L',(width,height),255);draw=ImageDraw.Draw(image)
+        for i,line in enumerate(lines):
+            draw.text(((width-draw.textlength(line,font=face))/2,inset+i*step),line,font=face,fill=0)
+        draw.line((width//3,divider,2*width//3,divider),fill=128,width=1)
+        draw.text(((width-draw.textlength(lucky,font=number_face))/2,lucky_y),lucky,font=number_face,fill=0)
         details={'kind':kind,'text':value,'lines':lines,'lucky_numbers':numbers,'note':'Random numbers for fun, not a lottery prediction.'}
         if kind=='fortune' and artwork is not None:
             from PIL import ImageOps
