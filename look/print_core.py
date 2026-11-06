@@ -536,6 +536,10 @@ def local(payload=None):
     if action=='bluetooth':return add_bluetooth(**value)
     if action=='profile':return configure_profile(**value)
     if action=='nickname':return nickname(**value)
+    if action=='draw-cookie':
+        import fortune_deck
+        require_queue(value['queue'])
+        with Spool().connect() as db:return {'text':fortune_deck.draw(db)}
     if action=='prepare':
         encoded=value.pop('data','')
         if not isinstance(encoded,str) or len(encoded)>4*((MAX_INPUT_BYTES+2)//3):raise ValueError('Print input exceeds 3 MiB')
