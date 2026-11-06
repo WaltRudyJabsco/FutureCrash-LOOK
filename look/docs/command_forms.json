@@ -1157,7 +1157,7 @@
   ],
   [
     "lk dictate",
-    "[OPTIONS]",
+    "[toggle|status] [OPTIONS]",
     "media",
     "Explicit local microphone dictation"
   ],
