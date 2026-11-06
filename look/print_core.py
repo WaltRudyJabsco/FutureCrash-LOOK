@@ -228,7 +228,7 @@ def cancel(queue,job,confirm=False):
 
 def print_options(value):
     value=value or {}
-    if not isinstance(value,dict) or set(value)-{'copies','pages','media','sides','style','rotation','paper_limit_mm'}:raise ValueError('Unsupported print options')
+    if not isinstance(value,dict) or set(value)-{'copies','pages','media','sides','style','rotation','caption','paper_limit_mm'}:raise ValueError('Unsupported print options')
     result={};copies=value.get('copies',1)
     if type(copies) is not int or not 1<=copies<=20:raise ValueError('Copies must be 1–20')
     result['copies']=copies
@@ -240,6 +240,12 @@ def print_options(value):
     if type(value.get('rotation',0)) is not int or value.get('rotation',0) not in (0,90):raise ValueError('Choose rotation 0 or 90')
     if value.get('style')=='ascii':result['style']='ascii'
     if value.get('rotation'):result['rotation']=90
+    if 'caption' in value:
+        fields=value['caption']
+        if not isinstance(fields,list) or len(fields)>4 or any(not isinstance(v,str) or len(v)>250 for v in fields):
+            raise ValueError('Invalid artwork caption')
+        cleaned=[' '.join(v.split()) for v in fields]
+        if any(cleaned):result['caption']=[v for v in cleaned if v]
     if value.get('pages'):
         if not isinstance(value['pages'],str) or not re.fullmatch(r'[1-9][0-9]{0,5}(?:-[1-9][0-9]{0,5})?(?:,[1-9][0-9]{0,5}(?:-[1-9][0-9]{0,5})?)*',value['pages']):raise ValueError('Use page ranges such as 1-3,5')
         for part in value['pages'].split(','):
@@ -282,7 +288,7 @@ def receipt_banner(text,width,style='image',rotation=0):
     return receipt_bitmap(out.getvalue(),width,rotation=rotation)
 
 
-def receipt_bitmap(data,width,style="image",rotation=0):
+def receipt_bitmap(data,width,style="image",rotation=0,caption=None):
     try:from PIL import Image,ImageOps
     except ImportError as error:raise RuntimeError('Receipt image preparation needs Pillow; text receipts work without it') from error
     with Image.open(io.BytesIO(data)) as source:
@@ -303,6 +309,20 @@ def receipt_bitmap(data,width,style="image",rotation=0):
             for y in range(rows):
                 for x in range(cols):draw.text((x*cell_width,y*cell_height),ramp[samples.getpixel((x,y))*9//255],font=font,fill=0)
             image=art
+        if caption:
+            import textwrap
+            from PIL import ImageDraw
+            from print_design import font
+            face=font(max(10,round(width/30)))
+            columns=max(1,int((width-16)/face.getlength('M')))
+            lines=[line for field in caption for line in textwrap.wrap(field,columns)]
+            step=face.getbbox('Ag')[3]+4
+            canvas=Image.new('1',(width,height+16+step*len(lines)),1)
+            canvas.paste(image.convert('1'),((width-image.width)//2,0))
+            draw=ImageDraw.Draw(canvas)
+            for index,line in enumerate(lines):
+                draw.text((8,height+6+index*step),line,font=face,fill=0)
+            return canvas
         padded=Image.new('L',((image.width+7)//8*8,height),255);padded.paste(image)
         return padded.convert('1')
 
@@ -356,12 +376,13 @@ class Spool:
         profile=profiles().get(queue,{'kind':'document'})
         selected_options=print_options(options_value)
         paper_limit=selected_options.get('paper_limit_mm',MAX_RECEIPT_MM)
-        render_options={key:selected_options[key] for key in ('style','rotation') if key in selected_options}
+        render_options={key:selected_options[key] for key in ('style','rotation','caption') if key in selected_options}
+        if 'caption' in render_options and kind=='receipt-text':raise ValueError('Captions apply to images only')
         if render_options and kind not in {'receipt-image','receipt-text'} and not (kind=='document' and Path(filename).suffix.casefold() in {'.png','.jpg','.jpeg'}):raise ValueError('Style and rotation apply to images only')
         if profile.get('transport')=='mxw01-ble':
             import print_mxw01
             print_mxw01.validate(profile)
-            if set(selected_options)-{'copies','style','rotation','paper_limit_mm'}:raise ValueError('Tiny Bluetooth printing does not support document options')
+            if set(selected_options)-{'copies','style','rotation','caption','paper_limit_mm'}:raise ValueError('Tiny Bluetooth printing does not support document options')
             if kind=='receipt-text':image=receipt_banner(data.decode('utf-8'),384,**render_options) if render_options else print_mxw01.text_image(data.decode('utf-8'))
             elif kind=='receipt-image':image=receipt_bitmap(data,384,**render_options)
             else:raise ValueError('Tiny Bluetooth printer accepts receipt text or images; use a document printer for PDF')
@@ -380,7 +401,7 @@ class Spool:
                 image=receipt_bitmap(data,1200,**render_options);out=io.BytesIO();image.save(out,format='PNG');payload=out.getvalue()
         elif kind in {'receipt-text','receipt-image'}:
             if profile.get('kind')!='escpos':raise ValueError('Configure this verified receipt queue with profile --kind escpos first')
-            if set(selected_options)-{'copies','style','rotation','paper_limit_mm'}:raise ValueError('Receipt jobs do not support document page/media/sides options')
+            if set(selected_options)-{'copies','style','rotation','caption','paper_limit_mm'}:raise ValueError('Receipt jobs do not support document page/media/sides options')
             if kind=='receipt-text' and not render_options:
                 rendered=receipt_text(data.decode('utf-8'),profile['columns'])
                 dots=rendered.count(b'\n')*RECEIPT_LINE_DOTS
