@@ -141,9 +141,9 @@
   ],
   [
     "lk clip",
-    "[shared|on|off|status|clear|add]",
+    "[share on|share off|shared|on|off|status|clear|add]",
     "files",
-    "Local clipboard history and explicitly shared Fabric clips"
+    "Local clips and optional automatic sharing with paired nodes"
   ],
   [
     "lk tasks",
