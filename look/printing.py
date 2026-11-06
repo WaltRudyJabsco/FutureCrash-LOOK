@@ -231,6 +231,32 @@ def main(args,ui=None):
         if action=='setup':
             import print_design
             print(print_design.setup());return 0
+        if action=='banner' and not as_json and sys.stdin.isatty() and sys.stdout.isatty():
+            from look_renderer import prompt_line
+            from print_desk import pick
+            import print_design
+            print(print_design.banner(value['text'],value['font']))
+            queue=value['printer']
+            if not queue:
+                answer,cancel=prompt_line('Choose a printer? [p choose · Enter/Esc done] ')
+                if cancel or answer.strip().casefold()!='p':return 0
+                choice=pick(ui,prefer_receipt=True)
+                if not choice:return 0
+                queue=choice['id']
+            plan=design(value['text'],kind='banner',font=value['font'],queue=queue,paper_limit_mm=value['paper_limit_mm'])
+            print('Banner on '+plan['destination'])
+            if 'estimated_paper_mm' in plan:print(f"Estimated paper: {plan['estimated_paper_mm']/10:.1f} cm")
+            try:
+                answer,cancel=prompt_line('Print one banner? [y yes · Enter/Esc cancel] ')
+            except (EOFError,KeyboardInterrupt):
+                answer,cancel='',True
+            if cancel or answer.strip().casefold() not in {'y','yes'}:
+                request('discard',plan['node'],ident=plan['id'],confirm=True)
+                print('Banner cancelled.')
+                return 0
+            result=request('send',plan['node'],ident=plan['id'],confirm=True)
+            print(design_summary(dict(result,destination=plan['destination'],design=plan['design'])))
+            return 0 if result.get('state') in {'queued','submitting','printing'} else 1
         if action in {'banner','fortune','fortune-cookie'}:
             result=design(value['text'],kind=action,font=value['font'],queue=value['printer'],paper_limit_mm=value['paper_limit_mm'])
             if 'ascii_preview' in result and not as_json:
