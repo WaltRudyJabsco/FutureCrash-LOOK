@@ -110,7 +110,9 @@ def transcribe(path,model=None):
 # Capture runs in the optional speech environment, keeping audio dependencies out
 # of LOOK's Python process. Samples stream to a temporary file, not system output.
 CAPTURE_PROGRAM = r"""
-import sys, queue
+import sys, queue, os, time
+from pathlib import Path
+parent=os.getppid()
 try:
     import sounddevice as sd
     import soundfile as sf
@@ -125,7 +127,11 @@ try:
         try:
             with sd.InputStream(samplerate=16000,channels=1,callback=receive):
                 print('Recording microphone · Ctrl-C finishes',file=sys.stderr,flush=True)
+                if len(sys.argv)>2:Path(sys.argv[3]).touch()
+                started=time.monotonic()
                 while True:
+                    if len(sys.argv)>2 and (Path(sys.argv[2]).exists() or os.getppid()!=parent or time.monotonic()-started>=1800):
+                        raise KeyboardInterrupt
                     try:output.write(pending.get(timeout=.1))
                     except queue.Empty:pass
                     if overflow.is_set():raise RuntimeError('Audio capture could not keep up; recording stopped')
@@ -186,6 +192,78 @@ def dictate(model=None):
     return safe_text(speech_process([command,'listen',str(model or config.get('model') or MODEL)]).strip())
 
 
+def _key_folder():
+    folder=root()/'key'
+    folder.mkdir(parents=True,exist_ok=True,mode=0o700)
+    return folder
+
+
+def _key_state(folder,message):
+    temp=folder/'state.tmp'
+    temp.write_text(message,encoding='utf-8')
+    temp.replace(folder/'state')
+
+
+def dictate_key(action):
+    import fcntl
+    folder=_key_folder()
+    with (folder/'control.lock').open('a') as gate, (folder/'active.lock').open('a') as active:
+        fcntl.flock(gate,fcntl.LOCK_EX)
+        try:fcntl.flock(active,fcntl.LOCK_EX|fcntl.LOCK_NB)
+        except BlockingIOError:
+            if action=='toggle':
+                (folder/'stop').touch()
+            return (folder/'state').read_text() if action=='status' else 'Finishing dictation.'
+        state=folder/'state'
+        if action=='status':
+            message=state.read_text() if state.exists() else 'Idle.'
+            return 'Interrupted; check the recovery folder.' if message in {'Starting microphone.','Recording.','Transcribing.'} else message
+        if not (root()/'venv/bin/python').is_file():raise ValueError('Run lk transcribe setup on this computer first.')
+        for name in ('stop','ready'):
+            (folder/name).unlink(missing_ok=True)
+        _key_state(folder,'Starting microphone.')
+        # The worker inherits the same locked file description, even after this
+        # shortcut exits. A repeated press cannot accidentally start a second mic.
+        subprocess.Popen([sys.executable,__file__,'--key-worker'],pass_fds=(active.fileno(),),
+                         start_new_session=True,stdin=subprocess.DEVNULL,stdout=subprocess.DEVNULL,stderr=subprocess.DEVNULL)
+        return 'Starting microphone. Press the shortcut again to finish.'
+
+
+def _key_worker():
+    import clipboard_shelf
+    folder=_key_folder()
+    recovery=root()/'recovery'
+    recovery.mkdir(mode=0o700,exist_ok=True)
+    fd,name=tempfile.mkstemp(prefix='dictation-',suffix='.wav',dir=recovery)
+    os.close(fd)
+    audio=Path(name)
+    try:
+        command=[str(root()/'venv/bin/python'),'-c',CAPTURE_PROGRAM,name,str(folder/'stop'),str(folder/'ready')]
+        with subprocess.Popen(command) as capture:
+            while capture.poll() is None and not (folder/'ready').exists():time.sleep(.05)
+            if (folder/'ready').exists():_key_state(folder,'Recording.')
+            if capture.wait():raise ValueError('Microphone unavailable; check the input device and microphone permission.')
+        _key_state(folder,'Transcribing.')
+        with wave.open(name,'rb') as wav:
+            text=transcribe(audio) if wav.getnframes() else ''
+        if not text:
+            _key_state(folder,'No speech detected.')
+        else:
+            transcript=audio.with_suffix('.txt')
+            transcript.write_text(text+'\n',encoding='utf-8')
+            shelf=clipboard_shelf.Shelf()
+            try:shelf.observe(text)
+            finally:shelf.close()
+            copied=clipboard_shelf.copy_clipboard(text)
+            _key_state(folder,('Copied. ' if copied else 'System clipboard unavailable. ')+str(transcript))
+        audio.unlink()
+        return 0
+    except Exception as exc:
+        if audio.exists() and audio.stat().st_size<=44:audio.unlink()
+        _key_state(folder,'Dictation failed: '+str(exc)+(' · recording kept at '+name if audio.exists() else ''))
+        return 1
+
+
 def main(argv=None,live=False):
     parser=argparse.ArgumentParser(prog='lk dictate' if live else 'lk transcribe',description='Optional offline speech input; never executes the words you say.')
     parser.add_argument('target',nargs='?',help='Audio/video file, status, setup, or configure')
@@ -195,8 +273,11 @@ def main(argv=None,live=False):
     parser.add_argument('--note',metavar='TITLE',help='Save the transcript as a new Notebook note')
     parser.add_argument('--json',action='store_true')
     args=parser.parse_args(argv)
-    if live and args.target:parser.error('dictate takes options only; use lk transcribe FILE for a recording')
+    if live and args.target not in (None,'toggle','status'):parser.error('use lk dictate [toggle|status] or lk transcribe FILE')
     try:
+        if live and args.target:
+            if args.output or args.note or args.model or args.server:parser.error('toggle uses the configured model and saves to the clipboard')
+            message=dictate_key(args.target);print(json.dumps({'status':message}) if args.json else message);return 0
         if not live and args.target=='setup':setup();return 0
         if not live and args.target=='configure':
             data={'model':args.model or MODEL}
@@ -223,4 +304,4 @@ def main(argv=None,live=False):
         print('LOOK TRANSCRIPTION · '+str(exc),file=sys.stderr);return 1
     except KeyboardInterrupt:return 130
 
-if __name__=='__main__':raise SystemExit(main())
+if __name__=='__main__':raise SystemExit(_key_worker() if sys.argv[1:]==['--key-worker'] else main())

@@ -148,3 +148,26 @@ def test_linux_setup_uses_cpu_torch_before_resolving_runtime(tmp_path,monkeypatc
     cpu=next(i for i,c in enumerate(calls) if 'https://download.pytorch.org/whl/cpu' in c)
     runtime=next(i for i,c in enumerate(calls) if 'fermion-research=='+speech.RUNTIME_VERSION in c)
     assert cpu<runtime and '--no-deps' in calls[cpu]
+
+
+def test_shortcut_worker_preserves_text_if_clipboard_unavailable(tmp_path,monkeypatch):
+    import transcription as speech, clipboard_shelf
+    from unittest.mock import Mock
+    import wave
+    monkeypatch.setattr(speech,'root',lambda:tmp_path)
+    def start(command):
+        with wave.open(command[3],'wb') as wav:
+            wav.setparams((1,2,16000,0,'NONE',''));wav.writeframes(b'\0\0'*160)
+        from pathlib import Path
+        Path(command[5]).touch()
+        from contextlib import nullcontext
+        return nullcontext(Mock(poll=lambda:0,wait=lambda:0))
+    monkeypatch.setattr(speech.subprocess,'Popen',start)
+    monkeypatch.setattr(speech,'transcribe',lambda audio:'A thought worth keeping.')
+    shelf=Mock()
+    monkeypatch.setattr(clipboard_shelf,'Shelf',lambda:shelf)
+    monkeypatch.setattr(clipboard_shelf,'copy_clipboard',lambda text:False)
+    assert speech._key_worker()==0
+    assert next((tmp_path/'recovery').glob('*.txt')).read_text()=='A thought worth keeping.\n'
+    shelf.observe.assert_called_once_with('A thought worth keeping.')
+    assert 'clipboard unavailable' in speech.dictate_key('status')
