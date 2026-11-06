@@ -59,7 +59,7 @@ def prepare(queue,node='auto',path=None,text=None,receipt=False,**options):
 MAX_QUICK_TEXT = 8000
 
 
-def quick_text(queue, text, exact_label=False):
+def prepare_short_text(queue, text, exact_label=False):
     """Resolve once and pin the owner before preparing and submitting one copy."""
     from print_destinations import choose, route
     if not isinstance(text,str) or not text.strip() or len(text)>MAX_QUICK_TEXT:
@@ -70,7 +70,37 @@ def quick_text(queue, text, exact_label=False):
     selected=route(destination,catalog.get('local_node',''))
     plan=prepare(selected['name'],selected['node'],text=text,
                  receipt=selected.get('profile',{}).get('kind')=='escpos',copies=1)
-    return dict(request('send',plan['node'],ident=plan['id'],confirm=True),destination=destination['label'])
+    return dict(plan,destination=destination['label'])
+
+
+def quick_text(queue,text,exact_label=False):
+    plan=prepare_short_text(queue,text,exact_label)
+    return dict(request('send',plan['node'],ident=plan['id'],confirm=True),destination=plan['destination'])
+
+
+def clipboard_print(ui,queue=None):
+    from look_renderer import clipboard_text,prompt_line
+    from print_desk import pick
+    content=clipboard_text().replace('\r\n','\n').replace('\r','\n').strip()
+    if not content:raise ValueError('Copy a recipe, passage or list as text first.')
+    if len(content)>MAX_QUICK_TEXT:raise ValueError('Copy a shorter selection (up to 8,000 characters).')
+    if any(not ch.isprintable() and ch not in '\t\n' for ch in content):
+        raise ValueError('Copy plain text without control characters.')
+    if not queue:
+        choice=pick(ui,prefer_receipt=True)
+        if not choice:return 'Cancelled.'
+        queue=choice['id']
+    plan=prepare_short_text(queue,content)
+    print(content)
+    print('One copy on '+plan['destination'])
+    if 'estimated_paper_mm' in plan:print(f"Estimated paper: {plan['estimated_paper_mm']/10:.1f} cm")
+    try:answer,cancel=prompt_line('Print this text? [y yes · Enter/Esc cancel] ')
+    except (KeyboardInterrupt,EOFError):answer,cancel='',True
+    if cancel or answer.strip().casefold() not in {'y','yes'}:
+        request('discard',plan['node'],ident=plan['id'],confirm=True)
+        return 'Cancelled.'
+    result=request('send',plan['node'],ident=plan['id'],confirm=True)
+    return design_summary(dict(result,destination=plan['destination']))
 
 
 def explicit_print(prompt, label):
@@ -180,13 +210,14 @@ def parser():
     item=sub.add_parser('profile');item.add_argument('queue');item.add_argument('--kind',choices=['document','escpos'],required=True);item.add_argument('--width',type=int,default=384);item.add_argument('--columns',type=int,default=32);item.add_argument('--image-mode',choices=['raster','column24'],default='raster');item.add_argument('--max-receipt-bytes',type=int,default=None,help='Device-specific encoded receipt limit; 0 disables');item.add_argument('--confirm',action='store_true');item.add_argument('--node',default='local')
     for action in ['file','text','receipt']:
         item=sub.add_parser(action);item.add_argument('content',nargs='?' if action=='receipt' else None);item.add_argument('--image');item.add_argument('--printer');item.add_argument('--node',default='auto');item.add_argument('--paper-limit-mm',type=float);item.add_argument('--copies',type=int,default=1);item.add_argument('--style',choices=['image','ascii']);item.add_argument('--rotation',type=int,choices=[0,90]);item.add_argument('--pages');item.add_argument('--media');item.add_argument('--sides',choices=['one-sided','two-sided-long-edge','two-sided-short-edge'])
+    item=sub.add_parser('clip',aliases=['clipboard'],help='Review and print text copied on this computer');item.add_argument('--printer')
     item=sub.add_parser('quick',help='Send one text receipt/document immediately to a named printer')
     item.add_argument('content');item.add_argument('--printer',required=True)
     for action in ['inspect','send','discard']:
         item=sub.add_parser(action);item.add_argument('ident');item.add_argument('--node',default='local')
         if action!='inspect':item.add_argument('--confirm',action='store_true')
     item=sub.add_parser('cancel');item.add_argument('queue');item.add_argument('job');item.add_argument('--confirm',action='store_true');item.add_argument('--node',default='local')
-    for child in sub.choices.values():child.add_argument('--json',action='store_true',default=argparse.SUPPRESS)
+    for child in dict.fromkeys(sub.choices.values()):child.add_argument('--json',action='store_true',default=argparse.SUPPRESS)
     return result
 
 
@@ -228,6 +259,9 @@ def main(args,ui=None):
         return desk(ui)
     selected=parser().parse_args(args or ['list']);value=vars(selected);action=value.pop('action');node=value.pop('node','all');as_json=value.pop('json',False)
     try:
+        if action in ('clip','clipboard'):
+            if as_json or not sys.stdin.isatty() or not sys.stdout.isatty():raise ValueError('Open lk print clip in a terminal to review the selection.')
+            print(clipboard_print(ui,value['printer']));return 0
         if action=='setup':
             import print_design
             print(print_design.setup());return 0

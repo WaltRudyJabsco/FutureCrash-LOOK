@@ -75,3 +75,19 @@ def test_unsupported_file_never_opens_picker_or_uploads(tmp_path,monkeypatch):
     monkeypatch.setattr(renderer,'prompt_line',lambda *a:('',False))
     assert printing.selected_file(source,Mock())==1
     picker.assert_not_called();request.assert_not_called()
+
+
+def test_clipboard_print_reviews_same_text_and_only_sends_on_yes(monkeypatch):
+    import printing,look_renderer
+    from unittest.mock import Mock
+    monkeypatch.setattr(look_renderer,'clipboard_text',lambda:'Soup\r\n2 carrots\r\nSimmer.')
+    prepare=Mock(return_value={'id':'job','node':'owner','destination':'Tiny Printer','estimated_paper_mm':34})
+    monkeypatch.setattr(printing,'prepare_short_text',prepare)
+    dispatch=Mock(return_value={'state':'queued','id':'job'})
+    monkeypatch.setattr(printing,'request',dispatch)
+    for answer,operation in [('', 'discard'),('yes','send')]:
+        monkeypatch.setattr(look_renderer,'prompt_line',lambda prompt:(answer,False))
+        printing.clipboard_print(None,'tiny')
+        prepare.assert_called_with('tiny','Soup\n2 carrots\nSimmer.')
+        dispatch.assert_called_once_with(operation,'owner',ident='job',confirm=True)
+        dispatch.reset_mock()
