@@ -37,6 +37,8 @@ FABRIC_ACTIONS={
  'ytr':('YouTube Radio',('ytr',),('radio_queue','radio_add'),'Show the queue, or add a supplied YouTube URL without playback?'),
  'print':('Printers',('print',),('printers_list','printer_inspect','print_prepare','banner_render','print_design'),'Which document and printer? Prepare a review before sending paper.'),
  'saver':('Saver settings',('saver',),(),'Choose a saver or saved set in the terminal picker.'),
+ 'fortune':('Fortune',('o','fortune'),('printers_list','print_design'),'Choose a printer for an illustrated fortune.'),
+ 'fortune-cookie':('Fortune cookie',('o','fortune cookie'),('printers_list','print_design'),'Choose a printer for a short fortune with lucky numbers.'),
  'wiki':('Wiki',('wiki',),(),'Which article? Use a wiki: link to bookmark it.'),
 }
 
