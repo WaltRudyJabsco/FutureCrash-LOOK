@@ -136,7 +136,7 @@ def test_action_picker_search_navigation_and_cancel(keys,expected,capsys):
 
 def test_action_catalog_expansion_is_read_only_and_home_stays_small():
     rows=notebook.action_catalog()
-    assert len(rows)==24
-    assert {'files','tasks','terminal','commands','albert','visualizers'} <= {row['id'] for row in rows}
+    assert len(rows)==len({row['id'] for row in rows})
+    assert {'files','tasks','terminal','commands','albert','visualizers','fortune','fortune-cookie'} <= {row['id'] for row in rows}
     assert notebook.home_template().count('](look:')==6
     assert all(row['question'] and row['command'].startswith('lk ') for row in rows)
