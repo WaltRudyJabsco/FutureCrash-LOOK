@@ -41,6 +41,10 @@ def screen(ui,select=False,node='auto',prefer_receipt=False):
                 page=max(1,height-len(footer)-3);top=max(0,selected-page+1)
                 for index,row in enumerate(rows[top:top+page],top):
                     label=row['label']+' · '+str(len(row['routes']))+' route'+('s' if len(row['routes'])!=1 else '')
+                    bluetooth=[r for r in row['routes'] if r.get('profile',{}).get('transport')=='mxw01-ble']
+                    if bluetooth:
+                        status=bluetooth[0].get('status','')
+                        label=row['label']+' · '+(status if 'unavailable' in status.lower() else 'Bluetooth · checked at print time')
                     if not row.get('identity_verified'):label+=' · identity unverified'
                     frame.append(ui.terminal_style.list_row(safe_text(label),width,index,index==selected,ui.terminal_style.list_colors()))
                 if not rows:frame.append('No configured printers visible. Use system printer settings or lk print discover.')

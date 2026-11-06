@@ -437,4 +437,12 @@ def song_receipt(ui,entry,cover_path):
         request('discard',selected['node'],ident=plan['id'],confirm=True)
         return 'Cancelled.'
     result=request('send',selected['node'],ident=plan['id'],confirm=True)
+    if profile.get('transport')=='mxw01-ble':
+        receipt=result.get('receipt') or {}
+        if receipt.get('completion_acknowledged'):
+            return choice['label']+' confirmed completion.'
+        if result.get('state')=='failed' and 'connection failed' in receipt.get('error','').lower():
+            return 'Nothing sent. Wake '+choice['label']+' and press P to try again.'
+        if result.get('state') in {'printing','submitting'}:
+            return 'Delivery pending. Check lk print jobs "'+choice['label']+'".'
     return design_summary(dict(result,destination=choice['label']))
