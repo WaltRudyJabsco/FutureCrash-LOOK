@@ -8350,12 +8350,12 @@ def _lo_radio_direct(prompt,profile,events=None):
     return answer
 
 
-def _lo_fortune_direct(prompt,profile,events=None):
+def _lo_fortune_direct(prompt,profile,events=None,pending=None):
     import fortune_assistant
     if fortune_assistant.intent(prompt) is None:return None
     status='ok'
     if events:events.emit('tool_start',tool='print_design')
-    try:answer=fortune_assistant.execute(prompt,_tool_allowed('print_design',profile))
+    try:answer=fortune_assistant.execute(prompt,_tool_allowed('print_design',profile),pending)
     except (OSError,RuntimeError,ValueError) as error:answer='Fortune: '+str(error);status='failed'
     print(answer)
     if events:
@@ -11155,6 +11155,7 @@ def ollama_chat(force_search=False, initial_prompt=None, allow_start=True, host_
                     source=("fabric" if fabric_mode else ("override" if host_override else "environment")))
     profile=(access_profile or _load_lo_profile()).lower()
     book_context={}
+    fortune_printers={}
     if profile not in LO_PROFILES:
         print(f"LOOK OLLAMA · unknown access profile: {profile}")
         return 1
@@ -11170,7 +11171,7 @@ def ollama_chat(force_search=False, initial_prompt=None, allow_start=True, host_
             initial_prompt=None
 
     if initial_prompt and not force_search and not selected_paths:
-        printer_answer=_lo_fortune_direct(initial_prompt,profile,events)
+        printer_answer=_lo_fortune_direct(initial_prompt,profile,events,None if one_shot else fortune_printers)
         if printer_answer is None:printer_answer=_lo_printers_direct(initial_prompt,events)
         if printer_answer is not None:
             _save_recent_exchange(initial_prompt,printer_answer)
@@ -11437,6 +11438,12 @@ def ollama_chat(force_search=False, initial_prompt=None, allow_start=True, host_
 
         if not prompt:
             continue
+
+        if fortune_printers:
+            label=fortune_printers.get(prompt.casefold().strip(' .!?'))
+            fortune_printers.clear()
+            if label and not force_search and not selected_paths:
+                prompt='print me a fortune on '+label
 
         if not force_search:
             download_answer=_lo_download_direct(prompt,profile,events)
@@ -11953,7 +11960,7 @@ def ollama_chat(force_search=False, initial_prompt=None, allow_start=True, host_
                 continue
 
         if not turn_force_search and not selected_paths:
-            printer_answer=_lo_fortune_direct(prompt,profile,events)
+            printer_answer=_lo_fortune_direct(prompt,profile,events,None if one_shot else fortune_printers)
             if printer_answer is None:printer_answer=_lo_printers_direct(prompt,events)
             if printer_answer is not None:
                 book_context.clear();messages.append({'role':'assistant','content':printer_answer})

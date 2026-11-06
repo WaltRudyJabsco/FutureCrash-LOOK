@@ -313,7 +313,7 @@ def receipt_bitmap(data,width,style="image",rotation=0,caption=None):
             import textwrap
             from PIL import ImageDraw
             from print_design import font
-            face=font(max(10,round(width/30)))
+            face=font(max(16,round(width/16)))
             columns=max(1,int((width-16)/face.getlength('M')))
             lines=[line for field in caption for line in textwrap.wrap(field,columns)]
             step=face.getbbox('Ag')[3]+4
