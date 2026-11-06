@@ -73,7 +73,7 @@ def execute(prompt,allowed=True,pending=None):
     matches=[row for row in rows if ' '.join(row['label'].casefold().split())==wanted]
     if len(matches)!=1:raise ValueError('No unique printer named '+request['printer']+'. Available: '+', '.join(row['label'] for row in rows)+'. Nothing printed.')
     label=matches[0]['label']
-    value=generate()
+    value=None if request['kind']=='fortune-cookie' else generate()
     result=json.loads(printing.run_tool('print_design',{'kind':request['kind'],'text':value,'queue':label,'send':True},Path.home(),'print a '+request['kind'].replace('-',' ')+' on '+label,{}))
     deadline=time.monotonic()+40
     while result.get('state') in {'submitting','printing'} and time.monotonic()<deadline:

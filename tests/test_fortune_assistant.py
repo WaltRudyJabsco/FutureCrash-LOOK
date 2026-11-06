@@ -94,3 +94,14 @@ def test_signal_fortune_menu_and_typo(monkeypatch):
         assert fortune.follow_up(reply,history)=='print a fortune on Tiny Printer'
     assert fortune.intent('print a forutne on tiny printer')=={'printer':'tiny printer','kind':'fortune'}
     assert fortune.follow_up('1',history+[{'role':'assistant','content':'Something else'}])=='1'
+
+
+def test_cookie_deck_survives_reopen_and_wraps_after_200(tmp_path):
+    import sqlite3,fortune_deck
+    path=tmp_path/'jobs.db'
+    lines=[]
+    for _ in range(201):
+        with sqlite3.connect(path) as db:lines.append(fortune_deck.draw(db))
+        db.close()
+    assert len(set(lines[:200]))==200 and lines[200]==lines[0]
+    assert all(line.isascii() and len(line)<=60 for line in lines)
