@@ -4981,6 +4981,24 @@ class API(BaseHTTPRequestHandler):
         if path == "/v1/wiki": return self._wiki_request()
         if path in {"/v1/books/read","/v1/books/audio","/v1/books/cover","/v1/books/image","/v1/books/voices","/v1/books/discover","/v1/books/discovery-cover"}: return self._book_content()
         if path == "/v1/books/reader": return self._book_reader_request()
+        if path in {'/v1/clipboard','/v1/clipboard/fabric'}:
+            if self.headers.get('Origin') or self.headers.get('Sec-Fetch-Site'):
+                return self.sendj(403,{'error':'Terminal access only'})
+            if path.endswith('/fabric'):
+                if getattr(self.server,'plane','local')!='local' or self.headers.get('X-Fabric-Node'):
+                    return self.sendj(403,{'error':'Local shelf only'})
+                def peer_clips(peer):
+                    try:
+                        result=http_json(_copy_route(peer)+'/v1/clipboard',timeout=2)
+                        return [dict(text=r['text'],stamp=float(r['stamp']),node=peer['name'])
+                                for r in result.get('clips',[])[:10] if isinstance(r.get('text'),str) and len(r['text'])<=256000]
+                    except (KeyError,TypeError,ValueError,OSError,RuntimeError):return []
+                peers=[p for p in PEERS.public() if p.get('trusted') and _peer_bases(p)]
+                with concurrent.futures.ThreadPoolExecutor(max_workers=8) as pool:
+                    clips=[c for batch in pool.map(peer_clips,peers) for c in batch]
+                return self.sendj(200,{'clips':sorted(clips,key=lambda c:c['stamp'],reverse=True)[:10]})
+            _look_catalog_modules();import clipboard_shelf
+            return self.sendj(200,{'clips':clipboard_shelf.published_clips()})
         if path == "/v1/print": return self._print_request()
         if path == "/v1/print/fabric": return self._print_request(fabric=True)
         if path == "/v1/books": return self._books_request()

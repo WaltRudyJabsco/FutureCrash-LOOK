@@ -364,3 +364,25 @@ def test_wayland_without_display_does_not_poll_xwayland(shelf, monkeypatch):
     monkeypatch.setattr(clip, 'read_clipboard', read)
     clip.sample_automatic(shelf)
     read.assert_not_called()
+
+
+def test_auto_share_only_new_slots_and_withdrawal(shelf,monkeypatch):
+    monkeypatch.setattr(clip,'directory',lambda:shelf.root)
+    shelf.observe('older private text')
+    shelf.auto_share(True)
+    shelf.observe('command copied after opt-in')
+    assert [x['text'] for x in clip.published_clips()]==['command copied after opt-in']
+    shelf.auto_share(False)
+    assert not clip.published_clips()
+    shelf.auto_share(True)
+    assert not clip.published_clips()
+    assert len(shelf.rows())==2
+
+
+def test_incoming_command_on_default_shelf_with_capture_off(shelf,monkeypatch):
+    import fabric_files
+    shelf.observe('local')
+    monkeypatch.setattr(fabric_files,'request',lambda *a,**kw:{'clips':[{'stamp':9999999999,'node':'source','text':'remote command'}]})
+    assert not shelf.enabled
+    assert clip.visible_clips(shelf)==[('source','remote command'),(1,'local')]
+    assert shelf.rows()==[(1,'local')]

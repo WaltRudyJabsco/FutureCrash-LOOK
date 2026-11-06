@@ -2,8 +2,7 @@
 
 `lk clip` opens ten local text slots, numbered 1–9,0. Select a number to copy
 and close; Shift-number or x removes a saved item. Enter previews; Esc returns.
-Shift-Z opens the shelf from supported LOOK workspaces. Saved history stays on
-this computer; s explicitly saves one clip as a normal synced note.
+Shift-Z opens the shelf from supported LOOK workspaces. Capture is local by default. To publish new clips from one computer, run `lk clip share on` there. Open the ordinary `lk clip` on a paired computer (or press `r` in an open shelf) to see recent local and reachable shared text together. Incoming rows show their source. Recall a number to copy its text. The source must be online. Sharing exposes newly captured text, including copied secrets, to paired nodes; `lk clip share off` withdraws published slots and leaves local capture on. Earlier history is not published. For a persistent handoff, s explicitly saves one clip as a synced note.
 On the receiving computer, press f in the shelf or run `lk clip shared`. Press a number to copy that shared clip; r refreshes the synced list. Local capture can be off on either end.
 Shortcut keys and numbered slots use blue, with subdued gray action labels.
 The command footer wraps to the terminal width.

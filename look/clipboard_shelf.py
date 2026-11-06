@@ -1,4 +1,4 @@
-"""Ten local text clips. Capture is opt-in; only explicit note saves sync."""
+"""Ten text slots. Local capture and per-node Fabric publication are opt-in."""
 from __future__ import annotations
 
 import argparse
@@ -50,6 +50,15 @@ class Shelf:
             CREATE TABLE IF NOT EXISTS settings (name TEXT PRIMARY KEY, value TEXT);
             CREATE TABLE IF NOT EXISTS clips (
                 id INTEGER PRIMARY KEY AUTOINCREMENT, text TEXT NOT NULL);
+            CREATE TABLE IF NOT EXISTS clip_stamp (id INTEGER PRIMARY KEY, stamp REAL, published INTEGER);
+            CREATE TRIGGER IF NOT EXISTS stamp_clip AFTER INSERT ON clips BEGIN
+              INSERT INTO clip_stamp VALUES (NEW.id,(julianday('now')-2440587.5)*86400,
+                COALESCE((SELECT value='1' FROM settings WHERE name='auto_share'),0)
+                AND NOT EXISTS (SELECT 1 FROM settings WHERE name='recalling' AND value=(SELECT value FROM settings WHERE name='observed')));
+            END;
+            CREATE TRIGGER IF NOT EXISTS forget_stamp AFTER DELETE ON clips BEGIN
+              DELETE FROM clip_stamp WHERE id=OLD.id;
+            END;
         ''')
 
     def close(self):
@@ -85,6 +94,14 @@ class Shelf:
             self.db.execute('INSERT INTO clips(text) VALUES (?)', (text,))
             self.db.execute('DELETE FROM clips WHERE id NOT IN (SELECT id FROM clips ORDER BY id DESC LIMIT ?)', (HISTORY_LIMIT,))
         return True
+
+    def auto_share(self,on):
+        with self.db:
+            if not on:self.db.execute('UPDATE clip_stamp SET published=0')
+            self.db.execute("INSERT OR REPLACE INTO settings VALUES ('auto_share',?)",('1' if on else '0',))
+
+    def timed_rows(self):
+        return self.db.execute('SELECT c.id,c.text,COALESCE(s.stamp,0) FROM clips c LEFT JOIN clip_stamp s ON c.id=s.id ORDER BY c.id DESC LIMIT ?', (HISTORY_LIMIT,)).fetchall()
 
     def remove(self, identity):
         # Keep the observed digest so deleting the current clipboard does not
@@ -382,6 +399,33 @@ def share_note(text):
     return row
 
 
+def published_clips():
+    """Read only explicitly published slots. A remote request never samples the OS clipboard."""
+    path=directory()/'history.sqlite3'
+    if not path.exists():return []
+    from contextlib import closing
+    with closing(sqlite3.connect(path.as_uri()+'?mode=ro',uri=True)) as db:
+        if not db.execute("SELECT 1 FROM settings WHERE name='auto_share' AND value='1'").fetchone():return []
+        return [dict(text=text,stamp=stamp) for text,stamp in db.execute(
+            'SELECT text,stamp FROM clips JOIN clip_stamp USING(id) WHERE published=1 ORDER BY id DESC LIMIT ?', (HISTORY_LIMIT,))]
+
+
+def visible_clips(shelf):
+    try:
+        from fabric_files import request
+    except ImportError:
+        from .fabric_files import request
+    try:remote=request('/v1/clipboard/fabric',timeout=4).get('clips',[])
+    except (OSError,RuntimeError,ValueError):remote=[]
+    entries=shelf.timed_rows()+[(str(row['node']),row['text'],row['stamp']) for row in remote]
+    seen=set();result=[]
+    for identity,text,_ in sorted(entries,key=lambda item:item[2],reverse=True):
+        if text not in seen:
+            result.append((identity,text));seen.add(text)
+            if len(result)==HISTORY_LIMIT:break
+    return result
+
+
 def shared_clips():
     try:from .notebook_core import Notebook
     except ImportError:from notebook_core import Notebook
@@ -406,22 +450,22 @@ def show(*, insert=False, fd=None, reader=None, shelf=None, shared=False):
         ensure_watcher()
         # Freeze numbered slots while this popup owns input. New copies are
         # still captured in the background, but cannot move a target mid-keypress.
-        rows = shared_clips() if shared else shelf.rows()
+        rows = shared_clips() if shared else visible_clips(shelf)
         while True:
             selected = max(0, min(selected, len(rows)-1))
             width, height = shutil.get_terminal_size((90, 26))
             width = max(1, width-1)
             colors = terminal_style.list_colors()
             state = 'capture '+capture_description(shelf)
-            lines = [colors['CYAN']+'CLIPBOARD SHELF'+ '\033[0m · '+state+' · local text only']
+            lines = [colors['CYAN']+'CLIPBOARD SHELF'+ '\033[0m · '+state+' · Fabric auto-share '+('on' if shelf.setting('auto_share')=='1' else 'off')]
             if shared:
                 lines=[colors['CYAN']+'FABRIC CLIPS'+'\033[0m · shared through Notes']
             if not shared and not shelf.enabled:
                 lines += command_rows([('e','enables background text history on this computer.')],width,colors)
-                lines += ['Copied text may include secrets. History stays local; s saves one item as a synced note.']
+                lines += ['Local capture is off. Incoming Fabric clips remain available.']
             action = 'insert' if insert else 'copy & close'
             controls=command_rows([('1–9,0',action),('Shift-number','remove'),('↑↓','move'),('Enter','preview'),
-                ('x','remove'),('e','capture on/off'),('a','add clipboard'),('s','share to Fabric'),('f','Fabric clips'),
+                ('x','remove'),('e','capture on/off'),('a','add clipboard'),('s','share to Fabric'),('f','saved clips'),('r','refresh'),
                 ('Esc','list' if expanded else 'back')],width,colors)
             if shared:
                 controls=command_rows([('1–9,0',action),('↑↓','move'),('Enter','preview'),('r','refresh'),('f','local clips'),('Esc','back')],width,colors)
@@ -434,6 +478,7 @@ def show(*, insert=False, fd=None, reader=None, shelf=None, shared=False):
                 top = max(0, selected-page+1)
                 for index, (_, text) in list(enumerate(rows))[top:top+page]:
                     summary = ' ↵ '.join(text.splitlines())
+                    if not shared and isinstance(rows[index][0],str):summary='['+rows[index][0]+'] '+summary
                     prefix = f'{SLOTS[index]} '+('› ' if index == selected else '  ')
                     line = command_inks(colors)[0]+prefix+colors['WHITE']+clip_line(summary, max(0,width-len(prefix)))
                     lines.append(terminal_style.list_row(line, width, index, index == selected, colors))
@@ -467,10 +512,10 @@ def show(*, insert=False, fd=None, reader=None, shelf=None, shared=False):
                 scroll = max(0,scroll+(-page if key == 'pageup' else page)); continue
             if key in {'\r','\n','enter'} and rows:
                 expanded = not expanded; scroll = 0; continue
-            if key=='f' or (shared and key=='r'):
+            if key in {'f','r'}:
                 try:
-                    next_shared=not shared if key=='f' else True
-                    rows=shared_clips() if next_shared else shelf.rows()
+                    next_shared=not shared if key=='f' else shared
+                    rows=shared_clips() if next_shared else visible_clips(shelf)
                     shared=next_shared;selected=0;expanded=False;scroll=0;notice=''
                 except (OSError,ValueError,sqlite3.Error) as exc:notice='Could not load shared clips: '+str(exc)
                 continue
@@ -484,19 +529,21 @@ def show(*, insert=False, fd=None, reader=None, shelf=None, shared=False):
                     shelf.set('blocked_wayland','')
                     sample_automatic(shelf)
                     ensure_watcher()
-                rows = shelf.rows()
+                rows = visible_clips(shelf)
                 notice = 'Capture enabled' if shelf.enabled else 'Capture stopped; saved clips retained'
                 continue
             if key == 'a':
                 text=read_clipboard()
                 if text is None:notice='Clipboard read unavailable'
-                else:shelf.observe(text);rows=shelf.rows();notice='Current clipboard added'
+                else:shelf.observe(text);rows=visible_clips(shelf);notice='Current clipboard added'
                 continue
             remove = removal_slot(key)
             if key == 'x':
                 remove = selected
             if remove is not None and remove < len(rows):
-                shelf.remove(rows[remove][0]); rows = shelf.rows()
+                if isinstance(rows[remove][0],str):
+                    notice='Remove this clip on its source computer.';continue
+                shelf.remove(rows[remove][0]); rows = visible_clips(shelf)
                 notice = 'Removed from history; system clipboard unchanged'; continue
             if key == 's' and rows:
                 try:
@@ -508,9 +555,13 @@ def show(*, insert=False, fd=None, reader=None, shelf=None, shared=False):
                 text = rows[SLOTS.index(key)][1]
                 if insert:
                     return safe_text(text)
+                # Recall is not a fresh copy to broadcast back to paired computers.
+                shelf.set('recalling',hashlib.sha256(text.encode()).hexdigest())
                 if copy_clipboard(text):
                     shelf.observe(text)
+                    shelf.set('recalling','')
                     return text
+                shelf.set('recalling','')
                 notice = 'Clipboard write failed · saved clips retained'
     finally:
         termios.tcsetattr(fd, termios.TCSADRAIN, previous)
@@ -522,10 +573,12 @@ def show(*, insert=False, fd=None, reader=None, shelf=None, shared=False):
 
 def main(argv=None):
     parser = argparse.ArgumentParser(prog='lk clip', description=__doc__)
-    parser.add_argument('action', nargs='?', choices=['on','off','status','clear','add','shared'])
+    parser.add_argument('action', nargs='?', choices=['on','off','status','clear','add','shared','share'])
+    parser.add_argument('mode',nargs='?',choices=['on','off'])
     parser.add_argument('--watch', action='store_true', help=argparse.SUPPRESS)
     parser.add_argument('--capture-stdin',action='store_true',help=argparse.SUPPRESS)
     args = parser.parse_args(argv)
+    if (args.action=='share')!=bool(args.mode):parser.error('Use lk clip share on or lk clip share off')
     if args.capture_stdin:
         capture_stdin();return 0
     if args.watch:
@@ -536,7 +589,17 @@ def main(argv=None):
         show(shared=args.action=='shared'); return 0
     shelf = Shelf()
     try:
-        if args.action == 'on':
+        if args.action=='share':
+            if args.mode=='on':
+                if backend() is None:raise SystemExit('Clipboard capture unavailable on this computer.')
+                if shelf.setting('auto_share')!='1':
+                    # Establish a baseline before publishing future captures.
+                    if not wayland_session():shelf.observe(read_clipboard())
+                shelf.set('enabled','1')
+                shelf.auto_share(True)
+                ensure_watcher()
+            else:shelf.auto_share(False)
+        elif args.action == 'on':
             if backend() is None:
                 print('Clipboard unavailable: install wl-clipboard (Wayland) or xclip (X11).'); return 1
             shelf.set('enabled','1');shelf.set('blocked_wayland','');sample_automatic(shelf);ensure_watcher()
@@ -548,7 +611,7 @@ def main(argv=None):
             shelf.observe(text)
         elif args.action == 'clear':
             shelf.clear()
-        print(f'Clipboard capture {capture_description(shelf)} · {len(shelf.rows())}/10 saved · local only')
+        print(f'Clipboard capture {capture_description(shelf)} · {len(shelf.rows())}/10 saved · Fabric auto-share {"on" if shelf.setting("auto_share")=="1" else "off"}')
         return 0
     finally:
         shelf.close()
