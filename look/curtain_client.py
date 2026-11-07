@@ -47,12 +47,13 @@ def read_pin(prompt):
 
 def main(args,command='lock'):
     parser=argparse.ArgumentParser(prog='lk '+command,description='Fabric PIN curtain (not an OS lock)')
-    parser.add_argument('action',nargs='?',choices=('setup','status','lock','unlock'))
+    parser.add_argument('action',nargs='?',choices=('setup','status','lock','unlock','gypsy'))
     opts=parser.parse_args(args)
     if opts.action is None and command=='lock':return picker()
     action=opts.action or ('unlock' if command=='unlock' else 'lock')
     try:
-        fields={'variant':'they-live'} if command=='lktl' and action=='lock' else {}
+        if action=='gypsy':action='lock';command='gypsy'
+        fields={'variant':'gypsy'} if command=='gypsy' else {'variant':'they-live'} if command=='lktl' and action=='lock' else {}
         if action=='setup':
             if request().get('configured'):fields['old_pin']=read_pin('Current PIN: ')
             fields['pin']=read_pin('New four-digit PIN: ')

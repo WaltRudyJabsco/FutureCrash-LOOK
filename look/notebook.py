@@ -32,6 +32,7 @@ except ImportError:
 # Portable launch links use fixed argument lists, never note text as shell code.
 FABRIC_ACTIONS={
  'notes':('Notes workspace',('notes',),('notebook_list','notebook_read'),'Choose a note or task.'),
+ 'gypsy':('Gypsy Astronaut TV',('gypsy',),(),'Watch the saved animation collection.'),
  'museum':('Museum',('museum',),('museum_search',),'Which artist, title or subject?'),
  'books':('Mercury Reader',('books',),('books_shelf','books_lookup'),'Which book would you like?'),
  'ytr':('YouTube Radio',('ytr',),('radio_queue','radio_add'),'Show the queue, or add a supplied YouTube URL without playback?'),

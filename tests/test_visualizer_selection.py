@@ -84,7 +84,7 @@ def test_checklist_save_and_cancel_are_paged_and_bounded(home,lk,monkeypatch,siz
     assert not settings.picker(lk) and not settings.path().exists()
     keys(lk,monkeypatch,[' ','shiftright',' ','enter'])
     assert settings.picker(lk)
-    assert settings.read()['disabled']==['Bars',visuals.NAMES[-2]]
+    assert settings.read()['disabled']==sorted(['Bars',visuals.NAMES[-2]])
     assert all(len(frame.splitlines())<=size[1] for frame in frames)
     assert any(visuals.NAMES[-2] in frame for frame in frames)
 

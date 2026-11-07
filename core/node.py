@@ -4138,6 +4138,38 @@ class API(BaseHTTPRequestHandler):
             return self.sendj(200,dict(result,ok=True,node=identity()['name']))
         except Exception as exc:return self.sendj(400,{'ok':False,'error':str(exc)})
 
+    def _animation_request(self,payload=None):
+        try:
+            try:from . import animation_library as library
+            except ImportError:import animation_library as library
+            peer,_=self._file_target()
+            parsed=urlparse(self.path);params=parse_qs(parsed.query)
+            ident=(params.get('id') or [''])[0]
+            if peer is None:
+                if parsed.path.endswith('/image'):return self._serve_file_range(library.image(ident),'image/gif')
+                return self.sendj(200,library.change(payload) if payload is not None else library.snapshot())
+            route=parsed.path+'?'+urllib.parse.urlencode({'id':ident})
+            if not parsed.path.endswith('/image'):
+                try:return self.sendj(200,http_json(_copy_route(peer)+route,data=payload,timeout=15))
+                except OSError:
+                    if payload is not None:raise
+                    _look_catalog_modules();import animation_tv
+                    try:cached=json.loads((animation_tv.cache()/'catalog.json').read_text())
+                    except (OSError,ValueError):raise ValueError('Archive host unavailable and no cached animations yet')
+                    return self.sendj(200,dict(cached,state='offline cache'))
+            library.identity(ident)
+            _look_catalog_modules();import animation_tv
+            cached=animation_tv.cache()/(ident+'.gif')
+            if cached.is_file() and not cached.is_symlink():return self._serve_file_range(cached,'image/gif')
+            url=_copy_route(peer)+route
+            req=urllib.request.Request(url,headers=FABRIC_IDENTITY.auth_headers_for_url(url))
+            with urllib.request.urlopen(req,timeout=45,context=FABRIC_IDENTITY.ssl_context_for_url(url)) as response:
+                data=response.read(library.MAX_FILE+1)
+            if len(data)>library.MAX_FILE or data[:6] not in (b'GIF87a',b'GIF89a'):raise ValueError('Invalid animation transfer')
+            animation_tv.store_cached({'id':ident,'title':'Gypsy Astronaut','post':library.SOURCE,'sha256':hashlib.sha256(data).hexdigest()},data)
+            self.send_response(200);self.send_header('Content-Type','image/gif');self.send_header('Content-Length',str(len(data)));self.send_header('Cache-Control','private, max-age=86400');self.end_headers();self.wfile.write(data)
+        except Exception as exc:return self.sendj(400,{'error':str(exc)})
+
     def _museum_request(self,payload=None):
         _look_catalog_modules();import museum_library
         params=parse_qs(urlparse(self.path).query);owner=(params.get('target') or ['local'])[0]
@@ -4970,6 +5002,7 @@ class API(BaseHTTPRequestHandler):
             except ImportError: import notifications
             return self.sendj(200,{'ok':True,'settings':notifications.settings()})
         if path=="/v1/receipts":return self._receipts_request()
+        if path in {"/v1/gypsy","/v1/gypsy/image"}:return self._animation_request()
         if path in {"/v1/museum","/v1/museum/search","/v1/museum/image"}: return self._museum_request()
         if path in {"/v1/radio","/v1/radio/audio"}: return self._radio_request()
         if path == "/v1/downloads" or path.startswith("/v1/downloads/"): return self._downloads_request()
@@ -5568,6 +5601,7 @@ class API(BaseHTTPRequestHandler):
                 result["state"]=load_curator_state()
                 return self.sendj(200 if result.get("ok") else 409,result)
             return self.sendj(200,{"ok":True,"state":state,"plan":curator_plan(profile)})
+        if path == "/v1/gypsy":return self._animation_request(d)
         if path == "/v1/fabric-update":return self._fabric_update(d)
         if path == "/v1/upkeep":return self._fabric_update(d,local_job=True)
         if path == "/v1/care":return self._care(d)

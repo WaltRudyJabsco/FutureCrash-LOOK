@@ -50,6 +50,8 @@ class CurtainWindow(saver_gui.SaverWindow):
             scale=min(self.width()*.88/max(1,metrics.horizontalAdvance(text)),self.height()*.65/metrics.height())
             font.setPixelSize(max(1,int(100*scale)));painter.setFont(font)
             painter.drawText(self.rect(),Qt.AlignmentFlag.AlignCenter,text);painter.end();return
+        if self.controller.variant=='gypsy':
+            self.run.scenes=['Gypsy Astronaut'];self.run.scene_offset=0
         super().paintEvent(event)
         painter=QPainter(self);painter.fillRect(12,12,min(570,self.width()-24),32,QColor('#101719'))
         painter.setPen(QColor('#e6e6cf'));painter.drawText(22,33,'LOOK CURTAIN · Enter/click: PIN · C colors · V visual');painter.end()

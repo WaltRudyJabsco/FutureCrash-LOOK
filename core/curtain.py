@@ -96,7 +96,7 @@ def apply(event):
     kdf=event.get('kdf','scrypt')
     if kdf not in {PIN_KDF,'scrypt'}:raise ValueError('Unsupported PIN format')
     variant=event.get('variant','standard')
-    if variant not in {'standard','they-live'}:raise ValueError('Invalid curtain variant')
+    if variant not in {'standard','they-live','gypsy'}:raise ValueError('Invalid curtain variant')
     with GUARD:
         state=load()
         if (revision,origin)<=(state.get('revision',0),state.get('origin','')):return {'ok':True,'stale':True,**public(state)}

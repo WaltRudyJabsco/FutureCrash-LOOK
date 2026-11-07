@@ -443,6 +443,8 @@ install_file "$ROOT/look/curtain_client.py" "$HOME/.local/share/look/curtain_cli
 install_file "$ROOT/look/curtain_gui.py" "$HOME/.local/share/look/curtain_gui.py"
 install_file "$ROOT/look/saver_text.py" "$HOME/.local/share/look/saver_text.py"
 install_file "$ROOT/look/saver.py" "$HOME/.local/share/look/saver.py"
+install_file "$ROOT/look/animation_tv.py" "$HOME/.local/share/look/animation_tv.py"
+install_file "$ROOT/look/animation_gui.py" "$HOME/.local/share/look/animation_gui.py"
 install_file "$ROOT/look/saver_gui.py" "$HOME/.local/share/look/saver_gui.py"
 install_file "$ROOT/look/player_visuals.py" "$HOME/.local/share/look/player_visuals.py"
 install_file "$ROOT/look/terminal_style.py" "$HOME/.local/share/look/terminal_style.py"

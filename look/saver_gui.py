@@ -8,7 +8,7 @@ import sys
 import time
 
 from PySide6.QtCore import Qt, QTimer
-from PySide6.QtGui import QColor, QCursor, QFont, QFontDatabase, QFontMetricsF, QPainter, QPixmap
+from PySide6.QtGui import QColor, QCursor, QFont, QFontDatabase, QFontMetricsF, QPainter, QPixmap, QMovie
 from PySide6.QtWidgets import QApplication, QWidget
 
 import saver
@@ -100,6 +100,20 @@ class SaverWindow(QWidget):
         elapsed=max(0,time.monotonic()-self.controller.started)
         _scene,lines,(paper,ink)=self.run.sample(elapsed,columns,rows)
         painter.fillRect(self.rect(),QColor(paper));painter.setPen(QColor(ink))
+        if _scene=='Gypsy Astronaut':
+            import animation_tv
+            row,path=animation_tv.choose(elapsed+self.controller.museum_step*animation_tv.INTERVAL,getattr(self,'museum_slot',0),len(self.controller.windows),self.controller.seed)
+            painter.fillRect(self.rect(),QColor('#080d13'))
+            if path:
+                if getattr(self,'animation_key',None)!=str(path):
+                    if getattr(self,'animation_movie',None):self.animation_movie.stop();self.animation_movie.deleteLater()
+                    self.animation_key=str(path);self.animation_movie=QMovie(str(path));self.animation_movie.start()
+                picture=self.animation_movie.currentPixmap()
+                picture=picture.scaled(self.size(),Qt.AspectRatioMode.KeepAspectRatio,Qt.TransformationMode.SmoothTransformation)
+                painter.drawPixmap((self.width()-picture.width())//2,(self.height()-picture.height())//2,picture)
+                painter.end();return
+        elif getattr(self,'animation_movie',None):
+            self.animation_movie.stop();self.animation_movie.deleteLater();self.animation_movie=None;self.animation_key=None
         if _scene in {'Museum','ASCII Museum'}:
             # Shared clock plus a display slot guarantees distinct artwork when
             # the collection has at least as many images as attached displays.
@@ -188,6 +202,8 @@ class SaverController:
     def __init__(self,app,settings,*,preview=False,seconds=None,seed=None):
         self.app=app;self.settings=saver.validate(settings);self.preview=preview
         self.started=time.monotonic();self.windows={};self.stopping=False;self.museum_step=0
+        import animation_tv
+        self.animation_stop=animation_tv.start()
         import museum_cache
         self.museum_cache_stop=museum_cache.start() if self.settings['scene'] in {'Museum','ASCII Museum'} or any(name in self.settings['enabled'] for name in ('Museum','ASCII Museum')) else None
         self.presentation=MacPresentation() if not preview and app.platformName()=='cocoa' else None
@@ -248,6 +264,7 @@ class SaverController:
         self.stopping=True
         if self.presentation is not None:self.presentation.restore()
         if hasattr(self,'timer'):self.timer.stop()
+        if getattr(self,'animation_stop',None):self.animation_stop.set()
         if getattr(self,'museum_cache_stop',None):self.museum_cache_stop.set()
         for window in self.windows.values():window.removing=True;window.close()
         self.app.quit()
