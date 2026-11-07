@@ -377,3 +377,10 @@ blank graphics band before the image. It adds 24 dots (3 mm) to the paper estima
 and is included in transfer-size checks. Leave it absent for other printers.
 The Rongta RPP300 diagnostic was physically verified with this initialization;
 a successful USB transfer alone does not establish a successful print.
+
+Graphics priming reapplies 24-dot line spacing after the blank band, preventing
+white seams between image bands on the verified RPP300. Receipt Markdown type
+stops scaling up at 384 dots: 576-dot printers fit more words using two-thirds
+of their previous font size. This covers fortunes, lucky numbers, artwork
+credits, song receipts, and Markdown text; 384-dot Tiny Printer and banners
+retain their existing sizing.
