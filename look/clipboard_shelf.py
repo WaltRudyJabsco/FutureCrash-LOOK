@@ -144,8 +144,8 @@ def read_clipboard():
         return None
 
 
-def read_item():
-    try:return items.capture(read_clipboard)
+def read_item(for_print=False):
+    try:return items.capture(read_clipboard,for_print=for_print)
     except (OSError,subprocess.SubprocessError):return read_clipboard()
 
 
@@ -448,7 +448,7 @@ def shared_clips():
     return [(n['id'],n['body']) for n in notes if n['project']=='Clipboard'][:HISTORY_LIMIT]
 
 
-def show(*, pick=False, insert=False, fd=None, reader=None, shelf=None, shared=False):
+def show(*, initial_notice="", pick=False, insert=False, fd=None, reader=None, shelf=None, shared=False):
     fd = sys.stdin.fileno() if fd is None else fd
     reader = reader or read_key
     owned = shelf is None
@@ -457,7 +457,7 @@ def show(*, pick=False, insert=False, fd=None, reader=None, shelf=None, shared=F
     selected = 0
     expanded = False
     scroll = 0
-    notice = ''
+    notice = initial_notice
     try:
         tty.setraw(fd)
         sys.stdout.write('\033[?25l\033[?2004h')

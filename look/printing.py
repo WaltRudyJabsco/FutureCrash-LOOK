@@ -90,11 +90,13 @@ def clipboard_print(ui,queue=None):
             item=clipboard_items.unpack(value)
             return bool(value) and (not item or Path(item['name']).suffix.lower() in {'.pdf','.txt','.md','.markdown','.png','.jpg','.jpeg'})
         except (ValueError,TypeError):return False
-    try:content=clipboard_shelf.read_item()
-    except (OSError,ValueError,subprocess.SubprocessError):content=None
+    reason='Current clipboard is empty or not a printable type.'
+    try:content=clipboard_shelf.read_item(for_print=True)
+    except (OSError,ValueError,subprocess.SubprocessError) as exc:
+        content=None;reason='Current clipboard unavailable: '+str(exc)
     while not printable(content):
         print('Choose a printable clipboard item: text, image, or PDF.')
-        content=clipboard_shelf.show(pick=True)
+        content=clipboard_shelf.show(pick=True,initial_notice=reason)
         if content is None:return 'Cancelled.'
     item=clipboard_items.unpack(content)
     if item:
@@ -177,15 +179,10 @@ def selected_file(path,ui,prefer_receipt=False,default_style="image",caption=Non
             if cancelled or not value.strip():return 0
             options['pages']=value.strip()
         if source.suffix.casefold() in {'.png','.jpg','.jpeg'}:
-            from PIL import Image
-            with Image.open(source) as preview:
-                preview.verify()
-            with Image.open(source) as preview:
-                print(f'Image preview · {source.name} · {preview.width} × {preview.height} pixels')
-                thumb=preview.convert('L');thumb.thumbnail((48,18))
-                shades='@%#*+=-:. '
-                for y in range(thumb.height):
-                    print(''.join(shades[thumb.getpixel((x,y))*9//256] for x in range(thumb.width)))
+            import clipboard_image
+            preview=clipboard_image.process(source)
+            print(f"Image preview · {source.name} · {preview['size'][0]} × {preview['size'][1]} pixels")
+            print(preview['preview'])
         elif source.suffix.casefold() in {'.txt','.md','.markdown'}:
             print(source.read_text(encoding='utf-8')[:8000])
         value,cancelled=prompt_line('Copies [1]: ')

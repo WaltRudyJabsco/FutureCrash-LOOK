@@ -49,15 +49,15 @@ def test_linux_prefers_file_and_image_over_text(monkeypatch,tmp_path):
 
 
 def test_print_falls_back_and_never_sends_unsupported(monkeypatch):
-    monkeypatch.setattr(shelf,'read_item',lambda:items.pack(b'zip','archive.zip'))
+    monkeypatch.setattr(shelf,'read_item',lambda **kwargs:items.pack(b'zip','archive.zip'))
     picker=Mock(return_value=None);monkeypatch.setattr(shelf,'show',picker)
     send=Mock();monkeypatch.setattr(printing,'request',send)
     assert printing.clipboard_print(None)=='Cancelled.'
-    picker.assert_called_once_with(pick=True);send.assert_not_called()
+    assert picker.call_args.kwargs["pick"] is True;send.assert_not_called()
 
 
 def test_print_attachment_materialized_only_for_review(monkeypatch):
-    monkeypatch.setattr(shelf,'read_item',lambda:items.pack(b'hello','note.txt'))
+    monkeypatch.setattr(shelf,'read_item',lambda **kwargs:items.pack(b'hello','note.txt'))
     paths=[]
     def review(path,*args,**kwargs):
         assert path.read_bytes()==b'hello';paths.append(path);return 0
@@ -72,3 +72,25 @@ def test_pdf_requires_pages_before_prepare(tmp_path,monkeypatch):
     prepare=Mock();monkeypatch.setattr(printing,'prepare_file',prepare)
     assert printing.selected_file(source,None,queue='desk')==0
     prepare.assert_not_called()
+
+
+def test_large_print_image_is_normalized_without_history_expansion(monkeypatch):
+    import clipboard_image
+    raw=b'x'*(items.MAX_BYTES+1)
+    def process(path,**kwargs):
+        assert path.read_bytes()==raw
+        kwargs['output'].write_bytes(b'bounded-png')
+        return {'size':[2048,1152]}
+    monkeypatch.setattr(clipboard_image,'process',process)
+    with pytest.raises(ValueError):items.image_snapshot(raw,'screenshot.png','image/png')
+    item=items.unpack(items.image_snapshot(raw,'screenshot.png','image/png',for_print=True))
+    assert item['data']==b'bounded-png'
+    assert item['name']=='clipboard-print.png'
+
+
+def test_capture_failure_reason_survives_picker(monkeypatch):
+    def fail(**kwargs):raise ValueError('Image exceeds 64 MiB')
+    monkeypatch.setattr(shelf,'read_item',fail)
+    picker=Mock(return_value=None);monkeypatch.setattr(shelf,'show',picker)
+    assert printing.clipboard_print(None)=='Cancelled.'
+    assert '64 MiB' in picker.call_args.kwargs['initial_notice']

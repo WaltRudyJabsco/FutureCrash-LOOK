@@ -81,7 +81,7 @@ def test_clipboard_print_reviews_same_text_and_only_sends_on_yes(monkeypatch):
     import printing,look_renderer
     from unittest.mock import Mock
     import clipboard_shelf
-    monkeypatch.setattr(clipboard_shelf,'read_item',lambda:'Soup\r\n2 carrots\r\nSimmer.')
+    monkeypatch.setattr(clipboard_shelf,'read_item',lambda **kwargs:'Soup\r\n2 carrots\r\nSimmer.')
     prepare=Mock(return_value={'id':'job','node':'owner','destination':'Tiny Printer','estimated_paper_mm':34})
     monkeypatch.setattr(printing,'prepare_short_text',prepare)
     dispatch=Mock(return_value={'state':'queued','id':'job'})
