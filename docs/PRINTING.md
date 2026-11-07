@@ -428,3 +428,11 @@ The verified portable column24 profile primes with a full-width blank band and
 reasserts zero extra spacing before every image band. This prevents startup glyph
 garbage and horizontal seams; all receipt-image producers use this owner-side
 encoder, including Markdown, Museum, fortunes, clipboard and song receipts.
+
+Assistant `print_text` accepts an optional `illustration` (`sun`, `cloud`, `rain`,
+`snow`, `storm`, `fog`). The renderer combines the monochrome symbol and Markdown
+into one PNG at the selected printer's width, then uses the same owner-side spool,
+paper limit, device encoder and one-copy send path. It does not download artwork.
+For forecasts, the assistant retrieves weather first and chooses the symbol from
+those conditions. Configured printer names are discovered before inference;
+configuration does not prove the physical printer is awake.

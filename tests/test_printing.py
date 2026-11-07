@@ -470,3 +470,37 @@ def test_omitted_queue_resolves_requested_printer_not_default(tmp_path,monkeypat
         with pytest.raises(ValueError):
             printing.run_tool('print_text',{'text':'# List'},tmp_path,prompt,{})
     assert send.call_count==1
+
+
+@pytest.mark.parametrize('width',[384,576])
+def test_weather_illustrations_compose_real_graphics_and_text(width):
+    from print_design import illustrated_text,WEATHER_ILLUSTRATIONS
+    for name in WEATHER_ILLUSTRATIONS:
+        image=illustrated_text('# Forecast\nRain tomorrow; 12 C.',width,name)
+        assert image.width==width and 144<image.height<2438
+        assert image.crop((0,0,width,144)).getextrema()==(0,255)
+        assert image.crop((0,152,width,image.height)).getextrema()[0]==0
+
+
+def test_illustrated_print_dispatches_once_with_named_printer(tmp_path,monkeypatch):
+    send=Mock(return_value={'state':'queued'})
+    monkeypatch.setattr(printing,'quick_text',send)
+    turn={'weather_verified':True}
+    args={'queue':'Pocket','text':'# Forecast\nRain tomorrow.','illustration':'rain'}
+    printing.run_tool('print_text',args,tmp_path,'Print a forecast with picture on Pocket',turn)
+    send.assert_called_once_with('Pocket',args['text'],exact_label=True,illustration='rain')
+    with pytest.raises(ValueError,match='Only one'):
+        printing.run_tool('print_text',args,tmp_path,'Print a forecast with picture on Pocket',turn)
+
+
+def test_illustrated_receipt_routes_combined_png_to_owner(monkeypatch):
+    from PIL import Image
+    monkeypatch.setattr(printing,'destinations',lambda:{'printers':[{'id':'usb1','label':'Desk','routes':[{'name':'usb','node':'owner','status':'idle','profile':{'kind':'escpos','width':384}}]}]})
+    prepare=Mock(return_value={'id':'plan','node':'owner'})
+    monkeypatch.setattr(printing,'_request',prepare)
+    plan=printing.prepare_short_text('Desk','# Forecast\nRain',True,'rain')
+    args=prepare.call_args.kwargs
+    image=Image.open(io.BytesIO(base64.b64decode(args['data'])))
+    assert image.width==384 and image.height>144
+    assert args['kind']=='receipt-image' and args['options_value']=={'copies':1}
+    assert plan['destination']=='Desk'

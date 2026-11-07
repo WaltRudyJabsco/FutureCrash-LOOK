@@ -11461,6 +11461,9 @@ def ollama_chat(force_search=False, initial_prompt=None, allow_start=True, host_
         if not prompt:
             continue
 
+        import tool_workflow
+        if not print_conversation.choices:
+            prompt=tool_workflow.printer_list_choice(prompt,messages)
         prompt=print_conversation.begin(prompt)
 
         if fortune_printers:
@@ -11820,6 +11823,7 @@ def ollama_chat(force_search=False, initial_prompt=None, allow_start=True, host_
         turn_successful_tools=set()
         print_turn={'on_print_attempt':print_conversation.finish}
         last_print_result=None
+        last_printer_catalog=None
 
         # Terminal drag/drop becomes first-class resource context. Finder and most Linux
         # terminals paste escaped/quoted paths into the input line; normalize them here.
@@ -12194,6 +12198,7 @@ def ollama_chat(force_search=False, initial_prompt=None, allow_start=True, host_
                     time.sleep(.18)
             if weather_succeeded:
                 print_turn["weather_verified"]=True
+                print_turn["weather_receipt"]=weather_content
                 pending_weather_clarification=False
                 pending_home_definition=False
                 if pending_home_candidate:
@@ -12261,6 +12266,16 @@ def ollama_chat(force_search=False, initial_prompt=None, allow_start=True, host_
             if one_shot:
                 return 0
             continue
+
+        if 'printing' in getattr(turn_route,'families',[]) and re.search(r'\bprint\b',prompt,re.I):
+            # Existence is host evidence, not something a model should guess from memory.
+            try:
+                import printing
+                catalog=printing.destinations()
+                labels=[p.get('label',p.get('name','')) for p in catalog.get('printers',[])]
+                messages.append({'role':'system','content':'CURRENT DISCOVERED PRINTER NAMES (configured destinations; not proof of readiness): '+json.dumps(labels)+'. Use the matching requested name. Do not ask permission to list printers.'})
+            except Exception as exc:
+                messages.append({'role':'system','content':'Printer discovery did not complete: '+str(exc)+'. Do not claim the named printer is absent; use printers_list if needed.'})
 
         runtime=_lo_runtime_policy(thinking_mode, prompt)
         task_tier,budget=_lo_budget_for(prompt,thinking_mode,selected_paths)
@@ -12441,6 +12456,7 @@ def ollama_chat(force_search=False, initial_prompt=None, allow_start=True, host_
                                 tool_content=_weather_lookup(location,request=args.get("request") or prompt)
                             weather_succeeded=not str(tool_content).startswith(("Weather lookup failed:","No weather location match"))
                             print_turn["weather_verified"]=weather_succeeded
+                            if weather_succeeded:print_turn["weather_receipt"]=tool_content
                         except Exception as exc: tool_content=f"Weather lookup failed: {exc}"
                     elif name == "place_lookup":
                         query=args.get("query","")
@@ -12535,7 +12551,9 @@ def ollama_chat(force_search=False, initial_prompt=None, allow_start=True, host_
                         import printing
                         tool_content,_ok,_elapsed=_tool_transaction(name,args,lambda:printing.run_tool(name,args,workspace,prompt,print_turn))
                         if name=='printers_list' and _ok:
-                            try:print_conversation.catalog(json.loads(tool_content))
+                            try:
+                                last_printer_catalog=json.loads(tool_content)
+                                print_conversation.catalog(last_printer_catalog)
                             except (ValueError,TypeError):pass
                         if print_turn.get('print_attempted'):print_conversation.finish()
                         if _ok:
@@ -12806,6 +12824,9 @@ def ollama_chat(force_search=False, initial_prompt=None, allow_start=True, host_
                     messages.append(message)
                     messages.append({'role':'system','content':'The requested action has no completion receipt. If required inputs are available, call the appropriate tool now; otherwise ask only for the missing input. Do not claim completion. Missing eligible actions: '+', '.join(sorted(missing & exposed))})
                     continue
+            if last_printer_catalog and not _split_ollama_thinking(message)[1]:
+                labels=[p.get('label',p.get('name','Printer')) for p in last_printer_catalog.get('printers',[])]
+                message=dict(message,content='Available printers:\n'+'\n'.join(f'{i}. {label}' for i,label in enumerate(labels,1)) if labels else 'No printers were returned by discovery.')
             if last_print_result:
                 import printing
                 message=dict(message,content=printing.design_summary(last_print_result))

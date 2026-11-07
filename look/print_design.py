@@ -229,3 +229,35 @@ def song_bitmap(entry,cover,width):
             art=ImageOps.exif_transpose(source).convert('L')
             art.thumbnail((width,width))
     return stack_receipt(width,info,art)
+
+
+WEATHER_ILLUSTRATIONS=('sun','cloud','rain','snow','storm','fog')
+
+
+def illustrated_text(body,width,illustration):
+    """Compose a monochrome weather symbol and Markdown as one bounded image."""
+    from PIL import Image,ImageDraw
+    import math
+    if illustration not in WEATHER_ILLUSTRATIONS:raise ValueError('Choose a supported weather illustration')
+    size=144
+    icon=Image.new('L',(size,size),255);d=ImageDraw.Draw(icon)
+    if illustration=='sun':
+        d.ellipse((48,48,96,96),outline=0,width=5)
+        for angle in range(0,360,45):
+            a=math.radians(angle)
+            d.line((72+36*math.cos(a),72+36*math.sin(a),72+55*math.cos(a),72+55*math.sin(a)),fill=0,width=5)
+    else:
+        d.ellipse((27,38,76,86),fill=0);d.ellipse((52,23,108,83),fill=0)
+        d.ellipse((84,45,127,87),fill=0);d.rectangle((48,60,108,87),fill=0)
+        if illustration in ('rain','storm'):
+            for x in (40,72,104):d.line((x,97,x-8,115),fill=0,width=4)
+        if illustration=='storm':d.polygon([(78,84),(63,108),(76,108),(66,135),(96,99),(82,99)],fill=0)
+        if illustration=='snow':
+            for x in (40,75,110):
+                d.line((x-6,105,x+6,117),fill=0,width=2);d.line((x+6,105,x-6,117),fill=0,width=2)
+        if illustration=='fog':
+            for y in (99,110,121):d.line((24,y,125,y),fill=0,width=3)
+    text=markdown_bitmap(body,width,2300)
+    out=Image.new('L',(width,size+text.height+8),255)
+    out.paste(icon,((width-size)//2,0));out.paste(text,(0,size+8))
+    return out

@@ -16,8 +16,8 @@ core._queue_memory_exchange=lambda *a,**k:False
 core._save_recent_exchange=lambda *a,**k:None
 core._record_ai_stats=lambda *a,**k:None
 calls=[];envelopes=[]
-def send(queue,text,exact_label=False):
- calls.append({'tool':'print_text','queue':queue,'text':text});return {'state':'queued','destination':queue,'id':'test-no-paper','receipt':{'job':'TEST-NO-PAPER'}}
+def send(queue,text,exact_label=False,**options):
+ calls.append({'tool':'print_text','queue':queue,'text':text,**options});return {'state':'queued','destination':queue,'id':'test-no-paper','receipt':{'job':'TEST-NO-PAPER'}}
 printing.quick_text=send
 printing.preferred_receipt=lambda prompt='':'Receipt Desk'
 printing.destinations=lambda:{'printers':[{'label':'Receipt Desk','name':'Receipt Desk','routes':[{'name':'receipt','node':'fixture','profile':{'kind':'escpos','preferred_receipt':True}}]}]}
@@ -39,7 +39,7 @@ def inference(payload_obj,**kwargs):
   if call.get('function',{}).get('name') not in allowed:raise RuntimeError('Blocked unexpected test effect '+str(call))
  out['done']=True;yield out
 core._fabric_stream_chat=inference
-cases=[('supplied_receipt','Print this as a compact Markdown receipt on Receipt Desk: Market list: eggs, rice, apples.'),('summary_note','Summarize this text and save the summary as a new note titled Garden Plan: Plant peas in March. Water them twice a week. Put labels on each row.'),('forecast','Will you print up a three-day forecast for Portland Oregon on Receipt Desk')]
+cases=[('illustrated_forecast','Will you print up a forecast with a weather picture on Receipt Desk'),('supplied_receipt','Print this as a compact Markdown receipt on Receipt Desk: Market list: eggs, rice, apples.'),('summary_note','Summarize this text and save the summary as a new note titled Garden Plan: Plant peas in March. Water them twice a week. Put labels on each row.'),('forecast','Will you print up a three-day forecast for Portland Oregon on Receipt Desk')]
 results=[]
 for name,prompt in cases:
  calls.clear();envelopes.clear();start=time.monotonic()
@@ -59,8 +59,9 @@ for row in results:
  tool_workflow.require_content(text,'Audit generated content')
  words={'summary_note':['peas','March','twice','labels'],
         'supplied_receipt':['eggs','rice','apples'],
-        'forecast':['Portland','Open-Meteo']}[row['case']]
+        'forecast':['Portland','Open-Meteo'], 'illustrated_forecast':['Open-Meteo']}[row['case']]
+ if row['case']=='illustrated_forecast' and not effects[0].get('illustration'):failures.append(row['case'])
  if any(word.casefold() not in text.casefold() for word in words) or re.search(r'\[(?:summary|insert)[^]]*\]',text,re.I):
   failures.append(row['case'])
 if failures:raise SystemExit('Workflow failed: '+', '.join(failures))
-print('PASS: all three workflows produced content and exactly one successful mocked effect.')
+print('PASS: all workflows produced content and exactly one successful mocked effect.')

@@ -60,7 +60,7 @@ def prepare(queue,node='auto',path=None,text=None,receipt=False,**options):
 MAX_QUICK_TEXT = 8000
 
 
-def prepare_short_text(queue, text, exact_label=False):
+def prepare_short_text(queue, text, exact_label=False, illustration=None):
     """Resolve once and pin the owner before preparing and submitting one copy."""
     from print_destinations import choose, route
     if not isinstance(text,str) or not text.strip() or len(text)>MAX_QUICK_TEXT:
@@ -69,13 +69,21 @@ def prepare_short_text(queue, text, exact_label=False):
     if exact_label and destination['label'].casefold()!=queue.casefold():
         raise ValueError('Use the exact friendly printer name from discovery')
     selected=route(destination,catalog.get('local_node',''))
-    plan=prepare(selected['name'],selected['node'],text=text,
-                 receipt=selected.get('profile',{}).get('kind')=='escpos',copies=1)
+    if illustration:
+        import io
+        from print_design import illustrated_text
+        profile=selected.get('profile',{})
+        image=illustrated_text(text,profile.get('width',576),illustration)
+        out=io.BytesIO();image.save(out,format='PNG')
+        plan=_request('prepare',selected['node'],queue=selected['name'],data=base64.b64encode(out.getvalue()).decode(),filename='Illustrated receipt.png',kind='receipt-image' if profile.get('kind')=='escpos' else 'document',options_value={'copies':1})
+    else:
+        plan=prepare(selected['name'],selected['node'],text=text,
+                     receipt=selected.get('profile',{}).get('kind')=='escpos',copies=1)
     return dict(plan,destination=destination['label'])
 
 
-def quick_text(queue,text,exact_label=False):
-    plan=prepare_short_text(queue,text,exact_label)
+def quick_text(queue,text,exact_label=False,illustration=None):
+    plan=prepare_short_text(queue,text,exact_label,illustration)
     return dict(request('send',plan['node'],ident=plan['id'],confirm=True),destination=plan['destination'])
 
 
@@ -150,6 +158,7 @@ class PrintConversation:
         answer=prompt.strip().casefold().strip(' .!?')
         if answer in {'cancel','no','stop','never mind','nevermind'}:
             self.finish();return prompt
+        if self.request and answer=='list available printers':return prompt
         if self.request and answer in {'print it','print it now'}:return self.request
         if re.search(r'\bprint\b',prompt,re.I):
             self.request=prompt;self.choices={};self.persist();return prompt
@@ -462,7 +471,7 @@ def tools():
     return [
         {'type':'function','function':{'name':'banner_render','description':'Render offline FIGlet lettering for a banner preview. No printing. Fonts: standard, small, slant, banner, big.','parameters':{'type':'object','properties':{'text':{'type':'string','maxLength':120},'font':{'type':'string','enum':['standard','small','slant','banner','big']}},'required':['text'],'additionalProperties':False}}},
         {'type':'function','function':{'name':'print_design','description':'Prepare or explicitly print a banner or fortune-cookie slip. For fortunes write an original, thoughtful/playful fortune of one to three short lines (prefer under 90 characters); omit text for a standard fortune-cookie to draw from the owner’s 200-line deck; provide text for custom wording. Both include lucky numbers. Choose fortune-cookie for a short text slip or fortune for the illustrated card with a saved Museum artwork and credit; no new outside downloads. Landscape artwork rotates independently of the upright fortune text. Banners default to solid sideways letters. Choose a FIGlet font for ASCII lettering. Discover the exact friendly printer label first. send defaults false; set true only for an explicit current request to print to that named printer. One attempt per turn. Longer banners require an explicitly requested banner allowance. Never claim physical appearance from a receipt.','parameters':{'type':'object','properties':{'text':{'type':'string','maxLength':140},'kind':{'type':'string','enum':['banner','fortune','fortune-cookie']},'font':{'type':'string','enum':['solid','standard','small','slant','banner','big']},'queue':{'type':'string'},'paper_limit_mm':{'type':'number','minimum':1,'maximum':3048},'send':{'type':'boolean'}},'required':['kind','queue'],'additionalProperties':False}}},
-        {'type':'function','function':{'name':'print_text','description':'Compose and print a short Markdown document when the user explicitly requests paper output. First retrieve needed facts with weather, web or Notes tools; do not invent forecasts. Use headings, short paragraphs and lists; include location, dates, units and source for forecasts. Omit queue to use the configured preferred receipt printer, or use the exact printer named by the user. No default means ask the user to choose. One copy, at most 8000 characters, normal paper limit, no automatic retries. Report queue acceptance rather than physical delivery. Use print_prepare for previews.','parameters':{'type':'object','properties':{'queue':{'type':'string','description':'Named destination; omit to use the user-configured receipt default'},'text':{'type':'string','maxLength':8000}},'required':['text'],'additionalProperties':False}}},
+        {'type':'function','function':{'name':'print_text','description':'Compose and print a short Markdown document, optionally with a weather illustration, when the user explicitly requests paper output. First retrieve needed facts with weather, web or Notes tools; do not invent forecasts. Use headings, short paragraphs and lists; include location, dates, units and source for forecasts. Omit queue to use the configured preferred receipt printer, or use the exact printer named by the user. No default means ask the user to choose. One copy, at most 8000 characters, normal paper limit, no automatic retries. Report queue acceptance rather than physical delivery. Use print_prepare for previews.','parameters':{'type':'object','properties':{'queue':{'type':'string','description':'Named destination; omit to use the user-configured receipt default'},'text':{'type':'string','maxLength':8000},'illustration':{'type':'string','enum':['sun','cloud','rain','snow','storm','fog'],'description':'Optional weather symbol above the Markdown. Choose from retrieved weather conditions when the user requests a weather picture.'}},'required':['text'],'additionalProperties':False}}},
         {'type':'function','function':{'name':'printers_list','description':'List physical printers once across the trusted Fabric, with stable ID, friendly name and underlying queue routes. No setup or printing.','parameters':{'type':'object','properties':{},'additionalProperties':False}}},
         {'type':'function','function':{'name':'printer_inspect','description':'Inspect printer options or jobs on an exact owner/queue.','parameters':{'type':'object','properties':dict(fields,view={'type':'string','enum':['options','jobs']}),'required':['queue'],'additionalProperties':False}}},
         {'type':'function','function':{'name':'print_prepare','description':'Prepare a text/document/receipt job for user review, NEVER send paper. Return immutable plan, options and confirmation command. Choose a physical printer from discovery; automatic routing hides its underlying queues. Export DOCX/manuscripts to PDF before preparing.','parameters':{'type':'object','properties':dict(fields,path={'type':'string'},text={'type':'string'},receipt={'type':'boolean','description':'True for a configured ESC/POS receipt destination; false for document printers'},copies={'type':'integer','minimum':1,'maximum':20},style={'type':'string','enum':['image','ascii']},rotation={'type':'integer','enum':[0,90]},paper_limit_mm={'type':'number','minimum':1,'maximum':3048,'description':'Explicit paper allowance in mm; default 304.8 (one foot). Larger values are deliberate banner jobs.'},pages={'type':'string'},media={'type':'string'},sides={'type':'string','enum':['one-sided','two-sided-long-edge','two-sided-short-edge']}),'required':['queue'],'additionalProperties':False}}}]
@@ -492,10 +501,13 @@ def run_tool(tool,args,workspace,prompt='',turn=None):
             result=dict(request('send',result['node'],ident=result['id'],confirm=True),destination=result['destination'],design=result['design'])
         return json.dumps(result)
     if tool=='print_text':
-        if set(value)-{'queue','text'} or 'text' not in value:
+        if set(value)-{'queue','text','illustration'} or 'text' not in value:
             raise ValueError('Use text and an optional printer queue')
         import tool_workflow
         tool_workflow.require_content(value['text'],prompt)
+        if value.get('illustration'):
+            from print_design import WEATHER_ILLUSTRATIONS
+            if value['illustration'] not in WEATHER_ILLUSTRATIONS:raise ValueError('Unsupported illustration')
         queue=value.get('queue')
         if not queue:
             matches=[p['label'] for p in destinations().get('printers',[])
@@ -514,9 +526,18 @@ def run_tool(tool,args,workspace,prompt='',turn=None):
             raise ValueError('Fetch live weather successfully before composing and printing the forecast')
         if turn is None or turn.get('print_attempted'):
             raise ValueError('Only one quick print attempt per user message; inspect jobs before requesting another')
+        raw=turn.get('weather_receipt')
+        if raw:
+            try:
+                receipt=json.loads(raw) if isinstance(raw,str) else raw
+                source=receipt.get('source','')
+                if source and source.casefold() not in value['text'].casefold():
+                    value['text']+='\n\nSource: '+source
+            except (ValueError,TypeError,AttributeError):pass
         turn['print_attempted']=True
         if turn.get('on_print_attempt'):turn['on_print_attempt']()
-        return json.dumps(quick_text(queue,value['text'],exact_label=True))
+        options={'illustration':value['illustration']} if value.get('illustration') else {}
+        return json.dumps(quick_text(queue,value['text'],exact_label=True,**options))
     if tool=='printers_list':return json.dumps(request('list','all'))
     if tool=='printer_inspect':
         if set(value)-{'view','node','queue'}:raise ValueError('Printer inspection accepts only owner, queue and options/jobs view')
