@@ -332,14 +332,14 @@ def encode_receipt_image(image,mode='raster',*,prime_graphics=False):
     band_height=24
     payload=bytearray(b'\x1b3'+bytes([band_height]))
     # Some portable firmware consumes the first graphics command as initialization.
-    # A one-column blank band protects real image data without printing junk.
+    # A full-width blank band protects real image data without printing junk.
     if prime_graphics:
-        payload.extend(b'\x1b*\x21\x01\x00\x00\x00\x00\n')
-        # Let bitmap height determine feed: extra line spacing creates white seams.
-        # Apply after priming because this firmware ignores the earlier setting.
-        payload.extend(b'\x1b3\x00')
+        payload.extend(b'\x1b*\x21'+image.width.to_bytes(2,'little')+bytes(image.width*3)+b'\n')
     pixels=image.load()
     for top in range(0,image.height,band_height):
+        # Portable firmware can lose line spacing between bands. Reassert it
+        # at every boundary; a single initial setting leaves white seams.
+        if prime_graphics:payload.extend(b'\x1b3\x00')
         payload.extend(b'\x1b*\x21'+image.width.to_bytes(2,'little'))
         for x in range(image.width):
             for offset in range(0,band_height,8):

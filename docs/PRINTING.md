@@ -372,13 +372,13 @@ Press **P** in either `lk player` or `lk mp` to print the currently playing trac
 ### Portable printer graphics initialization
 
 For verified column24 devices that render their first image band as text, set
-`"prime_graphics": true` in that queue's printer profile. This sends a one-column
+`"prime_graphics": true` in that queue's printer profile. This sends a full-width
 blank graphics band before the image. It adds 24 dots (3 mm) to the paper estimate
 and is included in transfer-size checks. Leave it absent for other printers.
 The Rongta RPP300 diagnostic was physically verified with this initialization;
 a successful USB transfer alone does not establish a successful print.
 
-Graphics priming sets zero extra line spacing after the blank band, letting
+Graphics priming reasserts zero extra line spacing before every image band, letting
 the 24-dot bitmap height determine paper advance and preventing
 white seams between image bands on the verified RPP300. Receipt Markdown type
 stops scaling up at 384 dots: 576-dot printers fit more words using two-thirds
@@ -423,3 +423,8 @@ count as completed. A queued receipt proves spooler acceptance, not physical
 printing. Weather-plus-print requests retain action tools instead of entering
 the weather-only text shortcut. Missing actions get at most one bounded model
 recovery step within the existing turn budget, never an automatic print retry.
+
+The verified portable column24 profile primes with a full-width blank band and
+reasserts zero extra spacing before every image band. This prevents startup glyph
+garbage and horizontal seams; all receipt-image producers use this owner-side
+encoder, including Markdown, Museum, fortunes, clipboard and song receipts.

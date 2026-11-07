@@ -383,8 +383,13 @@ def test_column_graphics_priming_preserves_image_and_accounts_for_feed(spool,mon
     image=Image.new('1',(96,48),0)
     original,dots=core.encode_receipt_image(image,'column24')
     primed,primed_dots=core.encode_receipt_image(image,'column24',prime_graphics=True)
-    blank=b'\x1b*\x21\x01\x00\x00\x00\x00\n'
-    assert primed==original[:3]+blank+b'\x1b3\x00'+original[3:]
+    blank=b'\x1b*\x21'+image.width.to_bytes(2,'little')+bytes(image.width*3)+b'\n'
+    band_bytes=5+96*3+1
+    expected=original[:3]+blank
+    for offset in range(3,3+2*band_bytes,band_bytes):
+        expected+=b'\x1b3\x00'+original[offset:offset+band_bytes]
+    expected+=original[3+2*band_bytes:]
+    assert primed==expected
     assert primed_dots==dots+24
     monkeypatch.setattr(core,'profiles',lambda:{'desk':{'kind':'escpos','width':576,'columns':48,'image_mode':'column24','prime_graphics':True}})
     output=io.BytesIO();image.save(output,format='PNG')
