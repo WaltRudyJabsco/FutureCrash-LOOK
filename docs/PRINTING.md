@@ -385,3 +385,21 @@ stops scaling up at 384 dots: 576-dot printers fit more words using two-thirds
 of their previous font size. This covers fortunes, lucky numbers, artwork
 credits, song receipts, and Markdown text; 384-dot Tiny Printer and banners
 retain their existing sizing.
+
+### Assistant-composed receipts
+
+LO, Signal and Albert can combine read tools with `print_text`: retrieve a
+forecast, recipe or Note, compose concise Markdown, then print one copy. Live
+forecast output requires a successful weather lookup in the same turn. Requests
+for previews or explanations do not send paper, and uncertain sends are not retried.
+
+A queue profile can set `preferred_receipt: true` (CLI profile option
+`--preferred-receipt`, or `--no-preferred-receipt` to disable). This preference
+is discovered from its owner across the Fabric. Exactly one preferred receipt
+destination is required for unnamed printing; absent or conflicting preferences
+produce a numbered destination list instead of guessing. Named destinations
+continue to override the default. No printer name is built into the application.
+
+Examples: “Print me a five-day forecast for Paris”, “Print a short packing list”,
+or “Print this recipe on [printer name]”. Include dates, location, units and a
+source in factual receipts. Existing paper limits apply.

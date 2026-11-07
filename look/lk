@@ -11332,6 +11332,7 @@ def ollama_chat(force_search=False, initial_prompt=None, allow_start=True, host_
             "Use write_file only for intentional textual creation or editing. Only mutate files when the user explicitly asks. "
             "Do not claim to have read or changed a file unless the corresponding tool supplied or confirmed it. "
             "CRITICAL EXECUTION CONTRACT: when the user explicitly asks you to create, write, copy, move, rename, edit, or remove local files/folders, you must CALL the appropriate filesystem tool before reporting success. Planning or describing a tool call is not execution. Never say an operation succeeded unless a tool result confirms it. "
+            "For requests to print information, retrieve it with the relevant tools, compose concise Markdown, then call print_text. Omit queue for the configured receipt default; use a named printer when requested. Ask only for missing facts such as location. Printing requires a successful tool receipt, not a filesystem mutation. "
             "Filesystem reach starts at the workspace and may be extended only by LOOK's explicit host-owned path grants. "
             "Use word_reference for offline definitions, synonyms, antonyms, word patterns and spelling; preserve its named source and distinguish reference entries from creative suggestions. Missing vocabulary is not proof of a spelling error. Never install dictionaries automatically. Use canonical information edges before generic search whenever they fit: weather=WEATHER, place_lookup=PLACE, wikipedia=WIKI, wikidata=DATA, papers=PAPERS, archive=ARCHIVE. You MUST call weather for current weather, temperature, rain, wind, or forecasts; never answer those from model memory. Use WIKI for readable stable background, DATA for structured entity facts, PAPERS for bibliographic/DOI questions, and ARCHIVE when the historical object or primary artifact matters. Canonical tool results include an epistemic receipt: edge, source, confidence, as_of when available, retrieved_at, and source_url. Preserve that provenance compactly in factual answers. DIRECT means the canonical source returned the fact; DERIVED means LOOK computed it from canonical data; SEARCHED means general web results were interpreted; MODEL means no external verification. Never invent numerical confidence percentages. If web_search is available, use it when current or externally verifiable information is needed and no canonical tool fits; "
             "when citing or recommending web material, always preserve the exact http/https URL supplied by the search result and emit a complete Markdown link in the form [descriptive label](https://actual-url). Never emit citation placeholders such as [source], [1], or a site name styled like a link without an actual URL. Never invent a URL from a site name."
@@ -12188,6 +12189,7 @@ def ollama_chat(force_search=False, initial_prompt=None, allow_start=True, host_
                     if events: events.emit("tool_retry", tool="weather", mode="preflight", reason="transient_read_failure", attempt=2)
                     time.sleep(.18)
             if weather_succeeded:
+                print_turn["weather_verified"]=True
                 pending_weather_clarification=False
                 pending_home_definition=False
                 if pending_home_candidate:
@@ -12244,7 +12246,7 @@ def ollama_chat(force_search=False, initial_prompt=None, allow_start=True, host_
             if direct_weather_answer is None and (weather_forced_location or re.search(r"\b(?:weather|temperature|my weather)\b",str(prompt),re.I)):
                 direct_weather_answer=_weather_direct_summary(weather_content)
 
-        if direct_weather_answer:
+        if direct_weather_answer and not re.search(r"\bprint\b",prompt,re.I):
             print("\n"+_lo_label("lo","35")+"\n"+_ollama_markup(direct_weather_answer)+"\n")
             messages.append({"role":"assistant","content":direct_weather_answer})
             if events:
@@ -12426,6 +12428,7 @@ def ollama_chat(force_search=False, initial_prompt=None, allow_start=True, host_
                             with _activity("weather"):
                                 tool_content=_weather_lookup(location,request=args.get("request") or prompt)
                             weather_succeeded=not str(tool_content).startswith(("Weather lookup failed:","No weather location match"))
+                            print_turn["weather_verified"]=weather_succeeded
                         except Exception as exc: tool_content=f"Weather lookup failed: {exc}"
                     elif name == "place_lookup":
                         query=args.get("query","")

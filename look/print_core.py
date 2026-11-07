@@ -164,13 +164,17 @@ def receipt_byte_limit(profile):
     return limit
 
 
-def configure_profile(queue,kind='document',width=384,columns=32,confirm=False,image_mode='raster',max_receipt_bytes=None):
+def configure_profile(queue,kind='document',width=384,columns=32,confirm=False,image_mode='raster',max_receipt_bytes=None,preferred_receipt=None):
     queue=require_queue(queue)
     if kind not in {'document','escpos'}:raise ValueError('Choose document or escpos')
     if type(width) is not int or not 128<=width<=832 or width%8:raise ValueError('Printable width must be 128–832 dots in multiples of 8; check the printer manual')
     if type(columns) is not int or not 16<=columns<=80:raise ValueError('Columns must be 16–80')
     if image_mode not in {'raster','column24'}:raise ValueError('Choose raster or column24 image mode')
     value={'kind':kind,'width':width,'columns':columns}
+    if preferred_receipt is not None:
+        if type(preferred_receipt) is not bool:raise ValueError('preferred_receipt must be boolean')
+        if preferred_receipt and kind!='escpos':raise ValueError('Preferred receipt destination must be a receipt printer')
+        value['preferred_receipt']=preferred_receipt
     if max_receipt_bytes is not None:
         receipt_byte_limit({'max_receipt_bytes':max_receipt_bytes})
         value['max_receipt_bytes']=max_receipt_bytes
