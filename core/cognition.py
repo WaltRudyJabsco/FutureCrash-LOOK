@@ -258,7 +258,7 @@ def _rule_scores(text: str) -> dict[str, float]:
         ("weather", r"\b(weather|forecast|temperature|temp|rain(?:ing)?|snow(?:ing)?|wind(?:y)?|humidity|precipitation)\b", .995),
         ("web", r"\b(youtube|yt-dlp|download (?:a |the )?video)\b", .995),
         ("web", r"\b(headlines?|breaking news|latest news|current events?|news today|today'?s news)\b", .995),
-        ("printing", r"\b(printers?|printing|print (?:file|document|receipt|jobs|this|that|my|our|the|a))\b", .98),
+        ("printing", r"\b(printers?|printing|print)\b", .98),
         ("books", r"\b(mercury reader|bookshelf|book library|continue reading|resume reading|what books)\b", .97),
         ("media", r"\b(play|queue|shuffle|pause|resume|next track|previous track|now playing|listen to)\b", .82),
         ("speech", r"\b(say|speak|read (?:this|that|it)?\s*aloud|out loud|tell .* aloud)\b", .94),

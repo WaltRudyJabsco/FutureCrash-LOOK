@@ -391,3 +391,38 @@ def test_column_graphics_priming_preserves_image_and_accounts_for_feed(spool,mon
     plan=spool.prepare('desk',output.getvalue(),'test.png','receipt-image')
     assert spool.get(plan['id'])[3]==primed
     assert plan['estimated_paper_mm']==primed_dots/8
+
+
+def test_default_forecast_print_requires_weather_and_one_attempt(tmp_path,monkeypatch):
+    monkeypatch.setattr(printing,'preferred_receipt',lambda prompt='':'Receipt Desk')
+    send=Mock(return_value={'state':'queued'});monkeypatch.setattr(printing,'quick_text',send)
+    args={'text':'# Forecast\nToday: 15 C'}
+    with pytest.raises(ValueError,match='live weather'):
+        printing.run_tool('print_text',args,tmp_path,'Print a forecast for today',{})
+    send.assert_not_called()
+    turn={'weather_verified':True}
+    printing.run_tool('print_text',args,tmp_path,'Print a forecast for today',turn)
+    send.assert_called_once_with('Receipt Desk',args['text'],exact_label=True)
+    with pytest.raises(ValueError,match='Only one'):
+        printing.run_tool('print_text',args,tmp_path,'Print a forecast for today',turn)
+
+
+@pytest.mark.parametrize('prompt',['Do not print this','How do I print this?','Preview a forecast','Print this on Epson printer'])
+def test_default_print_does_not_override_intent(prompt,tmp_path,monkeypatch):
+    send=Mock();monkeypatch.setattr(printing,'quick_text',send)
+    with pytest.raises(ValueError):printing.run_tool('print_text',{'text':'hello'},tmp_path,prompt,{})
+    send.assert_not_called()
+
+
+def test_default_receipt_is_unique_and_discovered(monkeypatch):
+    rows=[{'label':'Receipt Desk','routes':[{'profile':{'kind':'escpos','preferred_receipt':True}}]}]
+    monkeypatch.setattr(printing,'destinations',lambda:{'printers':rows})
+    assert printing.preferred_receipt()=='Receipt Desk'
+    rows.append({'label':'Other','routes':[{'profile':{'kind':'escpos','preferred_receipt':True}}]})
+    with pytest.raises(ValueError,match='no unique'):printing.preferred_receipt()
+
+
+def test_compound_print_request_exposes_weather_and_printing():
+    from core import cognition
+    route=cognition.analyze('Print me a five-day forecast',use_openjev=False)
+    assert {'weather','print_text','printers_list'}<=set(route.allowed_tools)
