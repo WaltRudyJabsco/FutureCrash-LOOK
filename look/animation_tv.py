@@ -19,6 +19,7 @@ MAX_FILE=64*1024*1024
 MAX_CACHE=512*1024*1024
 MAX_ITEMS=128
 INTERVAL=30
+_RUN_SEED=random.SystemRandom().randrange(2**63)
 _cache_lock=threading.Lock()
 _rows=[]
 _checked=0
@@ -56,7 +57,8 @@ def available():
 def shuffled_ids(ids,seed):
     return sorted(ids,key=lambda ident:hashlib.sha256((str(seed)+ident).encode()).digest())
 
-def choose(elapsed,slot=0,displays=1,seed=0):
+def choose(elapsed,slot=0,displays=1,seed=None):
+    if seed is None:seed=_RUN_SEED
     rows=available()
     if not rows:return None,None
     # A shuffled permutation plus disjoint display lanes guarantees different
@@ -64,7 +66,15 @@ def choose(elapsed,slot=0,displays=1,seed=0):
     mapping={row['id']:(row,path) for row,path in rows}
     order=[mapping[ident] for ident in shuffled_ids(tuple(mapping),seed)]
     lanes=min(max(1,displays),len(order));lane=order[slot%lanes::lanes]
-    return lane[int(elapsed//INTERVAL)%len(lane)]
+    # Each display starts at its own phase and reshuffles its private lane on
+    # every lap. Disjoint lanes still prevent simultaneous duplicate artwork.
+    rng=random.Random(f'{seed}:display:{slot}')
+    phase=rng.random()*INTERVAL
+    step=int((elapsed+phase)//INTERVAL)+rng.randrange(len(lane))
+    cycle,position=divmod(step,len(lane))
+    lane_ids=tuple(row['id'] for row,path in lane)
+    selected=shuffled_ids(lane_ids,f'{seed}:display:{slot}:lap:{cycle}')[position]
+    return mapping[selected]
 
 def store_cached(row,data):
     ident=row['id']

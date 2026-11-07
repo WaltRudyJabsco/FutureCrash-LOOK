@@ -18,8 +18,8 @@ TV controls: left/right changes animations, Space holds/resumes the slideshow,
 `f` toggles fullscreen, Escape leaves fullscreen (then closes native TV).
 Hold keeps the current GIF looping; it does not freeze its animation.
 Native screensavers allocate separate lanes to attached displays, avoiding
-repeats across those displays while enough cached GIFs are available. Browser
-curtains choose independent random offsets; separate browser sessions may
+repeats across those displays while enough cached GIFs are available. Each lane reshuffles on subsequent laps and starts with its own random timing. Browser
+curtains use independent shuffle bags and timing; separate browser sessions may
 occasionally coincide.
 
 ## Storage and setup
