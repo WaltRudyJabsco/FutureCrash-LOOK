@@ -52,3 +52,44 @@ def test_gnome_recording_explains_native_control_without_invalid_dbus(monkeypatc
     assert shot.main(['record'])==0
     assert 'No recording has started' in capsys.readouterr().out
     run.assert_not_called()
+
+
+def test_uniform_frame_is_not_a_successful_screenshot():
+    class Color:
+        def __init__(self,value):self.value=value
+        def rgba(self):return self.value
+    class Frame:
+        def isNull(self):return False
+        def width(self):return 5120
+        def height(self):return 2880
+        def pixelColor(self,x,y):return Color(0xff161619)
+    assert not shot.varied_frame(Frame())
+    class Content(Frame):
+        def pixelColor(self,x,y):return Color(x+y)
+    assert shot.varied_frame(Content())
+
+
+def test_native_mac_capture_uses_selected_rectangle(tmp_path,monkeypatch):
+    path=tmp_path/'frame.png'
+    calls=[]
+    def run(args,**kwargs):
+        calls.append(args);path.write_bytes(b'png');return Mock(returncode=0,stderr='')
+    monkeypatch.setattr(shot.subprocess,'run',run)
+    shot.capture_mac((-1920,0,1920,1080),path)
+    assert calls==[['/usr/sbin/screencapture','-x','-t','png','-R','-1920,0,1920,1080',str(path)]]
+
+
+def test_failed_native_capture_stops_before_clipboard(tmp_path,monkeypatch):
+    monkeypatch.setattr(shot.subprocess,'run',Mock(return_value=Mock(returncode=1,stderr='capture denied')))
+    with pytest.raises(ValueError,match='Nothing copied'):
+        shot.capture_mac((0,0,100,100),tmp_path/'absent.png')
+
+
+def test_picker_selection_capture_runs_in_parent(monkeypatch,tmp_path):
+    import saver,json
+    monkeypatch.setattr(shot.sys,'platform','darwin')
+    monkeypatch.setattr(saver,'interpreter',lambda:Path('/test/python'))
+    monkeypatch.setattr(shot.subprocess,'run',Mock(return_value=Mock(returncode=0,stdout='LOOK_SHOT_SELECTION:[[0,0,2560,1440]]\n',stderr='')))
+    capture=Mock();monkeypatch.setattr(shot,'capture_selected',capture)
+    assert shot.main(['1'])==0
+    capture.assert_called_once_with([[0,0,2560,1440]],Path('/test/python'),None)

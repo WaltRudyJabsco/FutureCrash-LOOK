@@ -1,5 +1,7 @@
 """Foreground screenshot commands. No model, remote capture, or background service."""
 import argparse
+import json
+import time
 import os
 from pathlib import Path
 import shutil
@@ -16,6 +18,51 @@ def selection(value, count):
     except ValueError:raise ValueError('Choose all or display numbers such as 1,3')
     if not result or any(n<0 or n>=count for n in result):raise ValueError('Choose connected display numbers')
     return result
+
+
+
+def capture_mac(rect, output):
+    """Use the proven native Vision backend, matching the picker's exact rectangle.
+
+    Qt's display inventory identifies the rectangle; Qt does not read pixels on
+    Mac. Its grabWindow path can return a valid-sized uniform desktop fallback.
+    """
+    x,y,width,height=rect
+    if width<=0 or height<=0:raise ValueError('Display rectangle is empty')
+    result=subprocess.run(['/usr/sbin/screencapture','-x','-t','png','-R',
+                           f'{x},{y},{width},{height}',str(output)],capture_output=True,text=True,timeout=15)
+    if result.returncode or not Path(output).is_file():
+        raise ValueError('Native Mac screen capture failed: '+(result.stderr.strip() or 'no image returned')+'. Nothing copied. If macOS requests Screen Recording permission, allow your terminal and restart it.')
+
+
+def varied_frame(image):
+    """Reject the uniform desktop fallback observed when Mac capture is denied."""
+    if image.isNull():return False
+    # Sampling is bounded even for a large Retina desktop.
+    first=image.pixelColor(0,0).rgba()
+    return any(image.pixelColor(x,y).rgba()!=first
+               for y in range(0,image.height(),max(1,image.height()//128))
+               for x in range(0,image.width(),max(1,image.width()//128)))
+
+
+def capture_selected(rectangles, python, destination=None):
+    """Capture from the original terminal process after the picker has exited."""
+    if not rectangles or len(rectangles)>32:raise ValueError('Invalid display selection')
+    time.sleep(.35)
+    with tempfile.TemporaryDirectory(prefix='look-shot-') as folder:
+        paths=[]
+        for index,rect in enumerate(rectangles):
+            if len(rect)!=4 or any(type(v)!=int for v in rect):raise ValueError('Invalid display rectangle')
+            path=Path(folder)/f'display-{index}.png';capture_mac(rect,path);paths.append(str(path))
+        combined=Path(folder)/'combined.png'
+        composed=subprocess.run([str(python),str(Path(__file__).with_name('screen_shot_gui.py')),'--compose'],
+            input=json.dumps(dict(paths=paths,output=str(combined))),text=True,capture_output=True,timeout=30)
+        if composed.returncode:raise ValueError(composed.stdout.strip() or composed.stderr.strip() or 'Image composition failed')
+        if destination:
+            with Path(destination).open('xb') as out:out.write(combined.read_bytes())
+        copy_image(combined)
+    print('Screenshot copied to clipboard.')
+    if destination:print('Saved '+str(destination))
 
 
 def copy_image(path):
@@ -81,8 +128,16 @@ def main(argv=None):
         import saver
         python=saver.interpreter()
         if not python:raise ValueError('Run lk saver setup to install the shared graphical picker runtime.')
-        import json
-        return subprocess.run([str(python),str(Path(__file__).with_name('screen_shot_gui.py'))],input=json.dumps(dict(screens=args.screens,delay=args.delay,save=str(args.save) if args.save else '')),text=True).returncode
+        result=subprocess.run([str(python),str(Path(__file__).with_name('screen_shot_gui.py'))],input=json.dumps(dict(screens=args.screens,delay=args.delay,save=str(args.save) if args.save else '')),text=True,capture_output=True)
+        selected=None
+        for line in result.stdout.splitlines():
+            if line.startswith('LOOK_SHOT_SELECTION:'):selected=json.loads(line.split(':',1)[1])
+            else:print(line)
+        if result.returncode:
+            if result.stderr:print(result.stderr.strip())
+            return result.returncode
+        if selected is not None:capture_selected(selected,python,args.save)
+        return 0
     except (ValueError,OSError,subprocess.SubprocessError) as exc:
         print('LOOK Shot: '+str(exc));return 1
     except KeyboardInterrupt:
