@@ -375,3 +375,19 @@ def test_sideways_literal_text_banner_preserves_whitespace():
     assert normal.height==sideways.width or abs(normal.height-sideways.width)<8
     assert sideways.height>0 and sideways.getextrema()[0]==0
     with pytest.raises(ValueError):core.receipt_banner('\x1b[31mRED',384,rotation=90)
+
+
+def test_column_graphics_priming_preserves_image_and_accounts_for_feed(spool,monkeypatch):
+    import io
+    from PIL import Image
+    image=Image.new('1',(96,48),0)
+    original,dots=core.encode_receipt_image(image,'column24')
+    primed,primed_dots=core.encode_receipt_image(image,'column24',prime_graphics=True)
+    blank=b'\x1b*\x21\x01\x00\x00\x00\x00\n'
+    assert primed==original[:3]+blank+original[3:]
+    assert primed_dots==dots+24
+    monkeypatch.setattr(core,'profiles',lambda:{'desk':{'kind':'escpos','width':576,'columns':48,'image_mode':'column24','prime_graphics':True}})
+    output=io.BytesIO();image.save(output,format='PNG')
+    plan=spool.prepare('desk',output.getvalue(),'test.png','receipt-image')
+    assert spool.get(plan['id'])[3]==primed
+    assert plan['estimated_paper_mm']==primed_dots/8

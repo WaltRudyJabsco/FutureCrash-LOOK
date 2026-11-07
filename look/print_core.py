@@ -316,7 +316,7 @@ def receipt_bitmap(data,width,style="image",rotation=0,caption=None):
         return padded.convert('1')
 
 
-def encode_receipt_image(image,mode='raster'):
+def encode_receipt_image(image,mode='raster',*,prime_graphics=False):
     """Encode the same monochrome bitmap in the device's configured wire format."""
     if mode=='raster':
         raster=bytes(byte^255 for byte in image.tobytes())
@@ -327,6 +327,9 @@ def encode_receipt_image(image,mode='raster'):
     # Each LF advances exactly one 24-dot band; restore text spacing afterward.
     band_height=24
     payload=bytearray(b'\x1b3'+bytes([band_height]))
+    # Some portable firmware consumes the first graphics command as initialization.
+    # A one-column blank band protects real image data without printing junk.
+    if prime_graphics:payload.extend(b'\x1b*\x21\x01\x00\x00\x00\x00\n')
     pixels=image.load()
     for top in range(0,image.height,band_height):
         payload.extend(b'\x1b*\x21'+image.width.to_bytes(2,'little'))
@@ -340,6 +343,7 @@ def encode_receipt_image(image,mode='raster'):
         payload.append(10)
     payload.extend(b'\x1b3'+bytes([RECEIPT_LINE_DOTS])+b'\n'*RECEIPT_FEED_LINES)
     dots=((image.height+band_height-1)//band_height)*band_height+RECEIPT_FEED_LINES*RECEIPT_LINE_DOTS
+    if prime_graphics:dots+=band_height
     return bytes(payload),dots
 
 
@@ -408,7 +412,7 @@ class Spool:
                 rendered=receipt_text(data.decode('utf-8'),profile['columns'])
                 dots=rendered.count(b'\n')*RECEIPT_LINE_DOTS
             else:
-                rendered,dots=encode_receipt_image(receipt_banner(data.decode('utf-8'),profile['width'],**render_options) if kind=='receipt-text' else receipt_bitmap(data,profile['width'],**render_options),profile.get('image_mode','raster'))
+                rendered,dots=encode_receipt_image(receipt_banner(data.decode('utf-8'),profile['width'],**render_options) if kind=='receipt-text' else receipt_bitmap(data,profile['width'],**render_options),profile.get('image_mode','raster'),prime_graphics=profile.get('prime_graphics',False))
             paper_mm=dots/RECEIPT_DOTS_PER_MM*selected_options['copies']
             if paper_mm>paper_limit:
                 raise ValueError(f'Receipt would use about {paper_mm/10:.1f} cm of paper; limit is {paper_limit/10:g} cm per job. Shorten the selection or crop the image.')

@@ -368,3 +368,12 @@ automatically while open. An accepted job is not a delivery confirmation.
 For a formatted thermal slip, use `lk print file recipe.md --printer "Tiny Printer"` and review the returned plan, or copy the Markdown and run `lk print clip`. On receipts, `# Title` centers a large heading, `## Ingredients` makes a smaller heading, and `- item` makes a bullet. Use `**bold**`, `*italic*`, or a single line wrapped in `<center>…</center>`. Formatting is local and the paper estimate includes wrapped lines.
 
 Press **P** in either `lk player` or `lk mp` to print the currently playing track. Choose a printer, review the paper estimate and press **y**. The receipt includes the song title, artist, album and available cover art. Fortunes, Museum credits and track receipts share the Markdown typography.
+
+### Portable printer graphics initialization
+
+For verified column24 devices that render their first image band as text, set
+`"prime_graphics": true` in that queue's printer profile. This sends a one-column
+blank graphics band before the image. It adds 24 dots (3 mm) to the paper estimate
+and is included in transfer-size checks. Leave it absent for other printers.
+The Rongta RPP300 diagnostic was physically verified with this initialization;
+a successful USB transfer alone does not establish a successful print.
