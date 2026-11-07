@@ -10,6 +10,7 @@ parser.add_argument('--model',required=True)
 parser.add_argument('--endpoint',default='http://127.0.0.1:11434/api/chat')
 options=parser.parse_args()
 root=Path(__file__).resolve().parents[1];sys.path[:0]=[str(root/'look'),str(root/'core')]
+import cognition
 import lo_engine,printing,notebook,tool_workflow
 loader=importlib.machinery.SourceFileLoader('audit_workflow_core',str(root/'look/lk'));spec=importlib.util.spec_from_loader(loader.name,loader);core=importlib.util.module_from_spec(spec);sys.modules[loader.name]=core;loader.exec_module(core);lo_engine._CORE=core
 core._queue_memory_exchange=lambda *a,**k:False

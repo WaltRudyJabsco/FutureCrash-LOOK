@@ -436,3 +436,10 @@ paper limit, device encoder and one-copy send path. It does not download artwork
 For forecasts, the assistant retrieves weather first and chooses the symbol from
 those conditions. Configured printer names are discovered before inference;
 configuration does not prove the physical printer is awake.
+
+For Museum requests, assistants use `museum_search` (an artist surname is enough)
+followed by `print_artwork` with a returned stable artwork ID. Random discovery
+selects from downloaded works instead of searching for the literal word “random.”
+The image and its actual credits go through the same bounded preparation and
+one-copy send path as the Museum UI. Missing or unavailable IDs fail without
+substituting a fortune, text description, or an unrelated image.
