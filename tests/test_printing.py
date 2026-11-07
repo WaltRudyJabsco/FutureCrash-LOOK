@@ -394,6 +394,7 @@ def test_column_graphics_priming_preserves_image_and_accounts_for_feed(spool,mon
 
 
 def test_default_forecast_print_requires_weather_and_one_attempt(tmp_path,monkeypatch):
+    monkeypatch.setattr(printing,'destinations',lambda:{'printers':[]})
     monkeypatch.setattr(printing,'preferred_receipt',lambda prompt='':'Receipt Desk')
     send=Mock(return_value={'state':'queued'});monkeypatch.setattr(printing,'quick_text',send)
     args={'text':'# Forecast\nToday: 15 C'}
@@ -409,6 +410,7 @@ def test_default_forecast_print_requires_weather_and_one_attempt(tmp_path,monkey
 
 @pytest.mark.parametrize('prompt',['Do not print this','How do I print this?','Preview a forecast','Print this on Epson printer'])
 def test_default_print_does_not_override_intent(prompt,tmp_path,monkeypatch):
+    monkeypatch.setattr(printing,'destinations',lambda:{'printers':[]})
     send=Mock();monkeypatch.setattr(printing,'quick_text',send)
     with pytest.raises(ValueError):printing.run_tool('print_text',{'text':'hello'},tmp_path,prompt,{})
     send.assert_not_called()
@@ -452,3 +454,14 @@ def test_model_can_name_configured_default_for_unnamed_request(tmp_path,monkeypa
     send=Mock(return_value={'state':'queued'});monkeypatch.setattr(printing,'quick_text',send)
     printing.run_tool('print_text',{'queue':'Little Printer','text':'# List\n- Eggs'},tmp_path,'Print my shopping list',{})
     send.assert_called_once()
+
+
+def test_omitted_queue_resolves_requested_printer_not_default(tmp_path,monkeypatch):
+    monkeypatch.setattr(printing,'destinations',lambda:{'printers':[{'label':'Studio'},{'label':'Office'}]})
+    send=Mock(return_value={'state':'queued'});monkeypatch.setattr(printing,'quick_text',send)
+    printing.run_tool('print_text',{'text':'# List'},tmp_path,'Print the list on Studio',{})
+    send.assert_called_once_with('Studio','# List',exact_label=True)
+    for prompt in ['Preview the list on Studio','Do not print on Studio','Print on Studio and Office']:
+        with pytest.raises(ValueError):
+            printing.run_tool('print_text',{'text':'# List'},tmp_path,prompt,{})
+    assert send.call_count==1
