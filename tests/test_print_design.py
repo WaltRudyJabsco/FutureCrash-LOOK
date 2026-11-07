@@ -100,3 +100,13 @@ def test_song_receipt_uses_track_and_cover_before_confirm(tmp_path,monkeypatch,a
     img=Image.open(io.BytesIO(base64.b64decode(prepare.call_args.kwargs['data'])))
     assert img.width==384 and img.height>80 and img.getpixel((192,img.height-1))==64
     submit.assert_called_once_with(action,'owner',ident='one',confirm=True)
+
+
+def test_wide_receipt_uses_more_columns_without_enlarging_text():
+    import print_design
+    print_design.dependencies()
+    narrow=print_design.markdown_bitmap('### Readable fortune\nLucky: 01 02 03',384,1000)
+    wide=print_design.markdown_bitmap('### Readable fortune\nLucky: 01 02 03',576,1000)
+    # Only the width-based margins grow; the two text rows keep their physical size.
+    assert wide.height-narrow.height==2*(576//48-384//48)
+    assert wide.width==576 and narrow.width==384

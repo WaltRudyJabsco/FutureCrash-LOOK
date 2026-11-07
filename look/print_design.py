@@ -10,6 +10,8 @@ import textwrap
 
 FONTS=('standard','small','slant','banner','big')
 PACKAGES=('pyfiglet==1.0.4','Pillow>=10,<14')
+# Wider paper should fit more text, rather than enlarge pocket-printer lettering.
+TYPOGRAPHY_REFERENCE_WIDTH=384
 
 def dependency_path():return Path.home()/'.local/share/look/lettering/python'
 
@@ -164,7 +166,7 @@ def markdown_bitmap(body,width,max_height,*,type_scale=1.0):
         level=len(heading[1]) if heading else 0
         if heading:line=heading[2]
         elif line.startswith(('- ','* ')):line='• '+line[2:]
-        size=max(10,round(width*([24,42,36,32,29,27,25][level])*type_scale/384))
+        size=max(10,round(min(width,TYPOGRAPHY_REFERENCE_WIDTH)*([24,42,36,32,29,27,25][level])*type_scale/TYPOGRAPHY_REFERENCE_WIDTH))
         advance=round(size*1.36)
         if not line:
             y+=advance//2
