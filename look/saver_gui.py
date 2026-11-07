@@ -102,7 +102,7 @@ class SaverWindow(QWidget):
         painter.fillRect(self.rect(),QColor(paper));painter.setPen(QColor(ink))
         if _scene=='Gypsy Astronaut':
             import animation_tv
-            row,path=animation_tv.choose(elapsed+self.controller.museum_step*animation_tv.INTERVAL,getattr(self,'museum_slot',0),len(self.controller.windows),self.controller.seed)
+            row,path=animation_tv.choose(elapsed,getattr(self,'museum_slot',0),len(self.controller.windows),self.controller.seed,step_offset=self.controller.museum_step)
             painter.fillRect(self.rect(),QColor('#080d13'))
             if path:
                 if getattr(self,'animation_key',None)!=str(path):

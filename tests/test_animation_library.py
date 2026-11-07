@@ -9,6 +9,7 @@ import player_visuals
 import saver
 
 class Animations(unittest.TestCase):
+    def setUp(self):animation_tv._choices.clear()
     def test_originals_and_photosets(self):
         post={'id':123,'type':'photo','photo-caption':'<b>A &amp; B</b>','photos':[{'photo-url-1280':'https://64.media.tumblr.com/a.gif'},{'photo-url-1280':'https://64.media.tumblr.com/a.jpg'}]}
         rows=library.entries(post)
@@ -32,6 +33,19 @@ class Animations(unittest.TestCase):
             sequences=[[animation_tv.choose(t*30,0,1,seed)[0]['id'] for t in range(40)] for seed in range(3)]
             self.assertEqual(len({seq[0] for seq in sequences}),3)
             for seq in sequences:self.assertNotEqual(seq[:20],seq[20:])
+
+    def test_downloads_do_not_interrupt_hold_and_arrows_work(self):
+        rows=[({'id':str(i)},Path(str(i))) for i in range(20)]
+        with patch.object(animation_tv,'available',return_value=rows) as available:
+            first=animation_tv.choose(0,seed=81)
+            available.return_value=rows+[({'id':'new'},Path('new'))]
+            self.assertEqual(animation_tv.choose(2,seed=81),first)
+            self.assertEqual(animation_tv.choose(9.9,seed=81),first)
+            self.assertNotEqual(animation_tv.choose(2,seed=81,step_offset=1),first)
+        animation_tv._choices.clear()
+        with patch.object(animation_tv,'available',return_value=rows):
+            first=animation_tv.choose(0,seed=81)
+            self.assertNotEqual(animation_tv.choose(12.6,seed=81),first)
 
     def test_shared_visual_catalog(self):
         for name in ['Gypsy Astronaut','Afterimage']:
