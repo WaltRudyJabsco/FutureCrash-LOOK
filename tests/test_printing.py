@@ -426,3 +426,29 @@ def test_compound_print_request_exposes_weather_and_printing():
     from core import cognition
     route=cognition.analyze('Print me a five-day forecast',use_openjev=False)
     assert {'weather','print_text','printers_list'}<=set(route.allowed_tools)
+
+
+def test_print_conversation_retains_request_and_printer_but_not_completed_send():
+    state=printing.PrintConversation()
+    assert state.begin('print it up on the printer')=='print it up on the printer'
+    assert state.begin('Little Printer').endswith('on Little Printer')
+    assert state.begin('yes').endswith('on Little Printer')
+    assert state.begin('send it').startswith('print it up')
+    state.finish()
+    assert state.begin('yes')=='yes'
+
+
+def test_print_conversation_numbered_choice_and_cancellation():
+    state=printing.PrintConversation();state.begin('Print the packing list')
+    state.catalog({'printers':[{'label':'Desk'},{'label':'Receipt'}]})
+    assert state.begin('2')=='Print the packing list on Receipt'
+    state.begin('cancel');assert state.begin('send it')=='send it'
+    state.begin('Print a recipe');state.begin('Tell me a joke')
+    assert state.begin('yes')=='yes'
+
+
+def test_model_can_name_configured_default_for_unnamed_request(tmp_path,monkeypatch):
+    monkeypatch.setattr(printing,'preferred_receipt',lambda prompt='':'Little Printer')
+    send=Mock(return_value={'state':'queued'});monkeypatch.setattr(printing,'quick_text',send)
+    printing.run_tool('print_text',{'queue':'Little Printer','text':'# List\n- Eggs'},tmp_path,'Print my shopping list',{})
+    send.assert_called_once()
