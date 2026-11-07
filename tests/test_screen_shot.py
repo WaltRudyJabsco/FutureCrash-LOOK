@@ -52,3 +52,28 @@ def test_gnome_recording_explains_native_control_without_invalid_dbus(monkeypatc
     assert shot.main(['record'])==0
     assert 'No recording has started' in capsys.readouterr().out
     run.assert_not_called()
+
+
+def test_uniform_frame_is_not_a_successful_screenshot():
+    class Color:
+        def __init__(self,value):self.value=value
+        def rgba(self):return self.value
+    class Frame:
+        def isNull(self):return False
+        def width(self):return 5120
+        def height(self):return 2880
+        def pixelColor(self,x,y):return Color(0xff161619)
+    assert not shot.varied_frame(Frame())
+    class Content(Frame):
+        def pixelColor(self,x,y):return Color(x+y)
+    assert shot.varied_frame(Content())
+
+
+def test_denied_mac_permission_requests_consent_and_stops(monkeypatch):
+    import ctypes
+    monkeypatch.setattr(shot.sys,'platform','darwin')
+    library=Mock();library.CGPreflightScreenCaptureAccess.return_value=False
+    monkeypatch.setattr(ctypes,'CDLL',lambda path:library)
+    with pytest.raises(ValueError,match='Nothing copied'):
+        shot.require_capture_permission()
+    library.CGRequestScreenCaptureAccess.assert_called_once()

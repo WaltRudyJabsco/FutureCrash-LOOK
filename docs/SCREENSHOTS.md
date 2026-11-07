@@ -31,3 +31,9 @@ GNOME does not expose a public recorder-launch method here, so the command direc
 you to Print → video mode or the Screenshot button in Quick Settings.
 LOOK does not yet provide synchronized multi-monitor video recording, audio mixing,
 or a custom cross-platform recorder. OBS is optional for those advanced uses.
+
+Mac captures now check Screen Recording authorization before reading pixels.
+A denied capture can otherwise return a valid-sized solid desktop image. Such
+uniform frames are rejected and leave the clipboard unchanged. If permission is
+requested, enable the terminal/capture application identified by macOS in Privacy
+& Security → Screen & System Audio Recording, restart it, then capture again.

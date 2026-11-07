@@ -18,6 +18,31 @@ def selection(value, count):
     return result
 
 
+
+def require_capture_permission():
+    """macOS can return valid-sized wallpaper frames without capture permission."""
+    if sys.platform!='darwin':return
+    import ctypes
+    library=ctypes.CDLL('/System/Library/Frameworks/CoreGraphics.framework/CoreGraphics')
+    library.CGPreflightScreenCaptureAccess.restype=ctypes.c_bool
+    if not library.CGPreflightScreenCaptureAccess():
+        # Request only after the user explicitly starts a capture. The OS owns
+        # consent; never change privacy settings or accept a blank fallback.
+        library.CGRequestScreenCaptureAccess.restype=ctypes.c_bool
+        library.CGRequestScreenCaptureAccess()
+        raise ValueError('Screen Recording permission is required. In System Settings → Privacy & Security → Screen & System Audio Recording, allow the terminal/capture app shown by macOS (for example Kitty or Python), then quit and reopen it and try again. Nothing copied.')
+
+
+def varied_frame(image):
+    """Reject the uniform desktop fallback observed when Mac capture is denied."""
+    if image.isNull():return False
+    # Sampling is bounded even for a large Retina desktop.
+    first=image.pixelColor(0,0).rgba()
+    return any(image.pixelColor(x,y).rgba()!=first
+               for y in range(0,image.height(),max(1,image.height()//128))
+               for x in range(0,image.width(),max(1,image.width()//128)))
+
+
 def copy_image(path):
     """Copy full-resolution PNG without applying the shelf attachment size limit."""
     if sys.platform=='darwin':

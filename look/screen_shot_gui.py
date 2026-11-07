@@ -72,10 +72,12 @@ class Controller:
         try:
             # Use this exact inventory for both labels and capture, avoiding
             # mismatched system_profiler versus OS display numbering.
+            screen_shot.require_capture_permission()
             images=[]
             for index in sorted(self.selected):
                 image=self.screens[index].grabWindow(0).toImage()
                 if image.isNull():raise ValueError('Screen capture unavailable; allow Screen Recording for this terminal in system settings')
+                if not screen_shot.varied_frame(image):raise ValueError('Display '+str(index+1)+' returned a solid-color frame. Nothing copied. Check Screen Recording permission and try a visible desktop window.')
                 image.setDevicePixelRatio(1);images.append(image)
             width=sum(image.width() for image in images);height=max(image.height() for image in images)
             if width*height>100_000_000:raise ValueError('Selected display image is too large; capture fewer displays')
