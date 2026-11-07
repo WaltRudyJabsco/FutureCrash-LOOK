@@ -11,6 +11,18 @@ import screen_shot
 SETTLE_MS=350
 
 
+def compose(images):
+    if not images or any(not screen_shot.varied_frame(image) for image in images):
+        raise ValueError('Capture returned an empty or solid-color frame. Nothing copied. Try a visible desktop window; check capture permission if macOS requests it.')
+    for image in images:image.setDevicePixelRatio(1)
+    width=sum(image.width() for image in images);height=max(image.height() for image in images)
+    if width*height>100_000_000:raise ValueError('Selected display image is too large; capture fewer displays')
+    combined=QImage(width,height,QImage.Format.Format_RGB32);combined.fill(QColor('#000000'))
+    painter=QPainter(combined);x=0
+    for image in images:painter.drawImage(x,0,image);x+=image.width()
+    painter.end();return combined
+
+
 class Badge(QWidget):
     def __init__(self,controller,screen,index):
         super().__init__();self.controller=controller;self.index=index
@@ -72,24 +84,14 @@ class Controller:
         try:
             # Use this exact inventory for both labels and capture, avoiding
             # mismatched system_profiler versus OS display numbering.
-            images=[]
-            for index in sorted(self.selected):
-                if sys.platform=='darwin':
-                    geometry=self.screens[index].geometry()
-                    with tempfile.TemporaryDirectory(prefix='look-shot-frame-') as folder:
-                        path=Path(folder)/'frame.png'
-                        screen_shot.capture_mac((geometry.x(),geometry.y(),geometry.width(),geometry.height()),path)
-                        image=QImage(str(path))
-                else:image=self.screens[index].grabWindow(0).toImage()
-                if image.isNull():raise ValueError('Screen capture unavailable; allow Screen Recording for this terminal in system settings')
-                if not screen_shot.varied_frame(image):raise ValueError('Display '+str(index+1)+' returned a solid-color frame. Nothing copied. Check Screen Recording permission and try a visible desktop window.')
-                image.setDevicePixelRatio(1);images.append(image)
-            width=sum(image.width() for image in images);height=max(image.height() for image in images)
-            if width*height>100_000_000:raise ValueError('Selected display image is too large; capture fewer displays')
-            combined=QImage(width,height,QImage.Format.Format_RGB32);combined.fill(QColor('#000000'))
-            painter=QPainter(combined);x=0
-            for image in images:painter.drawImage(x,0,image);x+=image.width()
-            painter.end()
+            if sys.platform=='darwin':
+                rectangles=[]
+                for index in sorted(self.selected):
+                    g=self.screens[index].geometry();rectangles.append([g.x(),g.y(),g.width(),g.height()])
+                print('LOOK_SHOT_SELECTION:'+json.dumps(rectangles),flush=True)
+                self.app.exit(0);return
+            combined=compose([self.screens[index].grabWindow(0).toImage() for index in sorted(self.selected)])
+            width,height=combined.width(),combined.height()
             with tempfile.TemporaryDirectory(prefix='look-shot-') as folder:
                 path=Path(folder)/'screen.png'
                 if not combined.save(str(path),'PNG'):raise ValueError('Could not encode screenshot')
@@ -109,4 +111,11 @@ def main():
     return app.exec()
 
 
-if __name__=='__main__':raise SystemExit(main())
+if __name__=='__main__':
+    if sys.argv[1:]==['--compose']:
+        try:
+            job=json.loads(sys.stdin.read())
+            combined=compose([QImage(path) for path in job['paths']])
+            if not combined.save(job['output'],'PNG'):raise ValueError('Could not encode screenshot')
+        except Exception as exc:print(str(exc));raise SystemExit(1)
+    else:raise SystemExit(main())

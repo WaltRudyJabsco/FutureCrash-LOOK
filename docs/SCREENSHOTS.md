@@ -34,7 +34,8 @@ or a custom cross-platform recorder. OBS is optional for those advanced uses.
 
 Mac captures use the native `screencapture` tool, as Fabric Vision does, instead
 of Qt's pixel-reading API. Qt still supplies the numbered picker and exact display
-rectangles. Failed or uniform frames are rejected before saving or copying, leaving
+rectangles, then exits. The original terminal process performs the native capture,
+matching the existing Vision permission context. Failed or uniform frames are rejected before saving or copying, leaving
 the clipboard unchanged. Existing terminal capture authorization may already be
 sufficient; no privacy-setting reset is needed. If macOS requests permission,
 authorize the application it identifies in Screen & System Audio Recording.

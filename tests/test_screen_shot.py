@@ -83,3 +83,13 @@ def test_failed_native_capture_stops_before_clipboard(tmp_path,monkeypatch):
     monkeypatch.setattr(shot.subprocess,'run',Mock(return_value=Mock(returncode=1,stderr='capture denied')))
     with pytest.raises(ValueError,match='Nothing copied'):
         shot.capture_mac((0,0,100,100),tmp_path/'absent.png')
+
+
+def test_picker_selection_capture_runs_in_parent(monkeypatch,tmp_path):
+    import saver,json
+    monkeypatch.setattr(shot.sys,'platform','darwin')
+    monkeypatch.setattr(saver,'interpreter',lambda:Path('/test/python'))
+    monkeypatch.setattr(shot.subprocess,'run',Mock(return_value=Mock(returncode=0,stdout='LOOK_SHOT_SELECTION:[[0,0,2560,1440]]\n',stderr='')))
+    capture=Mock();monkeypatch.setattr(shot,'capture_selected',capture)
+    assert shot.main(['1'])==0
+    capture.assert_called_once_with([[0,0,2560,1440]],Path('/test/python'),None)
