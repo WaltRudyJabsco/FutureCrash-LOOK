@@ -43,22 +43,38 @@ def describe(value):
         return "[Unavailable attachment]"
 
 
-def file_snapshot(uri):
+def file_snapshot(uri, for_print=False):
     parsed = urlparse(uri)
     if parsed.scheme != 'file' or parsed.netloc not in {'', 'localhost'}:
         raise ValueError('Only local copied files can be captured')
     path = Path(unquote(parsed.path))
-    if not path.is_file() or path.stat().st_size > MAX_BYTES:
-        raise ValueError('Copy one regular file up to 3 MiB; folders are not captured')
+    image=path.suffix.lower() in {'.png','.jpg','.jpeg'}
+    limit=64*1024*1024 if for_print and image else MAX_BYTES
+    if not path.is_file() or path.stat().st_size > limit:
+        raise ValueError('Copy one regular file up to '+str(limit//(1024*1024))+' MiB; folders are not captured')
     with path.open('rb') as stream:
-        return pack(stream.read(MAX_BYTES + 1), path.name)
+        data=stream.read(limit+1)
+        return image_snapshot(data,path.name,mimetypes.guess_type(path.name)[0],for_print) if image else pack(data,path.name)
 
 
 def run(args, **kwargs):
     return subprocess.run(args, check=True, capture_output=True, timeout=3, **kwargs).stdout
 
 
-def capture(text_reader):
+def image_snapshot(data,name,mime,for_print=False):
+    if for_print and len(data)>MAX_BYTES:
+        import tempfile
+        import clipboard_image
+        with tempfile.TemporaryDirectory(prefix='look-clip-image-') as folder:
+            source=Path(folder)/name;source.write_bytes(data)
+            output=Path(folder)/'print-copy.png'
+            info=clipboard_image.process(source,output=output,limit=MAX_BYTES)
+            print('Large clipboard image: preparing '+str(info['size'][0])+' × '+str(info['size'][1])+' print copy; original clipboard unchanged.')
+            return pack(output.read_bytes(),'clipboard-print.png','image/png')
+    return pack(data,name,mime)
+
+
+def capture(text_reader, for_print=False):
     """Prefer file ownership metadata, then image bytes, then plain text."""
     if sys.platform == 'darwin':
         script = r'''ObjC.import('AppKit');
@@ -70,10 +86,11 @@ else { var d=p.dataForType('public.png');
 if(!ObjC.unwrap(d)) {var t=p.dataForType('public.tiff'); if(ObjC.unwrap(t)) {var r=$.NSBitmapImageRep.imageRepWithData(t); if(ObjC.unwrap(r)) d=r.representationUsingTypeProperties($.NSBitmapImageFileTypePNG,$.NSDictionary.dictionary);}}
 if(ObjC.unwrap(d) && Number(d.length)<=3145728) JSON.stringify({png:ObjC.unwrap(d.base64EncodedStringWithOptions(0))});
 else if(ObjC.unwrap(d)) JSON.stringify({error:'Image exceeds 3 MiB'}); else '{}'; }'''
+        if for_print:script=script.replace('3145728','67108864').replace('Image exceeds 3 MiB','Image exceeds 64 MiB')
         result = json.loads(run(['osascript', '-l', 'JavaScript', '-e', script]).decode())
         if result.get('error'): raise ValueError(result['error'])
-        if result.get('uri'): return file_snapshot(result['uri'])
-        if result.get('png'): return pack(base64.b64decode(result['png']), 'clipboard.png', 'image/png')
+        if result.get('uri'): return file_snapshot(result['uri'],for_print)
+        if result.get('png'): return image_snapshot(base64.b64decode(result['png']), 'clipboard.png', 'image/png',for_print)
     else:
         wayland = bool(os.environ.get('WAYLAND_DISPLAY'))
         prefix = ['wl-paste'] if wayland else ['xclip', '-selection', 'clipboard', '-o']
@@ -84,9 +101,9 @@ else if(ObjC.unwrap(d)) JSON.stringify({error:'Image exceeds 3 MiB'}); else '{}'
         if 'text/uri-list' in types:
             uris = [s for s in read('text/uri-list').decode().splitlines() if s and not s.startswith('#')]
             if len(uris) != 1: raise ValueError('Copy one file at a time')
-            return file_snapshot(uris[0])
+            return file_snapshot(uris[0],for_print)
         for kind, name in [('image/png','clipboard.png'), ('image/jpeg','clipboard.jpg')]:
-            if kind in types: return pack(read(kind), name, kind)
+            if kind in types: return image_snapshot(read(kind), name, kind,for_print)
     return text_reader()
 
 
@@ -118,12 +135,11 @@ def preview(value):
     if not item:return value
     label=describe(value)
     if item['mime'].startswith('image/'):
-        from io import BytesIO
-        from PIL import Image
+        import tempfile
         try:
-            with Image.open(BytesIO(item['data'])) as image:
-                image.thumbnail((48,18));image=image.convert('L')
-                shades='@%#*+=-:. '
-                return label+'\n'+'\n'.join(''.join(shades[image.getpixel((x,y))*9//256] for x in range(image.width)) for y in range(image.height))
-        except (OSError,ValueError):return label+'\nImage preview unavailable'
+            import clipboard_image
+            with tempfile.TemporaryDirectory(prefix='look-clip-preview-') as folder:
+                path=Path(folder)/item['name'];path.write_bytes(item['data'])
+                return label+'\n'+clipboard_image.process(path)['preview']
+        except (OSError,ValueError,subprocess.SubprocessError) as exc:return label+'\nImage preview unavailable: '+str(exc)
     return label+'\nFile snapshot · content retained, never executed'

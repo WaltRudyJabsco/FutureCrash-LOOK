@@ -26,3 +26,12 @@ Attachments use a versioned envelope in the existing private clipboard database.
 All peers need this update to display and recall attachments. Recalled attachments
 are materialized under the private clipboard `recalled` directory so file URLs
 remain usable after closing the shelf. These files are not canonical documents.
+
+Large screenshots can exceed the shelf's 3 MiB history limit. `lk print clip`
+reads current images up to 64 MiB and prepares a bounded print copy (up to 2048
+pixels on the longest edge), without replacing the full-resolution clipboard.
+This direct print path does not add oversized originals to history. If current
+content cannot be read, the picker displays the reason instead of silently hiding
+it. Image previews use the shared Qt graphics runtime (`lk saver setup`), not a
+Pillow installation in the invoking terminal's Python. The printer service still
+uses its existing image-rendering dependencies.

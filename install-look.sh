@@ -375,6 +375,7 @@ install_file "$ROOT/look/note_composer.py" "$HOME/.local/share/look/note_compose
 install_file "$ROOT/look/work_desk.py" "$HOME/.local/share/look/work_desk.py"
 install_file "$ROOT/look/screen_shot.py" "$HOME/.local/share/look/screen_shot.py"
 install_file "$ROOT/look/screen_shot_gui.py" "$HOME/.local/share/look/screen_shot_gui.py"
+install_file "$ROOT/look/clipboard_image.py" "$HOME/.local/share/look/clipboard_image.py"
 install_file "$ROOT/look/clipboard_items.py" "$HOME/.local/share/look/clipboard_items.py"
 install_file "$ROOT/look/clipboard_shelf.py" "$HOME/.local/share/look/clipboard_shelf.py"
 install_file "$ROOT/look/notebook_markdown.py" "$HOME/.local/share/look/notebook_markdown.py"
