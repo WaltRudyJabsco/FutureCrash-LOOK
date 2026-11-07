@@ -403,3 +403,23 @@ continue to override the default. No printer name is built into the application.
 Examples: “Print me a five-day forecast for Paris”, “Print a short packing list”,
 or “Print this recipe on [printer name]”. Include dates, location, units and a
 source in factual receipts. Existing paper limits apply.
+
+### Pending tasks and completion
+
+Terminal LO, Signal and Albert use the same pending-print state model. Browser
+turns store it privately under `~/.local/share/look/tasks`, scoped by interface
+and session ID, with a 30-minute expiry and serialized access. Separate chats
+never inherit one another's authorization. Missing session IDs get no persistent
+state. This is session continuity, not automatic transfer between nodes or chats.
+
+Only operator messages and discovered printer choices update pending intent;
+assistant prose cannot authorize a print. A send attempt clears and persists
+pending intent before submission, including when the response is lost. A later
+“yes” cannot repeat that pending send. Explicit new print requests are new work.
+
+Completion requires the requested action's successful receipt. Printer discovery
+and prepared plans do not prove a print was submitted; uncertain results do not
+count as completed. A queued receipt proves spooler acceptance, not physical
+printing. Weather-plus-print requests retain action tools instead of entering
+the weather-only text shortcut. Missing actions get at most one bounded model
+recovery step within the existing turn budget, never an automatic print retry.

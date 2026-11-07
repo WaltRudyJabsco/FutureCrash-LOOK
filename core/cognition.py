@@ -8,6 +8,7 @@ provides cheap satisfaction checks after tools run.
 """
 from __future__ import annotations
 
+import json
 import difflib
 import re
 import time
@@ -377,15 +378,55 @@ def assess(goal: Goal|dict[str,Any], *, successful_tools: list[str]|None=None, f
     else: g=dict(goal or {})
     families=list(g.get("families") or [])
     successful=set(successful_tools or [])
-    effect_families={"media","speech","games","display","browser","image","schedule","files","system"}
-    required_effect=[f for f in families if f in effect_families]
-    evidence_families={ACTION_BY_NAME[n].family for n in successful if n in ACTION_BY_NAME}
-    missing=[f for f in required_effect if f not in evidence_families]
+    request=str(g.get('request','')).casefold()
+    requirements=[]
+    def require(pattern,tools):
+        if re.search(pattern,request):requirements.append(set(tools))
+    if 'printing' in families:
+        if re.search(r'\b(preview|prepare|draft)\b',request):requirements.append({'print_prepare','print_design'})
+        elif re.search(r'\b(print|send)\b',request):requirements.append({'print_text','print_design'})
+    if 'memory' in families:
+        require(r'\b(add|append|edit|update|change|save|write|create|record)\b',{'notebook_update','notebook_capture'})
+        require(r'\b(complete|mark.*done)\b',{'notebook_complete'})
+    if 'radio' in families:require(r'\b(add|queue|save)\b',{'radio_add'})
+    if 'books' in families:require(r'\b(continue|resume|open|start)\b',{'books_open','open_url','open_path'})
+    if 'web' in families:require(r'\bdownload\b',{'video_download'})
+    if 'files' in families:
+        require(r'\b(copy|duplicate|backup)\b',{'copy_path'})
+        require(r'\b(move|rename)\b',{'move_path'})
+        require(r'\b(delete|remove)\b',{'remove_path'})
+        require(r'\b(write|edit|create|make|save)\b',{'write_file','create_text_files','make_directory'})
+    effect_verbs={'media':r'\b(play|queue|pause|resume|stop|shuffle|listen|watch|next)\b',
+                  'speech':r'\b(say|speak|aloud)\b', 'games':r'\b(play|start|move)\b',
+                  'display':r'\b(open|show|preview|reveal)\b', 'browser':r'\b(open|visit|launch)\b',
+                  'image':r'\b(draw|generate|render|make|create)\b', 'schedule':r'\b(remind|schedule)\b'}
+    for family,pattern in effect_verbs.items():
+        if family in families and re.search(pattern,request):
+            actions={s.name for s in ACTION_SPECS if s.family==family and s.effect in {'action','mutation'}}
+            if actions:requirements.append(actions)
+    missing=[sorted(group) for group in requirements if not successful & group]
     if missing:
-        return {"satisfied":False,"confidence":0.25,"reason":"missing successful action receipt for "+", ".join(missing)}
-    if str(final_text or "").strip() or successful:
-        return {"satisfied":True,"confidence":0.90 if successful else 0.72,"reason":"final answer/evidence completed the bounded turn"}
-    return {"satisfied":False,"confidence":0.10,"reason":"no final answer or successful tool evidence"}
+        return {'satisfied':False,'status':'pending','confidence':0.0,
+                'reason':'missing successful action receipt','missing_actions':missing}
+    if not any(ACTION_BY_NAME.get(n) and ACTION_BY_NAME[n].effect in {'action','mutation'} for n in successful) and re.search(r"\b(cannot|can't|unable|not able|did not|haven't)\b",final_text,re.I):
+        return {'satisfied':False,'status':'uncompleted','confidence':0.0,'reason':'no successful receipt; response reports inability'}
+    if str(final_text or '').strip() or successful:
+        return {'satisfied':True,'status':'completed','confidence':0.90 if successful else 0.72,'reason':'required action receipts present' if requirements else 'informational response/evidence'}
+    return {'satisfied':False,'status':'uncompleted','confidence':0.0,'reason':'no response or successful receipt'}
+
+
+def action_result_completed(name,result):
+    """Separate transport success from a tool's actual outcome."""
+    if isinstance(result,str):
+        try:result=json.loads(result)
+        except (ValueError,TypeError):return True
+    if not isinstance(result,dict):return True
+    if result.get('ok') is False or result.get('error'):return False
+    state=result.get('state',result.get('status',''))
+    if state in {'uncertain','failed','cancelled','needs_input','pending','error'}:return False
+    if name in {'print_text','print_design'}:
+        return state in {'queued','sent','completed','acknowledged','delivered'}
+    return True
 
 
 def resolve_name(query: str, candidates: list[dict[str,Any]], *, keys=("name","label","id")) -> dict[str,Any]:

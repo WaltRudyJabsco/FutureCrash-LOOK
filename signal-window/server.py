@@ -546,7 +546,7 @@ def load_lo_engine(explicit=""):
         _LO_ENGINE=module
         return module
 
-def native_lo_chat(profile,prompt,cwd,selected_paths,history):
+def native_lo_chat(profile,prompt,cwd,selected_paths,history,session_id=None):
     engine=load_lo_engine()
     interface_context=(
         "INTERFACE: Signal Window browser. Answer the operator normally and truthfully. "
@@ -558,7 +558,7 @@ def native_lo_chat(profile,prompt,cwd,selected_paths,history):
         "When generate_image succeeds, preserve the exact saved path from the tool result in the final answer; this gives the browser conversation a durable artifact reference for follow-up requests such as where is it, show it, or open it."
     )
     result=engine.chat_once(
-        prompt,profile=profile,workspace=cwd,selected_paths=selected_paths,
+        prompt,session_id=("signal:"+session_id) if session_id else None,profile=profile,workspace=cwd,selected_paths=selected_paths,
         history=history,interface_context=interface_context,
     )
     return str(result.get("text") or "").strip(), list(result.get("events") or [])
@@ -1501,7 +1501,7 @@ class App(BaseHTTPRequestHandler):
                     node_progress(lease_id,"inference","LO native engine working")
                     session_id=str(d.get("session") or "").strip()[:120]
                     history=_session_history(session_id)
-                    text,lo_events=native_lo_chat(self.profile,full,td,paths,history)
+                    text,lo_events=native_lo_chat(self.profile,full,td,paths,history,session_id=session_id)
                     _session_append(session_id,prompt or full,text)
                 else:
                     direct_base,direct_model,_=look_inference_config(

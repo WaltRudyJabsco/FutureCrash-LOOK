@@ -135,8 +135,8 @@ def available() -> bool:
         return False
 
 
-def chat_once(prompt: str, *, profile='workspace', workspace=None, selected_paths=None,
-              history=None, interface_context=None, persona=None, force_search=False):
+def _chat_once(prompt: str, *, profile='workspace', workspace=None, selected_paths=None,
+              history=None, interface_context=None, persona=None, force_search=False, task_context=None):
     """Run one LO operator turn and return structured machine data."""
     import ytd
     download=ytd.direct_download(prompt,profile) if not selected_paths else None
@@ -169,7 +169,7 @@ def chat_once(prompt: str, *, profile='workspace', workspace=None, selected_path
                 force_search=bool(force_search), initial_prompt=str(prompt), allow_start=True,
                 access_profile=profile, selected_paths=selected_paths,
                 workspace_override=workspace, one_shot=True, events=events,
-                conversation_history=history or [], interface_context=interface_context,
+                conversation_history=history or [], interface_context=interface_context, task_context=task_context,
             )
         finally:
             if old is None:
@@ -232,3 +232,10 @@ def chat_once(prompt: str, *, profile='workspace', workspace=None, selected_path
     return {'text':response,'events':events.rows,'returncode':int(rc or 0),
             'persona':str(persona or ''),'receipts':receipts,'provenance':provenance,
             'route':route,'goal':goal,'plan':plan,'satisfaction':satisfaction}
+
+
+def chat_once(prompt: str, *, session_id=None, **kwargs):
+    if session_id is None:return _chat_once(prompt,**kwargs)
+    from task_state import session
+    with session(session_id) as context:
+        return _chat_once(prompt,task_context=context,**kwargs)
