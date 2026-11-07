@@ -7,6 +7,9 @@ import sys
 MAX_INPUT = 64 * 1024 * 1024
 MAX_PIXELS = 100_000_000
 PRINT_WIDTH = 2048
+PREVIEW_COLUMNS = 48
+PREVIEW_ROWS = 18
+CELL_HEIGHT_TO_WIDTH = 2.0
 
 
 def process(path, *, output=None, limit=3*1024*1024):
@@ -37,7 +40,12 @@ def worker(job):
             if Path(job['output']).stat().st_size<=job['limit']:break
             if min(image.width(),image.height())<64:raise ValueError('Image cannot fit the print transfer limit')
             image=image.scaled(max(1,int(image.width()*.8)),max(1,int(image.height()*.8)),Qt.AspectRatioMode.KeepAspectRatio,Qt.TransformationMode.SmoothTransformation)
-    thumb=image.scaled(48,18,Qt.AspectRatioMode.KeepAspectRatio,Qt.TransformationMode.SmoothTransformation)
+    # A terminal cell is roughly twice as tall as it is wide. Resample fewer
+    # image rows so the displayed characters preserve the picture's proportions.
+    scale=min(PREVIEW_COLUMNS/image.width(),PREVIEW_ROWS*CELL_HEIGHT_TO_WIDTH/image.height())
+    columns=max(1,round(image.width()*scale))
+    rows_count=max(1,round(image.height()*scale/CELL_HEIGHT_TO_WIDTH))
+    thumb=image.scaled(columns,rows_count,Qt.AspectRatioMode.IgnoreAspectRatio,Qt.TransformationMode.SmoothTransformation)
     shades='@%#*+=-:. ';rows=[]
     for y in range(thumb.height()):
         row=''
