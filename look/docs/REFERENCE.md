@@ -323,6 +323,8 @@ lk print completion [--node NODE] [--confirm]
   [files] Review/install current LOOK zsh printer completion; preserves the prior script
 lk print add QUEUE --uri URI [--driver everywhere|raw] [--node NODE] [--confirm]
   [files] Review then explicitly add a CUPS queue; no drivers installed automatically
+lk shot [all|N|N,M|record] [--delay SECONDS] [--save FILE.png]
+  [files] Numbered monitor screenshot picker, image clipboard and native recording toolbar
 lk print nickname [PRINTER] [NAME] [--node NODE] [--confirm]
   [files] Name a physical destination across its reachable routes
 lk print profile QUEUE --kind document|escpos [--width DOTS] [--columns N] [--node NODE] [--confirm]
@@ -498,6 +500,8 @@ lk project [ARGS]
 lk receipt [ARGS]
   [aliases] Additional routed entry point; see usage details below
 lk scheduler [ARGS]
+  [aliases] Additional routed entry point; see usage details below
+lk screenshot [ARGS]
   [aliases] Additional routed entry point; see usage details below
 lk thinkdisplay [ARGS]
   [aliases] Additional routed entry point; see usage details below

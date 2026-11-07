@@ -21503,6 +21503,7 @@ _COMMANDS = [
     ("lk print", "[list [--queues]|discover|options [PRINTER]|jobs [PRINTER]] [--node NODE]", "files", "Physical-printer desk; pick options/jobs and manage friendly names"),
     ("lk print completion", "[--node NODE] [--confirm]", "files", "Review/install current LOOK zsh printer completion; preserves the prior script"),
     ("lk print add", "QUEUE --uri URI [--driver everywhere|raw] [--node NODE] [--confirm]", "files", "Review then explicitly add a CUPS queue; no drivers installed automatically"),
+    ("lk shot", "[all|N|N,M|record] [--delay SECONDS] [--save FILE.png]", "files", "Numbered monitor screenshot picker, image clipboard and native recording toolbar"),
     ("lk print nickname", "[PRINTER] [NAME] [--node NODE] [--confirm]", "files", "Name a physical destination across its reachable routes"),
     ("lk print profile", "QUEUE --kind document|escpos [--width DOTS] [--columns N] [--node NODE] [--confirm]", "files", "Review a document or verified receipt printer profile"),
     ("lk print file", "FILE [--printer PRINTER] [--node NODE] [--pages 1-3,5] [--copies N] [--media MEDIA] [--sides SIDES]", "files", "Prepare a bounded document job; export manuscripts to PDF first"),
@@ -22765,6 +22766,9 @@ def main():
     import clipboard_shelf
     try: clipboard_shelf.ensure_watcher()
     except (OSError,clipboard_shelf.sqlite3.Error): pass
+    if len(sys.argv)>=2 and sys.argv[1] in {'shot','screenshot'}:
+        import screen_shot
+        return screen_shot.main(sys.argv[2:])
     if len(sys.argv)>=2 and sys.argv[1]=='clip':
         return clipboard_shelf.main(sys.argv[2:])
     if len(sys.argv)>2 and sys.argv[1]=='help' and sys.argv[2]!='all':
