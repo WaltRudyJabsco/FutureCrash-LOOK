@@ -958,6 +958,12 @@
     "Review then explicitly add a CUPS queue; no drivers installed automatically"
   ],
   [
+    "lk shot",
+    "[all|N|N,M|record] [--delay SECONDS] [--save FILE.png]",
+    "files",
+    "Numbered monitor screenshot picker, image clipboard and native recording toolbar"
+  ],
+  [
     "lk print nickname",
     "[PRINTER] [NAME] [--node NODE] [--confirm]",
     "files",
@@ -1485,6 +1491,12 @@
   ],
   [
     "lk scheduler",
+    "[ARGS]",
+    "aliases",
+    "Additional routed entry point; see usage details below"
+  ],
+  [
+    "lk screenshot",
     "[ARGS]",
     "aliases",
     "Additional routed entry point; see usage details below"
