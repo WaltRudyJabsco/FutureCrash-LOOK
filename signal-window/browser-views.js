@@ -538,7 +538,7 @@
     const gypsy=document.createElement('img');gypsy.alt='Gypsy Astronaut animation';gypsy.style.cssText='position:absolute;inset:0;width:100%;height:100%;object-fit:contain;display:none';layer.insertBefore(gypsy,form);
     let gypsyRows=[],gypsyStep=-1,gypsyBusy=false;const gypsyOffset=crypto.getRandomValues(new Uint32Array(1))[0];
     async function gypsyFrame(step){
-      if(gypsyBusy||step===gypsyStep)return;gypsyBusy=true;
+      if(gypsyBusy||step===gypsyStep)return;gypsyBusy=true;gypsyStep=step;
       try{if(!gypsyRows.length){const response=await fetch('/api/gypsy');if(!response.ok)throw Error('Archive unavailable');const data=await response.json();gypsyRows=Object.values(data.items||{}).filter(row=>row.sha256);}
         if(gypsyRows.length){const row=gypsyRows[(step+gypsyOffset)%gypsyRows.length];gypsy.src='/api/gypsy/image?id='+encodeURIComponent(row.id);gypsyStep=step;}
       }catch(_){}finally{gypsyBusy=false;}
