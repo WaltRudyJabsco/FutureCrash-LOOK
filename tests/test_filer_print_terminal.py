@@ -78,7 +78,11 @@ print('DONE',flush=True)
     try:
         assert until(b'FILER_KEY_READY'),output[-1500:]
         output=b''
-        os.write(master,b'N');assert until('› '.encode()),output[-1500:]
+        os.write(master,b'N');assert until(b'Copies [1]'),output[-1500:]
+        output=b''
+        os.write(master,b'\r');assert until('› '.encode()),output[-1500:]
+        output=b''
+        os.write(master,b'\r');assert until('› '.encode()),output[-1500:]
         os.write(master,b'p\r' if confirm else b'\r')
         if confirm:
             assert until(b'Enter returns to LOOK'),output[-1500:]

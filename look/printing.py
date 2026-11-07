@@ -1,4 +1,5 @@
 """Fabric printing CLI and bounded assistant hooks. Explicit text-print requests can submit one bounded job."""
+import subprocess
 import argparse
 import base64
 import json
@@ -79,10 +80,29 @@ def quick_text(queue,text,exact_label=False):
 
 
 def clipboard_print(ui,queue=None):
-    from look_renderer import clipboard_text,prompt_line
+    from look_renderer import prompt_line
     from print_desk import pick
-    content=clipboard_text().replace('\r\n','\n').replace('\r','\n').strip()
-    if not content:raise ValueError('Copy a recipe, passage or list as text first.')
+    import clipboard_shelf
+    import clipboard_items
+    import tempfile
+    def printable(value):
+        try:
+            item=clipboard_items.unpack(value)
+            return bool(value) and (not item or Path(item['name']).suffix.lower() in {'.pdf','.txt','.md','.markdown','.png','.jpg','.jpeg'})
+        except (ValueError,TypeError):return False
+    try:content=clipboard_shelf.read_item()
+    except (OSError,ValueError,subprocess.SubprocessError):content=None
+    while not printable(content):
+        print('Choose a printable clipboard item: text, image, or PDF.')
+        content=clipboard_shelf.show(pick=True)
+        if content is None:return 'Cancelled.'
+    item=clipboard_items.unpack(content)
+    if item:
+        with tempfile.TemporaryDirectory(prefix='look-clip-print-') as folder:
+            source=Path(folder)/item['name'];source.write_bytes(item['data'])
+            result=selected_file(source,ui,prefer_receipt=source.suffix.lower()!='.pdf',queue=queue)
+        return 'Print review closed.' if result==0 else 'Print was not completed; see the error above.'
+    content=content.replace('\r\n','\n').replace('\r','\n').strip()
     if len(content)>MAX_QUICK_TEXT:raise ValueError('Copy a shorter selection (up to 8,000 characters).')
     if any(not ch.isprintable() and ch not in '\t\n' for ch in content):
         raise ValueError('Copy plain text without control characters.')
@@ -142,16 +162,32 @@ def prepare_file(queue,path,node='auto',receipt=None,**options):
 def artwork_caption(row):
     return [' '.join(str(row.get(key) or '').split())[:250] for key in ('title','artist','date','museum')]
 
-def selected_file(path,ui,prefer_receipt=False,default_style="image",caption=None):
+def selected_file(path,ui,prefer_receipt=False,default_style="image",caption=None,queue=None):
     """Foreground file-manager handoff: choose, review, explicitly print, return."""
     from print_desk import pick
     from look_renderer import prompt_line
     plan=None
     try:
         source=printable_file(path)
-        choice=pick(ui,prefer_receipt=True) if prefer_receipt else pick(ui)
+        choice={'id':queue} if queue else (pick(ui,prefer_receipt=True) if prefer_receipt else pick(ui))
         if not choice:return 0
         options={'caption':caption} if caption else {}
+        if source.suffix.casefold()=='.pdf':
+            value,cancelled=prompt_line('PDF pages to print (required, e.g. 1 or 1-3): ')
+            if cancelled or not value.strip():return 0
+            options['pages']=value.strip()
+        if source.suffix.casefold() in {'.png','.jpg','.jpeg'}:
+            from PIL import Image
+            with Image.open(source) as preview:
+                preview.verify()
+            with Image.open(source) as preview:
+                print(f'Image preview · {source.name} · {preview.width} × {preview.height} pixels')
+                thumb=preview.convert('L');thumb.thumbnail((48,18))
+                shades='@%#*+=-:. '
+                for y in range(thumb.height):
+                    print(''.join(shades[thumb.getpixel((x,y))*9//256] for x in range(thumb.width)))
+        elif source.suffix.casefold() in {'.txt','.md','.markdown'}:
+            print(source.read_text(encoding='utf-8')[:8000])
         value,cancelled=prompt_line('Copies [1]: ')
         if cancelled:return 0
         options['copies']=int(value.strip() or '1')
@@ -210,7 +246,7 @@ def parser():
     item=sub.add_parser('profile');item.add_argument('queue');item.add_argument('--kind',choices=['document','escpos'],required=True);item.add_argument('--width',type=int,default=384);item.add_argument('--columns',type=int,default=32);item.add_argument('--image-mode',choices=['raster','column24'],default='raster');item.add_argument('--max-receipt-bytes',type=int,default=None,help='Device-specific encoded receipt limit; 0 disables');item.add_argument('--confirm',action='store_true');item.add_argument('--node',default='local')
     for action in ['file','text','receipt']:
         item=sub.add_parser(action);item.add_argument('content',nargs='?' if action=='receipt' else None);item.add_argument('--image');item.add_argument('--printer');item.add_argument('--node',default='auto');item.add_argument('--paper-limit-mm',type=float);item.add_argument('--copies',type=int,default=1);item.add_argument('--style',choices=['image','ascii']);item.add_argument('--rotation',type=int,choices=[0,90]);item.add_argument('--pages');item.add_argument('--media');item.add_argument('--sides',choices=['one-sided','two-sided-long-edge','two-sided-short-edge'])
-    item=sub.add_parser('clip',aliases=['clipboard'],help='Review and print text copied on this computer');item.add_argument('--printer')
+    item=sub.add_parser('clip',aliases=['clipboard'],help='Review copied text, images or files; choose from history when unavailable');item.add_argument('--printer')
     item=sub.add_parser('quick',help='Send one text receipt/document immediately to a named printer')
     item.add_argument('content');item.add_argument('--printer',required=True)
     for action in ['inspect','send','discard']:
