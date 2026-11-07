@@ -9,7 +9,7 @@ before capture. No model, remote capture, or persistent recording service is use
 - `lk shot 2` captures display 2.
 - `lk shot 1,3 --delay 5` captures selected displays after five seconds.
 - `lk shot --save ~/Desktop/screen.png` also saves the screenshot; it never overwrites.
-- `lk shot record` opens the native recording controls (Mac, GNOME, or Spectacle).
+- `lk shot record` opens native recording controls on Mac/Spectacle, or shows GNOME’s native shortcut.
 - `[Screenshot](look:shot)` adds the picker to a Note.
 
 Multiple displays become one full-resolution PNG arranged side by side in display
@@ -27,5 +27,7 @@ are not accepted there; selection and timing use the desktop picker. This avoids
 pretending that an arbitrary application can capture monitors behind the portal.
 
 Recording uses the desktop's own start/stop, destination and selection controls.
+GNOME does not expose a public recorder-launch method here, so the command directs
+you to Print → video mode or the Screenshot button in Quick Settings.
 LOOK does not yet provide synchronized multi-monitor video recording, audio mixing,
 or a custom cross-platform recorder. OBS is optional for those advanced uses.

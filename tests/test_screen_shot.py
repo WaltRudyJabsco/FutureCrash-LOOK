@@ -33,7 +33,7 @@ def test_recording_only_opens_native_toolbar(monkeypatch):
     monkeypatch.setattr(shot.sys,'platform','darwin')
     run=Mock(return_value=Mock(returncode=0));monkeypatch.setattr(shot.subprocess,'run',run)
     assert shot.main(['record'])==0
-    assert run.call_args.args[0]==['/usr/sbin/screencapture','-i','-U','-J','video']
+    assert run.call_args.args[0]==['open','-a','Screenshot']
     run.reset_mock();assert shot.main(['record','--delay','10'])==1;run.assert_not_called()
 
 
@@ -44,3 +44,11 @@ def test_png_clipboard_declares_image_type(tmp_path,monkeypatch):
     run=Mock();monkeypatch.setattr(shot.subprocess,'run',run)
     shot.copy_image(path)
     assert run.call_args.args[0]==['wl-copy','--type','image/png']
+
+
+def test_gnome_recording_explains_native_control_without_invalid_dbus(monkeypatch,capsys):
+    monkeypatch.setattr(shot.sys,'platform','linux');monkeypatch.setenv('XDG_CURRENT_DESKTOP','ubuntu:GNOME')
+    run=Mock();monkeypatch.setattr(shot.subprocess,'run',run)
+    assert shot.main(['record'])==0
+    assert 'No recording has started' in capsys.readouterr().out
+    run.assert_not_called()
