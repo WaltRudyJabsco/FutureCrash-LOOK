@@ -31,10 +31,11 @@ def copy_image(path):
 
 def recording():
     if sys.platform=='darwin':
-        return subprocess.run(['/usr/sbin/screencapture','-i','-U','-J','video']).returncode
-    if 'gnome' in os.environ.get('XDG_CURRENT_DESKTOP','').lower() and shutil.which('gdbus'):
-        print('Choose video mode in the desktop capture toolbar; its stop control ends recording.')
-        return subprocess.run(['gdbus','call','--session','--dest','org.gnome.Shell.Screenshot','--object-path','/org/gnome/Shell/Screenshot','--method','org.gnome.Shell.Screenshot.ShowScreenshotUI']).returncode
+        print('Choose a Record mode in the Screenshot toolbar; its stop control ends recording.')
+        return subprocess.run(['open','-a','Screenshot']).returncode
+    if 'gnome' in os.environ.get('XDG_CURRENT_DESKTOP','').lower():
+        print('GNOME keeps its recorder in the desktop shell. Press Print, then choose video mode, or use the Screenshot button in Quick Settings. No recording has started.')
+        return 0
     if shutil.which('spectacle'):
         print('Use the recording tab in Spectacle.')
         return subprocess.run(['spectacle']).returncode
