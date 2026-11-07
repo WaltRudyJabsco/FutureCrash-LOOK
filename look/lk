@@ -11426,6 +11426,8 @@ def ollama_chat(force_search=False, initial_prompt=None, allow_start=True, host_
     last_action=_lo_latest_command_action()
     last_candidates=""
     pending_media_clarification=None
+    import printing as _print_conversation_tools
+    print_conversation=_print_conversation_tools.PrintConversation()
     brain_state=_load_brain_state()
     brain_pending=brain_state.get("pending") or {}
     pending_weather_clarification=brain_pending.get("goal")=="weather" and brain_pending.get("slot") in {"weather.location","home.location"}
@@ -11458,6 +11460,8 @@ def ollama_chat(force_search=False, initial_prompt=None, allow_start=True, host_
 
         if not prompt:
             continue
+
+        prompt=print_conversation.begin(prompt)
 
         if fortune_printers:
             fortune_command=fortune_printers.get(prompt.casefold().strip(' .!?'))
@@ -12522,6 +12526,10 @@ def ollama_chat(force_search=False, initial_prompt=None, allow_start=True, host_
                     elif name in {'printers_list','printer_inspect','print_prepare','print_text','banner_render','print_design'}:
                         import printing
                         tool_content,_ok,_elapsed=_tool_transaction(name,args,lambda:printing.run_tool(name,args,workspace,prompt,print_turn))
+                        if name=='printers_list' and _ok:
+                            try:print_conversation.catalog(json.loads(tool_content))
+                            except (ValueError,TypeError):pass
+                        if print_turn.get('print_attempted'):print_conversation.finish()
                         if _ok:
                             turn_successful_tools.add(name)
                             if name in {'print_design','print_text','print_prepare'}:

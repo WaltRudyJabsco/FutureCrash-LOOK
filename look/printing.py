@@ -134,6 +134,40 @@ def explicit_print(prompt, label):
     return bool(re.search(r'\bprint\b',text) or re.search(r'\bsend\b.*\bto (?:the )?'+re.escape(label)+r'(?!\w)',text))
 
 
+class PrintConversation:
+    """Keep explicit print intent across short answers in this chat only."""
+    def __init__(self):
+        self.request=''
+        self.choices={}
+
+    def begin(self,prompt):
+        answer=prompt.strip().casefold().strip(' .!?')
+        if answer in {'cancel','no','stop','never mind','nevermind'}:
+            self.finish();return prompt
+        if re.search(r'\bprint\b',prompt,re.I):
+            self.request=prompt;self.choices={};return prompt
+        if self.request:
+            if answer in self.choices:
+                self.request=self.request+' on '+self.choices[answer]
+                return self.request
+            if answer in {'yes','y','send it','send it now','immediately','go ahead','print it'}:
+                return self.request
+            # Printer labels still go through discovery/exact-label checks at send time.
+            if re.fullmatch(r'[\w -]{1,80}printer',answer):
+                self.request=self.request+' on '+prompt.strip()
+                return self.request
+        self.finish();return prompt
+
+    def catalog(self,result):
+        if not self.request:return
+        rows=result.get('printers',[])
+        self.choices={str(i):p.get('label',p.get('name','')) for i,p in enumerate(rows,1)}
+        self.choices.update({label.casefold():label for label in list(self.choices.values()) if label})
+
+    def finish(self):
+        self.request='';self.choices={}
+
+
 def preferred_receipt(prompt=""):
     """A preference belongs to the physical destination, visible to every peer."""
     catalog=destinations()
@@ -455,7 +489,8 @@ def run_tool(tool,args,workspace,prompt='',turn=None):
         if not queue:
             if not explicit_default_print(prompt):raise ValueError('Ask explicitly to print; name any requested destination')
             queue=preferred_receipt(prompt)
-        elif not isinstance(queue,str) or not explicit_print(prompt,queue):
+        elif not isinstance(queue,str) or not (explicit_print(prompt,queue) or
+                explicit_default_print(prompt) and queue.casefold()==preferred_receipt(prompt).casefold()):
             raise ValueError('Ask explicitly to print to a named printer; previews and questions do not send paper')
         if re.search(r'\b(weather|forecast)\b',prompt,re.I) and not (turn or {}).get('weather_verified'):
             raise ValueError('Fetch live weather successfully before composing and printing the forecast')
