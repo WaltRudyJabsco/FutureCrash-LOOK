@@ -1392,7 +1392,7 @@ def tools():
         ('notebook_search','Search saved notebook records. Omit query or use an empty string to list all records, including completed records. Results include full note bodies.',{'query':{'type':'string'}},[]),
         ('notebook_list','List saved notes, tasks and reminders in default LKN order: most recently updated first. No keyword is required. Results include full bodies.',{'include_done':{'type':'boolean'}},[]),
         ('notebook_read','Read the full text of a saved notebook record by its ID or position in the default LKN list. First note means position 1; positions follow newest updated first.',{'id':{'type':'string'},'position':{'type':'integer','minimum':1},'include_done':{'type':'boolean'}},[]),
-        ('notebook_capture','Save a note, task or reminder only when the user asks to record it.',
+        ('notebook_capture','Save a complete note, task or reminder when requested. Compose the actual content first; text is the full Markdown, with the title on its own first line and the body below. Never send an unfinished template.',
          {'text':{'type':'string'},'kind':{'type':'string','enum':['note','task','reminder']},'project':{'type':'string'},
           'due':{'type':'string'},'remind_at':{'type':'string'},'target':{'type':'string'}},['text']),
         ('notebook_complete','Complete a saved note/task/reminder explicitly requested by the user.',{'id':{'type':'string'}},['id']),

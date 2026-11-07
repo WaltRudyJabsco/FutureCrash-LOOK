@@ -6910,7 +6910,7 @@ def _lo_tools_for_route(profile,route):
     """Fuzzy discovery, exact execution: expose only the useful tool neighborhood."""
     tools=_lo_tools(profile)
     allowed=set(getattr(route,"allowed_tools",[]) or [])
-    if not allowed or getattr(route,"primary","general")=="general" or getattr(route,"needs_clarification",False):
+    if not allowed or getattr(route,"primary","general")=="general":
         return tools
     # web_search is appended separately because availability is dynamic.
     allowed.discard("web_search")
@@ -12101,7 +12101,7 @@ def ollama_chat(force_search=False, initial_prompt=None, allow_start=True, host_
 
         # Normal mode exposes tools to the model, but explicit mutations are also
         # enforced by the host so prose can never masquerade as execution.
-        mutation_required=(profile!="conservative" and _lo_requires_filesystem_action(prompt))
+        mutation_required=(profile!="conservative" and _lo_requires_filesystem_action(prompt) and ("memory" not in getattr(turn_route,"families",[]) or "files" in getattr(turn_route,"families",[])))
         external_action_required=(profile!="conservative" and _lo_requires_external_action(prompt))
         speech_required=(profile!="conservative" and _lo_requires_speech(prompt))
         # Weather discourse state is derived only from user/assistant turns, never
@@ -12321,6 +12321,9 @@ def ollama_chat(force_search=False, initial_prompt=None, allow_start=True, host_
                 route_allowed=set(getattr(turn_route,"allowed_tools",[]) or [])
                 if has_web and not turn_force_search and (not route_allowed or "web_search" in route_allowed):
                     tools.append(web_tool)
+                import tool_workflow
+                if tool_workflow.active(prompt,getattr(turn_route,"families",[])):
+                    payload_obj["messages"]=tool_workflow.envelope(messages,user_message)
                 payload_obj["tools"] = tools
                 if events: events.emit("tools_scoped",family=turn_intent,tools=[t.get("function",{}).get("name","") for t in tools])
 
@@ -12413,7 +12416,11 @@ def ollama_chat(force_search=False, initial_prompt=None, allow_start=True, host_
                         try:
                             if name in {'notebook_capture','notebook_complete','notebook_update'} and not re.search(r'\b(save|record|remember|remind|create|add|append|edit|update|change|rewrite|replace|reschedule|snooze|complete|done|finish|mark|move|set|remove|reopen)\b',prompt,re.I):
                                 raise ValueError('The user has not requested a notebook change')
+                            if name=='notebook_capture':
+                                import tool_workflow
+                                tool_workflow.require_content(args.get('text'),prompt)
                             tool_content=notebook.tool(name,args)
+                            if _cognition_module().action_result_completed(name,tool_content):turn_successful_tools.add(name)
                         except Exception as exc: tool_content=f"NOTEBOOK FAILED · {exc}"
                     elif name in {"video_search","video_download","video_download_status"}:
                         import ytd
@@ -12794,7 +12801,7 @@ def ollama_chat(force_search=False, initial_prompt=None, allow_start=True, host_
                 check=_cognition_module().assess(turn_goal,successful_tools=list(turn_successful_tools),final_text=_split_ollama_thinking(message)[1])
                 exposed={t.get('function',{}).get('name') for t in tools}
                 missing={n for group in check.get('missing_actions',[]) for n in group}
-                if missing & exposed and task_rounds<budget['tool_rounds'] and '?' not in _split_ollama_thinking(message)[1]:
+                if missing & exposed and task_rounds<budget['tool_rounds']:
                     completion_recovery_used=True
                     messages.append(message)
                     messages.append({'role':'system','content':'The requested action has no completion receipt. If required inputs are available, call the appropriate tool now; otherwise ask only for the missing input. Do not claim completion. Missing eligible actions: '+', '.join(sorted(missing & exposed))})

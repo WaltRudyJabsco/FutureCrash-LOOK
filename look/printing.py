@@ -494,10 +494,19 @@ def run_tool(tool,args,workspace,prompt='',turn=None):
     if tool=='print_text':
         if set(value)-{'queue','text'} or 'text' not in value:
             raise ValueError('Use text and an optional printer queue')
+        import tool_workflow
+        tool_workflow.require_content(value['text'],prompt)
         queue=value.get('queue')
         if not queue:
-            if not explicit_default_print(prompt):raise ValueError('Ask explicitly to print; name any requested destination')
-            queue=preferred_receipt(prompt)
+            matches=[p['label'] for p in destinations().get('printers',[])
+                     if explicit_print(prompt,p['label'])]
+            if len(matches)==1:
+                queue=matches[0]
+            elif matches:
+                raise ValueError('Choose one printer for this job')
+            else:
+                if not explicit_default_print(prompt):raise ValueError('Ask explicitly to print; name any requested destination')
+                queue=preferred_receipt(prompt)
         elif not isinstance(queue,str) or not (explicit_print(prompt,queue) or
                 explicit_default_print(prompt) and queue.casefold()==preferred_receipt(prompt).casefold()):
             raise ValueError('Ask explicitly to print to a named printer; previews and questions do not send paper')
