@@ -26,6 +26,13 @@ class Animations(unittest.TestCase):
             for times in [(0,0,0),(30,0,60),(120,90,30)]:
                 picks=[animation_tv.choose(t,n,3,42)[0]['id'] for n,t in enumerate(times)]
                 self.assertEqual(len(set(picks)),3)
+    def test_laps_reshuffle_and_starts_vary(self):
+        rows=[({'id':str(i)},Path(str(i))) for i in range(20)]
+        with patch.object(animation_tv,'available',return_value=rows):
+            sequences=[[animation_tv.choose(t*30,0,1,seed)[0]['id'] for t in range(40)] for seed in range(3)]
+            self.assertEqual(len({seq[0] for seq in sequences}),3)
+            for seq in sequences:self.assertNotEqual(seq[:20],seq[20:])
+
     def test_shared_visual_catalog(self):
         for name in ['Gypsy Astronaut','Afterimage']:
             self.assertIn(name,saver.SCENES)
