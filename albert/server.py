@@ -311,6 +311,7 @@ def cognition_json(text, session="", selected_paths=None):
     engine=_load_lo_engine()
     result=engine.chat_once(
         text,
+        session_id="albert:"+sid,
         profile="workspace",
         workspace=str(Path.home()),
         history=_session_history(sid),

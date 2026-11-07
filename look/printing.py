@@ -136,26 +136,33 @@ def explicit_print(prompt, label):
 
 class PrintConversation:
     """Keep explicit print intent across short answers in this chat only."""
-    def __init__(self):
-        self.request=''
-        self.choices={}
+    def __init__(self,state=None,save=None):
+        self.state=state if state is not None else {}
+        self.save=save or (lambda:None)
+        self.request=self.state.get('request','')
+        self.choices=self.state.get('choices',{})
+
+    def persist(self):
+        self.state.update(request=self.request,choices=self.choices)
+        self.save()
 
     def begin(self,prompt):
         answer=prompt.strip().casefold().strip(' .!?')
         if answer in {'cancel','no','stop','never mind','nevermind'}:
             self.finish();return prompt
+        if self.request and answer in {'print it','print it now'}:return self.request
         if re.search(r'\bprint\b',prompt,re.I):
-            self.request=prompt;self.choices={};return prompt
+            self.request=prompt;self.choices={};self.persist();return prompt
         if self.request:
             if answer in self.choices:
                 self.request=self.request+' on '+self.choices[answer]
-                return self.request
+                self.persist();return self.request
             if answer in {'yes','y','send it','send it now','immediately','go ahead','print it'}:
-                return self.request
+                self.persist();return self.request
             # Printer labels still go through discovery/exact-label checks at send time.
             if re.fullmatch(r'[\w -]{1,80}printer',answer):
                 self.request=self.request+' on '+prompt.strip()
-                return self.request
+                self.persist();return self.request
         self.finish();return prompt
 
     def catalog(self,result):
@@ -163,9 +170,10 @@ class PrintConversation:
         rows=result.get('printers',[])
         self.choices={str(i):p.get('label',p.get('name','')) for i,p in enumerate(rows,1)}
         self.choices.update({label.casefold():label for label in list(self.choices.values()) if label})
+        self.persist()
 
     def finish(self):
-        self.request='';self.choices={}
+        self.request='';self.choices={};self.persist()
 
 
 def preferred_receipt(prompt=""):
@@ -474,6 +482,7 @@ def run_tool(tool,args,workspace,prompt='',turn=None):
             if turn is None or turn.get('print_attempted'):raise ValueError('Only one print attempt per user message')
             if value.get('paper_limit_mm',304.8)>304.8 and not re.search(r'\b(banner|feet|foot|ticker)\b',prompt,re.I):raise ValueError('Ask explicitly for a longer banner allowance')
             turn['print_attempted']=True
+            if turn.get('on_print_attempt'):turn['on_print_attempt']()
         result=design(**value)
         if send:
             if result['destination'].casefold()!=value['queue'].casefold():
@@ -497,6 +506,7 @@ def run_tool(tool,args,workspace,prompt='',turn=None):
         if turn is None or turn.get('print_attempted'):
             raise ValueError('Only one quick print attempt per user message; inspect jobs before requesting another')
         turn['print_attempted']=True
+        if turn.get('on_print_attempt'):turn['on_print_attempt']()
         return json.dumps(quick_text(queue,value['text'],exact_label=True))
     if tool=='printers_list':return json.dumps(request('list','all'))
     if tool=='printer_inspect':

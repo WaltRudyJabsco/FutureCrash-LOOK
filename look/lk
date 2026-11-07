@@ -7513,7 +7513,7 @@ def _lo_weather_only_query(prompt):
     if not _lo_requires_weather(text):
         return False
     # Keep full tools for compound requests such as save/open/search/compare.
-    other=r"\b(save|write|create|copy|move|delete|remove|open|play|launch|search|find|file|folder|directory|compare|code|debug|run|command|process|port|generate|image|schedule)\b"
+    other=r"\b(print|send|save|write|create|copy|move|delete|remove|open|play|launch|search|find|file|folder|directory|compare|code|debug|run|command|process|port|generate|image|schedule)\b"
     return not re.search(other,text)
 
 def _lo_explicit_web_scope(prompt):
@@ -11156,7 +11156,7 @@ def _lo_download_direct(prompt,profile,events=None):
     return text
 
 
-def ollama_chat(force_search=False, initial_prompt=None, allow_start=True, host_override=None, host_name=None, access_profile=None, selected_paths=None, workspace_override=None, one_shot=False, confirm_unsafe_override=False, events=None, conversation_history=None, interface_context=None):
+def ollama_chat(force_search=False, initial_prompt=None, allow_start=True, host_override=None, host_name=None, access_profile=None, selected_paths=None, workspace_override=None, one_shot=False, confirm_unsafe_override=False, events=None, conversation_history=None, interface_context=None, task_context=None):
     """Minimal local chat; optional first prompt and web-search mode."""
     import json
     import urllib.request
@@ -11427,7 +11427,7 @@ def ollama_chat(force_search=False, initial_prompt=None, allow_start=True, host_
     last_candidates=""
     pending_media_clarification=None
     import printing as _print_conversation_tools
-    print_conversation=_print_conversation_tools.PrintConversation()
+    print_conversation=_print_conversation_tools.PrintConversation(*(task_context or (None,None)))
     brain_state=_load_brain_state()
     brain_pending=brain_state.get("pending") or {}
     pending_weather_clarification=brain_pending.get("goal")=="weather" and brain_pending.get("slot") in {"weather.location","home.location"}
@@ -11818,7 +11818,7 @@ def ollama_chat(force_search=False, initial_prompt=None, allow_start=True, host_
         turn_evidence = []
         turn_proposed_action = None
         turn_successful_tools=set()
-        print_turn={}
+        print_turn={'on_print_attempt':print_conversation.finish}
         last_print_result=None
 
         # Terminal drag/drop becomes first-class resource context. Finder and most Linux
@@ -12266,6 +12266,7 @@ def ollama_chat(force_search=False, initial_prompt=None, allow_start=True, host_
         task_tier,budget=_lo_budget_for(prompt,thinking_mode,selected_paths)
         task_started=time.monotonic()
         task_rounds=0
+        completion_recovery_used=False
         task_tool_calls=0
         task_prompt_tokens=0
         task_prompt_s=0.0
@@ -12531,9 +12532,11 @@ def ollama_chat(force_search=False, initial_prompt=None, allow_start=True, host_
                             except (ValueError,TypeError):pass
                         if print_turn.get('print_attempted'):print_conversation.finish()
                         if _ok:
-                            turn_successful_tools.add(name)
+                            if _cognition_module().action_result_completed(name,tool_content):turn_successful_tools.add(name)
                             if name in {'print_design','print_text','print_prepare'}:
-                                try:last_print_result=json.loads(tool_content)
+                                try:
+                                    last_print_result=json.loads(tool_content)
+                                    if last_print_result.get('state')=='prepared':turn_successful_tools.add('print_prepare')
                                 except (ValueError,TypeError):pass
                     elif name=='receipts_search':
                         import receipt_desk
@@ -12787,6 +12790,22 @@ def ollama_chat(force_search=False, initial_prompt=None, allow_start=True, host_
                 message=dict(message,content=printing.design_summary(last_print_result))
             elif not _split_ollama_thinking(message)[1] and print_turn.get('print_attempted'):
                 message=dict(message,content='The print attempt did not return a usable result. Check printer jobs before retrying; I cannot confirm completion.')
+            if turn_goal and not print_turn.get('print_attempted') and not completion_recovery_used:
+                check=_cognition_module().assess(turn_goal,successful_tools=list(turn_successful_tools),final_text=_split_ollama_thinking(message)[1])
+                exposed={t.get('function',{}).get('name') for t in tools}
+                missing={n for group in check.get('missing_actions',[]) for n in group}
+                if missing & exposed and task_rounds<budget['tool_rounds'] and '?' not in _split_ollama_thinking(message)[1]:
+                    completion_recovery_used=True
+                    messages.append(message)
+                    messages.append({'role':'system','content':'The requested action has no completion receipt. If required inputs are available, call the appropriate tool now; otherwise ask only for the missing input. Do not claim completion. Missing eligible actions: '+', '.join(sorted(missing & exposed))})
+                    continue
+            if last_print_result:
+                import printing
+                message=dict(message,content=printing.design_summary(last_print_result))
+            if turn_goal:
+                check=_cognition_module().assess(turn_goal,successful_tools=list(turn_successful_tools),final_text=_split_ollama_thinking(message)[1])
+                if check.get('missing_actions') and '?' not in _split_ollama_thinking(message)[1] and not last_print_result:
+                    message=dict(message,content='The requested action is not confirmed complete. '+_split_ollama_thinking(message)[1])
             messages.append(message)
             # Thinking was already presented live according to the selected display mode.
             final=_split_ollama_thinking(message)[1]
