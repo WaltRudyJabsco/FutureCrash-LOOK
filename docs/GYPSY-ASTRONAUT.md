@@ -17,6 +17,8 @@ higher-resolution URLs or bypass the site's HTML access restrictions.
 TV controls: left/right changes animations, Space holds/resumes the slideshow,
 `f` toggles fullscreen, Escape leaves fullscreen (then closes native TV).
 Hold keeps the current GIF looping; it does not freeze its animation.
+Automatic slides hold for ten seconds. Displays stagger their first transition
+slightly, and new downloads never replace an image before its hold ends.
 Native screensavers allocate separate lanes to attached displays, avoiding
 repeats across those displays while enough cached GIFs are available. Each lane reshuffles on subsequent laps and starts with its own random timing. Browser
 curtains use independent shuffle bags and timing; separate browser sessions may

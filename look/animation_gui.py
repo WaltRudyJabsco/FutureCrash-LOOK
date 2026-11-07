@@ -16,7 +16,7 @@ class TV(QWidget):
             button=QPushButton(text);button.clicked.connect(callback);bar.addWidget(button)
         self.setStyleSheet('QWidget {background:#0b1118;color:#eee9df} QPushButton {padding:12px;background:#243548;border:1px solid #b49b65;border-radius:5px}')
         self.timer=QTimer(self);self.timer.timeout.connect(self.tick);self.timer.start(100);self.show()
-    def step(self,n):self.offset+=n*animation_tv.INTERVAL;self.tick()
+    def step(self,n):self.offset+=n;self.tick()
     def hold(self):
         self.held=not self.held
         if self.held:self.frozen=time.monotonic()-self.started
@@ -24,7 +24,7 @@ class TV(QWidget):
     def fullscreen(self):self.showNormal() if self.isFullScreen() else self.showFullScreen()
     def tick(self):
         elapsed=self.frozen if self.held else time.monotonic()-self.started
-        row,path=animation_tv.choose(elapsed+self.offset,seed=self.seed)
+        row,path=animation_tv.choose(elapsed,seed=self.seed,step_offset=self.offset)
         if path and str(path)!=self.key:
             if self.movie:self.movie.stop();self.movie.deleteLater()
             self.key=str(path);self.movie=QMovie(str(path));self.movie.frameChanged.connect(self.draw);self.movie.start();self.caption.setText(row['title'])

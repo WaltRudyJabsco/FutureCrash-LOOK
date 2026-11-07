@@ -18,7 +18,8 @@ import urllib.request
 MAX_FILE=64*1024*1024
 MAX_CACHE=512*1024*1024
 MAX_ITEMS=128
-INTERVAL=30
+INTERVAL=10
+_choices={}
 _RUN_SEED=random.SystemRandom().randrange(2**63)
 _cache_lock=threading.Lock()
 _rows=[]
@@ -57,24 +58,34 @@ def available():
 def shuffled_ids(ids,seed):
     return sorted(ids,key=lambda ident:hashlib.sha256((str(seed)+ident).encode()).digest())
 
-def choose(elapsed,slot=0,displays=1,seed=None):
+def choose(elapsed,slot=0,displays=1,seed=None,step_offset=0):
     if seed is None:seed=_RUN_SEED
+    rng=random.Random(f'{seed}:display:{slot}')
+    # Delay the first transition rather than shortening the first image's hold.
+    phase=rng.random()*INTERVAL*.25
+    step=max(0,int((elapsed-phase)//INTERVAL))+step_offset
+    key=(seed,slot,displays)
+    prior=_choices.get(key)
+    if prior and prior[0]==step:return prior[1]
     rows=available()
     if not rows:return None,None
-    # A shuffled permutation plus disjoint display lanes guarantees different
-    # images on attached monitors, including while individual lanes advance.
     mapping={row['id']:(row,path) for row,path in rows}
     order=[mapping[ident] for ident in shuffled_ids(tuple(mapping),seed)]
     lanes=min(max(1,displays),len(order));lane=order[slot%lanes::lanes]
-    # Each display starts at its own phase and reshuffles its private lane on
-    # every lap. Disjoint lanes still prevent simultaneous duplicate artwork.
-    rng=random.Random(f'{seed}:display:{slot}')
-    phase=rng.random()*INTERVAL
-    step=int((elapsed+phase)//INTERVAL)+rng.randrange(len(lane))
-    cycle,position=divmod(step,len(lane))
+    cycle,position=divmod(step+rng.randrange(len(lane)),len(lane))
     lane_ids=tuple(row['id'] for row,path in lane)
     selected=shuffled_ids(lane_ids,f'{seed}:display:{slot}:lap:{cycle}')[position]
+    # Catalogue growth can move lane boundaries. Reserve other displays' held
+    # images until their own transitions, instead of replacing them on refresh.
+    occupied={value[1][0]['id'] for other,value in _choices.items() if other[0]==seed and other[2]==displays and other!=key}
+    if selected in occupied:
+        selected=next((row['id'] for row,path in order if row['id'] not in occupied),selected)
+    if prior and selected==prior[1][0]['id'] and len(order)>displays:
+        selected=next((row['id'] for row,path in lane+order if row['id'] not in occupied and row['id']!=selected),selected)
+    if len(_choices)>=128 and key not in _choices:_choices.pop(next(iter(_choices)))
+    _choices[key]=(step,mapping[selected])
     return mapping[selected]
+
 
 def store_cached(row,data):
     ident=row['id']
