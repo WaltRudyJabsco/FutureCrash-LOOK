@@ -55,3 +55,10 @@ def test_generated_weekday_must_match_explicit_date():
     with pytest.raises(ValueError,match='Saturday'):
         tool_workflow.require_content('Tuesday, 2026-11-07','Print the forecast')
     tool_workflow.require_content('Saturday, 2026-11-07','Print the forecast')
+
+
+def test_numbered_read_only_printer_listing_is_resolved_from_actual_offer():
+    messages=[{'role':'assistant','content':'1. List available printers\n2. Generate a banner'}]
+    assert tool_workflow.printer_list_choice('1',messages)=='List available printers'
+    assert tool_workflow.printer_list_choice('2',messages)=='2'
+    assert tool_workflow.printer_list_choice('1',[])=='1'
