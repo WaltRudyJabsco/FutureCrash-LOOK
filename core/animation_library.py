@@ -91,10 +91,11 @@ def start():
     return snapshot()
 
 def archive():
-    state=snapshot();state.update(state='indexing',error=None,source=SOURCE)
+    state=snapshot();resume=state.get('state') in {'indexing','downloading','paused','partial'}
+    state.update(state='indexing',error=None,source=SOURCE)
     rows=state.setdefault('items',{})
     try:
-        offset=0
+        offset=int(state.get('posts_scanned',0)) if resume else 0
         while not _stop.is_set():
             batch=posts(fetch(SOURCE+'/api/read/json?'+urllib.parse.urlencode({'num':50,'start':offset}),True))
             state['posts_total']=batch.get('posts-total',0)
