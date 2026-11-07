@@ -4991,7 +4991,7 @@ class API(BaseHTTPRequestHandler):
                     try:
                         result=http_json(_copy_route(peer)+'/v1/clipboard',timeout=2)
                         return [dict(text=r['text'],stamp=float(r['stamp']),node=peer['name'])
-                                for r in result.get('clips',[])[:10] if isinstance(r.get('text'),str) and len(r['text'])<=256000]
+                                for r in result.get('clips',[])[:10] if isinstance(r.get('text'),str) and len(r['text'])<=4198400]
                     except (KeyError,TypeError,ValueError,OSError,RuntimeError):return []
                 peers=[p for p in PEERS.public() if p.get('trusted') and _peer_bases(p)]
                 with concurrent.futures.ThreadPoolExecutor(max_workers=8) as pool:

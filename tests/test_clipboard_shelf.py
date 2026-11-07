@@ -205,7 +205,7 @@ def test_enhanced_shelf_keys(sequence,expected):
 
 def test_watcher_samples_only_enabled_and_exits_on_disable(shelf,monkeypatch):
     monkeypatch.setattr(clip,'directory',lambda:shelf.root)
-    read = Mock(return_value='background text'); monkeypatch.setattr(clip,'read_clipboard',read)
+    read = Mock(return_value='background text'); monkeypatch.setattr(clip,'read_item',read)
     sleep = Mock(side_effect=lambda seconds:shelf.set('enabled','0'))
     monkeypatch.setattr(clip.time,'sleep',sleep)
     clip.watch()
@@ -220,7 +220,7 @@ def test_locked_watcher_does_not_spawn_or_capture_a_second_time(shelf,monkeypatc
     shelf.set('enabled','1')
     monkeypatch.setattr(clip,'backend',lambda:(['reader'],['writer']))
     read = Mock(); launch = Mock()
-    monkeypatch.setattr(clip,'read_clipboard',read)
+    monkeypatch.setattr(clip,'read_item',read)
     monkeypatch.setattr(clip.subprocess,'Popen',launch)
     with (shelf.root/'watch.lock').open('a') as lock:
         clip.fcntl.flock(lock,clip.fcntl.LOCK_EX|clip.fcntl.LOCK_NB)
@@ -233,7 +233,7 @@ def test_disabled_during_read_does_not_capture_one_more_item(shelf,monkeypatch):
     shelf.set('enabled','1')
     def read():
         shelf.set('enabled','0'); return 'must not capture'
-    monkeypatch.setattr(clip,'read_clipboard',read)
+    monkeypatch.setattr(clip,'read_item',read)
     monkeypatch.setattr(clip.time,'sleep',lambda *args:None)
     clip.watch()
     assert shelf.rows() == []
@@ -278,7 +278,7 @@ def wayland(monkeypatch):
 def test_wayland_watch_is_event_driven_and_never_polls(shelf,monkeypatch):
     import io
     wayland(monkeypatch);monkeypatch.setattr(clip,'directory',lambda:shelf.root);shelf.set('enabled','1')
-    read=Mock(side_effect=AssertionError('Wayland must not poll'));monkeypatch.setattr(clip,'read_clipboard',read)
+    read=Mock(side_effect=AssertionError('Wayland must not poll'));monkeypatch.setattr(clip,'read_item',read)
     process=Mock(pid=123456);process.poll.side_effect=[None,1]
     launch=Mock(return_value=process);monkeypatch.setattr(clip.subprocess,'Popen',launch)
     def event(_):
@@ -298,7 +298,7 @@ def test_unsupported_wayland_watch_does_not_retry_or_fall_back(shelf,monkeypatch
     wayland(monkeypatch);monkeypatch.setattr(clip,'directory',lambda:shelf.root);shelf.set('enabled','1')
     process=Mock();process.poll.return_value=1
     launch=Mock(return_value=process);monkeypatch.setattr(clip.subprocess,'Popen',launch)
-    read=Mock(side_effect=AssertionError('No polling fallback'));monkeypatch.setattr(clip,'read_clipboard',read)
+    read=Mock(side_effect=AssertionError('No polling fallback'));monkeypatch.setattr(clip,'read_item',read)
     clip.watch();clip.ensure_watcher();clip.watch();clip.sample_automatic(shelf)
     assert launch.call_count==1 and 'unavailable' in clip.capture_description(shelf)
     assert shelf.enabled and shelf.rows()==[]
@@ -315,7 +315,7 @@ def test_wayland_callback_ignores_non_data_states(shelf,monkeypatch,state):
 
 def test_wayland_enable_and_popup_do_not_read_clipboard(shelf,terminal,monkeypatch):
     wayland(monkeypatch);monkeypatch.setattr(clip,'directory',lambda:shelf.root)
-    read=Mock(side_effect=AssertionError('No unsolicited Wayland read'));monkeypatch.setattr(clip,'read_clipboard',read)
+    read=Mock(side_effect=AssertionError('No unsolicited Wayland read'));monkeypatch.setattr(clip,'read_item',read)
     assert clip.main(['on'])==0
     clip.show(fd=0,reader=lambda *a:'esc',shelf=shelf)
     read.assert_not_called()

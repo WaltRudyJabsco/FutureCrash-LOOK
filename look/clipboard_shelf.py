@@ -1,4 +1,4 @@
-"""Ten text slots. Local capture and per-node Fabric publication are opt-in."""
+"""Ten text, image and file slots. Local capture and per-node Fabric publication are opt-in."""
 from __future__ import annotations
 
 import argparse
@@ -23,6 +23,11 @@ try:
 except ImportError:
     import terminal_style
     from notebook_markdown import safe_text, cell_width
+
+try:
+    from . import clipboard_items as items
+except ImportError:
+    import clipboard_items as items
 
 SLOTS = '1234567890'
 SHIFT_SLOTS = '!@#$%^&*()'
@@ -80,8 +85,11 @@ class Shelf:
         return self.db.execute('SELECT id,text FROM clips ORDER BY id DESC LIMIT ?', (HISTORY_LIMIT,)).fetchall()
 
     def observe(self, text):
-        if text is None or len(text) > TEXT_LIMIT:
+        if text is None or len(text) > (items.MAX_ENCODED if text.startswith(items.PREFIX) else TEXT_LIMIT):
             return False
+        if text.startswith(items.PREFIX):
+            try:items.unpack(text)
+            except ValueError:return False
         digest = hashlib.sha256(text.encode('utf-8')).hexdigest()
         with self.db:
             previous = self.setting('observed')
@@ -136,6 +144,11 @@ def read_clipboard():
         return None
 
 
+def read_item():
+    try:return items.capture(read_clipboard)
+    except (OSError,subprocess.SubprocessError):return read_clipboard()
+
+
 def copy_clipboard(text):
     commands = backend()
     if commands is None:
@@ -162,7 +175,8 @@ def wayland_token():
 def sample_automatic(shelf):
     # A wl-paste read can map a focus-stealing surface on GNOME. Never poll it.
     if not wayland_session() and shelf.enabled:
-        shelf.observe(read_clipboard())
+        try:shelf.observe(read_item())
+        except ValueError:pass
 
 
 def capture_stdin():
@@ -241,7 +255,8 @@ def watch():
                 return
             failures = 0
             while shelf.enabled:
-                text = read_clipboard()
+                try:text = read_item()
+                except ValueError:text = None
                 failures = failures+1 if text is None else 0
                 if failures >= FAILED_POLLS_LIMIT:
                     return  # A departed desktop session must not leave a busy helper.
@@ -433,7 +448,7 @@ def shared_clips():
     return [(n['id'],n['body']) for n in notes if n['project']=='Clipboard'][:HISTORY_LIMIT]
 
 
-def show(*, insert=False, fd=None, reader=None, shelf=None, shared=False):
+def show(*, pick=False, insert=False, fd=None, reader=None, shelf=None, shared=False):
     fd = sys.stdin.fileno() if fd is None else fd
     reader = reader or read_key
     owned = shelf is None
@@ -461,9 +476,9 @@ def show(*, insert=False, fd=None, reader=None, shelf=None, shared=False):
             if shared:
                 lines=[colors['CYAN']+'FABRIC CLIPS'+'\033[0m · shared through Notes']
             if not shared and not shelf.enabled:
-                lines += command_rows([('e','enables background text history on this computer.')],width,colors)
+                lines += command_rows([('e','enables background clipboard history on this computer.')],width,colors)
                 lines += ['Local capture is off. Incoming Fabric clips remain available.']
-            action = 'insert' if insert else 'copy & close'
+            action = 'choose' if pick else 'insert' if insert else 'copy & close'
             controls=command_rows([('1–9,0',action),('Shift-number','remove'),('↑↓','move'),('Enter','preview'),
                 ('x','remove'),('e','capture on/off'),('a','add clipboard'),('s','share to Fabric'),('f','saved clips'),('r','refresh'),
                 ('Esc','list' if expanded else 'back')],width,colors)
@@ -471,13 +486,13 @@ def show(*, insert=False, fd=None, reader=None, shelf=None, shared=False):
                 controls=command_rows([('1–9,0',action),('↑↓','move'),('Enter','preview'),('r','refresh'),('f','local clips'),('Esc','back')],width,colors)
             page=max(1,height-len(lines)-len(controls)-2)
             if expanded and rows:
-                content = wrap_cells(safe_text(rows[selected][1]).expandtabs(4), width)
+                content = wrap_cells(safe_text(items.preview(rows[selected][1])).expandtabs(4), width)
                 scroll = min(scroll, max(0, len(content)-page))
                 lines += content[scroll:scroll+page]
             else:
                 top = max(0, selected-page+1)
                 for index, (_, text) in list(enumerate(rows))[top:top+page]:
-                    summary = ' ↵ '.join(text.splitlines())
+                    summary = ' ↵ '.join(items.describe(text).splitlines())
                     if not shared and isinstance(rows[index][0],str):summary='['+rows[index][0]+'] '+summary
                     prefix = f'{SLOTS[index]} '+('› ' if index == selected else '  ')
                     line = command_inks(colors)[0]+prefix+colors['WHITE']+clip_line(summary, max(0,width-len(prefix)))
@@ -533,7 +548,9 @@ def show(*, insert=False, fd=None, reader=None, shelf=None, shared=False):
                 notice = 'Capture enabled' if shelf.enabled else 'Capture stopped; saved clips retained'
                 continue
             if key == 'a':
-                text=read_clipboard()
+                try:text=read_item()
+                except ValueError as exc:
+                    notice=str(exc);continue
                 if text is None:notice='Clipboard read unavailable'
                 else:shelf.observe(text);rows=visible_clips(shelf);notice='Current clipboard added'
                 continue
@@ -547,17 +564,25 @@ def show(*, insert=False, fd=None, reader=None, shelf=None, shared=False):
                 notice = 'Removed from history; system clipboard unchanged'; continue
             if key == 's' and rows:
                 try:
+
+                    if items.unpack(rows[selected][1]):
+                        notice='Attachments use Fabric auto-share; Notes clips accept text.';continue
                     share_note(rows[selected][1]); notice = 'Saved to Notes · Clipboard project · normal Fabric sync'
                 except (OSError, ValueError, sqlite3.Error) as exc:
                     notice = 'Note save failed: '+str(exc)
                 continue
             if len(key) == 1 and key in SLOTS and SLOTS.index(key) < len(rows):
                 text = rows[SLOTS.index(key)][1]
+                if pick:return text
                 if insert:
+                    if items.unpack(text):
+                        notice='Choose text to insert into this editor.';continue
                     return safe_text(text)
                 # Recall is not a fresh copy to broadcast back to paired computers.
                 shelf.set('recalling',hashlib.sha256(text.encode()).hexdigest())
-                if copy_clipboard(text):
+                try:restored=items.restore(text, copy_clipboard, shelf.root)
+                except (OSError,ValueError,subprocess.SubprocessError):restored=False
+                if restored:
                     shelf.observe(text)
                     shelf.set('recalling','')
                     return text
@@ -594,7 +619,7 @@ def main(argv=None):
                 if backend() is None:raise SystemExit('Clipboard capture unavailable on this computer.')
                 if shelf.setting('auto_share')!='1':
                     # Establish a baseline before publishing future captures.
-                    if not wayland_session():shelf.observe(read_clipboard())
+                    if not wayland_session():shelf.observe(read_item())
                 shelf.set('enabled','1')
                 shelf.auto_share(True)
                 ensure_watcher()
@@ -606,7 +631,8 @@ def main(argv=None):
         elif args.action == 'off':
             shelf.set('enabled','0')
         elif args.action == 'add':
-            text=read_clipboard()
+            try:text=read_item()
+            except ValueError as exc:print(str(exc));return 1
             if text is None:print('Clipboard read unavailable');return 1
             shelf.observe(text)
         elif args.action == 'clear':
