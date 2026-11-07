@@ -8640,6 +8640,7 @@ _TOOL_POLICY = {
     "audio_speak":("all","action"),
     "banner_render":("all","observation"),"print_design":("workspace","action"),"printers_list":("all","observation"),"printer_inspect":("all","observation"),"print_prepare":("workspace","mutation"),"print_text":("workspace","action"),
     "receipts_search":("all","observation"),
+    "animation_catalog":("all","observation"),
     "museum_search":("all","observation"),
     "radio_queue":("all","observation"),"radio_add":("workspace","action"),
     "books_shelf":("all","observation"),"books_lookup":("all","observation"),
@@ -8673,6 +8674,8 @@ def _lo_tools(profile):
     tools.extend(radio_assistant.tools())
     import museum_assistant
     tools.extend(museum_assistant.tools())
+    import animation_tv
+    tools.extend(animation_tv.tools())
     import receipt_desk
     tools.extend(receipt_desk.tools())
     import printing
@@ -12525,6 +12528,9 @@ def ollama_chat(force_search=False, initial_prompt=None, allow_start=True, host_
                         import receipt_desk
                         tool_content,_ok,_elapsed=_tool_transaction(name,args,lambda:receipt_desk.run_tool(name,args))
                         if _ok:turn_successful_tools.add(name)
+                    elif name=='animation_catalog':
+                        import animation_tv
+                        tool_content,_ok,_elapsed=_tool_transaction(name,args,lambda:animation_tv.run_tool(args))
                     elif name=='museum_search':
                         import museum_assistant
                         tool_content,_ok,_elapsed=_tool_transaction(name,args,lambda:museum_assistant.run_tool(name,args))
@@ -21461,6 +21467,7 @@ _COMMANDS = [
     ("lk clean", "", "system", "Conservative maintenance surface"),
     ("lk web", "[...]", "ai", "Web-search key/status"),
     ("lk budget", "[...]", "ai", "LO context/token budget"),
+    ("lk gypsy", "[tv|status|sync|cancel]", "media", "Gypsy Astronaut animation TV, archive progress and offline playback"),
     ("lk museum", "[desk|list|search QUERY|save ID|pin ID|sync|starter|status|cancel|slideshow] [--node NODE] [--source met|aic] [--count 1000] [--page N] [--json]", "media", "Offline museum collection, open-access discovery and artwork slideshow"),
     ("lk ytr", "[URL|desk|list|clean|sync|resolve NUMBER --keep local|remote] [--node NODE]", "media", "YouTube Radio audio-only listen-later queue"),
     ("lk ytd", "<URL> [--node NODE] [--to DIR] [--holding]", "media", "Download a YouTube video on the selected node"),
@@ -22769,6 +22776,9 @@ def main():
     if len(sys.argv)>=2 and sys.argv[1] in {'shot','screenshot'}:
         import screen_shot
         return screen_shot.main(sys.argv[2:])
+    if len(sys.argv)>=2 and (sys.argv[1]=='gypsy' or sys.argv[1:3]==['tv','gypsy']):
+        import animation_tv
+        return animation_tv.main(sys.argv[3:] if sys.argv[1]=='tv' else sys.argv[2:])
     if len(sys.argv)>=2 and sys.argv[1]=='clip':
         return clipboard_shelf.main(sys.argv[2:])
     if len(sys.argv)>2 and sys.argv[1]=='help' and sys.argv[2]!='all':

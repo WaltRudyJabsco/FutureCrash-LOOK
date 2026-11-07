@@ -5,7 +5,7 @@ import hashlib
 import json
 import random
 
-NAMES = ('Bars', 'Waves', 'Orbit', 'Tunnel', 'Stars', 'Plasma', 'Album Art', 'Black Hole', 'Rooftops', 'Spectrum', 'Moon Jelly', 'Firefly Garden', 'Clockwork Garden', 'Rain on Glass', 'Neon Reef', 'Aurora Loom', 'Paper Lanterns', 'Magnetic Field', 'Comet Trails', 'Orrery', 'Phosphor Rain', 'Kinetic Mobile', 'Haunted Hollow', 'Dune Sea', 'Harmonic Ink', 'Tide Pools', 'Switchyard', 'Flight Deck', 'Signal Bloom', 'Tape Echo', 'Deep Space Relay', 'Museum', 'ASCII Museum', 'Number Station', 'Prism Grid', 'Parallax Gates', 'Silk Current', 'Cycle')
+NAMES = ('Bars', 'Waves', 'Orbit', 'Tunnel', 'Stars', 'Plasma', 'Album Art', 'Black Hole', 'Rooftops', 'Spectrum', 'Moon Jelly', 'Firefly Garden', 'Clockwork Garden', 'Rain on Glass', 'Neon Reef', 'Aurora Loom', 'Paper Lanterns', 'Magnetic Field', 'Comet Trails', 'Orrery', 'Phosphor Rain', 'Kinetic Mobile', 'Haunted Hollow', 'Dune Sea', 'Harmonic Ink', 'Tide Pools', 'Switchyard', 'Flight Deck', 'Signal Bloom', 'Tape Echo', 'Deep Space Relay', 'Museum', 'ASCII Museum', 'Number Station', 'Prism Grid', 'Parallax Gates', 'Silk Current', 'Gypsy Astronaut', 'Afterimage', 'Cycle')
 CYCLE_MODE = len(NAMES)
 CYCLE_INTERVAL_SECONDS = 10.0
 
@@ -90,6 +90,21 @@ def frame(mode, width, height, phase, playing=True, seed=0, *, captions=None):
         x=int(x); y=int(y)
         if 0<=x<width and 0<=y<height: canvas[y][x]=char
 
+    if NAMES[mode]=='Gypsy Astronaut':
+        import animation_tv
+        return animation_tv.frame(width,height,t)
+    if NAMES[mode]=='Afterimage':
+        ramp=' .·:+*oO@'
+        for y in range(height):
+            for x in range(width):
+                value=0.0
+                for n in range(3):
+                    cx=.5+.28*math.sin(t*.13+n*2.1+seed%7)
+                    cy=.5+.27*math.cos(t*.17+n*1.9)
+                    distance=math.hypot(x/max(1,width)-cx,(y/max(1,height)-cy)*.65)
+                    value=max(value,max(0,1-abs(distance-(.12+n*.035))/.055))
+                canvas[y][x]=ramp[min(len(ramp)-1,int(value*(len(ramp)-1)))]
+        return [''.join(row) for row in canvas]
     if NAMES[mode] in {'Parallax Gates','Silk Current'}:
         return gallery_motion_frame(NAMES[mode],width,height,t,seed)
     if NAMES[mode] in {'Number Station','Prism Grid'}:

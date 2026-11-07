@@ -705,6 +705,12 @@
     "LO context/token budget"
   ],
   [
+    "lk gypsy",
+    "[tv|status|sync|cancel]",
+    "media",
+    "Gypsy Astronaut animation TV, archive progress and offline playback"
+  ],
+  [
     "lk museum",
     "[desk|list|search QUERY|save ID|pin ID|sync|starter|status|cancel|slideshow] [--node NODE] [--source met|aic] [--count 1000] [--page N] [--json]",
     "media",

@@ -204,7 +204,7 @@ class SceneRun:
             self.style=(paper,ink);self.step=step
         scene=self.scenes[(step+self.scene_offset)%len(self.scenes)]
         phase=elapsed+self.offset
-        lines=player_visuals.frame(player_visuals.NAMES.index(scene)+1,width,height,phase,True,self.seed,captions=self.captions)
+        lines=[line[:width].ljust(width) for line in (['Gypsy Astronaut','Preparing saved animations…']+['']*height)[:height]] if scene=='Gypsy Astronaut' else player_visuals.frame(player_visuals.NAMES.index(scene)+1,width,height,phase,True,self.seed,captions=self.captions)
         self.inverse_rows=player_visuals.flight_deck_inverse_rows(height,phase) if scene=='Flight Deck' else set()
         return scene,lines,self.style
 

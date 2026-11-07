@@ -219,7 +219,7 @@ def local_work(step):
             if coverage.get('verified_recently'):return {'verified':True,'verified_at':coverage['verified_at'],'owner':coverage.get('owner'),'scope':'Shared essential-state backup receipt'}
             return {'state':'not_configured','hint':'lk fabric backup add'}
         step('Essential-state backup coverage',shared_backup)
-    for name in ('books','museum'):
+    for name in ('books','museum','animations'):
         helper=Path.home()/'.local/bin'/('fcl-'+name+'-backup')
         if not helper.is_file():
             step(name.title()+' media backup',lambda:{'state':'disabled','reason':'No owner-local media backup integration configured'});continue

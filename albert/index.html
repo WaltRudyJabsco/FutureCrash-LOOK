@@ -405,6 +405,7 @@ async function removeSaved(id){await savedRequest({op:'delete',id});state.saved=
 function addProgress(text='Understanding…'){state.busy=true;statusLine('thinking');const id=addFold({type:'progress',title:'Albert',meta:'cognition',badge:'working',text,kind:'progress'});return id}
 function finishProgress(id){state.folds=state.folds.filter(x=>x.id!==id);state.busy=false;statusLine('local surface · ready');render()}
 async function askFabric(query,context={},targetFold=null){
+  if(FabricBrowserViews.gypsyCommand(query)){FabricBrowserViews.openGypsy();addFold({type:'gypsy',title:'Gypsy Astronaut TV'});return}
   if(FabricBrowserViews.museumCommand(query)){FabricBrowserViews.openMuseum();addFold({type:'museum',title:'LOOK Museum'});return}
   if(FabricBrowserViews.radioAddCommand(query)){try{addFold({type:'answer',title:'YouTube Radio',text:await FabricBrowserViews.addRadio(FabricBrowserViews.radioAddCommand(query))})}catch(error){addFold({type:'answer',title:'YouTube Radio',text:error.message})}return}
   if(FabricBrowserViews.radioCommand(query)){const command=FabricBrowserViews.radioCommand(query);FabricBrowserViews.openRadio(command);addFold({type:'radio',title:'YouTube Radio',...command});return}

@@ -49,6 +49,8 @@
       cancel(){try{if(tab&&!tab.closed)tab.close()}catch{}tab=null}
     };
   }
+  function gypsyCommand(text){return /^\/gypsy$/i.test(String(text||'').trim())}
+  function openGypsy(){const url=new URL('/gypsy',root.location.href).href;try{root.open(url,'_blank','noopener')}catch{}return url}
   function museumCommand(text){return /^\/museum$/i.test(String(text||'').trim())}
   function openMuseum(){const url=new URL('/museum',root.location.href).href;try{root.open(url,'_blank','noopener')}catch{}return url}
   function radioCommand(text){
@@ -159,7 +161,7 @@
     try{root.open(url.href,'_blank','noopener')}catch{}
     return url.href;
   }
-  root.FabricBrowserViews={museumCommand,openMuseum,radioAddCommand,addRadio,radioCommand,openRadio,beginImage,imageArtifacts,imageRequest,fabricCommand,openFabric,booksCommand,openBooks,bookQuery,bookMatches,createBookAhead,bookPosition};
+  root.FabricBrowserViews={gypsyCommand,openGypsy,museumCommand,openMuseum,radioAddCommand,addRadio,radioCommand,openRadio,beginImage,imageArtifacts,imageRequest,fabricCommand,openFabric,booksCommand,openBooks,bookQuery,bookMatches,createBookAhead,bookPosition};
 })(globalThis);
 
 
@@ -533,6 +535,14 @@
     document.body.append(layer);
     const canvas=layer.querySelector('canvas'),ctx=canvas.getContext('2d'),form=layer.querySelector('form'),pin=layer.querySelector('input'),notice=layer.querySelector('[role=status]');
     let locked=false,configured=false,busy=false,frame=0,captions=[],variant="standard",variantEpoch=0,shutdownStart=null,shutdownImage=null,previousFocus=null;
+    const gypsy=document.createElement('img');gypsy.alt='Gypsy Astronaut animation';gypsy.style.cssText='position:absolute;inset:0;width:100%;height:100%;object-fit:contain;display:none';layer.insertBefore(gypsy,form);
+    let gypsyRows=[],gypsyStep=-1,gypsyBusy=false;const gypsyOffset=crypto.getRandomValues(new Uint32Array(1))[0];
+    async function gypsyFrame(step){
+      if(gypsyBusy||step===gypsyStep)return;gypsyBusy=true;
+      try{if(!gypsyRows.length){const response=await fetch('/api/gypsy');if(!response.ok)throw Error('Archive unavailable');const data=await response.json();gypsyRows=Object.values(data.items||{}).filter(row=>row.sha256);}
+        if(gypsyRows.length){const row=gypsyRows[(step+gypsyOffset)%gypsyRows.length];gypsy.src='/api/gypsy/image?id='+encodeURIComponent(row.id);gypsyStep=step;}
+      }catch(_){}finally{gypsyBusy=false;}
+    }
     const words=['LISTEN','ORBIT','AWAIT','SIGNAL','RETURN','DREAM','DRIFT','ALIGN'];
     const phrases=['OBEY','CONSUME','REPRODUCE','SLEEP','CONFORM','SUBMIT','STAY ASLEEP','DO NOT QUESTION'];
     function shufflePhrases(){for(let i=phrases.length-1;i>0;i--){const j=Math.floor(Math.random()*(i+1));[phrases[i],phrases[j]]=[phrases[j],phrases[i]];}}
@@ -549,6 +559,8 @@
       }
       if(!locked){frame=0;return;}
       const w=canvas.width=innerWidth,h=canvas.height=innerHeight,page=Math.floor(stamp/8000),ink=['#ebc47a','#b5d6a4','#9dbbd7'][Math.floor(stamp/20000)%3],inverse=page%2;
+      gypsy.style.display=variant==='gypsy'?'block':'none';
+      if(variant==='gypsy'){ctx.fillStyle='#080d13';ctx.fillRect(0,0,w,h);gypsyFrame(Math.floor(stamp/30000));frame=requestAnimationFrame(draw);return;}
       if(variant==='they-live'){
         const text=phrases[Math.floor(Math.max(0,Date.now()-variantEpoch)/12000)%phrases.length];
         ctx.fillStyle='#fff';ctx.fillRect(0,0,w,h);ctx.fillStyle='#000';ctx.textAlign='center';ctx.textBaseline='middle';ctx.font='900 100px Arial, sans-serif';
@@ -591,8 +603,8 @@
     layer.addEventListener('click',()=>{if(locked&&variant==='they-live')revealPin();});
     layer.addEventListener('keydown',event=>{if(variant==='they-live'&&form.style.display==='none'){event.preventDefault();revealPin();return;}if(event.key==='Escape'){event.preventDefault();pin.focus();}if(event.key==='Tab'){const button=form.querySelector('button');if(event.shiftKey&&document.activeElement===pin){event.preventDefault();button.focus();}else if(!event.shiftKey&&document.activeElement===button){event.preventDefault();pin.focus();}}});
     // Explicit commands only: do not infer locking from ordinary conversation.
-    function command(target){const text=String(target?.value||'').trim().toLowerCase();return ['/lock','lk lk','/lktl','lk lktl','/unlock','lk unlock'].includes(text)?text:null;}
-    function consume(target){const text=command(target);if(!text)return false;target.value='';if(text.includes('unlock')){if(locked)revealPin();}else cover(text.includes('lktl')?'they-live':'standard');return true;}
+    function command(target){const text=String(target?.value||'').trim().toLowerCase();return ['/lock','lk lk','/lock gypsy','lk lk gypsy','/lktl','lk lktl','/unlock','lk unlock'].includes(text)?text:null;}
+    function consume(target){const text=command(target);if(!text)return false;target.value='';if(text.includes('unlock')){if(locked)revealPin();}else cover(text.includes('gypsy')?'gypsy':text.includes('lktl')?'they-live':'standard');return true;}
     window.LookCurtain={consume};
     document.addEventListener('keydown',event=>{if(event.key!=='Enter'||event.shiftKey||!['input','ask'].includes(event.target.id)||!command(event.target))return;event.preventDefault();event.stopImmediatePropagation();consume(event.target);},true);
     async function poll(){try{if(!busy)update(await request());}catch(_){/* Keep the curtain visible during disconnection. */}finally{setTimeout(poll,1500);}}
