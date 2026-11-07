@@ -6914,6 +6914,8 @@ def _lo_tools_for_route(profile,route):
         return tools
     # web_search is appended separately because availability is dynamic.
     allowed.discard("web_search")
+    if "museum" in getattr(route,"families",[]):
+        allowed-={"print_design","banner_render"}
     narrowed=[t for t in tools if t.get("function",{}).get("name","") in allowed]
     # Never hand the model an empty schema because a new family has not yet been registered.
     return narrowed or tools
@@ -8638,7 +8640,7 @@ _TOOL_POLICY = {
     "list_processes":("all","observation"),"listening_ports":("all","observation"),"system_snapshot":("all","observation"),
     "game_action":("all","action"),
     "audio_speak":("all","action"),
-    "banner_render":("all","observation"),"print_design":("workspace","action"),"printers_list":("all","observation"),"printer_inspect":("all","observation"),"print_prepare":("workspace","mutation"),"print_text":("workspace","action"),
+    "banner_render":("all","observation"),"print_design":("workspace","action"),"printers_list":("all","observation"),"printer_inspect":("all","observation"),"print_prepare":("workspace","mutation"),"print_text":("workspace","action"),"print_artwork":("workspace","action"),
     "receipts_search":("all","observation"),
     "animation_catalog":("all","observation"),
     "museum_search":("all","observation"),
@@ -12547,7 +12549,7 @@ def ollama_chat(force_search=False, initial_prompt=None, allow_start=True, host_
                             tool_content,_ok,_elapsed=_tool_transaction(
                                 name,args,lambda: _run_system_inspection_tool(name,args))
                         if _ok: turn_successful_tools.add(name)
-                    elif name in {'printers_list','printer_inspect','print_prepare','print_text','banner_render','print_design'}:
+                    elif name in {'printers_list','printer_inspect','print_prepare','print_text','print_artwork','banner_render','print_design'}:
                         import printing
                         tool_content,_ok,_elapsed=_tool_transaction(name,args,lambda:printing.run_tool(name,args,workspace,prompt,print_turn))
                         if name=='printers_list' and _ok:
@@ -12558,7 +12560,7 @@ def ollama_chat(force_search=False, initial_prompt=None, allow_start=True, host_
                         if print_turn.get('print_attempted'):print_conversation.finish()
                         if _ok:
                             if _cognition_module().action_result_completed(name,tool_content):turn_successful_tools.add(name)
-                            if name in {'print_design','print_text','print_prepare'}:
+                            if name in {'print_design','print_text','print_artwork','print_prepare'}:
                                 try:
                                     last_print_result=json.loads(tool_content)
                                     if last_print_result.get('state')=='prepared':turn_successful_tools.add('print_prepare')

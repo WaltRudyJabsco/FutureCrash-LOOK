@@ -86,6 +86,7 @@ ACTION_SPECS = (
     ActionSpec("print_design", "printing", "local_effect", "action", ("print fortune", "printed fortune", "print banner", "fortune cookie", "ticker tape")),
     ActionSpec("printers_list", "printing", "read", "observation", ("printers", "available printers", "receipt printer")),
     ActionSpec("printer_inspect", "printing", "read", "observation", ("printer options", "print jobs")),
+    ActionSpec("print_artwork", "printing", "local_effect", "action", ("print artwork", "print museum image")),
     ActionSpec("print_text", "printing", "local_effect", "action", ("print recipe", "print list", "little printer")),
     ActionSpec("print_prepare", "printing", "local_effect", "mutation", ("print file", "print document", "print receipt")),
     ActionSpec("books_shelf", "books", "read", "observation", ("bookshelf", "our books", "Mercury Reader")),
@@ -126,7 +127,7 @@ ACTION_IDS = {
     "create_text_files":"files.create", "copy_path":"files.copy", "move_path":"files.move",
     "remove_path":"files.remove", "make_directory":"files.mkdir",
     "open_path":"display.open", "preview_path":"display.preview", "reveal_path":"display.reveal",
-    "banner_render":"printing.banner", "print_design":"printing.design", "printers_list":"printing.list", "printer_inspect":"printing.inspect", "print_prepare":"printing.prepare", "print_text":"printing.text",
+    "banner_render":"printing.banner", "print_design":"printing.design", "printers_list":"printing.list", "printer_inspect":"printing.inspect", "print_prepare":"printing.prepare", "print_text":"printing.text", "print_artwork":"printing.artwork",
     "books_shelf":"books.shelf", "books_lookup":"books.lookup",
     "open_url":"browser.open", "media_search":"media.search", "media_play":"media.play",
     "media_queue":"media.queue", "media_control":"media.control", "audio_speak":"audio.speak",
@@ -147,7 +148,7 @@ def public_registry() -> list[dict[str,Any]]:
 FAMILY_TOOLS: dict[str, set[str]] = {}
 for _spec in ACTION_SPECS:
     FAMILY_TOOLS.setdefault(_spec.family, set()).add(_spec.name)
-FAMILY_TOOLS.setdefault('printing',set()).update({'notebook_search','notebook_list','notebook_read'})
+FAMILY_TOOLS.setdefault('printing',set()).update({'notebook_search','notebook_list','notebook_read','museum_search'})
 FAMILY_TOOLS.setdefault('schedule',set()).update({'notebook_search','notebook_capture','notebook_complete'})
 
 # Families may need adjacent capabilities to complete a natural request.  These
@@ -384,7 +385,7 @@ def assess(goal: Goal|dict[str,Any], *, successful_tools: list[str]|None=None, f
         if re.search(pattern,request):requirements.append(set(tools))
     if 'printing' in families:
         if re.search(r'\b(preview|prepare|draft)\b',request):requirements.append({'print_prepare','print_design'})
-        elif re.search(r'\b(print|send)\b',request):requirements.append({'print_text','print_design'})
+        elif re.search(r'\b(print|send)\b',request):requirements.append({'print_text','print_design','print_artwork'})
     if 'memory' in families:
         require(r'\b(add|append|edit|update|change|save|write|create|record)\b',{'notebook_update','notebook_capture'})
         require(r'\b(complete|mark.*done)\b',{'notebook_complete'})
@@ -424,7 +425,7 @@ def action_result_completed(name,result):
     if result.get('ok') is False or result.get('error'):return False
     state=result.get('state',result.get('status',''))
     if state in {'uncertain','failed','cancelled','needs_input','pending','error'}:return False
-    if name in {'print_text','print_design'}:
+    if name in {'print_text','print_design','print_artwork'}:
         return state in {'queued','sent','completed','acknowledged','delivered'}
     return True
 

@@ -87,6 +87,17 @@ def quick_text(queue,text,exact_label=False,illustration=None):
     return dict(request('send',plan['node'],ident=plan['id'],confirm=True),destination=plan['destination'])
 
 
+def quick_artwork(queue,artwork_id):
+    from museum_desk import Client,preference
+    client=Client(preference())
+    row=next((r for r in client.snapshot().get('items',[]) if r.get('id')==artwork_id),None)
+    if not row:raise ValueError('Artwork ID not found in the Museum; search the catalog first')
+    if not (row.get('downloaded') or row.get('available_offline')):
+        raise ValueError('Artwork is not downloaded; choose an available Museum image')
+    plan=prepare_file(queue,client.image(row),caption=artwork_caption(row),copies=1)
+    return dict(request('send',plan['node'],ident=plan['id'],confirm=True),destination=plan['destination'],artwork={'id':row['id'],'title':row.get('title'),'artist':row.get('artist')})
+
+
 def clipboard_print(ui,queue=None):
     from look_renderer import prompt_line
     from print_desk import pick
@@ -472,6 +483,7 @@ def tools():
         {'type':'function','function':{'name':'banner_render','description':'Render offline FIGlet lettering for a banner preview. No printing. Fonts: standard, small, slant, banner, big.','parameters':{'type':'object','properties':{'text':{'type':'string','maxLength':120},'font':{'type':'string','enum':['standard','small','slant','banner','big']}},'required':['text'],'additionalProperties':False}}},
         {'type':'function','function':{'name':'print_design','description':'Prepare or explicitly print a banner or fortune-cookie slip. For fortunes write an original, thoughtful/playful fortune of one to three short lines (prefer under 90 characters); omit text for a standard fortune-cookie to draw from the owner’s 200-line deck; provide text for custom wording. Both include lucky numbers. Choose fortune-cookie for a short text slip or fortune for the illustrated card with a saved Museum artwork and credit; no new outside downloads. Landscape artwork rotates independently of the upright fortune text. Banners default to solid sideways letters. Choose a FIGlet font for ASCII lettering. Discover the exact friendly printer label first. send defaults false; set true only for an explicit current request to print to that named printer. One attempt per turn. Longer banners require an explicitly requested banner allowance. Never claim physical appearance from a receipt.','parameters':{'type':'object','properties':{'text':{'type':'string','maxLength':140},'kind':{'type':'string','enum':['banner','fortune','fortune-cookie']},'font':{'type':'string','enum':['solid','standard','small','slant','banner','big']},'queue':{'type':'string'},'paper_limit_mm':{'type':'number','minimum':1,'maximum':3048},'send':{'type':'boolean'}},'required':['kind','queue'],'additionalProperties':False}}},
         {'type':'function','function':{'name':'print_text','description':'Compose and print a short Markdown document, optionally with a weather illustration, when the user explicitly requests paper output. First retrieve needed facts with weather, web or Notes tools; do not invent forecasts. Use headings, short paragraphs and lists; include location, dates, units and source for forecasts. Omit queue to use the configured preferred receipt printer, or use the exact printer named by the user. No default means ask the user to choose. One copy, at most 8000 characters, normal paper limit, no automatic retries. Report queue acceptance rather than physical delivery. Use print_prepare for previews.','parameters':{'type':'object','properties':{'queue':{'type':'string','description':'Named destination; omit to use the user-configured receipt default'},'text':{'type':'string','maxLength':8000},'illustration':{'type':'string','enum':['sun','cloud','rain','snow','storm','fog'],'description':'Optional weather symbol above the Markdown. Choose from retrieved weather conditions when the user requests a weather picture.'}},'required':['text'],'additionalProperties':False}}},
+        {'type':'function','function':{'name':'print_artwork','description':'Print one downloaded Museum image with its title and artist credit. First use museum_search to find an artwork ID; an artist or random selection is enough, no exact title is needed. Uses the shared image printer pipeline. Only for an explicit print request; one copy, bounded paper, no automatic retries.','parameters':{'type':'object','properties':{'artwork_id':{'type':'string'},'queue':{'type':'string'}},'required':['artwork_id'],'additionalProperties':False}}},
         {'type':'function','function':{'name':'printers_list','description':'List physical printers once across the trusted Fabric, with stable ID, friendly name and underlying queue routes. No setup or printing.','parameters':{'type':'object','properties':{},'additionalProperties':False}}},
         {'type':'function','function':{'name':'printer_inspect','description':'Inspect printer options or jobs on an exact owner/queue.','parameters':{'type':'object','properties':dict(fields,view={'type':'string','enum':['options','jobs']}),'required':['queue'],'additionalProperties':False}}},
         {'type':'function','function':{'name':'print_prepare','description':'Prepare a text/document/receipt job for user review, NEVER send paper. Return immutable plan, options and confirmation command. Choose a physical printer from discovery; automatic routing hides its underlying queues. Export DOCX/manuscripts to PDF before preparing.','parameters':{'type':'object','properties':dict(fields,path={'type':'string'},text={'type':'string'},receipt={'type':'boolean','description':'True for a configured ESC/POS receipt destination; false for document printers'},copies={'type':'integer','minimum':1,'maximum':20},style={'type':'string','enum':['image','ascii']},rotation={'type':'integer','enum':[0,90]},paper_limit_mm={'type':'number','minimum':1,'maximum':3048,'description':'Explicit paper allowance in mm; default 304.8 (one foot). Larger values are deliberate banner jobs.'},pages={'type':'string'},media={'type':'string'},sides={'type':'string','enum':['one-sided','two-sided-long-edge','two-sided-short-edge']}),'required':['queue'],'additionalProperties':False}}}]
@@ -500,7 +512,13 @@ def run_tool(tool,args,workspace,prompt='',turn=None):
             if turn.get('progress'):turn['progress']('Sending to '+result['destination']+'…')
             result=dict(request('send',result['node'],ident=result['id'],confirm=True),destination=result['destination'],design=result['design'])
         return json.dumps(result)
-    if tool=='print_text':
+    if tool in {'print_text','print_artwork'}:
+        artwork_id=None
+        if tool=='print_artwork':
+            if set(value)-{'queue','artwork_id'}:raise ValueError('Use artwork_id and optional queue')
+            artwork_id=value.pop('artwork_id',None)
+            if not isinstance(artwork_id,str) or not re.fullmatch(r'(met|aic)-[1-9][0-9]{0,9}',artwork_id):raise ValueError('Use a Museum artwork ID returned by museum_search')
+            value['text']='Museum artwork'
         if set(value)-{'queue','text','illustration'} or 'text' not in value:
             raise ValueError('Use text and an optional printer queue')
         import tool_workflow
@@ -536,6 +554,7 @@ def run_tool(tool,args,workspace,prompt='',turn=None):
             except (ValueError,TypeError,AttributeError):pass
         turn['print_attempted']=True
         if turn.get('on_print_attempt'):turn['on_print_attempt']()
+        if artwork_id:return json.dumps(quick_artwork(queue,artwork_id))
         options={'illustration':value['illustration']} if value.get('illustration') else {}
         return json.dumps(quick_text(queue,value['text'],exact_label=True,**options))
     if tool=='printers_list':return json.dumps(request('list','all'))
