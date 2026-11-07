@@ -69,11 +69,17 @@ def test_uniform_frame_is_not_a_successful_screenshot():
     assert shot.varied_frame(Content())
 
 
-def test_denied_mac_permission_requests_consent_and_stops(monkeypatch):
-    import ctypes
-    monkeypatch.setattr(shot.sys,'platform','darwin')
-    library=Mock();library.CGPreflightScreenCaptureAccess.return_value=False
-    monkeypatch.setattr(ctypes,'CDLL',lambda path:library)
+def test_native_mac_capture_uses_selected_rectangle(tmp_path,monkeypatch):
+    path=tmp_path/'frame.png'
+    calls=[]
+    def run(args,**kwargs):
+        calls.append(args);path.write_bytes(b'png');return Mock(returncode=0,stderr='')
+    monkeypatch.setattr(shot.subprocess,'run',run)
+    shot.capture_mac((-1920,0,1920,1080),path)
+    assert calls==[['/usr/sbin/screencapture','-x','-t','png','-R','-1920,0,1920,1080',str(path)]]
+
+
+def test_failed_native_capture_stops_before_clipboard(tmp_path,monkeypatch):
+    monkeypatch.setattr(shot.subprocess,'run',Mock(return_value=Mock(returncode=1,stderr='capture denied')))
     with pytest.raises(ValueError,match='Nothing copied'):
-        shot.require_capture_permission()
-    library.CGRequestScreenCaptureAccess.assert_called_once()
+        shot.capture_mac((0,0,100,100),tmp_path/'absent.png')

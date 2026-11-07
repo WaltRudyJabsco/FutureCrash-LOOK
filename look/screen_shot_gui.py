@@ -72,10 +72,15 @@ class Controller:
         try:
             # Use this exact inventory for both labels and capture, avoiding
             # mismatched system_profiler versus OS display numbering.
-            screen_shot.require_capture_permission()
             images=[]
             for index in sorted(self.selected):
-                image=self.screens[index].grabWindow(0).toImage()
+                if sys.platform=='darwin':
+                    geometry=self.screens[index].geometry()
+                    with tempfile.TemporaryDirectory(prefix='look-shot-frame-') as folder:
+                        path=Path(folder)/'frame.png'
+                        screen_shot.capture_mac((geometry.x(),geometry.y(),geometry.width(),geometry.height()),path)
+                        image=QImage(str(path))
+                else:image=self.screens[index].grabWindow(0).toImage()
                 if image.isNull():raise ValueError('Screen capture unavailable; allow Screen Recording for this terminal in system settings')
                 if not screen_shot.varied_frame(image):raise ValueError('Display '+str(index+1)+' returned a solid-color frame. Nothing copied. Check Screen Recording permission and try a visible desktop window.')
                 image.setDevicePixelRatio(1);images.append(image)

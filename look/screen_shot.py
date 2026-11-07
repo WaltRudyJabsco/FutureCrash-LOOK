@@ -19,18 +19,18 @@ def selection(value, count):
 
 
 
-def require_capture_permission():
-    """macOS can return valid-sized wallpaper frames without capture permission."""
-    if sys.platform!='darwin':return
-    import ctypes
-    library=ctypes.CDLL('/System/Library/Frameworks/CoreGraphics.framework/CoreGraphics')
-    library.CGPreflightScreenCaptureAccess.restype=ctypes.c_bool
-    if not library.CGPreflightScreenCaptureAccess():
-        # Request only after the user explicitly starts a capture. The OS owns
-        # consent; never change privacy settings or accept a blank fallback.
-        library.CGRequestScreenCaptureAccess.restype=ctypes.c_bool
-        library.CGRequestScreenCaptureAccess()
-        raise ValueError('Screen Recording permission is required. In System Settings → Privacy & Security → Screen & System Audio Recording, allow the terminal/capture app shown by macOS (for example Kitty or Python), then quit and reopen it and try again. Nothing copied.')
+def capture_mac(rect, output):
+    """Use the proven native Vision backend, matching the picker's exact rectangle.
+
+    Qt's display inventory identifies the rectangle; Qt does not read pixels on
+    Mac. Its grabWindow path can return a valid-sized uniform desktop fallback.
+    """
+    x,y,width,height=rect
+    if width<=0 or height<=0:raise ValueError('Display rectangle is empty')
+    result=subprocess.run(['/usr/sbin/screencapture','-x','-t','png','-R',
+                           f'{x},{y},{width},{height}',str(output)],capture_output=True,text=True,timeout=15)
+    if result.returncode or not Path(output).is_file():
+        raise ValueError('Native Mac screen capture failed: '+(result.stderr.strip() or 'no image returned')+'. Nothing copied. If macOS requests Screen Recording permission, allow your terminal and restart it.')
 
 
 def varied_frame(image):
