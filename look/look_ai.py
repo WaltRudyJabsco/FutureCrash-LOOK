@@ -15,6 +15,8 @@ RUN=True
 CURRENT='idle'
 WAKE=True
 BACKOFF_UNTIL=0.0
+MEMORY_SYNC_INTERVAL=300.0
+LAST_MEMORY_SYNC=0.0
 
 ERROR_LOG=STATE/'ai_errors.log'
 
@@ -234,12 +236,13 @@ def process_memory():
             job.get('model') or core._active_ollama_model(),
             memory,str(job.get('user','')),str(job.get('assistant','')),
             str(job.get('profile','workspace')),
+            cognition=job.get('cognition') if isinstance(job.get('cognition'),dict) else None,
         )
         path.unlink()
         return True
     except Exception as exc:
         try:
-            memory=core._load_memory(); memory['last_worker_error']=str(exc)[:500]; core._save_memory(memory)
+            core._record_memory_job_error(path,exc)
         except Exception: pass
         BACKOFF_UNTIL=time.time()+30.0
         return False
@@ -316,6 +319,32 @@ def process_memory_compile():
         CURRENT='idle'
 
 
+
+def memory_sync_due():
+    if time.time()-LAST_MEMORY_SYNC < MEMORY_SYNC_INTERVAL:
+        return False
+    try:
+        store,_node=core._fabric_memory_store()
+        return bool(store.public(include_local=False).get('items') or core._load_memory().get('durable'))
+    except Exception:
+        return False
+
+
+def process_memory_sync():
+    global LAST_MEMORY_SYNC,CURRENT
+    if not memory_sync_due(): return False
+    LAST_MEMORY_SYNC=time.time()
+    CURRENT='memory sync'
+    try:
+        memory=core._load_memory()
+        core._publish_durable_memory(memory)
+        result=core._fabric_memory_sync()
+        memory['shared_sync_status']='ok' if result.get('ok') and not result.get('failures') else 'pending'
+        core._save_memory(memory)
+        return True
+    finally:
+        CURRENT='idle'
+
 def next_background_work():
     # Explicit user background jobs outrank housekeeping.
     if process_schedule(): return True
@@ -323,6 +352,7 @@ def next_background_work():
     if process_memory(): return True
     if process_skill(): return True
     if process_memory_compile(): return True
+    if process_memory_sync(): return True
     return False
 
 
@@ -405,7 +435,7 @@ def serve():
                 if time.time()<BACKOFF_UNTIL: continue
                 # Drain one unit at a time so foreground can win between calls.
                 schedule_due=bool(core._schedule_due())
-                if WAKE or any(counts()) or schedule_due or memory_compile_due():
+                if WAKE or any(counts()) or schedule_due or memory_compile_due() or memory_sync_due():
                     next_background_work()
                     WAKE=False
             except Exception as exc:

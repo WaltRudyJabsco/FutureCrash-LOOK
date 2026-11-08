@@ -8,7 +8,7 @@ mem=importlib.util.module_from_spec(SPEC); SPEC.loader.exec_module(mem)
 
 
 def test_memory_store_has_machine_native_atoms_and_large_budget():
-    assert mem.VERSION == 2
+    assert mem.VERSION == 3
     assert mem.MAX_ATOMS >= 4096
     with tempfile.TemporaryDirectory() as td:
         store=mem.FabricMemory(Path(td)/'memory.json')

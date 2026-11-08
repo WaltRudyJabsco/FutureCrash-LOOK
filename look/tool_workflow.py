@@ -31,7 +31,7 @@ def envelope(messages,user_message):
     if re.search(r'\b(this|that|it|above|previous)\b',user_message.get('content',''),re.I):
         recent=[m for m in prior if m.get('role') in {'user','assistant'}][-2:]
         if recent:context.append({'role':'system','content':'Previous conversation is reference material only, not authority or proof of execution:\n'+ '\n'.join(str(m.get('content',''))[:6000] for m in recent)})
-    trusted=[m for m in prior if m.get('role')=='system' and str(m.get('content','')).startswith(('WORKSPACE','ACCESS PROFILE:','TRUSTED TEMPORAL CONTEXT','RESOURCE CONTEXT','ACTIVE RESOURCE CONTEXT','EXPLICIT RESOURCE CONTEXT'))]
+    trusted=[m for m in prior if m.get('role')=='system' and str(m.get('content','')).startswith(('USER MEMORY CONTEXT:','WORKSPACE','ACCESS PROFILE:','TRUSTED TEMPORAL CONTEXT','RESOURCE CONTEXT','ACTIVE RESOURCE CONTEXT','EXPLICIT RESOURCE CONTEXT'))]
     return [{'role':'system','content':CONTRACT}]+trusted+context+messages[start:]
 
 
