@@ -106,6 +106,7 @@ AI_FOREGROUND_FILE=STATE_DIR/"ai_foreground.json"
 AI_LOG_FILE=STATE_DIR/"ai.log"
 AI_STATS_FILE=STATE_DIR/"ai_stats.json"
 SKILL_STATE_FILE=STATE_DIR/"skill_state.json"
+MAX_ACTIVE_LEARNED_SKILLS=24
 SKILL_FEEDBACK_QUEUE=STATE_DIR/"skill_feedback_queue"
 SKILL_FEEDBACK_LOCK=STATE_DIR/"skill_feedback.lock"
 OLLAMA_MODEL_FILE=STATE_DIR/"ollama_model"
@@ -1606,6 +1607,7 @@ AI / OLLAMA
   lk ollama access MODE set conservative/workspace/power/unsafe
 
 MEMORY + CRAFT
+  lk memory retry      retry retained failed background memory jobs
   lk memory            inspect Living Memory: core summary, durable domains/atoms,
                        recent conversation, candidates, compiler diagnostics
                        candidates are cheap hypotheses; durable memory must earn promotion
@@ -2441,6 +2443,11 @@ def _load_memory():
                 "last_change":str(data.get("last_change", ""))[:80],
                 "summary_last_reinforced_at":float(data.get("summary_last_reinforced_at",0) or 0),
                 "last_worker_error":str(data.get("last_worker_error", ""))[:500],
+                "extraction_diagnostic":data.get("extraction_diagnostic",{}),
+                "extraction_outcomes":data.get("extraction_outcomes",{}),
+                "shared_memory_status":str(data.get("shared_memory_status", "never")),
+                "shared_migration_version":int(data.get("shared_migration_version",0)),
+                "shared_sync_status":str(data.get("shared_sync_status", "never")),
                 "last_extraction_at":float(data.get("last_extraction_at",0) or 0),
                 "last_extraction":str(data.get("last_extraction","never"))[:120],
                 "last_extraction_reason":str(data.get("last_extraction_reason",""))[:180],
@@ -2475,7 +2482,7 @@ def _load_memory():
             result["legacy_summary"]=""
         result=_prune_contaminated_memory(result)
         _save_memory(result)
-        return result
+        return _apply_shared_corrections(result)
     except Exception:
         return _empty_memory()
 
@@ -2716,12 +2723,12 @@ def _effective_skills_text():
         confidence=int(meta.get("confidence",1))
         if confidence<=0:
             continue
-        rows.append((confidence,skill))
-    rows.sort(key=lambda x:(-x[0],x[1].casefold()))
+        rows.append((confidence,float(meta.get("last_reinforced",0)),skill))
+    rows.sort(key=lambda x:(-x[0],-x[1],x[2].casefold()))
 
     text=bundled.rstrip()+"\n\n## Learned\n"
     if rows:
-        text+="\n"+"\n".join(f"- {skill}." for _,skill in rows)+"\n"
+        text+="\n"+"\n".join(f"- {skill}." for _,_,skill in rows[:MAX_ACTIVE_LEARNED_SKILLS])+"\n"
     return text.strip()
 
 
@@ -3077,7 +3084,10 @@ def _forget_memory(fragment):
         memory["legacy_summary"]=""
     memory["last_compiled_at"]=0
     _save_memory(memory)
-    return (before_candidates-len(memory["memories"]))+(before_durable-len(memory["durable"]))
+    store,_node=_fabric_memory_store()
+    shared_removed=store.forget(fragment)
+    _fabric_memory_sync()
+    return shared_removed+(before_candidates-len(memory["memories"]))+(before_durable-len(memory["durable"]))
 
 
 def _fabric_memory_store():
@@ -3119,6 +3129,17 @@ def _fabric_memory_show(scope=None):
 
 
 def _memory_command(args):
+    if args and args[0]=="retry":
+        count=0
+        for path in MEMORY_QUEUE.glob("*.failed"):
+            job=json.loads(path.read_text())
+            job["attempts"]=0
+            path.write_text(json.dumps(job,ensure_ascii=False))
+            path.replace(path.with_suffix(".json"))
+            count+=1
+        _start_memory_worker()
+        print(f"Queued {count} retained memory jobs for retry.")
+        return 0
     memory=_load_memory()
     if args and args[0] in {"shared","local","persona","fabric","sync","add-shared","add-persona","add-local"}:
         cmd=args[0]
@@ -3173,7 +3194,7 @@ def _memory_command(args):
         for d in durable[:16]: print(f"  {str(d.get('domain','general')).upper():<11} {str(d.get('text',''))[:104]}")
         return 0
     if args and args[0]=="clear":
-        if not _confirm("Clear LO user memory? [y/N] "): return 1
+        if not _confirm("Clear local LO memory and shared user memory across the Fabric? [y/N] "): return 1
         _save_memory(_empty_memory())
         print("LO memory cleared.")
         return 0
@@ -3232,6 +3253,10 @@ def _memory_command(args):
     with contextlib.redirect_stdout(buf):
         _title("LO memory")
         core=str(memory.get("core_summary","")).strip()
+        print("  Pending jobs:",len(_memory_job_files()),"· retained failures:",len(list(MEMORY_QUEUE.glob("*.failed"))))
+        print("  Extraction:",memory.get("extraction_diagnostic",{}))
+        print("  Shared memory:",memory.get("shared_memory_status","never"),"· sync:",memory.get("shared_sync_status","never"))
+        if memory.get("last_worker_error"): print("  Worker:",memory["last_worker_error"])
         print("  CORE SUMMARY")
         print("  "+(core or "No compact durable memory yet."))
         summaries=memory.get("domain_summaries",{}) or {}
@@ -3683,7 +3708,7 @@ def _high_recall_memory_candidate(user_text):
         importance=max(importance,68)
     return importance,text[:520].rstrip()
 
-def _extract_memory_candidate(base, model, user_text, assistant_text):
+def _extract_memory_candidate(base, model, user_text, assistant_text, diagnostic=None):
     prompt=f"""Capture the compact meat of this exchange when it would help conversational
 continuity later.
 
@@ -3717,7 +3742,7 @@ NONE
 or:
 NN|compact memory text
 
-NN is importance 1-100.
+Replace NN with an actual integer from 1 to 100, for example 70|User prefers concise answers. Never output the literal letters NN.
 
 Suggested importance:
 20-39  plausible reusable fact worth testing through decay
@@ -3738,19 +3763,17 @@ ASSISTANT:
             {"role":"system","content":"You maintain compact conversational memory. Preserve substantive continuity; decay will forget weak memories later."},
             {"role":"user","content":prompt},
         ], num_ctx=4096, num_predict=128, think=False, temperature=0.15)
-        final=_strip_reasoning_payload(raw).strip()
-        if final.upper()=="NONE":
-            return None
-        if "\n" in final.strip():
-            return None
-        m=re.fullmatch(r"\s*(\d{1,3})\s*\|\s*(.+?)\s*", final)
-        if not m:
-            return None
-        text=_sanitize_memory_text(m.group(2))
-        if not text:
-            return None
-        return max(1,min(100,int(m.group(1)))), text
-    except Exception:
+        from memory_learning import parse_candidate
+        candidate,status=parse_candidate(_strip_reasoning_payload(raw))
+        if candidate:
+            text=_sanitize_memory_text(candidate[1])
+            candidate=(candidate[0],text) if text else None
+            if not text: status="filtered"
+        if diagnostic is not None: diagnostic["status"]=status
+        return candidate
+    except Exception as exc:
+        if diagnostic is not None:
+            diagnostic.update(status="error",error_type=type(exc).__name__)
         return None
 
 
@@ -4007,8 +4030,7 @@ def _append_learned_skill(skill, signal="new"):
             _update_skill_meta(old, "positive" if signal=="positive" else signal)
             return False
 
-    if len(current)>=24:
-        return False
+    # Storage retains learned craft; retrieval has a separate bounded budget.
     try:
         text=SKILLS_FILE.read_text(encoding="utf-8")
         marker="## Learned"
@@ -4338,9 +4360,46 @@ def _mirror_machine_atoms_to_fabric(atoms):
         return False
 
 
+
+
+def _apply_shared_corrections(memory):
+    """Retire stale local projections when a peer corrects or forgets a fact."""
+    import hashlib
+    try:
+        store,_node=_fabric_memory_store()
+        hashes={h for r in store.load()["items"] for h in r.get("superseded_hashes",[])}
+    except Exception:
+        return memory
+    changed=False
+    for tier in ("durable","memories"):
+        before=memory.get(tier,[])
+        memory[tier]=[r for r in before if hashlib.sha256(str(r.get("text","")).encode()).hexdigest() not in hashes]
+        changed=changed or len(memory[tier])!=len(before)
+    if changed:
+        memory.update(domain_summaries={},core_summary="",summary="",last_compiled_at=0)
+    return memory
+
+
+def _publish_durable_memory(memory):
+    """One-time migration of existing user memory, preserving its legacy provenance."""
+    if memory.get("shared_migration_version")==1: return
+    store,_node=_fabric_memory_store()
+    rows=store.load()["items"]
+    represented={text for row in rows for text in (row["text"],row.get("previous_text",""))}
+    for item in memory.get("durable",[]):
+        text=str(item.get("text") or "").strip()
+        import hashlib
+        legacy_id=hashlib.sha256(("shared\0"+text.casefold()).encode("utf-8","replace")).hexdigest()[:20]
+        if text and text not in represented and not any(r["id"]==legacy_id for r in rows):
+            store.remember(text,int(item.get("importance",70)),evidence=text,
+                           source="legacy-durable-record")
+    memory["shared_migration_version"]=1
+
+
 def _remember_exchange(base, model, memory, user_text, assistant_text, profile="workspace", cognition=None):
     """Living Memory: evidence-driven extraction, semantic reinforcement, consolidation."""
     now=time.time()
+    _publish_durable_memory(memory)
     memory=_prune_contaminated_memory(memory)
     memory=_decay_memories(memory,now)
     memory["last_evidence_at"]=now
@@ -4359,7 +4418,12 @@ def _remember_exchange(base, model, memory, user_text, assistant_text, profile="
                     memory["last_fabric_sync_at"]=now
 
     local_only=_conversation_local_memory_intent(user_text)
-    candidate=None if local_only else _extract_memory_candidate(base,model,user_text,assistant_text)
+    diagnostic={"status":"local-only"}
+    candidate=None if local_only else _extract_memory_candidate(base,model,user_text,assistant_text,diagnostic)
+    memory["extraction_diagnostic"]=diagnostic
+    counts=memory.setdefault("extraction_outcomes",{})
+    status=diagnostic["status"]
+    counts[status]=int(counts.get(status,0))+1
     source="local-only" if local_only else "model"
     forced_idx=None
     if not candidate and not local_only:
@@ -4382,6 +4446,10 @@ def _remember_exchange(base, model, memory, user_text, assistant_text, profile="
         forced_idx=None
         source="environment"
 
+    if not candidate and diagnostic["status"] in {"error","parse_error"}:
+        _save_memory(memory)
+        raise ValueError("memory extraction failed: "+diagnostic["status"])
+
     memory["last_extraction_at"]=now
     memory["extractions_total"]=int(memory.get("extractions_total",0))+1
     if local_only:
@@ -4397,6 +4465,39 @@ def _remember_exchange(base, model, memory, user_text, assistant_text, profile="
         if not local_only:
             memory["last_extraction"]="none"
             memory["last_extraction_reason"]="no reusable user-authored signal survived extraction"
+
+    if candidate:
+        from memory_learning import reconcile, UngroundedMemory
+        store,_node=_fabric_memory_store()
+        def memory_chat(messages):
+            return _strip_reasoning_payload(_local_chat_once(base,model,messages,
+                num_ctx=8192,num_predict=512,think=False,temperature=0.05))
+        try:
+            shared=reconcile(memory_chat,store,user_text,candidate[1],candidate[0],
+                             str((cognition or {}).get("interface") or "lo"))
+            memory["shared_memory_status"]="accepted" if shared else "skipped"
+            if not shared:
+                candidate=None
+            if shared:
+                record,old=shared
+                candidate=(candidate[0],record["text"])
+                if old and old["text"]!=record["text"]:
+                    forced_idx=None
+                    for tier in ("memories","durable"):
+                        memory[tier]=[r for r in memory.get(tier,[]) if r.get("text")!=old["text"]]
+                    memory["domain_summaries"]={}
+                    memory["core_summary"]=""
+                    memory["last_compiled_at"]=0
+                result=_fabric_memory_sync()
+                memory["shared_sync_status"]="ok" if result.get("ok") and not result.get("failures") else "pending"
+        except UngroundedMemory:
+            candidate=None
+            memory["shared_memory_status"]="rejected:ungrounded"
+        except Exception as exc:
+            memory["shared_memory_status"]="error:"+type(exc).__name__
+            _save_memory(memory)
+            # Retain the durable job instead of silently consuming a failed correction.
+            raise
 
     durable=_durable_memory_intent(user_text)
     durable_text=""
@@ -4451,6 +4552,7 @@ def _remember_exchange(base, model, memory, user_text, assistant_text, profile="
     else:
         memory["last_maintenance_at"]=now
 
+    memory["last_worker_error"]=""
     _save_memory(memory)
     _learn_from_exchange(base,model,user_text,assistant_text,profile)
     return memory
@@ -4623,6 +4725,25 @@ def _skill_feedback_worker():
     return 0
 
 
+
+MEMORY_JOB_MAX_ATTEMPTS=3
+
+
+def _record_memory_job_error(path, exc):
+    """Keep failed evidence inspectable without blocking every newer interaction."""
+    job=json.loads(path.read_text(encoding="utf-8"))
+    job["attempts"]=int(job.get("attempts",0))+1
+    job["error_type"]=type(exc).__name__
+    temp=path.with_suffix(".tmp")
+    temp.write_text(json.dumps(job,ensure_ascii=False),encoding="utf-8")
+    os.chmod(temp,0o600)
+    temp.replace(path)
+    if job["attempts"]>=MEMORY_JOB_MAX_ATTEMPTS:
+        path.replace(path.with_suffix(".failed"))
+    memory=_load_memory()
+    memory["last_worker_error"]=type(exc).__name__+": evidence retained; use lk memory retry to retry failed jobs"
+    _save_memory(memory)
+
 def _memory_job_files():
     try:
         return sorted(MEMORY_QUEUE.glob("*.json"))
@@ -4715,9 +4836,9 @@ def _memory_worker():
                     job.get("cognition") if isinstance(job.get("cognition"),dict) else None,
                 )
                 job_path.unlink()
-            except Exception:
-                # Leave the job for a future worker rather than losing memory.
-                break
+            except Exception as exc:
+                _record_memory_job_error(job_path,exc)
+                return 1
     finally:
         try:
             MEMORY_WORKER_LOCK.unlink()
@@ -7612,8 +7733,8 @@ def _lo_requires_filesystem_action(prompt):
     # still govern truth even when this extra host guard is not engaged.
     action=r"(create|make|write|save|copy|duplicate|move|rename|remove|delete|edit|replace)"
     object_hint=(
-        r"(file|files|folder|folders|directory|directories|path|paths|txt|md|json|csv|yaml|yml|py|js|html)"
-        r"|[./~][^\s]*"
+        r"(?:\b(?:file|files|folder|folders|directory|directories|path|paths|txt|md|json|csv|yaml|yml|py|js|html)\b"
+        r"|(?:~/|\./|\.\./|/)[^\s]+|\b[\w-]+\.(?:txt|md|json|csv|yaml|yml|py|js|html)\b)"
     )
     request_forms=(
         rf"^(please\s+)?{action}\b",
@@ -11407,6 +11528,8 @@ def ollama_chat(force_search=False, initial_prompt=None, allow_start=True, host_
     # memory snapshots in chat history.
     memory_message_index=len(messages)
     messages.append({"role":"system","content":""})
+    preference_message_index=len(messages)
+    messages.append({"role":"system","content":""})
     recent_context_index=len(messages)
     recent_context=_recent_context()
     messages.append({"role":"system","content":recent_context})
@@ -11875,6 +11998,13 @@ def ollama_chat(force_search=False, initial_prompt=None, allow_start=True, host_
         # disk, then retrieve only what is relevant to this exact prompt.
         memory=_load_memory()
         messages[memory_message_index]["content"]=_memory_context(memory,prompt)
+        from memory_learning import preference_context
+        try:
+            preference_store,_node=_fabric_memory_store()
+            preferences=preference_context(preference_store,prompt)
+        except Exception:
+            preferences=""
+        messages[preference_message_index]["content"]=preferences
         messages[brain_context_index]["content"]=_brain_context()
         messages=[m for i,m in enumerate(messages) if i < base_message_count or not (m.get("role")=="system" and str(m.get("content","")).startswith(("RESOURCE CONTEXT GOVERNOR:","TYPED WORLD STATE (","LIVE STATE (")))]
         world_context=_world_context()
@@ -12289,6 +12419,8 @@ def ollama_chat(force_search=False, initial_prompt=None, allow_start=True, host_
         task_tier,budget=_lo_budget_for(prompt,thinking_mode,selected_paths)
         task_started=time.monotonic()
         task_rounds=0
+        conversation_pass=(bool(preferences) and getattr(turn_route,"primary","")=="general" and not selected_paths and not turn_force_search
+                           and not (mutation_required or external_action_required or speech_required or weather_required))
         completion_recovery_used=False
         completion_recovery_tools=set()
         task_tool_calls=0
@@ -12309,6 +12441,9 @@ def ollama_chat(force_search=False, initial_prompt=None, allow_start=True, host_
             payload_messages=messages
             payload_context=budget["context"]
             payload_output=budget["output"]
+            if conversation_pass:
+                from memory_learning import conversation_envelope
+                payload_messages=conversation_envelope(messages,user_message,preferences)
             if weather_text_fast_path:
                 # A deterministic edge already did the retrieval. Do not make a reflex
                 # model reread LO's full tool/personality/context manual merely to phrase
@@ -12337,10 +12472,14 @@ def ollama_chat(force_search=False, initial_prompt=None, allow_start=True, host_
                     "temperature": runtime["temperature"],
                 },
             }
+            if conversation_pass:
+                # Applying corrections requires instruction following, not a tiny
+                # reflex model chosen solely because the question is short.
+                payload_obj["model"]=model or _active_ollama_model()
             if supports_thinking:
                 payload_obj["think"]=runtime["think"]
             tools=[]
-            if supports_tools and not host_repair_final and not weather_text_fast_path:
+            if supports_tools and not host_repair_final and not weather_text_fast_path and not conversation_pass:
                 tools = _lo_tools_for_route(profile,turn_route)
                 route_allowed=set(getattr(turn_route,"allowed_tools",[]) or [])
                 if has_web and not turn_force_search and (not route_allowed or "web_search" in route_allowed):
@@ -12412,6 +12551,10 @@ def ollama_chat(force_search=False, initial_prompt=None, allow_start=True, host_
                 break
 
             message = result.get("message", {})
+            if conversation_pass and ("NEED_TOOLS" in str(message.get("content","")).upper() or message.get("tool_calls")):
+                conversation_pass=False
+                if turn_fabric_route is not None: turn_fabric_route.clear()
+                continue
             tool_calls = message.get("tool_calls") or []
             if tool_calls:
                 task_tool_calls+=len(tool_calls)
@@ -12883,23 +13026,23 @@ def ollama_chat(force_search=False, initial_prompt=None, allow_start=True, host_
                 "thinking":thinking_mode,
             })
             feedback_queued=_queue_skill_feedback(base,model,prompt,profile)
-            _save_recent_exchange(prompt, answer)
+            _save_recent_exchange(prompt, final)
             if feedback_queued and sys.stdout.isatty():
                 print(_c("  reflecting · background","2"))
             cognition_atoms=[]
             if turn_successful_tools:
                 for tool_name in sorted(turn_successful_tools):
-                    cognition_atoms.append({"k":"action","s":tool_name,"r":"succeeded_for","v":prompt[:240],"c":100,"u":1})
+                    cognition_atoms.append({"k":"action","s":tool_name,"r":"tool_completed_for","v":prompt[:240],"c":100,"u":1})
             if turn_goal:
                 cognition_atoms.append({"k":"goal","s":str(turn_goal.primary),"r":"request","v":prompt[:240],"c":max(50,int(float(getattr(turn_route,'confidence',.5))*100)),"u":1})
-            cognition={"atoms":cognition_atoms}
-            if _queue_memory_exchange(base, model, prompt, answer, profile, cognition=cognition):
+            cognition={"atoms":cognition_atoms,"interface":str(interface_context or "lo")[:120]}
+            if _queue_memory_exchange(base, model, prompt, final, profile, cognition=cognition):
                 if sys.stdout.isatty():
                     print(_c("  memory · background", "2"))
             else:
                 # If queueing ever fails, preserve memory rather than silently dropping it.
                 with _activity("remembering"):
-                    memory = _remember_exchange(base, model, memory, prompt, answer, profile, cognition=cognition)
+                    memory = _remember_exchange(base, model, memory, prompt, final, profile, cognition=cognition)
             _ai_foreground(False,"lo")
             if one_shot:
                 return 0

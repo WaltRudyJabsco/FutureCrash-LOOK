@@ -754,8 +754,9 @@ MEMORY + CRAFT
   lk memory add-local TEXT [--importance N]
   lk memory sync       merge shared/persona memory across live Fabric nodes
                        add with importance 1–100
+  lk memory retry      retry retained failed background memory jobs
   lk memory forget TEXT
-                       remove matching candidate + durable atomic memories
+                       remove matching local and shared user memories; replicate deletion
   lk forget TEXT       short form of memory forget
   lk memory compact    force domain/core summary recompilation now
   lk memory prune      remove known reasoning/meta/environmental artifacts
