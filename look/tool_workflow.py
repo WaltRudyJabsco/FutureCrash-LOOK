@@ -1,6 +1,6 @@
 """Focused inference envelopes for composing content and delivering it with tools."""
 import re
-from datetime import date
+from datetime import date, datetime
 
 CONTRACT='''You are the Fabric assistant. Complete the user's requested outcome with the available tools.
 Retrieve missing facts, compose the actual content, then deliver it with the appropriate action tool.
@@ -47,7 +47,12 @@ def require_content(text,request):
     # Validate this across delivery tools, not just the weather request path.
     weekdays='Monday Tuesday Wednesday Thursday Friday Saturday Sunday'.split()
     pattern=r'\b('+'|'.join(weekdays)+r'),?\s+(\d{4}-\d{2}-\d{2})\b'
-    for weekday,iso in re.findall(pattern,text,re.I):
+    pairs=re.findall(pattern,text,re.I)
+    written=r'\b('+'|'.join(weekdays)+r'),?\s+([A-Z][a-z]+ \d{1,2}, \d{4})\b'
+    for weekday,spelled in re.findall(written,text):
+        try:pairs.append((weekday,datetime.strptime(spelled,'%B %d, %Y').date().isoformat()))
+        except ValueError:raise ValueError('Invalid calendar date: '+spelled)
+    for weekday,iso in pairs:
         try:actual=weekdays[date.fromisoformat(iso).weekday()]
         except ValueError:raise ValueError('Invalid calendar date: '+iso)
         if weekday.casefold()!=actual.casefold():
@@ -62,3 +67,11 @@ def printer_list_choice(prompt,messages):
     if match and re.search(r'\blist\b.*\bprinters\b',match[1],re.I):
         return 'List available printers'
     return prompt
+
+
+def incomplete_response(missing,print_attempted=False):
+    names={name for group in missing for name in group}
+    if names & {'print_text','print_artwork','print_design'}:
+        if print_attempted:return 'A print submission was attempted, but its outcome is uncertain. Check printer jobs before retrying; it may already have printed.'
+        return 'No print job was submitted. The requested output is still pending; retrieving information alone did not complete the print.'
+    return 'The requested action did not return a completion receipt. It remains incomplete.'

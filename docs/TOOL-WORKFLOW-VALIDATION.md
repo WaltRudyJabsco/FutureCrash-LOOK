@@ -35,3 +35,24 @@ printer delivery or the quality of every possible model answer.
 Regression coverage additionally checks scoped compound routes, retained resource
 context, stale confirmation history, printer ambiguity, preview-only behavior,
 receipt completion, pending task state and duplicate-print prevention.
+
+## Terminal conversation audit
+
+```sh
+PYTHONPATH=look:core:. python tools/check_terminal_workflow.py
+```
+
+This runs the real multi-turn POWER terminal loop with normal Fabric routing,
+model selection, temperature and thinking settings. It requests an illustrated
+forecast, a Renoir artwork, then “how about printing a three day forcast.”
+Only printer discovery/submission are fixtures; no real paper is sent. Unexpected
+shell actions are blocked. It asserts three separate requested effects and the
+illustration on the first receipt. This supplements deterministic model audits;
+passing a forced-model single-turn test alone is not sufficient validation.
+
+Conversational printing invitations normalize before task routing. A new request
+replaces the prior task. Unique near-exact printer-name replies can use the live
+catalog, but ambiguous names are not guessed. “It didn't print” resumes only a
+still-unsubmitted request; state is cleared before an actual submission. Failed
+completion reports replace unsupported success prose instead of prepending a
+warning to the same false claim.

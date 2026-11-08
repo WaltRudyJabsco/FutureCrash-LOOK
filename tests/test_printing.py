@@ -504,3 +504,28 @@ def test_illustrated_receipt_routes_combined_png_to_owner(monkeypatch):
     assert image.width==384 and image.height>144
     assert args['kind']=='receipt-image' and args['options_value']=={'copies':1}
     assert plan['destination']=='Desk'
+
+
+def test_conversational_printing_replaces_previous_task():
+    state=printing.PrintConversation()
+    state.begin('Print something by Renoir')
+    assert state.begin('how about printing a three day forcast')=='Print a three day forecast'
+    assert state.begin('Little Printer')=='Print a three day forecast on Little Printer'
+    assert printing.explicit_print('how about printing a forecast on Little Printer','Little Printer')
+    assert not printing.explicit_print('How do I print on Little Printer?','Little Printer')
+
+
+def test_unique_printer_typo_keeps_new_task_not_previous_artwork():
+    state=printing.PrintConversation()
+    state.remember_printers({'printers':[{'label':'Little Printer'},{'label':'Tiny Printer'}]})
+    state.begin('Print something by Renoir')
+    state.begin('how about printing a three day forcast')
+    assert state.begin('littlwe printer')=='Print a three day forecast on Little Printer'
+
+
+def test_didnt_print_resumes_only_an_unsubmitted_request():
+    state=printing.PrintConversation()
+    state.begin('Print a forecast on Desk')
+    assert state.begin("it didn't print")=='Print a forecast on Desk'
+    state.finish()  # Cleared before any send, including an uncertain send.
+    assert state.begin("it didn't print")=="it didn't print"
