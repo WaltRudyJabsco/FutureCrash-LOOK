@@ -94,7 +94,7 @@ def main():
                 answer=next((r['text'] for r in reversed(rows) if r['event']=='response'),'')
             elif surface=='Signal':answer,rows=signal.native_lo_chat('workspace',prompt,td,[],list(history),'proof')
             else:
-                result=albert.cognition_json(prompt,session='proof');answer=result['text'];rows=result.get('events',[])
+                result=albert.cognition_json(prompt,session='proof');answer=result['text'];rows=result.get('lo_events',[])
             interpretations=[r for r in rows if r.get('event')=='task_interpreted']
             errors=[r for r in rows if r.get('event') in {'error','task_interpretation_failed'}]
             print(json.dumps({'surface':surface,'prompt':prompt,'seconds':round(time.monotonic()-start,2),'answer':answer,'plan':interpretations,'errors':errors,'effects':effects[before:]}),flush=True)
