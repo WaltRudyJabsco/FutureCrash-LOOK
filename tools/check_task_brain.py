@@ -63,7 +63,6 @@ def main():
         notebook.nudge_sync=lambda:None
         def note(tool,values):
             if tool!='notebook_capture':raise RuntimeError('Unexpected note operation '+tool)
-            assert values.get('target','all') in {'all','local'}, 'Unexpected note delivery target: '+str(values)
             result=original_note(tool,values)
             effects.append({'tool':tool,**values});(root/'note.json').write_text(json.dumps(values))
             assert any('water' in row.get('body','').lower() or values['text'].splitlines()[0].lstrip('# ') == row['title'] for row in store.list(include_done=True))

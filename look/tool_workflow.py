@@ -21,7 +21,7 @@ Do not repeat an uncertain action. Report its concrete blocker instead of invent
 TOOL_GUIDANCE = {
     ('print_text', 'print_design'): "For printing, use print_text with concise Markdown; omit queue for the configured default or use the user's printer. For a forecast with a picture, set illustration to sun/cloud/rain/snow/storm/fog based on retrieved conditions. This prints a real graphic with the text. If a named printer is not yet known, call printers_list rather than claiming it does not exist. Discovery needs no confirmation.",
     ('print_artwork',): 'For Museum printing, call museum_search with an artist surname or other useful terms; random=true and an empty query chooses available artwork. Then call print_artwork with a returned ID. Artwork printing is not a fortune or banner; do not substitute print_design or a text-only description. Do not ask for a title when the user has authorized choosing any matching work.',
-    ('notebook_capture',): 'For a new note, use notebook_capture: text contains the complete note including its title; target is an optional delivery target, not the note title.',
+    ('notebook_capture',): 'For a new note, use notebook_capture: text contains the complete note including its title; target only selects reminder-alert recipients; omit it for ordinary notes. It is not the title or storage location.',
     ('notebook_update',): 'For existing Notes, read first and preserve unrelated content; use notebook_update with the returned id and revision.',
     ('notebook_home_draft', 'notebook_home_apply'): 'For Home, use notebook_home_draft and apply its exact apply_args when the user asked to save.',
 }
