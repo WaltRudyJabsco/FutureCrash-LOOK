@@ -91,3 +91,31 @@ class FabricBusyGraceTests(unittest.TestCase):
             events=list(fabric_client.stream_infer(payload,timeout=1))
         self.assertGreaterEqual(calls["n"],2)
         self.assertTrue(any(e.get("done") for e in events if isinstance(e,dict)))
+
+class FabricUnreadyWorkerTests(unittest.TestCase):
+    def test_unready_probe_fails_over_before_submitting_a_job(self):
+        import io, urllib.error
+        model={'name':'m','size':2,'resident':True,'features':{'text':True}}
+        snap={'self':{'name':'local','inference':{'available':True,'models':[model]}},
+              'peers':[{'dns':'peer.example','node':{'identity':{'name':'peer'},'inference':{'available':True,'models':[model]}}}]}
+        route={'target':'peer','dns':'peer.example','model':'m'}
+        probes=[];submitted=[]
+        def probe(endpoint,base):
+            probes.append(endpoint)
+            if 'peer.example' in endpoint:
+                raise urllib.error.HTTPError(endpoint,503,'unready',{},io.BytesIO(b'{"ok":false}'))
+        class Response:
+            headers={}
+            def __enter__(self):return self
+            def __exit__(self,*a):return False
+            def __iter__(self):yield b'{"message":{"content":"ok"},"done":true}\n'
+        def opened(req,**kwargs):
+            submitted.append(req.full_url);return Response()
+        with patch.object(fabric_client,'_nodes',return_value=snap), patch.object(fabric_client,'_probe_worker',side_effect=probe), \
+             patch.object(fabric_client,'_open',side_effect=opened), patch.object(fabric_client.time,'sleep',return_value=None), \
+             patch.object(fabric_client,'_failed_peers',{}):
+            rows=list(fabric_client.stream_infer({'model':'m','messages':[{'role':'user','content':'hi'}]},route=route,timeout=1))
+        self.assertTrue(any(row.get('done') for row in rows))
+        self.assertEqual(len(submitted),1)
+        self.assertNotIn('peer.example',submitted[0])
+        self.assertEqual(route['target'],'local')

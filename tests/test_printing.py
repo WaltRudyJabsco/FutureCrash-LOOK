@@ -222,6 +222,7 @@ def test_unverified_job_id_never_claims_queued(spool,monkeypatch):
 
 @pytest.mark.parametrize('prompt', ["Do not print on Little Printer", "How do I print on Little Printer?", "Preview this for Little Printer", "What can I print on Little Printer?", "I asked it to print on Little Printer", "Print this on Epson", "Can Little Printer print recipes?", "Send me information about Little Printer", "Don’t print on Little Printer"])
 def test_quick_tool_requires_current_explicit_named_print(prompt,tmp_path,monkeypatch):
+    monkeypatch.setattr(printing,'destinations',lambda:{'printers':[{'label':'Epson'},{'label':'Little Printer'}]})
     call=Mock();monkeypatch.setattr(printing,'quick_text',call)
     with pytest.raises(ValueError):printing.run_tool('print_text',{'queue':'Little Printer','text':'Eggs'},tmp_path,prompt,{})
     call.assert_not_called()

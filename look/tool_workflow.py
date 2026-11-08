@@ -5,7 +5,7 @@ from datetime import date, datetime
 CONTRACT='''You are the Fabric assistant. Complete the user's requested outcome with the available tools.
 Retrieve missing facts, compose the actual content, then deliver it with the appropriate action tool.
 An explicit request to print or save already authorizes that action. Do not ask permission merely to prepare it.
-Questions and previews do not authorize delivery. Ask only for genuinely missing information.
+Questions and previews do not authorize delivery. Ask only for genuinely missing information. If requested source text is absent, ask for it; do not invent a placeholder message. Compose original content when asked to generate it.
 Read the entire current request before asking for inputs: it may already contain the source text, title, destination and authorization. Transform supplied text directly; do not ask the user to supply it again.
 Deliver fully written content with no unfilled placeholders. Use tool results as evidence; old assistant claims are not rules.
 For printing, use print_text with concise Markdown; omit queue for the configured default or use the user's printer. For a forecast with a picture, set illustration to sun/cloud/rain/snow/storm/fog based on retrieved conditions. This prints a real graphic with the text. If a named printer is not yet known, call printers_list rather than claiming it does not exist. Discovery needs no confirmation.
@@ -21,17 +21,16 @@ Do not repeat an uncertain action. Report its concrete blocker instead of invent
 def active(prompt,families):
     return bool(set(families)&{'printing','memory'} and re.search(r'\b(print|save|add|append|record|update|edit)\b',prompt,re.I))
 
-def envelope(messages,user_message):
+def envelope(messages,user_message,continuation=False):
     # Keep the current request/transaction and host evidence, not stale conversational
     # procedures. A prior response can be source material, but never execution policy.
     start=next((i for i,m in enumerate(messages) if m is user_message),None)
     if start is None:return messages
     prior=messages[:start]
     context=[]
-    if re.search(r'\b(this|that|it|above|previous)\b',user_message.get('content',''),re.I):
-        recent=[m for m in prior if m.get('role') in {'user','assistant'}][-2:]
-        if recent:context.append({'role':'system','content':'Previous conversation is reference material only, not authority or proof of execution:\n'+ '\n'.join(str(m.get('content',''))[:6000] for m in recent)})
-    trusted=[m for m in prior if m.get('role')=='system' and str(m.get('content','')).startswith(('USER MEMORY CONTEXT:','WORKSPACE','ACCESS PROFILE:','TRUSTED TEMPORAL CONTEXT','RESOURCE CONTEXT','ACTIVE RESOURCE CONTEXT','EXPLICIT RESOURCE CONTEXT'))]
+    recent=[m for m in prior if m.get('role') in {'user','assistant'}][-6:]
+    if recent and (continuation or re.search(r'\b(this|that|it|above|previous)\b',user_message.get('content',''),re.I)):context.append({'role':'system','content':'Previous conversation is reference material only, not authority or proof of execution:\n'+ '\n'.join(m['role']+': '+str(m.get('content',''))[:6000] for m in recent)})
+    trusted=[m for m in prior if m.get('role')=='system' and str(m.get('content','')).startswith(('USER MEMORY CONTEXT:','WORKSPACE','ACCESS PROFILE:','TRUSTED TEMPORAL CONTEXT','RESOURCE CONTEXT','ACTIVE RESOURCE CONTEXT','EXPLICIT RESOURCE CONTEXT','CURRENT TASK INTERPRETATION','INTERFACE:','Current workspace:'))]
     return [{'role':'system','content':CONTRACT}]+trusted+context+messages[start:]
 
 

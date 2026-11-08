@@ -199,6 +199,7 @@ class Goal:
     primary: str
     families: list[str]
     status: str = "active"
+    requirements: list[list[str]] | None = None
     steps: list[dict[str, Any]] = field(default_factory=list)
 
     def public(self) -> dict[str, Any]:
@@ -405,6 +406,8 @@ def assess(goal: Goal|dict[str,Any], *, successful_tools: list[str]|None=None, f
         if family in families and re.search(pattern,request):
             actions={s.name for s in ACTION_SPECS if s.family==family and s.effect in {'action','mutation'}}
             if actions:requirements.append(actions)
+    if g.get("requirements") is not None:
+        requirements=[set(group) for group in g["requirements"]]
     missing=[sorted(group) for group in requirements if not successful & group]
     if missing:
         return {'satisfied':False,'status':'pending','confidence':0.0,

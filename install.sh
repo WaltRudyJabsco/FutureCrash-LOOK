@@ -560,6 +560,7 @@ verify_same "$ROOT/look/look_renderer.py" "$HOME/.local/share/look/look_renderer
 verify_same "$ROOT/look/look_ai.py" "$HOME/.local/share/look/look_ai.py" "LOOK AI broker"
 verify_same "$ROOT/look/lo_engine.py" "$HOME/.local/share/look/lo_engine.py" "native LO engine"
 verify_same "$ROOT/look/lo_stream.py" "$HOME/.local/share/look/lo_stream.py" "LO stream assembler"
+verify_same "$ROOT/look/task_brain.py" "$HOME/.local/share/look/task_brain.py" "shared task interpreter"
 verify_same "$ROOT/look/file_catalog.py" "$HOME/.local/share/look/file_catalog.py" "file catalog core"
 verify_same "$ROOT/look/media_watch.py" "$HOME/.local/share/look/media_watch.py" "removable media watcher"
 verify_same "$ROOT/look/media_core.py" "$HOME/.local/share/look/media_core.py" "media core"

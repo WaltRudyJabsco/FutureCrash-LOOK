@@ -32,6 +32,8 @@ def main():
     parser.add_argument('--base',default='http://127.0.0.1:11434')
     args=parser.parse_args()
     core=load('memory_live_core',ROOT/'look/lk');lo_engine._CORE=core
+    client=load('memory_live_fabric_client',ROOT/'core/fabric_client.py')
+    core._fabric_client_module=lambda:client
     signal=load('memory_live_signal',ROOT/'signal-window/server.py')
     albert=load('memory_live_albert',ROOT/'albert/server.py')
     signal.load_lo_engine=lambda *a:lo_engine
