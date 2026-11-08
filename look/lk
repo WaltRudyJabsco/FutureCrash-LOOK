@@ -6984,6 +6984,19 @@ def _lo_latest_tool_error_answer():
     return f"The last tool failure was `{action}` [{status}] ({failure}): {message}"
 
 
+def _lo_interpret_task(prompt,messages,state,tools,base,model,fabric_mode,events=None):
+    """One bounded semantic interpretation; no tools or effects run here."""
+    import task_brain
+    import lo_stream
+    payload={"model":model or _active_ollama_model(), "messages":task_brain.planning_messages(
+        prompt,messages,state,tools), "stream":False,"think":False,"format":"json",
+        "options":{"temperature":0,"num_ctx":8192,"num_predict":1000}}
+    with _activity("understanding task"):
+        stream=(_fabric_stream_chat(payload,events=events,route={}) if fabric_mode else _ollama_stream_chat(base,payload,events=events))
+        interpreted,_=lo_stream.collect_response(stream,round_number=0,on_first_token=lambda:None,on_thinking=lambda text:None,events=events)
+    return task_brain.parse(interpreted.get("content",""),tools)
+
+
 def _lo_cognition_route(prompt,use_openjev=True):
     """Return the shared bounded route while preserving exact host reflexes."""
     import book_assistant
@@ -11558,6 +11571,7 @@ def ollama_chat(force_search=False, initial_prompt=None, allow_start=True, host_
     pending_media_clarification=None
     import printing as _print_conversation_tools
     print_conversation=_print_conversation_tools.PrintConversation(*(task_context or (None,None)))
+    semantic_state,semantic_save=task_context or ({},lambda:None)
     brain_state=_load_brain_state()
     brain_pending=brain_state.get("pending") or {}
     pending_weather_clarification=brain_pending.get("goal")=="weather" and brain_pending.get("slot") in {"weather.location","home.location"}
@@ -11591,6 +11605,7 @@ def ollama_chat(force_search=False, initial_prompt=None, allow_start=True, host_
         if not prompt:
             continue
 
+        original_user_prompt=prompt
         import tool_workflow
         if not print_conversation.choices:
             prompt=tool_workflow.printer_list_choice(prompt,messages)
@@ -11912,12 +11927,35 @@ def ollama_chat(force_search=False, initial_prompt=None, allow_start=True, host_
 
         # Shared host routing runs before any surface or model gets to improvise.
         # This is the same gate for terminal LOOK, Signal, and Albert.
-        turn_route=_lo_cognition_route(prompt,use_openjev=True)
-        if weather_forced_location:
+        task_plan=None
+        messages=[m for m in messages if not (m.get("role")=="system" and str(m.get("content","")).startswith("CURRENT TASK INTERPRETATION"))]
+        import task_brain
+        planning_tools=_lo_tools(profile) + ([web_tool] if has_web else [])
+        try:
+            task_plan=_lo_interpret_task(original_user_prompt,messages,semantic_state,planning_tools,base,model,fabric_mode,events)
+            if events and task_plan:events.emit("task_interpreted",**task_plan)
+        except KeyboardInterrupt:
+            if one_shot:return 130
+            continue
+        except Exception as exc:
+            # Interpretation is advisory: a failed planner does not grant authority.
+            if events:events.emit("task_interpretation_failed",error=str(exc))
+            task_plan={"kind":"reply","relation":"new","request":"Interpretation failed. Ask the user to clarify their desired outcome; do not perform actions.","tools":[],"required":[]}
+        turn_route=task_brain.route(task_plan,_cognition_module()) if task_plan else _lo_cognition_route(prompt,use_openjev=True)
+        if task_plan:
+            # Keep the original user wording as the source of authority. The
+            # semantic description guides inference, never supplies tool arguments.
+            prompt=original_user_prompt
+            prior=semantic_state.get("brain_task",{})
+            if task_plan["relation"] in {"continue","replace"} and prior.get("status")=="pending" and time.time()-prior.get("updated",0)<task_brain.MAX_TASK_AGE:
+                prompt += "\nPrevious user request in this session: " + str(prior.get("user", ""))[:12000]
+            messages.append(task_brain.context(task_plan))
+        if weather_forced_location and not task_plan:
             turn_route=_lo_cognition_route("weather",use_openjev=True)
         turn_intent="web_current" if turn_route.primary=="web" else turn_route.primary
         turn_force_search=bool(force_search or turn_intent=="web_current")
         turn_goal=_lo_goal(prompt,turn_route)
+        if turn_goal and task_plan:turn_goal.requirements=task_plan["required"]
         if turn_goal:
             try: _world_state().begin_goal(turn_goal)
             except Exception: pass
@@ -11926,6 +11964,17 @@ def ollama_chat(force_search=False, initial_prompt=None, allow_start=True, host_
             if turn_goal:
                 events.emit("goal_started",**turn_goal.public())
                 events.emit("plan_created",goal_id=turn_goal.id,steps=list(turn_goal.steps))
+
+        if task_plan and task_plan.get('missing'):
+            question=task_plan['question']
+            task_brain.remember(semantic_state,semantic_save,task_plan,prompt,question,[],[])
+            messages.extend([{'role':'user','content':original_user_prompt},{'role':'assistant','content':question}])
+            print("\n"+_lo_label("lo","35")+"\n"+_ollama_markup(question)+"\n")
+            if events:
+                events.emit('response',text=question)
+                events.emit('request_done',status='needs_input',rounds=0,tool_calls=0)
+            if one_shot:return 0
+            continue
 
         # An explicit `lk ...` line is an operator command, not language for the model.
         # Execute it argv-safe with the current TTY so interactive LOOK surfaces work
@@ -11952,6 +12001,11 @@ def ollama_chat(force_search=False, initial_prompt=None, allow_start=True, host_
         turn_proposed_action = None
         turn_successful_tools=set()
         print_turn={'on_print_attempt':print_conversation.finish}
+        if task_plan:
+            print_turn['authorized_tools']={name for group in task_plan['required'] for name in group}
+            if task_plan['relation']!='new' and semantic_state.get('brain_task',{}).get('status')=='uncertain':
+                print_turn['print_attempted']=True
+                messages.append({'role':'system','content':'A previous submission has an uncertain outcome. Do not repeat it. Inspect printer jobs or ask the user to verify delivery first.'})
         last_print_result=None
         last_printer_catalog=None
 
@@ -12250,7 +12304,12 @@ def ollama_chat(force_search=False, initial_prompt=None, allow_start=True, host_
         weather_discourse=[m for m in messages if str(m.get("role") or "").lower() in {"user","assistant"}][-16:]
         weather_explicit=_lo_requires_weather(prompt)
         weather_followup=_lo_weather_followup(prompt, weather_discourse)
-        weather_required=bool(weather_forced_location or weather_explicit or weather_followup)
+        weather_required=("weather" in task_plan["tools"] if task_plan else bool(weather_forced_location or weather_explicit or weather_followup))
+        if task_plan:
+            chosen=set(task_plan["tools"])
+            mutation_required=bool(chosen & {"write_file","create_text_files","copy_path","move_path","remove_path","make_directory"})
+            external_action_required=bool(chosen & {"open_path","open_url","preview_path","reveal_path"})
+            speech_required="audio_speak" in chosen
         weather_verify=_lo_weather_verification_requested(prompt) if weather_required else False
         weather_succeeded=False
         weather_repair_sent=False
@@ -12392,7 +12451,7 @@ def ollama_chat(force_search=False, initial_prompt=None, allow_start=True, host_
             if direct_weather_answer is None and (weather_forced_location or re.search(r"\b(?:weather|temperature|my weather)\b",str(prompt),re.I)):
                 direct_weather_answer=_weather_direct_summary(weather_content)
 
-        if direct_weather_answer and not re.search(r"\bprint\b",prompt,re.I):
+        if direct_weather_answer and not task_plan and not re.search(r"\bprint\b",prompt,re.I):
             print("\n"+_lo_label("lo","35")+"\n"+_ollama_markup(direct_weather_answer)+"\n")
             messages.append({"role":"assistant","content":direct_weather_answer})
             if events:
@@ -12419,7 +12478,7 @@ def ollama_chat(force_search=False, initial_prompt=None, allow_start=True, host_
         task_tier,budget=_lo_budget_for(prompt,thinking_mode,selected_paths)
         task_started=time.monotonic()
         task_rounds=0
-        conversation_pass=(bool(preferences) and getattr(turn_route,"primary","")=="general" and not selected_paths and not turn_force_search
+        conversation_pass=(not task_plan and bool(preferences) and getattr(turn_route,"primary","")=="general" and not selected_paths and not turn_force_search
                            and not (mutation_required or external_action_required or speech_required or weather_required))
         completion_recovery_used=False
         completion_recovery_tools=set()
@@ -12430,6 +12489,15 @@ def ollama_chat(force_search=False, initial_prompt=None, allow_start=True, host_
         task_eval_s=0.0
         task_load_s=0.0
         task_trace=[]
+        def checkpoint_task(answer="",uncertain=False):
+            if task_plan:
+                task_brain.remember(semantic_state,semantic_save,task_plan,prompt,answer,
+                    turn_successful_tools,{row['tool'] for row in task_trace},uncertain=uncertain)
+        def print_attempt_checkpoint():
+            print_conversation.finish()
+            checkpoint_task(uncertain=True)
+        print_turn['on_print_attempt']=print_attempt_checkpoint
+        checkpoint_task()
         repeated_tool_calls={}
         download_receipts={}
         # Route once per operator turn, then keep every tool continuation on the
@@ -12472,7 +12540,7 @@ def ollama_chat(force_search=False, initial_prompt=None, allow_start=True, host_
                     "temperature": runtime["temperature"],
                 },
             }
-            if conversation_pass:
+            if conversation_pass or task_plan:
                 # Applying corrections requires instruction following, not a tiny
                 # reflex model chosen solely because the question is short.
                 payload_obj["model"]=model or _active_ollama_model()
@@ -12480,13 +12548,16 @@ def ollama_chat(force_search=False, initial_prompt=None, allow_start=True, host_
                 payload_obj["think"]=runtime["think"]
             tools=[]
             if supports_tools and not host_repair_final and not weather_text_fast_path and not conversation_pass:
-                tools = _lo_tools_for_route(profile,turn_route)
+                if task_plan:
+                    tools=[t for t in planning_tools if t["function"]["name"] in task_plan["tools"]]
+                else:
+                    tools = _lo_tools_for_route(profile,turn_route)
                 route_allowed=set(getattr(turn_route,"allowed_tools",[]) or [])
-                if has_web and not turn_force_search and (not route_allowed or "web_search" in route_allowed):
+                if not task_plan and has_web and not turn_force_search and (not route_allowed or "web_search" in route_allowed):
                     tools.append(web_tool)
                 import tool_workflow
-                if tool_workflow.active(prompt,getattr(turn_route,"families",[])):
-                    payload_obj["messages"]=tool_workflow.envelope(messages,user_message)
+                if task_plan or tool_workflow.active(prompt,getattr(turn_route,"families",[])):
+                    payload_obj["messages"]=tool_workflow.envelope(messages,user_message,continuation=bool(task_plan and task_plan["relation"]!="new"))
                 if completion_recovery_tools:
                     tools=[t for t in tools if t.get('function',{}).get('name') in completion_recovery_tools]
                 payload_obj["tools"] = tools
@@ -12568,9 +12639,14 @@ def ollama_chat(force_search=False, initial_prompt=None, allow_start=True, host_
                             args=json.loads(args)
                         except Exception:
                             args={}
+                    if task_plan and name not in {t['function']['name'] for t in tools}:
+                        messages.append({'role':'tool','content':'Tool is not available for the current task. Do not execute a superseded or unrelated action.'})
+                        continue
                     signature=name+":"+json.dumps(args,sort_keys=True,default=str)
                     repeated_tool_calls[signature]=repeated_tool_calls.get(signature,0)+1
-                    if repeated_tool_calls[signature]>=3:
+                    spec=_cognition_module().ACTION_BY_NAME.get(name)
+                    repeated_effect=(repeated_tool_calls[signature]>1 and spec and spec.effect in {'action','mutation','command'})
+                    if repeated_effect or repeated_tool_calls[signature]>=3:
                         tool_content="STOP · repeated identical tool call detected; choose a different step or finish the task."
                         _audit_receipt("lo","loop_guard",name,ok=False)
                         messages.append({"role":"tool","content":tool_content})
@@ -12583,7 +12659,7 @@ def ollama_chat(force_search=False, initial_prompt=None, allow_start=True, host_
                     if name in {"notebook_home_draft","notebook_home","notebook_actions","notebook_links","notebook_search","notebook_list","notebook_read","notebook_capture","notebook_complete","notebook_update"}:
                         import notebook
                         try:
-                            if name in {'notebook_capture','notebook_complete','notebook_update'} and not re.search(r'\b(save|record|remember|remind|create|add|append|edit|update|change|rewrite|replace|reschedule|snooze|complete|done|finish|mark|move|set|remove|reopen)\b',prompt,re.I):
+                            if name in {'notebook_capture','notebook_complete','notebook_update'} and not (task_plan and any(name in group for group in task_plan['required'])) and not re.search(r'\b(save|record|remember|remind|create|add|append|edit|update|change|rewrite|replace|reschedule|snooze|complete|done|finish|mark|move|set|remove|reopen)\b',prompt,re.I):
                                 raise ValueError('The user has not requested a notebook change')
                             if name=='notebook_capture':
                                 import tool_workflow
@@ -12785,6 +12861,8 @@ def ollama_chat(force_search=False, initial_prompt=None, allow_start=True, host_
                     else:
                         tool_content = f"Unknown tool: {name}"
 
+                    checkpoint_task(str(tool_content),uncertain=bool(print_turn.get('print_attempted') and not
+                        (turn_successful_tools & {'print_text','print_design','print_artwork'})))
                     info_receipt=_info_receipt(name,tool_content)
                     if info_receipt:
                         _show_info_receipt(info_receipt)
@@ -12869,7 +12947,7 @@ def ollama_chat(force_search=False, initial_prompt=None, allow_start=True, host_
                 # Final renderer invariant: success prose cannot cross this point
                 # without a receipt. If a verified session referent exists, LOOK
                 # performs that exact action itself; otherwise suppress the claim.
-                if last_action:
+                if last_action and not task_plan:
                     with _activity(last_action["tool"].replace("_"," ")):
                         host_result,_tx_ok,_elapsed=_tool_transaction(
                             "verified_action_replay",last_action["args"],
@@ -12989,6 +13067,10 @@ def ollama_chat(force_search=False, initial_prompt=None, allow_start=True, host_
                 if check.get('missing_actions') and '?' not in _split_ollama_thinking(message)[1] and not last_print_result:
                     import tool_workflow
                     message=dict(message,content=tool_workflow.incomplete_response(check['missing_actions'],print_turn.get('print_attempted',False)))
+            if task_plan:
+                task_brain.remember(semantic_state,semantic_save,task_plan,prompt,
+                    _split_ollama_thinking(message)[1],turn_successful_tools,
+                    {row['tool'] for row in task_trace},uncertain=bool(print_turn.get('print_attempted') and not (turn_successful_tools & {'print_text','print_design','print_artwork'})))
             messages.append(message)
             # Thinking was already presented live according to the selected display mode.
             final=_split_ollama_thinking(message)[1]
@@ -13047,6 +13129,25 @@ def ollama_chat(force_search=False, initial_prompt=None, allow_start=True, host_
             if one_shot:
                 return 0
             break
+        else:
+            # Exhausting tool rounds must not silently drop the user's turn.
+            import tool_workflow
+            check=_cognition_module().assess(turn_goal,successful_tools=list(turn_successful_tools)) if turn_goal else {}
+            if last_print_result:
+                import printing
+                final=printing.design_summary(last_print_result)
+            elif check.get("satisfied") and turn_successful_tools:
+                final="Completed with verified tool receipts: "+", ".join(sorted(turn_successful_tools))+"."
+            else:
+                final=tool_workflow.incomplete_response(check.get('missing_actions',[]),print_turn.get('print_attempted',False))
+            checkpoint_task(final,uncertain=bool(print_turn.get('print_attempted') and not last_print_result))
+            messages.append({'role':'assistant','content':final})
+            print("\n"+_lo_label("lo","35")+"\n"+_ollama_markup(final)+"\n")
+            _ai_foreground(False,"lo")
+            if events:
+                events.emit('response',text=final)
+                events.emit('request_done',status='incomplete',rounds=task_rounds,tool_calls=task_tool_calls)
+            if one_shot:return 0
 
 
 def _c(text, code):

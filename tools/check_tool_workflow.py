@@ -13,7 +13,7 @@ root=Path(__file__).resolve().parents[1];sys.path[:0]=[str(root/'look'),str(root
 import cognition
 import lo_engine,printing,notebook,tool_workflow
 loader=importlib.machinery.SourceFileLoader('audit_workflow_core',str(root/'look/lk'));spec=importlib.util.spec_from_loader(loader.name,loader);core=importlib.util.module_from_spec(spec);sys.modules[loader.name]=core;loader.exec_module(core);lo_engine._CORE=core
-core._queue_memory_exchange=lambda *a,**k:False
+core._queue_memory_exchange=lambda *a,**k:True
 core._save_recent_exchange=lambda *a,**k:None
 core._record_ai_stats=lambda *a,**k:None
 calls=[];envelopes=[]

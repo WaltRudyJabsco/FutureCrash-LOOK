@@ -1598,3 +1598,12 @@ The content is included in the generated installed `look/docs/REFERENCE.md`,
 available through existing file-reading tools and `lk doc` / `lk help all`.
 Source documentation and runtime evidence have different roles: docs describe
 contracts; registered tools and live observations establish what can run now.
+
+### Shared task understanding
+
+LO, Signal, and Albert interpret conversational requests against the same tool
+catalog, carry session task context through follow-ups, and check completion
+against tool receipts. “Put that on paper” can follow a composed answer; “instead,
+just suggest a title” does not repeat the previous print or save. Failed task
+interpretation runs no action tools. Existing access profiles and print limits
+still apply. An uncertain print submission is not automatically retried.

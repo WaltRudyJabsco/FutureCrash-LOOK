@@ -170,11 +170,15 @@ def chat(monkeypatch):
     for name in ("_brain_context", "_recent_context", "_world_context"):
         monkeypatch.setattr(lk, name, lambda: "")
     monkeypatch.setattr(lk, "_memory_context", lambda *args: "")
+    import memory_learning
+    monkeypatch.setattr(memory_learning, "preference_context", lambda *args, **kwargs: "")
     monkeypatch.setattr(lk, "_live_state_context", lambda *args: "")
     monkeypatch.setattr(lk, "_lo_latest_command_action", lambda: None)
     route = SimpleNamespace(primary="general", families=["general"], confidence=1.0,
                             margin=1.0, source="test", allowed_tools=[])
     monkeypatch.setattr(lk, "_lo_cognition_route", lambda *args, **kwargs: route)
+    # Provider scripts below exercise execution streaming, not the separately tested planner.
+    monkeypatch.setattr(lk, "_lo_interpret_task", lambda *args, **kwargs: None)
     monkeypatch.setattr(lk, "_lo_goal", lambda *args: None)
     monkeypatch.setattr(lk, "_lo_tools_for_route", lambda *args: [])
     monkeypatch.setattr(lk, "_lo_budget_for", lambda *args: (

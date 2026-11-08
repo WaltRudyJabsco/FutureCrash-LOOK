@@ -565,9 +565,13 @@ def stream_infer(payload, *, requires=None, priority="interactive", timeout=180,
             # 409 before streaming is temporary placement pressure. Try distinct
             # workers first, then briefly wait/re-route instead of telling the user
             # the Fabric is unavailable merely because every lane was busy now.
-            if exc.code != 409 or emitted:
+            if exc.code == 503 and stage == "worker connection" and not emitted:
+                # The worker can be reachable but temporarily unready. No model
+                # job was submitted yet, so another eligible worker is safe.
+                _failed_peers[target]=time.monotonic()+FAILED_PEER_SECONDS
+            elif exc.code != 409 or emitted:
                 raise last_error from None
-            if busy_grace_seconds and busy_grace_deadline is None:
+            if exc.code == 409 and busy_grace_seconds and busy_grace_deadline is None:
                 busy_grace_deadline=time.monotonic()+busy_grace_seconds
         except (urllib.error.URLError, TimeoutError, socket.timeout, ssl.SSLError) as exc:
             _failed_peers[target]=time.monotonic()+FAILED_PEER_SECONDS

@@ -552,10 +552,11 @@ def run_tool(tool,args,workspace,prompt='',turn=None):
             elif matches:
                 raise ValueError('Choose one printer for this job')
             else:
-                if not explicit_default_print(prompt):raise ValueError('Ask explicitly to print; name any requested destination')
+                if not explicit_default_print(prompt) and tool not in (turn or {}).get('authorized_tools',set()):raise ValueError('Ask explicitly to print; name any requested destination')
                 queue=preferred_receipt(prompt)
         elif not isinstance(queue,str) or not (explicit_print(prompt,queue) or
-                explicit_default_print(prompt) and queue.casefold()==preferred_receipt(prompt).casefold()):
+                explicit_default_print(prompt) and queue.casefold()==preferred_receipt(prompt).casefold() or
+                tool in (turn or {}).get('authorized_tools',set())):
             raise ValueError('Ask explicitly to print to a named printer; previews and questions do not send paper')
         if re.search(r'\b(weather|forecast)\b',prompt,re.I) and not (turn or {}).get('weather_verified'):
             raise ValueError('Fetch live weather successfully before composing and printing the forecast')
