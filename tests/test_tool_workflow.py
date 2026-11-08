@@ -62,3 +62,27 @@ def test_numbered_read_only_printer_listing_is_resolved_from_actual_offer():
     assert tool_workflow.printer_list_choice('1',messages)=='List available printers'
     assert tool_workflow.printer_list_choice('2',messages)=='2'
     assert tool_workflow.printer_list_choice('1',[])=='1'
+
+
+def test_missing_effect_response_does_not_repeat_model_success_claim():
+    text=tool_workflow.incomplete_response([['print_text']])
+    assert 'No print job was submitted' in text
+    assert 'has been completed' not in text
+
+
+def test_forecast_delivery_scope_does_not_offer_unrelated_artwork_or_file_actions(lk):
+    route=cognition.analyze('Print a forecast with a weather picture',use_openjev=False)
+    names={t['function']['name'] for t in lk._lo_tools_for_route('workspace',route)}
+    assert {'weather','print_text','printers_list'}<=names
+    assert not names & {'print_artwork','print_design','write_file','banner_render'}
+
+
+def test_written_date_weekdays_are_validated_too():
+    import pytest
+    with pytest.raises(ValueError,match='Saturday'):
+        tool_workflow.require_content('Friday, November 7, 2026','Print forecast')
+
+
+def test_uncertain_submission_is_not_reported_as_unsent():
+    text=tool_workflow.incomplete_response([['print_text']],print_attempted=True)
+    assert 'uncertain' in text and 'No print job was submitted' not in text

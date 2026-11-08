@@ -144,8 +144,14 @@ def clipboard_print(ui,queue=None):
     return design_summary(dict(result,destination=plan['destination']))
 
 
+def normalize_print_request(prompt):
+    # Conversational invitations still express a direct action, not a how-to query.
+    text=re.sub(r'^\s*(?:how|what) about\s+printing\b','Print',str(prompt),flags=re.I)
+    return re.sub(r'\bforcast\b','forecast',text,flags=re.I)
+
+
 def explicit_print(prompt, label):
-    text=' '.join(str(prompt or '').casefold().replace('’',"'").split())
+    text=' '.join(normalize_print_request(prompt or '').casefold().replace('’',"'").split())
     label=' '.join(label.casefold().split())
     if not label or not re.search(r'(?<!\w)'+re.escape(label)+r'(?!\w)',text):return False
     if re.match(r'^(?:what|why|when|where|did|does|is|was|i (?:said|asked|tried)|(?:can|could|would|should) (?!you\b))\b',text):return False
@@ -160,17 +166,19 @@ class PrintConversation:
         self.save=save or (lambda:None)
         self.request=self.state.get('request','')
         self.choices=self.state.get('choices',{})
+        self.labels=self.state.get('printer_labels',[])
 
     def persist(self):
-        self.state.update(request=self.request,choices=self.choices)
+        self.state.update(request=self.request,choices=self.choices,printer_labels=self.labels)
         self.save()
 
     def begin(self,prompt):
+        prompt=normalize_print_request(prompt)
         answer=prompt.strip().casefold().strip(' .!?')
         if answer in {'cancel','no','stop','never mind','nevermind'}:
             self.finish();return prompt
         if self.request and answer=='list available printers':return prompt
-        if self.request and answer in {'print it','print it now'}:return self.request
+        if self.request and answer in {'print it','print it now',"it didn't print",'it didnt print',"that didn't print"}:return self.request
         if re.search(r'\bprint\b',prompt,re.I):
             self.request=prompt;self.choices={};self.persist();return prompt
         if self.request:
@@ -181,11 +189,20 @@ class PrintConversation:
                 self.persist();return self.request
             # Printer labels still go through discovery/exact-label checks at send time.
             if re.fullmatch(r'[\w -]{1,80}printer',answer):
+                import difflib
+                ranked=sorted(((difflib.SequenceMatcher(None,answer,label.casefold()).ratio(),label) for label in self.labels),reverse=True)
+                if ranked and ranked[0][0]>=0.88 and (len(ranked)==1 or ranked[0][0]-ranked[1][0]>=0.1):
+                    prompt=ranked[0][1]
                 self.request=self.request+' on '+prompt.strip()
                 self.persist();return self.request
         self.finish();return prompt
 
+    def remember_printers(self,result):
+        self.labels=[p.get('label',p.get('name','')) for p in result.get('printers',[])]
+        self.persist()
+
     def catalog(self,result):
+        self.remember_printers(result)
         if not self.request:return
         rows=result.get('printers',[])
         self.choices={str(i):p.get('label',p.get('name','')) for i,p in enumerate(rows,1)}
