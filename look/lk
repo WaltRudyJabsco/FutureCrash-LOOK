@@ -12304,7 +12304,7 @@ def ollama_chat(force_search=False, initial_prompt=None, allow_start=True, host_
         weather_discourse=[m for m in messages if str(m.get("role") or "").lower() in {"user","assistant"}][-16:]
         weather_explicit=_lo_requires_weather(prompt)
         weather_followup=_lo_weather_followup(prompt, weather_discourse)
-        weather_required=("weather" in task_plan["tools"] if task_plan else bool(weather_forced_location or weather_explicit or weather_followup))
+        weather_required=bool(weather_forced_location or ("weather" in task_plan["tools"] if task_plan else weather_explicit or weather_followup))
         if task_plan:
             chosen=set(task_plan["tools"])
             mutation_required=bool(chosen & {"write_file","create_text_files","copy_path","move_path","remove_path","make_directory"})
