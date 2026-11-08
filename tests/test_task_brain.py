@@ -163,3 +163,11 @@ def test_tool_free_question_is_normalized_toward_clarification_not_action():
     value=dict(kind='task',relation='new',request='Clarify the intended destination',tools=[],required=[],question='Save a note or print it?')
     parsed=task_brain.parse(json.dumps(value),TOOLS)
     assert parsed['kind']=='propose' and parsed['tools']==[]
+
+
+def test_changing_subject_retires_the_pending_offer():
+    state={};proposed=plan();proposed.update(kind='propose',question='Shall I print?')
+    task_brain.remember(state,lambda:None,proposed,'Maybe paper','Shall I print?',[],[])
+    reply=dict(kind='reply',relation='new',request='Tell a joke',tools=[],required=[])
+    task_brain.remember(state,lambda:None,reply,'No, tell a joke instead','A joke',[],[])
+    assert 'brain_proposal' not in state

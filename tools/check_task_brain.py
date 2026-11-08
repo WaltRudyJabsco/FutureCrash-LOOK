@@ -1,7 +1,7 @@
 """Live shared-brain checks. Disposable state; no paper or production Notes writes.
 
 Real models and all three application entry points. The print transport is replaced
-with a recorded receipt; Notes writes use a disposable JSON file for verification.
+with a recorded receipt; Notes use the real store in a disposable directory.
 """
 import argparse
 import contextlib
@@ -57,10 +57,17 @@ def main():
             effects.append({'tool':'print_text','queue':queue,'text':text})
             return {'state':'queued','destination':queue,'id':'test-no-paper','receipt':{'job':'TEST-NO-PAPER'}}
         printing.quick_text=send
+        original_note=notebook.tool
+        store=notebook.Notebook(root/'notes',origin='task-proof')
+        notebook.Notebook=lambda:store
+        notebook.nudge_sync=lambda:None
         def note(tool,values):
             if tool!='notebook_capture':raise RuntimeError('Unexpected note operation '+tool)
+            assert values.get('target','all') in {'all','local'}, 'Unexpected note delivery target: '+str(values)
+            result=original_note(tool,values)
             effects.append({'tool':tool,**values});(root/'note.json').write_text(json.dumps(values))
-            return json.dumps({'ok':True,'id':'disposable-note','text':values.get('text')})
+            assert any('water' in row.get('body','').lower() or values['text'].splitlines()[0].lstrip('# ') == row['title'] for row in store.list(include_done=True))
+            return result
         notebook.tool=note
         original_chat=core.ollama_chat
         def chat(**kwargs):

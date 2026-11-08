@@ -129,7 +129,7 @@ def context(plan):
 def remember(state, save, plan, user, answer, successful, attempted, uncertain=False):
     if plan["kind"] == "propose":
         state["brain_proposal"] = dict(plan, updated=time.time())
-    elif plan["kind"] in {"task", "cancel"} or plan["relation"] == "replace":
+    elif plan["kind"] in {"task", "cancel"} or plan["relation"] in {"new", "replace"}:
         state.pop("brain_proposal", None)
     state["brain_task"] = dict(plan, user=user, answer=answer[:6000],
         successful=sorted(successful), attempted=sorted(attempted), updated=time.time(),

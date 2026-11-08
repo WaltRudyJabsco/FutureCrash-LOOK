@@ -59,7 +59,7 @@ weights or expand Jev's inference capabilities.
 
 Run `tools/check_task_brain.py` with a working Fabric. It exercises the real LO,
 Signal, and Albert entry points with the configured model and isolated state.
-Print transport is intercepted (no paper); Notes writes use a disposable fixture;
+Print transport is intercepted (no paper); Notes use their real store in a disposable directory;
 file writes use the actual filesystem tool in a temporary workspace. Assertions
 check content, tool selection, effect counts, and persisted file contents.
 Use `--dialogue` for live Museum discussion, numbered selections, uncertain-action
