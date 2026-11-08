@@ -111,3 +111,16 @@ def test_diagnostics_strip_url_secrets():
         endpoint='https://user:password@peer.example:7443/v1/artifacts?token=secret', stage='image upload')
     assert 'https://peer.example:7443/v1/artifacts' in str(error)
     assert all(value not in str(error) for value in ('password', 'token=', 'secret'))
+
+
+@pytest.mark.parametrize('output_format',['json',{'type':'object','properties':{'answer':{'type':'string'}}}])
+def test_structured_format_reaches_worker_packet(monkeypatch,output_format):
+    payload=setup_workers(monkeypatch,names=('good',))
+    payload['messages']=[{'role':'user','content':'Return structured data'}]
+    payload['format']=output_format
+    packets=[]
+    def opened(req,**kw):
+        packets.append(json.loads(req.data));return Response()
+    monkeypatch.setattr(client,'_open',opened)
+    list(client.stream_infer(payload,requires=['text']))
+    assert packets[0]['packet']['work']['input']['format']==output_format

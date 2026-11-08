@@ -1947,6 +1947,7 @@ def _stream_model_infer(handler, raw):
                    "keep_alive":inp.get("keep_alive",-1),
                    "options":inp.get("options") if isinstance(inp.get("options"),dict) else {}}
         if "think" in inp: payload["think"] = bool(inp.get("think"))
+        if inp.get("format") == "json" or isinstance(inp.get("format"),dict): payload["format"] = inp["format"]
         if isinstance(inp.get("tools"),list): payload["tools"] = inp["tools"]
         FABRIC_STORE.event(job["id"], "progress", "inference", f"{model} streaming", node=worker)
         SUP.progress(lease_id, "inference", f"{model} streaming")

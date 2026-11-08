@@ -193,3 +193,15 @@ def test_background_worker_discards_old_stream_backlog_but_runs_normal_jobs(work
     execute.assert_called_once()
     assert execute.call_args.args[1] == normal_job['id']
     assert sup.status()['active'] is None
+
+
+@pytest.mark.parametrize('output_format',['json',{'type':'object','properties':{'answer':{'type':'string'}}}])
+def test_structured_format_reaches_ollama(worker,monkeypatch,output_format):
+    import json
+    sent=[]
+    monkeypatch.setattr(node,'_curator_prepare_packet',lambda *a,**k:None)
+    def opened(req,**kw):
+        sent.append(json.loads(req.data));return Upstream()
+    monkeypatch.setattr(node.urllib.request,'urlopen',opened)
+    node._stream_model_infer(Handler(),packet(format=output_format))
+    assert sent[0]['format']==output_format

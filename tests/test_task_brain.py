@@ -59,6 +59,7 @@ def test_redundant_provider_closing_brace_is_safe_but_trailing_instructions_are_
 
 # Keep the real executor loop while scripting only model output and tool effects.
 from test_lo_stream import chat
+from test_media_request_regressions import lk
 
 def test_repeated_effect_runs_once_in_real_executor(chat,monkeypatch,tmp_path):
     import notebook
@@ -105,3 +106,60 @@ def test_reply_never_promotes_stray_obligations_to_tools():
     value={'kind':'reply','relation':'new','request':'Suggest a title','tools':[],'required':[['notebook_actions']]}
     parsed=task_brain.parse(json.dumps(value),TOOLS)
     assert parsed['tools']==[] and parsed['required']==[]
+
+
+def test_proposal_is_stored_without_execution_and_survives_a_question(chat,monkeypatch,tmp_path):
+    lk,*_=chat
+    proposed=plan();proposed.update(kind='propose',question='Shall I print this on Test Desk?')
+    monkeypatch.setattr(lk,'_lo_interpret_task',lambda *a,**k:proposed)
+    monkeypatch.setattr(lk,'_fabric_stream_chat',lambda *a,**k:pytest.fail('proposal must not execute'))
+    state={}
+    lk.ollama_chat(initial_prompt='Put this somewhere useful',access_profile='workspace',workspace_override=tmp_path,
+        one_shot=True,task_context=(state,lambda:None))
+    assert state['brain_task']['status']=='proposed'
+    reply=dict(kind='reply',relation='continue',request='Explain the offer',tools=[],required=[])
+    task_brain.remember(state,lambda:None,reply,'What would that do?','Explanation',[],[])
+    payload=json.loads(task_brain.planning_messages('yes',[],state,TOOLS)[-1]['content'])
+    assert payload['pending_proposal']['question']==proposed['question']
+    task_brain.remember(state,lambda:None,dict(reply,kind='cancel'),'Never mind','Cancelled',[],[])
+    assert 'brain_proposal' not in state
+
+
+def test_expired_proposal_does_not_supply_authority():
+    state={'brain_proposal':dict(plan(),updated=time.time()-task_brain.MAX_TASK_AGE-1)}
+    payload=json.loads(task_brain.planning_messages('yes',[],state,TOOLS)[-1]['content'])
+    assert not payload['pending_proposal']
+
+
+def test_proposal_requires_concrete_question_and_valid_capabilities():
+    proposed=plan();proposed['kind']='propose'
+    with pytest.raises(ValueError):task_brain.parse(json.dumps(proposed),TOOLS)
+    proposed['question']='Shall I print the briefing on Test Desk?'
+    assert task_brain.parse(json.dumps(proposed),TOOLS)['kind']=='propose'
+
+
+def test_numbered_answer_keeps_the_actual_list_in_executor_context():
+    import tool_workflow
+    user={'role':'user','content':'1'}
+    offered={'role':'assistant','content':'1. Acrobats\n2. Seashore'}
+    result=tool_workflow.envelope([offered,user],user)
+    assert '1. Acrobats' in str(result)
+    assert '2. Seashore' in str(result)
+
+
+def test_interpreter_repairs_once_without_tools(lk,monkeypatch):
+    calls=[]
+    def stream(payload,**kwargs):
+        calls.append(payload.copy())
+        yield {'message':{'content':'{"broken":' if len(calls)==1 else json.dumps(plan())},'done':True}
+    monkeypatch.setattr(lk,'_fabric_stream_chat',stream)
+    assert lk._lo_interpret_task('Print this',[],{},TOOLS,'','model',True)==plan()
+    assert len(calls)==2 and all('tools' not in p and p['format']=='json' for p in calls)
+    monkeypatch.setattr(lk,'_fabric_stream_chat',lambda *a,**k:iter([{'message':{'content':'broken'},'done':True}]))
+    with pytest.raises(ValueError):lk._lo_interpret_task('Print this',[],{},TOOLS,'','model',True)
+
+
+def test_tool_free_question_is_normalized_toward_clarification_not_action():
+    value=dict(kind='task',relation='new',request='Clarify the intended destination',tools=[],required=[],question='Save a note or print it?')
+    parsed=task_brain.parse(json.dumps(value),TOOLS)
+    assert parsed['kind']=='propose' and parsed['tools']==[]
