@@ -1,7 +1,7 @@
 """Live shared-brain checks. Disposable state; no paper or production Notes writes.
 
 Real models and all three application entry points. The print transport is replaced
-with a recorded receipt; Notes writes use a disposable JSON file for verification.
+with a recorded receipt; Notes use the real store in a disposable directory.
 """
 import argparse
 import contextlib
@@ -20,6 +20,7 @@ def main():
     parser=argparse.ArgumentParser(description=__doc__)
     parser.add_argument('--surface',choices=['LO','Signal','Albert'])
     parser.add_argument('--followups-only',action='store_true')
+    parser.add_argument('--dialogue',action='store_true',help='Exercise conversational choices and proposed actions')
     args=parser.parse_args()
     core=load('task_live_core',ROOT/'look/lk');lo_engine._CORE=core
     client=load('task_live_fabric_client',ROOT/'core/fabric_client.py')
@@ -56,10 +57,16 @@ def main():
             effects.append({'tool':'print_text','queue':queue,'text':text})
             return {'state':'queued','destination':queue,'id':'test-no-paper','receipt':{'job':'TEST-NO-PAPER'}}
         printing.quick_text=send
+        original_note=notebook.tool
+        store=notebook.Notebook(root/'notes',origin='task-proof')
+        notebook.Notebook=lambda:store
+        notebook.nudge_sync=lambda:None
         def note(tool,values):
             if tool!='notebook_capture':raise RuntimeError('Unexpected note operation '+tool)
+            result=original_note(tool,values)
             effects.append({'tool':tool,**values});(root/'note.json').write_text(json.dumps(values))
-            return json.dumps({'ok':True,'id':'disposable-note','text':values.get('text')})
+            assert any('water' in row.get('body','').lower() or values['text'].splitlines()[0].lstrip('# ') == row['title'] for row in store.list(include_done=True))
+            return result
         notebook.tool=note
         original_chat=core.ollama_chat
         def chat(**kwargs):
@@ -73,7 +80,7 @@ def main():
             return result
         core._run_filesystem_tool=file_tool
         original=core._fabric_stream_chat
-        allowed={'print_text','printers_list','notebook_capture','write_file'}
+        allowed={'print_text','printers_list','notebook_capture','write_file','museum_search'}
         def inference(payload_obj,**kwargs):
             accumulated=""
             for row in original(payload_obj,**kwargs):
@@ -83,7 +90,9 @@ def main():
                     if call.get('function',{}).get('name') not in allowed:raise RuntimeError('Blocked unexpected test effect '+str(call))
                 yield row
         core._fabric_stream_chat=inference
+        last_rows=[]
         def call(surface,prompt):
+            nonlocal last_rows
             start=time.monotonic();before=len(effects)
             if surface=='LO':
                 events=lo_engine.EventCollector()
@@ -95,9 +104,10 @@ def main():
             elif surface=='Signal':answer,rows=signal.native_lo_chat('workspace',prompt,td,[],list(history),'proof')
             else:
                 result=albert.cognition_json(prompt,session='proof');answer=result['text'];rows=result.get('lo_events',[])
+            last_rows=rows
             interpretations=[r for r in rows if r.get('event')=='task_interpreted']
             errors=[r for r in rows if r.get('event') in {'error','task_interpretation_failed'}]
-            print(json.dumps({'surface':surface,'prompt':prompt,'seconds':round(time.monotonic()-start,2),'answer':answer,'plan':interpretations,'errors':errors,'effects':effects[before:]}),flush=True)
+            print(json.dumps({'surface':surface,'prompt':prompt,'seconds':round(time.monotonic()-start,2),'answer':answer,'plan':interpretations,'errors':errors,'calls':[r.get('tool') for r in rows if r.get('event')=='tool_start'],'effects':effects[before:]}),flush=True)
             assert interpretations, 'No semantic interpretation: '+str(errors)
             history.extend([{'role':'user','content':prompt},{'role':'assistant','content':answer}])
             return answer,effects[before:]
@@ -107,7 +117,44 @@ def main():
             assert not out and '?' in answer
             answer,out=call(surface,'The message is: Meet me at seven.')
             assert len(out)==1 and out[0]['tool']=='print_text' and 'seven' in out[0]['text'].lower()
+        def check_dialogue(surface):
+            history.clear();sessions.clear()
+            answer,out=call(surface,'Find a Renoir in our Museum and tell me a little about it.')
+            assert not out and 'Renoir' in answer and 'which one' not in answer.lower(), answer
+            answer,out=call(surface,'What unifies his work?')
+            assert not out and len(answer)>100 and not any(r.get('event')=='tool_start' for r in last_rows), answer
+            # Reproduce the user's actual offered-choice transcript, independent of
+            # whether this model volunteers a menu on its first answer.
+            history.clear();sessions.clear()
+            history.extend([{'role':'user','content':'Tell me about one of these paintings.'},
+                {'role':'assistant','content':'Which interests you? 1. Acrobats at the Cirque Fernando by Renoir (1879). 2. By the Seashore by Renoir (1883).'}])
+            answer,out=call(surface,'1')
+            assert not out and ('Acrobats' in answer or 'Fernando' in answer) and len(answer)>200 and 'print' not in answer.lower(), answer
+            history.clear();sessions.clear()
+            answer,out=call(surface,'Here is my checklist: pack water, take a hat. Put it somewhere useful, but I am not sure whether I want paper or a saved note.')
+            assert not out and '?' in answer, answer
+            assert any(v.get('brain_proposal') for v in sessions.values()), sessions
+            answer,out=call(surface,'What would that do?')
+            assert not out and answer, answer
+            answer,out=call(surface,'Save it as a note instead. Call it Walk Kit.')
+            assert len(out)==1 and out[0]['tool']=='notebook_capture' and 'water' in out[0].get('text','').lower(),out
+            history.clear();sessions.clear()
+            answer,out=call(surface,'Suggest saving a note called Lunch Plan containing soup and bread. Ask before you save it.')
+            assert not out and '?' in answer, answer
+            answer,out=call(surface,'Yes, do that.')
+            assert len(out)==1 and out[0]['tool']=='notebook_capture' and 'soup' in out[0].get('text','').lower(),out
+            answer,out=call(surface,'Thanks, yes.')
+            assert not out,out
+            history.clear();sessions.clear()
+            answer,out=call(surface,'Suggest printing the message Hello on Test Desk, but ask me before doing it.')
+            assert not out and '?' in answer, answer
+            answer,out=call(surface,'No, forget it. Just tell me a short joke.')
+            assert not out and answer,answer
+            assert not any(v.get('brain_proposal') for v in sessions.values()),sessions
         for surface in [args.surface] if args.surface else ['LO','Signal','Albert']:
+            if args.dialogue:
+                check_dialogue(surface)
+                continue
             if args.followups_only:
                 check_followup(surface)
                 continue

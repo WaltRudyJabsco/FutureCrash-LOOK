@@ -1394,7 +1394,7 @@ def tools():
         ('notebook_read','Read the full text of a saved notebook record by its ID or position in the default LKN list. First note means position 1; positions follow newest updated first.',{'id':{'type':'string'},'position':{'type':'integer','minimum':1},'include_done':{'type':'boolean'}},[]),
         ('notebook_capture','Save a complete note, task or reminder when requested. Compose the actual content first; text is the full Markdown, with the title on its own first line and the body below. Never send an unfinished template.',
          {'text':{'type':'string'},'kind':{'type':'string','enum':['note','task','reminder']},'project':{'type':'string'},
-          'due':{'type':'string'},'remind_at':{'type':'string'},'target':{'type':'string'}},['text']),
+          'due':{'type':'string'},'remind_at':{'type':'string'},'target':{'type':'string','description':'Optional reminder-alert recipient node name, or all. Omit for ordinary notes: this does not choose where a note is saved. Put the note title on the first line of text.'}},['text']),
         ('notebook_complete','Complete a saved note/task/reminder explicitly requested by the user.',{'id':{'type':'string'}},['id']),
         ('notebook_update','Edit or append to an existing note/task/reminder only when requested. Read it first; use its id and revision. Change remind_at to reschedule, or null to remove an alert. Preserve unspecified fields.',
          {'id':{'type':'string'},'revision':{'type':'string'},'append_text':{'type':'string'},

@@ -6991,10 +6991,18 @@ def _lo_interpret_task(prompt,messages,state,tools,base,model,fabric_mode,events
     payload={"model":model or _active_ollama_model(), "messages":task_brain.planning_messages(
         prompt,messages,state,tools), "stream":False,"think":False,"format":"json",
         "options":{"temperature":0,"num_ctx":8192,"num_predict":1000}}
-    with _activity("understanding task"):
-        stream=(_fabric_stream_chat(payload,events=events,route={}) if fabric_mode else _ollama_stream_chat(base,payload,events=events))
-        interpreted,_=lo_stream.collect_response(stream,round_number=0,on_first_token=lambda:None,on_thinking=lambda text:None,events=events)
-    return task_brain.parse(interpreted.get("content",""),tools)
+    # Repair malformed structured output once, without executing any tools. Older
+    # workers may not yet forward JSON mode during a rolling update.
+    for attempt in range(2):
+        with _activity("understanding task"):
+            stream=(_fabric_stream_chat(payload,events=events,route={}) if fabric_mode else _ollama_stream_chat(base,payload,events=events))
+            interpreted,_=lo_stream.collect_response(stream,round_number=0,on_first_token=lambda:None,on_thinking=lambda text:None,events=events)
+        try:
+            return task_brain.parse(interpreted.get("content",""),tools)
+        except (ValueError,TypeError) as exc:
+            if attempt:raise
+            payload["messages"] += [{"role":"assistant","content":interpreted.get("content","")[:12000]},
+                {"role":"user","content":"Return the interpretation as valid JSON matching the contract. Do not execute anything. Validation error: "+str(exc)}]
 
 
 def _lo_cognition_route(prompt,use_openjev=True):
@@ -11965,14 +11973,14 @@ def ollama_chat(force_search=False, initial_prompt=None, allow_start=True, host_
                 events.emit("goal_started",**turn_goal.public())
                 events.emit("plan_created",goal_id=turn_goal.id,steps=list(turn_goal.steps))
 
-        if task_plan and task_plan.get('missing'):
+        if task_plan and (task_plan.get('missing') or task_plan['kind']=='propose'):
             question=task_plan['question']
             task_brain.remember(semantic_state,semantic_save,task_plan,prompt,question,[],[])
             messages.extend([{'role':'user','content':original_user_prompt},{'role':'assistant','content':question}])
             print("\n"+_lo_label("lo","35")+"\n"+_ollama_markup(question)+"\n")
             if events:
                 events.emit('response',text=question)
-                events.emit('request_done',status='needs_input',rounds=0,tool_calls=0)
+                events.emit('request_done',status=('proposal' if task_plan['kind']=='propose' else 'needs_input'),rounds=0,tool_calls=0)
             if one_shot:return 0
             continue
 
@@ -12557,7 +12565,7 @@ def ollama_chat(force_search=False, initial_prompt=None, allow_start=True, host_
                     tools.append(web_tool)
                 import tool_workflow
                 if task_plan or tool_workflow.active(prompt,getattr(turn_route,"families",[])):
-                    payload_obj["messages"]=tool_workflow.envelope(messages,user_message,continuation=bool(task_plan and task_plan["relation"]!="new"))
+                    payload_obj["messages"]=tool_workflow.envelope(messages,user_message,continuation=bool(task_plan and task_plan["relation"]!="new"),tools=tools)
                 if completion_recovery_tools:
                     tools=[t for t in tools if t.get('function',{}).get('name') in completion_recovery_tools]
                 payload_obj["tools"] = tools

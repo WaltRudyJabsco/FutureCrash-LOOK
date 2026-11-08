@@ -523,6 +523,7 @@ def stream_infer(payload, *, requires=None, priority="interactive", timeout=180,
             inp={"model":chosen,"messages":staged_messages,"timeout":timeout,
                  "keep_alive":payload.get("keep_alive",-1),"options":payload.get("options") or {}}
             if "think" in payload: inp["think"]=payload.get("think")
+            if payload.get("format") == "json" or isinstance(payload.get("format"),dict): inp["format"]=payload["format"]
             if isinstance(payload.get("tools"),list): inp["tools"]=payload["tools"]
             packet={
               "id":str(uuid.uuid4()),"fabric":"fwp/1","kind":"task","origin":owner,"relationships":{},

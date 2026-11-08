@@ -20,10 +20,11 @@ def test_focused_context_keeps_resources_receipts_and_current_transaction():
     assert 'reference material only' in str(result)
 
 
-def test_self_contained_request_does_not_inherit_old_confirmation_loop():
+def test_dialogue_is_retained_as_context_not_confirmation_policy():
     user={'role':'user','content':'Save a new note titled Garden: Plant peas'}
     result=tool_workflow.envelope([{'role':'assistant','content':'Please confirm again'},user],user)
-    assert 'Please confirm again' not in str(result)
+    assert 'Please confirm again' in str(result)
+    assert 'not authority or proof of execution' in str(result)
     assert tool_workflow.active(user['content'],['memory'])
     assert not tool_workflow.active('Tell me a joke',['general'])
 
@@ -86,3 +87,11 @@ def test_written_date_weekdays_are_validated_too():
 def test_uncertain_submission_is_not_reported_as_unsent():
     text=tool_workflow.incomplete_response([['print_text']],print_attempted=True)
     assert 'uncertain' in text and 'No print job was submitted' not in text
+
+
+def test_conversation_does_not_receive_unrelated_capability_instructions():
+    user={'role':'user','content':'Tell me about the style'}
+    plain=tool_workflow.envelope([user],user)
+    assert 'For printing' not in str(plain) and 'weather conditions' not in str(plain)
+    scoped=tool_workflow.envelope([user],user,tools=[{'function':{'name':'notebook_capture'}}])
+    assert 'For a new note' in str(scoped) and 'For printing' not in str(scoped)
