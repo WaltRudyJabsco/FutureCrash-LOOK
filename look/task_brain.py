@@ -102,9 +102,9 @@ def parse(text, tools):
         raise ValueError("Invalid missing inputs")
     if not isinstance(question,str) or len(question)>1000 or (missing and not question.strip()):
         raise ValueError("Missing inputs need a question")
-    # A tool-free clarification is safe even if a small model labels it task.
-    # Normalize toward asking, never toward granting an executable capability.
-    if value["kind"] == "task" and not selected and not required and question.strip():
+    # An unanswered question is not an executable plan, even when a small
+    # model labels it task. Normalize toward asking, never toward permission.
+    if value["kind"] == "task" and not missing and question.strip():
         value["kind"] = "propose"
     if value["kind"] == "task" and (not selected or not required):
         raise ValueError("Task needs a capability")

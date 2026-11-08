@@ -171,3 +171,9 @@ def test_changing_subject_retires_the_pending_offer():
     reply=dict(kind='reply',relation='new',request='Tell a joke',tools=[],required=[])
     task_brain.remember(state,lambda:None,reply,'No, tell a joke instead','A joke',[],[])
     assert 'brain_proposal' not in state
+
+
+def test_unanswered_question_blocks_execution_even_with_selected_tools():
+    value=plan(question='Shall I print the briefing?')
+    parsed=task_brain.parse(json.dumps(value),TOOLS)
+    assert parsed['kind']=='propose' and parsed['tools']==value['tools']
