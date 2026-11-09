@@ -247,3 +247,47 @@ def test_reported_download_typo_and_link_separator():
 def isolated_receipt_archive(tmp_path,monkeypatch):
     from core import receipt_cards
     monkeypatch.setattr(receipt_cards,'root',lambda:tmp_path/'receipt-cards')
+
+
+def test_terminal_progress_reuses_one_line_and_finishes_cleanly(monkeypatch):
+    import io
+    stream=io.StringIO();stream.isatty=lambda:True
+    monkeypatch.setattr(ytd.sys,'stdout',stream);monkeypatch.setenv('TERM','xterm-256color')
+    rows=iter([{'stage':'downloading','progress':{'downloaded_bytes':n,'total_bytes':100}} for n in (10,50,100)]+[{'stage':'complete','progress':{'downloaded_bytes':100,'total_bytes':100}}])
+    monkeypatch.setattr(ytd,'request',lambda **kw:{'job':next(rows)})
+    monkeypatch.setattr(ytd.time,'sleep',lambda _:None)
+    assert ytd.wait('job','local')['stage']=='complete'
+    assert stream.getvalue().count('\n')==1
+    assert stream.getvalue().count('\r\033[2K')==4
+    assert '50.0%' in stream.getvalue()
+
+
+def test_redirected_progress_only_logs_stage_changes(monkeypatch):
+    import io
+    stream=io.StringIO();monkeypatch.setattr(ytd.sys,'stdout',stream)
+    rows=iter([{'stage':stage,'progress':{'downloaded_bytes':n}} for n,stage in enumerate(['queued','downloading','downloading','complete'])])
+    monkeypatch.setattr(ytd,'request',lambda **kw:{'job':next(rows)})
+    monkeypatch.setattr(ytd.time,'sleep',lambda _:None)
+    ytd.wait('job','local')
+    assert len(stream.getvalue().splitlines())==3
+    assert '\033' not in stream.getvalue()
+
+
+def test_progress_fits_narrow_terminals_and_unknown_size_moves():
+    row={'stage':'downloading','progress':{'downloaded_bytes':500}}
+    assert ytd.progress_line(row,80,0)!=ytd.progress_line(row,80,1)
+    assert '%' not in ytd.progress_line(row,80)
+    for width in (10,30,80,140):assert len(ytd.progress_line(row,width))<width
+
+
+def test_progress_restores_newline_on_connection_failure(monkeypatch):
+    import io
+    stream=io.StringIO();stream.isatty=lambda:True
+    monkeypatch.setattr(ytd.sys,'stdout',stream);monkeypatch.setenv('TERM','xterm')
+    calls=[]
+    def request(**kw):
+        if calls:raise RuntimeError('offline')
+        calls.append(True);return {'job':{'stage':'downloading'}}
+    monkeypatch.setattr(ytd,'request',request);monkeypatch.setattr(ytd.time,'sleep',lambda _:None)
+    with pytest.raises(RuntimeError,match='offline'):ytd.wait('job','local')
+    assert stream.getvalue().endswith('\n')

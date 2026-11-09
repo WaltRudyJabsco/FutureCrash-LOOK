@@ -1,6 +1,6 @@
 """LOOK download client. Media bytes remain on the selected Fabric node."""
 from __future__ import annotations
-import argparse, json, re, sys, time
+import argparse, json, os, re, shutil, sys, time
 import urllib.parse, urllib.request, urllib.error
 import fabric_files
 
@@ -79,17 +79,46 @@ def progress(row):
     return f"{row['stage']} · {done/1048576:.2f} MiB{percent}{speed}{eta}"
 
 
+def progress_line(row, width, frame=0):
+    """Fit the display inside one terminal row, including a spare wrapping cell."""
+    info=row.get('progress') or {}
+    total=info.get('total_bytes') or info.get('total_bytes_estimate') or 0
+    done=info.get('downloaded_bytes') or 0
+    available=max(1,width-1)
+    bar_width=min(20,max(4,available//5))
+    if total:
+        filled=round(bar_width*min(1,max(0,done/total)))
+        bar='['+'#'*filled+'-'*(bar_width-filled)+']'
+    else:
+        # Unknown totals show activity, never a fabricated completion percentage.
+        position=frame%bar_width
+        bar='['+' '*position+'>'+ ' '*(bar_width-position-1)+']'
+    text=bar+' '+progress(row)
+    return text if len(text)<=available else text[:max(0,available-1)]+'…'
+
+
 def wait(job,node):
-    last=''
+    interactive=sys.stdout.isatty() and os.environ.get('TERM')!='dumb'
+    last='';last_stage=None;frame=0;drawn=False
     try:
         while True:
-            row=request(node=node,job=job)['job']; line=progress(row)
-            if line!=last: print(line,flush=True); last=line
+            row=request(node=node,job=job)['job']
+            if interactive:
+                line=progress_line(row,shutil.get_terminal_size().columns,frame)
+                if line!=last:
+                    print('\r\033[2K'+line,end='',flush=True);drawn=True;last=line
+            elif row['stage']!=last_stage:
+                # Redirected logs retain lifecycle events without per-second spam.
+                print(progress(row),flush=True)
+            last_stage=row['stage'];frame+=1
             if row['stage'] in {'complete','failed','cancelled','expired'}: return row
             time.sleep(1)
     except KeyboardInterrupt:
-        print(f'\nDownload continues. Resume: lk ytd status {job} --node {node} --wait')
+        if drawn:print();drawn=False
+        print(f'Download continues. Resume: lk ytd status {job} --node {node} --wait')
         return None
+    finally:
+        if drawn:print(flush=True)
 
 
 def main(argv=None):
