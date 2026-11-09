@@ -100,9 +100,34 @@ def portal_capture(output):
     if result.returncode or not output.exists():raise ValueError(result.stderr.strip() or result.stdout.strip() or 'Screenshot cancelled')
 
 
+def capture_area(destination=None):
+    """Let the desktop select a region; cancellation preserves the clipboard."""
+    with tempfile.TemporaryDirectory(prefix='look-shot-area-') as folder:
+        path=Path(folder)/'area.png'
+        if sys.platform=='darwin':
+            print('Drag a rectangle to capture · Esc cancels.')
+            result=subprocess.run(['/usr/sbin/screencapture','-i','-s','-x','-t','png',str(path)],
+                                  capture_output=True,text=True)
+            if result.returncode:
+                raise ValueError(result.stderr.strip() or 'Area capture failed; nothing copied')
+            if not path.is_file():
+                print('Screenshot cancelled. Nothing copied.');return 0
+        else:
+            print('Choose Area in the desktop screenshot picker, then drag your rectangle.')
+            portal_capture(path)
+        if not path.is_file() or not path.stat().st_size:
+            raise ValueError('No image returned; nothing copied')
+        if destination:
+            with Path(destination).open('xb') as out:out.write(path.read_bytes())
+        copy_image(path)
+    print('Area screenshot copied to clipboard · lk print clip to print.')
+    if destination:print('Saved '+str(destination))
+    return 0
+
+
 def main(argv=None):
     parser=argparse.ArgumentParser(prog='lk shot',description=__doc__)
-    parser.add_argument('screens',nargs='?',help='all, 2, 1,3, or record; omit for numbered picker')
+    parser.add_argument('screens',nargs='?',help='all, 2, 1,3, area, or record; omit for numbered picker')
     parser.add_argument('--delay',type=int,default=3,help='Countdown seconds (0–60, default 3)')
     parser.add_argument('--save',type=Path,help='Also save PNG to this file (existing files are not overwritten)')
     args=parser.parse_args(argv)
@@ -115,6 +140,9 @@ def main(argv=None):
             args.save=args.save.expanduser().absolute()
             if args.save.suffix.lower()!='.png':raise ValueError('Use a .png filename for screenshots')
             if args.save.exists():raise ValueError('Save destination already exists; choose a new filename')
+        if args.screens=='area':
+            if args.delay!=3:raise ValueError('Area capture uses desktop selection timing; omit --delay')
+            return capture_area(args.save)
         if sys.platform!='darwin' and (os.environ.get('WAYLAND_DISPLAY') or os.environ.get('XDG_SESSION_TYPE')=='wayland'):
             if args.screens:raise ValueError('Wayland selects screens in the desktop picker. Run lk shot without display numbers.')
             print('Opening the desktop screenshot picker. Selection and timing are controlled by your desktop.')
