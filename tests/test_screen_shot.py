@@ -93,3 +93,34 @@ def test_picker_selection_capture_runs_in_parent(monkeypatch,tmp_path):
     capture=Mock();monkeypatch.setattr(shot,'capture_selected',capture)
     assert shot.main(['1'])==0
     capture.assert_called_once_with([[0,0,2560,1440]],Path('/test/python'),None)
+
+
+def test_mac_area_copies_and_saves_only_selected_image(tmp_path,monkeypatch):
+    monkeypatch.setattr(shot.sys,'platform','darwin')
+    def run(args,**kwargs):
+        assert args[1:6]==['-i','-s','-x','-t','png']
+        Path(args[-1]).write_bytes(b'area-png')
+        return Mock(returncode=0)
+    monkeypatch.setattr(shot.subprocess,'run',run)
+    copy=Mock();monkeypatch.setattr(shot,'copy_image',copy)
+    out=tmp_path/'area.png'
+    assert shot.main(['area','--save',str(out)])==0
+    assert out.read_bytes()==b'area-png'
+    copy.assert_called_once()
+    assert shot.main(['area','--save',str(out)])==1
+
+
+def test_cancelled_mac_area_preserves_clipboard(monkeypatch):
+    monkeypatch.setattr(shot.sys,'platform','darwin')
+    monkeypatch.setattr(shot.subprocess,'run',Mock(return_value=Mock(returncode=0)))
+    copy=Mock();monkeypatch.setattr(shot,'copy_image',copy)
+    assert shot.main(['area'])==0
+    copy.assert_not_called()
+
+
+def test_linux_area_uses_interactive_portal(monkeypatch):
+    monkeypatch.setattr(shot.sys,'platform','linux')
+    monkeypatch.setattr(shot,'portal_capture',lambda path:path.write_bytes(b'png'))
+    copy=Mock();monkeypatch.setattr(shot,'copy_image',copy)
+    assert shot.main(['area'])==0
+    copy.assert_called_once()
