@@ -59,6 +59,10 @@ def run(ui):
         while True:
             size=shutil.get_terminal_size((100,30));width=max(1,size.columns-1)
             colors=terminal_style.list_colors()
+            blue,muted=clipboard_shelf.command_inks(colors)
+            light=terminal_style.luminance(colors.get('_palette',{}).get('background','#111111'))>.3
+            brass='\033[38;2;126;91;34m' if light else '\033[38;2;214;179;106m'
+            reset='\033[0m'
             hints=clipboard_shelf.command_rows([('Type','search'),('↑↓','choose'),('PgUp/PgDn','page'),
                 ('Home/End','first/last'),('Enter','back' if details else 'edit command' if selected else 'browse'),
                 ('Tab','options/help'),('Esc/←','back'),('Ctrl-Q','quit')],width,colors)
@@ -69,14 +73,19 @@ def run(ui):
             lines=help_lines(selected,width) if details else visible
             index=min(index,max(0,len(lines)-1));top=max(0,index-height+1)
             print('\033[2J\033[H',end='')
-            for line in header:print(ui._ansi_clip(line,width))
-            print(ui._ansi_clip('LOOK COMMANDS'+(' · '+selected if selected else ' · l opens files'),width))
+            for n,line in enumerate(header):
+                ink=brass if n==0 else muted
+                line=re.sub(r'\blk(?: home| o)?\b|\blo\b',lambda m:blue+m[0]+ink,line)
+                print(ui._ansi_clip(ink+line+reset,width))
+            print(ui._ansi_clip(brass+'LOOK COMMANDS'+muted+(' · '+selected if selected else ' · l opens files')+reset,width))
             for n,row in enumerate(lines[top:top+height],top):
                 if details:print(row)
                 else:
-                    text=f'{row[0]}  · {row[2]}'
-                    print(ui._ansi_clip(ui._c('› '+text,'1;36') if n==index else '  '+text,width))
-            print(ui._ansi_clip('FILTER '+query,width) if not details else 'OPTIONS / HELP · read only')
+                    mark='› ' if n==index else '  '
+                    emphasis='\033[1m' if n==index else ''
+                    text=emphasis+blue+mark+row[0]+reset+muted+'  · '+row[2]+reset
+                    print(ui._ansi_clip(text,width))
+            print(ui._ansi_clip(blue+'FILTER '+muted+query+reset,width) if not details else blue+'OPTIONS / HELP'+muted+' · read only'+reset)
             print('\n'.join(hints),end='',flush=True)
             key=ui._read_tty_key(fd)
             if key in {'\x11','\x03'}:break
