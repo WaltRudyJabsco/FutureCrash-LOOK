@@ -1,4 +1,6 @@
 """Read-only command discovery; selection edits the shell, never executes a tool."""
+import contextlib
+import io
 import json
 import re
 import shutil
@@ -44,6 +46,12 @@ def run(ui):
         for name,rows in catalog.items():
             for template,category,description in forms(rows):print(f'{template} · {description}')
         return 0
+    # Capture once: redraws must not repeat network probes or change the artwork.
+    welcome=[]
+    if hasattr(ui,'home'):
+        buffer=io.StringIO()
+        with contextlib.redirect_stdout(buffer):ui.home()
+        welcome=buffer.getvalue().rstrip().splitlines()
     fd=sys.stdin.fileno();old=termios.tcgetattr(fd)
     selected=None;query='';index=0;details=False
     try:
@@ -54,12 +62,14 @@ def run(ui):
             hints=clipboard_shelf.command_rows([('Type','search'),('↑↓','choose'),('PgUp/PgDn','page'),
                 ('Home/End','first/last'),('Enter','back' if details else 'edit command' if selected else 'browse'),
                 ('Tab','options/help'),('Esc/←','back'),('Ctrl-Q','quit')],width,colors)
-            height=max(1,size.lines-len(hints)-4)
+            header=welcome if not selected and len(welcome)<=size.lines-len(hints)-12 else []
+            height=max(1,size.lines-len(hints)-4-len(header))
             rows=forms(catalog[selected]) if selected else [('lk '+name,rows[0][1],rows[0][2]) for name,rows in catalog.items()]
             visible=[r for r in rows if all(t in ' '.join(r).casefold() for t in query.casefold().split())]
             lines=help_lines(selected,width) if details else visible
             index=min(index,max(0,len(lines)-1));top=max(0,index-height+1)
             print('\033[2J\033[H',end='')
+            for line in header:print(ui._ansi_clip(line,width))
             print(ui._ansi_clip('LOOK COMMANDS'+(' · '+selected if selected else ' · l opens files'),width))
             for n,row in enumerate(lines[top:top+height],top):
                 if details:print(row)

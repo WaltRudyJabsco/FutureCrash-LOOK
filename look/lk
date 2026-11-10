@@ -1977,9 +1977,9 @@ def home():
     if "l" in active:
         parts.append(f"{_c('l','36')} look around")
     else:
-        parts.append(f"{_c('lk','36')} look around")
+        parts.append(f"{_c('lk .','36')} look around")
     parts.append(f"{_c('lo' if 'lo' in active else 'lk o','36')} ask")
-    parts.append(f"{_c('lk','36')} inspect")
+    parts.append(f"{_c('lk','36')} commands")
     parts.append(f"{_c('lk home','36')} home")
     if "fc" in active:
         parts.append(f"{_c('fc','36')} Future Crash")
