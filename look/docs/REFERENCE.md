@@ -62,7 +62,7 @@ lk tasks [TEXT|ACTION] [OPTIONS]
 lk reminders [TEXT|ACTION] [OPTIONS]
   [files] Notebook reminder view
 lk
-  [files] Open interactive LOOK in the current directory
+  [meta] Browse commands, subcommands, options and help; l opens files
 l [PATH|WORD]
   [files] Smart jump + interactive LOOK
 ll [PATH|WORD]
@@ -741,6 +741,7 @@ AI / OLLAMA
   lk ollama access MODE set conservative/workspace/power/unsafe
 
 MEMORY + CRAFT
+  lk memory retry      retry retained failed background memory jobs
   lk memory            inspect Living Memory: core summary, durable domains/atoms,
                        recent conversation, candidates, compiler diagnostics
                        candidates are cheap hypotheses; durable memory must earn promotion
@@ -754,9 +755,8 @@ MEMORY + CRAFT
   lk memory add-local TEXT [--importance N]
   lk memory sync       merge shared/persona memory across live Fabric nodes
                        add with importance 1–100
-  lk memory retry      retry retained failed background memory jobs
   lk memory forget TEXT
-                       remove matching local and shared user memories; replicate deletion
+                       remove matching candidate + durable atomic memories
   lk forget TEXT       short form of memory forget
   lk memory compact    force domain/core summary recompilation now
   lk memory prune      remove known reasoning/meta/environmental artifacts
@@ -1037,6 +1037,7 @@ Parser arguments and recognized option tokens (grouped by handler):
 --node
 --pages
 --paper-limit-mm
+--preferred-receipt — Use this receipt destination when an assistant print request omits the printer
 --printer
 --queues — Show underlying owner/queue routes
 --rotation
@@ -1598,12 +1599,3 @@ The content is included in the generated installed `look/docs/REFERENCE.md`,
 available through existing file-reading tools and `lk doc` / `lk help all`.
 Source documentation and runtime evidence have different roles: docs describe
 contracts; registered tools and live observations establish what can run now.
-
-### Shared task understanding
-
-LO, Signal, and Albert interpret conversational requests against the same tool
-catalog, carry session task context through follow-ups, and check completion
-against tool receipts. “Put that on paper” can follow a composed answer; “instead,
-just suggest a title” does not repeat the previous print or save. Failed task
-interpretation runs no action tools. Existing access profiles and print limits
-still apply. An uncertain print submission is not automatically retried.

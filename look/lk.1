@@ -67,7 +67,7 @@ lk tasks [TEXT|ACTION] [OPTIONS]
 lk reminders [TEXT|ACTION] [OPTIONS]
   [files] Notebook reminder view
 lk
-  [files] Open interactive LOOK in the current directory
+  [meta] Browse commands, subcommands, options and help; l opens files
 l [PATH|WORD]
   [files] Smart jump + interactive LOOK
 ll [PATH|WORD]
@@ -746,6 +746,7 @@ AI / OLLAMA
   lk ollama access MODE set conservative/workspace/power/unsafe
 
 MEMORY + CRAFT
+  lk memory retry      retry retained failed background memory jobs
   lk memory            inspect Living Memory: core summary, durable domains/atoms,
                        recent conversation, candidates, compiler diagnostics
                        candidates are cheap hypotheses; durable memory must earn promotion
@@ -1041,6 +1042,7 @@ Parser arguments and recognized option tokens (grouped by handler):
 --node
 --pages
 --paper-limit-mm
+--preferred-receipt — Use this receipt destination when an assistant print request omits the printer
 --printer
 --queues — Show underlying owner/queue routes
 --rotation

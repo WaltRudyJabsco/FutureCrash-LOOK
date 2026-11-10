@@ -160,8 +160,8 @@
   [
     "lk",
     "",
-    "files",
-    "Open interactive LOOK in the current directory"
+    "meta",
+    "Browse commands, subcommands, options and help; l opens files"
   ],
   [
     "l",
@@ -965,9 +965,9 @@
   ],
   [
     "lk shot",
-    "[all|N|N,M|record] [--delay SECONDS] [--save FILE.png]",
+    "[all|N|N,M|area|record] [--delay SECONDS] [--save FILE.png]",
     "files",
-    "Numbered monitor screenshot picker, image clipboard and native recording toolbar"
+    "Monitor/area screenshots, image clipboard and native recording toolbar"
   ],
   [
     "lk print nickname",

@@ -21697,7 +21697,7 @@ _COMMANDS = [
     ("lk clip", "[share on|share off|shared|on|off|status|clear|add]", "files", "Local clips and optional automatic sharing with paired nodes"),
     ("lk tasks", "[TEXT|ACTION] [OPTIONS]", "files", "Notebook task view"),
     ("lk reminders", "[TEXT|ACTION] [OPTIONS]", "files", "Notebook reminder view"),
-    ("lk", "", "files", "Open interactive LOOK in the current directory"),
+    ("lk", "", "meta", "Browse commands, subcommands, options and help; l opens files"),
     ("l", "[PATH|WORD]", "files", "Smart jump + interactive LOOK"),
     ("ll", "[PATH|WORD]", "files", "LOOK detail view", "lk detail"),
     ("ld", "[PATH|WORD]", "files", "LOOK directories", "lk dirs"),
@@ -23227,7 +23227,9 @@ def main():
             confirm_unsafe_override=(access_profile=="unsafe")
         )
     a=sys.argv[1:]
-    if not a: return render(["--interactive"])
+    if not a:
+        import command_picker
+        return command_picker.run(sys.modules[__name__])
     cmd=a[0]; rest=a[1:]
     if cmd in {"--hidden","--all","-a","--no-hidden"}: return render([*a,"--interactive"])
     if cmd=="_remember-worker": return _memory_worker()
