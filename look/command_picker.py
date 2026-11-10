@@ -56,6 +56,10 @@ def run(ui):
     selected=None;query='';index=0;details=False
     try:
         tty.setcbreak(fd)
+        # Ctrl-Q is otherwise consumed as XON by the terminal driver.
+        mode=termios.tcgetattr(fd)
+        mode[0] &= ~(termios.IXON | termios.IXOFF)
+        termios.tcsetattr(fd,termios.TCSANOW,mode)
         while True:
             size=shutil.get_terminal_size((100,30));width=max(1,size.columns-1)
             colors=terminal_style.list_colors()
@@ -75,9 +79,9 @@ def run(ui):
             print('\033[2J\033[H',end='')
             for n,line in enumerate(header):
                 ink=brass if n==0 else muted
-                line=re.sub(r'\blk(?: home| o)?\b|\blo\b',lambda m:blue+m[0]+ink,line)
+                line=re.sub(r'\blk(?: home| o)?\b|\blo\b|\bl\b',lambda m:blue+m[0]+ink,line)
                 print(ui._ansi_clip(ink+line+reset,width))
-            print(ui._ansi_clip(brass+'LOOK COMMANDS'+muted+(' · '+selected if selected else ' · l opens files')+reset,width))
+            print(ui._ansi_clip(brass+'LOOK COMMANDS'+muted+(' · '+selected if selected else ' · '+blue+'l'+muted+' opens files')+reset,width))
             for n,row in enumerate(lines[top:top+height],top):
                 if details:print(row)
                 else:
