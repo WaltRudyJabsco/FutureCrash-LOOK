@@ -177,3 +177,55 @@ def test_unanswered_question_blocks_execution_even_with_selected_tools():
     value=plan(question='Shall I print the briefing?')
     parsed=task_brain.parse(json.dumps(value),TOOLS)
     assert parsed['kind']=='propose' and parsed['tools']==value['tools']
+
+
+def test_textless_tool_call_does_not_erase_followup_history():
+    import json
+    import task_brain as brain
+    history=[{'role':'user','content':'Print November 10 history facts on Little Printer'},
+             {'role':'assistant','content':'1969: Sesame Street premiered.'},
+             {'role':'user','content':'Print it like that'},
+             {'role':'assistant','content':'','tool_calls':[{'function':{'name':'print_text','arguments':{'queue':'Little Printer','text':'November 10: 1969 Sesame Street premiered.'}}}]},
+             {'role':'tool','content':'Accepted by CUPS'},
+             {'role':'assistant','content':'Print job sent.'}]
+    payload=json.loads(brain.planning_messages('Print six more including Edmund Fitzgerald',history,{},[])[1]['content'])
+    assert payload['conversation'][0]['content']=='Print November 10 history facts on Little Printer'
+    assert 'Little Printer' in payload['recent_tool_inputs'][0]['input_reference']
+    assert 'Sesame Street' in payload['recent_tool_inputs'][0]['input_reference']
+
+
+def test_reference_material_is_bounded_and_excludes_shell_arguments():
+    import task_brain as brain
+    history=[{'role':'assistant','tool_calls':[{'function':{'name':'run_command','arguments':{'command':'secret'}}},
+              {'function':{'name':'print_text','arguments':{'text':'x'*20000}}}]}]
+    data=brain.reference_material(history)
+    assert len(data)==1 and data[0]['tool']=='print_text'
+    assert len(data[0]['input_reference'])<=brain.REFERENCE_BUDGET+20
+
+
+def test_completed_content_survives_stateless_surface_followup():
+    import task_brain as brain
+    import tool_workflow
+    state={}
+    done=plan(missing=[],question='')
+    brain.remember(state,lambda:None,done,'Print these facts','Job sent',['print_text'],['print_text'],trace=[
+        {'tool':'print_text','args':{'text':'November 10: previous list','queue':'Little Printer'}}])
+    history=[{'role':'assistant','content':'Job sent.'}]
+    payload=json.loads(brain.planning_messages('Print six more',history,state,TOOLS)[1]['content'])
+    assert 'November 10' in payload['recent_tool_inputs'][0]['input_reference']
+    user={'role':'user','content':'Print six more'}
+    envelope=tool_workflow.envelope(history+[user],user,tools=TOOLS,state=state)
+    assert any('Little Printer' in m['content'] for m in envelope)
+    state['brain_material']['updated']=0
+    assert not brain.working_material(history,state)
+
+
+def test_fifteen_exchanges_survive_tool_scaffolding():
+    history=[]
+    for i in range(17):
+        history.extend([{'role':'user','content':f'Question {i}'}, {'role':'assistant','content':'','tool_calls':[]},
+                        {'role':'tool','content':'receipt'}, {'role':'assistant','content':f'Answer {i}'}])
+    recent=task_brain.recent_dialogue(history)
+    assert len(recent)==30 and recent[0]['content']=='Question 2'
+    assert recent[-1]['content']=='Answer 16'
+    assert sum(len(m['content']) for m in task_brain.recent_dialogue([{'role':'user','content':'x'*20000}]))<=task_brain.MAX_HISTORY_CHARS
