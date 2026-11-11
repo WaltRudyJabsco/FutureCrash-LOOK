@@ -12506,6 +12506,7 @@ def ollama_chat(force_search=False, initial_prompt=None, allow_start=True, host_
             checkpoint_task(uncertain=True)
         print_turn['on_print_attempt']=print_attempt_checkpoint
         checkpoint_task()
+        capability_retried=False
         repeated_tool_calls={}
         download_receipts={}
         # Route once per operator turn, then keep every tool continuation on the
@@ -12571,6 +12572,11 @@ def ollama_chat(force_search=False, initial_prompt=None, allow_start=True, host_
                 payload_obj["tools"] = tools
                 if events: events.emit("tools_scoped",family=turn_intent,tools=[t.get("function",{}).get("name","") for t in tools])
 
+            import capability_context
+            payload_obj['messages']=list(payload_obj['messages'])+[{
+                'role':'system','content':capability_context.context(
+                    planning_tools,tools,profile,conversation=conversation_pass)}]
+
             try:
                 roller=_RollingThinking(_load_think_display())
                 waiting=_ActivityHandle("waiting for model").start()
@@ -12633,6 +12639,14 @@ def ollama_chat(force_search=False, initial_prompt=None, allow_start=True, host_
             if conversation_pass and ("NEED_TOOLS" in str(message.get("content","")).upper() or message.get("tool_calls")):
                 conversation_pass=False
                 if turn_fabric_route is not None: turn_fabric_route.clear()
+                continue
+            if (not capability_retried and not message.get('tool_calls') and planning_tools
+                    and capability_context.generic_denial(message.get('content',''))):
+                capability_retried=True
+                messages.append({'role':'system','content':
+                    'Your previous draft incorrectly denied host capabilities. Answer the current request using the HOST CAPABILITIES contract. '
+                    'Explain supplied code without executing it unless execution was requested. State any specific unavailable capability accurately.'})
+                if turn_fabric_route is not None:turn_fabric_route.clear()
                 continue
             tool_calls = message.get("tool_calls") or []
             if tool_calls:
