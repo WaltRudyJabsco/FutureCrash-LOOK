@@ -12501,7 +12501,7 @@ def ollama_chat(force_search=False, initial_prompt=None, allow_start=True, host_
         def checkpoint_task(answer="",uncertain=False):
             if task_plan:
                 task_brain.remember(semantic_state,semantic_save,task_plan,prompt,answer,
-                    turn_successful_tools,{row['tool'] for row in task_trace},uncertain=uncertain)
+                    turn_successful_tools,{row['tool'] for row in task_trace},uncertain=uncertain,trace=task_trace)
         def print_attempt_checkpoint():
             print_conversation.finish()
             checkpoint_task(uncertain=True)
@@ -12567,7 +12567,7 @@ def ollama_chat(force_search=False, initial_prompt=None, allow_start=True, host_
                     tools.append(web_tool)
                 import tool_workflow
                 if task_plan or tool_workflow.active(prompt,getattr(turn_route,"families",[])):
-                    payload_obj["messages"]=tool_workflow.envelope(messages,user_message,continuation=bool(task_plan and task_plan["relation"]!="new"),tools=tools)
+                    payload_obj["messages"]=tool_workflow.envelope(messages,user_message,continuation=bool(task_plan and task_plan["relation"]!="new"),tools=tools,state=semantic_state)
                 if completion_recovery_tools:
                     tools=[t for t in tools if t.get('function',{}).get('name') in completion_recovery_tools]
                 payload_obj["tools"] = tools
@@ -13093,7 +13093,7 @@ def ollama_chat(force_search=False, initial_prompt=None, allow_start=True, host_
             if task_plan:
                 task_brain.remember(semantic_state,semantic_save,task_plan,prompt,
                     _split_ollama_thinking(message)[1],turn_successful_tools,
-                    {row['tool'] for row in task_trace},uncertain=bool(print_turn.get('print_attempted') and not (turn_successful_tools & {'print_text','print_design','print_artwork'})))
+                    {row['tool'] for row in task_trace},trace=task_trace,uncertain=bool(print_turn.get('print_attempted') and not (turn_successful_tools & {'print_text','print_design','print_artwork'})))
             messages.append(message)
             # Thinking was already presented live according to the selected display mode.
             final=_split_ollama_thinking(message)[1]
