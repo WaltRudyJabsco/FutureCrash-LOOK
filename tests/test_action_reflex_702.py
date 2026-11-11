@@ -76,3 +76,22 @@ def test_retry_rechecks_current_authority(tmp_path,monkeypatch,capsys):
     rc=lk.ollama_chat(initial_prompt='try again',access_profile='workspace',workspace_override=tmp_path,one_shot=True)
     assert rc==0
     assert 'unavailable in this access profile' in capsys.readouterr().out
+
+
+def test_generic_approval_never_repeats_global_action():
+    old={'tool':'run_command','args':{'command':'printf OLD'},'path':'printf OLD'}
+    for answer in ['yes','okay','yes please','go ahead','do it','that one']:
+        assert not lk._lo_action_continuation(answer,old)
+    assert lk._lo_action_continuation('run it again',old)
+
+
+def test_yes_reaches_conversation_instead_of_running_old_receipt(tmp_path,monkeypatch):
+    import pytest
+    class ReachedPlanner(BaseException):pass
+    old={'tool':'run_command','args':{'command':'printf OLD'},'path':'printf OLD'}
+    monkeypatch.setattr(lk,'_lo_latest_command_action',lambda:old)
+    monkeypatch.setattr(lk,'_run_command_tool',lambda *a,**k:pytest.fail('Replayed unrelated command'))
+    def plan(*args,**kwargs):raise ReachedPlanner()
+    monkeypatch.setattr(lk,'_lo_interpret_task',plan)
+    with pytest.raises(ReachedPlanner):
+        lk.ollama_chat(initial_prompt='yes',access_profile='power',workspace_override=tmp_path,one_shot=True)

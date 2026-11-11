@@ -158,6 +158,12 @@
     "Notebook reminder view"
   ],
   [
+    "lk handoff",
+    "[--instruction TEXT] INPUT...",
+    "ai",
+    "Open LO with text/files; preserve temporary Shortcuts attachments"
+  ],
+  [
     "lk",
     "",
     "meta",
