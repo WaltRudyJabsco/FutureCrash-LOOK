@@ -97,7 +97,8 @@ def conversation_envelope(messages, user_message, preferences):
     phrase-specific command classifier. This pass never authorizes effects.
     """
     start=next(i for i,m in enumerate(messages) if m is user_message)
-    recent=[m for m in messages[:start] if m.get('role') in {'user','assistant'}][-4:]
+    from task_brain import recent_dialogue
+    recent=recent_dialogue(messages[:start])
     return [{'role':'system','content':
              'You are the Fabric assistant. Respond directly to conversation and compose requested prose. '
              'Use the user preferences below when relevant. A correction replaces the old preference. '

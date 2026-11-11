@@ -6322,8 +6322,8 @@ LO_FAST_TOOL_ROUNDS=4
 LO_STANDARD_TOOL_ROUNDS=8
 LO_DEEP_TOOL_ROUNDS=12
 
-LO_HISTORY_MAX_MESSAGES=28
-LO_HISTORY_MAX_CHARS=28000
+LO_HISTORY_MAX_TURNS=15
+LO_HISTORY_MAX_CHARS=64000
 
 class _ResourceRef:
     __slots__=("path","kind","name","provenance","last_referenced_turn")
@@ -7790,7 +7790,9 @@ def _lo_message_size(message):
 def _trim_lo_history(messages, base_count):
     """Keep core system context plus a bounded recent working conversation."""
     base=list(messages[:base_count])
-    tail=list(messages[base_count:])[-LO_HISTORY_MAX_MESSAGES:]
+    tail=list(messages[base_count:])
+    starts=[i for i,m in enumerate(tail) if m.get("role")=="user"]
+    if len(starts)>LO_HISTORY_MAX_TURNS:tail=tail[starts[-LO_HISTORY_MAX_TURNS]:]
     kept=[]
     used=0
     for item in reversed(tail):
@@ -11561,7 +11563,7 @@ def ollama_chat(force_search=False, initial_prompt=None, allow_start=True, host_
     # tool state and host receipts are always rebuilt by LOOK for the current turn.
     if interface_context:
         messages.append({"role":"system","content":str(interface_context)[:6000]})
-    for prior in list(conversation_history or [])[-12:]:
+    for prior in list(conversation_history or [])[-30:]:
         if not isinstance(prior,dict):
             continue
         role=str(prior.get("role") or "").strip().lower()

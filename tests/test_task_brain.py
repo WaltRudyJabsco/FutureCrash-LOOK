@@ -218,3 +218,14 @@ def test_completed_content_survives_stateless_surface_followup():
     assert any('Little Printer' in m['content'] for m in envelope)
     state['brain_material']['updated']=0
     assert not brain.working_material(history,state)
+
+
+def test_fifteen_exchanges_survive_tool_scaffolding():
+    history=[]
+    for i in range(17):
+        history.extend([{'role':'user','content':f'Question {i}'}, {'role':'assistant','content':'','tool_calls':[]},
+                        {'role':'tool','content':'receipt'}, {'role':'assistant','content':f'Answer {i}'}])
+    recent=task_brain.recent_dialogue(history)
+    assert len(recent)==30 and recent[0]['content']=='Question 2'
+    assert recent[-1]['content']=='Answer 16'
+    assert sum(len(m['content']) for m in task_brain.recent_dialogue([{'role':'user','content':'x'*20000}]))<=task_brain.MAX_HISTORY_CHARS

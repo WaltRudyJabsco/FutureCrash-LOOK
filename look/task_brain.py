@@ -6,9 +6,10 @@ Host receipts, not its prose, determine whether the requested effects happened.
 import json
 import time
 
-MAX_HISTORY = 6
+RECENT_EXCHANGES = 15
+MAX_HISTORY = RECENT_EXCHANGES * 2
 MAX_TASK_AGE = 1800
-MAX_HISTORY_CHARS = 4000
+MAX_HISTORY_CHARS = 12000
 MAX_REQUEST_CHARS = 10000
 CONTRACT = """Interpret the latest user message in context. Return ONLY a JSON object:
 {"kind":"reply|task|propose|cancel", "relation":"new|continue|replace", "request":"self-contained description of the current desired outcome", "tools":["exact_tool_name"], "required":[["acceptable_completion_tool"]], "missing":[], "question":""}
@@ -39,18 +40,7 @@ def planning_messages(prompt, history, state, tools):
     prior = state.get("brain_task", {})
     if time.time() - prior.get("updated", 0) > MAX_TASK_AGE:
         prior = {}
-    recent = []
-    remaining = MAX_HISTORY_CHARS
-    for message in reversed(history):
-        if message.get("role") not in {"user", "assistant"}:
-            continue
-        content = str(message.get("content", ""))[:remaining]
-        if len(recent) >= MAX_HISTORY or remaining<=0:
-            break
-        if not content:
-            continue
-        recent.insert(0, {"role": message["role"], "content": content})
-        remaining -= len(content)
+    recent = recent_dialogue(history)
     proposal = state.get("brain_proposal", {})
     if time.time() - proposal.get("updated", 0) > MAX_TASK_AGE:
         proposal = {}
@@ -175,3 +165,16 @@ def working_material(history,state=None):
     if current:return current
     if time.time()-prior.get('updated',0)<MAX_TASK_AGE:return prior.get('inputs',[])
     return []
+
+
+def recent_dialogue(history):
+    """Fifteen exchanges, bounded for small local model contexts; skip tool scaffolding."""
+    recent=[];remaining=MAX_HISTORY_CHARS
+    for message in reversed(history):
+        if message.get('role') not in {'user','assistant'}:continue
+        if len(recent)>=MAX_HISTORY or remaining<=0:break
+        content=str(message.get('content') or '')[:remaining]
+        if not content:continue
+        recent.insert(0,{'role':message['role'],'content':content})
+        remaining-=len(content)
+    return recent
