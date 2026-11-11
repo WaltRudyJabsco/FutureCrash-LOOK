@@ -61,6 +61,8 @@ lk tasks [TEXT|ACTION] [OPTIONS]
   [files] Notebook task view
 lk reminders [TEXT|ACTION] [OPTIONS]
   [files] Notebook reminder view
+lk handoff [--instruction TEXT] INPUT...
+  [ai] Open LO with text/files; preserve temporary Shortcuts attachments
 lk
   [meta] Browse commands, subcommands, options and help; l opens files
 l [PATH|WORD]

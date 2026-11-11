@@ -7670,17 +7670,16 @@ def _lo_explicit_web_scope(prompt):
     return bool(re.search(r"\b(online|on the web|web|youtube(?:\.com)?|vimeo(?:\.com)?|website|site|url|browser)\b",low))
 
 def _lo_action_continuation(prompt,last_action):
-    """Short confirmations/retries inherit the prior actionable referent."""
+    """Only explicit retries inherit an executed action, never generic approval."""
     if not last_action: return False
     low=" ".join(str(prompt or "").casefold().split())
     if not low: return False
     if last_action.get("tool")=="run_command" and low==str(last_action.get("path") or "").casefold():
         return True
     patterns=(
-        r"^(yes|yes!|yep|yeah|sure|okay|ok)(\b|[!.])",
         r"^(try|do|play|open|run)\s+(it\s+|that\s+)?again\b",
         r"^(try\s+(it|that)\s+now|run\s+(it|that)\s+now)\b",
-        r"^(try again|do it|run it|that one|the same one|go ahead|please do)\b",
+        r"^try again\b",
     )
     return any(re.search(p,low) for p in patterns)
 
@@ -11931,6 +11930,8 @@ def ollama_chat(force_search=False, initial_prompt=None, allow_start=True, host_
             if one_shot: return 0
             continue
 
+        # A new conversational task supersedes the old retry referent.
+        last_action=None
         turn_id -= 1
 
         # Shared host routing runs before any surface or model gets to improvise.
@@ -21711,6 +21712,7 @@ _COMMANDS = [
     ("lk clip", "[share on|share off|shared|on|off|status|clear|add]", "files", "Local clips and optional automatic sharing with paired nodes"),
     ("lk tasks", "[TEXT|ACTION] [OPTIONS]", "files", "Notebook task view"),
     ("lk reminders", "[TEXT|ACTION] [OPTIONS]", "files", "Notebook reminder view"),
+    ("lk handoff", "[--instruction TEXT] INPUT...", "ai", "Open LO with text/files; preserve temporary Shortcuts attachments"),
     ("lk", "", "meta", "Browse commands, subcommands, options and help; l opens files"),
     ("l", "[PATH|WORD]", "files", "Smart jump + interactive LOOK"),
     ("ll", "[PATH|WORD]", "files", "LOOK detail view", "lk detail"),
@@ -23095,6 +23097,9 @@ _HIDDEN_COMMANDS = {'force'}
 
 def main():
     _safe_cwd(repair=True)
+    if len(sys.argv)>=2 and sys.argv[1]=='handoff':
+        import shortcut_handoff
+        return shortcut_handoff.main(sys.argv[2:])
     if len(sys.argv)>=2 and sys.argv[1]=='receipts':
         if len(sys.argv)>=3 and sys.argv[2].isdigit():return receipts(sys.argv[2])
         if len(sys.argv)>=3 and sys.argv[2]=='transactions':return receipts(sys.argv[3] if len(sys.argv)>=4 else 30)
