@@ -442,6 +442,14 @@ lk ttt [0p|1p|2p]
   [meta] Tic-Tac-Toe alias
 lk gtnw
   [meta] Global Thermonuclear War alias
+lk fabric storage [status|drives|sync|register|resolve|open] [--help]
+  [fabric] Recognize registered backup and travel-library drives across trusted nodes
+lk fabric storage register [--mount PATH --name NAME --role backup|travel] [--path FOLDER ...] [--yes]
+  [fabric] Choose a drive and review registration; no copying, formatting or backup schedule changes
+lk fabric storage open NAME [--folder N]
+  [fabric] Browse a registered travel folder on its current host
+lk fabric storage sync
+  [fabric] Refresh drive locations and exchange trusted registrations
 lk fabric update [check|run|status] [SOURCE] [--yes] [--json]
   [fabric] Review and run runtime updates, library synchronization and configured backups; durable receipt
 lk fabric care [status|ensure|backup|sync SOURCE] [--yes] [--json]

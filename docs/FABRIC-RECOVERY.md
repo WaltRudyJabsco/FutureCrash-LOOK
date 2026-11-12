@@ -142,3 +142,9 @@ Old essential-state receipts without Mercury coverage do not count as current
 manuscript protection. Existing FabBack destination, keys, schedules and unrelated
 drive contents are preserved. Replication brings writes to the 3090; its existing
 backup plan protects the resulting point-in-time library and revision history.
+
+## Moving a registered drive
+
+[Portable storage](PORTABLE-STORAGE.md) recognizes backup and travel drives across
+trusted nodes. Registration leaves this recovery repository, keys and schedules
+unchanged; recognition does not automatically transfer backup ownership.

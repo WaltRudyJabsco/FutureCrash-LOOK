@@ -1303,6 +1303,30 @@
     "Global Thermonuclear War alias"
   ],
   [
+    "lk fabric storage",
+    "[status|drives|sync|register|resolve|open] [--help]",
+    "fabric",
+    "Recognize registered backup and travel-library drives across trusted nodes"
+  ],
+  [
+    "lk fabric storage register",
+    "[--mount PATH --name NAME --role backup|travel] [--path FOLDER ...] [--yes]",
+    "fabric",
+    "Choose a drive and review registration; no copying, formatting or backup schedule changes"
+  ],
+  [
+    "lk fabric storage open",
+    "NAME [--folder N]",
+    "fabric",
+    "Browse a registered travel folder on its current host"
+  ],
+  [
+    "lk fabric storage sync",
+    "",
+    "fabric",
+    "Refresh drive locations and exchange trusted registrations"
+  ],
+  [
     "lk fabric update",
     "[check|run|status] [SOURCE] [--yes] [--json]",
     "fabric",
