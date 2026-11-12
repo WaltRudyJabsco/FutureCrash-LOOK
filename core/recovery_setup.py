@@ -34,7 +34,7 @@ def command(argv, *, binary=False):
     return result.stdout
 
 
-def mounted_drives(*, external_only=True):
+def mounted_drives(*, external_only=True, include_readonly=False):
     """Report volumes, not disk names; UUIDs survive mount-point changes."""
     rows = []
     if sys.platform == 'darwin':
@@ -43,7 +43,7 @@ def mounted_drives(*, external_only=True):
             info = plistlib.loads(command(['/usr/sbin/diskutil', 'info', '-plist', device], binary=True))
             mount = info.get('MountPoint'); uuid = info.get('VolumeUUID')
             if not mount or not uuid or mount == '/' or mount.startswith(('/System/', '/Library/')): continue
-            if info.get('ReadOnlyVolume') or info.get('ReadOnlyMedia') or not info.get('WritableVolume', True) or not info.get('WritableMedia', True): continue
+            if not include_readonly and (info.get('ReadOnlyVolume') or info.get('ReadOnlyMedia') or not info.get('WritableVolume', True) or not info.get('WritableMedia', True)): continue
             if info.get('BusProtocol') == 'Disk Image' or info.get('SystemImage') or info.get('Locked'): continue
             if external_only and info.get('Internal', True): continue
             rows.append({'uuid': uuid, 'mount': mount, 'name': info.get('VolumeName') or device,
@@ -56,7 +56,7 @@ def mounted_drives(*, external_only=True):
             for d in devices:
                 attached = external or d.get('tran') == 'usb' or bool(d.get('rm'))
                 for mount in d.get('mountpoints') or []:
-                    if not mount or not d.get('uuid') or d.get('ro') or mount == '/' or mount.startswith(('/boot', '/snap/', '/sys/', '/proc/', '/dev/')): continue
+                    if not mount or not d.get('uuid') or (d.get('ro') and not include_readonly) or mount == '/' or mount.startswith(('/boot', '/snap/', '/sys/', '/proc/', '/dev/')): continue
                     if external_only and not attached: continue
                     rows.append({'uuid': d['uuid'], 'mount': mount, 'name': d.get('label') or d['name'],
                                  'filesystem': d.get('fstype') or '', 'device': d.get('path') or d['name']})
@@ -69,7 +69,7 @@ def mounted_drives(*, external_only=True):
         path = Path(row['mount'])
         if not path.is_mount(): continue
         try:
-            if os.statvfs(path).f_flag & os.ST_RDONLY: continue
+            if not include_readonly and os.statvfs(path).f_flag & os.ST_RDONLY: continue
         except OSError: continue
         usage = shutil.disk_usage(path)
         result.append({**row, 'bytes': usage.total, 'free_bytes': usage.free})

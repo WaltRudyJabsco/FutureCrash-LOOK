@@ -184,6 +184,7 @@ install -m 0644 "$ROOT/core/attention.py" "$HOME/.local/share/future-crash-look/
 install -m 0644 "$ROOT/core/notifications.py" "$HOME/.local/share/future-crash-look/core/notifications.py"
 install -m 0644 "$ROOT/core/memory_store.py" "$HOME/.local/share/future-crash-look/core/memory_store.py"
 install -m 0644 "$ROOT/core/recovery_setup.py" "$HOME/.local/share/future-crash-look/core/recovery_setup.py"
+install -m 0644 "$ROOT/core/portable_storage.py" "$HOME/.local/share/future-crash-look/core/portable_storage.py"
 install -m 0644 "$ROOT/core/recovery.py" "$HOME/.local/share/future-crash-look/core/recovery.py"
 install -m 0755 "$ROOT/core/fcl-recovery" "$HOME/.local/bin/fcl-recovery"
 install -m 0644 "$ROOT/core/ui_model.py" "$HOME/.local/share/future-crash-look/core/ui_model.py"

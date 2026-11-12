@@ -8625,6 +8625,7 @@ def _fabric_care_direct(prompt,profile,events=None):
 
 def _capability_tools():
     return _fabric_care_module().tools()+[
+        {"type":"function","function":{"name":"fabric_storage","description":"Locate registered portable backup and travel-library drives across trusted Fabric nodes. Read-only; reports folders and attachment status, never starts backups or copies data.","parameters":{"type":"object","properties":{}}}},
         {"type":"function","function":{
             "name":"generate_image",
             "description":"Generate a local image through configured ComfyUI and save it to LOOK's image output folder. This tool already owns the configured automatic preview; do not follow it with open_path/preview_path unless the user separately asks. Use when the user explicitly asks to create/generate/render/draw an image, make a picture, illustration, artwork, or photo. A Signal/Signal image/Signal scene request belongs to the lightweight Signal canvas instead.",
@@ -8802,6 +8803,7 @@ _TOOL_POLICY = {
     "notebook_list":("all","observation"),"notebook_read":("all","observation"),
     "notebook_capture":("workspace","mutation"),"notebook_complete":("workspace","mutation"),"notebook_update":("workspace","mutation"),
     "word_reference":("all","observation"),
+    "fabric_storage":("all","observation"),
     "fabric_status":("all","observation"),"fabric_maintain":("workspace","action"),
     "run_command":("power","command"),
 }
@@ -12837,6 +12839,11 @@ def ollama_chat(force_search=False, initial_prompt=None, allow_start=True, host_
                         import book_assistant
                         tool_content,_ok,_elapsed=_tool_transaction(name,args,lambda:book_assistant.run_tool(name,args))
                         if _ok:turn_successful_tools.add(name)
+                    elif name == 'fabric_storage':
+                        _fabric_care_module()
+                        import portable_storage
+                        tool_content,_ok,_elapsed=_tool_transaction(name,args,lambda:json.dumps(portable_storage.request()))
+                        if _ok:turn_successful_tools.add(name)
                     elif name in {'fabric_status','fabric_maintain'}:
                         tool_content,_ok,_elapsed=_tool_transaction(name,args,lambda:_fabric_care_tool(name,args,profile,prompt))
                         if _ok:turn_successful_tools.add(name)
@@ -15086,6 +15093,10 @@ def _settings_rows():
          "Inspect portable LOOK profile and backup configuration.",
          "profile backup portable sync identity"),
 
+        ("storage","FABRIC","Portable drives","backup / travel",
+         "Register a connected drive for recognition across trusted nodes. Backup settings remain unchanged.",
+         "portable storage travel drive register library"),
+
         ("recovery","FABRIC","Recovery backup","setup / status",
          "Choose a connected backup drive, contributors and schedule; inspect what is protected and the last verified restore.",
          "fabric recovery backup restore restic drive storage encryption"),
@@ -15337,6 +15348,7 @@ def _settings_action(key):
     if key=="personalityvoices": return _settings_pick_personality_voices()
     if key=="voicepreview": return _voice_command(["preview"])
     if key=="motion": return _settings_pick_motion()
+    if key=="storage": return _fabric_command(["storage","register"])
     if key=="recovery": return _fabric_command(["backup","menu"])
     if key=="profile": return _profile_status()
     if key=="memory": return _memory_command([])
@@ -21906,6 +21918,10 @@ _COMMANDS = [
     ("lk ttt", "[0p|1p|2p]", "meta", "Tic-Tac-Toe alias"),
     ("lk gtnw", "", "meta", "Global Thermonuclear War alias"),
     # Config/meta
+    ("lk fabric storage", "[status|drives|sync|register|resolve|open] [--help]", "fabric", "Recognize registered backup and travel-library drives across trusted nodes"),
+    ("lk fabric storage register", "[--mount PATH --name NAME --role backup|travel] [--path FOLDER ...] [--yes]", "fabric", "Choose a drive and review registration; no copying, formatting or backup schedule changes"),
+    ("lk fabric storage open", "NAME [--folder N]", "fabric", "Browse a registered travel folder on its current host"),
+    ("lk fabric storage sync", "", "fabric", "Refresh drive locations and exchange trusted registrations"),
     ("lk fabric update", "[check|run|status] [SOURCE] [--yes] [--json]", "fabric", "Review and run runtime updates, library synchronization and configured backups; durable receipt"),
     ("lk fabric care", "[status|ensure|backup|sync SOURCE] [--yes] [--json]", "fabric", "Check releases and verified essential backups; run configured upkeep"),
     ("lk fabric backup", "[add|configure|drives|status [--json]|inventory|run|restore DIR]", "fabric", "Encrypted essential-state recovery"),
@@ -22849,6 +22865,10 @@ def _fabric_command(args):
     if sub in {"backup","recovery"}:
         recovery=shutil.which("fcl-recovery") or str(HOME/".local/bin/fcl-recovery")
         return subprocess.call([recovery,*args[1:]]) if args[1:] else subprocess.call([recovery,"menu" if sys.stdin.isatty() and sys.stdout.isatty() else "status"])
+    if sub=="storage":
+        _fabric_care_module()
+        import portable_storage
+        return portable_storage.main(args[1:])
     if sub in {"doctor","diagnose","debug"}: return _fabric_doctor()
     if sub not in {"fabric","doctor","watch","dashboard","dash","beacon","lights","nodes","activity","pulse","models","status","qualify","services","service","jobs","job","submit","packet","cancel","events","http","decisions","decision","answer","ask","decision-shadow","decision-provider","identity","trust","untrust","pair-code","pair","transport","rendezvous","endpoints","endpoint-code","allow","revoke-endpoint","speak","alert","route","release","maintenance","update","care"}:
         print("usage: lk fabric [doctor|identity|trust|pair-code [URL]|pair NODE CODE|untrust NODE_ID|transport|rendezvous [status|set URL|off|sync]|endpoints|endpoint-code URL [once|trust]|allow CODE [once|trust]|revoke-endpoint ENDPOINT_ID|watch|dashboard|decisions [NODE]|decision [NODE] ID|answer [NODE] ID CHOICE|ask [NODE] QUESTION [CHOICE ...]|decision-shadow [NODE] STATE QUESTION CANDIDATE...|decision-provider [NODE]|beacon|lights|nodes|status|activity|pulse|models|route reflex|balanced|deep|jobs|events|submit|packet|cancel|qualify|services|service|speak [NODE] TEXT|alert [@TARGET] MESSAGE]")

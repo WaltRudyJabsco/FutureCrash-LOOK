@@ -156,6 +156,11 @@ def _file_peer_json(peer,path):
     return _file_race(peer,path)[1]
 
 
+try:
+    from . import portable_storage
+except ImportError:
+    import portable_storage
+
 VERSION = "8.26.1"
 RELEASE_NAME = "FABRIC VISION"
 DEFAULT_HOST = "127.0.0.1"
@@ -557,6 +562,7 @@ def capabilities():
     lk = binary("lk")
     return {
         "fabric.care": True,
+        "fabric.storage": True,
         "filesystem": True,
         "shell": True,
         "look": bool(lk),
@@ -1297,6 +1303,8 @@ def _build_advertisement():
         "curation": load_curator_state(),
         "maintenance": _maintenance_advertisement(),
         "backup": _recovery_advertisement(),
+        "storage": {"registered": len(portable_storage.snapshot()["registered"]),
+                    "attached": len(portable_storage.snapshot()["attached"])},
     }
 
 def refresh_advertisement():
@@ -1446,6 +1454,7 @@ def background_qualifier():
 def pulse_loop():
     # Pulse is a local reconciliation clock, not a network poll. Network identity
     # and peer advertisements refresh on a slower cadence with jitter/backoff.
+    threading.Thread(target=portable_storage.worker, args=(PEERS.public, _file_peer_json), daemon=True, name="portable-storage").start()
     last_peer = 0.0
     refresh_identity()
     MODELS.discover()
@@ -5038,6 +5047,15 @@ class API(BaseHTTPRequestHandler):
         if path == "/v1/books": return self._books_request()
         if path == "/v1/books/fabric": return self._books_request(fabric=True)
         if path == "/v1/books/item": return self._serve_book_item()
+        if path in {'/v1/storage', '/v1/storage/local', '/v1/storage/refresh'}:
+            if path == '/v1/storage/refresh':
+                if getattr(self.server, 'plane', 'local') != 'local' or self.headers.get('X-Fabric-Node'):
+                    return self.sendj(403, {'error': 'Refresh from this node only'})
+                data = portable_storage.refresh(PEERS.public(), _file_peer_json)
+            else:
+                data = portable_storage.snapshot()
+            if path == '/v1/storage/local': data.pop('peers', None)
+            return self.sendj(200, data)
         if path == "/v1/files/browse": return self._files_browse()
         if path == "/v1/files/copy/status": return self._files_copy_status()
         if path in ("/health", "/v1/health"):
