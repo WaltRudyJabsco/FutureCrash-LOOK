@@ -7,6 +7,23 @@ joins the current shared playback clock. The host controls pause, seek and stop.
 Viewers press Watch to satisfy browser autoplay rules. The audience page offers
 fullscreen and works with phone/tablet inline video.
 
+## Terminal projection room
+
+Run `lk theater` to open the terminal menu. It remembers your chosen media host
+and starts with the configured media-library owner. Choose a movie, start a
+showing, pause/resume/seek, or create a movie/channel ticket. Arrows, Page Up/Down,
+Home/End and Shift-arrow navigation work in each picker. Escape returns and
+Ctrl-Q exits the desk.
+
+The ticket screen offers **Print QR on Little Printer**, another-printer selection,
+copy link and open audience page. Printing uses the existing image preview,
+copy/style options and explicit Print confirmation. Manage issued tickets to
+return to a saved code or revoke admission. Tickets issued here are saved in a
+private local file under `~/.local/share/look/theater/` for later QR printing.
+Tickets issued elsewhere can be revoked here, while their original links remain
+available where they were issued. `lk theater status` and `--json` retain their
+command-line behavior.
+
 ## Host setup
 
 Configure a dedicated HTTPS origin and point it at the host's loopback port 7340.

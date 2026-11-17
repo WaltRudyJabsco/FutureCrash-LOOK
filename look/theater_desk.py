@@ -21,11 +21,11 @@ def request(value=None,node='local'):
         raise ValueError(message) from exc
 
 
-def main(argv=None):
+def main(argv=None,ui=None):
     parser=argparse.ArgumentParser(prog='lk theater',description='Movie tickets and shared browser showings. Select the node that owns the media.')
-    parser.add_argument('--node',default='local');parser.add_argument('--json',action='store_true')
+    parser.add_argument('--node');parser.add_argument('--json',action='store_true')
     sub=parser.add_subparsers(dest='command')
-    sub.add_parser('status')
+    sub.add_parser('status');sub.add_parser('menu')
     item=sub.add_parser('search');item.add_argument('query',nargs='*')
     item=sub.add_parser('setup');item.add_argument('--url',required=True)
     sub.add_parser('qr-setup')
@@ -37,6 +37,11 @@ def main(argv=None):
     item=sub.add_parser('channel');item.add_argument('access',choices=['open','ticketed'])
     args=parser.parse_args(argv)
     try:
+        if args.command=='menu' or (args.command is None and not args.json and sys.stdin.isatty() and sys.stdout.isatty()):
+            if ui is None or not sys.stdin.isatty():raise ValueError('Open the terminal menu through lk theater')
+            from theater_terminal import Desk
+            return Desk(ui,args.node).run()
+        args.node=args.node or 'local'
         if args.command=='qr-setup':
             if args.node!='local':raise ValueError('Run qr-setup directly on the Theater host')
             dest=Path.home()/'.local/share/future-crash-look/theater-python'

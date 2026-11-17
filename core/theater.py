@@ -176,7 +176,10 @@ def admin(payload,catalog,entry):
     if action=='status':return listing()
     if action=='search':
         query=str(payload.get('query','')).casefold().split()
+        kind=payload.get('kind','all')
+        if kind not in {'all','video','audio'}:raise ValueError('Choose video or audio media')
         rows=catalog().get('entries',[])
+        rows=[r for r in rows if kind=='all' or str(r.get('media_type','')).startswith(kind+'/')]
         rows=[r for r in rows if str(r.get('media_type','')).startswith(('video/','audio/')) and all(w in (' '.join(str(r.get(k,'')) for k in ('title','artist','album','path'))).casefold() for w in query)]
         return {'items':[{k:r.get(k,'') for k in ('id','title','artist','media_type')} for r in rows[:100]]}
     if action=='configure':return configure(str(payload.get('url','')))

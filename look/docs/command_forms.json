@@ -1304,9 +1304,9 @@
   ],
   [
     "lk theater",
-    "[--node NODE] [status|search WORDS|show ID|ticket ID|pause|resume|stop|seek SECONDS|revoke ID]",
+    "[--node NODE] [menu|status|search WORDS|show ID|ticket ID|pause|resume|stop|seek SECONDS|revoke ID]",
     "media",
-    "Browser theater, shared showings and expiring admission tickets"
+    "Terminal projection room, shared showings and printable admission tickets"
   ],
   [
     "lk theater ticket",
