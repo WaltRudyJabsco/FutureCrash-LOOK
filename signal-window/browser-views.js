@@ -51,6 +51,24 @@
   }
   function gypsyCommand(text){return /^\/gypsy$/i.test(String(text||'').trim())}
   function openGypsy(){const url=new URL('/gypsy',root.location.href).href;try{root.open(url,'_blank','noopener')}catch{}return url}
+  async function saveCamera(file){
+    const url=URL.createObjectURL(file),image=new Image();
+    try{
+      image.src=url;await image.decode();
+      const canvas=document.createElement('canvas'),ratio=Math.min(1,1920/Math.max(image.naturalWidth,image.naturalHeight));
+      canvas.width=Math.max(1,Math.round(image.naturalWidth*ratio));canvas.height=Math.max(1,Math.round(image.naturalHeight*ratio));
+      canvas.getContext('2d').drawImage(image,0,0,canvas.width,canvas.height);
+      let blob=await new Promise(resolve=>canvas.toBlob(resolve,'image/png'));
+      while(blob&&blob.size>3145728&&canvas.width>320){
+        const small=document.createElement('canvas');small.width=Math.round(canvas.width*.8);small.height=Math.round(canvas.height*.8);
+        small.getContext('2d').drawImage(canvas,0,0,small.width,small.height);canvas.width=small.width;canvas.height=small.height;canvas.getContext('2d').drawImage(small,0,0);
+        blob=await new Promise(resolve=>canvas.toBlob(resolve,'image/png'));
+      }
+      if(!blob||blob.size>3145728)throw Error('Could not prepare this photo for LK Clip');
+      const response=await root.fetch('/api/photo',{method:'POST',headers:{'Content-Type':'image/png'},body:blob});
+      const result=await response.json();if(!response.ok)throw Error(result.error||'Photo save failed');return result;
+    }finally{URL.revokeObjectURL(url)}
+  }
   function theaterCommand(text){return /^\/theater$/i.test(String(text||'').trim())}
   function openTheater(){const url=new URL('/theater',root.location.href).href;root.open(url,'_blank','noopener');return url}
   function museumCommand(text){return /^\/museum$/i.test(String(text||'').trim())}
@@ -163,7 +181,7 @@
     try{root.open(url.href,'_blank','noopener')}catch{}
     return url.href;
   }
-  root.FabricBrowserViews={theaterCommand,openTheater,gypsyCommand,openGypsy,museumCommand,openMuseum,radioAddCommand,addRadio,radioCommand,openRadio,beginImage,imageArtifacts,imageRequest,fabricCommand,openFabric,booksCommand,openBooks,bookQuery,bookMatches,createBookAhead,bookPosition};
+  root.FabricBrowserViews={saveCamera,theaterCommand,openTheater,gypsyCommand,openGypsy,museumCommand,openMuseum,radioAddCommand,addRadio,radioCommand,openRadio,beginImage,imageArtifacts,imageRequest,fabricCommand,openFabric,booksCommand,openBooks,bookQuery,bookMatches,createBookAhead,bookPosition};
 })(globalThis);
 
 

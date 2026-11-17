@@ -718,6 +718,11 @@ class Handler(BaseHTTPRequestHandler):
                 return self.send_json(200,node_json('/v1/curtain',{'action':data['action'],'pin':data.get('pin'),'variant':data.get('variant','standard')},timeout=12))
             except Exception as exc:return self.send_json(400,{'error':str(exc)})
 
+        if urlparse(self.path).path=='/api/photo':
+            if not self._require_endpoint('lo.use'):return
+            import photo_web
+            try:return photo_web.post(self)
+            except Exception as exc:return self.send_json(400,{'error':str(exc)})
         if urlparse(self.path).path=='/api/theater':
             if not self._require_endpoint('lo.use'):return
             import theater_admin_web

@@ -58,6 +58,7 @@ def print_ticket(ticket,node,ui,queue=None):
     with tempfile.TemporaryDirectory(prefix='look-theater-ticket-') as directory:
         path=Path(directory)/'Theater ticket.png';path.write_bytes(raw)
         caption=[ticket.get('title') or 'Fabric Theater',ticket['code'],
+                 'Watch at '+ticket['url'].split('#',1)[0],
                  'Valid until '+time.strftime('%b %d, %Y %H:%M',time.localtime(ticket['expires']))]
         # QR modules remain square: image style and the shared raster renderer own scaling.
         return printing.selected_file(path,ui,prefer_receipt=True,default_style='image',caption=caption,queue=queue)
@@ -197,7 +198,7 @@ class Desk:
                     ('Resume showing' if paused else 'Pause showing','resume' if paused else 'pause'),
                     ('Seek to a time','seek'),('End showing','stop'),('Create movie ticket','ticket'),
                     ('Create channel ticket','channel'),('Manage issued tickets','tickets'),
-                    ('Choose media host','host'),('Refresh','refresh'),('Quit','quit')],details)
+                    ('Watch / enter ticket in browser','browser'),('Choose media host','host'),('Refresh','refresh'),('Quit','quit')],details)
                 if action in (None,'quit'):return 0
                 self.notice=''
                 try:
@@ -207,6 +208,11 @@ class Desk:
                     elif action=='channel':self.issue(channel=True)
                     elif action=='tickets':self.tickets()
                     elif action=='refresh':self.refresh()
+                    elif action=='browser':
+                        import webbrowser
+                        url=self.state.get('settings',{}).get('url')
+                        if not url:raise ValueError('Set up the Theater address on the media host first')
+                        webbrowser.open(url);self.notice='Opened Theater · enter the code printed on your ticket'
                     elif action=='show':
                         if not self.movie:self.pick_movie()
                         if self.movie:self.call({'action':'show','media':self.movie['id']});self.refresh()

@@ -186,6 +186,7 @@ install -m 0644 "$ROOT/core/memory_store.py" "$HOME/.local/share/future-crash-lo
 install -m 0644 "$ROOT/core/recovery_setup.py" "$HOME/.local/share/future-crash-look/core/recovery_setup.py"
 install -m 0644 "$ROOT/core/portable_storage.py" "$HOME/.local/share/future-crash-look/core/portable_storage.py"
 install -m 0644 "$ROOT/core/theater.py" "$HOME/.local/share/future-crash-look/core/theater.py"
+install -m 0644 "$ROOT/core/photo_web.py" "$HOME/.local/share/future-crash-look/core/photo_web.py"
 install -m 0644 "$ROOT/core/theater_web.py" "$HOME/.local/share/future-crash-look/core/theater_web.py"
 install -m 0644 "$ROOT/core/theater_admin_web.py" "$HOME/.local/share/future-crash-look/core/theater_admin_web.py"
 install -m 0644 "$ROOT/core/recovery.py" "$HOME/.local/share/future-crash-look/core/recovery.py"

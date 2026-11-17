@@ -39,3 +39,27 @@ matching the existing Vision permission context. Failed or uniform frames are re
 the clipboard unchanged. Existing terminal capture authorization may already be
 sufficient; no privacy-setting reset is needed. If macOS requests permission,
 authorize the application it identifies in Screen & System Audio Recording.
+
+## Camera photos
+
+`lk photo` opens a local browser preview with a camera-source selector. Press
+Start camera, allow the browser camera prompt, then Take photo. Built-in, USB
+and Continuity cameras appear when the OS and browser expose them as cameras.
+Only video is requested. Done stops the camera and closes the local capture
+service. Sessions expire after 30 minutes.
+
+Photos are saved under `~/Pictures/LOOK Photos` and added to LK Clip. The image
+is also copied to the system clipboard when its image backend is available.
+`--output-dir DIR` selects another destination. Captures fit the existing 3 MiB
+clipboard attachment limit, with a maximum initial edge of 1920 pixels.
+The capture page is served only on a random loopback port and uses a per-session
+token plus same-origin checks for uploads. Camera permission and capture remain
+explicit browser actions.
+
+Signal and Albert's CAM button also saves a PNG copy to `Pictures/LOOK Photos`
+on the computer hosting that web page and adds it to that host's LK Clip. The
+photo remains attached to chat. A phone or Mac browser connected to the 3090
+therefore saves that copy on the 3090. Normal opt-in clipboard publication makes
+it available to other paired shelves. The capture feedback names the host and
+saved path. Browser camera inputs can offer a camera or an image picker depending
+on the platform. `lk photo` provides the explicit live-preview/source-picker UI.

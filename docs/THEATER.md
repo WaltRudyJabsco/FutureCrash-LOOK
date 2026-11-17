@@ -16,7 +16,9 @@ Home/End and Shift-arrow navigation work in each picker. Escape returns and
 Ctrl-Q exits the desk.
 
 The ticket screen offers **Print QR on Little Printer**, another-printer selection,
-copy link and open audience page. Printing uses the existing image preview,
+copy link and open audience page. The main menu also opens the audience page,
+where you can type a printed ticket code. Printed tickets include the viewing
+address beside the code. Printing uses the existing image preview,
 copy/style options and explicit Print confirmation. Manage issued tickets to
 return to a saved code or revoke admission. Tickets issued here are saved in a
 private local file under `~/.local/share/look/theater/` for later QR printing.
