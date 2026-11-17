@@ -206,5 +206,5 @@ def qr_png(code):
     url=read('settings')['url']+'/#'+code
     from qrcode.image.pure import PyPNGImage
     image=qrcode.make(url,box_size=8,border=4,image_factory=PyPNGImage)
-    output=io.BytesIO();image.save(output,format='PNG')
+    output=io.BytesIO();image.save(output)
     return output.getvalue()
