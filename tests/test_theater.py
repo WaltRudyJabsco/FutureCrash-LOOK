@@ -12,6 +12,7 @@ from core import theater as t,theater_web as web
 def state(tmp_path,monkeypatch):
     monkeypatch.setattr(t,'root',lambda:tmp_path/'theater')
     monkeypatch.setattr(t,'start_guest',lambda:None)
+    monkeypatch.setattr(t,'preparation',lambda media:{'state':'ready'})
     t.configure('https://theater.example:8443')
     return tmp_path
 
@@ -144,3 +145,14 @@ def test_printable_ticket_qr_is_real_png(state):
     ticket=t.issue('movie','PCU')
     image=t.qr_png(ticket['code'])
     assert image.startswith(b'\x89PNG\r\n\x1a\n') and len(image)>200
+
+
+def test_guest_reports_preparation_without_blocking(server,monkeypatch):
+    ticket=t.issue('pending','Movie')
+    monkeypatch.setattr(t,'preparation',lambda media:{'state':'preparing'})
+    headers={'Cookie':t.COOKIE+'='+ticket['code']}
+    with urllib.request.urlopen(urllib.request.Request(server+'/state',headers=headers)) as response:
+        assert json.load(response)['preparation']['state']=='preparing'
+    with pytest.raises(urllib.error.HTTPError) as error:
+        urllib.request.urlopen(urllib.request.Request(server+'/stream',headers=headers))
+    assert error.value.code==425
