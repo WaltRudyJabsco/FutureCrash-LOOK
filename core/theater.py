@@ -146,7 +146,7 @@ def media_request(media,range_header=None,head=False):
     # Admission supplies an immutable catalog ID. Guests cannot supply node/path URLs.
     query=urllib.parse.urlencode({'id':media})
     headers={'Range':range_header} if range_header else {}
-    return urllib.request.urlopen(urllib.request.Request('http://127.0.0.1:7332/v1/media/browser?'+query,headers=headers,method='HEAD' if head else 'GET'),timeout=120)
+    return urllib.request.urlopen(urllib.request.Request('http://127.0.0.1:7332/v1/media/browser?'+query,headers=headers,method='HEAD' if head else 'GET'),timeout=1900)
 
 
 _CHANNEL_LOCK=threading.Lock()
@@ -208,3 +208,27 @@ def qr_png(code):
     image=qrcode.make(url,box_size=8,border=4,image_factory=PyPNGImage)
     output=io.BytesIO();image.save(output)
     return output.getvalue()
+
+
+_PREPARATION = {}
+_PREPARATION_LOCK = threading.Lock()
+
+
+def preparation(media):
+    """Prepare one browser copy once, while guests receive immediate progress."""
+    with _PREPARATION_LOCK:
+        if media in _PREPARATION:
+            return dict(_PREPARATION[media])
+        _PREPARATION[media] = {'state': 'preparing'}
+    def run():
+        try:
+            with media_request(media, head=True) as response:
+                if response.status != 200:
+                    raise ValueError('Browser media preparation failed')
+            result = {'state': 'ready'}
+        except Exception:
+            result = {'state': 'error', 'message': 'The host could not prepare this movie. Ask the host to check the original and try again.'}
+        with _PREPARATION_LOCK:
+            _PREPARATION[media] = result
+    threading.Thread(target=run, daemon=True, name='theater-media-prepare').start()
+    return {'state': 'preparing'}

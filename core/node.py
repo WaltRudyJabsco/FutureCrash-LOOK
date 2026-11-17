@@ -161,6 +161,8 @@ try:
 except ImportError:
     import portable_storage
 
+VIDEO_DELIVERY_LOCK = threading.Lock()
+
 VERSION = "8.26.1"
 RELEASE_NAME = "FABRIC VISION"
 DEFAULT_HOST = "127.0.0.1"
@@ -4565,31 +4567,32 @@ class API(BaseHTTPRequestHandler):
             # Version the representation so older surround-AAC copies are rebuilt.
             stat=source.stat(); key=hashlib.sha256(f"video:stereo-v2:{source}:{stat.st_size}:{stat.st_mtime_ns}".encode()).hexdigest()[:24]
             target=cache/(key+".mp4")
-            if not target.exists() or target.stat().st_size==0:
-                tmp=target.with_name(key+f".{os.getpid()}.{threading.get_ident()}.tmp.mp4")
-                encoders=[("libx264",["-preset","veryfast","-crf","21"])]
-                if platform.system()=="Darwin": encoders.append(("h264_videotoolbox",["-b:v","6M"]))
-                # Most H.264 Blu-ray rips need a container/audio change, not new video.
-                # If remuxing fails, keep the existing conservative encoder fallback.
-                if copy_video:encoders.insert(0,("copy",[]))
-                last_error=""
-                try:
-                    for encoder,video_args in encoders:
-                        # Stereo AAC is the conservative common browser endpoint.
-                        audio_args=["-c:a","copy"] if encoder=="copy" and copy_audio else ["-c:a","aac","-ac","2","-ar","48000","-b:a","160k"]
-                        pixel_args=[] if encoder=="copy" else ["-pix_fmt","yuv420p"]
-                        cmd=[ffmpeg,"-nostdin","-v","error","-y","-i",str(source),"-map","0:v:0","-map","0:a:0?","-c:v",encoder,*video_args,*pixel_args,*audio_args,"-movflags","+faststart",str(tmp)]
-                        cp=subprocess.run(cmd,capture_output=True,text=True,timeout=1800)
-                        if cp.returncode==0 and tmp.exists() and tmp.stat().st_size>0:
-                            os.replace(tmp,target); last_error=""; break
-                        last_error=(cp.stderr or cp.stdout or f"ffmpeg exit {cp.returncode}").strip()[-800:]
+            with VIDEO_DELIVERY_LOCK:
+                if not target.exists() or target.stat().st_size==0:
+                    tmp=target.with_name(key+f".{os.getpid()}.{threading.get_ident()}.tmp.mp4")
+                    encoders=[("libx264",["-preset","veryfast","-crf","21"])]
+                    if platform.system()=="Darwin": encoders.append(("h264_videotoolbox",["-b:v","6M"]))
+                    # Most H.264 Blu-ray rips need a container/audio change, not new video.
+                    # If remuxing fails, keep the existing conservative encoder fallback.
+                    if copy_video:encoders.insert(0,("copy",[]))
+                    last_error=""
+                    try:
+                        for encoder,video_args in encoders:
+                            # Stereo AAC is the conservative common browser endpoint.
+                            audio_args=["-c:a","copy"] if encoder=="copy" and copy_audio else ["-c:a","aac","-ac","2","-ar","48000","-b:a","160k"]
+                            pixel_args=[] if encoder=="copy" else ["-pix_fmt","yuv420p"]
+                            cmd=[ffmpeg,"-nostdin","-v","error","-y","-i",str(source),"-map","0:v:0","-map","0:a:0?","-c:v",encoder,*video_args,*pixel_args,*audio_args,"-movflags","+faststart",str(tmp)]
+                            cp=subprocess.run(cmd,capture_output=True,text=True,timeout=1800)
+                            if cp.returncode==0 and tmp.exists() and tmp.stat().st_size>0:
+                                os.replace(tmp,target); last_error=""; break
+                            last_error=(cp.stderr or cp.stdout or f"ffmpeg exit {cp.returncode}").strip()[-800:]
+                            try: tmp.unlink(missing_ok=True)
+                            except OSError: pass
+                        if not target.exists() or target.stat().st_size==0:
+                            raise RuntimeError("browser video conversion failed"+(f": {last_error}" if last_error else ""))
+                    finally:
                         try: tmp.unlink(missing_ok=True)
                         except OSError: pass
-                    if not target.exists() or target.stat().st_size==0:
-                        raise RuntimeError("browser video conversion failed"+(f": {last_error}" if last_error else ""))
-                finally:
-                    try: tmp.unlink(missing_ok=True)
-                    except OSError: pass
             return target,"video/mp4"
 
         cache=Path.home()/".cache"/"future-crash-look"/"browser-media"; cache.mkdir(parents=True,exist_ok=True)
