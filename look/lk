@@ -21924,6 +21924,7 @@ _COMMANDS = [
     ("lk ttt", "[0p|1p|2p]", "meta", "Tic-Tac-Toe alias"),
     ("lk gtnw", "", "meta", "Global Thermonuclear War alias"),
     # Config/meta
+    ("lk photo", "[--output-dir DIR]", "media", "Camera preview and source picker; save photos to Pictures/LOOK Photos and LK Clip"),
     ("lk theater", "[--node NODE] [menu|status|search WORDS|show ID|ticket ID|pause|resume|stop|seek SECONDS|revoke ID]", "media", "Terminal projection room, shared showings and printable admission tickets"),
     ("lk theater ticket", "[ID|--channel] [--hours N] [--qr FILE]", "media", "Issue one revocable movie or channel ticket with optional printable QR"),
     ("lk theater setup", "--url HTTPS_ORIGIN", "media", "Enable the dedicated audience listener on localhost:7340"),
@@ -23145,6 +23146,9 @@ def main():
     import clipboard_shelf
     try: clipboard_shelf.ensure_watcher()
     except (OSError,clipboard_shelf.sqlite3.Error): pass
+    if len(sys.argv)>=2 and sys.argv[1]=='photo':
+        import photo_capture
+        return photo_capture.main(sys.argv[2:])
     if len(sys.argv)>=2 and sys.argv[1] in {'shot','screenshot'}:
         import screen_shot
         return screen_shot.main(sys.argv[2:])
@@ -23157,7 +23161,7 @@ def main():
         import command_help
         return command_help.show(sys.argv[2:])
     if len(sys.argv)>2 and any(flag in sys.argv[2:] for flag in ('--help','-h')):
-        if sys.argv[1] not in {'web','terminal','saver','sv','lock','unlock','lk','lktl','notes','tasks','reminders','ytd','ytr','theater','museum','describe','notifications'} and not (sys.argv[1] in {'media','music'} and sys.argv[2] in {'import','disc','rip','edit','storage'}):
+        if sys.argv[1] not in {'web','terminal','saver','sv','lock','unlock','lk','lktl','notes','tasks','reminders','ytd','ytr','theater','photo','museum','describe','notifications'} and not (sys.argv[1] in {'media','music'} and sys.argv[2] in {'import','disc','rip','edit','storage'}):
             import command_help
             return command_help.show([word for word in sys.argv[1:] if word not in {'--help','-h'}])
     if len(sys.argv)>=2 and sys.argv[1] in {"notes","tasks","reminders"}:

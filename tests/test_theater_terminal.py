@@ -48,7 +48,7 @@ def test_issue_stores_private_ticket_and_returns_same_invitation(tmp_path,monkey
 
 def test_little_printer_handoff_uses_review_and_same_ticket(tmp_path,monkeypatch):
     import printing
-    ticket={'id':'one','code':'ABCDEFGH1234','title':'PCU','expires':9999999999}
+    ticket={'id':'one','code':'ABCDEFGH1234','title':'PCU','expires':9999999999,'url':'https://theater.example:8443/#ABCDEFGH1234'}
     request=Mock(return_value={'png':base64.b64encode(b'\x89PNG\r\n\x1a\nimage').decode()})
     monkeypatch.setattr(terminal,'request',request)
     captures=[]
@@ -60,6 +60,7 @@ def test_little_printer_handoff_uses_review_and_same_ticket(tmp_path,monkeypatch
     path,options=captures[0]
     assert options['queue']=='Little Printer' and options['default_style']=='image'
     assert options['caption'][1]=='ABCDEFGH1234'
+    assert 'Watch at https://theater.example:8443/' in options['caption']
     assert not path.exists()
 
 
@@ -92,3 +93,13 @@ def test_real_raw_key_picker_handles_shift_navigation_and_restores_tty(monkeypat
         flags=terminal.termios.ECHO|terminal.termios.ICANON|terminal.termios.ISIG
         assert after[3]&flags==before[3]&flags
     finally:stream.close();os.close(master);os.close(slave)
+
+
+def test_main_menu_opens_audience_url(tmp_path,monkeypatch):
+    import webbrowser
+    desk=terminal.Desk(None,'host')
+    desk.state={'settings':{'url':'https://theater.example'},'channel':{}}
+    desk.refresh=Mock();desk.choose=Mock(side_effect=['browser',None])
+    opened=Mock();monkeypatch.setattr(webbrowser,'open',opened)
+    assert desk.run()==0
+    opened.assert_called_once_with('https://theater.example')

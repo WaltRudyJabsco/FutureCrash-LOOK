@@ -417,6 +417,7 @@ install_file "$ROOT/look/museum_fullscreen.py" "$HOME/.local/share/look/museum_f
 install_file "$ROOT/look/radio_assistant.py" "$HOME/.local/share/look/radio_assistant.py"
 install_file "$ROOT/look/receipt_desk.py" "$HOME/.local/share/look/receipt_desk.py"
 install_file "$ROOT/look/fortune_assistant.py" "$HOME/.local/share/look/fortune_assistant.py"
+install_file "$ROOT/look/photo_capture.py" "$HOME/.local/share/look/photo_capture.py"
 install_file "$ROOT/look/theater_terminal.py" "$HOME/.local/share/look/theater_terminal.py"
 install_file "$ROOT/look/theater_desk.py" "$HOME/.local/share/look/theater_desk.py"
 install_file "$ROOT/look/fortune_deck.py" "$HOME/.local/share/look/fortune_deck.py"
