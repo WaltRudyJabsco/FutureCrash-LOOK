@@ -322,7 +322,7 @@ def wait_idle(seconds=300):
         media = local_json('/v1/media/state')
         traffic = local_json('/v1/http')
         importing = imports_active()
-        streaming = any(str(request.get('path', '')).split('?', 1)[0] in {'/v1/media/browser', '/v1/media/audio', '/v1/media/item', '/v1/media/artifact'}
+        streaming = any(request.get('method','GET')!='HEAD' and str(request.get('path', '')).split('?', 1)[0] in {'/v1/media/browser', '/v1/media/audio', '/v1/media/item', '/v1/media/artifact'}
                         for meter in (traffic.get('listeners') or {}).values()
                         for request in meter.get('oldest_active', []))
         if activity.get('active') is None and not media.get('active') and not streaming and not importing:

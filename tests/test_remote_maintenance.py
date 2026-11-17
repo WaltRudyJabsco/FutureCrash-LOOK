@@ -398,3 +398,14 @@ def test_updates_wait_for_reference_downloads_and_voice_setup(monkeypatch,refere
         raise AssertionError(path)
     monkeypatch.setattr(m,'local_json',local)
     assert m.imports_active()
+
+
+def test_idle_update_does_not_treat_metadata_head_as_playback(home,monkeypatch):
+    def local(path,payload=None):
+        if path=='/v1/activity':return {'active':None}
+        if path=='/v1/media/state':return {'active':False}
+        if path=='/v1/http':return {'listeners':{'local':{'oldest_active':[{'method':'HEAD','path':'/v1/media/item'}]}}}
+        if path=='/v1/lease/acquire':return {'lease':{'id':'reserved'}}
+        return {}
+    monkeypatch.setattr(m,'local_json',local)
+    assert m.wait_idle(.1)=='reserved'
