@@ -8624,7 +8624,8 @@ def _fabric_care_direct(prompt,profile,events=None):
 
 
 def _capability_tools():
-    return _fabric_care_module().tools()+[
+    import theater_desk
+    return theater_desk.tools()+ _fabric_care_module().tools()+[
         {"type":"function","function":{"name":"fabric_storage","description":"Locate registered portable backup and travel-library drives across trusted Fabric nodes. Read-only; reports folders and attachment status, never starts backups or copies data.","parameters":{"type":"object","properties":{}}}},
         {"type":"function","function":{
             "name":"generate_image",
@@ -8803,6 +8804,7 @@ _TOOL_POLICY = {
     "notebook_list":("all","observation"),"notebook_read":("all","observation"),
     "notebook_capture":("workspace","mutation"),"notebook_complete":("workspace","mutation"),"notebook_update":("workspace","mutation"),
     "word_reference":("all","observation"),
+    "theater_lookup":("all","observation"),"theater_control":("workspace","action"),
     "fabric_storage":("all","observation"),
     "fabric_status":("all","observation"),"fabric_maintain":("workspace","action"),
     "run_command":("power","command"),
@@ -12838,6 +12840,10 @@ def ollama_chat(force_search=False, initial_prompt=None, allow_start=True, host_
                     elif name in {'books_shelf','books_lookup'}:
                         import book_assistant
                         tool_content,_ok,_elapsed=_tool_transaction(name,args,lambda:book_assistant.run_tool(name,args))
+                        if _ok:turn_successful_tools.add(name)
+                    elif name in {'theater_lookup','theater_control'}:
+                        import theater_desk
+                        tool_content,_ok,_elapsed=_tool_transaction(name,args,lambda:theater_desk.run_tool(name,args))
                         if _ok:turn_successful_tools.add(name)
                     elif name == 'fabric_storage':
                         _fabric_care_module()
@@ -21918,6 +21924,9 @@ _COMMANDS = [
     ("lk ttt", "[0p|1p|2p]", "meta", "Tic-Tac-Toe alias"),
     ("lk gtnw", "", "meta", "Global Thermonuclear War alias"),
     # Config/meta
+    ("lk theater", "[--node NODE] [status|search WORDS|show ID|ticket ID|pause|resume|stop|seek SECONDS|revoke ID]", "media", "Browser theater, shared showings and expiring admission tickets"),
+    ("lk theater ticket", "[ID|--channel] [--hours N] [--qr FILE]", "media", "Issue one revocable movie or channel ticket with optional printable QR"),
+    ("lk theater setup", "--url HTTPS_ORIGIN", "media", "Enable the dedicated audience listener on localhost:7340"),
     ("lk fabric storage", "[status|drives|sync|register|resolve|open] [--help]", "fabric", "Recognize registered backup and travel-library drives across trusted nodes"),
     ("lk fabric storage register", "[--mount PATH --name NAME --role backup|travel] [--path FOLDER ...] [--yes]", "fabric", "Choose a drive and review registration; no copying, formatting or backup schedule changes"),
     ("lk fabric storage open", "NAME [--folder N]", "fabric", "Browse a registered travel folder on its current host"),
@@ -23148,7 +23157,7 @@ def main():
         import command_help
         return command_help.show(sys.argv[2:])
     if len(sys.argv)>2 and any(flag in sys.argv[2:] for flag in ('--help','-h')):
-        if sys.argv[1] not in {'web','terminal','saver','sv','lock','unlock','lk','lktl','notes','tasks','reminders','ytd','ytr','museum','describe','notifications'} and not (sys.argv[1] in {'media','music'} and sys.argv[2] in {'import','disc','rip','edit','storage'}):
+        if sys.argv[1] not in {'web','terminal','saver','sv','lock','unlock','lk','lktl','notes','tasks','reminders','ytd','ytr','theater','museum','describe','notifications'} and not (sys.argv[1] in {'media','music'} and sys.argv[2] in {'import','disc','rip','edit','storage'}):
             import command_help
             return command_help.show([word for word in sys.argv[1:] if word not in {'--help','-h'}])
     if len(sys.argv)>=2 and sys.argv[1] in {"notes","tasks","reminders"}:
@@ -23167,6 +23176,9 @@ def main():
     if len(sys.argv)>=2 and sys.argv[1]=='web':
         import web_desk
         return web_desk.main(sys.argv[2:],read_key=_read_tty_key)
+    if len(sys.argv)>=2 and sys.argv[1]=="theater":
+        import theater_desk
+        return theater_desk.main(sys.argv[2:])
     if len(sys.argv)>=2 and sys.argv[1]=="museum":
         import museum_desk
         return museum_desk.main(sys.argv[2:],ui=sys.modules[__name__])

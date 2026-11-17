@@ -51,6 +51,8 @@
   }
   function gypsyCommand(text){return /^\/gypsy$/i.test(String(text||'').trim())}
   function openGypsy(){const url=new URL('/gypsy',root.location.href).href;try{root.open(url,'_blank','noopener')}catch{}return url}
+  function theaterCommand(text){return /^\/theater$/i.test(String(text||'').trim())}
+  function openTheater(){const url=new URL('/theater',root.location.href).href;root.open(url,'_blank','noopener');return url}
   function museumCommand(text){return /^\/museum$/i.test(String(text||'').trim())}
   function openMuseum(){const url=new URL('/museum',root.location.href).href;try{root.open(url,'_blank','noopener')}catch{}return url}
   function radioCommand(text){
@@ -161,7 +163,7 @@
     try{root.open(url.href,'_blank','noopener')}catch{}
     return url.href;
   }
-  root.FabricBrowserViews={gypsyCommand,openGypsy,museumCommand,openMuseum,radioAddCommand,addRadio,radioCommand,openRadio,beginImage,imageArtifacts,imageRequest,fabricCommand,openFabric,booksCommand,openBooks,bookQuery,bookMatches,createBookAhead,bookPosition};
+  root.FabricBrowserViews={theaterCommand,openTheater,gypsyCommand,openGypsy,museumCommand,openMuseum,radioAddCommand,addRadio,radioCommand,openRadio,beginImage,imageArtifacts,imageRequest,fabricCommand,openFabric,booksCommand,openBooks,bookQuery,bookMatches,createBookAhead,bookPosition};
 })(globalThis);
 
 
