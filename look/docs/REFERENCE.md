@@ -437,6 +437,12 @@ lk ttt [0p|1p|2p]
   [meta] Tic-Tac-Toe alias
 lk gtnw
   [meta] Global Thermonuclear War alias
+lk theater [--node NODE] [status|search WORDS|show ID|ticket ID|pause|resume|stop|seek SECONDS|revoke ID]
+  [media] Browser theater, shared showings and expiring admission tickets
+lk theater ticket [ID|--channel] [--hours N] [--qr FILE]
+  [media] Issue one revocable movie or channel ticket with optional printable QR
+lk theater setup --url HTTPS_ORIGIN
+  [media] Enable the dedicated audience listener on localhost:7340
 lk fabric storage [status|drives|sync|register|resolve|open] [--help]
   [fabric] Recognize registered backup and travel-library drives across trusted nodes
 lk fabric storage register [--mount PATH --name NAME --role backup|travel] [--path FOLDER ...] [--yes]

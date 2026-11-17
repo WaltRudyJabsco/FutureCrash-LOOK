@@ -1456,6 +1456,12 @@ def pulse_loop():
     # and peer advertisements refresh on a slower cadence with jitter/backoff.
     threading.Thread(target=portable_storage.worker, args=(PEERS.public, _file_peer_json), daemon=True, name="portable-storage").start()
     last_peer = 0.0
+    try:
+        from . import theater
+    except ImportError:
+        import theater
+    try:theater.boot()
+    except Exception as exc:print('Theater startup: '+str(exc),flush=True)
     refresh_identity()
     MODELS.discover()
     refresh_advertisement()
@@ -3932,6 +3938,18 @@ class API(BaseHTTPRequestHandler):
             raise PermissionError("Destination node is not paired and advertising")
         return peer, value
 
+    def _theater_request(self,payload=None):
+        try:
+            try:from . import theater
+            except ImportError:import theater
+            peer,_=self._file_target();value=dict(payload or {})
+            if peer is not None:
+                result=http_json(_copy_route(peer)+'/v1/theater',data=value,timeout=45)
+            else:
+                result=theater.admin(value,_local_media_catalog,_local_media_entry)
+            return self.sendj(200,result)
+        except Exception as exc:return self.sendj(400,{'error':str(exc)})
+
     def _words_request(self,payload=None):
         try:
             _look_catalog_modules();import words
@@ -5011,6 +5029,7 @@ class API(BaseHTTPRequestHandler):
             try: from . import notifications
             except ImportError: import notifications
             return self.sendj(200,{'ok':True,'settings':notifications.settings()})
+        if path=="/v1/theater":return self._theater_request()
         if path=="/v1/receipts":return self._receipts_request()
         if path in {"/v1/gypsy","/v1/gypsy/image"}:return self._animation_request()
         if path in {"/v1/museum","/v1/museum/search","/v1/museum/image"}: return self._museum_request()

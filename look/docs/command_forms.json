@@ -1303,6 +1303,24 @@
     "Global Thermonuclear War alias"
   ],
   [
+    "lk theater",
+    "[--node NODE] [status|search WORDS|show ID|ticket ID|pause|resume|stop|seek SECONDS|revoke ID]",
+    "media",
+    "Browser theater, shared showings and expiring admission tickets"
+  ],
+  [
+    "lk theater ticket",
+    "[ID|--channel] [--hours N] [--qr FILE]",
+    "media",
+    "Issue one revocable movie or channel ticket with optional printable QR"
+  ],
+  [
+    "lk theater setup",
+    "--url HTTPS_ORIGIN",
+    "media",
+    "Enable the dedicated audience listener on localhost:7340"
+  ],
+  [
     "lk fabric storage",
     "[status|drives|sync|register|resolve|open] [--help]",
     "fabric",

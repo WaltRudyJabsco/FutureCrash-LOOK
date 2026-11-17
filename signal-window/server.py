@@ -1148,6 +1148,11 @@ class App(BaseHTTPRequestHandler):
             import animation_web
             try:return animation_web.handle(self,NODE_URL)
             except Exception as exc:return self.json(502,{'error':str(exc)})
+        if path=='/theater' or path in {'/api/theater','/api/theater/config'}:
+            if not self._require_endpoint('lo.use'):return
+            import theater_admin_web
+            try:return theater_admin_web.handle(self,NODE)
+            except Exception as exc:return self.send_json(502,{'error':str(exc)})
         if path=='/museum' or path.startswith('/api/museum'):
             if not self._require_endpoint('lo.use'):return
             import museum_web
@@ -1253,6 +1258,11 @@ class App(BaseHTTPRequestHandler):
                 return self.json(200,_node_call('/v1/curtain',{'action':data['action'],'pin':data.get('pin'),'variant':data.get('variant','standard')},timeout=12))
             except Exception as exc:return self.json(400,{'error':str(exc)})
 
+        if urlparse(self.path).path=='/api/theater':
+            if not self._require_endpoint('lo.use'):return
+            import theater_admin_web
+            try:return theater_admin_web.post(self,NODE)
+            except Exception as exc:return self.send_json(400,{'error':str(exc)})
         if urlparse(self.path).path.startswith('/api/museum'):
             if not self._require_endpoint('lo.use'):return
             import museum_web

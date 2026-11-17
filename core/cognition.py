@@ -113,6 +113,8 @@ ACTION_SPECS = (
     ActionSpec("list_processes", "system", "read", "observation", ("processes", "what is running", "pid")),
     ActionSpec("listening_ports", "system", "read", "observation", ("port", "listening", "what uses port")),
     ActionSpec("system_snapshot", "system", "read", "observation", ("system status", "machine status", "host status")),
+    ActionSpec("theater_lookup", "media", "read", "observation", ("theater", "cinema", "movie ticket")),
+    ActionSpec("theater_control", "media", "local_effect", "action", ("show on theater", "issue movie ticket")),
     ActionSpec("fabric_storage", "system", "read", "observation", ("portable storage", "travel library", "where is my backup drive")),
     ActionSpec("fabric_status", "system", "read", "observation", ("fabric status", "check our fabric", "backed up", "up to date")),
     ActionSpec("fabric_maintain", "system", "local_effect", "action", ("update all computers", "back up our fabric", "ensure our fabric")),
