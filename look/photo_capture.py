@@ -75,10 +75,14 @@ class CaptureHandler(BaseHTTPRequestHandler):
         self.send_header('Cache-Control','no-store');self.send_header('Referrer-Policy','no-referrer')
         self.send_header('X-Content-Type-Options','nosniff')
         self.send_header('Permissions-Policy','camera=(self), microphone=()')
-        self.send_header('Content-Security-Policy',"default-src 'self'; script-src 'unsafe-inline'; style-src 'unsafe-inline'; img-src 'self' blob:; media-src 'self' blob:; frame-ancestors 'none'; base-uri 'none'")
+        self.send_header('Content-Security-Policy',"default-src 'self'; script-src 'self' 'unsafe-inline'; style-src 'unsafe-inline'; img-src 'self' blob:; media-src 'self' blob:; frame-ancestors 'none'; base-uri 'none'")
         self.end_headers();self.wfile.write(data)
 
     def do_GET(self):
+        if self.path in {'/qr_decoder.js','/photo_qr.js'}:
+            path=Path(__file__).with_name(self.path[1:])
+            try:return self.reply(200,path.read_text(),'text/javascript; charset=utf-8')
+            except OSError:return self.reply(503,{'error':'QR scanner unavailable; update LOOK on this computer'})
         if self.path!='/':return self.reply(404,{'error':'Unknown capture route'})
         return self.reply(200,PAGE,'text/html; charset=utf-8')
 
@@ -115,7 +119,7 @@ def serve(directory,announce):
 
 
 def main(argv=None):
-    parser=argparse.ArgumentParser(prog='lk photo',description='Open a camera preview, choose a source and save captures to Pictures/LOOK Photos and LK Clip.')
+    parser=argparse.ArgumentParser(prog='lk photo',description='Open a camera preview, choose a source, scan QR tickets or save photos to Pictures/LOOK Photos and LK Clip.')
     parser.add_argument('--output-dir',type=Path,default=Path.home()/'Pictures/LOOK Photos')
     parser.add_argument('--serve',action='store_true',help=argparse.SUPPRESS)
     parser.add_argument('--announce',help=argparse.SUPPRESS)
@@ -134,7 +138,7 @@ def main(argv=None):
             process.terminate();raise ValueError('Camera session startup timed out')
         value=json.loads(announce.read_text())
         opened=webbrowser.open(value['url'])
-        print('Photo camera opened. Choose Start camera, then Take photo.' if opened else 'Photo camera is ready in your browser.')
+        print('Photo camera opened. Choose Start camera, then Take photo or Scan QR.' if opened else 'Photo camera is ready in your browser.')
         print('Photos save to '+str(args.output_dir.expanduser())+' and LK Clip.')
         if not opened:print('Open this local capture link: '+value['url'])
     return 0
@@ -142,13 +146,28 @@ def main(argv=None):
 
 PAGE=r'''<!doctype html><html lang="en"><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>LOOK Photo</title><style>
 :root{color-scheme:dark}*{box-sizing:border-box}body{margin:auto;padding:24px;max-width:1000px;background:#10191d;color:#eee9dc;font:17px/1.5 system-ui}header,.tools{display:flex;gap:12px;align-items:center;flex-wrap:wrap;justify-content:space-between}h1{font:normal 30px Georgia;color:#c6a66f}video,img{width:100%;max-height:68vh;object-fit:contain;background:#080c0e;border-radius:10px}button,select{font:inherit;padding:12px;background:#1d2b31;color:inherit;border:1px solid #60757d;border-radius:6px;min-height:44px}button{cursor:pointer}button.primary{background:#c6a66f;color:#10191d;font-weight:600}button:disabled{opacity:.5}button:focus-visible,select:focus-visible{outline:2px solid #83c9f4}p{color:#b4c0c3;overflow-wrap:anywhere}.tools{justify-content:flex-start;margin:16px 0}[hidden]{display:none!important}@media(max-width:600px){body{padding:14px}select{max-width:100%}}
-</style><header><h1>LOOK Photo</h1><button id="done">Done</button></header><div class="tools"><label>Camera <select id="camera"><option value="">Default camera</option></select></label><button id="start">Start camera</button><button id="capture" class="primary" disabled>Take photo</button><button id="retake" hidden>Back to camera</button></div><p id="status" role="status">Start camera to allow access. Connected cameras appear in the source list.</p><video id="video" autoplay playsinline muted></video><img id="photo" alt="Your captured photo" hidden><p id="saved"></p><script>
-const $=id=>document.getElementById(id),v=$('video');let token=location.hash.slice(1),stream=null,busy=false,closed=false,preview=null;
+</style><header><h1>LOOK Photo</h1><button id="done">Done</button></header><div class="tools"><label>Camera <select id="camera"><option value="">Default camera</option></select></label><button id="start">Start camera</button><button id="capture" class="primary" disabled>Take photo</button><button id="scan" disabled>Scan QR</button><button id="retake" hidden>Back to camera</button></div><p id="status" role="status">Start camera to allow access. Connected cameras appear in the source list.</p><video id="video" autoplay playsinline muted></video><img id="photo" alt="Your captured photo" hidden><p id="saved"></p><section id="qr-result" hidden><h2>QR recognized</h2><p id="qr-text"></p><button id="qr-open" class="primary" hidden>Open in browser</button><button id="qr-again">Scan another</button></section><script src="/qr_decoder.js"></script><script src="/photo_qr.js"></script><script>
+const $=id=>document.getElementById(id),v=$('video');let token=location.hash.slice(1),stream=null,busy=false,closed=false,preview=null,scanner=null,qrURL=null;
 function message(text){$('status').textContent=text}
-function stop(){if(stream)for(const track of stream.getTracks())track.stop();stream=null;v.srcObject=null;$('capture').disabled=true}
+function stopScan(){scanner?.stop();$('scan').textContent='Scan QR'}
+function stop(){stopScan();$('scan').disabled=true;if(stream)for(const track of stream.getTracks())track.stop();stream=null;v.srcObject=null;$('capture').disabled=true}
 async function devices(){if(!navigator.mediaDevices)return;const selected=$('camera').value;const list=await navigator.mediaDevices.enumerateDevices();$('camera').replaceChildren();const first=document.createElement('option');first.value='';first.textContent='Default camera';$('camera').append(first);for(const device of list.filter(x=>x.kind==='videoinput')){const option=document.createElement('option');option.value=device.deviceId;option.textContent=device.label||'Camera '+$('camera').options.length;$('camera').append(option)}if([...$('camera').options].some(o=>o.value===selected))$('camera').value=selected}
-async function start(){if(busy||closed)return;busy=true;$('start').disabled=true;$('camera').disabled=true;stop();try{if(!navigator.mediaDevices?.getUserMedia)throw Error('Camera access requires a supported browser on this computer. Open the local link printed by lk photo.');const id=$('camera').value;stream=await navigator.mediaDevices.getUserMedia({video:{...(id?{deviceId:{exact:id}}:{}),width:{ideal:1920},height:{ideal:1080}},audio:false});v.srcObject=stream;await v.play();await devices();$('photo').hidden=true;v.hidden=false;$('capture').disabled=false;message('Ready · '+(stream.getVideoTracks()[0]?.label||'Default camera'))}catch(e){message(e.name==='NotAllowedError'?'Camera permission was denied. Allow this page in your browser’s camera settings and try again.':e.name==='NotFoundError'?'No camera found. Connect a camera and choose Start camera.':e.message)}finally{busy=false;$('start').disabled=false;$('camera').disabled=false}}
-async function capture(){if(busy||!stream)return;busy=true;$('capture').disabled=true;try{if(!v.videoWidth)throw Error('The camera is still starting');const canvas=document.createElement('canvas');const ratio=Math.min(1,1920/Math.max(v.videoWidth,v.videoHeight));canvas.width=Math.round(v.videoWidth*ratio);canvas.height=Math.round(v.videoHeight*ratio);canvas.getContext('2d').drawImage(v,0,0,canvas.width,canvas.height);let blob=await new Promise(r=>canvas.toBlob(r,'image/png'));while(blob&&blob.size>3145728&&canvas.width>320){const smaller=document.createElement('canvas');smaller.width=Math.round(canvas.width*.8);smaller.height=Math.round(canvas.height*.8);smaller.getContext('2d').drawImage(canvas,0,0,smaller.width,smaller.height);canvas.width=smaller.width;canvas.height=smaller.height;canvas.getContext('2d').drawImage(smaller,0,0);blob=await new Promise(r=>canvas.toBlob(r,'image/png'))}if(!blob||blob.size>3145728)throw Error('Could not prepare a clipboard-sized photo');message('Saving photo…');const response=await fetch('/capture',{method:'POST',headers:{'Content-Type':'image/png','X-LOOK-Photo-Token':token},body:blob});const data=await response.json();if(!response.ok)throw Error(data.error);if(preview)URL.revokeObjectURL(preview);preview=URL.createObjectURL(blob);$('photo').src=preview;$('photo').hidden=false;v.hidden=true;$('retake').hidden=false;$('saved').textContent='Saved '+data.path;message(data.clipboard?'Saved · copied to clipboard'+(data.shelf?' · added to LK Clip':''):data.shelf?'Saved · added to LK Clip. System clipboard unavailable.':'Saved. Clipboard unavailable.')}catch(e){message(e.message)}finally{busy=false;$('capture').disabled=!stream}}
+async function start(){if(busy||closed)return;busy=true;$('start').disabled=true;$('camera').disabled=true;$('qr-result').hidden=true;qrURL=null;stop();try{if(!navigator.mediaDevices?.getUserMedia)throw Error('Camera access requires a supported browser on this computer. Open the local link printed by lk photo.');const id=$('camera').value;stream=await navigator.mediaDevices.getUserMedia({video:{...(id?{deviceId:{exact:id}}:{}),width:{ideal:1920},height:{ideal:1080}},audio:false});v.srcObject=stream;await v.play();await devices();$('photo').hidden=true;v.hidden=false;$('capture').disabled=false;$('scan').disabled=false;message('Ready · '+(stream.getVideoTracks()[0]?.label||'Default camera'))}catch(e){message(e.name==='NotAllowedError'?'Camera permission was denied. Allow this page in your browser’s camera settings and try again.':e.name==='NotFoundError'?'No camera found. Connect a camera and choose Start camera.':e.message)}finally{busy=false;$('start').disabled=false;$('camera').disabled=false}}
+async function capture(){if(busy||!stream)return;stopScan();busy=true;$('capture').disabled=true;try{if(!v.videoWidth)throw Error('The camera is still starting');const canvas=document.createElement('canvas');const ratio=Math.min(1,1920/Math.max(v.videoWidth,v.videoHeight));canvas.width=Math.round(v.videoWidth*ratio);canvas.height=Math.round(v.videoHeight*ratio);canvas.getContext('2d').drawImage(v,0,0,canvas.width,canvas.height);let blob=await new Promise(r=>canvas.toBlob(r,'image/png'));while(blob&&blob.size>3145728&&canvas.width>320){const smaller=document.createElement('canvas');smaller.width=Math.round(canvas.width*.8);smaller.height=Math.round(canvas.height*.8);smaller.getContext('2d').drawImage(canvas,0,0,smaller.width,smaller.height);canvas.width=smaller.width;canvas.height=smaller.height;canvas.getContext('2d').drawImage(smaller,0,0);blob=await new Promise(r=>canvas.toBlob(r,'image/png'))}if(!blob||blob.size>3145728)throw Error('Could not prepare a clipboard-sized photo');message('Saving photo…');const response=await fetch('/capture',{method:'POST',headers:{'Content-Type':'image/png','X-LOOK-Photo-Token':token},body:blob});const data=await response.json();if(!response.ok)throw Error(data.error);if(preview)URL.revokeObjectURL(preview);preview=URL.createObjectURL(blob);$('photo').src=preview;$('photo').hidden=false;v.hidden=true;$('retake').hidden=false;$('saved').textContent='Saved '+data.path;message(data.clipboard?'Saved · copied to clipboard'+(data.shelf?' · added to LK Clip':''):data.shelf?'Saved · added to LK Clip. System clipboard unavailable.':'Saved. Clipboard unavailable.')}catch(e){message(e.message)}finally{busy=false;$('capture').disabled=!stream}}
+scanner=new LookPhotoQR.Scanner(v,text=>{
+  stopScan();qrURL=LookPhotoQR.destination(text);$('qr-text').textContent=String(text).slice(0,4096);
+  $('qr-result').hidden=false;$('qr-open').hidden=!qrURL;
+  message(qrURL?'Ticket or link recognized · open it below.':'QR text recognized.');
+},error=>{stopScan();message('QR scan failed: '+error.message)});
+async function scan(){
+  if(busy||closed)return;
+  if(scanner.active){stopScan();message('QR scanning paused');return}
+  if(!stream)await start();if(!stream)return;
+  $('photo').hidden=true;v.hidden=false;$('retake').hidden=true;$('qr-result').hidden=true;
+  qrURL=null;scanner.start();$('scan').textContent='Stop scanning';message('Hold the printed ticket steady in the camera view.');
+}
+$('scan').onclick=scan;$('qr-again').onclick=scan;
+$('qr-open').onclick=()=>{if(!qrURL)return;stop();window.open(qrURL,'_blank','noopener,noreferrer');message('Opened the recognized link in your browser. Camera stopped.')};
 $('start').onclick=start;$('camera').onchange=start;$('capture').onclick=capture;$('retake').onclick=()=>{$('photo').hidden=true;v.hidden=false;$('retake').hidden=true};$('done').onclick=async()=>{if(busy)return;closed=true;stop();$('start').disabled=true;$('camera').disabled=true;try{await fetch('/close',{method:'POST',headers:{'X-LOOK-Photo-Token':token}})}catch{}message('Camera closed. You can close this tab.')};window.addEventListener('pagehide',stop);navigator.mediaDevices?.addEventListener('devicechange',()=>devices().catch(e=>message(e.message)));devices().catch(()=>{});
 </script></html>'''
 

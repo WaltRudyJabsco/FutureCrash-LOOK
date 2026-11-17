@@ -1306,7 +1306,7 @@
     "lk photo",
     "[--output-dir DIR]",
     "media",
-    "Camera preview and source picker; save photos to Pictures/LOOK Photos and LK Clip"
+    "Camera preview, source picker and QR scanner; save photos to Pictures/LOOK Photos and LK Clip"
   ],
   [
     "lk theater",
