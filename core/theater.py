@@ -204,6 +204,7 @@ def qr_png(code):
     except ImportError as exc:raise ValueError('Install Theater QR support with lk theater qr-setup on this host') from exc
     admission(code)
     url=read('settings')['url']+'/#'+code
-    image=qrcode.make(url,box_size=8,border=4)
+    from qrcode.image.pure import PyPNGImage
+    image=qrcode.make(url,box_size=8,border=4,image_factory=PyPNGImage)
     output=io.BytesIO();image.save(output,format='PNG')
     return output.getvalue()

@@ -5639,6 +5639,7 @@ class API(BaseHTTPRequestHandler):
                 result["state"]=load_curator_state()
                 return self.sendj(200 if result.get("ok") else 409,result)
             return self.sendj(200,{"ok":True,"state":state,"plan":curator_plan(profile)})
+        if path == "/v1/theater":return self._theater_request(d)
         if path == "/v1/gypsy":return self._animation_request(d)
         if path == "/v1/fabric-update":return self._fabric_update(d)
         if path == "/v1/upkeep":return self._fabric_update(d,local_job=True)
