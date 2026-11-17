@@ -3,6 +3,7 @@ import argparse
 import json
 from pathlib import Path
 import subprocess
+import shutil
 import sys
 import urllib.parse
 import urllib.request
@@ -39,7 +40,10 @@ def main(argv=None):
         if args.command=='qr-setup':
             if args.node!='local':raise ValueError('Run qr-setup directly on the Theater host')
             dest=Path.home()/'.local/share/future-crash-look/theater-python'
-            subprocess.run([sys.executable,'-m','pip','install','--target',str(dest),'qrcode[pil]>=8,<9'],check=True)
+            candidates=[sys.executable,shutil.which('python3'),'/opt/homebrew/bin/python3','/usr/local/bin/python3','/home/linuxbrew/.linuxbrew/bin/python3']
+            python=next((p for p in candidates if p and Path(p).is_file() and subprocess.run([p,'-m','pip','--version'],capture_output=True).returncode==0),None)
+            if python is None:raise ValueError('Install Python with pip to set up Theater QR support')
+            subprocess.run([python,'-m','pip','install','--target',str(dest),'qrcode[png]>=8,<9'],check=True)
             return 0
         value={'action':args.command or 'status'}
         if args.command=='search':value['query']=' '.join(args.query)

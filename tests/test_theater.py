@@ -123,3 +123,17 @@ def test_assistant_tools_share_theater_actions(monkeypatch):
     theater_desk.run_tool('theater_control',{'node':'host','action':'ticket','media':'one'})
     assert calls[0]==({'action':'search','query':'PCU'},'host')
     with pytest.raises(ValueError):theater_desk.run_tool('theater_control',{'action':'configure','url':'https://elsewhere'})
+
+
+def test_post_dispatch_reaches_theater(state):
+    from core import node
+    import io
+    from types import SimpleNamespace
+    handler=object.__new__(node.API)
+    handler.path='/v1/theater'
+    handler.headers={'Content-Length':'19','Content-Type':'application/json'}
+    raw=json.dumps({'action':'status'}).encode();handler.headers['Content-Length']=str(len(raw))
+    handler.rfile=io.BytesIO(raw)
+    handler._authorized_ingress=lambda path:True
+    handler._theater_request=lambda data:('theater',data)
+    assert handler.do_POST()==('theater',{'action':'status'})
