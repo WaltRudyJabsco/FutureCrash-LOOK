@@ -21924,7 +21924,7 @@ _COMMANDS = [
     ("lk ttt", "[0p|1p|2p]", "meta", "Tic-Tac-Toe alias"),
     ("lk gtnw", "", "meta", "Global Thermonuclear War alias"),
     # Config/meta
-    ("lk photo", "[--output-dir DIR]", "media", "Camera preview and source picker; save photos to Pictures/LOOK Photos and LK Clip"),
+    ("lk photo", "[--output-dir DIR]", "media", "Camera preview, source picker and QR scanner; save photos to Pictures/LOOK Photos and LK Clip"),
     ("lk theater", "[--node NODE] [menu|status|search WORDS|show ID|ticket ID|pause|resume|stop|seek SECONDS|revoke ID]", "media", "Terminal projection room, shared showings and printable admission tickets"),
     ("lk theater ticket", "[ID|--channel] [--hours N] [--qr FILE]", "media", "Issue one revocable movie or channel ticket with optional printable QR"),
     ("lk theater setup", "--url HTTPS_ORIGIN", "media", "Enable the dedicated audience listener on localhost:7340"),

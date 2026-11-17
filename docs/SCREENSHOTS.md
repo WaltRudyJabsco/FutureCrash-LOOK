@@ -63,3 +63,16 @@ therefore saves that copy on the 3090. Normal opt-in clipboard publication makes
 it available to other paired shelves. The capture feedback names the host and
 saved path. Browser camera inputs can offer a camera or an image picker depending
 on the platform. `lk photo` provides the explicit live-preview/source-picker UI.
+
+### Printed QR tickets
+
+In `lk photo`, choose Start camera, then Scan QR. Hold the ticket steady and keep
+its full square visible. Photo decodes frames on this computer and shows the
+recognized text or link. Open in browser opens a recognized HTTP/HTTPS link and
+stops the camera. A Theater ticket goes directly to its movie admission page.
+The scanner pauses after each recognition; Scan another resumes it. Photo capture
+and saving continue to use Take photo as before.
+
+The offline decoder is jsQR 1.4.0 by the jsQR contributors, licensed under Apache
+2.0. Its source is https://github.com/cozmo/jsQR and its license ships alongside
+`qr_decoder.js`. Camera frames used for scanning are not uploaded or saved.

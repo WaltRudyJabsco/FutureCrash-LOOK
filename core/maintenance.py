@@ -45,7 +45,7 @@ def allowed(relative):
     parent = str(p.parent)
     if parent == '.local/share/future-crash-look/core': return p.suffix == '.py'
     if parent == '.local/share/future-crash-look': return p.name == 'RELEASE'
-    if parent == '.local/share/look': return p.suffix == '.py' or p.name == 'lk'
+    if parent == '.local/share/look': return p.suffix == '.py' or p.name in {'lk','qr_decoder.js','qr_decoder.LICENSE','photo_qr.js'}
     if parent == '.local/share/look/docs': return p.name in {'REFERENCE.md','command_forms.json','command_help.json'}
     if parent == '.local/share/signal-window':
         return p.name in {'server.py', 'app.js', 'media-session.js', 'media-art.js', 'index.html', 'style.css','browser-views.js','fabric.html','fabric-dashboard.js'}
@@ -75,6 +75,7 @@ def register_install(source, *, include_albert=True):
     for p in (source / 'look').glob('*.py'):
         mappings.append((p, '.local/share/look/' + p.name))
     mappings.append((source / 'look/lk', '.local/share/look/lk'))
+    mappings += [(source/'look'/name,'.local/share/look/'+name) for name in ('qr_decoder.js','qr_decoder.LICENSE','photo_qr.js')]
     mappings += [(source/'look/docs'/name,'.local/share/look/docs/'+name)
                  for name in ('REFERENCE.md','command_forms.json','command_help.json')]
     mappings.append((source / 'VERSION', '.local/share/future-crash-look/RELEASE'))
