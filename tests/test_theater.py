@@ -137,3 +137,10 @@ def test_post_dispatch_reaches_theater(state):
     handler._authorized_ingress=lambda path:True
     handler._theater_request=lambda data:('theater',data)
     assert handler.do_POST()==('theater',{'action':'status'})
+
+
+def test_printable_ticket_qr_is_real_png(state):
+    pytest.importorskip('qrcode.image.pure')
+    ticket=t.issue('movie','PCU')
+    image=t.qr_png(ticket['code'])
+    assert image.startswith(b'\x89PNG\r\n\x1a\n') and len(image)>200
