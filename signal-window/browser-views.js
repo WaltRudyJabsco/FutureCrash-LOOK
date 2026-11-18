@@ -382,8 +382,11 @@
     return api('/'+action+'?'+new URLSearchParams({target:row.node||'local'}),{id:row.id,...extra});
   }
   async function favoriteBook(row){
-    await curate(row,'favorite',{selected:!row.favorite});await shelf(shelfQuery);
-    status(row.favorite?'Returned to To explore.':'Saved to Favorites.');
+    const selected=!row.favorite;
+    await curate(row,'favorite',{selected});
+    if(selected&&collectionFilter==='pool')collectionFilter='favorites';
+    await shelf(shelfQuery);
+    status(selected?'Saved to Favorites — kept on your Fabric, not deleted.':'Removed from Favorites — still available in To explore and All books.');
   }
   function rating(icon,label,pressed,action){const b=button(icon,action);b.className='rating';b.title=label;b.setAttribute('aria-label',label);b.setAttribute('aria-pressed',String(pressed));return b}
   async function rejectBook(row){
@@ -425,6 +428,7 @@
       const actions=document.createElement('div');actions.className='book-actions';card.append(actions);
       actions.append(rating('👍',row.favorite?'Remove from Favorites':'Add to Favorites',!!row.favorite,()=>favoriteBook(row)));
       if(row.starter_managed||row.removal_due)actions.append(rating(row.removal_due?'↶':'👎',row.removal_due?'Undo removal':'Thumbs down',!!row.removal_due,()=>rejectBook(row)));
+      else{const protectedBook=rating('👎','Removal unavailable: manually imported book',false,()=>{});protectedBook.disabled=true;protectedBook.title='Manually imported books are protected from automatic removal.';actions.append(protectedBook)}
       const detail=document.createElement('details'),summary=document.createElement('summary');summary.textContent='Collections'+(row.collections?.length?' · '+row.collections.join(', '):'');detail.append(summary);
       detail.addEventListener('toggle',()=>{if(!detail.open||detail.dataset.ready)return;detail.dataset.ready='true';
       for(const name of collectionNames){const label=document.createElement('label'),check=document.createElement('input');check.type='checkbox';check.checked=(row.collections||[]).includes(name);label.append(check,document.createTextNode(' '+name));detail.append(label);check.onchange=()=>curate(row,'collect',{name,selected:check.checked}).then(()=>shelf(shelfQuery)).catch(e=>status(e.message))}
@@ -449,7 +453,7 @@
     $('shelf').setAttribute('aria-pressed',String(isShelf));$('discover').setAttribute('aria-pressed',String(!isShelf));
     $('load-more').hidden=true;
   }
-  function renderShelf(){const rows=shelfRows();show(rows);status(rows.length?'Choose a book or continue reading.':collectionFilter==='pool'?'Your discovery pool is empty. Favorites are saved separately; daily refill can bring new books.':collectionFilter==='favorites'?'Use 👍 on a book to save it here.':collectionFilter==='rejected'?'No books pending removal.':collectionFilter.startsWith('c:')?'This collection is empty. Choose All books, then use Collections on a title.':'No matching book on your Fabric shelf. Use Search Gutenberg to find new books.')}
+  function renderShelf(){const rows=shelfRows();show(rows);$('favorites').textContent='👍 Favorites ('+catalog.filter(r=>r.favorite&&!r.removal_due).length+')';status(rows.length?'Choose a book or continue reading.':collectionFilter==='pool'?'Your discovery pool is empty. Favorites are saved separately; daily refill can bring new books.':collectionFilter==='favorites'?'Use 👍 on a book to save it here.':collectionFilter==='rejected'?'No books pending removal.':collectionFilter.startsWith('c:')?'This collection is empty. Choose All books, then use Collections on a title.':'No matching book on your Fabric shelf. Use Search Gutenberg to find new books.')}
   async function shelf(query=''){
     const mine=++libraryGeneration;discovery=null;shelfQuery=query;libraryView();libraryControls(true);status('Loading Fabric shelf…');
     const value=await api();if(mine!==libraryGeneration)return;catalog=value.entries||[];collectionNames=[...new Set([...(value.collections||[]),...catalog.flatMap(r=>r.collections||[])])].sort();collectionOptions();renderShelf();
@@ -466,7 +470,7 @@
     discovery={mode,subject,query,entries:rows,next_index:value.next_index};show(rows,true);
     $('load-more').hidden=!value.next_index;
     const label=mode==='subject'?subject:mode==='search'?'Search: '+query:mode==='new'?'New arrivals':mode==='subjects'?'Subjects':mode==='surprise'?'Surprise me':'Popular';
-    status('Project Gutenberg · '+label+' · '+(rows.length?(mode==='subjects'?'Choose a subject.':'Select a title to download; dimmed titles are already on your shelf.'):'No matching books.')+(shelfValue.errors?.length?' Some book owners are unavailable; ownership checks are incomplete.':''));
+    status((value.warning?value.warning+' ':'')+'Project Gutenberg · '+label+' · '+(rows.length?(mode==='subjects'?'Choose a subject.':'Select a title to download; dimmed titles are already on your shelf.'):'No matching books.')+(shelfValue.errors?.length?' Some book owners are unavailable; ownership checks are incomplete.':''));
   }
   async function resume(query=''){
     await shelf();const match=FabricBrowserViews.bookMatches(query,catalog.filter(r=>!r.removal_due));
@@ -499,6 +503,7 @@
   $('shelf-sort').onchange=()=>{sortOrder=$('shelf-sort').value;try{localStorage.setItem('look-books-shelf-sort',sortOrder)}catch{}renderShelf()};
   $('discover').onclick=()=>discoverMode('popular').catch(e=>status(e.message));
   $('load-more').onclick=()=>{if(discovery)discoverMode(discovery.mode,discovery.subject,discovery.query,true).catch(e=>{status(e.message);$('load-more').hidden=!discovery?.next_index})};
+  $('favorites').onclick=()=>{collectionFilter='favorites';shelf().catch(e=>status(e.message))};
   $('shelf').onclick=()=>shelf().catch(e=>status(e.message));$('continue').onclick=()=>resume().catch(e=>status(e.message));
   $('library-back').onclick=()=>shelf().catch(e=>status(e.message));
   $('theme').onclick=()=>{theme=theme==='dark'?'paper':'dark';appearance()};
@@ -514,7 +519,7 @@
     save();load(position.chapter,position.paragraph,autoplay).then(()=>save()).catch(e=>status(e.message));
   };
   document.querySelectorAll('[data-mode]').forEach(b=>b.onclick=()=>discoverMode(b.dataset.mode).catch(e=>status(e.message)));
-  $('search').onsubmit=e=>{e.preventDefault();const query=$('query').value.trim();(e.submitter?.value==='gutenberg'?discoverMode('search','',query):shelf(query)).catch(e=>status(e.message))};
+  $('search').onsubmit=e=>{e.preventDefault();const query=$('query').value.trim();if(query&&e.submitter?.value!=='gutenberg')collectionFilter='all';(e.submitter?.value==='gutenberg'?discoverMode('search','',query):shelf(query)).catch(e=>status(e.message))};
   $('controls-toggle').onclick=()=>controlsOpen($('books-app').classList.contains('compact-reader')?!$('books-app').classList.contains('controls-open'):desktopQuiet);
   $('controls-close').onclick=()=>controlsOpen(false,true);
   document.addEventListener('keydown',event=>{if(event.key==='Escape'&&$('books-app').classList.contains('controls-open')){event.preventDefault();controlsOpen(false,true)}});

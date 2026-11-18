@@ -103,7 +103,16 @@ lk books search "Pride and Prejudice"
 lk books fetch https://www.gutenberg.org/ebooks/1342.opds --node local
 ```
 
-Search is explicitly online and uses [Project Gutenberg's official OPDS catalog](https://www.gutenberg.org/ebooks/offline_catalogs.html).
+Search uses [Project Gutenberg's official OPDS catalog](https://www.gutenberg.org/ebooks/offline_catalogs.html).
+During an outage, discovery can use an existing bulk catalogue cache on this node
+or a trusted Fabric peer. Cached results are labeled; popular books fall back to
+title order because the bulk catalogue contains no download rankings. Downloads
+may remain unavailable until Gutenberg returns. Local books stay readable.
+
+In the browser, **👍 Favorites** opens your saved books. Favoriting a book from
+To explore follows it into Favorites; it never deletes its file. Search shelf
+includes Favorites. Only managed starter downloads can be thumbs-downed for
+removal after 48 hours; manually imported books show a disabled removal button.
 Fetch accepts direct public HTTPS EPUB/PDF links (including suitable Internet
 Archive download links) or Gutenberg OPDS entries. It does not automate borrowing,
 subscription authentication or protected downloads. Downloads and remote copies

@@ -179,6 +179,7 @@ figcaption{font:14px/1.5 system-ui;color:var(--muted);margin-top:10px}
 <section id="library" aria-label="Book library">
 <nav>
 <button id="shelf">My shelf</button>
+<button id="favorites">👍 Favorites</button>
 <button id="continue">Continue reading</button>
 <button id="discover">Discover Gutenberg</button>
 <button data-mode="popular">Popular</button>

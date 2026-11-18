@@ -4087,7 +4087,25 @@ class API(BaseHTTPRequestHandler):
                 return self._serve_file_range(image,mimetypes.guess_type(image.name)[0] or 'image/jpeg')
             if action=='discover':
                 import book_core
-                return self.sendj(200,dict(ok=True,**book_core.discover((params.get('mode') or ['popular'])[0],(params.get('subject') or [''])[0],query=(params.get('query') or [''])[0],start_index=(params.get('start_index') or ['1'])[0],page=True)))
+                options=dict(query=(params.get('query') or [''])[0],start_index=(params.get('start_index') or ['1'])[0],page=True)
+                mode=(params.get('mode') or ['popular'])[0];subject=(params.get('subject') or [''])[0]
+                cache_only=(params.get('cached') or [''])[0]=='1'
+                try:
+                    value=book_core.discover(mode,subject,**options,**({'cached':True} if cache_only else {}))
+                except OSError as exc:
+                    # Cache-only peer requests cannot recurse or multiply upstream traffic.
+                    value=None
+                    if not cache_only:
+                        route='/v1/books/discover?'+urllib.parse.urlencode(dict(mode=mode,subject=subject,query=options['query'],start_index=options['start_index'],cached='1'))
+                        peers=[p for p in PEERS.public() if p.get('trusted') and _peer_bases(p)]
+                        def cached_catalog(peer):
+                            try:return _file_peer_json(peer,route)
+                            except Exception:return None
+                        with concurrent.futures.ThreadPoolExecutor(max_workers=4) as pool:
+                            for result in pool.map(cached_catalog,peers):
+                                if result and result.get('cached'):value=result;break
+                    if value is None:return self.sendj(503,{'ok':False,'error':str(exc)})
+                return self.sendj(200,dict(value,ok=True))
             peer,_=self._file_target()
             if peer is not None:
                 query={k:v[0] for k,v in params.items() if k!='target'}

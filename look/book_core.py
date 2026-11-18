@@ -1,7 +1,9 @@
 """Bookshelf ownership and bounded document metadata; never launches a reader."""
 from __future__ import annotations
 import contextlib
+import csv
 import fcntl
+import gzip
 import hashlib
 import json
 import os
@@ -23,6 +25,8 @@ MAX_DOWNLOAD_BYTES=100*1024*1024
 MAX_SCAN_FILES=10000
 REMOVAL_GRACE_SECONDS=48*3600
 GUTENBERG='https://www.gutenberg.org/ebooks/search.opds/'
+CATALOG_PAGE_SIZE=25
+MAX_CATALOG_BYTES=250*1024*1024
 
 
 def gutenberg_id(row):
@@ -340,7 +344,10 @@ def gutenberg(query='',sort=None,*,subject='',start_index=1,page=False):
     if start_index!=1:params['start_index']=start_index
     if sort:params['sort_order']=sort
     url=GUTENBERG+'?'+urllib.parse.urlencode(params)
-    with urllib.request.urlopen(url,timeout=15) as response:root=xml(response.read(MAX_METADATA_BYTES+1))
+    try:
+        with urllib.request.urlopen(url,timeout=15) as response:root=xml(response.read(MAX_METADATA_BYTES+1))
+    except OSError:
+        return cached_gutenberg(query,sort,subject=subject,start_index=start_index,page=page)
     ns={'a':'http://www.w3.org/2005/Atom'};rows=[]
     for entry in root.findall('a:entry',ns):
         links=[link for link in entry.findall('a:link',ns) if link.get('type')=='application/epub+zip' and link.get('rel') in {'http://opds-spec.org/acquisition','http://opds-spec.org/acquisition/open-access'}]
@@ -365,23 +372,51 @@ def gutenberg(query='',sort=None,*,subject='',start_index=1,page=False):
     return {'entries':rows,'next_index':next_index} if page else rows
 
 
+def cached_gutenberg(query='',sort=None,*,subject='',start_index=1,page=False):
+    """Use the existing bulk metadata, without pretending it has popularity ranks."""
+    start_index=int(start_index)
+    if len(query)>500 or not 1<=start_index<=1000000:raise ValueError('Invalid catalog search or page')
+    path=Path.home()/'.local/share/look/gutenberg-starter/catalog.csv.gz'
+    if not path.is_file():raise OSError('Project Gutenberg is temporarily unavailable. Your downloaded books and Favorites are safe; try Discover again later.')
+    terms=query.casefold().split();subjects=subject.casefold().split();rows=[]
+    with gzip.open(path,'rt',encoding='utf-8-sig') as stream:
+        total=0
+        for row in csv.DictReader(stream):
+            total+=sum(len(str(v).encode('utf-8')) for v in row.values())
+            if total>MAX_CATALOG_BYTES:raise ValueError('Cached catalog exceeds size limit')
+            ident=row.get('Text#','')
+            if row.get('Type')!='Text' or not re.fullmatch(r'[1-9][0-9]{0,8}',ident):continue
+            text=(row.get('Title','')+' '+row.get('Authors','')).casefold()
+            topic=(row.get('Subjects','')+' '+row.get('Bookshelves','')).casefold()
+            if not all(term in text for term in terms) or not all(term in topic for term in subjects):continue
+            rows.append({'title':clean(row.get('Title')),'author':clean(row.get('Authors')),
+                         'url':f'https://www.gutenberg.org/ebooks/{ident}.epub.images','issued':row.get('Issued','')})
+    rows.sort(key=lambda r:(r['issued'],r['title'].casefold()) if sort=='release_date' else (r['title'].casefold(),r['author'].casefold()),reverse=sort=='release_date')
+    end=start_index-1+CATALOG_PAGE_SIZE
+    warning='Gutenberg is unavailable · browsing cached catalog. New downloads may be unavailable.'
+    if sort=='downloads':warning+=' Popularity is unavailable; showing title order.'
+    value={'entries':rows[start_index-1:end],'next_index':end+1 if end<len(rows) else None,'cached':True,'warning':warning}
+    return value if page else value['entries']
+
+
 SUBJECTS=('Adventure','Classics','Detective and mystery stories','History','Philosophy','Poetry','Science fiction','Travel')
 
 
-def discover(mode='popular',subject='',*,query='',start_index=1,page=False):
+def discover(mode='popular',subject='',*,query='',start_index=1,page=False,cached=False):
     if mode=='subjects':
         rows=[{'title':s,'subject':s,'kind':'subject'} for s in SUBJECTS]
         return {'entries':rows,'next_index':None} if page else rows
     options={'start_index':start_index,'page':page}
-    if mode=='search':return gutenberg(query,**options)
+    search=cached_gutenberg if cached else gutenberg
+    if mode=='search':return search(query,**options)
     if mode=='subject':
         if subject not in SUBJECTS:raise ValueError('Choose a listed subject')
-        return gutenberg(subject=subject,sort='downloads',**options)
-    if mode=='popular':return gutenberg(sort='downloads',**options)
-    if mode=='new':return gutenberg(sort='release_date',**options)
+        return search(subject=subject,sort='downloads',**options)
+    if mode=='popular':return search(sort='downloads',**options)
+    if mode=='new':return search(sort='release_date',**options)
     if mode=='surprise':
         import random
-        rows=gutenberg(sort='downloads')
-        rows=random.sample(rows,min(1,len(rows)))
-        return {'entries':rows,'next_index':None} if page else rows
+        value=search(sort='downloads',page=True)
+        rows=random.sample(value['entries'],min(1,len(value['entries'])))
+        return dict(value,entries=rows,next_index=None) if page else rows
     raise ValueError('Choose search, popular, new, subjects or surprise')

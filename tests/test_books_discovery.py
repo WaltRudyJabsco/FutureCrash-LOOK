@@ -11,6 +11,46 @@ import book_speech
 from test_books import epub
 
 
+def test_outage_uses_cached_bulk_catalog_with_honest_sorting(tmp_path,monkeypatch):
+    import csv,gzip
+    monkeypatch.setattr(Path,'home',lambda:tmp_path)
+    path=tmp_path/'.local/share/look/gutenberg-starter/catalog.csv.gz'
+    path.parent.mkdir(parents=True)
+    with gzip.open(path,'wt') as stream:
+        writer=csv.DictWriter(stream,fieldnames=['Text#','Type','Title','Authors','Issued','Subjects'])
+        writer.writeheader()
+        for i in range(30):writer.writerow({'Text#':str(i+1),'Type':'Text','Title':f'Gatsby {i:02}','Authors':'Fitzgerald','Issued':f'2020-01-{i+1:02}','Subjects':'Fiction'})
+        writer.writerow({'Text#':'999','Type':'Sound','Title':'Ignore me'})
+    monkeypatch.setattr(book_core.urllib.request,'urlopen',Mock(side_effect=OSError('503 maintenance')))
+    value=book_core.discover('popular',page=True)
+    assert value['cached'] and len(value['entries'])==25 and value['next_index']==26
+    assert 'Popularity is unavailable' in value['warning']
+    assert book_core.discover('search',query='gatsby fitzgerald',start_index=26,page=True)['entries'][0]['title']=='Gatsby 25'
+    assert book_core.discover('new',page=True)['entries'][0]['title']=='Gatsby 29'
+    assert book_core.discover('subject','Science fiction')==[]
+    assert book_core.discover('search',query='not present')==[]
+    assert book_core.discover('surprise',page=True)['cached']
+    path.unlink()
+    with pytest.raises(OSError,match='downloaded books and Favorites are safe'):book_core.discover('popular')
+
+
+def test_discovery_outage_reads_trusted_peer_cache_without_recursing(monkeypatch):
+    from core import node
+    discover=Mock(side_effect=OSError('maintenance'))
+    monkeypatch.setattr(book_core,'discover',discover)
+    monkeypatch.setattr(node.PEERS,'public',lambda:[{'name':'library','trusted':True},{'name':'stranger','trusted':False}])
+    monkeypatch.setattr(node,'_peer_bases',lambda p:['https://library.test'])
+    peer=Mock(return_value={'entries':[{'title':'Gatsby'}],'cached':True,'next_index':None,'warning':'Cached catalog'})
+    monkeypatch.setattr(node,'_file_peer_json',peer)
+    handler=node.API.__new__(node.API);handler.path='/v1/books/discover?mode=search&query=Gatsby';handler.sendj=Mock()
+    handler._book_content()
+    assert handler.sendj.call_args.args[0]==200 and handler.sendj.call_args.args[1]['cached']
+    assert peer.call_count==1 and 'cached=1' in peer.call_args.args[1]
+    peer.reset_mock();handler.path+='&cached=1';handler._book_content()
+    assert handler.sendj.call_args.args[0]==503
+    peer.assert_not_called()
+
+
 def feed(count=25,next_link='/ebooks/search.opds/?start_index=26'):
     return ('<feed xmlns="http://www.w3.org/2005/Atom">'
         '<entry><title>Subjects navigation</title><link rel="subsection" href="/ebooks/subjects/search.opds/?query=History"/></entry>'
