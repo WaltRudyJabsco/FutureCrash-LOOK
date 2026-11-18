@@ -41,11 +41,13 @@ def test_discovery_outage_reads_trusted_peer_cache_without_recursing(monkeypatch
     monkeypatch.setattr(node.PEERS,'public',lambda:[{'name':'library','trusted':True},{'name':'stranger','trusted':False}])
     monkeypatch.setattr(node,'_peer_bases',lambda p:['https://library.test'])
     peer=Mock(return_value={'entries':[{'title':'Gatsby'}],'cached':True,'next_index':None,'warning':'Cached catalog'})
-    monkeypatch.setattr(node,'_file_peer_json',peer)
+    monkeypatch.setattr(node,'_copy_route',lambda p:'https://library.test')
+    monkeypatch.setattr(node,'http_json',peer)
     handler=node.API.__new__(node.API);handler.path='/v1/books/discover?mode=search&query=Gatsby';handler.sendj=Mock()
     handler._book_content()
     assert handler.sendj.call_args.args[0]==200 and handler.sendj.call_args.args[1]['cached']
-    assert peer.call_count==1 and 'cached=1' in peer.call_args.args[1]
+    assert peer.call_count==1 and 'cached=1' in peer.call_args.args[0]
+    assert peer.call_args.kwargs['timeout']==book_core.CATALOG_TIMEOUT_SECONDS
     peer.reset_mock();handler.path+='&cached=1';handler._book_content()
     assert handler.sendj.call_args.args[0]==503
     peer.assert_not_called()
