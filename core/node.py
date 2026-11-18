@@ -4099,7 +4099,9 @@ class API(BaseHTTPRequestHandler):
                         route='/v1/books/discover?'+urllib.parse.urlencode(dict(mode=mode,subject=subject,query=options['query'],start_index=options['start_index'],cached='1'))
                         peers=[p for p in PEERS.public() if p.get('trusted') and _peer_bases(p)]
                         def cached_catalog(peer):
-                            try:return _file_peer_json(peer,route)
+                            # Probe connectivity cheaply, then read the catalogue once.
+                            # Racing the full CSV lookup on every route overwhelms peers.
+                            try:return http_json(_copy_route(peer)+route,timeout=book_core.CATALOG_TIMEOUT_SECONDS)
                             except Exception:return None
                         with concurrent.futures.ThreadPoolExecutor(max_workers=4) as pool:
                             for result in pool.map(cached_catalog,peers):

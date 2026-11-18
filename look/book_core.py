@@ -26,6 +26,7 @@ MAX_SCAN_FILES=10000
 REMOVAL_GRACE_SECONDS=48*3600
 GUTENBERG='https://www.gutenberg.org/ebooks/search.opds/'
 CATALOG_PAGE_SIZE=25
+CATALOG_TIMEOUT_SECONDS=15
 MAX_CATALOG_BYTES=250*1024*1024
 
 
@@ -345,7 +346,7 @@ def gutenberg(query='',sort=None,*,subject='',start_index=1,page=False):
     if sort:params['sort_order']=sort
     url=GUTENBERG+'?'+urllib.parse.urlencode(params)
     try:
-        with urllib.request.urlopen(url,timeout=15) as response:root=xml(response.read(MAX_METADATA_BYTES+1))
+        with urllib.request.urlopen(url,timeout=CATALOG_TIMEOUT_SECONDS) as response:root=xml(response.read(MAX_METADATA_BYTES+1))
     except OSError:
         return cached_gutenberg(query,sort,subject=subject,start_index=start_index,page=page)
     ns={'a':'http://www.w3.org/2005/Atom'};rows=[]
