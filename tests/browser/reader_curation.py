@@ -37,10 +37,10 @@ with sync_playwright() as p:
  assert page.get_by_role('button',name='Thumbs down',exact=True).count()==1 # manual imports have no discard control
  card=page.locator('.book-card').filter(has_text='Persuasion')
  card.get_by_role('button',name='Add to Favorites',exact=True).click()
- page.wait_for_function("document.querySelector('#collection-filter').value==='favorites'")
+ page.wait_for_function("document.querySelectorAll('.book-card').length===1 && document.querySelector('#collection-filter').value==='pool'")
  assert 'not deleted' in page.locator('#status').inner_text()
  assert page.locator('#favorites').inner_text()=='👍 Favorites (1)'
- assert page.get_by_role('button',name='Removal unavailable: manually imported book').count()==0
+ assert page.get_by_role('button',name='Removal unavailable: manually imported book').is_disabled()
  page.locator('#favorites').click()
  assert page.locator('.book-card').count()==1
  page.locator('.book-card').get_by_role('button',name='Remove from Favorites',exact=True).click()

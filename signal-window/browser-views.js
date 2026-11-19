@@ -384,9 +384,8 @@
   async function favoriteBook(row){
     const selected=!row.favorite;
     await curate(row,'favorite',{selected});
-    if(selected&&collectionFilter==='pool')collectionFilter='favorites';
     await shelf(shelfQuery);
-    status(selected?'Saved to Favorites — kept on your Fabric, not deleted.':'Removed from Favorites — still available in To explore and All books.');
+    status(selected?'Saved to Favorites — use 👍 Favorites to find it; kept on your Fabric, not deleted.':'Removed from Favorites — still available in To explore and All books.');
   }
   function rating(icon,label,pressed,action){const b=button(icon,action);b.className='rating';b.title=label;b.setAttribute('aria-label',label);b.setAttribute('aria-pressed',String(pressed));return b}
   async function rejectBook(row){
@@ -450,10 +449,10 @@
   function libraryControls(isShelf){
     $('shelf-sort').hidden=$('sort-label').hidden=!isShelf;
     for(const id of ['collection-label','collection-filter','collection-new','refill-settings'])$(id).hidden=!isShelf;
-    $('shelf').setAttribute('aria-pressed',String(isShelf));$('discover').setAttribute('aria-pressed',String(!isShelf));
+    $('shelf').setAttribute('aria-pressed',String(isShelf&&collectionFilter==='pool'));$('favorites').setAttribute('aria-pressed',String(isShelf&&collectionFilter==='favorites'));$('discover').setAttribute('aria-pressed',String(!isShelf));
     $('load-more').hidden=true;
   }
-  function renderShelf(){const rows=shelfRows();show(rows);$('favorites').textContent='👍 Favorites ('+catalog.filter(r=>r.favorite&&!r.removal_due).length+')';status(rows.length?'Choose a book or continue reading.':collectionFilter==='pool'?'Your discovery pool is empty. Favorites are saved separately; daily refill can bring new books.':collectionFilter==='favorites'?'Use 👍 on a book to save it here.':collectionFilter==='rejected'?'No books pending removal.':collectionFilter.startsWith('c:')?'This collection is empty. Choose All books, then use Collections on a title.':'No matching book on your Fabric shelf. Use Search Gutenberg to find new books.')}
+  function renderShelf(){const rows=shelfRows();libraryControls(true);show(rows);$('shelf').textContent='My shelf ('+catalog.filter(r=>!r.favorite&&!r.removal_due).length+')';$('favorites').textContent='👍 Favorites ('+catalog.filter(r=>r.favorite&&!r.removal_due).length+')';status(rows.length?'Choose a book or continue reading.':collectionFilter==='pool'?'Your discovery pool is empty. Favorites are saved separately; daily refill can bring new books.':collectionFilter==='favorites'?'Use 👍 on a book to save it here.':collectionFilter==='rejected'?'No books pending removal.':collectionFilter.startsWith('c:')?'This collection is empty. Choose All books, then use Collections on a title.':'No matching book on your Fabric shelf. Use Search Gutenberg to find new books.')}
   async function shelf(query=''){
     const mine=++libraryGeneration;discovery=null;shelfQuery=query;libraryView();libraryControls(true);status('Loading Fabric shelf…');
     const value=await api();if(mine!==libraryGeneration)return;catalog=value.entries||[];collectionNames=[...new Set([...(value.collections||[]),...catalog.flatMap(r=>r.collections||[])])].sort();collectionOptions();renderShelf();
@@ -494,7 +493,7 @@
     const text=prompt('Daily discovery-pool refill on '+target+': target book count (1–10000), or 0 to turn off. Downloads stay on this owner.','1000');if(text===null)return;
     const count=Number(text);if(!Number.isInteger(count)||count<0||count>10000)throw Error('Choose 0–10000');
     if(!confirm(count?'Keep '+count+' undecided books plus Favorites on '+target+' with daily Gutenberg downloads? Rejected IDs stay excluded.':'Disable daily refill on '+target+'?'))return;
-    await api('/refill?'+new URLSearchParams({target}),{enabled:count>0,target:count||1000});status(count?'Daily refill enabled on '+target:'Daily refill disabled');
+    await api('/refill?'+new URLSearchParams({target}),{enabled:count>0,target:count||1000});collectionFilter='pool';await shelf();status(count?'Daily refill set to '+count+' discovery books on '+target+'. Checks once a day; Favorites stay separate. No download is needed when the pool is already full.':'Daily refill disabled');
   }catch(e){status(e.message)}};
   $('book-favorite').onclick=()=>{if(book)favoriteBook(book).catch(e=>status(e.message))};
   $('book-collect').onclick=()=>{if(book)addCollection(book).catch(e=>status(e.message))};
@@ -504,7 +503,7 @@
   $('discover').onclick=()=>discoverMode('popular').catch(e=>status(e.message));
   $('load-more').onclick=()=>{if(discovery)discoverMode(discovery.mode,discovery.subject,discovery.query,true).catch(e=>{status(e.message);$('load-more').hidden=!discovery?.next_index})};
   $('favorites').onclick=()=>{collectionFilter='favorites';shelf().catch(e=>status(e.message))};
-  $('shelf').onclick=()=>shelf().catch(e=>status(e.message));$('continue').onclick=()=>resume().catch(e=>status(e.message));
+  $('shelf').onclick=()=>{collectionFilter='pool';shelf().catch(e=>status(e.message))};$('continue').onclick=()=>resume().catch(e=>status(e.message));
   $('library-back').onclick=()=>shelf().catch(e=>status(e.message));
   $('theme').onclick=()=>{theme=theme==='dark'?'paper':'dark';appearance()};
   $('font-smaller').onclick=()=>{fontSize=Math.max(16,fontSize-1);appearance();focusPassage()};

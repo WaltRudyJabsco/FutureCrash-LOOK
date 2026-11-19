@@ -110,7 +110,8 @@ title order because the bulk catalogue contains no download rankings. Downloads
 may remain unavailable until Gutenberg returns. Local books stay readable.
 
 In the browser, **👍 Favorites** opens your saved books. Favoriting a book from
-To explore follows it into Favorites; it never deletes its file. Search shelf
+To explore keeps you in the discovery pool; it never deletes its file. My shelf
+always returns to that pool, while Favorites opens your kept books. Search shelf
 includes Favorites. Only managed starter downloads can be thumbs-downed for
 removal after 48 hours; manually imported books show a disabled removal button.
 Fetch accepts direct public HTTPS EPUB/PDF links (including suitable Internet

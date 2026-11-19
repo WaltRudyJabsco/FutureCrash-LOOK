@@ -7,7 +7,7 @@ const {chromium}=require('playwright'),fs=require('node:fs'),assert=require('nod
   page.on('pageerror',e=>errors.push(e.message));
   const rows=[{id:'gatsby',title:'The Great Gatsby',author:'F. Scott Fitzgerald',node:'owner',starter_managed:false},
               {id:'starter',title:'Starter Book',node:'owner',starter_managed:true}];
-  const calls=[];
+  const calls=[],refills=[];
   await page.route('**/*',async route=>{
    const request=route.request(),path=new URL(request.url()).pathname;
    if(path==='/reader')return route.fulfill({body:fs.readFileSync(process.argv[2],'utf8'),contentType:'text/html'});
@@ -18,6 +18,7 @@ const {chromium}=require('playwright'),fs=require('node:fs'),assert=require('nod
     rows.find(r=>r.id===payload.id).favorite=payload.selected;
     return route.fulfill({json:{ok:true}});
    }
+   if(path==='/api/books/refill'){refills.push(request.postDataJSON());return route.fulfill({json:{ok:true}})}
    if(path==='/api/books/discover')return route.fulfill({json:{entries:[{title:'Cached Gatsby',url:'https://www.gutenberg.org/ebooks/64317.epub.images'}],cached:true,warning:'Gutenberg is unavailable · browsing cached catalog.',next_index:null}});
    return route.fulfill({status:404,body:''});
   });
@@ -26,11 +27,24 @@ const {chromium}=require('playwright'),fs=require('node:fs'),assert=require('nod
   await card().waitFor();
   assert(await card().getByRole('button',{name:'Removal unavailable: manually imported book'}).isDisabled());
   await card().getByRole('button',{name:'Add to Favorites',exact:true}).click();
-  await page.waitForFunction(()=>document.querySelector('#collection-filter').value==='favorites');
-  await card().waitFor();
+  await page.waitForFunction(()=>document.querySelectorAll('.book-card').length===1 && document.querySelector('#collection-filter').value==='pool');
+  assert.equal(await card().count(),0);
   assert((await page.locator('#status').innerText()).includes('not deleted'));
   assert.equal(await page.locator('#favorites').innerText(),'👍 Favorites (1)');
-  await page.locator('#collection-filter').selectOption('pool');assert.equal(await card().count(),0);
+  await page.locator('#favorites').click();await card().waitFor();
+  page.on('dialog',dialog=>dialog.accept(dialog.type()==='prompt'?'1000':undefined));
+  await page.locator('#refill-settings').click();
+  await page.waitForFunction(()=>document.querySelector('#status').textContent.includes('Daily refill set to 1000'));
+  assert.equal(await page.locator('#collection-filter').inputValue(),'pool');
+  assert.deepEqual(refills,[{enabled:true,target:1000}]);
+  assert((await page.locator('#status').innerText()).includes('Checks once a day'));
+  await page.locator('#favorites').click();await card().waitFor();
+  assert.equal(await page.locator('#favorites').getAttribute('aria-pressed'),'true');
+  await page.locator('#shelf').click();
+  await page.waitForFunction(()=>document.querySelector('#collection-filter').value==='pool' && document.querySelectorAll('.book-card').length===1);
+  assert.equal(await card().count(),0);
+  assert.equal(await page.locator('#shelf').innerText(),'My shelf (1)');
+  assert.equal(await page.locator('#shelf').getAttribute('aria-pressed'),'true');
   await page.locator('#query').fill('Gatsby');await page.getByRole('button',{name:'Search shelf',exact:true}).click();
   await card().waitFor();assert.equal(await page.locator('#collection-filter').inputValue(),'all');
   await page.locator('#discover').click();await page.getByRole('button',{name:'Cached Gatsby'}).waitFor();
