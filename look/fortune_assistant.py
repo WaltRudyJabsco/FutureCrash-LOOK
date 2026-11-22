@@ -1,8 +1,7 @@
-"""Narrow fortune-print requests: discover, generate, submit once, report receipt."""
+"""Narrow fortune-print requests: discover, draw, submit once, report receipt."""
 import json
 from pathlib import Path
 import re
-import sys
 import time
 
 
@@ -40,18 +39,6 @@ def follow_up(prompt,history):
     return prompt
 
 
-def generate():
-    for path in (Path(__file__).resolve().parents[1]/'core',Path.home()/'.local/share/future-crash-look/core'):
-        if (path/'fabric_client.py').is_file():sys.path.insert(0,str(path));break
-    import fabric_client
-    result=fabric_client.infer([
-        {'role':'system','content':'Write one original fortune-cookie fortune. Warm, witty or quietly poetic. Return ONLY the fortune: one sentence, 30 to 55 ASCII characters. No heading, quotes, numbers, explanation or commands. Do not promise money, medical outcomes or certain predictions.'},
-        {'role':'user','content':'A fresh little fortune for a printed Museum keepsake.'}],owner='look-fortune',priority='interactive',latency=True,think=False,options={'num_predict':70,'temperature':.9},timeout=45)
-    value=' '.join(str((result.get('message') or {}).get('content') or '').strip().strip('"').split())
-    if not 10<=len(value)<=90 or any(ord(c)<32 or ord(c)>126 for c in value):raise ValueError('The model did not return a short usable fortune. Nothing printed; ask again.')
-    return value
-
-
 def execute(prompt,allowed=True,pending=None,progress=None):
     request=intent(prompt)
     if request is None:return None
@@ -75,8 +62,8 @@ def execute(prompt,allowed=True,pending=None,progress=None):
     if len(matches)!=1:raise ValueError('No unique printer named '+request['printer']+'. Available: '+', '.join(row['label'] for row in rows)+'. Nothing printed.')
     label=matches[0]['label']
     if progress:
-        progress('Preparing fortune cookie…' if request['kind']=='fortune-cookie' else 'Writing fortune…')
-    value=None if request['kind']=='fortune-cookie' else generate()
+        progress('Preparing fortune cookie…' if request['kind']=='fortune-cookie' else 'Selecting aphorism…')
+    value=None  # Both formats draw at the printer owner.
     if progress and request['kind']=='fortune':progress('Preparing illustrated card…')
     result=json.loads(printing.run_tool('print_design',{'kind':request['kind'],'text':value,'queue':label,'send':True},Path.home(),'print a '+request['kind'].replace('-',' ')+' on '+label,{'progress':progress} if progress else {}))
     if progress and result.get('state') in {'submitting','printing'}:

@@ -1,206 +1,302 @@
-"""Original short fortunes, in reading order. Draws are shared by a print owner."""
+"""293 selected short excerpts from W. Scarborough, A Collection of Chinese Proverbs (1875),
+and the Analects, translated by James Legge. Traditional sayings have multiple authors.
+Sources: archive.org/details/cu31924023892981 and gutenberg.org/ebooks/3330.
+"""
 import secrets
 
-LINES = """Use the good pencil while it is still long.
-Your lucky socks have requested a day off.
-Somewhere a book has kept your place.
-Two cups make a better invitation than one.
-Leave the last stitch loose until you try it on.
-Tonight the moon will work for scale.
-Take the seat where you can see the cook.
-A pear ripens on its own schedule.
-One good question will outlast the meeting.
-The pie owes nobody a perfect slice.
-A familiar song has another instrument in it.
-Keep a little shelf for changing your mind.
-An empty chair is a fine excuse to call.
-Today the scenic route is the shortcut.
-Let the soup have the last word on salt.
-A small drawer will surrender a large memory.
-Wear the color you keep buying as a gift.
-Even the lighthouse blinks.
-The best line may be hiding in the margin.
-Somebody has been hoping you would ask.
-Your shadow has excellent comic timing.
-Read the dedication this time.
-A crooked nail still knows where the picture hung.
-Leave room in the bag for a good accident.
-A slow breakfast is a small rebellion.
-The right button is probably in the wrong tin.
-Put the flower where you wash the dishes.
-Today calls for the fancy mustard.
-Your future self would appreciate a label.
-A footnote knows a marvelous side street.
-Try the harmony under the part you know.
-The last pancake belongs to the cook.
-Ask about the photograph behind the counter.
-A clean window alters the whole exhibition.
-An old key makes an excellent paperweight.
-The joke gets better when you leave a beat.
-Walk far enough to hear a different bird.
-Your first draft has volunteered for the messy work.
-A little more lemon will settle the matter.
-The quiet guest knows a very good story.
-Turn the cup around. There is another landscape.
-Start with the screw that still turns.
-A bookmark is a promise with excellent patience.
-You have permission to peel the sticker off.
-Borrow a word from the youngest person there.
-The train window has curated today's scenery.
-Set a place for the unplanned hour.
-A repaired pocket is ready for new treasure.
-Put on the record with the scratched sleeve.
-The bread is worth getting crumbs on the map.
-Today your eyebrows will do some fine acting.
-Draw the view before you learn its name.
-A postcard takes the long way into a kitchen.
-A slightly smaller table may improve the party.
-Taste the apple before you promise a pie.
-The missing piece might be under your elbow.
-Compliment the person who picked the music.
-A rain barrel is an optimist with a lid.
-The back of the envelope is open for business.
-You will find company in the acknowledgments.
-Some doors open best with an armful of groceries.
-Take a photograph of an ordinary Tuesday.
-A bent spoon still measures out a kindness.
-Give the bass line a turn at the microphone.
-The first tomato needs very little advice.
-Use the ticket before it becomes a souvenir.
-Ask what the dog was called.
-Half the magic trick is a well-placed pause.
-A pencil stub has earned its short sentences.
-The oldest tree has never counted its rings.
-Pick a favorite cloud. Its career is brief.
-A change of chair may improve the chapter.
-Learn the name of the person who fixes things.
-The kettle has found a note you can hum.
-A decent sandwich deserves a real plate.
-Your umbrella has been saving up a dramatic entrance.
-Put today's date on the drawing.
-The crooked shelf is perfect for the crooked bowl.
-An invitation can be as small as a spare fork.
-Give the drummer the window seat.
-A small map leaves more room for discoveries.
-The cat considers your deadline a local custom.
-Someone remembers the song by its first three notes.
-A whole orchard once fit in a coat pocket.
-Try telling the story from the doorway.
-The chipped mug has survived the audition.
-The best souvenir may be a recipe.
-Put a little music on before you sweep.
-Your eyes will adjust before the stars do.
-A spool of thread can rescue a Saturday.
-Today the side dish gets top billing.
-There is still a letter hiding in your handwriting.
-An accordion makes a convincing case for breathing.
-Let someone else name the constellation.
-The clock in the bakery keeps excellent pastry time.
-Read a page aloud and listen for the snag.
-An extra blanket is a very practical welcome.
-The eraser has done its share of the drawing.
-A good walk need only have a middle.
-Your smallest pan is ready for a solo.
-The coat you mend already fits you.
-Listen for the audience just before the first note.
-A library card is remarkably light luggage.
-Your left hand knows a different doodle.
-Set aside a little jam for February.
-Try the entrance with the painted steps.
-A folded napkin can hold a grand plan.
-Evening light is generous to brick walls.
-Nobody ever finished a jigsaw by polishing the box.
-There is news in the smell of the soil.
-Ask for the story behind the nickname.
-A loose floorboard can announce an old friend.
-The stars have declined to form a committee.
-Give the good scissors their own hook.
-The next verse may have a better rhyme.
-Pack one fewer worry and one more peach.
-A tide pool keeps its own visiting hours.
-Read the book with the penciled-in train ticket.
-A quiet room can make a small radio sound grand.
-Put the spare change toward something unnecessary.
-Today the corner piece of cake is yours to offer.
-Someone learned your favorite song by ear.
-An unfinished scarf still warms the knitter.
-The house band accepts requests from the rain.
-Three careful folds can turn a bill into a boat.
-Keep the directions that mention a blue gate.
-A second helping is a review the cook can read.
-The garden gate has a distinctive accent.
-Try your grand idea on a small piece of cardboard.
-A new shoelace can revive a long acquaintance.
-The tiny spoon is taking its dessert duties seriously.
-Tell a friend which line made you laugh.
-An unsigned sketch still has a point of view.
-Toast waits for no philosopher.
-Leave a bit of sky above the roof in your drawing.
-The last chair unfolded may get the best view.
-The first onion in the pan makes quite a speech.
-Move the lamp before you repaint the room.
-Your handwriting looks like home to somebody.
-A wrong turn has excellent research potential.
-An old photograph would welcome a name on the back.
-Some advice improves when shortened to a nod.
-Split the last biscuit along its natural fault line.
-A full pocket makes its own percussion.
-Today is an excellent day to return the casserole dish.
-Try the color that looks lonely on the palette.
-The best ghost stories start in a familiar kitchen.
-A seed packet is a very small illustrated calendar.
-Somewhere a stagehand knows how the moon works.
-Leave the bakery with one question for the baker.
-Half a tune is enough to start a duet.
-The umbrella stand collects stories about weather.
-Send the postcard with the peculiar statue.
-There is a good seat just outside the argument.
-A dish towel makes a respectable curtain call.
-Ask an old friend what they are learning lately.
-The underside of a leaf is worth the trouble.
-Your spare minute has asked to go outside.
-Find the brightest patch on the oldest quilt.
-A little vinegar can wake a sleepy supper.
-The next good sentence might start with yesterday.
-The street musician has changed the weather slightly.
-Try writing the invitation before planning the party.
-A dandelion has very modest travel expenses.
-Your best hat is wasting its material on the hook.
-The last rung is still part of the ladder.
-Take home the melody; leave room for the silence.
-A pencil mark can spare a second trip upstairs.
-Say the thank-you while the bread is warm.
-A fish does not owe the pond a straight line.
-Let the interesting mistake sit in the frame a minute.
-A second pair of hands can untangle a whole afternoon.
-Try looking at the painting from across the room.
-Your lunch break would enjoy a change of scenery.
-A small bell has no difficulty making an entrance.
-Today is ripe for a question with a silly answer.
-Open the window for the part with the trumpets.
-A smooth stone is an excellent listener.
-A borrowed ladder brings two neighbors into the story.
-The toast can carry a little more marmalade.
-Leave your favorite page easy to find.
-A short pencil makes a wonderfully portable studio.
-The sleeve notes might introduce your next favorite band.
-A bus ride can lend you a whole cast of characters.
-The snow has taken notes on every passing foot.
-Tell the gardener which flower stopped you.
-A single sprig can dress a very small table.
-Consider the second name on the movie poster.
-Somebody else is glad you remember that joke.
-The rain has rehearsed this roof before.
-A spare ribbon turns a pebble into a present.
-Trust the pencil marks on the old measuring stick.
-Try humming the chorus at walking speed.
-Your favorite bench has a fine view in winter too.
-Ask the potter which bowl they eat from.
-A light left on is a short letter.
-The curtains are taking their bow in the breeze.
-A little pencil drawing travels well by post.
-Save one bright button for an ordinary coat.
-Tomorrow will have a perfectly good blank margin.""".splitlines()
+LINES = """One dog barks at something, and a hundred bark at him.
+A man may say what he has seen.
+Men are friends the world over.
+Man lives a generation as plants a spring.
+The superior man is correctly firm, and not firm merely.
+To go beyond is as wrong as to fall short.
+It is not easy to find a man who has learned for three years without coming to be good.
+The farmer hopes for rain, the traveller for fine weather.
+It is easy to open a shop, but hard to keep it open.
+When a large vessel has opened a way, it is easy for a small one to follow.
+If there is no oil in the lamp the wick is wasted in vain.
+It is better to ward off than to cure disease.
+Clothes and food are daily mercies.
+A thousand artisans a thousand plans.
+Come easy, go easy.
+Neither beat a man on a wound, nor curse him about a disgrace.
+Is virtue a thing remote? I wish to be virtuous, and lo! virtue is at hand.
+Neither repine against Heaven, nor blame men.
+The mind is the lord of the man.
+One generation opens up the roads on which another generation travels.
+A wise man will sometimes overlook injuries done to his face.
+The reputation of a thousand years may depend on the character of a single day.
+Those who prepare for, will escape trouble.
+The self-conceited come to grief; the boastful are but fools.
+Fire should be hollow hearted; man true hearted.
+The firm, the enduring, the simple, and the modest are near to virtue.
+The dog has no aversion to a poor family.
+I won't laugh at another for having grown old; for that will assuredly happen to me.
+What one knows not how to do is difficult; what one knows how to do is not.
+The upright in heart fear no thunderbolts.
+One evening's conversation with a superior man, is better than ten years of study.
+The two words Pure and Leisure no money can buy.
+Good deeds may fill the empire without provoking any one's dislike.
+A clever man needs few words; as a drum but to be lightly beaten.
+Have every thing you use substantial and clean: Earthenware is better than gold and jade.
+In calmness heaven and earth seem greater; in leisure days and months seem longer.
+Like a lamp-stand, he lights others but not himself.
+Though conversing face to face, their hearts have a thousand hills between them.
+Don't blame others for your own faults.
+Always beware of many words; when words are many there must be error.
+Nothing in the end is got by thieving.
+The ancients see not the modern moon; but the modern moon shone on the ancients.
+A good fellow will stick to his bargain.
+Read ancient essays and know how to compose modern ones.
+In hurry is error.
+The two words Peace and Rest are worth a thousand taels of gold.
+Possessing a great tree, why be anxious about fuel ?
+Anything beyond one's strength is never done well.
+When troubles are few dreams are few; when words are scarce faults are scarce.
+Sour, sweet, bitter, pungent, all must be tasted.
+He is a good fellow who can endure wrong.
+Fields are divided from each other; but dwellings are joined together.
+In trouble think of your relations; in danger depend on old friends.
+A word is enough to a clever man.
+Cut your cloth according to your measure.
+Receive all guests that come, making no difference between relations and others.
+Done leisurely, done well.
+Every thing must have a cause.
+A troublesomely great talker is sure to make mistakes.
+Though the peony be beautiful, it must be supported by its green leaves.
+Never spend a farthing uselessly.
+When the floating clouds are dispersed we see a clear sky.
+The superior man is dignified, but does not wrangle. He is sociable, but not a partizan.
+If the will be set on virtue, there will be no practice of wickedness.
+The rider on horseback knows nothing of the toil of those who travel on foot.
+Easy to look at; difficult to imitate.
+The dog understands his master's mood.
+What is chopped has not the roundness of what is turned.
+Never presume on authority or power to injure orphans or widows.
+There is nothing mean in a generous man.
+Over a bowl of congee or rice, one should remember the trouble it has cost to supply it.
+Who know, don't talk; who talk, don't know.
+A man is not beggared by eating or dressing, but by the failure of his plans.
+All unskilful fools, Quarrel with their tools.
+Virtue is not left to stand alone. He who practises it will have neighbors.
+When happiness comes the mind grows more intelligent.
+There is happiness in doing good, and secret merit in virtuous deeds.
+He who in high station is without pride, is exalted without danger.
+Having something to say speak plainly, and never conceal it.
+If you share a man's wealth, try to lessen his misfortunes.
+The wise are free from perplexities; the virtuous from anxiety; and the bold from fear.
+Relatives are bound to stand by one another.
+A good bird selects its tree.
+Do not talk about a thing when it is done; spilt water cannot be gathered up again.
+A well-known friend is a treasure.
+A good questioner is like one beating a bell.
+Mountains do not hinder a journey so much as rivers.
+Books do not exhaust words, nor words thoughts.
+It is for me to put forth the utmost effort, it rests with Heaven to succeed my plan.
+Clever for a lifetime; foolish for a moment.
+Though the left hand conquer the right, no advantage is gained.
+When the arrow is on the string it must go.
+Of all important things, the first is not to cheat the conscience.
+His winds and waves may rise, I shall still sit secure in my fishing terrace.
+To have faults and not to reform them,-- this, indeed, should be pronounced having faults.
+Though the wind has fallen the waves have not yet settled.
+An equal combination of elegance and plainness is the fashion of the superior man.
+The locust chases the cicada, ignorant that the yellow bird is after it.
+Do not drink more wine than you are able to carry.
+Don't wait for slander to enter your ears, lest it turn former love into hatred.
+He who speaks without modesty will find it difficult to make his words good.
+Though a tree grow never so high, its falling leaves return to the root.
+Much politeness offends no one.
+Some study shows the need of more.
+Hope little from the yet to you unseen; Care little for what has already been.
+All the rivers flow into the sea, and yet it is not full.
+There is a time to fish, and a time to dry nets.
+Nothing can be done without instruction.
+He who rouses a sleeping tiger, exposes himself to harm.
+Time flies like an arrow; days and months like a shuttle.
+Do continually acts of kindness; perform every sort of secret virtue.
+Extensive reading is a priceless treasure.
+Make every cash serve two purposes.
+One generation plants the trees under whose cool shade another generation rests.
+Obstinate men waste wealth, as obstinate oxen strength.
+Speak carefully and be slow to speak.
+A novice at the first attempt, an adept at the second.
+From the past you may forecast the future.
+Would you know the affairs of the empire, read the works of the ancients.
+When against any your anger glows, Be sure you never do come to blows.
+The fisherman must not desert his boat.
+The pen can convey one's meaning for a thousand miles.
+Many men, many tongues.
+Eating bamboo-sprouts, remember the planter of the bamboos.
+Who teaches me a day is my father for life.
+Learning without thought is labour lost; thought without learning is perilous.
+The superior man wishes to be slow in his speech and earnest in his conduct.
+A great tree attracts the wind.
+Those whose courses are different cannot lay plans for one another.
+Neither spend foolishly, nor work fruitlessly.
+Distance tests a horse's strength; long service reveals a man's character.
+It takes little time to reprove a man; but it takes a long time to forget reproof.
+A man of few words escapes slander, of few desires preserves his health.
+Do not violate conscience.
+In difficulties men are easily tested, and easily saved.
+A single strand of silk cannot make a thread; a solitary tree cannot make a grove.
+The man of perfect virtue is cautious and slow in his speech.
+Knowledge comes by study, ignorance follows its neglect.
+What is the use of weeping over broken vessels ? Spilt water cannot be gathered up again.
+This man seldom speaks; when he does, he is sure to hit the point.
+In learning length of study goes for nothing; the most intelligent becomes master.
+Learning is far more precious than gold.
+Tall talk is followed by no true action.
+May fair winds attend you !
+Do good regardless of consequences.
+There is dew for every blade of grass.
+The humble reap advantage; the haughty meet misfortune.
+When the melon is ripe it will drop of itself.
+To injure men is misery; to pity men is happiness.
+Reduction of expenditure brings freedom of action.
+One hurtful word wounds like a sharp sword.
+The cautious seldom err.
+Fear the lack of perfectness in your conduct, not the lack of honesty in your examiner.
+If poor don't cheat; if rich don't presume.
+Who sits in a well to observe the sky does not see very much.
+Mercy is the root and core; Opportunity the door.
+Possessed of happiness don't exhaust it.
+Flattery is sickness; reproof is medicine.
+All vice avoid, all virtue follow.
+He acts before he speaks, and afterwards speaks according to his actions.
+When all our affairs are in order great is our felicity and profit.
+A man's face is the reflex of his states of mind.
+When you have anything to say, first think and then say it.
+Better go yourself than send; better do it yourself than ask any one to do it for you.
+To be poor without murmuring is difficult. To be rich without being proud is easy.
+In digging up a tree you must begin with the root.
+Peace and joy are more precious than yellow gold.
+Your study goes on like a flowing stream.
+Diligence is an inestimable treasure, and prudence a defensive charm.
+If the superior man desires wealth, he gets it in a proper fashion.
+Study thoroughly and think deeply.
+What man is not guilty of one error and half a mistake?
+There is nothing like newness in clothes; nothing like age in man.
+Strike while the iron's hot.
+He who checks his appetite avoids debt.
+Any man who shows ability may leap the dragon gate.
+Men must set their minds on being honest and straightforward.
+Would you yourself a perfect workman find, To an embroidery needle an iron pestle grind.
+In language it is simply required that it convey the meaning.
+If you want to be quiet, do not meddle with other people's business.
+Throw a tile over a wall and you cannot say on which side it has lighted.
+The dog guards the night, the cock rules the morn.
+You may study to old age and yet have things to learn.
+Men know not their own faults, as oxen know not the greatness of their strength.
+Without going you can get to nowhere; you can complete nothing without doing.
+He who hurries cannot walk with a stately step.
+When free from trouble be on your guard; when trouble comes don't get excited.
+Every thing is difficult at first.
+He who is grateful has nothing to blush for.
+The superior man is modest in his speech, but exceeds in his actions.
+Idle slanders do not affect wise men.
+Resolution is independent of great age; but without it one lives a hundred years in vain.
+Good students resemble workers in hard wood.
+One who acts cautiously may go anywhere; one who does not, will always be suffering.
+He who has patience to wait for a shoal of fish, will catch small ones if not large.
+It is easier to build up a fortune than to retain one.
+His words command general assent whose conduct is upright and unwavering.
+He who rides a tiger is afraid to dismount.
+If you are offended with a person, you must tell him what for.
+Man's heart is never satisfied; the snake would swallow the elephant.
+The melon seller declares his melons sweet.
+Deviate an inch, and lose a thousand miles.
+Be content with whatever you have.
+The light of all the stars is not equal to that of the moon.
+Having lost anything do not suspect men of stealing it.
+If you long for pleasure, you must labour hard to get it.
+Words may not be foolishly spoken; what you say must accord with reason.
+Don't boast of being first, for others indeed are before you.
+May all your journey be in peace !
+Be content with what is sufficient to pass over the present time.
+Every household knows when salt and rice are dear.
+Cold sends us to the fire; heat sends us into the shade.
+Better do a kindness near home, than go far away to burn incense.
+Pure as water, clear as a mirror.
+Old trees become half empty at the core: Old men see all things clearer than before.
+Whatever will fill your belly is good food.
+Slander is of daily occurrence, but if nobody would listen to it, it would soon cease.
+Fine words and an insinuating appearance are seldom associated with virtue.
+You cannot open a book without learning something.
+Slander may injure any cause.
+A man without a smiling face must not open a shop.
+Economy makes men independent.
+Of all acquaintanceship, that in which each knows the other's heart, is best.
+He who is not hospitable to an excellent guest will have none.
+A sparrow is a little bird yet it has liver and gall all complete.
+A wise man needs three assistants.
+He who has friends in every place finds every place delicious.
+In teaching there should be no distinction of classes.
+Dogs have more good in them than men think they have.
+Be resolved and the thing is done.
+Entertain guests but do not detain them.
+Never converse on the faults of others; nor presume to speak of your own virtues.
+Who turns him round to reinspect, Shall nothing lose through his neglect.
+Those who reject iron cannot make steel.
+A lofty lamp-post lights what is distant, not what is near.
+Whoever undertakes a task cannot repudiate the responsibility.
+Days of sorrow pass slowly; times of joy very quickly.
+What is said to a man's face is not slander.
+Every trade has its ways.
+If you want to get along. Let the old respect the young.
+Every character must be chewed to get out its juice.
+Three years' reading is not so good as to hear the explanation.
+His pen is as sharp as a sword.
+If you don't scale the mountain, you can't view the plain.
+Be as careful as if you were entering a battle, or crossing a bridge.
+By nature, men are nearly alike; by practice, they get to be wide apart.
+Pretty things and good men are difficult to make.
+Slow work produces fine goods.
+Wherever you go, talk as the people of the place talk.
+If poor don't lose your self-reliance; if rich don't act like a fool.
+For one bad move, if you're to blame, Be sure that you will lose the game.
+Praise is hard to get; but censure is easy to give.
+If you ferry at all, ferry right over.
+Learning is a treasure which follows its owner everywhere.
+Wine can both help and hinder business.
+If to be right is your desire, Then of three aged men enquire.
+By all means avoid extravagance.
+It is not hard to talk about good works, but to do them.
+He shall reap hemp who sows hemp, and beans who sows beans.
+One man in a house, of joy possessed, Passes it on to all the rest.
+Always leave some way of escape to the erring.
+Fear not when men speak evil of you; fear lest you should do evil.
+Water can both sustain and upset a ship.
+When the vehicle in front upsets, the vehicle following takes more heed.
+Three raw hands are unequal to one good hand.
+Clever men are sometimes the dupes of their own cleverness.
+It will not do to say one thing and mean another.
+More fuel more fire.
+Easier said than done.
+One word now will settle a bargain, though prices vary from morning to night.
+A stick's a stick whether short or tall; A man's a man whether great or small.
+Half your talents are natural; the other half acquired.
+Practice makes perfect.
+Man's life is truly a performance.
+What the superior man seeks, is in himself. What the mean man seeks, is in others.
+Follow the good, and learn to be so.
+Unjustly-gotten wealth will go unjustly.
+There are three rules for men in office: be upright, be cautious, be diligent.
+You can hardly make a friend in a year; but you can easily offend one in an hour.
+Never do what you don't want to be known.
+A chance day is better than a chosen one.
+Sages have written thousands and myriads of words to rouse up dreaming men.
+It thunders loudly, but rains very little.
+It is easier to know how to do a thing than to do it.
+True gold fears no fire.
+When a man is calm he says nothing; when water is level it flows not.
+If you do not enter a tiger's den, you cannot get his cubs.
+When you have fully done your duty, abide the will of Heaven.
+Study which does not daily advance will daily retrograde.
+Fine words are incredible; credible words are not fine.
+To one full of expectation a moment seems a year.
+If a man take no thought about what is distant, he will find sorrow near at hand.
+It is good to be neither too high nor too low.""".splitlines()
 
 
 def draw(db):
@@ -208,6 +304,6 @@ def draw(db):
     db.execute('BEGIN IMMEDIATE')
     db.execute('CREATE TABLE IF NOT EXISTS cookie_deck (id INTEGER PRIMARY KEY, position INTEGER NOT NULL)')
     row=db.execute('SELECT position FROM cookie_deck WHERE id=1').fetchone()
-    position=row[0] if row else secrets.randbelow(len(LINES))
+    position=(row[0]%len(LINES)) if row else secrets.randbelow(len(LINES))
     db.execute('INSERT OR REPLACE INTO cookie_deck VALUES (1,?)',((position+1)%len(LINES),))
     return LINES[position]
