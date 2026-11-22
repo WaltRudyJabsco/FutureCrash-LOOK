@@ -14,14 +14,19 @@ def test_explicit_intent(prompt):
 def test_no_implicit_replay(prompt):assert fortune.intent(prompt) is None
 
 
-def test_exact_user_request_discovers_generates_submits_once(monkeypatch,lk,capsys):
+@pytest.mark.parametrize('kind',['fortune','fortune cookie'])
+def test_exact_user_request_discovers_draws_submits_once(monkeypatch,lk,capsys,kind):
     monkeypatch.setattr(lk,'_cognition_module',lambda:cognition)
     listing=Mock(return_value={'printers':[{'label':'Tiny Printer'}]});monkeypatch.setattr(printing,'destinations',listing)
-    generate=Mock(return_value='A small kindness will find its way back to you.');monkeypatch.setattr(fortune,'generate',generate)
+    import sys
+    infer=Mock(side_effect=AssertionError('Default fortunes must not call a model'))
+    monkeypatch.setitem(sys.modules,'fabric_client',Mock(infer=infer))
     submit=Mock(return_value=json.dumps({'state':'queued','id':'abc','destination':'Tiny Printer','design':{'kind':'fortune'}}));monkeypatch.setattr(printing,'run_tool',submit)
-    result=lk._lo_fortune_direct('print me a fortune on tiny printer','workspace')
+    result=lk._lo_fortune_direct('print me a '+kind+' on tiny printer','workspace')
     assert 'sent to Tiny Printer' in result and 'abc' in result
-    listing.assert_called_once();generate.assert_called_once();submit.assert_called_once()
+    listing.assert_called_once();infer.assert_not_called();submit.assert_called_once()
+    assert submit.call_args.args[1]['text'] is None
+    assert submit.call_args.args[1]['kind']==kind.replace(' ','-')
     assert submit.call_args.args[1]['queue']=='Tiny Printer' and submit.call_args.args[1]['send'] is True
     assert 'sent' in capsys.readouterr().out
 
@@ -29,10 +34,9 @@ def test_exact_user_request_discovers_generates_submits_once(monkeypatch,lk,caps
 def test_failure_stops_before_printing_and_reports_reason(monkeypatch,lk):
     monkeypatch.setattr(lk,'_cognition_module',lambda:cognition)
     monkeypatch.setattr(printing,'destinations',lambda:{'printers':[{'label':'Tiny Printer'}]})
-    monkeypatch.setattr(fortune,'generate',Mock(side_effect=ValueError('Model unavailable; nothing printed')))
-    submit=Mock();monkeypatch.setattr(printing,'run_tool',submit)
-    assert 'Model unavailable' in lk._lo_fortune_direct('print me a fortune on tiny printer','workspace')
-    submit.assert_not_called()
+    submit=Mock(side_effect=ValueError('Deck unavailable'));monkeypatch.setattr(printing,'run_tool',submit)
+    assert 'Deck unavailable' in lk._lo_fortune_direct('print me a fortune on tiny printer','workspace')
+    submit.assert_called_once()
 
 
 def test_available_printers_bare_phrase(lk,monkeypatch):
@@ -42,24 +46,13 @@ def test_available_printers_bare_phrase(lk,monkeypatch):
 
 def test_read_only_profile_never_generates(lk,monkeypatch):
     monkeypatch.setattr(lk,'_cognition_module',lambda:cognition)
-    generate=Mock();monkeypatch.setattr(fortune,'generate',generate)
+    submit=Mock();monkeypatch.setattr(printing,'run_tool',submit)
     assert 'cannot print' in lk._lo_fortune_direct('print me a fortune on Tiny Printer','conservative')
-    generate.assert_not_called()
-
-
-def test_generator_validates_model_output(monkeypatch):
-    import sys
-    infer=Mock(return_value={'message':{'content':'A small kindness will find its way back to you.'}})
-    monkeypatch.setitem(sys.modules,'fabric_client',Mock(infer=infer))
-    assert fortune.generate().startswith('A small kindness')
-    assert infer.call_args.kwargs['think'] is False
-    infer.return_value={'message':{'content':'too long '*30}}
-    with pytest.raises(ValueError,match='Nothing printed'):fortune.generate()
+    submit.assert_not_called()
 
 
 def test_direct_waits_for_background_failure(monkeypatch):
     monkeypatch.setattr(printing,'destinations',lambda:{'printers':[{'label':'Tiny Printer'}]})
-    monkeypatch.setattr(fortune,'generate',lambda:'Kindness finds its way home.')
     monkeypatch.setattr(printing,'run_tool',lambda *a:json.dumps({'id':'a','node':'owner','state':'submitting'}))
     inspect=Mock(return_value={'id':'a','state':'failed','receipt':{'error':'Wake the printer; no print data sent'}})
     monkeypatch.setattr(printing,'request',inspect);monkeypatch.setattr(fortune.time,'sleep',lambda _:None)
@@ -96,12 +89,30 @@ def test_signal_fortune_menu_and_typo(monkeypatch):
     assert fortune.follow_up('1',history+[{'role':'assistant','content':'Something else'}])=='1'
 
 
-def test_cookie_deck_survives_reopen_and_wraps_after_200(tmp_path):
+def test_aphorism_deck_survives_reopen_and_wraps_without_repeats(tmp_path):
     import sqlite3,fortune_deck
     path=tmp_path/'jobs.db'
     lines=[]
-    for _ in range(201):
+    for _ in range(len(fortune_deck.LINES)+1):
         with sqlite3.connect(path) as db:lines.append(fortune_deck.draw(db))
         db.close()
-    assert len(set(lines[:200]))==200 and lines[200]==lines[0]
-    assert all(line.isascii() and len(line)<=60 for line in lines)
+    assert len(set(lines[:-1]))==len(fortune_deck.LINES) and lines[-1]==lines[0]
+    assert all(line.isascii() and len(line)<=90 for line in lines)
+
+
+def test_changed_deck_size_preserves_existing_cursor(tmp_path):
+    import sqlite3,fortune_deck
+    with sqlite3.connect(tmp_path/'jobs.db') as db:
+        db.execute('CREATE TABLE cookie_deck (id INTEGER PRIMARY KEY, position INTEGER NOT NULL)')
+        db.execute('INSERT INTO cookie_deck VALUES (1,10000)');db.commit()
+        assert fortune_deck.draw(db)==fortune_deck.LINES[10000%len(fortune_deck.LINES)]
+
+
+def test_concurrent_clients_draw_unique_cards(tmp_path):
+    import sqlite3,fortune_deck
+    from concurrent.futures import ThreadPoolExecutor
+    path=tmp_path/'jobs.db'
+    def draw(_):
+        with sqlite3.connect(path,timeout=10) as db:return fortune_deck.draw(db)
+    with ThreadPoolExecutor(max_workers=4) as pool:rows=list(pool.map(draw,range(24)))
+    assert len(set(rows))==24

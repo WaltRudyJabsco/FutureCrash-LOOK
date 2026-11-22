@@ -67,6 +67,44 @@ def test_design_prepares_real_render_with_pinned_route(monkeypatch):
     assert request.call_args.kwargs['kind']=='receipt-image'
 
 
+def test_both_default_fortunes_draw_and_submit_through_shared_owner(tmp_path,monkeypatch):
+    import sqlite3,fortune_deck,base64
+    monkeypatch.setattr(designs,'museum_artwork',artwork)
+    monkeypatch.setattr(printing,'destinations',lambda:{'local_node':'client','printers':[{'id':'p','label':'Little Printer','routes':[{'name':'little','node':'owner','status':'idle','profile':{'kind':'escpos','width':576}}]}]})
+    calls=[];path=tmp_path/'owner-jobs.db'
+    def request(action,node,**value):
+        calls.append((action,node,value))
+        if action=='draw-cookie':
+            with sqlite3.connect(path) as db:return {'text':fortune_deck.draw(db)}
+        assert action=='prepare'
+        image=Image.open(io.BytesIO(base64.b64decode(value['data'])))
+        assert image.width==576 and image.height>0
+        return {'id':'a'*32,'node':'owner'}
+    monkeypatch.setattr(printing,'_request',request)
+    send=Mock(return_value={'id':'a'*32,'state':'queued'});monkeypatch.setattr(printing,'request',send)
+    values=[]
+    for kind in ('fortune','fortune-cookie'):
+        result=json.loads(printing.run_tool('print_design',{'kind':kind,'queue':'Little Printer','send':True},tmp_path,'Print a '+kind.replace('-',' ')+' on Little Printer',{}))
+        assert result['state']=='queued'
+        detail=result['design'];values.append(detail['text'])
+        assert detail['text'] in fortune_deck.LINES and len(detail['lucky_numbers'])==6
+        assert ('artwork' in detail)==(kind=='fortune')
+    assert values[0]!=values[1]
+    assert [c[0] for c in calls]==['draw-cookie','prepare','draw-cookie','prepare']
+    assert all(c[1]=='owner' for c in calls) and send.call_count==2
+
+
+@pytest.mark.parametrize('kind',['fortune','fortune-cookie'])
+def test_optional_fortune_text_and_custom_wording(kind,monkeypatch):
+    assert printing.parser().parse_args([kind]).text is None
+    monkeypatch.setattr(designs,'museum_artwork',artwork)
+    request=Mock(side_effect=AssertionError('A local preview must not contact a printer'))
+    monkeypatch.setattr(printing,'_request',request)
+    import fortune_deck
+    assert printing.design(kind=kind)['text'] in fortune_deck.LINES
+    assert printing.design('My own words.',kind=kind)['text']=='My own words.'
+
+
 def test_interactive_banner_picker_preserves_text_and_confirms_once(monkeypatch):
     from unittest.mock import Mock
     import printing, print_desk, look_renderer

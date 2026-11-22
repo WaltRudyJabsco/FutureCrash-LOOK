@@ -298,10 +298,12 @@ into the receipt pipeline.
 ```sh
 lk print banner "HAPPY BIRTHDAY" --font small
 lk print banner "HAPPY BIRTHDAY" --font small --printer "Tiny Printer" --paper-limit-mm 3048
-lk print fortune "A small kindness will find its way back to you." --printer "Tiny Printer"
+lk print fortune --printer "Little Printer"
+lk print fortune-cookie --printer "Little Printer"
+lk print fortune-cookie "Your own words here." --printer "Tiny Printer"
 ```
 
-Without a printer, banner prints a terminal preview. With a printer, both commands
+Without a printer, banner prints a terminal preview. With a printer, these commands
 prepare a reviewed job; use the returned send command to send it. Fonts are
 standard, small, slant, banner and big. Banners fill the printable width and run
 sideways along the roll; their estimated length includes all content.
@@ -316,8 +318,10 @@ nothing printed rather than silently omitting the artwork. Tiny text may need
 to be shortened for narrower printers.
 
 LO, Signal and Albert share `banner_render` (read-only preview) and `print_design`
-(preparation or explicit printing). The AI writes an original, concise fortune;
-the renderer provides its layout and numbers. Examples: “Show a small-font banner
+(preparation or explicit printing). Both fortune formats default to the same
+rotating [293-saying aphorism collection](FORTUNES.md) on the printer owner.
+The AI does not generate their default wording; the renderer adds lucky numbers
+and, for the art card, Museum artwork. Explicit custom text is still supported. Examples: “Show a small-font banner
 saying Happy Birthday” or “Print me a fortune on Tiny Printer.” Printing requires
 an explicit current request naming the exact discovered printer; unclear requests
 create review plans. One print attempt per message applies across text/design
@@ -351,10 +355,10 @@ for measurements; raster sizing and printer mechanics can affect its scale.
 
 Named fortune requests such as “print me a fortune on tiny printer” take a
 narrow direct route shared by LO, Signal and Albert. It discovers the friendly
-printer name case-insensitively, generates a short fortune through Fabric, then
+printer name case-insensitively, draws the next aphorism on its owner, then
 submits once using the existing explicit-print guard. The model does not decide
 whether the printer exists or whether to ask for redundant confirmation. Missing
-printers, failed generation and submission errors produce an explicit result.
+printers, deck failures and submission errors produce an explicit result.
 Bare follow-ups such as “immediately” do not replay an earlier print attempt.
 
 
