@@ -96,3 +96,24 @@ def test_cli_search_preserves_paging_and_cache_notice(monkeypatch,capsys):
     value=json.loads(capsys.readouterr().out)
     assert value['next_index']==26 and value['warning']=='Cached catalog'
     search.assert_called_once_with('search',query='Woolf',start_index=1)
+
+
+@pytest.mark.parametrize('width',[56,72,100,140])
+def test_final_frame_preserves_all_wrapped_command_rows(terminal,monkeypatch,width):
+    import io,os
+    class Output(io.StringIO):
+        def isatty(self):return True
+    monkeypatch.setattr(books.sys,'stdout',Output())
+    monkeypatch.setenv('LOOK_NATIVE_PREVIEW','off')
+    monkeypatch.setattr(terminal.shutil,'get_terminal_size',lambda *a:os.terminal_size((width,30)))
+    monkeypatch.setattr(books,'catalog',lambda:{'entries':[{'id':'fixture','title':'Fixture book','node':'owner'}]})
+    monkeypatch.setattr(terminal,'_read_tty_key',lambda *a:'esc')
+    frames=[];render=terminal._terminal_frame_payload
+    def capture(frame):frames.append(frame);return render(frame)
+    monkeypatch.setattr(terminal,'_terminal_frame_payload',capture)
+    assert books.desk(terminal,owner='owner')==0
+    frame=terminal._strip_ansi(frames[-1])
+    for label in ['f favorite','g Gutenberg','d discover','Esc back','? help']:
+        assert label in frame,(width,label,frame)
+    assert all(len(line)<=width for line in frame.splitlines())
+    assert len(frame.splitlines())<=30
