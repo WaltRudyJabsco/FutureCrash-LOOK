@@ -190,6 +190,7 @@
   if(typeof document==='undefined'||!document.getElementById?.('books-app'))return;
   const $=id=>document.getElementById(id),audio=$('audio');
   let libraryGeneration=0,shelfQuery='',discovery=null,sortOrder='title',collectionFilter='pool',collectionNames=[];
+  let downloadOwner='';
   try{sortOrder=localStorage.getItem('look-books-shelf-sort')||'title'}catch{}
   if(!['title','author','opened','added'].includes(sortOrder))sortOrder='title';
   let catalog=[],book=null,model=null,chapter=0,paragraph=0,generation=0,lastSave=0,saving=Promise.resolve();
@@ -404,6 +405,14 @@
     if(!name?.trim())return;
     await curate(row,'collect',{name:name.trim(),selected:true});await shelf(shelfQuery);status('Added to '+name.trim());
   }
+  function downloadOwners(value){
+    const owners=[...new Set([...(value.owners||[]),...(value.entries||[]).map(r=>r.node),value.node].filter(n=>typeof n==='string'&&n))];
+    if(!owners.length)owners.push('local');
+    let saved=downloadOwner;try{saved=saved||localStorage.getItem('look-books-download-owner')}catch{}
+    downloadOwner=owners.includes(saved)?saved:owners.includes(value.download_owner)?value.download_owner:owners[0];
+    $('download-owner').replaceChildren(...owners.map(name=>{const option=document.createElement('option');option.value=name;option.textContent=name;return option}));
+    $('download-owner').value=downloadOwner;
+  }
   function show(rows,discover=false){
     $('result-count').textContent=rows.length+(discover?(rows.length===1?' result':' results'):(rows.length===1?' book':' books'));
     $('items').replaceChildren(...rows.map(row=>{
@@ -411,9 +420,18 @@
       const b=button(row.title+(row.author?' — '+row.author:''),async()=>{
         if(row.kind==='subject')return discoverMode('subject',row.subject);
         if(!discover||owned)return open(owned||row);
-        if(!confirm('Download '+row.title+' to this Fabric host’s books library?'))return;
+        const target=downloadOwner;
+        if(!target)throw Error('Choose a download owner first.');
+        if(!confirm('Download '+row.title+' to '+target+'’s books library?'))return;
         b.disabled=true;
-        try{status('Downloading book…');const value=await api('/fetch',{url:row.url});await shelf();status('Added to your shelf: '+value.book.title)}finally{b.disabled=false}
+        try{
+          status('Downloading book to '+target+'…');
+          const value=await api('/fetch?'+new URLSearchParams({target}),{url:row.url});
+          if(!value.book?.id)throw Error('Download was not confirmed. Refresh the shelf before retrying.');
+          collectionFilter='all';$('query').value=value.book.title;await shelf(value.book.title);
+          if(!catalog.some(r=>r.id===value.book.id))throw Error('Book saved on '+(value.node||target)+', but the shelf refresh could not find it. Reconnect that owner and refresh My shelf.');
+          status('Verified on '+(value.node||target)+': '+value.book.title+' · showing the downloaded book in All books.');
+        }finally{b.disabled=false}
       });
       if(owned){b.classList.add('owned');const badge=document.createElement('small');badge.textContent='Already on your shelf · Read';b.append(badge)}
       if(row.kind!=='subject'&&(!discover||id)){
@@ -455,7 +473,7 @@
   function renderShelf(){const rows=shelfRows();libraryControls(true);show(rows);$('shelf').textContent='My shelf ('+catalog.filter(r=>!r.favorite&&!r.removal_due).length+')';$('favorites').textContent='👍 Favorites ('+catalog.filter(r=>r.favorite&&!r.removal_due).length+')';status(rows.length?'Choose a book or continue reading.':collectionFilter==='pool'?'Your discovery pool is empty. Favorites are saved separately; daily refill can bring new books.':collectionFilter==='favorites'?'Use 👍 on a book to save it here.':collectionFilter==='rejected'?'No books pending removal.':collectionFilter.startsWith('c:')?'This collection is empty. Choose All books, then use Collections on a title.':'No matching book on your Fabric shelf. Use Search Gutenberg to find new books.')}
   async function shelf(query=''){
     const mine=++libraryGeneration;discovery=null;shelfQuery=query;libraryView();libraryControls(true);status('Loading Fabric shelf…');
-    const value=await api();if(mine!==libraryGeneration)return;catalog=value.entries||[];collectionNames=[...new Set([...(value.collections||[]),...catalog.flatMap(r=>r.collections||[])])].sort();collectionOptions();renderShelf();
+    const value=await api();if(mine!==libraryGeneration)return;catalog=value.entries||[];downloadOwners(value);collectionNames=[...new Set([...(value.collections||[]),...catalog.flatMap(r=>r.collections||[])])].sort();collectionOptions();renderShelf();
     if(value.errors?.length)status('Some book owners are unavailable. Showing the reachable shelf.');
   }
   async function discoverMode(mode,subject='',query='',more=false){
@@ -464,7 +482,7 @@
     if(!cursor)return;
     const [value,shelfValue]=await Promise.all([api('/discover?'+new URLSearchParams({mode,subject,query,start_index:cursor})),api()]);
     if(mine!==libraryGeneration)return;
-    catalog=shelfValue.entries||[];
+    catalog=shelfValue.entries||[];downloadOwners(shelfValue);
     const rows=more?[...discovery.entries,...(value.entries||[])]:value.entries||[];
     discovery={mode,subject,query,entries:rows,next_index:value.next_index};show(rows,true);
     $('load-more').hidden=!value.next_index;
@@ -503,6 +521,7 @@
   $('discover').onclick=()=>discoverMode('popular').catch(e=>status(e.message));
   $('load-more').onclick=()=>{if(discovery)discoverMode(discovery.mode,discovery.subject,discovery.query,true).catch(e=>{status(e.message);$('load-more').hidden=!discovery?.next_index})};
   $('favorites').onclick=()=>{collectionFilter='favorites';shelf().catch(e=>status(e.message))};
+  $('download-owner').onchange=()=>{downloadOwner=$('download-owner').value;try{localStorage.setItem('look-books-download-owner',downloadOwner)}catch{}};
   $('shelf').onclick=()=>{collectionFilter='pool';shelf().catch(e=>status(e.message))};$('continue').onclick=()=>resume().catch(e=>status(e.message));
   $('library-back').onclick=()=>shelf().catch(e=>status(e.message));
   $('theme').onclick=()=>{theme=theme==='dark'?'paper':'dark';appearance()};

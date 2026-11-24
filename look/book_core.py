@@ -14,6 +14,7 @@ import subprocess
 import tempfile
 import time
 import urllib.parse
+import urllib.error
 import urllib.request
 import xml.etree.ElementTree as ET
 import zipfile
@@ -25,6 +26,8 @@ MAX_DOWNLOAD_BYTES=100*1024*1024
 MAX_SCAN_FILES=10000
 REMOVAL_GRACE_SECONDS=48*3600
 GUTENBERG='https://www.gutenberg.org/ebooks/search.opds/'
+GUTENBERG_MIRROR='https://gutenberg.pglaf.org/cache/epub'
+SOURCE_RETRY_CODES={429,500,502,503,504}
 CATALOG_PAGE_SIZE=25
 CATALOG_TIMEOUT_SECONDS=15
 MAX_CATALOG_BYTES=250*1024*1024
@@ -294,23 +297,39 @@ class Shelf:
                 self.item(existing['id'])
                 return existing
         parsed=urllib.parse.urlsplit(url)
+        mirrors=[f'{GUTENBERG_MIRROR}/{source_id}/pg{source_id}-{variant}.epub' for variant in ('images','noimages')] if source_id else []
+        metadata_unavailable=False
         if parsed.hostname in {'www.gutenberg.org','gutenberg.org'} and parsed.path.endswith('.opds'):
-            with urllib.request.urlopen(url,timeout=15) as response:entry=xml(response.read(MAX_METADATA_BYTES+1))
-            links=[n for n in entry.iter() if n.tag.endswith('link') and n.get('type')=='application/epub+zip' and n.get('rel') in {'http://opds-spec.org/acquisition','http://opds-spec.org/acquisition/open-access'}]
-            if not links:raise ValueError('This Gutenberg entry has no open EPUB download')
-            url=urllib.parse.urljoin(url,links[0].get('href',''));parsed=urllib.parse.urlsplit(url)
+            try:
+                with urllib.request.urlopen(url,timeout=15) as response:entry=xml(response.read(MAX_METADATA_BYTES+1))
+            except OSError as exc:
+                if not mirrors or not source_unavailable(exc):raise
+                metadata_unavailable=True
+            if not metadata_unavailable:
+                links=[n for n in entry.iter() if n.tag.endswith('link') and n.get('type')=='application/epub+zip' and n.get('rel') in {'http://opds-spec.org/acquisition','http://opds-spec.org/acquisition/open-access'}]
+                if not links:raise ValueError('This Gutenberg entry has no open EPUB download')
+                url=urllib.parse.urljoin(url,links[0].get('href',''));parsed=urllib.parse.urlsplit(url)
         if parsed.scheme!='https' or not parsed.hostname or parsed.username:raise ValueError('Use a public HTTPS EPUB or PDF download URL')
         self.root.mkdir(parents=True,exist_ok=True)
         fd,temp=tempfile.mkstemp(dir=self.root,prefix='.download-');os.close(fd)
         try:
-            request=urllib.request.Request(url,headers={'User-Agent':'FutureCrash-LOOK Books (https://github.com/WaltRudyJabsco/FutureCrash-LOOK)'})
-            with urllib.request.urlopen(request,timeout=30) as response,open(temp,'wb') as stream:
-                if urllib.parse.urlsplit(response.url).scheme!='https':raise ValueError('Book download redirected away from HTTPS')
-                total=0
-                while block:=response.read(65536):
-                    total+=len(block)
-                    if total>MAX_DOWNLOAD_BYTES:raise ValueError('Book download exceeds 100 MiB')
-                    stream.write(block)
+            candidates=mirrors if metadata_unavailable else [url,*mirrors]
+            for position,candidate in enumerate(candidates):
+                request=urllib.request.Request(candidate,headers={'User-Agent':'FutureCrash-LOOK Books (https://github.com/WaltRudyJabsco/FutureCrash-LOOK)'})
+                try:
+                    with urllib.request.urlopen(request,timeout=30) as response,open(temp,'wb') as stream:
+                        if urllib.parse.urlsplit(response.url).scheme!='https':raise ValueError('Book download redirected away from HTTPS')
+                        total=0
+                        while block:=response.read(65536):
+                            total+=len(block)
+                            if total>MAX_DOWNLOAD_BYTES:raise ValueError('Book download exceeds 100 MiB')
+                            stream.write(block)
+                    break
+                except OSError as exc:
+                    # Only public Gutenberg IDs gain a fixed mirror fallback.
+                    # A mirror may lack an image edition; try its text edition.
+                    mirror_missing=candidate in mirrors and isinstance(exc,urllib.error.HTTPError) and exc.code==404
+                    if position==len(candidates)-1 or not (source_unavailable(exc) or mirror_missing):raise
             raw=Path(temp)
             with raw.open('rb') as stream:prefix=stream.read(1024)
             suffix='.pdf' if b'%PDF-' in prefix else '.epub' if zipfile.is_zipfile(raw) else None
@@ -333,6 +352,11 @@ class Shelf:
                 return row
             finally:staged.unlink(missing_ok=True)
         finally:Path(temp).unlink(missing_ok=True)
+
+
+def source_unavailable(exc):
+    if isinstance(exc,urllib.error.HTTPError):return exc.code in SOURCE_RETRY_CODES
+    return isinstance(exc,(urllib.error.URLError,TimeoutError,ConnectionError))
 
 
 def gutenberg(query='',sort=None,*,subject='',start_index=1,page=False):

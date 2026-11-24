@@ -187,6 +187,7 @@ figcaption{font:14px/1.5 system-ui;color:var(--muted);margin-top:10px}
 <button data-mode="subjects">Subjects</button>
 <button data-mode="surprise">Surprise me</button>
 </nav>
+<div class="shelf-tools"><label for="download-owner">Download books to</label><select id="download-owner" aria-label="Download books to"></select></div>
 <form id="search">
 <input id="query" aria-label="Book title or author" placeholder="Book title or author" maxlength="500">
 <button type="submit" value="shelf">Search shelf</button>
@@ -223,7 +224,7 @@ def handle(handler,node_url,payload=None):
     url=node_url+route+('?' + urllib.parse.urlencode(query) if query else '')
     request=urllib.request.Request(url,data=json.dumps(payload).encode() if payload is not None else None,headers=headers)
     try:
-        with urllib.request.urlopen(request,timeout=185 if action=='audio' else 60) as response:
+        with urllib.request.urlopen(request,timeout=185 if action=='audio' else 150 if action=='fetch' else 60) as response:
             handler.send_response(response.status)
             for key in ('Content-Type','Content-Length','Content-Range','Accept-Ranges'):
                 if response.headers.get(key):handler.send_header(key,response.headers[key])

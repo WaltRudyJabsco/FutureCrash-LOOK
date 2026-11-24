@@ -25,12 +25,42 @@ from notebook_markdown import safe_text
 from notebook import make_link
 
 BASE='http://127.0.0.1:7332'
+DISCOVERY_TIMEOUT_SECONDS=60
+
+
+def discover(mode='popular',subject='',*,query='',start_index=1):
+    """Use the browser's discovery service, including trusted peer caches."""
+    if mode=='subjects':return book_core.discover(mode,page=True)
+    params=dict(mode=mode,subject=subject,query=query,start_index=start_index)
+    try:return fabric_files.request('/v1/books/discover',params,timeout=DISCOVERY_TIMEOUT_SECONDS)
+    except OSError:
+        # A standalone terminal can still search online without a running node.
+        return book_core.discover(mode,subject,query=query,start_index=start_index,page=True)
+    except RuntimeError:
+        # The service already tried discovery; do not repeat upstream requests.
+        return book_core.discover(mode,subject,query=query,start_index=start_index,page=True,cached=True)
+
+
+def owned_book(row,value):
+    ident=book_core.gutenberg_id(row)
+    return next((r for r in value.get('entries',[]) if ident and book_core.gutenberg_id(r)==ident),None)
+
+
+def acquire_book(row,value,owner,*,favorite=False):
+    """Called after the UI's download confirmation; never re-download an owned ID."""
+    book=owned_book(row,value)
+    if book is None:
+        response=request('fetch',node=owner,url=row['url'])
+        book=dict(response['book'],node=response.get('node') or owner)
+    if favorite and not book.get('favorite'):
+        request('favorite',node=book.get('node') or owner,id=book['id'],selected=True)
+    return book
 
 
 def request(action=None,node='local',**payload):
     route='/v1/books'+('/fabric' if action is None and node=='all' else '')
     value=fabric_files.request(route,{'target':node} if node!='all' else None,
-        json.dumps(dict(payload,action=action)).encode() if action else None,timeout=45 if action in {'scan','fetch'} else 15)
+        json.dumps(dict(payload,action=action)).encode() if action else None,timeout=150 if action=='fetch' else 45 if action=='scan' else 15)
     return value
 
 
@@ -117,6 +147,7 @@ def read_along(ui,row):
 
 def desk(ui,query='',owner=None):
     fd=sys.stdin.fileno();old=termios.tcgetattr(fd);index=0;shelf='To explore';search=False;notice='';results=None
+    search_source='library';discovery=None
     owner=owner or media_storage.settings()['node'];sort_reverse=False;help_visible=False;pane_help=False
     previews=LatestWork();native=look_renderer.NativePreviewController();native_images=True;show_preview=True;last_frame=None
     def ask(label,initial='',path=False):
@@ -126,6 +157,24 @@ def desk(ui,query='',owner=None):
             result,cancelled=look_renderer.prompt_line('› ',initial=initial,picker_root=Path.cwd() if path else None)
             return None if cancelled else result.strip()
         finally:tty.setcbreak(fd)
+    def browse(mode,subject='',text='',more=False):
+        nonlocal results,index,notice,discovery,search_source,last_frame
+        cursor=discovery.get('next_index') if more and discovery else 1
+        if not cursor:return
+        native.frame_cleared();last_frame=None
+        sys.stdout.write('\nSearching Project Gutenberg…');sys.stdout.flush()
+        value=discover(mode,subject,query=text,start_index=cursor)
+        results=(results or [])+value['entries'] if more else value['entries']
+        discovery=dict(mode=mode,subject=subject,text=text,next_index=value.get('next_index'))
+        if not more:index=0
+        search_source='gutenberg'
+        notice=(value.get('warning','')+' · ' if value.get('warning') else '')+'Enter adds to library on '+owner+' · f adds to Favorites'+(' · n more results' if value.get('next_index') else '')
+    def select_library(book,*,favorite=False):
+        nonlocal value,results,discovery,index,shelf,query,search_source
+        value=catalog();results=None;discovery=None;query='';shelf='Favorites' if favorite else 'All';search_source='library'
+        rows=rows_for(value,shelf=shelf)
+        if sort_reverse:rows=list(reversed(rows))
+        index=next((i for i,r in enumerate(rows) if r['id']==book['id']),0)
     try:
         tty.setcbreak(fd)
         # A prior Kitty preview has a graphics placement independent of text.
@@ -140,8 +189,8 @@ def desk(ui,query='',owner=None):
             if sort_reverse:visible=list(reversed(visible))
             index=max(0,min(index,max(0,len(visible)-1)));chosen=visible[index] if visible else None
             owned_gutenberg={book_core.gutenberg_id(r):r for r in value.get('entries',[]) if book_core.gutenberg_id(r)}
-            controls='↑↓ move · Shift-arrows page/ends · Enter '+('import book' if results is not None else 'read')+' · a read aloud · o system reader · / search · s shelves/collections · c new collection · C add/remove collection · f thumbs up/favorite · x thumbs down/undo · m reading state · e edit · i import · g Gutenberg · d discover · I preview · M image/ASCII · k keep offline · y copy link · R scan/refresh · G reverse · P clipboard · W shell pane · Esc back'
-            if width<80 and not help_visible:controls='↑↓ select · Enter open · / search · W pane · ? help · Esc back'
+            controls='↑↓ move · Shift-arrows page/ends · Enter '+('add/read book' if results is not None else 'read')+' · / search · Tab Library/Gutenberg while searching · g Gutenberg search · d discover · n more results · f thumbs up/favorite · a read aloud · o system reader · s shelves/collections · c new collection · C add/remove collection · x thumbs down/undo · m reading state · e edit · i import · I preview · M image/ASCII · k keep offline · y copy link · R scan/refresh · G reverse · P clipboard · W shell pane · Esc back'
+            if width<80 and not help_visible:controls='↑↓ select · Enter add/read · / search · g Gutenberg · d discover · f favorite · n more · W pane · ? help · Esc back'
             else:controls+=' · ? help'
             if pane_help or help_visible:controls+=' · '+' · '.join(terminal_style.pane_shortcuts())
             hints='\n'.join(ui._media_hints(controls,width).splitlines()[:max(1,height-8)]);page=max(1,height-8-len(hints.splitlines()));top=max(0,index-page+1)
@@ -173,7 +222,8 @@ def desk(ui,query='',owner=None):
                 frame.append(ui._c(ui._media_find_cell(safe_text(detail),width),'2'))
             else:frame.append(ui._c('No books here · R scans your configured books folder · i imports a file · g searches Gutenberg','33'))
             if value.get('errors'):frame.append(ui._c('Some owners unavailable · cached books may need an offline copy','33'))
-            frame.extend([ui._c(('SEARCH /' if search else 'FILTER ')+safe_text(query),'1;36'),hints,ui._c(ui._media_find_cell(safe_text(notice),width),'33')])
+            search_label=('SEARCH '+('Library' if search_source=='library' else 'Gutenberg')+' /' if search else 'FILTER ')
+            frame.extend([ui._c(search_label+safe_text(query)+(' · Tab switches source · Enter searches' if search else ''),'1;36'),hints,ui._c(ui._media_find_cell(safe_text(notice),width),'33')])
             rendered=ui._terminal_frame_payload('\n'.join(ui._ansi_clip(line,width) for line in frame))
             if rendered!=last_frame:
                 native.frame_cleared();sys.stdout.write(rendered);sys.stdout.flush();last_frame=rendered
@@ -184,9 +234,18 @@ def desk(ui,query='',owner=None):
             if key=='\x03':return 0
             if key.startswith('paste:'):
                 pasted=safe_text(key[6:])
-                query+=(' ' if query and pasted[:1].isspace() else '')+' '.join(pasted.split());search=True;results=None;index=0;continue
+                query+=(' ' if query and pasted[:1].isspace() else '')+' '.join(pasted.split());search=True;results=[] if search_source=='gutenberg' else None;index=0;continue
             if search:
-                if key in {'esc','enter','\r','\n'}:search=False;continue
+                if key in {'tab','\t'}:
+                    search_source='gutenberg' if search_source=='library' else 'library'
+                    if search_source=='library':shelf='All'
+                    results=[] if search_source=='gutenberg' else None;index=0;continue
+                if key in {'esc','enter','\r','\n'}:
+                    search=False
+                    if key!='esc' and search_source=='gutenberg':
+                        try:browse('search',text=query)
+                        except (OSError,ValueError,RuntimeError) as exc:notice=str(exc)
+                    continue
                 if key in {'\x7f','\b'}:query=query[:-1];index=0;continue
                 if len(key)==1 and key.isprintable():query+=key;index=0;continue
                 if key not in {'up','down','shiftup','shiftdown','pageup','pagedown','shiftleft','shiftright','home','end'}:continue
@@ -195,7 +254,10 @@ def desk(ui,query='',owner=None):
                 if query:query='';index=0;continue
                 return 0
             if key=='?':help_visible=not help_visible;continue
-            if key=='/':search=True;results=None;continue
+            if key=='/':
+                search=True;search_source='gutenberg' if results is not None else 'library'
+                if search_source=='library':shelf='All'
+                continue
             if key in {'up','down','shiftup','shiftdown','pageup','pagedown','shiftleft','shiftright','home','end'}:
                 if key=='up':index-=1
                 elif key=='down':index+=1
@@ -226,9 +288,12 @@ def desk(ui,query='',owner=None):
                         selected=name not in chosen.get('collections',[])
                         request('collect',node=chosen.get('node',owner),id=chosen['id'],name=name,selected=selected)
                         value=catalog();notice=('Added to ' if selected else 'Removed from ')+name
-                elif key=='f' and chosen and results is None:
-                    request('favorite',node=chosen.get('node',owner),id=chosen['id'],selected=not chosen.get('favorite',False))
-                    value=catalog();notice='Favorites updated'
+                elif key=='f' and chosen and chosen.get('kind')!='subject':
+                    if results is None:
+                        request('favorite',node=chosen.get('node',owner),id=chosen['id'],selected=not chosen.get('favorite',False))
+                        value=catalog();notice='Favorites updated'
+                    elif owned_book(chosen,value) or (ask('Download “'+chosen['title']+'” to '+owner+' and add to Favorites? y/N') or '').casefold()=='y':
+                        book=acquire_book(chosen,value,owner,favorite=True);select_library(book,favorite=True);notice='Saved to Favorites'
                 elif key=='x' and chosen and results is None:
                     action='restore' if chosen.get('removal_due') else 'reject'
                     if action=='restore' or (ask('Hide and delete this starter download after 48 hours? Undo in Pending removals · y/N') or '').casefold()=='y':
@@ -237,21 +302,23 @@ def desk(ui,query='',owner=None):
                     mode=ask('Discover · p popular · n new arrivals · s subjects · r surprise me','p')
                     if mode:
                         selected={'p':'popular','n':'new','s':'subjects','r':'surprise'}.get(mode,mode)
-                        results=book_core.discover(selected);index=0
-                        if selected=='surprise':notice='LOOK surprise selection from Gutenberg’s popular list'
+                        query='';browse(selected)
                 elif key=='g':
-                    text=ask('Search Project Gutenberg')
-                    if text:results=book_core.gutenberg(text);index=0;notice='Enter imports the selected EPUB to '+owner+'; Esc returns to your shelf'
+                    text=ask('Search Project Gutenberg',query)
+                    if text:query=text;browse('search',text=text)
+                elif key=='n' and results is not None and discovery and discovery.get('next_index'):
+                    browse(discovery['mode'],discovery['subject'],discovery['text'],more=True)
                 elif key=='i':
                     path=ask('Import EPUB or PDF · Tab completes · arrows open the path picker',path=True)
                     if path:import_files([path],owner);value=catalog();notice='Imported; source retained'
                 elif key in {'enter','\r','\n'} and chosen:
                     if results is not None:
-                        if chosen.get('kind')=='subject':results=book_core.discover('subject',chosen['subject']);index=0;continue
-                        if book_core.gutenberg_id(chosen) in owned_gutenberg:
-                            results=None;index=0;notice='Already on your Fabric shelf; choose the existing copy to read';continue
+                        if chosen.get('kind')=='subject':browse('subject',chosen['subject']);continue
+                        if owned_book(chosen,value):
+                            select_library(owned_book(chosen,value));notice='Already on your Fabric shelf · selected existing copy; Enter reads';continue
                         answer=ask('Download “'+chosen['title']+'” to '+owner+'? y/N')
-                        if answer and answer.casefold()=='y':request('fetch',node=owner,url=chosen['url']);value=catalog();results=None;notice='Book imported'
+                        if answer and answer.casefold()=='y':
+                            book=acquire_book(chosen,value,owner);select_library(book);notice='Book added to library on '+owner
                     else:
                         print('\nOpening reader; copying a remote book locally if needed…',flush=True)
                         path=local_copy(chosen)
@@ -300,11 +367,12 @@ def desk(ui,query='',owner=None):
 
 
 def main(args,ui):
-    parser=argparse.ArgumentParser(prog='lk books',description='Fabric EPUB/PDF shelf; bk is an alias. Files stay on their owner; opening remote books makes a verified local cache copy.')
+    parser=argparse.ArgumentParser(prog='lk books',description='Fabric EPUB/PDF shelf and Gutenberg discovery; bk is an alias. In the terminal, / searches Library or Gutenberg (Tab switches source); g searches Gutenberg and d browses. Downloads stay on the configured owner; opening remote books makes a verified local cache copy.')
     parser.add_argument('action',nargs='?',default='shelf',choices=['shelf','list','scan','import','search','discover','fetch','reader','listen','voices','speech-setup','refill','collections','reject','restore','collect','favorite','unfavorite'])
     parser.add_argument('values',nargs='*',help='reader: status/install/native-install/auto/bookokrat/system; listen: FILE; other actions: query or path')
     parser.add_argument('--node',default=None,help='Library owner; defaults to configured media destination')
     parser.add_argument('--json',action='store_true')
+    parser.add_argument('--start-index',type=int,default=1,help='Gutenberg catalogue cursor returned as next_index by search/discover --json')
     parser.add_argument('--chapter',type=int)
     parser.add_argument('--paragraph',type=int)
     selected=parser.parse_args(args);owner=selected.node or media_storage.settings()['node']
@@ -358,15 +426,17 @@ def main(args,ui):
         elif selected.action=='import':
             if not selected.values:raise ValueError('Choose one or more EPUB/PDF files')
             value={'entries':import_files(selected.values,owner)}
-        elif selected.action=='search':value={'entries':book_core.gutenberg(' '.join(selected.values))}
-        elif selected.action=='discover':value={'entries':book_core.discover(selected.values[0] if selected.values else 'popular',' '.join(selected.values[1:]))}
+        elif selected.action=='search':value=discover('search',query=' '.join(selected.values),start_index=selected.start_index)
+        elif selected.action=='discover':value=discover(selected.values[0] if selected.values else 'popular',' '.join(selected.values[1:]),start_index=selected.start_index)
         else:
             if len(selected.values)!=1:raise ValueError('Choose one direct HTTPS EPUB/PDF URL')
             value=request('fetch',node=owner,url=selected.values[0])
         if value.get('book'):value=dict(value,entries=[value['book']])
         if selected.json:print(json.dumps(value,ensure_ascii=False))
         else:
+            if value.get('warning'):print(value['warning'])
             for row in value.get('entries',[]):print(book_core.clean(row.get('title'))+' · '+book_core.clean(row.get('author'))+(' · '+row['url'] if row.get('url') else ''))
+            if value.get('next_index'):print('More results: add --start-index '+str(value['next_index']))
             if not value.get('entries'):print('No books yet · lk books scan · lk books import FILE · lk books search QUERY')
             for warning in value.get('warnings',[]):print('Warning: '+book_core.clean(warning))
         return 0
