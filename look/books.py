@@ -189,7 +189,7 @@ def desk(ui,query='',owner=None):
             if sort_reverse:visible=list(reversed(visible))
             index=max(0,min(index,max(0,len(visible)-1)));chosen=visible[index] if visible else None
             owned_gutenberg={book_core.gutenberg_id(r):r for r in value.get('entries',[]) if book_core.gutenberg_id(r)}
-            controls='↑↓ move · Shift-arrows page/ends · Enter '+('add/read book' if results is not None else 'read')+' · / search · Tab Library/Gutenberg while searching · g Gutenberg search · d discover · n more results · f thumbs up/favorite · a read aloud · o system reader · s shelves/collections · c new collection · C add/remove collection · x thumbs down/undo · m reading state · e edit · i import · I preview · M image/ASCII · k keep offline · y copy link · R scan/refresh · G reverse · P clipboard · W shell pane · Esc back'
+            controls='↑↓ move · Shift-arrows page/ends · Enter '+('add/read book' if results is not None else 'read')+' · / search · Tab Library/Gutenberg while searching · g Gutenberg search · d discover · n more results · f favorite · a read aloud · o system reader · s shelves/collections · c new collection · C add/remove collection · x thumbs down/undo · m reading state · e edit · i import · I preview · M image/ASCII · k keep offline · y copy link · R scan/refresh · G reverse · P clipboard · W shell pane · Esc back'
             if width<80 and not help_visible:controls='↑↓ select · Enter add/read · / search · g Gutenberg · d discover · f favorite · n more · W pane · ? help · Esc back'
             else:controls+=' · ? help'
             if pane_help or help_visible:controls+=' · '+' · '.join(terminal_style.pane_shortcuts())
