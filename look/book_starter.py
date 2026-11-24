@@ -3,7 +3,7 @@ import csv,fcntl,gzip,json,os,re,subprocess,sys,time,urllib.request,zipfile
 from pathlib import Path
 import book_core
 DAY=24*3600
-MIRROR='https://gutenberg.pglaf.org/cache/epub'
+MIRROR=book_core.GUTENBERG_MIRROR
 MAX_BYTES=50*1024*1024
 MAX_UNPACKED_BYTES=250*1024*1024
 MAX_FAILURES_PER_RUN=30

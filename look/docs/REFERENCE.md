@@ -391,8 +391,8 @@ lk books speech-setup
   [media] Install optional offline British neural speech
 lk books reader [status|install|native-install|auto|bookokrat|system]
   [media] Choose the local reader; install standard or native read-along Bookokrat
-lk books [shelf|list|scan|import FILE...|search QUERY|discover [popular|new|subjects|surprise]|fetch URL|reader MODE|listen FILE|voices|speech-setup] [--node NODE] [--json]
-  [media] Fabric EPUB/PDF shelf; bk alias, reading state, Notes links and W shell panes
+lk books [shelf|list|scan|import FILE...|search QUERY|discover [popular|new|subjects|surprise]|fetch URL|reader MODE|listen FILE|voices|speech-setup] [--node NODE] [--start-index N] [--json]
+  [media] EPUB/PDF library and Gutenberg discovery; / search with Tab source choice, Favorites, paging and W panes
 lk transcribe [FILE|status|setup|configure] [OPTIONS]
   [media] Optional local speech-to-text
 lk dictate [toggle|status] [OPTIONS]

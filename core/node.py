@@ -4045,10 +4045,14 @@ class API(BaseHTTPRequestHandler):
                     for rows,names,error in pool.map(read,peers):
                         entries.extend(rows);collections.update(names)
                         if error:errors.append(error)
-                return self.sendj(200,{'ok':True,'entries':entries,'errors':errors,'collections':sorted(collections)})
+                import media_storage
+                try:configured=media_storage.settings()['node']
+                except (OSError,ValueError):configured='local'
+                return self.sendj(200,{'ok':True,'entries':entries,'errors':errors,'collections':sorted(collections),
+                    'node':name,'owners':[name,*[p['name'] for p in peers if p.get('name')]],'download_owner':name if configured=='local' else configured})
             peer,_=self._file_target()
             if peer is not None:
-                value=_file_peer_json(peer,'/v1/books') if payload is None else http_json(_copy_route(peer)+'/v1/books',data=payload,timeout=45)
+                value=_file_peer_json(peer,'/v1/books') if payload is None else http_json(_copy_route(peer)+'/v1/books',data=payload,timeout=120 if payload.get('action')=='fetch' else 45)
                 return self.sendj(200,value)
             shelf=self._books_shelf()
             if payload is None:value=shelf.catalog()

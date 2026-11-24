@@ -1163,9 +1163,9 @@
   ],
   [
     "lk books",
-    "[shelf|list|scan|import FILE...|search QUERY|discover [popular|new|subjects|surprise]|fetch URL|reader MODE|listen FILE|voices|speech-setup] [--node NODE] [--json]",
+    "[shelf|list|scan|import FILE...|search QUERY|discover [popular|new|subjects|surprise]|fetch URL|reader MODE|listen FILE|voices|speech-setup] [--node NODE] [--start-index N] [--json]",
     "media",
-    "Fabric EPUB/PDF shelf; bk alias, reading state, Notes links and W shell panes"
+    "EPUB/PDF library and Gutenberg discovery; / search with Tab source choice, Favorites, paging and W panes"
   ],
   [
     "lk transcribe",

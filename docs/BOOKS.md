@@ -41,8 +41,13 @@ uses synthetic book text and a seeded reading position.
   then run `lk books scan` or press **R** in the shelf.
 - Or run `lk books import "/path/My Book.epub"`. Import copies the original and
   refuses a conflicting filename. The source is retained.
-- Use **g** to search Project Gutenberg. Select a result and confirm its download
-  to the configured media owner. **Esc** returns without importing.
+- Press **/** to search, **Tab** to switch Library/Gutenberg, then **Enter**.
+  **g** opens Gutenberg search directly; **d** browses popular books, new arrivals,
+  subjects or a surprise. **n** loads more catalogue results.
+- Select a Gutenberg result and press **Enter** to add it to the library, or **f**
+  to download and add it to Favorites. Confirm the named download owner first.
+  Books already owned are marked and reused without downloading another copy.
+  **Esc** returns without importing.
 
 No account-specific paths, machine names or drives are assumed. The default for
 a fresh account is `~/Media/books`. The existing media destination chooses the
@@ -57,7 +62,7 @@ An empty shelf does not scan the home directory or initialize attached drives.
 | Key | Action |
 | --- | --- |
 | Arrows / Shift-arrows | Select / page and ends |
-| `/` | Search title, author, shelf or format; Enter returns to browsing |
+| `/` | Search Library or Gutenberg; Tab switches source, Enter searches |
 | Enter | Read in Bookokrat when available; quit it with q to return |
 | `o` | Open in the system/configured reader |
 | `a` | Open local read-aloud controls; choose a paragraph, then Enter |
@@ -67,6 +72,9 @@ An empty shelf does not scan the home directory or initialize attached drives.
 | `e` | Edit prefilled title, author, custom shelf and reading-position label |
 | `i` | Import a file; Tab completes and arrows open the existing path picker |
 | `g` | Search Gutenberg; Enter offers import confirmation |
+| `d` | Browse Gutenberg popular, new arrivals, subjects or surprise |
+| `n` | Load more Gutenberg results |
+| `f` | Toggle Favorites on a library book; download/favorite a Gutenberg result |
 | `k` | Keep a permanent local library copy for offline reading |
 | `y` | Copy a Markdown file/Fabric link for Notes |
 | Shift-R | Scan the configured books folder and refresh the Fabric shelf |
@@ -100,14 +108,31 @@ lk books list --json
 lk books scan --node local
 lk books import "/path/My Book.pdf" --node local
 lk books search "Pride and Prejudice"
+lk books search "Virginia Woolf" --json
+lk books search "Virginia Woolf" --start-index 26 --json
+lk books discover popular --json
 lk books fetch https://www.gutenberg.org/ebooks/1342.opds --node local
 ```
 
 Search uses [Project Gutenberg's official OPDS catalog](https://www.gutenberg.org/ebooks/offline_catalogs.html).
+Terminal search and discovery use the same service as browser Mercury Reader;
+`--json` includes the next catalogue cursor as `next_index`. Without JSON, the
+command prints the `--start-index` option needed for another page.
 During an outage, discovery can use an existing bulk catalogue cache on this node
 or a trusted Fabric peer. Cached results are labeled; popular books fall back to
 title order because the bulk catalogue contains no download rankings. Downloads
 may remain unavailable until Gutenberg returns. Local books stay readable.
+For a recognized Gutenberg book ID, transient download failures use the same
+public PGLAF mirror as the starter library, trying an illustrated then a text-only
+EPUB. The normal size, HTTPS, metadata and identity checks still apply. Other
+download hosts and missing Gutenberg records do not gain this fallback.
+
+Browser Reader shows **Download books to** with the available trusted owners.
+The selected owner appears in the confirmation and receives the download.
+After saving, Reader verifies the returned book is in the Fabric catalogue and
+shows it in All books with its title prefilled in search, even if you were
+previously viewing Favorites or a different collection. A failed download is
+reported as a failure, with no success claim.
 
 In the browser, **👍 Favorites** opens your saved books. Favoriting a book from
 To explore keeps you in the discovery pool; it never deletes its file. My shelf
