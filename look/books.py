@@ -223,7 +223,8 @@ def desk(ui,query='',owner=None):
             else:frame.append(ui._c('No books here · R scans your configured books folder · i imports a file · g searches Gutenberg','33'))
             if value.get('errors'):frame.append(ui._c('Some owners unavailable · cached books may need an offline copy','33'))
             search_label=('SEARCH '+('Library' if search_source=='library' else 'Gutenberg')+' /' if search else 'FILTER ')
-            frame.extend([ui._c(search_label+safe_text(query)+(' · Tab switches source · Enter searches' if search else ''),'1;36'),hints,ui._c(ui._media_find_cell(safe_text(notice),width),'33')])
+            # Per-row clipping must not treat the whole wrapped footer as one line.
+            frame.extend([ui._c(search_label+safe_text(query)+(' · Tab switches source · Enter searches' if search else ''),'1;36'),*hints.splitlines(),ui._c(ui._media_find_cell(safe_text(notice),width),'33')])
             rendered=ui._terminal_frame_payload('\n'.join(ui._ansi_clip(line,width) for line in frame))
             if rendered!=last_frame:
                 native.frame_cleared();sys.stdout.write(rendered);sys.stdout.flush();last_frame=rendered
