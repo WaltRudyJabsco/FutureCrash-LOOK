@@ -82,12 +82,13 @@ def prepare_short_text(queue, text, exact_label=False, illustration=None):
     return dict(plan,destination=destination['label'])
 
 
-def quick_text(queue,text,exact_label=False,illustration=None):
+def quick_text(queue,text,exact_label=False,illustration=None,on_submit=None):
     plan=prepare_short_text(queue,text,exact_label,illustration)
+    if on_submit:on_submit(plan)
     return dict(request('send',plan['node'],ident=plan['id'],confirm=True),destination=plan['destination'])
 
 
-def quick_artwork(queue,artwork_id):
+def quick_artwork(queue,artwork_id,on_submit=None):
     from museum_desk import Client,preference
     client=Client(preference())
     row=next((r for r in client.snapshot().get('items',[]) if r.get('id')==artwork_id),None)
@@ -95,6 +96,7 @@ def quick_artwork(queue,artwork_id):
     if not (row.get('downloaded') or row.get('available_offline')):
         raise ValueError('Artwork is not downloaded; choose an available Museum image')
     plan=prepare_file(queue,client.image(row),caption=artwork_caption(row),copies=1)
+    if on_submit:on_submit(plan)
     return dict(request('send',plan['node'],ident=plan['id'],confirm=True),destination=plan['destination'],artwork={'id':row['id'],'title':row.get('title'),'artist':row.get('artist')})
 
 
@@ -213,9 +215,9 @@ class PrintConversation:
         self.request='';self.choices={};self.persist()
 
 
-def preferred_receipt(prompt=""):
+def preferred_receipt(prompt="",catalog=None):
     """A preference belongs to the physical destination, visible to every peer."""
-    catalog=destinations()
+    catalog=destinations() if catalog is None else catalog
     if any(re.search(r'(?<!\w)'+re.escape(p['label'])+r'(?!\w)',prompt,re.I) for p in catalog.get('printers',[])):
         raise ValueError('A printer was named: pass its exact label as queue instead of using the default')
     matches=[p for p in catalog.get('printers',[]) if any(
@@ -484,6 +486,14 @@ def design(text=None,kind='banner',font='solid',queue=None,paper_limit_mm=304.8)
     return result
 
 
+def tool_error_summary(error,turn):
+    if turn.get('submission_started') or turn.get('prior_uncertain'):
+        plan=turn.get('plan',{})
+        if not plan:return 'A previous print submission is uncertain. '+str(error)+'. Inspect printer jobs before retrying.'
+        return 'Print submission outcome is uncertain: '+str(error)+'. Inspect job '+str(plan.get('id','unknown'))+' on '+str(plan.get('node','owner'))+' before retrying.'
+    return 'No print job was submitted. Print tool error: '+str(error)
+
+
 def design_summary(result):
     state=result.get('state','unknown');label=result.get('destination',result.get('queue','printer'))
     receipt=result.get('receipt') or {};ident=result.get('id','')
@@ -527,6 +537,7 @@ def run_tool(tool,args,workspace,prompt='',turn=None):
                 request('discard',result['node'],ident=result['id'],confirm=True)
                 raise ValueError('Use the exact friendly printer name')
             if turn.get('progress'):turn['progress']('Sending to '+result['destination']+'…')
+            if turn.get('on_submit'):turn['on_submit'](result)
             result=dict(request('send',result['node'],ident=result['id'],confirm=True),destination=result['destination'],design=result['design'])
         return json.dumps(result)
     if tool in {'print_text','print_artwork'}:
@@ -537,9 +548,12 @@ def run_tool(tool,args,workspace,prompt='',turn=None):
             if not isinstance(artwork_id,str) or not re.fullmatch(r'(met|aic)-[1-9][0-9]{0,9}',artwork_id):raise ValueError('Use a Museum artwork ID returned by museum_search')
             value['text']='Museum artwork'
         if set(value)-{'queue','text','illustration'} or 'text' not in value:
-            raise ValueError('Use text and an optional printer queue')
+            unsupported=sorted(set(value)-{'queue','text','illustration'})
+            raise ValueError('Use text and an optional printer queue (queue). Supported keys: text, queue, illustration.'+
+                             (' Unsupported keys: '+', '.join(unsupported) if unsupported else ' text is required.'))
         import tool_workflow
-        tool_workflow.require_content(value['text'],prompt)
+        if not (turn or {}).get('supplied_text'):
+            tool_workflow.require_content(value['text'],prompt)
         if value.get('illustration'):
             from print_design import WEATHER_ILLUSTRATIONS
             if value['illustration'] not in WEATHER_ILLUSTRATIONS:raise ValueError('Unsupported illustration')
@@ -572,9 +586,10 @@ def run_tool(tool,args,workspace,prompt='',turn=None):
             except (ValueError,TypeError,AttributeError):pass
         turn['print_attempted']=True
         if turn.get('on_print_attempt'):turn['on_print_attempt']()
-        if artwork_id:return json.dumps(quick_artwork(queue,artwork_id))
+        submission={'on_submit':turn['on_submit']} if turn.get('on_submit') else {}
+        if artwork_id:return json.dumps(quick_artwork(queue,artwork_id,**submission))
         options={'illustration':value['illustration']} if value.get('illustration') else {}
-        return json.dumps(quick_text(queue,value['text'],exact_label=True,**options))
+        return json.dumps(quick_text(queue,value['text'],exact_label=True,**options,**submission))
     if tool=='printers_list':return json.dumps(request('list','all'))
     if tool=='printer_inspect':
         if set(value)-{'view','node','queue'}:raise ValueError('Printer inspection accepts only owner, queue and options/jobs view')

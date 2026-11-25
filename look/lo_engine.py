@@ -139,7 +139,8 @@ def _chat_once(prompt: str, *, profile='workspace', workspace=None, selected_pat
               history=None, interface_context=None, persona=None, force_search=False, task_context=None):
     """Run one LO operator turn and return structured machine data."""
     import ytd
-    download=ytd.direct_download(prompt,profile) if not selected_paths else None
+    import print_text_workflow
+    download=ytd.direct_download(prompt,profile) if not selected_paths and not print_text_workflow.supplied(prompt) else None
     if download is not None:
         events=EventCollector()
         events.emit('tool_start',tool='video_download')
