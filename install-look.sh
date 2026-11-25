@@ -428,6 +428,7 @@ install_file "$ROOT/look/print_design.py" "$HOME/.local/share/look/print_design.
 echo "  Optional offline banner lettering and fortune rendering (pyfiglet + Pillow)"
 run python3 "$HOME/.local/share/look/print_design.py" --setup || echo "  Lettering setup unavailable; run lk print setup later."
 install_file "$ROOT/look/printing.py" "$HOME/.local/share/look/printing.py"
+install_file "$ROOT/look/print_text_workflow.py" "$HOME/.local/share/look/print_text_workflow.py"
 install_file "$ROOT/look/book_assistant.py" "$HOME/.local/share/look/book_assistant.py"
 install_file "$ROOT/look/force_player.py" "$HOME/.local/share/look/force_player.py"
 install_file "$ROOT/look/books.py" "$HOME/.local/share/look/books.py"

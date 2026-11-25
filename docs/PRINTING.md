@@ -1,5 +1,33 @@
 # LK Print
 
+## Supplied text in LO, Signal and Albert
+
+A request such as “format and print this on Little Printer --” followed by the
+body uses the shared supplied-text workflow. The body stays separate from the
+instruction: dates, quoted commands and words such as “weather” do not start a
+replacement search or authorize another action. Formatting adds Markdown titles,
+section headings and list structure while retaining the supplied wording and
+quantities. It does not silently fact-check or rewrite the content.
+
+The current private chat keeps the body and discovered printer through preparation
+errors and follow-ups such as “try again” or “print the text.” A new supplied-text
+print in that chat can reuse the printer, while an explicitly different printer
+always wins. Missing destinations are shown as choices from actual discovery.
+This context does not transfer to another user's chat and expires with task state.
+
+The workflow prepares one copy and saves the owner/job ID before submitting.
+Preparation failures report their actual error and can be retried. After a lost
+reply, a retry inspects the same job: an unsent prepared plan can resume, but an
+accepted or uncertain plan is not duplicated. “Print another copy” explicitly
+requests a new job. A successful receipt means owner/spooler acceptance, never
+proof of physical paper delivery. Cancellation or another topic ends the pending
+request. Preview and non-print requests do not send paper.
+
+Model-driven print tools also report their actual validation/transport error;
+assistant prose cannot replace that error with a claim that printing is simulated.
+
+## Printer desk
+
 Bare `lk print` opens a small terminal desk with one entry per identified physical
 printer. Enter/o opens Options, j shows Jobs, r shows underlying Routes, n sets a
 Nickname, and R refreshes. Arrows/Tab select; Page Up/Down scroll detail views;

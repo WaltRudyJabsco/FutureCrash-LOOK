@@ -8501,6 +8501,28 @@ def _lo_radio_direct(prompt,profile,events=None):
     return answer
 
 
+def _lo_supplied_print_direct(prompt,profile,conversation,events=None):
+    import print_text_workflow
+    spinner=None
+    def progress(message):
+        nonlocal spinner
+        if events:events.emit('progress',detail=message)
+        elif sys.stdout.isatty():
+            if spinner:spinner.finish()
+            spinner=_ActivityHandle(message,hint='').start()
+    try:result=print_text_workflow.execute(prompt,conversation,allowed=_tool_allowed('print_text',profile),progress=progress,events=events)
+    finally:
+        if spinner:spinner.finish()
+    if result is None:return None
+    answer=result['text'];print(answer)
+    if events:
+        events.emit('intent_routed',family='printing',families=['printing'],confidence=1.0,source='supplied-content workflow')
+        events.emit('source_receipt',edge='PRINT',source='Print workflow result',confidence='OBSERVED')
+        events.emit('response',text=answer)
+        events.emit('request_done',status=result['status'],rounds=0,tool_calls=result['tool_calls'],prompt_tokens=0,output_tokens=0,load_ms=0)
+    return answer
+
+
 def _lo_fortune_direct(prompt,profile,events=None,pending=None):
     import fortune_assistant
     if fortune_assistant.intent(prompt) is None:return None
@@ -11334,6 +11356,16 @@ def ollama_chat(force_search=False, initial_prompt=None, allow_start=True, host_
         print("· cancelled")
         return 0
 
+    import printing as _print_conversation_tools
+    print_conversation=_print_conversation_tools.PrintConversation(*(task_context or (None,None)))
+    if initial_prompt and not force_search and not selected_paths:
+        supplied_answer=_lo_supplied_print_direct(initial_prompt,profile,print_conversation,events)
+        if supplied_answer is not None:
+            _save_recent_exchange(initial_prompt,supplied_answer)
+            if one_shot:return 0
+            conversation_history=[*(conversation_history or []),{'role':'user','content':initial_prompt},{'role':'assistant','content':supplied_answer}]
+            initial_prompt=None
+
     if initial_prompt and not force_search and not selected_paths:
         radio_answer=_lo_radio_direct(initial_prompt,profile,events)
         if radio_answer is not None:
@@ -11582,8 +11614,6 @@ def ollama_chat(force_search=False, initial_prompt=None, allow_start=True, host_
     last_action=_lo_latest_command_action()
     last_candidates=""
     pending_media_clarification=None
-    import printing as _print_conversation_tools
-    print_conversation=_print_conversation_tools.PrintConversation(*(task_context or (None,None)))
     semantic_state,semantic_save=task_context or ({},lambda:None)
     brain_state=_load_brain_state()
     brain_pending=brain_state.get("pending") or {}
@@ -11619,6 +11649,13 @@ def ollama_chat(force_search=False, initial_prompt=None, allow_start=True, host_
             continue
 
         original_user_prompt=prompt
+        if not force_search and not selected_paths:
+            supplied_answer=_lo_supplied_print_direct(prompt,profile,print_conversation,events)
+            if supplied_answer is not None:
+                _save_recent_exchange(prompt,supplied_answer)
+                messages.extend([{'role':'user','content':prompt},{'role':'assistant','content':supplied_answer}])
+                if one_shot:return 0
+                continue
         import tool_workflow
         if not print_conversation.choices:
             prompt=tool_workflow.printer_list_choice(prompt,messages)
@@ -12016,12 +12053,18 @@ def ollama_chat(force_search=False, initial_prompt=None, allow_start=True, host_
         turn_proposed_action = None
         turn_successful_tools=set()
         print_turn={'on_print_attempt':print_conversation.finish}
+        def print_submitting(plan):
+            print_turn['submission_started']=True
+            print_turn['plan']={key:plan[key] for key in ('id','node')}
+        print_turn['on_submit']=print_submitting
         if task_plan:
             print_turn['authorized_tools']={name for group in task_plan['required'] for name in group}
             if task_plan['relation']!='new' and semantic_state.get('brain_task',{}).get('status')=='uncertain':
                 print_turn['print_attempted']=True
+                print_turn['prior_uncertain']=True
                 messages.append({'role':'system','content':'A previous submission has an uncertain outcome. Do not repeat it. Inspect printer jobs or ask the user to verify delivery first.'})
         last_print_result=None
+        last_print_error=None
         last_printer_catalog=None
 
         # Terminal drag/drop becomes first-class resource context. Finder and most Linux
@@ -12133,7 +12176,7 @@ def ollama_chat(force_search=False, initial_prompt=None, allow_start=True, host_
         else:
             messages.append({"role":"system","content":(
                 "RESOURCE SCOPE: unqualified open/play/find requests default to the operator's local world. "
-                "Fabric printers use printers_list/printer_inspect. Use banner_render for offline ASCII lettering previews. Use print_design for banners or fortune-cookie slips: author an original concise fortune (one to three lines, ideally under 90 characters); use kind fortune-cookie for the short slip with lucky numbers, or fortune for the card with lucky numbers and credited Museum artwork. Set send=true only when asked to print to that exact named printer; otherwise prepare a review. Fortunes are compact; banners are sideways large lettering.  To print a to-do list from Notes, use notebook_search/list/read for its actual body, then print_prepare with that text and the chosen receipt destination; do not substitute a guessed list. When the current user explicitly asks to print to a named printer, use print_text with its friendly label and the requested short text; this sends one copy. Otherwise print_prepare creates a review plan only; return its confirmation command. Do not automatically retry a print_text submission. For recipes format a title, ingredients and concise steps; preserve quantities. Never invent the contents of an existing note. Never claim physical printing from a spooler receipt. Export DOCX/manuscripts to PDF first. "
+                "Fabric printers use printers_list/printer_inspect. Use banner_render for offline ASCII lettering previews. Use print_design for banners or fortune-cookie slips: omit text for standard fortunes to draw from the owner’s rotating aphorism deck; provide text only for user-requested custom wording; use kind fortune-cookie for the short slip with lucky numbers, or fortune for the card with lucky numbers and credited Museum artwork. Set send=true only when asked to print to that exact named printer; otherwise prepare a review. Fortunes are compact; banners are sideways large lettering.  To print a to-do list from Notes, use notebook_search/list/read for its actual body, then print_prepare with that text and the chosen receipt destination; do not substitute a guessed list. When the current user explicitly asks to print to a named printer, use print_text with its friendly label and the requested short text; this sends one copy. Otherwise print_prepare creates a review plan only; return its confirmation command. Do not automatically retry a print_text submission. For recipes format a title, ingredients and concise steps; preserve quantities. Never invent the contents of an existing note. Never claim physical printing from a spooler receipt. Export DOCX/manuscripts to PDF first. "
                 "Museum is the Fabric artwork collection. Use museum_search for actual artworks and image links; do not guess folders or claim to see an image from metadata. "
                 "YouTube Radio (YTR / lk ytr) is the shared listen-later queue. Use radio_queue to inspect it and radio_add for explicitly requested YouTube links; adding never starts playback. "
                 "Mercury Reader is the built-in Fabric EPUB/PDF library. For books and saved reading positions use books_shelf/books_lookup; never guess a media folder or substitute music search. Reader links are relative to the current Signal/Albert browser host; lk books is the terminal shelf. Book lookups do not launch or start narration. "
@@ -12809,6 +12852,8 @@ def ollama_chat(force_search=False, initial_prompt=None, allow_start=True, host_
                     elif name in {'printers_list','printer_inspect','print_prepare','print_text','print_artwork','banner_render','print_design'}:
                         import printing
                         tool_content,_ok,_elapsed=_tool_transaction(name,args,lambda:printing.run_tool(name,args,workspace,prompt,print_turn))
+                        if not _ok and name in {'print_text','print_artwork','print_design','print_prepare'}:
+                            last_print_error=str(tool_content)
                         if name=='printers_list' and _ok:
                             try:
                                 last_printer_catalog=json.loads(tool_content)
@@ -12899,7 +12944,7 @@ def ollama_chat(force_search=False, initial_prompt=None, allow_start=True, host_
                     else:
                         tool_content = f"Unknown tool: {name}"
 
-                    checkpoint_task(str(tool_content),uncertain=bool(print_turn.get('print_attempted') and not
+                    checkpoint_task(str(tool_content),uncertain=bool((print_turn.get('submission_started') or print_turn.get('prior_uncertain')) and not
                         (turn_successful_tools & {'print_text','print_design','print_artwork'})))
                     info_receipt=_info_receipt(name,tool_content)
                     if info_receipt:
@@ -13100,15 +13145,18 @@ def ollama_chat(force_search=False, initial_prompt=None, allow_start=True, host_
             if last_print_result:
                 import printing
                 message=dict(message,content=printing.design_summary(last_print_result))
+            elif last_print_error:
+                import printing
+                message=dict(message,content=printing.tool_error_summary(last_print_error,print_turn))
             if turn_goal:
                 check=_cognition_module().assess(turn_goal,successful_tools=list(turn_successful_tools),final_text=_split_ollama_thinking(message)[1])
-                if check.get('missing_actions') and '?' not in _split_ollama_thinking(message)[1] and not last_print_result:
+                if check.get('missing_actions') and '?' not in _split_ollama_thinking(message)[1] and not last_print_result and not last_print_error:
                     import tool_workflow
                     message=dict(message,content=tool_workflow.incomplete_response(check['missing_actions'],print_turn.get('print_attempted',False)))
             if task_plan:
                 task_brain.remember(semantic_state,semantic_save,task_plan,prompt,
                     _split_ollama_thinking(message)[1],turn_successful_tools,
-                    {row['tool'] for row in task_trace},trace=task_trace,uncertain=bool(print_turn.get('print_attempted') and not (turn_successful_tools & {'print_text','print_design','print_artwork'})))
+                    {row['tool'] for row in task_trace},trace=task_trace,uncertain=bool((print_turn.get('submission_started') or print_turn.get('prior_uncertain')) and not (turn_successful_tools & {'print_text','print_design','print_artwork'})))
             messages.append(message)
             # Thinking was already presented live according to the selected display mode.
             final=_split_ollama_thinking(message)[1]
@@ -13174,11 +13222,14 @@ def ollama_chat(force_search=False, initial_prompt=None, allow_start=True, host_
             if last_print_result:
                 import printing
                 final=printing.design_summary(last_print_result)
+            elif last_print_error:
+                import printing
+                final=printing.tool_error_summary(last_print_error,print_turn)
             elif check.get("satisfied") and turn_successful_tools:
                 final="Completed with verified tool receipts: "+", ".join(sorted(turn_successful_tools))+"."
             else:
                 final=tool_workflow.incomplete_response(check.get('missing_actions',[]),print_turn.get('print_attempted',False))
-            checkpoint_task(final,uncertain=bool(print_turn.get('print_attempted') and not last_print_result))
+            checkpoint_task(final,uncertain=bool((print_turn.get('submission_started') or print_turn.get('prior_uncertain')) and not last_print_result))
             messages.append({'role':'assistant','content':final})
             print("\n"+_lo_label("lo","35")+"\n"+_ollama_markup(final)+"\n")
             _ai_foreground(False,"lo")
