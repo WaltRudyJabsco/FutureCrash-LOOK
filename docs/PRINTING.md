@@ -41,7 +41,8 @@ with the original task available for a follow-up. Retrieved sources stay in the
 private task context for a bounded time. Factual print drafts are reviewed against
 those sources before submission; irrelevant results or unsupported claims require
 a corrected draft rather than printing. This review is a model check, not a
-guarantee of factual accuracy. A completed print receipt ends
+guarantee of factual accuracy. Preparing a review plan cannot fulfill an already-authorized print request.
+A completed print receipt ends
 the task without another inference round or another approval request. A terminal
 model frame ends the inference stream even if the worker keeps HTTP open.
 

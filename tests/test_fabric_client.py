@@ -146,3 +146,20 @@ def test_text_planning_never_selects_an_embedding_only_model():
     ]}},'peers':[]}
     _,_,_,models=fabric_client._choose_from_snapshot(snapshot,requires={'text'},tier='reflex')
     assert [model['name'] for model in models]==['chat']
+
+
+def test_auto_worker_idle_timeout_is_bounded_but_explicit_model_budget_is_preserved(monkeypatch):
+    model={'name':'chat','size':200,'resident':True,'features':{'text':True}}
+    snapshot={'self':{'name':'local','inference':{'available':True,'models':[model]}},'peers':[]}
+    seen=[]
+    class Response:
+        headers={}
+        def __enter__(self):return self
+        def __exit__(self,*a):pass
+        def __iter__(self):yield b'{"done":true}\n'
+    def opened(*a,**kw):seen.append(kw['timeout']);return Response()
+    monkeypatch.setattr(fabric_client,'_nodes',lambda *a:snapshot)
+    monkeypatch.setattr(fabric_client,'_open',opened)
+    for name in ['', 'chat']:
+        list(fabric_client.stream_infer({'model':name,'messages':[]},timeout=180))
+    assert seen==[fabric_client.AUTO_STREAM_IDLE_SECONDS,180]

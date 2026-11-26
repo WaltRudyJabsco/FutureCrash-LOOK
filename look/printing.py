@@ -60,12 +60,13 @@ def prepare(queue,node='auto',path=None,text=None,receipt=False,**options):
 MAX_QUICK_TEXT = 8000
 
 
-def prepare_short_text(queue, text, exact_label=False, illustration=None):
+def prepare_short_text(queue, text, exact_label=False, illustration=None,catalog=None):
     """Resolve once and pin the owner before preparing and submitting one copy."""
     from print_destinations import choose, route
     if not isinstance(text,str) or not text.strip() or len(text)>MAX_QUICK_TEXT:
         raise ValueError('Quick printing accepts 1–8,000 characters; use a reviewed plan for longer documents')
-    catalog=destinations();destination=choose(catalog,queue)
+    catalog=destinations() if catalog is None else catalog
+    destination=choose(catalog,queue)
     if exact_label and destination['label'].casefold()!=queue.casefold():
         raise ValueError('Use the exact friendly printer name from discovery')
     selected=route(destination,catalog.get('local_node',''))
@@ -82,8 +83,9 @@ def prepare_short_text(queue, text, exact_label=False, illustration=None):
     return dict(plan,destination=destination['label'])
 
 
-def quick_text(queue,text,exact_label=False,illustration=None,on_submit=None):
-    plan=prepare_short_text(queue,text,exact_label,illustration)
+def quick_text(queue,text,exact_label=False,illustration=None,on_submit=None,catalog=None):
+    options={'catalog':catalog} if catalog is not None else {}
+    plan=prepare_short_text(queue,text,exact_label,illustration,**options)
     if on_submit:on_submit(plan)
     return dict(request('send',plan['node'],ident=plan['id'],confirm=True),destination=plan['destination'])
 
@@ -474,7 +476,8 @@ def design(text=None,kind='banner',font='solid',queue=None,paper_limit_mm=304.8)
         if kind=='banner':return {'kind':kind,'font':font,'ascii_preview':print_design.banner_preview(text,font),'fonts':('solid',*print_design.FONTS)}
         _,details=print_design.render(text,kind,font,artwork=print_design.museum_artwork() if kind=='fortune' else None);return details
     from print_destinations import choose,route
-    catalog=destinations();destination=choose(catalog,queue);selected=route(destination,catalog.get('local_node',''))
+    catalog=destinations()
+    destination=choose(catalog,queue);selected=route(destination,catalog.get('local_node',''))
     profile=selected.get('profile',{});receipt=profile.get('kind')=='escpos'
     if kind in ('fortune','fortune-cookie') and text is None:
         text=_request('draw-cookie',selected['node'],queue=selected['name'])['text']
@@ -558,8 +561,9 @@ def run_tool(tool,args,workspace,prompt='',turn=None):
             from print_design import WEATHER_ILLUSTRATIONS
             if value['illustration'] not in WEATHER_ILLUSTRATIONS:raise ValueError('Unsupported illustration')
         queue=value.get('queue')
+        catalog=(turn or {}).get('printer_catalog')
         if not queue:
-            matches=[p['label'] for p in destinations().get('printers',[])
+            matches=[p['label'] for p in (catalog if catalog is not None else destinations()).get('printers',[])
                      if explicit_print(prompt,p['label'])]
             if len(matches)==1:
                 queue=matches[0]
@@ -567,7 +571,7 @@ def run_tool(tool,args,workspace,prompt='',turn=None):
                 raise ValueError('Choose one printer for this job')
             else:
                 if not explicit_default_print(prompt) and tool not in (turn or {}).get('authorized_tools',set()):raise ValueError('Ask explicitly to print; name any requested destination')
-                queue=preferred_receipt(prompt)
+                queue=preferred_receipt(prompt,**({'catalog':catalog} if catalog is not None else {}))
         elif not isinstance(queue,str) or not (explicit_print(prompt,queue) or
                 explicit_default_print(prompt) and queue.casefold()==preferred_receipt(prompt).casefold() or
                 tool in (turn or {}).get('authorized_tools',set())):
@@ -589,6 +593,7 @@ def run_tool(tool,args,workspace,prompt='',turn=None):
         submission={'on_submit':turn['on_submit']} if turn.get('on_submit') else {}
         if artwork_id:return json.dumps(quick_artwork(queue,artwork_id,**submission))
         options={'illustration':value['illustration']} if value.get('illustration') else {}
+        if catalog is not None:options['catalog']=catalog
         return json.dumps(quick_text(queue,value['text'],exact_label=True,**options,**submission))
     if tool=='printers_list':return json.dumps(request('list','all'))
     if tool=='printer_inspect':

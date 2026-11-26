@@ -12031,6 +12031,7 @@ def ollama_chat(force_search=False, initial_prompt=None, allow_start=True, host_
         planning_tools=_lo_tools(profile) + ([web_tool] if has_web else [])
         try:
             task_plan=_lo_interpret_task(original_user_prompt,messages,semantic_state,planning_tools,base,model,fabric_mode,events)
+            task_plan=task_brain.delivery_obligations(task_plan,original_user_prompt,planning_tools)
             if events and task_plan:events.emit("task_interpreted",**task_plan)
         except KeyboardInterrupt:
             if one_shot:return 130
@@ -12578,6 +12579,7 @@ def ollama_chat(force_search=False, initial_prompt=None, allow_start=True, host_
             try:
                 import printing
                 catalog=printing.destinations()
+                print_turn['printer_catalog']=catalog
                 print_conversation.remember_printers(catalog)
                 labels=[p.get('label',p.get('name','')) for p in catalog.get('printers',[])]
                 messages.append({'role':'system','content':'CURRENT DISCOVERED PRINTER NAMES (configured destinations; not proof of readiness): '+json.dumps(labels)+'. Use the matching requested name. Do not ask permission to list printers.'})
@@ -12926,9 +12928,11 @@ def ollama_chat(force_search=False, initial_prompt=None, allow_start=True, host_
                             tool_content,_ok,_elapsed=_tool_transaction(name,args,lambda:printing.run_tool(name,args,workspace,prompt,print_turn))
                         if not _ok and name in {'print_text','print_artwork','print_design','print_prepare'}:
                             last_print_error=str(tool_content)
+                            if last_print_result and last_print_result.get('state')=='prepared':last_print_result=None
                         if name=='printers_list' and _ok:
                             try:
                                 last_printer_catalog=json.loads(tool_content)
+                                print_turn['printer_catalog']=last_printer_catalog
                                 print_conversation.catalog(last_printer_catalog)
                             except (ValueError,TypeError):pass
                         if print_turn.get('print_attempted'):print_conversation.finish()

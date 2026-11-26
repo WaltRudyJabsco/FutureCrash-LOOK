@@ -171,3 +171,50 @@ def test_review_prompt_requires_source_relevance_and_bounded_model_decision(lk,m
     assert lk._lo_review_delivery('Summarize a novel','Wrong characters',['A different article'],'unused','',True)['status']=='revise'
     assert payloads[0]['model']=='' and 'sources' in payloads[0]['messages'][-1]['content']
     assert 'tool_calls' not in payloads[0] and payloads[0]['format']['properties']['status']['enum']==['ready','revise']
+
+
+@pytest.mark.parametrize('prompt,send',[
+    ('Summarize the novel and print it on Little Printer',True),
+    ('Prepare a print preview of the novel summary',False),
+    ('How do I print a novel summary?',False),
+    ('Do not print the novel summary',False),
+])
+def test_staging_cannot_complete_an_authorized_print_request(prompt,send):
+    import task_brain
+    catalog=[{'function':{'name':name}} for name in ['wikipedia','print_prepare','print_text']]
+    plan=dict(PLAN,tools=['wikipedia','print_prepare'],required=[['print_prepare']])
+    fixed=task_brain.delivery_obligations(plan,prompt,catalog)
+    assert ('print_text' in fixed['tools'])==send
+    if send:assert fixed['required']==[['print_text']]
+
+
+def test_prior_preview_cannot_hide_actual_send_error(chat,transport,monkeypatch,tmp_path,capsys):
+    import printing
+    ui,*_=chat
+    monkeypatch.setattr(ui,'_lo_interpret_task',lambda *a,**k:dict(PLAN,tools=['print_prepare'],required=[['print_prepare']]))
+    monkeypatch.setattr(ui,'_lo_goal',lambda prompt,route:ui._cognition_module().new_goal(prompt,route))
+    real=printing.run_tool
+    def tool(name,*a,**kw):
+        if name=='print_prepare':return json.dumps({'state':'prepared','id':'preview','node':'owner'})
+        a[-1]['print_attempted']=True
+        raise RuntimeError('Printer profile unavailable')
+    monkeypatch.setattr(printing,'run_tool',tool)
+    decisions=iter([
+        {'tool_calls':[{'function':{'name':'print_prepare','arguments':{}}}]},
+        {'tool_calls':[{'function':{'name':'print_text','arguments':{'text':SUMMARY,'queue':'Little Printer'}}}]},
+        {'content':'I cannot print.'},
+    ])
+    monkeypatch.setattr(ui,'_fabric_stream_chat',lambda *a,**k:iter([{'message':next(decisions),'done':True}]))
+    ui.ollama_chat(initial_prompt='Summarize the novel and print it on Little Printer',access_profile='workspace',workspace_override=tmp_path,one_shot=True)
+    output=capsys.readouterr().out
+    assert 'Printer profile unavailable' in output and 'Print job prepared, not printed' not in output
+    transport[1].assert_not_called()
+
+
+def test_prepared_route_reuses_current_turn_catalog_without_requerying_peers(transport,monkeypatch):
+    import printing
+    catalog=printing.destinations()
+    monkeypatch.setattr(printing,'destinations',lambda:pytest.fail('A second discovery must not stall an already-resolved destination'))
+    result=json.loads(printing.run_tool('print_text',{'queue':'Little Printer','text':'# Receipt\nHello.'},'.','Print this on Little Printer',{'printer_catalog':catalog}))
+    assert result['state']=='queued'
+    transport[1].assert_called_once()

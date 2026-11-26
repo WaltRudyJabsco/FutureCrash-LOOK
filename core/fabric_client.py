@@ -20,6 +20,7 @@ PEER_PROBE_SECONDS = .8
 PEER_FRESH_SECONDS = 90.0
 LOCAL_FALLBACK_MODEL_LIMIT = 4
 FAILED_PEER_SECONDS = 5.0
+AUTO_STREAM_IDLE_SECONDS = 30.0
 _failed_peers = {}
 
 
@@ -545,7 +546,10 @@ def stream_infer(payload, *, requires=None, priority="interactive", timeout=180,
             headers.update(FABRIC_IDENTITY.auth_headers_for_url(endpoint))
             req=urllib.request.Request(endpoint,data=json.dumps({"packet":packet}).encode(),
                                        headers=headers,method="POST")
-            with _open(req,url=endpoint,timeout=timeout) as response:
+            # Auto placement must not hold a compound task on a silent worker.
+            # Explicitly pinned models retain their requested cold-start budget.
+            stream_timeout=min(timeout,AUTO_STREAM_IDLE_SECONDS) if not model else timeout
+            with _open(req,url=endpoint,timeout=stream_timeout) as response:
                 node=response.headers.get("X-Fabric-Node") or target
                 for raw in response:
                     if not raw.strip():

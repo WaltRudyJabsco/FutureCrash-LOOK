@@ -179,3 +179,18 @@ def recent_dialogue(history):
         recent.insert(0,{'role':message['role'],'content':content})
         remaining-=len(content)
     return recent
+
+
+def delivery_obligations(plan,prompt,catalog):
+    """Staging is not delivery when the user's print request already authorizes sending."""
+    if not plan or plan['kind']!='task' or plan.get('missing'):return plan
+    import printing
+    if not printing.explicit_print(prompt+' on requested destination','requested destination'):return plan
+    if 'print_prepare' not in plan['tools']:return plan
+    available={tool['function']['name'] for tool in catalog}
+    if 'print_text' not in available:return plan
+    result=dict(plan,tools=list(dict.fromkeys(plan['tools']+['print_text'])))
+    deliveries=set(result['tools']) & {'print_text','print_artwork','print_design'}
+    result['required']=[group for group in plan['required'] if 'print_prepare' not in group]
+    if not any(set(group)&deliveries for group in result['required']):result['required'].append(sorted(deliveries))
+    return result
