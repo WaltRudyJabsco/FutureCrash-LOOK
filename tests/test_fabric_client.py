@@ -137,3 +137,12 @@ def test_terminal_frame_does_not_wait_for_http_eof_or_cancel_completed_job(monke
     rows=list(fabric_client.stream_infer({'model':'m','messages':[{'role':'user','content':'hello'}]}))
     assert rows[-1]['done'] and rows[-1]['message']['content']=='complete'
     assert list(fabric_client._direct_stream('http://127.0.0.1:11434',{},1))[-1]['done']
+
+
+def test_text_planning_never_selects_an_embedding_only_model():
+    snapshot={'self':{'name':'local','inference':{'available':True,'preferred_model':'embedding','models':[
+        {'name':'embedding','size':100,'resident':True,'features':{'text':False,'embedding':True}},
+        {'name':'chat','size':2000000000,'resident':False,'features':{'text':True}},
+    ]}},'peers':[]}
+    _,_,_,models=fabric_client._choose_from_snapshot(snapshot,requires={'text'},tier='reflex')
+    assert [model['name'] for model in models]==['chat']

@@ -184,6 +184,7 @@ def _choose_from_snapshot(snapshot, *, model=None, requires=None, latency=False,
         eligible=[]
         for m in models:
             f=m.get("features") or {}
+            if "text" in requires and f.get("text") is False: continue
             if model and m.get("name") != model: continue
             if any(r in {"vision","tools","thinking","embedding"} and not f.get(r) for r in requires): continue
             eligible.append(m)
@@ -232,6 +233,7 @@ def explain_route(*, tier="balanced", model=None, requires=None, base=DEFAULT_NO
         for m in models:
             f=m.get("features") or {}
             reasons=[]
+            if "text" in requires and f.get("text") is False: reasons.append("missing text")
             if model and m.get("name") != model: reasons.append("model mismatch")
             missing=[r for r in requires if r in {"vision","tools","thinking","embedding"} and not f.get(r)]
             if missing: reasons.append("missing "+",".join(sorted(missing)))
@@ -449,6 +451,7 @@ def stream_infer(payload, *, requires=None, priority="interactive", timeout=180,
             eligible=[]
             for m in models:
                 features=m.get("features") or {}
+                if "text" in reqs and features.get("text") is False: continue
                 if model and m.get("name") != model: continue
                 if any(r in {"vision","tools","thinking","embedding"} and not features.get(r) for r in reqs): continue
                 eligible.append(m)

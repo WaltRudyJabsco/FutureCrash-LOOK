@@ -12654,8 +12654,8 @@ def ollama_chat(force_search=False, initial_prompt=None, allow_start=True, host_
                 },
             }
             if conversation_pass or task_plan:
-                # Applying corrections requires instruction following, not a tiny
-                # reflex model chosen solely because the question is short.
+                # Fabric chooses from eligible workers; a machine-local model
+                # preference must not exclude the rest of the Fabric.
                 payload_obj["model"]=(os.environ.get("LOOK_OLLAMA_MODEL","").strip() if fabric_mode else model or _active_ollama_model())
             if supports_thinking:
                 payload_obj["think"]=runtime["think"]
