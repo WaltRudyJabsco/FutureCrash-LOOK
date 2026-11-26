@@ -20,6 +20,7 @@ PEER_PROBE_SECONDS = .8
 PEER_FRESH_SECONDS = 90.0
 LOCAL_FALLBACK_MODEL_LIMIT = 4
 FAILED_PEER_SECONDS = 5.0
+AUTO_STREAM_IDLE_SECONDS = 30.0
 _failed_peers = {}
 
 
@@ -168,7 +169,7 @@ def _benchmark_role_bias(model, tier):
     return -(reasoning*80.0) -(tools*60.0) -(120.0 if agent else 0.0) -(80.0 if fit in {"GOOD","EXCELLENT"} else 0.0)
 
 
-def _choose_from_snapshot(snapshot, *, model=None, requires=None, latency=False, exclude=None, tier="balanced"):
+def _choose_from_snapshot(snapshot, *, model=None, requires=None, latency=False, exclude=None, tier="balanced", min_model_bytes=0):
     scored=[]
     requires=set(requires or ["text"])
     excluded=set(exclude or [])
@@ -184,6 +185,7 @@ def _choose_from_snapshot(snapshot, *, model=None, requires=None, latency=False,
         eligible=[]
         for m in models:
             f=m.get("features") or {}
+            if "text" in requires and f.get("text") is False: continue
             if model and m.get("name") != model: continue
             if any(r in {"vision","tools","thinking","embedding"} and not f.get(r) for r in requires): continue
             eligible.append(m)
@@ -211,6 +213,10 @@ def _choose_from_snapshot(snapshot, *, model=None, requires=None, latency=False,
             score=busy_penalty+cold_penalty+network_penalty+expected+preferred_bonus+policy+evidence_bias
             scored.append((score,name,dns,[m]))
     if not scored: raise RuntimeError("Fabric has no worker satisfying this inference request")
+    # Semantic control may request a capacity preference. If a capable model
+    # exists, residency of a tiny reflex model must not outweigh that need.
+    capable=[row for row in scored if float(row[3][0].get('size') or 0)>=min_model_bytes]
+    if min_model_bytes and capable:scored=capable
     scored.sort(key=lambda x:x[0])
     return scored[0]
 
@@ -232,6 +238,7 @@ def explain_route(*, tier="balanced", model=None, requires=None, base=DEFAULT_NO
         for m in models:
             f=m.get("features") or {}
             reasons=[]
+            if "text" in requires and f.get("text") is False: reasons.append("missing text")
             if model and m.get("name") != model: reasons.append("model mismatch")
             missing=[r for r in requires if r in {"vision","tools","thinking","embedding"} and not f.get(r)]
             if missing: reasons.append("missing "+",".join(sorted(missing)))
@@ -276,6 +283,7 @@ def _direct_stream(endpoint, payload, timeout, cancel_event=None):
             if event.get('error'):raise RuntimeError(event['error'])
             event['_fabric_node']='local'
             yield event
+            if event.get('done'):break
 
 
 def _infer_on_target(messages, *, model=None, requires=None, latency=False, priority="interactive",
@@ -426,6 +434,7 @@ def stream_infer(payload, *, requires=None, priority="interactive", timeout=180,
     import socket
 
     model=payload.get("model") or None
+    min_model_bytes=max(0,int(payload.get("_min_model_bytes") or 0)) if not model else 0
     reqs=set(requires or ["text"])
     decision = work_class or _classify_work(_last_user_text(payload.get("messages")), requires=reqs,
                                             has_images=any(bool(m.get("images")) for m in payload.get("messages",[]) if isinstance(m,dict)),
@@ -448,6 +457,8 @@ def stream_infer(payload, *, requires=None, priority="interactive", timeout=180,
             eligible=[]
             for m in models:
                 features=m.get("features") or {}
+                if "text" in reqs and features.get("text") is False: continue
+                if min_model_bytes and float(m.get("size") or 0)<min_model_bytes:continue
                 if model and m.get("name") != model: continue
                 if any(r in {"vision","tools","thinking","embedding"} and not features.get(r) for r in reqs): continue
                 eligible.append(m)
@@ -458,7 +469,7 @@ def stream_infer(payload, *, requires=None, priority="interactive", timeout=180,
                     names={m.get("name") for m in eligible}
                     chosen=preferred if preferred in names else max(eligible,key=lambda m:int(m.get("size") or 0)).get("name")
                 return target,dns,chosen,snap
-        _,target,dns,eligible=_choose_from_snapshot(snap,model=model,requires=reqs,latency=(tier=="reflex"),exclude=tried,tier=tier)
+        _,target,dns,eligible=_choose_from_snapshot(snap,model=model,requires=reqs,latency=(tier=="reflex"),exclude=tried,tier=tier,**({"min_model_bytes":min_model_bytes} if min_model_bytes else {}))
         ad=_ad_for_target(base,target,snapshot=snap)
         chosen=model
         if not chosen:
@@ -541,7 +552,10 @@ def stream_infer(payload, *, requires=None, priority="interactive", timeout=180,
             headers.update(FABRIC_IDENTITY.auth_headers_for_url(endpoint))
             req=urllib.request.Request(endpoint,data=json.dumps({"packet":packet}).encode(),
                                        headers=headers,method="POST")
-            with _open(req,url=endpoint,timeout=timeout) as response:
+            # Auto placement must not hold a compound task on a silent worker.
+            # Explicitly pinned models retain their requested cold-start budget.
+            stream_timeout=min(timeout,AUTO_STREAM_IDLE_SECONDS) if not model else timeout
+            with _open(req,url=endpoint,timeout=stream_timeout) as response:
                 node=response.headers.get("X-Fabric-Node") or target
                 for raw in response:
                     if not raw.strip():
@@ -557,6 +571,9 @@ def stream_infer(payload, *, requires=None, priority="interactive", timeout=180,
                     if event.get("done"):completed=True
                     event["_fabric_node"]=node
                     yield event
+                    # The protocol's terminal frame completes inference even if
+                    # a worker leaves its HTTP connection alive.
+                    if completed:break
             return
         except urllib.error.HTTPError as exc:
             detail=exc.read().decode("utf-8","replace")

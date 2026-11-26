@@ -26,6 +26,30 @@ request. Preview and non-print requests do not send paper.
 Model-driven print tools also report their actual validation/transport error;
 assistant prose cannot replace that error with a claim that printing is simulated.
 
+## Research, compose and deliver
+
+LO, Signal and Albert use the same executor for requests to retrieve information,
+compose an answer and print it. Research and printer-discovery tools remain
+available until delivery succeeds. Wikipedia can search a topic or read an exact
+article title, rather than treating a search excerpt as the complete source.
+
+When native model tool calling stalls in prose, the executor requests a constrained
+JSON decision containing the next tool and its arguments. It validates the
+selected capability and uses the same guarded tool implementation; printed XML or
+an announced intention never executes. A concrete blocker remains incomplete,
+with the original task available for a follow-up. Retrieved sources stay in the
+private task context for a bounded time. Factual print drafts are reviewed against
+those sources before submission; irrelevant results or unsupported claims require
+a corrected draft rather than printing. This review is a model check, not a
+guarantee of factual accuracy. Preparing a review plan cannot fulfill an already-authorized print request.
+A completed print receipt ends
+the task without another inference round or another approval request. A terminal
+model frame ends the inference stream even if the worker keeps HTTP open.
+
+Fabric automatic model selection remains automatic for these tasks; a machine's
+local preferred model does not pin work away from other eligible nodes. An explicit
+process model override is still respected.
+
 ## Printer desk
 
 Bare `lk print` opens a small terminal desk with one entry per identified physical

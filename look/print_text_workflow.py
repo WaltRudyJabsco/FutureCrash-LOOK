@@ -130,7 +130,7 @@ def execute(prompt,conversation,*,allowed=True,progress=None,events=None):
                 job['status']='uncertain';save()
                 if progress:progress('Sending to '+printer+'…')
             instruction='Print the supplied text on '+printer
-            turn={'on_submit':submitting,'supplied_text':True}
+            turn={'on_submit':submitting,'supplied_text':True,'printer_catalog':catalog}
             import json
             result=json.loads(call('print_text',lambda:printing.run_tool('print_text',{'queue':printer,'text':body},Path.home(),instruction,turn)))
         result=dict(result,destination=job['printer'])

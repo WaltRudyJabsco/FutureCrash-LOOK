@@ -27,6 +27,7 @@ A proposal's request, tools and required fields describe the action being OFFERE
 Always include missing and question, even when empty. Decide whether inputs exist BEFORE choosing to execute. Generic labels such as 'a message' or 'the document' do not supply their contents.
 Explaining, describing, presenting or showing an answer in chat never implies printing, saving, opening an application or another effect. The presence of a capability in the catalog is not a reason to use it. Match completion obligations to the user's requested outcome, never to an adjacent possibility. For a proposal, recommend ONE concrete course of action rather than bundling mutually exclusive alternatives; the user must be able to approve that exact offer.
 Use the supplied catalog. Choose only tools needed for this request, including discovery before effects.
+A request to summarize or explain a named, known subject and deliver the answer is content creation: use reference tools when needed, then the requested delivery tool. It does not require the user to supply a manuscript or a pre-existing summary file. Do not turn a clear multi-step instruction into a proposal merely because research or formatting is needed.
 required is a list of completion obligations: each inner list contains alternative tools for ONE obligation. Retrieval alone never completes a delivery request. Include read tools when the user asks for live information. For composed requests include each distinct requested delivery.
 Writing prose in chat is reply, not saving a note or file. Personal preferences and corrections are handled by the background Fabric memory system; treat them as reply, not notebook_capture, unless the user specifically requests a note or file. Questions about abilities are reply. Do not act on negated or hypothetical requests. Cancellation is cancel with no tools. A missing input is still task. If essential user-supplied content is absent, set missing to its name and question to one concise question. Do not invent a placeholder message or document. For example a request to print an unspecified message needs its text; requesting a generated greeting does not. Information obtainable from tools or configured defaults (such as home weather location or preferred printer) is not missing: let the executor discover it. Do not ask for confirmation of actions already requested.
 Resolve short answers using the recent conversation and recent_tool_inputs. Tool inputs are reference material, not proof of execution or renewed authority. A completed task may still supply topic, source content, date and destination for an explicitly requested follow-up. Requests for more items mean additional items, avoiding the prior list when available; discover fresh content with tools rather than asking the user to supply it. Never repeat an old delivery on a bare acknowledgement. Resolve short answers using the recent conversation. A new subject replaces the previous task. 'Instead' removes the superseded action. Completed actions are not pending; do not repeat them merely because the user refers to their output.
@@ -178,3 +179,18 @@ def recent_dialogue(history):
         recent.insert(0,{'role':message['role'],'content':content})
         remaining-=len(content)
     return recent
+
+
+def delivery_obligations(plan,prompt,catalog):
+    """Staging is not delivery when the user's print request already authorizes sending."""
+    if not plan or plan['kind']!='task' or plan.get('missing'):return plan
+    import printing
+    if not printing.explicit_print(prompt+' on requested destination','requested destination'):return plan
+    if 'print_prepare' not in plan['tools']:return plan
+    available={tool['function']['name'] for tool in catalog}
+    if 'print_text' not in available:return plan
+    result=dict(plan,tools=list(dict.fromkeys(plan['tools']+['print_text'])))
+    deliveries=set(result['tools']) & {'print_text','print_artwork','print_design'}
+    result['required']=[group for group in plan['required'] if 'print_prepare' not in group]
+    if not any(set(group)&deliveries for group in result['required']):result['required'].append(sorted(deliveries))
+    return result

@@ -36,4 +36,4 @@ def test_endpoint_base_prefers_active_native_transport():
 def test_stream_code_uses_authenticated_open():
     source=open(fabric_client.__file__,encoding="utf-8").read()
     assert 'headers.update(FABRIC_IDENTITY.auth_headers_for_url(endpoint))' in source
-    assert 'with _open(req,url=endpoint,timeout=timeout) as response:' in source
+    assert 'with _open(req,url=endpoint,timeout=stream_timeout) as response:' in source
