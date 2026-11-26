@@ -276,6 +276,7 @@ def _direct_stream(endpoint, payload, timeout, cancel_event=None):
             if event.get('error'):raise RuntimeError(event['error'])
             event['_fabric_node']='local'
             yield event
+            if event.get('done'):break
 
 
 def _infer_on_target(messages, *, model=None, requires=None, latency=False, priority="interactive",
@@ -557,6 +558,9 @@ def stream_infer(payload, *, requires=None, priority="interactive", timeout=180,
                     if event.get("done"):completed=True
                     event["_fabric_node"]=node
                     yield event
+                    # The protocol's terminal frame completes inference even if
+                    # a worker leaves its HTTP connection alive.
+                    if completed:break
             return
         except urllib.error.HTTPError as exc:
             detail=exc.read().decode("utf-8","replace")

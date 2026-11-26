@@ -119,3 +119,21 @@ class FabricUnreadyWorkerTests(unittest.TestCase):
         self.assertEqual(len(submitted),1)
         self.assertNotIn('peer.example',submitted[0])
         self.assertEqual(route['target'],'local')
+
+
+def test_terminal_frame_does_not_wait_for_http_eof_or_cancel_completed_job(monkeypatch):
+    model={'name':'m','size':2,'resident':True,'features':{'text':True}}
+    snapshot={'self':{'name':'local','inference':{'available':True,'models':[model]}},'peers':[]}
+    class Response:
+        headers={}
+        def __enter__(self):return self
+        def __exit__(self,*args):pass
+        def __iter__(self):
+            yield b'{"message":{"content":"complete"},"done":true}\n'
+            raise AssertionError('Reading again would wait for an open HTTP connection')
+    monkeypatch.setattr(fabric_client,'_nodes',lambda *a:snapshot)
+    monkeypatch.setattr(fabric_client,'_open',lambda *a,**k:Response())
+    monkeypatch.setattr(fabric_client,'_cancel_job',lambda *a: (_ for _ in ()).throw(AssertionError('Completed job must not be cancelled')))
+    rows=list(fabric_client.stream_infer({'model':'m','messages':[{'role':'user','content':'hello'}]}))
+    assert rows[-1]['done'] and rows[-1]['message']['content']=='complete'
+    assert list(fabric_client._direct_stream('http://127.0.0.1:11434',{},1))[-1]['done']
