@@ -6984,12 +6984,14 @@ def _lo_latest_tool_error_answer():
     return f"The last tool failure was `{action}` [{status}] ({failure}): {message}"
 
 
+TASK_MODEL_MIN_BYTES=4_000_000_000
+
 def _lo_interpret_task(prompt,messages,state,tools,base,model,fabric_mode,events=None):
     """One bounded semantic interpretation; no tools or effects run here."""
     import task_brain
     import lo_stream
     payload={"model":(os.environ.get("LOOK_OLLAMA_MODEL","").strip() if fabric_mode else model or _active_ollama_model()), "messages":task_brain.planning_messages(
-        prompt,messages,state,tools), "stream":False,"think":False,"format":"json",
+        prompt,messages,state,tools), "stream":False,"think":False,"format":"json","_min_model_bytes":TASK_MODEL_MIN_BYTES,
         "options":{"temperature":0,"num_ctx":8192,"num_predict":1000}}
     # Repair malformed structured output once, without executing any tools. Older
     # workers may not yet forward JSON mode during a rolling update.
@@ -7016,7 +7018,7 @@ def _lo_review_delivery(request,text,sources,base,model,fabric_mode,events=None)
         remaining-=len(part)
         if not remaining:break
     payload={"model":(os.environ.get('LOOK_OLLAMA_MODEL','').strip() if fabric_mode else model),
-        "stream":False,"think":False,"format":{"type":"object","properties":{
+        "stream":False,"think":False,"_min_model_bytes":TASK_MODEL_MIN_BYTES,"format":{"type":"object","properties":{
             "status":{"type":"string","enum":["ready","revise"]},"reason":{"type":"string"}},
             "required":["status","reason"],"additionalProperties":False},
         "options":{"temperature":0,"num_ctx":8192,"num_predict":400},
@@ -12039,7 +12041,14 @@ def ollama_chat(force_search=False, initial_prompt=None, allow_start=True, host_
         except Exception as exc:
             # Interpretation is advisory: a failed planner does not grant authority.
             if events:events.emit("task_interpretation_failed",error=str(exc))
-            task_plan={"kind":"reply","relation":"new","request":"Interpretation failed. Ask the user to clarify their desired outcome; do not perform actions.","tools":[],"required":[]}
+            answer='Task interpretation failed: '+str(exc)+'. Nothing was executed. The previous pending task is retained.'
+            print('\n'+_lo_label('lo','35')+'\n'+answer+'\n')
+            messages.extend([{'role':'user','content':original_user_prompt},{'role':'assistant','content':answer}])
+            if events:
+                events.emit('response',text=answer)
+                events.emit('request_done',status='failed',rounds=0,tool_calls=0)
+            if one_shot:return 0
+            continue
         turn_route=task_brain.route(task_plan,_cognition_module()) if task_plan else _lo_cognition_route(prompt,use_openjev=True)
         if task_plan:
             # Keep the original user wording as the source of authority. The
@@ -12678,6 +12687,7 @@ def ollama_chat(force_search=False, initial_prompt=None, allow_start=True, host_
                 payload_obj["tools"] = tools
                 if events: events.emit("tools_scoped",family=turn_intent,tools=[t.get("function",{}).get("name","") for t in tools])
 
+            if task_plan and task_plan["kind"]=="task":payload_obj["_min_model_bytes"]=TASK_MODEL_MIN_BYTES
             if structured_execution and tools:
                 payload_obj=tool_workflow.recovery_payload(payload_obj,tools,task_plan,turn_successful_tools)
 

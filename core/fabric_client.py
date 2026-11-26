@@ -169,7 +169,7 @@ def _benchmark_role_bias(model, tier):
     return -(reasoning*80.0) -(tools*60.0) -(120.0 if agent else 0.0) -(80.0 if fit in {"GOOD","EXCELLENT"} else 0.0)
 
 
-def _choose_from_snapshot(snapshot, *, model=None, requires=None, latency=False, exclude=None, tier="balanced"):
+def _choose_from_snapshot(snapshot, *, model=None, requires=None, latency=False, exclude=None, tier="balanced", min_model_bytes=0):
     scored=[]
     requires=set(requires or ["text"])
     excluded=set(exclude or [])
@@ -213,6 +213,10 @@ def _choose_from_snapshot(snapshot, *, model=None, requires=None, latency=False,
             score=busy_penalty+cold_penalty+network_penalty+expected+preferred_bonus+policy+evidence_bias
             scored.append((score,name,dns,[m]))
     if not scored: raise RuntimeError("Fabric has no worker satisfying this inference request")
+    # Semantic control may request a capacity preference. If a capable model
+    # exists, residency of a tiny reflex model must not outweigh that need.
+    capable=[row for row in scored if float(row[3][0].get('size') or 0)>=min_model_bytes]
+    if min_model_bytes and capable:scored=capable
     scored.sort(key=lambda x:x[0])
     return scored[0]
 
@@ -430,6 +434,7 @@ def stream_infer(payload, *, requires=None, priority="interactive", timeout=180,
     import socket
 
     model=payload.get("model") or None
+    min_model_bytes=max(0,int(payload.get("_min_model_bytes") or 0)) if not model else 0
     reqs=set(requires or ["text"])
     decision = work_class or _classify_work(_last_user_text(payload.get("messages")), requires=reqs,
                                             has_images=any(bool(m.get("images")) for m in payload.get("messages",[]) if isinstance(m,dict)),
@@ -453,6 +458,7 @@ def stream_infer(payload, *, requires=None, priority="interactive", timeout=180,
             for m in models:
                 features=m.get("features") or {}
                 if "text" in reqs and features.get("text") is False: continue
+                if min_model_bytes and float(m.get("size") or 0)<min_model_bytes:continue
                 if model and m.get("name") != model: continue
                 if any(r in {"vision","tools","thinking","embedding"} and not features.get(r) for r in reqs): continue
                 eligible.append(m)
@@ -463,7 +469,7 @@ def stream_infer(payload, *, requires=None, priority="interactive", timeout=180,
                     names={m.get("name") for m in eligible}
                     chosen=preferred if preferred in names else max(eligible,key=lambda m:int(m.get("size") or 0)).get("name")
                 return target,dns,chosen,snap
-        _,target,dns,eligible=_choose_from_snapshot(snap,model=model,requires=reqs,latency=(tier=="reflex"),exclude=tried,tier=tier)
+        _,target,dns,eligible=_choose_from_snapshot(snap,model=model,requires=reqs,latency=(tier=="reflex"),exclude=tried,tier=tier,**({"min_model_bytes":min_model_bytes} if min_model_bytes else {}))
         ad=_ad_for_target(base,target,snapshot=snap)
         chosen=model
         if not chosen:

@@ -163,3 +163,12 @@ def test_auto_worker_idle_timeout_is_bounded_but_explicit_model_budget_is_preser
     for name in ['', 'chat']:
         list(fabric_client.stream_infer({'model':name,'messages':[]},timeout=180))
     assert seen==[fabric_client.AUTO_STREAM_IDLE_SECONDS,180]
+
+
+def test_semantic_capacity_preference_beats_warm_reflex_but_allows_small_only_fabric():
+    tiny={'name':'reflex','size':800000000,'resident':True,'features':{'text':True}}
+    large={'name':'operator','size':5000000000,'resident':False,'features':{'text':True}}
+    snapshot={'self':{'name':'local','inference':{'available':True,'models':[tiny,large]}},'peers':[]}
+    assert fabric_client._choose_from_snapshot(snapshot,requires={'text'},min_model_bytes=4000000000)[3][0]['name']=='operator'
+    snapshot['self']['inference']['models']=[tiny]
+    assert fabric_client._choose_from_snapshot(snapshot,requires={'text'},min_model_bytes=4000000000)[3][0]['name']=='reflex'
