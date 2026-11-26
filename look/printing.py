@@ -83,9 +83,14 @@ def prepare_short_text(queue, text, exact_label=False, illustration=None,catalog
     return dict(plan,destination=destination['label'])
 
 
+class PrintPreparationError(ValueError):
+    """An unsent draft failed; correcting it cannot duplicate physical output."""
+
+
 def quick_text(queue,text,exact_label=False,illustration=None,on_submit=None,catalog=None):
     options={'catalog':catalog} if catalog is not None else {}
-    plan=prepare_short_text(queue,text,exact_label,illustration,**options)
+    try:plan=prepare_short_text(queue,text,exact_label,illustration,**options)
+    except (OSError,RuntimeError,ValueError) as exc:raise PrintPreparationError(str(exc)) from exc
     if on_submit:on_submit(plan)
     return dict(request('send',plan['node'],ident=plan['id'],confirm=True),destination=plan['destination'])
 
@@ -594,7 +599,11 @@ def run_tool(tool,args,workspace,prompt='',turn=None):
         if artwork_id:return json.dumps(quick_artwork(queue,artwork_id,**submission))
         options={'illustration':value['illustration']} if value.get('illustration') else {}
         if catalog is not None:options['catalog']=catalog
-        return json.dumps(quick_text(queue,value['text'],exact_label=True,**options,**submission))
+        try:return json.dumps(quick_text(queue,value['text'],exact_label=True,**options,**submission))
+        except PrintPreparationError:
+            # This exception can only originate before the send boundary.
+            turn['print_attempted']=False
+            raise
     if tool=='printers_list':return json.dumps(request('list','all'))
     if tool=='printer_inspect':
         if set(value)-{'view','node','queue'}:raise ValueError('Printer inspection accepts only owner, queue and options/jobs view')

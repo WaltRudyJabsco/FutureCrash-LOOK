@@ -218,3 +218,25 @@ def test_prepared_route_reuses_current_turn_catalog_without_requerying_peers(tra
     result=json.loads(printing.run_tool('print_text',{'queue':'Little Printer','text':'# Receipt\nHello.'},'.','Print this on Little Printer',{'printer_catalog':catalog}))
     assert result['state']=='queued'
     transport[1].assert_called_once()
+
+
+def test_oversize_generated_draft_can_be_shortened_before_a_single_submission(chat,transport,monkeypatch,tmp_path,capsys):
+    import printing
+    ui,*_=chat
+    monkeypatch.setattr(ui,'_lo_interpret_task',lambda *a,**k:dict(PLAN,tools=['print_text']))
+    monkeypatch.setattr(ui,'_lo_goal',lambda prompt,route:ui._cognition_module().new_goal(prompt,route))
+    prepare=printing.prepare_short_text;attempts=[]
+    def bounded(*a,**kw):
+        attempts.append(a[1])
+        if len(attempts)==1:raise ValueError('Formatted receipt exceeds the paper allowance; choose a shorter passage.')
+        return prepare(*a,**kw)
+    monkeypatch.setattr(printing,'prepare_short_text',bounded)
+    decisions=iter([
+        {'tool_calls':[{'function':{'name':'print_text','arguments':{'text':SUMMARY,'queue':'Little Printer'}}}]},
+        {'tool_calls':[{'function':{'name':'print_text','arguments':{'text':'# Summary\nTwo families face moral choices.','queue':'Little Printer'}}}]},
+    ])
+    monkeypatch.setattr(ui,'_fabric_stream_chat',lambda *a,**k:iter([{'message':next(decisions),'done':True}]))
+    ui.ollama_chat(initial_prompt='Summarize a novel and print on Little Printer',access_profile='workspace',workspace_override=tmp_path,one_shot=True)
+    assert len(attempts)==2 and len(attempts[1])<len(attempts[0])
+    transport[1].assert_called_once()
+    assert 'Accepted by CUPS' in capsys.readouterr().out
