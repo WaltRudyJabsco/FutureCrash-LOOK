@@ -6,6 +6,7 @@ mkdir -p "$DST"
 install -m 0644 "$SRC/index.html" "$SRC/VERSION" "$DST/"
 install -m 0644 "$SRC/../signal-window/browser-views.js" "$SRC/../signal-window/fabric.html" "$SRC/../signal-window/fabric-dashboard.js" "$DST/"
 install -m 0755 "$SRC/server.py" "$DST/server.py"
+install -m 0644 "$SRC/../signal-window/mercury-mix.html" "$SRC/../signal-window/mercury-mix.css" "$SRC/../signal-window/mercury-mix.js" "$SRC/../signal-window/mercury-mix-dsp.js" "$SRC/../signal-window/mercury-mix-worklet.js" "$DST/"
 OS="$(uname -s)"
 if [[ "$OS" == Linux ]] && command -v systemctl >/dev/null 2>&1; then
   mkdir -p "$HOME/.config/systemd/user"

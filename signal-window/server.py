@@ -1143,6 +1143,11 @@ class App(BaseHTTPRequestHandler):
             except Exception:return self.json(503,{'error':'Fabric node unavailable'})
         parsed=urlparse(self.path); path=parsed.path
 
+        if path in {'/mix','/mix/','/api/mix/library'} or path.startswith('/mix/assets/'):
+            if not self._require_endpoint('lo.use'):return
+            import mixer_web
+            try:return mixer_web.handle(self,NODE_URL)
+            except (OSError,ValueError,KeyError) as exc:return self.json(502,{'error':str(exc)})
         if path=='/gypsy' or path.startswith('/api/gypsy'):
             if not self._require_endpoint('lo.use'):return
             import animation_web
