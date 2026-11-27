@@ -116,3 +116,16 @@ assert.ok(
 assert.ok(deck.pos >= 0.49 * 48000 && deck.pos < 0.51 * 48000);
 send({ type: "scratch", active: false });
 console.log("Loop-boundary scratching regression passed");
+for (const hamster of [false, true]) {
+  assert.equal(dsp.releasePosition("return-a", 1, hamster), hamster ? 1 : 0);
+  assert.equal(dsp.releasePosition("return-b", 0, hamster), hamster ? 0 : 1);
+  assert.equal(dsp.releasePosition("cut", 0, hamster), hamster ? 0 : 1);
+  assert.equal(dsp.releasePosition("latch", 1, hamster), null);
+}
+const impulse = dsp.reverbImpulse(32000);
+assert.equal(impulse.length, 2);
+assert.equal(impulse[0].length, 57600);
+assert.ok(impulse[0].every(Number.isFinite));
+assert.ok(impulse[0].slice(-100).every((v) => Math.abs(v) < 0.00001));
+assert.ok(impulse[0].some((v, i) => v !== impulse[1][i]));
+console.log("Spring-return fader and bounded stereo reverb passed");

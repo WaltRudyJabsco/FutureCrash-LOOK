@@ -10,6 +10,7 @@
     <title>Mercury Mix · Fabric</title>
     <link rel="stylesheet" href="/mix/assets/mercury-mix.css" />
     <script src="/mix/assets/mercury-mix-dsp.js" defer></script>
+    <script src="/mix/assets/mercury-mix-monitor.js" defer></script>
     <script src="/mix/assets/mercury-mix.js" defer></script>
   </head>
   <body>
@@ -83,6 +84,49 @@
               value=".8" /></label
           ><button id="mute" class="wide">Mute output</button>
           <div class="mixer-rule"></div>
+          <section class="headphone-panel" aria-label="Headphones and preview">
+            <div class="section-title">HEADPHONES / PREVIEW</div>
+            <div class="cue-select">
+              <button id="listen-a" aria-pressed="false">Listen A</button
+              ><button id="listen-b" aria-pressed="false">Listen B</button>
+            </div>
+            <label class="range-label"
+              >Cue → main mix<input
+                id="cue-blend"
+                type="range"
+                min="0"
+                max="1"
+                step=".01"
+                value="0"
+            /></label>
+            <label class="range-label"
+              >Headphone level<input
+                id="cue-level"
+                type="range"
+                min="0"
+                max="1"
+                step=".01"
+                value=".5"
+            /></label>
+            <label
+              >Listen through<select id="cue-route">
+                <option value="off">Main output only</option>
+                <option value="preview">Preview here (replaces main)</option>
+                <option value="split">Split cable: main L / cue R</option>
+                <option value="separate" disabled>
+                  Selected headphones device
+                </option>
+              </select></label
+            >
+            <button id="choose-headphones" class="wide">
+              Choose headphones output…
+            </button>
+            <p class="micro" id="cue-status" role="status">
+              Select a deck to hear it before the crossfader. Private cue needs
+              a separate output device or split cable.
+            </p>
+          </section>
+          <div class="mixer-rule"></div>
           <div class="section-title">IN THE POCKET</div>
           <p>
             Sync matches vinyl speed.<br />Tap a tempo. Set your first beat.<br />Use
@@ -103,15 +147,18 @@
             </select></label
           ><label
             >On key release<select id="release">
-              <option value="latch">Hold position</option>
-              <option value="cut">Close selected deck</option>
+              <option value="latch">Stay where I leave it</option>
+              <option value="cut">Silence selected deck</option>
+              <option value="return-a">Return to deck A</option>
+              <option value="return-b">Return to deck B</option>
             </select></label
           ><label class="check"
             ><input id="hamster" type="checkbox" />Reverse crossfader</label
           >
           <p class="micro">
             Either hand can work either platter. The keys always move the shared
-            fader.
+            fader. “Return to A”: hold F (or ;) for B, release for A.
+            Overlapping keys blend; no keys return to your chosen deck.
           </p>
         </aside>
         <section class="deck deck-b" id="deck-b" aria-label="Deck B"></section>
@@ -210,6 +257,27 @@
           Nudge the selected deck slower/faster · reverse · toggle slip. Slip
           catches up to where playback would have been after a scratch.
         </dd>
+        <dt>Headphones / preview</dt>
+        <dd>
+          Listen A/B taps each deck before the crossfader. Cue → main mix blends
+          that preview with the master. Choose a separate output device for
+          private cueing where supported. Preview here replaces the audible main
+          output; split cable puts mono main on left and mono cue on right.
+          Recordings always contain the stereo master only.
+        </dd>
+        <dt>On key release</dt>
+        <dd>
+          Stay where I leave it latches the fader. Return to A or B springs back
+          to that deck when all fader keys are released. Silence selected deck
+          closes whichever deck is selected with 1/2.
+        </dd>
+        <dt>Cue / Sync / Slip / Dub space</dt>
+        <dd>
+          Cue pauses and returns to the main cue, set with Set beat 1. Sync
+          matches the other deck’s speed and beat phase. Slip rejoins the
+          uninterrupted timeline after scratching. Dub space adds a filtered
+          repeating echo and reverb; tap again to disengage.
+        </dd>
         <dt>Hot cues 1–4</dt>
         <dd>
           Tap an empty pad to set it; tap a filled pad to jump and play.
@@ -299,11 +367,25 @@
         </div>
       </div>
       <div class="transport">
-        <button class="cue">Cue</button
+        <button
+          class="cue"
+          title="Pause and return to the cue set with Set beat 1"
+        >
+          Cue ↤</button
         ><button class="play primary">Play</button
-        ><button class="sync">Sync</button
+        ><button
+          class="sync"
+          title="Match the other deck’s tempo and beat phase; vinyl pitch changes too"
+        >
+          Sync</button
         ><button class="reverse" aria-pressed="false">Reverse</button
-        ><button class="slip" aria-pressed="false">Slip</button>
+        ><button
+          class="slip"
+          title="After scratching, catch up to where playback would have been"
+          aria-pressed="false"
+        >
+          Slip
+        </button>
       </div>
       <div class="tempo-row">
         <label
@@ -397,6 +479,12 @@
             max="1.25"
             step=".01"
             value="1" /></label
+        ><button
+          class="dub"
+          aria-pressed="false"
+          title="Filtered repeating echo plus a warm reverb space"
+        >
+          Dub space</button
         ><button class="fx-reset text-button">Reset EQ / FX</button>
       </div></template
     >

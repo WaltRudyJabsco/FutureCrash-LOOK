@@ -65,3 +65,30 @@ AudioWorklet needs a trusted HTTPS Fabric address or localhost. An insecure
 remote HTTP address can browse the crate but cannot enable this audio engine.
 The assistant’s `mix_library` tool finds real track references and the launch
 command; it does not pretend to operate a browser session remotely.
+
+## Preview and spring-return playing
+
+**Listen A / Listen B** selects records for the cue bus before the crossfader.
+**Cue → main mix** blends that preview with the master in your headphones, and
+**Headphone level** controls it independently. Press Play on the deck you want
+to audition; a closed crossfader keeps it out of the main mix.
+
+Choose **Preview here** to hear that bus instead of the main output on a single
+device. A private simultaneous headphone feed needs another physical output:
+use **Choose headphones output** where supported by the browser, leaving main
+on your system output, or use **Split cable** with a DJ splitter (mono main on
+left, mono cue on right). Choosing the same physical output for both will mix
+them audibly. Unsupported browsers explain that limitation without requesting
+microphone access. Output device routing is session-only, never silently
+restored. Cue audio never enters a recording; recording remains stereo even
+when monitoring uses a split cable.
+
+**On key release → Return to deck A** makes the fader spring back to A after
+all fader keys are released. With the left-hand layout, hold F for B, use S/D
+for intermediate blends, then release for A. **Return to deck B** reverses the
+resting deck. **Stay where I leave it** is the original latch behavior;
+**Silence selected deck** closes the deck selected with 1/2.
+
+**Dub space** on either deck adds a filtered repeating echo and a stereo reverb
+space. Tap again to disengage; Reset EQ / FX also clears it. Saved sets retain
+the deck’s dub setting and spring-return preference.
