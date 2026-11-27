@@ -69,6 +69,8 @@
       const result=await response.json();if(!response.ok)throw Error(result.error||'Photo save failed');return result;
     }finally{URL.revokeObjectURL(url)}
   }
+  function mixCommand(text){return /^(?:\/(?:mix|mixer)|(?:open|launch) mercury mix)[.!]?$/i.test(String(text||'').trim())}
+  function openMix(){const url=new URL('/mix',root.location.href).href;root.open(url,'_blank','noopener');return url}
   function theaterCommand(text){return /^\/theater$/i.test(String(text||'').trim())}
   function openTheater(){const url=new URL('/theater',root.location.href).href;root.open(url,'_blank','noopener');return url}
   function museumCommand(text){return /^\/museum$/i.test(String(text||'').trim())}
@@ -181,7 +183,7 @@
     try{root.open(url.href,'_blank','noopener')}catch{}
     return url.href;
   }
-  root.FabricBrowserViews={saveCamera,theaterCommand,openTheater,gypsyCommand,openGypsy,museumCommand,openMuseum,radioAddCommand,addRadio,radioCommand,openRadio,beginImage,imageArtifacts,imageRequest,fabricCommand,openFabric,booksCommand,openBooks,bookQuery,bookMatches,createBookAhead,bookPosition};
+  root.FabricBrowserViews={mixCommand,openMix,saveCamera,theaterCommand,openTheater,gypsyCommand,openGypsy,museumCommand,openMuseum,radioAddCommand,addRadio,radioCommand,openRadio,beginImage,imageArtifacts,imageRequest,fabricCommand,openFabric,booksCommand,openBooks,bookQuery,bookMatches,createBookAhead,bookPosition};
 })(globalThis);
 
 

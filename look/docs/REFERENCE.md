@@ -439,6 +439,8 @@ lk gtnw
   [meta] Global Thermonuclear War alias
 lk photo [--output-dir DIR]
   [media] Camera preview, source picker and QR scanner; save photos to Pictures/LOOK Photos and LK Clip
+lk mix [--host signal|albert] [--url]
+  [media] Mercury Mix: browser turntables, shared fader, touch and keyboard performance
 lk theater [--node NODE] [menu|status|search WORDS|show ID|ticket ID|pause|resume|stop|seek SECONDS|revoke ID]
   [media] Terminal projection room, shared showings and printable admission tickets
 lk theater ticket [ID|--channel] [--hours N] [--qr FILE]
@@ -504,6 +506,10 @@ lk live-state [ARGS]
 lk livestate [ARGS]
   [aliases] Additional routed entry point; see usage details below
 lk meaty [ARGS]
+  [aliases] Additional routed entry point; see usage details below
+lk mercury-mix [ARGS]
+  [aliases] Additional routed entry point; see usage details below
+lk mixer [ARGS]
   [aliases] Additional routed entry point; see usage details below
 lk music [ARGS]
   [aliases] Additional routed entry point; see usage details below

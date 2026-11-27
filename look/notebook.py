@@ -33,6 +33,7 @@ except ImportError:
 FABRIC_ACTIONS={
  'notes':('Notes workspace',('notes',),('notebook_list','notebook_read'),'Choose a note or task.'),
  'gypsy':('Gypsy Astronaut TV',('gypsy',),(),'Watch the saved animation collection.'),
+ 'mix':('Mercury Mix',('mix',),('mix_library',),'Open the two-deck browser instrument, with the shared fader and Fabric music.'),
  'museum':('Museum',('museum',),('museum_search',),'Which artist, title or subject?'),
  'books':('Mercury Reader',('books',),('books_shelf','books_lookup'),'Which book would you like?'),
  'ytr':('YouTube Radio',('ytr',),('radio_queue','radio_add'),'Show the queue, or add a supplied YouTube URL without playback?'),

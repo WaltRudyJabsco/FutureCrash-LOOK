@@ -1309,6 +1309,12 @@
     "Camera preview, source picker and QR scanner; save photos to Pictures/LOOK Photos and LK Clip"
   ],
   [
+    "lk mix",
+    "[--host signal|albert] [--url]",
+    "media",
+    "Mercury Mix: browser turntables, shared fader, touch and keyboard performance"
+  ],
+  [
     "lk theater",
     "[--node NODE] [menu|status|search WORDS|show ID|ticket ID|pause|resume|stop|seek SECONDS|revoke ID]",
     "media",
@@ -1503,6 +1509,18 @@
   ],
   [
     "lk meaty",
+    "[ARGS]",
+    "aliases",
+    "Additional routed entry point; see usage details below"
+  ],
+  [
+    "lk mercury-mix",
+    "[ARGS]",
+    "aliases",
+    "Additional routed entry point; see usage details below"
+  ],
+  [
+    "lk mixer",
     "[ARGS]",
     "aliases",
     "Additional routed entry point; see usage details below"

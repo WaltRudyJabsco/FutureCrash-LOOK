@@ -53,6 +53,7 @@ class ActionSpec:
 # reason over the same action vocabulary without duplicating policy.
 ACTION_SPECS = (
     ActionSpec("receipts_search", "receipts", "read", "observation", ("receipt cards", "saved receipts", "command cards")),
+    ActionSpec("mix_library", "media", "read", "observation", ("mercury mix", "mix music", "turntables", "DJ library")),
     ActionSpec("museum_search", "museum", "read", "observation", ("museum", "artwork collection", "our paintings")),
     ActionSpec("radio_queue", "radio", "read", "observation", ("youtube radio", "ytr queue")),
     ActionSpec("radio_add", "radio", "local_effect", "action", ("add to ytr", "queue youtube radio")),

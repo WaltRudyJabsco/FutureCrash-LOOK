@@ -1,0 +1,404 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta
+      name="viewport"
+      content="width=device-width,initial-scale=1,viewport-fit=cover"
+    />
+    <meta name="theme-color" content="#101416" />
+    <title>Mercury Mix · Fabric</title>
+    <link rel="stylesheet" href="/mix/assets/mercury-mix.css" />
+    <script src="/mix/assets/mercury-mix-dsp.js" defer></script>
+    <script src="/mix/assets/mercury-mix.js" defer></script>
+  </head>
+  <body>
+    <header class="masthead">
+      <a class="wordmark" href="/mix" aria-label="Mercury Mix home"
+        ><span class="orbit">◎</span
+        ><span
+          >Mercury <em>Mix</em><small>THE FABRIC IS YOUR CRATE.</small></span
+        ></a
+      >
+      <nav>
+        <button id="audio" class="audio-button">Enable audio</button
+        ><button id="demo">Demo set</button
+        ><button id="controls">Controls</button
+        ><button id="fullscreen" aria-label="Toggle full screen">
+          Full screen</button
+        ><a href="/" class="back">Back to Fabric</a>
+      </nav>
+    </header>
+    <div class="session-bar">
+      <span class="session-label"><i></i> TWO DECKS. YOUR HANDS.</span>
+      <div class="session-tools">
+        <button id="save">Save set</button
+        ><label class="file-button" role="button" tabindex="0"
+          >Open set<input
+            id="open-set"
+            type="file"
+            accept=".json,application/json"
+            hidden /></label
+        ><button id="record"><span class="record-dot"></span>Record mix</button
+        ><span id="record-time" hidden>0:00</span>
+      </div>
+    </div>
+    <div id="status" class="status" role="status" aria-live="polite">
+      Load a demo set or bring something from your library. Sound stays on this
+      device.
+    </div>
+    <main>
+      <div class="deck-switch" role="group" aria-label="Visible deck">
+        <button data-select="0" class="active">Deck A</button
+        ><button data-select="1">Deck B</button
+        ><button id="swap">Swap sides</button>
+      </div>
+      <div class="console" id="console">
+        <section
+          class="deck deck-a selected"
+          id="deck-a"
+          aria-label="Deck A"
+        ></section>
+        <aside class="mixer">
+          <div class="section-title">THE MIXER <span>STEREO</span></div>
+          <div class="master-display">
+            <canvas
+              id="master-meter"
+              width="220"
+              height="70"
+              aria-label="Master audio level"
+            ></canvas>
+            <div>
+              <strong id="master-db">−∞</strong><small>MASTER · dBFS</small>
+            </div>
+          </div>
+          <label class="range-label"
+            >Master output
+            <input
+              id="master"
+              type="range"
+              min="0"
+              max="1"
+              step=".01"
+              value=".8" /></label
+          ><button id="mute" class="wide">Mute output</button>
+          <div class="mixer-rule"></div>
+          <div class="section-title">IN THE POCKET</div>
+          <p>
+            Sync matches vinyl speed.<br />Tap a tempo. Set your first beat.<br />Use
+            your ears for the rest.
+          </p>
+          <button id="sync-all" class="wide">Match B to A</button>
+          <div class="mixer-rule"></div>
+          <div class="section-title">PLAYING STANCE</div>
+          <label
+            >Fader hand<select id="hand">
+              <option value="left">Left · A S D F</option>
+              <option value="right">Right · J K L ;</option>
+            </select></label
+          ><label
+            >Fader curve<select id="curve">
+              <option value="smooth">Smooth blend</option>
+              <option value="cut">Sharp cut</option>
+            </select></label
+          ><label
+            >On key release<select id="release">
+              <option value="latch">Hold position</option>
+              <option value="cut">Close selected deck</option>
+            </select></label
+          ><label class="check"
+            ><input id="hamster" type="checkbox" />Reverse crossfader</label
+          >
+          <p class="micro">
+            Either hand can work either platter. The keys always move the shared
+            fader.
+          </p>
+        </aside>
+        <section class="deck deck-b" id="deck-b" aria-label="Deck B"></section>
+      </div>
+      <section class="crossfader">
+        <div class="fader-end">
+          <span class="deck-letter a">A</span><span id="gain-a">71%</span>
+        </div>
+        <div class="fader-center">
+          <div class="fader-caption">
+            <strong>CROSSFADER</strong><span id="key-hint">A · S · D · F</span>
+          </div>
+          <input
+            id="crossfader"
+            aria-label="Shared crossfader, left deck A to right deck B"
+            type="range"
+            min="0"
+            max="1"
+            step=".001"
+            value=".5"
+          />
+          <div class="fader-scale">
+            <span>LEFT</span><span>BLEND</span><span>RIGHT</span>
+          </div>
+        </div>
+        <div class="fader-end">
+          <span class="deck-letter b">B</span><span id="gain-b">71%</span>
+        </div>
+      </section>
+      <section class="crate" id="crate">
+        <header>
+          <div>
+            <span class="eyebrow">DIG THROUGH THE FABRIC</span>
+            <h2>Your record crate</h2>
+          </div>
+          <div class="crate-tools">
+            <label class="file-button primary" role="button" tabindex="0"
+              >Add audio files<input
+                id="files"
+                type="file"
+                accept="audio/*,.flac,.aiff,.aif"
+                multiple
+                hidden /></label
+            ><button id="refresh">Refresh library</button>
+          </div>
+        </header>
+        <div class="crate-search">
+          <input
+            id="search"
+            type="search"
+            placeholder="Find a title, artist, album or node…"
+            aria-label="Search Fabric music"
+          /><span id="library-count">Connecting…</span>
+        </div>
+        <div id="library-status" class="library-status"></div>
+        <div id="tracks" class="tracks"></div>
+        <button id="more" hidden>Show more tracks</button>
+      </section>
+      <footer class="bottom-line">
+        <span>MERCURY MIX / A SMALL INSTRUMENT FOR A LARGE COLLECTION</span
+        ><span>Local audio. Shared culture.</span>
+      </footer>
+    </main>
+    <dialog id="help">
+      <form method="dialog">
+        <button class="dialog-close" aria-label="Close controls">Close</button>
+      </form>
+      <span class="eyebrow">MAKE IT YOUR OWN</span>
+      <h2>Two decks. One fader. Either hand.</h2>
+      <p>
+        The key rows are alternative hand positions for the
+        <strong>same crossfader</strong>. Select a deck separately to work its
+        platter or transport.
+      </p>
+      <dl>
+        <dt>A S D F / J K L ;</dt>
+        <dd>
+          Four fader positions. Roll across adjacent keys to sweep; overlapping
+          keys blend their positions.
+        </dd>
+        <dt>1 / 2 · Space · C</dt>
+        <dd>Select a deck · play/pause · return to the cue point.</dd>
+        <dt>Drag the record</dt>
+        <dd>
+          Grab and scratch forward or backward. Release to resume. Touchscreens
+          can grab both decks at once.
+        </dd>
+        <dt>Scroll over a record</dt>
+        <dd>
+          Briefly nudge its speed. Hold T to grab the selected platter, then
+          scroll to scratch. Physical trackpad finger zones are not exposed by
+          ordinary browsers.
+        </dd>
+        <dt>Z / X · R · V</dt>
+        <dd>
+          Nudge the selected deck slower/faster · reverse · toggle slip. Slip
+          catches up to where playback would have been after a scratch.
+        </dd>
+        <dt>Hot cues 1–4</dt>
+        <dd>
+          Tap an empty pad to set it; tap a filled pad to jump and play.
+          Shift-click clears a pad, or use Clear cues.
+        </dd>
+      </dl>
+      <p>
+        BPM detection is an estimate. Edit it, tap a tempo, and set Beat 1 to
+        correct the grid. Sync matches playback speed and aligns the grid;
+        changing speed also changes pitch, like vinyl.
+      </p>
+      <p>
+        Record exports what you mix on this device. Saved sets keep deck
+        references, cues and controls; local audio files must be selected again
+        after reopening. No local files or recordings are uploaded
+        automatically.
+      </p>
+      <button id="theme" type="button">Switch to paper finish</button>
+    </dialog>
+    <template id="deck-template"
+      ><header class="deck-heading">
+        <button class="deck-select" aria-label="Select deck">
+          <span class="deck-letter"></span>
+        </button>
+        <div class="track-heading">
+          <span class="eyebrow source">EMPTY DECK</span>
+          <h2 class="track-title">Find your next record.</h2>
+          <p class="track-artist">
+            Fabric library · local files · original demos
+          </p>
+        </div>
+        <button class="load-deck">Load</button>
+      </header>
+      <div class="wave-wrap">
+        <canvas
+          class="overview"
+          aria-label="Track overview; drag to seek"
+          role="slider"
+          tabindex="0"
+          aria-valuemin="0"
+          aria-valuemax="100"
+          aria-valuenow="0"
+        ></canvas
+        ><canvas class="waveform" aria-label="Scrolling waveform"></canvas>
+        <div class="time-row">
+          <span class="position">0:00</span
+          ><span class="grid-status">BEAT GRID · READY WHEN YOU ARE</span
+          ><span class="duration">—</span>
+        </div>
+      </div>
+      <div class="platter-area">
+        <div class="platter-shell">
+          <div class="strobe"></div>
+          <div
+            class="platter"
+            role="slider"
+            tabindex="0"
+            aria-label="Scratch platter; drag to move record"
+            aria-valuetext="No track loaded"
+          >
+            <div class="vinyl">
+              <div class="record-label">
+                <img class="record-cover" alt="" hidden /><span
+                  class="label-mark"
+                  >M</span
+                ><span class="label-title">MERCURY<br />SESSIONS</span
+                ><span class="label-speed">33⅓ / STEREO</span>
+              </div>
+            </div>
+            <span class="spindle"></span><span class="needle"></span>
+          </div>
+          <div class="platter-note">TOUCH THE RECORD. MAKE SOMETHING.</div>
+        </div>
+        <div class="pitch-strip">
+          <label
+            >VINYL RATE<input
+              class="pitch"
+              type="range"
+              min="-25"
+              max="25"
+              step=".1"
+              value="0"
+              orient="vertical" /></label
+          ><output class="pitch-value">+0.0%</output
+          ><button class="pitch-reset" title="Reset vinyl speed">Reset</button>
+          <div class="channel-meter"><i></i></div>
+        </div>
+      </div>
+      <div class="transport">
+        <button class="cue">Cue</button
+        ><button class="play primary">Play</button
+        ><button class="sync">Sync</button
+        ><button class="reverse" aria-pressed="false">Reverse</button
+        ><button class="slip" aria-pressed="false">Slip</button>
+      </div>
+      <div class="tempo-row">
+        <label
+          >BPM
+          <input
+            class="bpm"
+            type="number"
+            min="40"
+            max="240"
+            step=".1"
+            value="120"
+            aria-label="Original track BPM" /></label
+        ><button class="tap">Tap tempo</button
+        ><button class="beat-one">Set beat 1</button
+        ><span class="tempo-note">VINYL SPEED</span>
+      </div>
+      <div class="performance">
+        <div>
+          <span class="section-title">HOT CUES</span>
+          <div class="hotcues">
+            <button data-cue="0">1</button><button data-cue="1">2</button
+            ><button data-cue="2">3</button><button data-cue="3">4</button>
+          </div>
+          <button class="clear-cues text-button">Clear cues</button>
+        </div>
+        <div>
+          <span class="section-title">LOOP · BEATS</span>
+          <div class="loops">
+            <button data-loop=".5">½</button><button data-loop="1">1</button
+            ><button data-loop="2">2</button><button data-loop="4">4</button
+            ><button data-loop="8">8</button>
+          </div>
+          <button class="loop-off text-button">Exit loop</button>
+        </div>
+      </div>
+      <div class="eq-controls">
+        <label
+          >LOW
+          <input
+            class="eq-low"
+            type="range"
+            min="-12"
+            max="12"
+            step=".5"
+            value="0" /></label
+        ><label
+          >MID
+          <input
+            class="eq-mid"
+            type="range"
+            min="-12"
+            max="12"
+            step=".5"
+            value="0" /></label
+        ><label
+          >HIGH
+          <input
+            class="eq-high"
+            type="range"
+            min="-12"
+            max="12"
+            step=".5"
+            value="0" /></label
+        ><label
+          >FILTER
+          <input
+            class="filter"
+            type="range"
+            min="-1"
+            max="1"
+            step=".01"
+            value="0" /></label
+        ><label
+          >ECHO
+          <input
+            class="echo"
+            type="range"
+            min="0"
+            max=".7"
+            step=".01"
+            value="0"
+        /></label>
+      </div>
+      <div class="channel-bottom">
+        <label
+          >CHANNEL
+          <input
+            class="volume"
+            type="range"
+            min="0"
+            max="1.25"
+            step=".01"
+            value="1" /></label
+        ><button class="fx-reset text-button">Reset EQ / FX</button>
+      </div></template
+    >
+  </body>
+</html>
