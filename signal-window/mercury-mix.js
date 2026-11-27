@@ -12,6 +12,7 @@ const defaults = {
   release: "latch",
   hamster: false,
   theme: "night",
+  keyboard: "moves",
 };
 let prefs = readPrefs(),
   selected = 0,
@@ -27,7 +28,9 @@ let prefs = readPrefs(),
   libraryTotal = 0,
   libraryRequest = 0,
   libraryAbort = null,
-  searchTimer = null;
+  searchTimer = null,
+  activeMove = null,
+  moveSerial = 0;
 const decks = [0, 1].map((index) => ({
   index,
   track: null,
@@ -62,6 +65,7 @@ function readPrefs() {
         : "latch",
       hamster: !!p.hamster,
       theme: p.theme === "paper" ? "paper" : "night",
+      keyboard: p.keyboard === "fader" ? "fader" : "moves",
     };
   } catch {
     return { ...defaults };
@@ -231,6 +235,18 @@ const audio = {
       meterData: new Float32Array(256),
     };
     source.port.onmessage = ({ data }) => {
+      if (data.type === "gesture-start" && activeMove?.token === data.token) {
+        deck.performing = true;
+        updateGain();
+      }
+      if (data.type === "gesture-end" && activeMove?.token === data.token) {
+        activeMove = null;
+        deck.performing = false;
+        updateGain();
+        renderMoves();
+        $("move-status").textContent =
+          "Phrase finished. Fader restored; ready for your next move.";
+      }
       if (data.type === "position") {
         deck.position = data.seconds;
         if (data.ended) deck.playing = false;
@@ -248,7 +264,13 @@ const audio = {
   },
 };
 function selectDeck(index) {
+  if (index !== selected) stopMove();
   selected = index;
+  $("move-target").textContent =
+    "Target: deck " +
+    (index ? "B" : "A") +
+    " · " +
+    (decks[index].track?.title || "load a record");
   for (const deck of decks) {
     deck.ui.classList.toggle("selected", deck.index === selected);
     deck.ui
@@ -266,7 +288,8 @@ function updateGain() {
   decks.forEach((deck, i) => {
     audio.smooth(
       deck.nodes?.gain.gain,
-      gains[i] * Number(deck.ui?.querySelector(".volume").value || 1),
+      (deck.performing ? 1 : gains[i]) *
+        Number(deck.ui?.querySelector(".volume").value || 1),
     );
   });
   $("crossfader").value = crossfade;
@@ -279,10 +302,16 @@ function applyPrefs() {
     if (resting !== null) crossfade = resting;
   }
   for (const key of ["hand", "curve", "release"]) $(key).value = prefs[key];
+  $("keyboard-mode").value = prefs.keyboard;
+  $("move-pads").classList.toggle("keys-off", prefs.keyboard !== "moves");
   $("hamster").checked = prefs.hamster;
   document.body.dataset.theme = prefs.theme;
   $("key-hint").textContent =
-    prefs.hand === "left" ? "A · S · D · F" : "J · K · L · ;";
+    prefs.keyboard === "moves"
+      ? "SCRATCH MOVES · A–; / Q W"
+      : prefs.hand === "left"
+        ? "A · S · D · F"
+        : "J · K · L · ;";
   $("theme").textContent =
     prefs.theme === "paper"
       ? "Switch to night finish"
@@ -416,6 +445,7 @@ function exitLoop(deck) {
     .forEach((b) => b.classList.remove("active"));
 }
 function grab(deck, on) {
+  if (on) stopMove();
   if (!deck.track) return;
   selectDeck(deck.index);
   deck.grabbed = on;
@@ -470,6 +500,7 @@ function fail(error) {
   status(error?.message || String(error), true);
 }
 function stopDeck(deck) {
+  if (activeMove?.deck === deck) stopMove();
   deck.playing = false;
   deck.grabbed = false;
   deck.position = 0;
@@ -487,6 +518,12 @@ function stopDeck(deck) {
   exitLoop(deck);
 }
 function metadata(deck) {
+  if (deck.index === selected)
+    $("move-target").textContent =
+      "Target: deck " +
+      (selected ? "B" : "A") +
+      " · " +
+      (deck.track?.title || "load a record");
   const q = (s) => deck.ui.querySelector(s),
     track = deck.track;
   q(".track-title").textContent = track?.title || "Find your next record.";
@@ -1327,6 +1364,7 @@ async function openSet(file) {
         : "latch",
       hamster: !!p.hamster,
       theme: p.theme === "paper" ? "paper" : "night",
+      keyboard: p.keyboard === "fader" ? "fader" : "moves",
     };
     persist();
     applyPrefs();
@@ -1438,6 +1476,166 @@ async function openSet(file) {
       : "Set opened. Decks are paused and ready.",
   );
 }
+function renderMoves() {
+  document.querySelectorAll("[data-move]").forEach((button) => {
+    const live = activeMove?.id === button.dataset.move;
+    button.classList.toggle("active", live);
+    button.setAttribute("aria-pressed", String(live));
+  });
+}
+function stopMove() {
+  if (!activeMove) return;
+  const deck = activeMove.deck;
+  audio.send(deck, "gesture-stop");
+  activeMove = null;
+  deck.performing = false;
+  updateGain();
+  renderMoves();
+}
+async function startMove(move, key) {
+  const deck = decks[selected];
+  if (!deck.track) {
+    status("Load a track on the selected deck, then mark a sound to scratch.");
+    return;
+  }
+  if (deck.duration - deck.cue < 0.01) {
+    status("Mark a sound before the end of the track.", true);
+    return;
+  }
+  stopMove();
+  const current = {
+    id: move.id,
+    key,
+    token: ++moveSerial,
+    deck,
+    released: false,
+  };
+  activeMove = current;
+  renderMoves();
+  try {
+    await audio.ensure();
+    if (activeMove !== current) return;
+    const other = decks[1 - deck.index];
+    const tempo = other.playing
+      ? other.bpm * rate(other)
+      : deck.bpm * rate(deck);
+    const seconds =
+      move.id === "audition"
+        ? Number($("move-span").value) / rate(deck)
+        : ((move.beats || 1) * 60) / tempo;
+    audio.send(deck, "gesture", {
+      token: current.token,
+      points: move.points,
+      cue: deck.cue,
+      span: Number($("move-span").value),
+      seconds: D.clamp(seconds, 0.1, 8),
+    });
+    if (current.released)
+      audio.send(deck, "gesture-release", { token: current.token });
+    $("move-status").textContent =
+      (deck.index ? "B" : "A") +
+      " · " +
+      move.name +
+      " · cue " +
+      D.time(deck.cue) +
+      " · " +
+      Math.round(tempo) +
+      " BPM. " +
+      (current.released ? "One phrase." : "Hold to repeat; release to finish.");
+  } catch (error) {
+    if (activeMove === current) stopMove();
+    fail(error);
+  }
+}
+function releaseMove(key) {
+  if (activeMove?.key !== key) return;
+  activeMove.released = true;
+  audio.send(activeMove.deck, "gesture-release", { token: activeMove.token });
+}
+for (const move of MercuryMoves.moves) {
+  const button = document.createElement("button");
+  button.type = "button";
+  button.dataset.move = move.id;
+  const key = document.createElement("kbd"),
+    name = document.createElement("strong"),
+    hint = document.createElement("small");
+  key.textContent = move.key.toUpperCase();
+  name.textContent = move.name;
+  hint.textContent = move.hint;
+  button.append(key, name, hint);
+  button.setAttribute("aria-pressed", "false");
+  button.onpointerdown = (event) => {
+    if (event.button !== 0) return;
+    button.setPointerCapture(event.pointerId);
+    startMove(move, move.key);
+  };
+  button.onpointerup = () => releaseMove(move.key);
+  button.onpointercancel = stopMove;
+  button.onlostpointercapture = () => releaseMove(move.key);
+  button.onkeydown = (event) => {
+    if (["Enter", " "].includes(event.key)) {
+      event.preventDefault();
+      event.stopPropagation();
+      if (!event.repeat) startMove(move, move.key);
+    }
+  };
+  button.onkeyup = (event) => {
+    if (["Enter", " "].includes(event.key)) {
+      event.preventDefault();
+      event.stopPropagation();
+      releaseMove(move.key);
+    }
+  };
+  button.onclick = (event) => {
+    if (event.detail === 0) {
+      startMove(move, move.key);
+      releaseMove(move.key);
+    }
+  };
+  $("move-pads").append(button);
+}
+$("keyboard-mode").onchange = (event) => {
+  clearGestures();
+  prefs.keyboard = event.target.value;
+  persist();
+  applyPrefs();
+};
+$("moves-shortcut").onclick = () => {
+  document.querySelector(".moves-panel").scrollIntoView({ behavior: "smooth" });
+  $("moves-shortcut").focus({ preventScroll: true });
+};
+$("mark-sound").onclick = () => {
+  stopMove();
+  const deck = decks[selected];
+  if (!deck.track) {
+    status("Load a track on the selected deck first.");
+    return;
+  }
+  deck.cue = deck.position;
+  $("move-status").textContent =
+    "Deck " +
+    (deck.index ? "B" : "A") +
+    " sound marked at " +
+    D.time(deck.cue) +
+    ". Tap a move to play it.";
+};
+$("audition-sound").onclick = () => {
+  const move = {
+    id: "audition",
+    name: "Marked sound",
+    points: [
+      [0, 0, 1],
+      [1, 1, 0],
+    ],
+    beats: 1,
+  };
+  startMove(move, "audition");
+  releaseMove("audition");
+};
+$("stop-moves").onclick = () => {
+  stopMove();
+  $("move-status").textContent = "Moves stopped. Main mix restored.";
+};
 function faderKeys() {
   const value = D.keyPosition(held, prefs.hand);
   if (value !== null) {
@@ -1452,6 +1650,7 @@ function faderKeys() {
   }
 }
 function clearGestures() {
+  stopMove();
   held.clear();
   tHeld = false;
   for (const deck of decks) {
@@ -1470,7 +1669,17 @@ document.addEventListener("keydown", (e) => {
   if (e.ctrlKey || e.metaKey || e.altKey || typing(e.target)) return;
   const key = e.key.toLowerCase(),
     bank = prefs.hand === "left" ? ["a", "s", "d", "f"] : ["j", "k", "l", ";"];
-  if (bank.includes(key)) {
+  if (key === "escape") {
+    stopMove();
+    return;
+  }
+  const move = prefs.keyboard === "moves" && MercuryMoves.byKey(key);
+  if (move) {
+    e.preventDefault();
+    if (!e.repeat) startMove(move, key);
+    return;
+  }
+  if (prefs.keyboard === "fader" && bank.includes(key)) {
     e.preventDefault();
     held.add(key);
     faderKeys();
@@ -1500,6 +1709,7 @@ document.addEventListener("keydown", (e) => {
 });
 document.addEventListener("keyup", (e) => {
   const key = e.key.toLowerCase();
+  releaseMove(key);
   if (held.delete(key)) faderKeys();
   if (key === "t") {
     tHeld = false;
@@ -1687,6 +1897,7 @@ window.addEventListener("pagehide", (event) => {
   cancelAnimationFrame(frame);
   decks.forEach((d) => d.abort?.abort());
   if (recording && recording.state !== "inactive") recording.stop();
+  stopMove();
   audio.headphones?.close();
   audio.ctx?.close();
 });

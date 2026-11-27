@@ -11,6 +11,7 @@
     <link rel="stylesheet" href="/mix/assets/mercury-mix.css" />
     <script src="/mix/assets/mercury-mix-dsp.js" defer></script>
     <script src="/mix/assets/mercury-mix-monitor.js" defer></script>
+    <script src="/mix/assets/mercury-mix-moves.js" defer></script>
     <script src="/mix/assets/mercury-mix.js" defer></script>
   </head>
   <body>
@@ -24,6 +25,7 @@
       <nav>
         <button id="audio" class="audio-button">Enable audio</button
         ><button id="demo">Demo set</button
+        ><button id="moves-shortcut">Scratch moves ↓</button
         ><button id="controls">Controls</button
         ><button id="fullscreen" aria-label="Toggle full screen">
           Full screen</button
@@ -156,9 +158,9 @@
             ><input id="hamster" type="checkbox" />Reverse crossfader</label
           >
           <p class="micro">
-            Either hand can work either platter. The keys always move the shared
-            fader. “Return to A”: hold F (or ;) for B, release for A.
-            Overlapping keys blend; no keys return to your chosen deck.
+            In Manual fader mode, either hand can work either platter. The keys
+            move the shared fader. “Return to A”: hold F (or ;) for B, release
+            for A. Overlapping keys blend; no keys return to your chosen deck.
           </p>
         </aside>
         <section class="deck deck-b" id="deck-b" aria-label="Deck B"></section>
@@ -187,6 +189,46 @@
         <div class="fader-end">
           <span class="deck-letter b">B</span><span id="gain-b">71%</span>
         </div>
+      </section>
+      <section class="moves-panel" aria-label="Scratch moves">
+        <header>
+          <div>
+            <span class="eyebrow">PLAY THE SOUND, NOT THE HARDWARE</span>
+            <h2>Scratch moves</h2>
+          </div>
+          <label
+            >Keyboard mode<select id="keyboard-mode">
+              <option value="moves">Scratch moves</option>
+              <option value="fader">Manual fader</option>
+            </select></label
+          >
+        </header>
+        <p id="move-target">Target: deck A · load a record</p>
+        <div class="move-settings">
+          <button id="mark-sound">Mark sound here</button
+          ><button id="audition-sound">Hear marked sound</button
+          ><label
+            >Sound length<select id="move-span">
+              <option value=".12">Short · ⅛ second</option>
+              <option value=".25" selected>Medium · ¼ second</option>
+              <option value=".5">Long · ½ second</option>
+              <option value="1">Phrase · 1 second</option>
+            </select></label
+          ><button id="stop-moves">Stop moves</button>
+        </div>
+        <p id="move-status" role="status">
+          Select deck A or B, seek to a useful sound, then Mark sound here. Tap
+          a pad/key for one phrase; hold to repeat. The other deck keeps
+          playing.
+        </p>
+        <div id="move-pads" class="move-pads"></div>
+        <p class="micro">
+          Moves use the selected track’s real audio at its marked cue, with
+          timed record motion and cuts. They add that deck over the current mix
+          while held; releasing finishes the phrase and restores your fader.
+          Tempo follows the other playing deck. Manual fader mode keeps ASDF /
+          JKL;.
+        </p>
       </section>
       <section class="crate" id="crate">
         <header>
@@ -234,7 +276,16 @@
         platter or transport.
       </p>
       <dl>
-        <dt>A S D F / J K L ;</dt>
+        <dt>Scratch moves mode</dt>
+        <dd>
+          Select a deck with 1/2, mark a sound, then tap or hold A S D F G H J K
+          L ; Q W. Each pad plays a named motion/cut phrase from that cue. Tap
+          plays one cycle; hold repeats. New keys replace the active phrase.
+          Escape or Stop moves cancels. These are playable interpretations of
+          scratch techniques, not a claim to reproduce a human turntablist’s
+          articulation.
+        </dd>
+        <dt>Manual fader mode · A S D F / J K L ;</dt>
         <dd>
           Four fader positions. Roll across adjacent keys to sweep; overlapping
           keys blend their positions.
