@@ -16,8 +16,15 @@ class MercuryDeck extends AudioWorkletProcessor {
     this.loop = null;
     this.elapsed = 0;
     this.rms = 0;
+    this.gesture = null;
+    this.gestureGate = 0;
     this.port.onmessage = ({ data: m }) => {
+      if (m.type === "gesture") this.startGesture(m);
+      if (m.type === "gesture-release" && this.gesture?.token === m.token)
+        this.gesture.release = true;
+      if (m.type === "gesture-stop") this.finishGesture();
       if (m.type === "load") {
+        this.finishGesture();
         this.left = m.left;
         this.right = m.right;
         this.sourceRate = m.rate;
@@ -33,6 +40,7 @@ class MercuryDeck extends AudioWorkletProcessor {
         this.slipPos = 0;
       }
       if (m.type === "clear") {
+        this.finishGesture();
         this.left = null;
         this.right = null;
         this.playing = false;
@@ -81,6 +89,74 @@ class MercuryDeck extends AudioWorkletProcessor {
       }
     };
   }
+  startGesture(m) {
+    if (
+      !this.left ||
+      this.left.length < 2 ||
+      !Array.isArray(m.points) ||
+      m.points.length < 2 ||
+      m.points.length > 80 ||
+      !Number.isFinite(m.cue) ||
+      !Number.isFinite(m.span) ||
+      !Number.isFinite(m.seconds) ||
+      m.seconds < 0.1 ||
+      m.seconds > 8 ||
+      m.span <= 0 ||
+      m.span > 2
+    )
+      return;
+    if (
+      m.points.some(
+        (p, i) =>
+          !Array.isArray(p) ||
+          p.length !== 3 ||
+          p.some((v) => !Number.isFinite(v)) ||
+          p[0] < 0 ||
+          p[0] > 1 ||
+          p[1] < 0 ||
+          p[1] > 1 ||
+          p[2] < 0 ||
+          p[2] > 1 ||
+          (i && p[0] <= m.points[i - 1][0]),
+      )
+    )
+      return;
+    if (m.points[0][0] !== 0 || m.points[m.points.length - 1][0] !== 1) return;
+    // Finish a previous phrase before taking the new timeline snapshot.
+    this.finishGesture();
+    const cue = Math.max(
+      0,
+      Math.min(this.left.length - 2, m.cue * this.sourceRate),
+    );
+    this.gesture = {
+      token: m.token,
+      points: m.points,
+      cue,
+      span: Math.min(m.span * this.sourceRate, this.left.length - 2 - cue),
+      samples: Math.round(m.seconds * sampleRate),
+      age: 0,
+      segment: 0,
+      original: this.pos,
+      release: false,
+    };
+    this.gestureGate = 0;
+    this.port.postMessage({ type: "gesture-start", token: m.token });
+  }
+  finishGesture() {
+    const g = this.gesture;
+    if (!g) return;
+    this.pos = this.playing
+      ? this.wrap(
+          g.original +
+            ((g.age * this.sourceRate) / sampleRate) *
+              this.rate *
+              this.direction,
+        )
+      : g.cue;
+    this.pos = Math.max(0, Math.min((this.left?.length || 1) - 1, this.pos));
+    this.gesture = null;
+    this.port.postMessage({ type: "gesture-end", token: g.token });
+  }
   wrap(p) {
     const loop = this.loop;
     if (loop && loop.end > loop.start && (p >= loop.end || p < loop.start)) {
@@ -98,7 +174,36 @@ class MercuryDeck extends AudioWorkletProcessor {
     for (let i = 0; i < l.length; i++) {
       let a = 0,
         b = 0;
-      if (length) {
+      if (length && this.gesture) {
+        const g = this.gesture,
+          phase = (g.age % g.samples) / g.samples;
+        while (
+          g.segment < g.points.length - 2 &&
+          phase >= g.points[g.segment + 1][0]
+        )
+          g.segment++;
+        const from = g.points[g.segment],
+          to = g.points[g.segment + 1];
+        const fraction = (phase - from[0]) / (to[0] - from[0]);
+        this.pos = g.cue + g.span * (from[1] + (to[1] - from[1]) * fraction);
+        // A stationary record is silent; a short gate ramp avoids digital clicks.
+        const gate = from[1] === to[1] ? 0 : from[2];
+        this.gestureGate +=
+          (gate - this.gestureGate) * Math.min(1, 1 / (sampleRate * 0.001));
+        const at = Math.floor(this.pos),
+          sub = this.pos - at;
+        a =
+          (this.left[at] + (this.left[at + 1] - this.left[at]) * sub) *
+          this.gestureGate;
+        b =
+          (this.right[at] + (this.right[at + 1] - this.right[at]) * sub) *
+          this.gestureGate;
+        g.age++;
+        if (g.age % g.samples === 0) {
+          if (g.release) this.finishGesture();
+          else g.segment = 0;
+        }
+      } else if (length) {
         let speed = this.scratching
           ? Math.max(
               -8,
@@ -156,6 +261,7 @@ class MercuryDeck extends AudioWorkletProcessor {
           !!length &&
           !this.playing &&
           !this.scratching &&
+          !this.gesture &&
           (this.direction > 0 ? this.pos >= length - 1 : this.pos <= 0),
         rms: Math.sqrt(sum / (2 * l.length)),
       });

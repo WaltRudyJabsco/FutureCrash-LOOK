@@ -92,3 +92,50 @@ resting deck. **Stay where I leave it** is the original latch behavior;
 **Dub space** on either deck adds a filtered repeating echo and a stereo reverb
 space. Tap again to disengage; Reset EQ / FX also clears it. Saved sets retain
 the deck’s dub setting and spring-return preference.
+
+## Scratch Moves: play phrases from a marked sound
+
+This mode treats the keyboard as a performance instrument. The starter bank
+contains twelve playable interpretations of named scratch techniques, built
+from record-position curves and timed cuts. They use the loaded track’s PCM;
+there are no canned scratch sound effects. Technique names draw on
+[School of Scratch’s demonstrations](https://studioscratches.com/scratch-techniques-demo-video/).
+The patterns are stylized approximations, not a substitute for the articulation
+of a turntablist.
+
+1. Play the backing track on one deck and leave the crossfader on that side.
+2. Select the other deck with **1/2** or its deck button. Load a useful sound,
+   seek to it, and press **Mark sound here**. The mark is its main cue, retained
+   in saved sets. **Hear marked sound** auditions that segment.
+3. Tap a pad or key for one phrase. Hold to repeat; release finishes the current
+   phrase. Roll between keys to change moves. **Escape / Stop moves** cancels.
+
+| Key | Move |
+| --- | --- |
+| A | Baby |
+| S | Forward cut |
+| D | Reverse cut |
+| F | Stab |
+| G | Chirp |
+| H | Transformer |
+| J | One-click flare |
+| K | Two-click flare |
+| L | Tear |
+| ; | Scribble |
+| Q | Crab-style cuts |
+| W | Echo scratch |
+
+Each phrase follows the effective tempo of the other playing deck, or the
+selected deck’s tempo when the other is paused. This sets phrase duration;
+launch remains immediate and expressive rather than waiting for a beat grid.
+**Sound length** changes how much of the marked sound the motion covers.
+
+During a phrase, the selected deck is opened over the existing mix without
+moving the main crossfader or interrupting the backing deck. On completion,
+its original channel level is restored. A paused scratch deck returns to its
+cue; a previously playing one rejoins its uninterrupted timeline. Changing
+selected decks, opening Controls or losing window focus cancels the move to
+prevent a held note from getting stuck.
+
+**Keyboard mode → Manual fader** restores ASDF / JKL; crossfader playing.
+The on-screen scratch pads remain playable in either keyboard mode.
