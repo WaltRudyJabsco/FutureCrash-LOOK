@@ -11,7 +11,7 @@ MAX_RESULTS=200
 CATALOG_CACHE_SECONDS=20
 _CACHE={}
 _CACHE_LOCK=threading.Lock()
-ASSETS={'mercury-mix.html':'text/html; charset=utf-8','mercury-mix.css':'text/css; charset=utf-8',
+ASSETS={'mercury-mix-monitor.js':'text/javascript; charset=utf-8','mercury-mix.html':'text/html; charset=utf-8','mercury-mix.css':'text/css; charset=utf-8',
         'mercury-mix.js':'text/javascript; charset=utf-8','mercury-mix-dsp.js':'text/javascript; charset=utf-8',
         'mercury-mix-worklet.js':'text/javascript; charset=utf-8'}
 

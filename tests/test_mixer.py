@@ -92,3 +92,15 @@ def test_library_gateway_passes_query_and_offset_and_rejects_invalid_input(monke
     handler.path='/api/mix/library?offset=-1'
     with pytest.raises(ValueError):mixer_web.handle(handler,'http://test-node')
     mixer_web._CACHE.clear()
+
+
+def test_installer_audio_assets_are_individual_existing_source_arguments():
+    import shlex
+    for surface,variable in [('signal-window','SOURCE_DIR'),('albert','SRC')]:
+        line=next(line for line in (ROOT/surface/'install.sh').read_text().splitlines() if line.startswith('install ') and 'mercury-mix.html' in line)
+        args=shlex.split(line)
+        sources=args[3:-1]
+        assert len(sources)==len(ASSETS)
+        for source in sources:
+            path=Path(source.replace('$'+variable,str(ROOT/surface)))
+            assert path.is_file(),source

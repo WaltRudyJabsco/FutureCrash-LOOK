@@ -145,7 +145,29 @@
       demo: which,
     };
   }
+  function releasePosition(mode, selected, hamster) {
+    if (mode === "latch") return null;
+    const audible =
+      mode === "return-a" ? 0 : mode === "return-b" ? 1 : 1 - selected;
+    return hamster ? 1 - audible : audible;
+  }
+  function reverbImpulse(rate) {
+    const seconds = 1.8,
+      size = Math.ceil(rate * seconds);
+    const channels = [new Float32Array(size), new Float32Array(size)];
+    let seed = 7417;
+    for (let i = 0; i < size; i++) {
+      const envelope = Math.pow(1 - i / size, 3);
+      for (let side = 0; side < 2; side++) {
+        seed = (Math.imul(seed, 1664525) + 1013904223) | 0;
+        channels[side][i] = (seed / 2147483648) * envelope;
+      }
+    }
+    return channels;
+  }
   root.MercuryDSP = {
+    releasePosition,
+    reverbImpulse,
     clamp,
     fader,
     keyPosition,

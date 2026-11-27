@@ -40,6 +40,7 @@ const decks = [0, 1].map((index) => ({
   playing: false,
   reverse: false,
   slip: false,
+  dub: false,
   cues: [null, null, null, null],
   cue: 0,
   loop: null,
@@ -56,7 +57,9 @@ function readPrefs() {
     return {
       hand: p.hand === "right" ? "right" : "left",
       curve: p.curve === "cut" ? "cut" : "smooth",
-      release: p.release === "cut" ? "cut" : "latch",
+      release: ["cut", "return-a", "return-b"].includes(p.release)
+        ? p.release
+        : "latch",
       hamster: !!p.hamster,
       theme: p.theme === "paper" ? "paper" : "night",
     };
@@ -139,7 +142,13 @@ const audio = {
     this.monitor.connect(ctx.destination);
     limiter.connect(this.analyzer);
     limiter.connect(this.stream);
+    this.headphones = new MercuryMonitor(ctx, limiter, this.monitor);
+    const impulse = D.reverbImpulse(ctx.sampleRate);
+    this.impulse = ctx.createBuffer(2, impulse[0].length, ctx.sampleRate);
+    impulse.forEach((channel, i) => this.impulse.copyToChannel(channel, i));
     for (const deck of decks) this.deck(deck);
+    this.headphones.route($("cue-route").value, muted);
+    updateHeadphones();
     ctx.onstatechange = () => {
       const running = ctx.state === "running";
       $("audio").classList.toggle("active", running);
@@ -171,11 +180,18 @@ const audio = {
     hp.frequency.value = 20;
     const delay = ctx.createDelay(2),
       feedback = ctx.createGain(),
+      feedbackFilter = ctx.createBiquadFilter(),
+      reverb = ctx.createConvolver(),
+      reverbWet = ctx.createGain(),
       wet = ctx.createGain(),
       sum = ctx.createGain(),
       gain = ctx.createGain(),
       meter = ctx.createAnalyser();
     feedback.gain.value = 0.35;
+    feedbackFilter.type = "lowpass";
+    feedbackFilter.frequency.value = 2400;
+    reverb.buffer = this.impulse;
+    reverbWet.gain.value = 0;
     wet.gain.value = 0;
     delay.delayTime.value = 0.25;
     meter.fftSize = 256;
@@ -187,10 +203,15 @@ const audio = {
     hp.connect(sum);
     hp.connect(delay);
     delay.connect(feedback);
-    feedback.connect(delay);
+    feedback.connect(feedbackFilter);
+    feedbackFilter.connect(delay);
+    hp.connect(reverb);
+    reverb.connect(reverbWet);
+    reverbWet.connect(sum);
     delay.connect(wet);
     wet.connect(sum);
     sum.connect(gain);
+    sum.connect(this.headphones.inputs[deck.index]);
     gain.connect(meter);
     meter.connect(this.master);
     deck.nodes = {
@@ -202,6 +223,8 @@ const audio = {
       hp,
       delay,
       feedback,
+      reverb,
+      reverbWet,
       wet,
       gain,
       meter,
@@ -251,6 +274,10 @@ function updateGain() {
   setValue($("gain-b"), Math.round(gains[1] * 100) + "%");
 }
 function applyPrefs() {
+  if (!held.size) {
+    const resting = D.releasePosition(prefs.release, selected, prefs.hamster);
+    if (resting !== null) crossfade = resting;
+  }
   for (const key of ["hand", "curve", "release"]) $(key).value = prefs[key];
   $("hamster").checked = prefs.hamster;
   document.body.dataset.theme = prefs.theme;
@@ -286,7 +313,12 @@ function applyFX(deck) {
   const f = Number(q(".filter").value);
   audio.smooth(nodes.lp.frequency, f < 0 ? 20000 * Math.pow(0.012, -f) : 20000);
   audio.smooth(nodes.hp.frequency, f > 0 ? 20 * Math.pow(450, f) : 20);
-  audio.smooth(nodes.wet.gain, Number(q(".echo").value));
+  audio.smooth(
+    nodes.wet.gain,
+    Math.max(Number(q(".echo").value), deck.dub ? 0.45 : 0),
+  );
+  audio.smooth(nodes.feedback.gain, deck.dub ? 0.68 : 0.35);
+  audio.smooth(nodes.reverbWet.gain, deck.dub ? 0.28 : 0);
   applyRate(deck);
   updateGain();
 }
@@ -884,6 +916,16 @@ function bindDeck(deck) {
   q(".sync").onclick = () => sync(deck);
   q(".reverse").onclick = () => reverse(deck);
   q(".slip").onclick = () => slip(deck);
+  q(".dub").onclick = () => {
+    deck.dub = !deck.dub;
+    q(".dub").setAttribute("aria-pressed", String(deck.dub));
+    applyFX(deck);
+    status(
+      "Deck " +
+        (deck.index ? "B" : "A") +
+        (deck.dub ? ": dub echo and reverb on." : ": dub space off."),
+    );
+  };
   q(".pitch").oninput = (e) => {
     deck.pitch = Number(e.target.value);
     applyRate(deck);
@@ -927,6 +969,8 @@ function bindDeck(deck) {
   ])
     q(selector).oninput = () => applyFX(deck);
   q(".fx-reset").onclick = () => {
+    deck.dub = false;
+    q(".dub").setAttribute("aria-pressed", "false");
     for (const s of [".eq-low", ".eq-mid", ".eq-high", ".filter", ".echo"])
       q(s).value = 0;
     applyFX(deck);
@@ -1246,6 +1290,7 @@ function saveSet() {
       position: deck.position,
       reverse: deck.reverse,
       slip: deck.slip,
+      dub: deck.dub,
       loop: deck.loop,
       controls: Object.fromEntries(
         ["eq-low", "eq-mid", "eq-high", "filter", "echo", "volume"].map((k) => [
@@ -1277,7 +1322,9 @@ async function openSet(file) {
     prefs = {
       hand: p.hand === "right" ? "right" : "left",
       curve: p.curve === "cut" ? "cut" : "smooth",
-      release: p.release === "cut" ? "cut" : "latch",
+      release: ["cut", "return-a", "return-b"].includes(p.release)
+        ? p.release
+        : "latch",
       hamster: !!p.hamster,
       theme: p.theme === "paper" ? "paper" : "night",
     };
@@ -1348,6 +1395,10 @@ async function openSet(file) {
           ...bounds,
         );
     deck.ui.querySelector(".bpm").value = deck.bpm.toFixed(1);
+    deck.dub = !!saved.dub;
+    deck.ui
+      .querySelector(".dub")
+      .setAttribute("aria-pressed", String(deck.dub));
     applyFX(deck);
     seek(deck, Number(saved.position) || 0);
     if (saved.reverse) reverse(deck);
@@ -1392,15 +1443,12 @@ function faderKeys() {
   if (value !== null) {
     crossfade = value;
     updateGain();
-  } else if (prefs.release === "cut") {
-    crossfade = prefs.hamster
-      ? selected === 0
-        ? 0
-        : 1
-      : selected === 0
-        ? 1
-        : 0;
-    updateGain();
+  } else {
+    const resting = D.releasePosition(prefs.release, selected, prefs.hamster);
+    if (resting !== null) {
+      crossfade = resting;
+      updateGain();
+    }
   }
 }
 function clearGestures() {
@@ -1410,7 +1458,7 @@ function clearGestures() {
     if (deck.grabbed) grab(deck, false);
     bend(deck, 1);
   }
-  if (prefs.release === "cut") faderKeys();
+  if (prefs.release !== "latch") faderKeys();
 }
 function typing(target) {
   return (
@@ -1492,6 +1540,75 @@ $("fullscreen").onclick = async () => {
     status("Full screen is not available in this browser.", true);
   }
 };
+function updateHeadphones() {
+  if (!audio.headphones) return;
+  audio.headphones.cues = [
+    $("listen-a").getAttribute("aria-pressed") === "true",
+    $("listen-b").getAttribute("aria-pressed") === "true",
+  ];
+  audio.headphones.set(
+    Number($("cue-blend").value),
+    Number($("cue-level").value),
+  );
+}
+for (const id of ["listen-a", "listen-b"])
+  $(id).onclick = async () => {
+    try {
+      await audio.ensure();
+      $(id).setAttribute(
+        "aria-pressed",
+        String($(id).getAttribute("aria-pressed") !== "true"),
+      );
+      updateHeadphones();
+    } catch (error) {
+      fail(error);
+    }
+  };
+$("cue-blend").oninput = $("cue-level").oninput = updateHeadphones;
+$("cue-route").onchange = async () => {
+  try {
+    await audio.ensure();
+    const mode = $("cue-route").value;
+    audio.headphones.route(mode, muted);
+    if (mode === "separate") await audio.headphones.player.play();
+    $("cue-status").textContent =
+      mode === "preview"
+        ? "Preview replaces what you hear here. The stereo main recording is unchanged."
+        : mode === "split"
+          ? "Split-cable mode: mono main on LEFT, mono cue on RIGHT. Use a DJ splitter to separate them."
+          : mode === "separate"
+            ? "Cue uses your chosen output; main stays on the system output. Choose different physical devices for private monitoring."
+            : "Main output only. Cue monitoring is off.";
+  } catch (error) {
+    audio.headphones?.route("off", muted);
+    $("cue-route").value = "off";
+    fail(error);
+  }
+};
+$("choose-headphones").onclick = async () => {
+  try {
+    // Open directly from the click so the browser retains transient activation.
+    const device = await navigator.mediaDevices.selectAudioOutput();
+    await audio.ensure();
+    await audio.headphones.separate(device, muted);
+    $("cue-route").querySelector('[value="separate"]').disabled = false;
+    $("cue-route").value = "separate";
+    $("cue-status").textContent =
+      "Cue output: " +
+      (device.label || "Selected device") +
+      ". Main stays on the system output; choose a different physical device for private cueing.";
+  } catch (error) {
+    $("cue-status").textContent =
+      "Output selection was not completed. Use Preview here or a split cable, or try a browser with output selection.";
+  }
+};
+if (
+  !navigator.mediaDevices?.selectAudioOutput ||
+  !("setSinkId" in HTMLMediaElement.prototype)
+) {
+  $("choose-headphones").disabled = true;
+  $("choose-headphones").textContent = "Separate output unavailable here";
+}
 $("sync-all").onclick = () => sync(decks[1]);
 $("swap").onclick = () => {
   $("console").classList.toggle("swapped");
@@ -1526,7 +1643,9 @@ $("master").oninput = (e) => {
 };
 $("mute").onclick = () => {
   muted = !muted;
-  audio.smooth(audio.monitor?.gain, muted ? 0 : 1);
+  if (audio.headphones) audio.headphones.route(audio.headphones.mode, muted);
+  if (audio.headphones?.mode === "separate")
+    audio.headphones.player.play().catch(fail);
   $("mute").textContent = muted ? "Unmute output" : "Mute output";
   $("mute").setAttribute("aria-pressed", String(muted));
 };
@@ -1568,6 +1687,7 @@ window.addEventListener("pagehide", (event) => {
   cancelAnimationFrame(frame);
   decks.forEach((d) => d.abort?.abort());
   if (recording && recording.state !== "inactive") recording.stop();
+  audio.headphones?.close();
   audio.ctx?.close();
 });
 refreshLibrary();

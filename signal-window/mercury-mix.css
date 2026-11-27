@@ -1570,3 +1570,54 @@ body {
     padding-bottom: 17px;
   }
 }
+.cue-select {
+  display: flex;
+  gap: 6px;
+  margin: 12px 0;
+}
+.cue-select button {
+  flex: 1;
+}
+.cue-select button[aria-pressed="true"] {
+  color: var(--bg);
+  background: var(--brass, #ccb078);
+}
+.dub[aria-pressed="true"] {
+  color: #111;
+  background: #ccb078;
+}
+.channel-bottom {
+  flex-wrap: wrap;
+}
+.headphone-panel {
+  grid-column: 1 / -1;
+  min-width: 0;
+  padding: 12px 0;
+}
+.headphone-panel select {
+  width: 100%;
+  min-width: 0;
+}
+.headphone-panel .range-label {
+  display: block;
+}
+.headphone-panel p {
+  margin-bottom: 0;
+}
+@media (max-width: 850px) {
+  .headphone-panel {
+    display: grid;
+    grid-template-columns: 1fr 1fr;
+    gap: 12px;
+  }
+  .headphone-panel > .section-title,
+  .headphone-panel > .cue-select,
+  .headphone-panel > p,
+  .headphone-panel > button,
+  .headphone-panel > label:not(.range-label) {
+    grid-column: 1 / -1;
+  }
+  .headphone-panel label {
+    margin: 0;
+  }
+}
