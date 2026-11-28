@@ -136,6 +136,8 @@ console.log(
 for (const move of moves) {
   const plan = bank.MercuryMoves.plan(move, 0.25, 120, 1),
     long = bank.MercuryMoves.plan(move, 1, 120, 1);
+  assert.equal(plan.points[0][3], 0, "round the repeat boundary reversal");
+  assert.equal(plan.points.at(-1)[3], 0);
   assert.ok(
     Math.abs(long.seconds / plan.seconds - 4) < 1e-8,
     "longer selection must stretch time, not raise pitch: " + move.name,

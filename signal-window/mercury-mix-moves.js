@@ -165,13 +165,14 @@
   // Monotone Hermite tangents round a hand's acceleration and reversal without
   // overshooting the marked sound. Gate points along one stroke stay smooth.
   function smoothPoints(points) {
+    const cyclic = points[0][1] === points[points.length - 1][1];
     const slopes = points
       .slice(0, -1)
       .map((p, i) => (points[i + 1][1] - p[1]) / (points[i + 1][0] - p[0]));
     return points.map((p, i) => {
       let tangent = 0;
-      if (i === 0) tangent = slopes[0];
-      else if (i === points.length - 1) tangent = slopes[i - 1];
+      if (i === 0) tangent = cyclic ? 0 : slopes[0];
+      else if (i === points.length - 1) tangent = cyclic ? 0 : slopes[i - 1];
       else if (slopes[i - 1] * slopes[i] > 0)
         tangent = 2 / (1 / slopes[i - 1] + 1 / slopes[i]);
       return [...p, tangent];
