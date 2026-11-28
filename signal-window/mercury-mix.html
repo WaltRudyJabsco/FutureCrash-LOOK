@@ -328,6 +328,19 @@
             ><button id="refresh">Refresh library</button>
           </div>
         </header>
+        <div id="crate-preview" class="crate-preview" hidden>
+          <div>
+            <strong id="crate-preview-title"></strong
+            ><small id="crate-preview-status" role="status"></small>
+          </div>
+          <audio
+            id="crate-preview-audio"
+            controls
+            preload="none"
+            aria-label="Record crate preview"
+          ></audio>
+          <button id="crate-preview-stop">Stop preview</button>
+        </div>
         <div class="crate-view-tools">
           <button id="crate-albums" aria-pressed="true">Albums</button
           ><button id="crate-tracks" aria-pressed="false">All tracks</button

@@ -697,6 +697,7 @@ function resample(buffer) {
   return { left, right, rate: SOURCE_RATE, duration: buffer.duration };
 }
 async function load(deck, track, file = null) {
+  crateAudition.stop();
   const serial = ++deck.serial;
   deck.abort?.abort();
   const controller = new AbortController();
@@ -1160,6 +1161,111 @@ function bindDeck(deck) {
     }
   });
 }
+// One streaming audition voice, separate from deck processing and recording.
+class CrateAudition {
+  constructor(media, update, reportError) {
+    Object.assign(this, { media, update, reportError });
+    this.track = null;
+    this.loading = false;
+    this.serial = 0;
+    media.preload = "none";
+    media.volume = 0.6;
+    media.addEventListener("playing", () => {
+      this.loading = false;
+      this.update();
+    });
+    media.addEventListener("pause", () => this.update());
+    media.addEventListener("ended", () => this.stop());
+    media.addEventListener("error", () => {
+      if (!this.track) return;
+      const title = this.track.title;
+      this.stop();
+      this.reportError(
+        "Could not preview " +
+          title +
+          ". The source may be unavailable or this browser cannot play its audio. Refresh the crate or try another copy.",
+      );
+    });
+  }
+  key(track) {
+    return JSON.stringify([track.node, track.id]);
+  }
+  active(track) {
+    return (
+      this.track &&
+      this.key(this.track) === this.key(track) &&
+      (this.loading || !this.media.paused)
+    );
+  }
+  stop() {
+    ++this.serial;
+    this.track = null;
+    this.loading = false;
+    this.media.pause();
+    this.media.removeAttribute("src");
+    this.media.load();
+    this.update();
+  }
+  async toggle(track) {
+    if (this.active(track)) {
+      this.stop();
+      return;
+    }
+    if (!this.track || this.key(this.track) !== this.key(track)) {
+      this.stop();
+      this.track = track;
+      this.media.src = track.audio_url;
+    }
+    const serial = ++this.serial;
+    this.loading = true;
+    this.update();
+    try {
+      await this.media.play();
+      if (serial !== this.serial) return;
+      this.loading = false;
+      this.update();
+    } catch (error) {
+      // Closing the crate or selecting another song cancels a pending play.
+      if (serial !== this.serial) return;
+      this.stop();
+      this.reportError("Could not start this preview: " + error.message);
+    }
+  }
+}
+const crateAudition = new CrateAudition(
+  $("crate-preview-audio"),
+  () => {
+    const track = crateAudition.track;
+    $("crate-preview").hidden = !track;
+    $("crate-preview-title").textContent = track
+      ? [track.title, track.artist].filter(Boolean).join(" · ")
+      : "";
+    $("crate-preview-status").textContent = !track
+      ? ""
+      : crateAudition.loading
+        ? "Loading preview…"
+        : crateAudition.media.paused
+          ? "Preview paused"
+          : "Preview · outside the recorded mix";
+    document.querySelectorAll("[data-crate-preview]").forEach((button) => {
+      const active =
+        track &&
+        button.dataset.cratePreview === crateAudition.key(track) &&
+        crateAudition.active(track);
+      button.textContent = active ? "Stop" : "Play";
+      button.setAttribute("aria-pressed", String(!!active));
+      button.setAttribute(
+        "aria-label",
+        (active ? "Stop" : "Play") + " preview of " + button.dataset.title,
+      );
+    });
+  },
+  (message) => {
+    $("library-status").textContent = message;
+  },
+);
+$("crate-preview-stop").onclick = () => crateAudition.stop();
+$("crate-dialog").addEventListener("close", () => crateAudition.stop());
 function openCrate() {
   clearGestures();
   if (!$("crate-dialog").open) $("crate-dialog").showModal();
@@ -1309,6 +1415,12 @@ function renderLibrary() {
       duration.textContent = D.time(Number(track.duration) || NaN);
       const buttons = document.createElement("div");
       buttons.className = "track-load";
+      const preview = document.createElement("button");
+      preview.dataset.cratePreview = crateAudition.key(track);
+      preview.dataset.title = track.title;
+      preview.className = "track-preview";
+      preview.onclick = () => crateAudition.toggle(libraryTrack(track));
+      buttons.append(preview);
       for (const i of [0, 1]) {
         const button = document.createElement("button");
         button.textContent = "Load " + (i ? "B" : "A");
@@ -1332,6 +1444,7 @@ function renderLibrary() {
       fragment.append(row);
     });
   $("tracks").replaceChildren(fragment);
+  crateAudition.update();
   $("more").textContent = "More tracks";
   $("more").hidden =
     matches.length <= libraryLimit && library.length >= libraryTotal;
@@ -2102,6 +2215,7 @@ $("open-set").onchange = (e) => {
 };
 $("record").onclick = () => toggleRecord().catch(fail);
 window.addEventListener("pagehide", (event) => {
+  crateAudition.stop();
   if (event.persisted) {
     clearGestures();
     return;

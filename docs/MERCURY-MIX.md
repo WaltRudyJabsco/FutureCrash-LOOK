@@ -189,3 +189,9 @@ Open **Trim a sample**, choose a pad, and adjust **Start / End**, then
 **Audition**. Trimming is non-destructive and saved in this browser. Running
 audio starts before the pad UI refresh; browser/device output latency still
 applies.
+
+In the record crate, **Play / Stop** auditions a track without loading either
+deck. Only one preview plays at a time. The preview strip includes seek and
+volume controls and stays available while browsing. Loading a deck, closing the
+crate, or leaving the page stops preview playback. Auditions use the browser's
+normal output and stay outside mix recordings.
