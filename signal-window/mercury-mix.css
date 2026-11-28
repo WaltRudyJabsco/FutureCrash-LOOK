@@ -2244,3 +2244,16 @@ body {
 .compact-console .record-label .label-speed {
   display: none;
 }
+
+.sample-trim label {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.4rem;
+  margin: 0.5rem;
+}
+.sample-trim input {
+  width: 7rem;
+}
+.sample-trim output {
+  min-width: 4em;
+}

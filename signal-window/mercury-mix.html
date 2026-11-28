@@ -149,10 +149,48 @@
             ><button id="stop-samples">Stop pads</button>
           </header>
           <p id="sample-status" role="status">
-            Hold an empty pad to record the selected deck. Tap to play ·
-            Shift-click to clear.
+            Hold an empty pad to record the selected deck. E R T Y U I O P to
+            play · Shift-click to clear.
           </p>
           <div id="sample-pads" class="sample-pads"></div>
+          <details class="sample-trim">
+            <summary>Trim a sample</summary>
+            <label
+              >Pad<select id="sample-trim-pad" aria-label="Pad to trim">
+                <option value="0">1 · E</option>
+                <option value="1">2 · R</option>
+                <option value="2">3 · T</option>
+                <option value="3">4 · Y</option>
+                <option value="4">5 · U</option>
+                <option value="5">6 · I</option>
+                <option value="6">7 · O</option>
+                <option value="7">8 · P</option>
+              </select></label
+            >
+            <label
+              >Start<input
+                id="sample-trim-start"
+                aria-label="Sample start"
+                type="range"
+                min="0"
+                max="8"
+                step=".001"
+                value="0"
+              /><output id="sample-trim-start-value">0.00s</output></label
+            >
+            <label
+              >End<input
+                id="sample-trim-end"
+                aria-label="Sample end"
+                type="range"
+                min="0"
+                max="8"
+                step=".001"
+                value="8"
+              /><output id="sample-trim-end-value">0.00s</output></label
+            >
+            <button id="sample-audition">Audition</button>
+          </details>
           <small>8 seconds per pad · saved in this browser</small>
         </section>
       </div>
@@ -326,8 +364,10 @@
         <dd>
           Hold an empty pad while the selected deck plays or scratches. Release
           to keep up to eight seconds; a quick tap captures a short slice. Tap a
-          loaded pad to replay it; Shift-click clears it. Pads capture that deck
-          before EQ/effects, and playback goes into the master mix and
+          loaded pad or press E R T Y U I O P for pads 1–8; Shift-click clears
+          it. Empty-pad keys do not record. Open Trim a sample to adjust Start /
+          End without losing the original recording, then Audition. Pads capture
+          that deck before EQ/effects, and playback goes into the master mix and
           recording. Samples stay in this browser, separately from saved set
           files. Stop pads stops playback and finishes any current capture.
         </dd>
@@ -356,11 +396,11 @@
         </dd>
         <dt>Scroll over a record</dt>
         <dd>
-          Briefly nudge its speed. Hold T to grab the selected platter, then
-          scroll to scratch. Physical trackpad finger zones are not exposed by
-          ordinary browsers.
+          Briefly nudge its speed. Hold Shift-T to grab the selected platter,
+          then scroll to scratch. Physical trackpad finger zones are not exposed
+          by ordinary browsers.
         </dd>
-        <dt>← / → · R · B</dt>
+        <dt>← / → · Shift-R · B</dt>
         <dd>
           Nudge the selected deck slower/faster · reverse · toggle slip. Slip
           catches up to where playback would have been after a scratch.

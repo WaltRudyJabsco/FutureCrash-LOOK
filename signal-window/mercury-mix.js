@@ -1828,6 +1828,12 @@ document.addEventListener("keydown", (e) => {
     stopMove();
     return;
   }
+  const sampleIndex = MercurySampler.keyIndex(key, e.shiftKey);
+  if (sampleIndex >= 0) {
+    e.preventDefault();
+    if (!e.repeat) pads.trigger(sampleIndex).catch(fail);
+    return;
+  }
   const move = prefs.keyboard === "moves" && MercuryMoves.byKey(key);
   if (move) {
     e.preventDefault();
@@ -1856,12 +1862,12 @@ document.addEventListener("keydown", (e) => {
   } else if (key === "backspace") {
     e.preventDefault();
     cue(deck);
-  } else if (key === "r") reverse(deck);
+  } else if (key === "r" && e.shiftKey) reverse(deck);
   else if (key === "b") slip(deck);
   else if (key === "arrowleft" || key === "arrowright") {
     e.preventDefault();
     bend(deck, key === "arrowleft" ? 0.96 : 1.04);
-  } else if (key === "t") {
+  } else if (key === "t" && e.shiftKey) {
     e.preventDefault();
     tHeld = true;
     grab(deck, true);
@@ -1895,6 +1901,7 @@ document.querySelectorAll(".file-button").forEach((label) =>
 );
 for (const deck of decks) bindDeck(deck);
 pads = new MercurySampler({
+  context: () => (audio.ready && audio.master ? audio.ctx : null),
   ensure: () => audio.ensure(),
   selected: () => selected,
   decks,

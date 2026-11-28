@@ -21,9 +21,9 @@ reverse the fader. Platter hand and fader hand are independent.
 - **Space:** play or pause that deck.
 - **Backspace:** pause and return to the main cue.
 - **← / →:** momentarily nudge the selected deck slower / faster.
-- **R:** reverse; **B:** slip mode.
+- **Shift-R:** reverse; **B:** slip mode.
 - Drag a record to scratch. Touchscreens support independent pointers on both
-  records. Scroll over a record to nudge; hold **T** while scrolling to scratch.
+  records. Scroll over a record to nudge; hold **Shift-T** while scrolling to scratch.
 - Drag the overview waveform to seek. Set hot cues with the four cue buttons;
   Shift-click a cue to clear it.
 
@@ -167,7 +167,10 @@ tracks. Search by artist or album, open an album, and load a track onto A or B.
 cover placeholder; sources and files remain in their existing locations.
 
 For the sampler, play or scratch the selected deck and **hold an empty pad**.
-Release to keep the captured slice, up to eight seconds. A quick tap captures
+Release to keep the captured slice, up to eight seconds. **E R T Y U I O P**
+triggers pads 1–8 in both keyboard modes, independently of scratch and fader
+keys. Holding a playback key does not repeatedly fire it; tap again to
+retrigger. Empty-pad keys give a prompt and never start recording. A quick tap captures
 a short minimum slice. Tap a loaded pad to replay it; hitting it again retriggers
 that pad. **Shift-click** clears a pad. On touchscreens, tap **Erase pad**, then
 the pad to clear. **Stop pads** stops sample playback and finishes any capture.
@@ -181,3 +184,8 @@ Samples persist locally in this browser’s IndexedDB, separately from set JSON;
 they are not uploaded or synchronized to other browsers. If local saving is
 unavailable, the interface reports session-only storage. Clearing a pad removes
 its local sample. Set files continue to save deck references and controls.
+
+Open **Trim a sample**, choose a pad, and adjust **Start / End**, then
+**Audition**. Trimming is non-destructive and saved in this browser. Running
+audio starts before the pad UI refresh; browser/device output latency still
+applies.
