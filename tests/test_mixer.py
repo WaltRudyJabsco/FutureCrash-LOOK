@@ -29,7 +29,7 @@ def test_asset_paths_are_allowlisted_and_all_assets_exist():
 
 
 @pytest.mark.parametrize('surface',['signal-window','albert'])
-@pytest.mark.parametrize('path',['/mix','/mix/assets/mercury-mix-worklet.js','/api/mix/library'])
+@pytest.mark.parametrize('path',['/mix','/mix/assets/mercury-mix-worklet.js','/api/mix/library','/api/mix/cover'])
 def test_every_mixer_route_requires_the_existing_endpoint_authorization(surface,path,monkeypatch):
     spec=importlib.util.spec_from_file_location('mix_host_'+surface,ROOT/surface/'server.py');server=importlib.util.module_from_spec(spec);spec.loader.exec_module(server)
     handler=(server.App if surface=='signal-window' else server.Handler).__new__(server.App if surface=='signal-window' else server.Handler)
@@ -104,3 +104,27 @@ def test_installer_audio_assets_are_individual_existing_source_arguments():
         for source in sources:
             path=Path(source.replace('$'+variable,str(ROOT/surface)))
             assert path.is_file(),source
+
+
+def test_album_crate_pages_albums_across_the_full_catalog():
+    rows=[{'id':str(i),'node':'owner','path':'/music/'+str(i)+'.mp3','artist':'A','album':'Long album'} for i in range(240)]
+    rows.append({'id':'later','node':'owner','path':'/music/later.mp3','artist':'Z','album':'Later record'})
+    result=mixer_web.catalog({'entries':rows},view='albums')
+    assert result['total']==2
+    assert result['entries'][0]['album_tracks']==240
+    assert any(row['album']=='Later record' for row in result['entries'])
+    assert mixer_web.catalog({'entries':rows},query='Long album')['total']==240
+
+
+def test_cover_gateway_uses_the_owning_node_and_bounds_image_types(monkeypatch):
+    handler=Mock();handler.path='/api/mix/cover?node=owner&id=track';handler.wfile=io.BytesIO()
+    response=io.BytesIO(b'cover');response.headers={'Content-Type':'image/jpeg'}
+    called=[]
+    def request(url,**kwargs):called.append(url);return response
+    monkeypatch.setattr(mixer_web.urllib.request,'urlopen',request)
+    mixer_web.handle(handler,'http://test-node')
+    assert called==['http://test-node/v1/media/cover?node=owner&id=track']
+    assert handler.wfile.getvalue()==b'cover'
+    invalid=io.BytesIO(b'<html>');invalid.headers={'Content-Type':'text/html'}
+    monkeypatch.setattr(mixer_web.urllib.request,'urlopen',lambda *a,**k:invalid)
+    with pytest.raises(ValueError):mixer_web.handle(handler,'http://test-node')

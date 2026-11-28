@@ -151,3 +151,33 @@ prevent a held note from getting stuck.
 
 **Keyboard mode → Manual fader** restores ASDF / JKL; crossfader playing.
 The on-screen scratch pads remain playable in either keyboard mode.
+
+## Compact console, record crate and sample pads
+
+The main surface keeps smaller working records, transport, scratch moves,
+eight sample pads and a fixed crossfader together. Open a deck’s **Grid · cues ·
+loops · effects** to adjust its advanced controls. **Mixer / headphones** opens
+output, cue monitoring and fader preferences; **Controls** holds the detailed
+explanations. Records still rotate and support direct dragging.
+
+**Record crate** opens an album-cover picker. It groups albums across the full
+available catalog before paging, rather than taking only the first page of
+tracks. Search by artist or album, open an album, and load a track onto A or B.
+**All tracks** keeps a conventional song search. Missing artwork has a readable
+cover placeholder; sources and files remain in their existing locations.
+
+For the sampler, play or scratch the selected deck and **hold an empty pad**.
+Release to keep the captured slice, up to eight seconds. A quick tap captures
+a short minimum slice. Tap a loaded pad to replay it; hitting it again retriggers
+that pad. **Shift-click** clears a pad. On touchscreens, tap **Erase pad**, then
+the pad to clear. **Stop pads** stops sample playback and finishes any capture.
+
+Pads capture the selected deck before EQ/effects and independently of the
+crossfader. Their playback goes into the master output and mix recording,
+with a separate Pad level control. They do not record the microphone or include
+other sample pads. Silent captures leave the pad empty with an explanation.
+
+Samples persist locally in this browser’s IndexedDB, separately from set JSON;
+they are not uploaded or synchronized to other browsers. If local saving is
+unavailable, the interface reports session-only storage. Clearing a pad removes
+its local sample. Set files continue to save deck references and controls.

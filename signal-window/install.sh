@@ -5,7 +5,7 @@ INSTALL_DIR="$HOME/.local/share/signal-window"
 mkdir -p "$INSTALL_DIR"
 install -m 0644 "$SOURCE_DIR/index.html" "$SOURCE_DIR/style.css" "$SOURCE_DIR/app.js" "$SOURCE_DIR/media-session.js" "$SOURCE_DIR/media-art.js" "$SOURCE_DIR/browser-views.js" "$SOURCE_DIR/fabric.html" "$SOURCE_DIR/fabric-dashboard.js" "$INSTALL_DIR/"
 install -m 0755 "$SOURCE_DIR/server.py" "$INSTALL_DIR/server.py"
-install -m 0644 "$SOURCE_DIR/mercury-mix.html" "$SOURCE_DIR/mercury-mix.css" "$SOURCE_DIR/mercury-mix.js" "$SOURCE_DIR/mercury-mix-dsp.js" "$SOURCE_DIR/mercury-mix-worklet.js" "$SOURCE_DIR/mercury-mix-monitor.js" "$SOURCE_DIR/mercury-mix-moves.js" "$INSTALL_DIR/"
+install -m 0644 "$SOURCE_DIR/mercury-mix.html" "$SOURCE_DIR/mercury-mix.css" "$SOURCE_DIR/mercury-mix.js" "$SOURCE_DIR/mercury-mix-dsp.js" "$SOURCE_DIR/mercury-mix-worklet.js" "$SOURCE_DIR/mercury-mix-monitor.js" "$SOURCE_DIR/mercury-mix-moves.js" "$SOURCE_DIR/mercury-mix-sampler.js" "$INSTALL_DIR/"
 OS="$(uname -s)"
 if [[ "$OS" == "Linux" ]] && command -v systemctl >/dev/null 2>&1; then
   UNIT_DIR="$HOME/.config/systemd/user"; mkdir -p "$UNIT_DIR"
