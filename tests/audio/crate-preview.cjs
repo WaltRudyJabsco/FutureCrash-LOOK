@@ -92,6 +92,85 @@ class Media {
   assert.equal(media.src, undefined);
   assert.equal(media.preload, "none");
   assert.ok(updates > 0);
+  // A selected headphones sink is applied before sound starts, without
+  // touching any deck/master graph. The existing chooser owns authorization.
+  const routedMedia = new Media(),
+    routes = [],
+    plays = [];
+  routedMedia.sinkId = "";
+  routedMedia.setSinkId = async (id) => {
+    routes.push(id);
+    routedMedia.sinkId = id;
+  };
+  routedMedia.play = async () => {
+    routedMedia.paused = false;
+    plays.push(routedMedia.sinkId);
+  };
+  let target = "headphones",
+    routeErrors = [];
+  const routed = new scope.Audition(
+    routedMedia,
+    () => {},
+    (message) => routeErrors.push(message),
+    () => target,
+  );
+  await routed.toggle(a);
+  assert.deepEqual(
+    plays,
+    ["headphones"],
+    "route headphones before preview starts",
+  );
+  assert.equal(routed.outputName, "headphones");
+  target = "";
+  await routed.routeOutput();
+  assert.equal(
+    routedMedia.sinkId,
+    "",
+    "return a playing preview to normal output",
+  );
+  assert.equal(
+    routedMedia.paused,
+    false,
+    "changing output does not stop preview playback",
+  );
+  assert.equal(plays.length, 1, "changing output must not restart playback");
+  assert.deepEqual(routes, ["headphones", ""]);
+  routed.stop();
+  target = "missing";
+  routedMedia.setSinkId = async () => {
+    throw Error("device disconnected");
+  };
+  await routed.toggle(a);
+  assert.equal(routed.track, null);
+  assert.equal(
+    plays.length,
+    1,
+    "an unavailable selected device must not spill preview onto speakers",
+  );
+  assert.match(routeErrors[0], /device disconnected/);
+  const delayed = new Media();
+  delayed.sinkId = "";
+  let finishRoute;
+  delayed.setSinkId = () =>
+    new Promise((resolve) => {
+      finishRoute = resolve;
+    });
+  const cancelledRoute = new scope.Audition(
+    delayed,
+    () => {},
+    () => {},
+    () => "headphones",
+  );
+  const pendingRoute = cancelledRoute.toggle(a);
+  while (!finishRoute) await Promise.resolve();
+  cancelledRoute.stop();
+  finishRoute();
+  await pendingRoute;
+  assert.equal(
+    delayed.pending.length,
+    0,
+    "closing during output setup must not start audio later",
+  );
   console.log(
     "Crate preview: one voice, switch/stop, stale promise protection, error reporting, ended cleanup and streaming passed",
   );
