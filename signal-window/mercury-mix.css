@@ -1714,3 +1714,16 @@ body {
   white-space: normal;
   overflow-wrap: anywhere;
 }
+.scratch-pace {
+  display: grid;
+  gap: 5px;
+  min-width: 160px;
+}
+.scratch-pace input {
+  width: 160px;
+  max-width: 100%;
+}
+.scratch-pace output {
+  color: var(--muted);
+  font-size: 0.75rem;
+}

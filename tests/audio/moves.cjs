@@ -133,3 +133,51 @@ assert.equal(deck.gesture, null);
 console.log(
   "12 distinct cue-based PCM moves; timed finish, hold/release, stale keys, timeline restoration, validation and track-end bounds passed",
 );
+for (const move of moves) {
+  const plan = bank.MercuryMoves.plan(move, 0.25, 120, 1),
+    long = bank.MercuryMoves.plan(move, 1, 120, 1);
+  assert.equal(plan.points[0][3], 0, "round the repeat boundary reversal");
+  assert.equal(plan.points.at(-1)[3], 0);
+  assert.ok(
+    Math.abs(long.seconds / plan.seconds - 4) < 1e-8,
+    "longer selection must stretch time, not raise pitch: " + move.name,
+  );
+  assert.ok(
+    (bank.MercuryMoves.peakRate(plan.points) * plan.span) / plan.seconds <=
+      1.25 + 1e-8,
+  );
+  assert.ok(
+    bank.MercuryMoves.plan(move, 0.25, 120, 0.5).seconds > plan.seconds,
+  );
+  assert.ok(
+    bank.MercuryMoves.plan(move, 0.25, 120, 1.5).seconds < plan.seconds,
+  );
+  const slow = new Deck();
+  slow.port.onmessage({
+    data: { type: "load", left: pcm, right: pcm, rate: 48000 },
+  });
+  slow.port.onmessage({
+    data: { type: "gesture", token: 100, cue: 0.2, ...plan },
+  });
+  assert.ok(slow.gesture, "worklet accepts smooth motion plan");
+  slow.port.onmessage({ data: { type: "gesture-release", token: 100 } });
+  let previous = null,
+    maxSpeed = 0;
+  for (let frame = 0; frame < Math.ceil(plan.seconds * 48000); frame++) {
+    const out = [[new Float32Array(1), new Float32Array(1)]];
+    slow.process([], out);
+    if (
+      slow.gesture &&
+      previous !== null &&
+      slow.gesture.points[slow.gesture.segment][2] > 0
+    )
+      maxSpeed = Math.max(maxSpeed, Math.abs(slow.pos - previous));
+    previous = slow.pos;
+    assert.ok(Number.isFinite(out[0][0][0]));
+  }
+  assert.ok(slow.gesture === null || slow.gesture.age <= 1);
+  assert.ok(maxSpeed <= 1.26, "audible physical scratch speed stays bounded");
+}
+console.log(
+  "All 12 smooth plans preserve speed across selection lengths and respect independent pace",
+);

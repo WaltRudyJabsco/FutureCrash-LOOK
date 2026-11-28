@@ -1,4 +1,5 @@
 /* Stereo varispeed deck. No DOM, network, or allocations in the sample loop. */
+const MAX_GESTURE_SECONDS = 30;
 class MercuryDeck extends AudioWorkletProcessor {
   constructor() {
     super();
@@ -100,7 +101,7 @@ class MercuryDeck extends AudioWorkletProcessor {
       !Number.isFinite(m.span) ||
       !Number.isFinite(m.seconds) ||
       m.seconds < 0.1 ||
-      m.seconds > 8 ||
+      m.seconds > MAX_GESTURE_SECONDS ||
       m.span <= 0 ||
       m.span > 2
     )
@@ -109,7 +110,7 @@ class MercuryDeck extends AudioWorkletProcessor {
       m.points.some(
         (p, i) =>
           !Array.isArray(p) ||
-          p.length !== 3 ||
+          ![3, 4].includes(p.length) ||
           p.some((v) => !Number.isFinite(v)) ||
           p[0] < 0 ||
           p[0] > 1 ||
@@ -117,6 +118,7 @@ class MercuryDeck extends AudioWorkletProcessor {
           p[1] > 1 ||
           p[2] < 0 ||
           p[2] > 1 ||
+          (p.length === 4 && Math.abs(p[3]) > 1000) ||
           (i && p[0] <= m.points[i - 1][0]),
       )
     )
@@ -185,7 +187,19 @@ class MercuryDeck extends AudioWorkletProcessor {
         const from = g.points[g.segment],
           to = g.points[g.segment + 1];
         const fraction = (phase - from[0]) / (to[0] - from[0]);
-        this.pos = g.cue + g.span * (from[1] + (to[1] - from[1]) * fraction);
+        let position = from[1] + (to[1] - from[1]) * fraction;
+        if (from.length === 4 && to.length === 4) {
+          const u = fraction,
+            u2 = u * u,
+            u3 = u2 * u,
+            h = to[0] - from[0];
+          position =
+            (2 * u3 - 3 * u2 + 1) * from[1] +
+            (u3 - 2 * u2 + u) * h * from[3] +
+            (-2 * u3 + 3 * u2) * to[1] +
+            (u3 - u2) * h * to[3];
+        }
+        this.pos = g.cue + g.span * Math.max(0, Math.min(1, position));
         // A stationary record is silent; a short gate ramp avoids digital clicks.
         const gate = from[1] === to[1] ? 0 : from[2];
         this.gestureGate +=
