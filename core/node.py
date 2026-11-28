@@ -2902,6 +2902,16 @@ def _local_media_catalog_stamp():
         try:
             stat=path.stat();stamp.append((str(path),stat.st_mtime_ns,stat.st_size))
         except OSError:stamp.append((str(path),None))
+    # Revisions must notice detached/reconnected storage even when the saved
+    # catalog did not change. Only stat published roots; never parse the catalog
+    # or walk its files on this cheap revision endpoint.
+    published = LOCAL_MEDIA_CATALOG_CACHE.get('data') or {}
+    for root in sorted(set(str(x) for x in published.get('roots', []) if x)):
+        try:
+            info = Path(root).expanduser().stat()
+            stamp.append(('source-root', root, info.st_dev, info.st_ino, info.st_mtime_ns))
+        except OSError:
+            stamp.append(('source-root', root, None))
     return stamp
 
 
@@ -2940,13 +2950,16 @@ def _build_local_media_catalog():
         row = dict(raw)
         row["id"] = str(row.get("id") or _media_catalog_id(row["path"]))
         row["node"] = node
+        # Keep saved discoveries, but do not advertise missing files as loadable.
+        row["source_available"] = Path(str(row["path"])).expanduser().is_file()
         row["fabric_hidden_by"] = _media_owner_hidden(str(row["path"]), visibility)
         row["identified"] = bool(str(row.get("digest") or "").startswith("sha256:"))
         rows.append(row)
     return {
         "schema": "fabric-media-catalog-v1",
         "node": node,
-        "roots": [str(x) for x in (library.get("roots") or [])],
+        "roots": sorted({str(x) for x in (library.get("roots") or []) if x} |
+                        {str(row["root"]) for row in rows if row.get("root")}),
         "updated": float(library.get("updated") or 0.0),
         "entries": rows,
         "count": len(rows),

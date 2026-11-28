@@ -21,7 +21,7 @@ def catalog(data,query="",offset=0,view="tracks"):
     query=query.casefold()
     rows=[];seen=set()
     for row in data.get('entries',[]):
-        if not isinstance(row,dict) or row.get('offline') or row.get('fabric_hidden_by'):continue
+        if not isinstance(row,dict) or row.get('offline') or row.get('fabric_hidden_by') or row.get('source_available') is False:continue
         if str(row.get('media_type','')).lower().startswith('video'):continue
         if Path(str(row.get('path',''))).suffix.lower() not in AUDIO_EXTENSIONS:continue
         ident=str(row.get('id') or '');node=str(row.get('node') or '')

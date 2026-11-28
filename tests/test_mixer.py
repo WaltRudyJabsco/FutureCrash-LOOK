@@ -128,3 +128,12 @@ def test_cover_gateway_uses_the_owning_node_and_bounds_image_types(monkeypatch):
     invalid=io.BytesIO(b'<html>');invalid.headers={'Content-Type':'text/html'}
     monkeypatch.setattr(mixer_web.urllib.request,'urlopen',lambda *a,**k:invalid)
     with pytest.raises(ValueError):mixer_web.handle(handler,'http://test-node')
+
+
+def test_crate_excludes_unavailable_sources_without_guessing_remote_paths():
+    data={'entries':[
+        {'id':'gone','node':'owner','path':'/drive/gone.mp3','source_available':False},
+        {'id':'present','node':'owner','path':'/drive/present.mp3','source_available':True},
+        {'id':'older-node','node':'older','path':'/other/path.mp3'},
+    ]}
+    assert {row['id'] for row in mixer_web.catalog(data)['entries']}=={'present','older-node'}
