@@ -295,7 +295,7 @@ function updateGain() {
   decks.forEach((deck, i) => {
     audio.smooth(
       deck.nodes?.gain.gain,
-      (deck.performing ? 1 : gains[i]) *
+      (deck.performing && !activeMove?.manualFader ? 1 : gains[i]) *
         Number(deck.ui?.querySelector(".volume").value || 1),
     );
   });
@@ -316,11 +316,7 @@ function applyPrefs() {
   $("hamster").checked = prefs.hamster;
   document.body.dataset.theme = prefs.theme;
   $("key-hint").textContent =
-    prefs.keyboard === "moves"
-      ? "SCRATCH MOVES · A–; / Q W"
-      : prefs.hand === "left"
-        ? "A · S · D · F"
-        : "J · K · L · ;";
+    prefs.hand === "left" ? "Z · X · C · V" : "M · , · . · /";
   $("theme").textContent =
     prefs.theme === "paper"
       ? "Switch to night finish"
@@ -1645,6 +1641,7 @@ async function startMove(move, key) {
     token: ++moveSerial,
     deck,
     released: false,
+    manualFader: held.size > 0,
   };
   activeMove = current;
   renderMoves();
@@ -1826,7 +1823,7 @@ function typing(target) {
 document.addEventListener("keydown", (e) => {
   if (e.ctrlKey || e.metaKey || e.altKey || typing(e.target)) return;
   const key = e.key.toLowerCase(),
-    bank = prefs.hand === "left" ? ["a", "s", "d", "f"] : ["j", "k", "l", ";"];
+    bank = D.faderBank(prefs.hand);
   if (key === "escape") {
     stopMove();
     return;
@@ -1837,10 +1834,15 @@ document.addEventListener("keydown", (e) => {
     if (!e.repeat) startMove(move, key);
     return;
   }
-  if (prefs.keyboard === "fader" && bank.includes(key)) {
+  if (bank.includes(key)) {
     e.preventDefault();
+    if (activeMove) activeMove.manualFader = true;
     held.add(key);
     faderKeys();
+    return;
+  }
+  if ([...D.faderBank("left"), ...D.faderBank("right")].includes(key)) {
+    e.preventDefault();
     return;
   }
   if (e.repeat) return;
@@ -1851,14 +1853,14 @@ document.addEventListener("keydown", (e) => {
   } else if (key === " " && !e.target.closest("button")) {
     e.preventDefault();
     play(deck).catch(fail);
-  } else if (key === "c") {
+  } else if (key === "backspace") {
     e.preventDefault();
     cue(deck);
   } else if (key === "r") reverse(deck);
-  else if (key === "v") slip(deck);
-  else if (key === "z" || key === "x") {
+  else if (key === "b") slip(deck);
+  else if (key === "arrowleft" || key === "arrowright") {
     e.preventDefault();
-    bend(deck, key === "z" ? 0.96 : 1.04);
+    bend(deck, key === "arrowleft" ? 0.96 : 1.04);
   } else if (key === "t") {
     e.preventDefault();
     tHeld = true;
@@ -1875,7 +1877,8 @@ document.addEventListener("keyup", (e) => {
       if (d.grabbed) grab(d, false);
     });
   }
-  if (key === "z" || key === "x") decks.forEach((d) => bend(d, 1));
+  if (key === "arrowleft" || key === "arrowright")
+    decks.forEach((d) => bend(d, 1));
 });
 window.addEventListener("blur", () => {
   clearGestures();
@@ -2012,6 +2015,7 @@ $("theme").onclick = () => {
   applyPrefs();
 };
 $("crossfader").oninput = (e) => {
+  if (activeMove) activeMove.manualFader = true;
   crossfade = Number(e.target.value);
   updateGain();
 };

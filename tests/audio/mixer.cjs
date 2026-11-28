@@ -15,9 +15,9 @@ assert.ok(dsp.fader(1)[0] < 1e-10);
 assert.ok(
   Math.abs(dsp.fader(0.5)[0] ** 2 + dsp.fader(0.5)[1] ** 2 - 1) < 1e-10,
 );
-assert.equal(dsp.keyPosition(new Set(["a", "s"]), "left"), 1 / 6);
-assert.equal(dsp.keyPosition(new Set(["j", "k"]), "right"), 1 / 6);
-assert.equal(dsp.keyPosition(new Set(["j"]), "left"), null);
+assert.equal(dsp.keyPosition(new Set(["z", "x"]), "left"), 1 / 6);
+assert.equal(dsp.keyPosition(new Set(["m", ","]), "right"), 1 / 6);
+assert.equal(dsp.keyPosition(new Set(["m"]), "left"), null);
 assert.ok(dsp.fader(0, "cut", true)[0] === 0);
 assert.equal(dsp.wrap(-1, 0, 4), 3);
 for (const index of [0, 1]) {
@@ -129,3 +129,11 @@ assert.ok(impulse[0].every(Number.isFinite));
 assert.ok(impulse[0].slice(-100).every((v) => Math.abs(v) < 0.00001));
 assert.ok(impulse[0].some((v, i) => v !== impulse[1][i]));
 console.log("Spring-return fader and bounded stereo reverb passed");
+
+assert.equal(dsp.keyPosition(new Set(["v"]), "left"), 1);
+assert.equal(dsp.keyPosition(new Set(["/"]), "right"), 1);
+assert.equal(
+  dsp.keyPosition(new Set(["a", "s", "d", "f"]), "left"),
+  null,
+  "scratch keys cannot move the fader",
+);

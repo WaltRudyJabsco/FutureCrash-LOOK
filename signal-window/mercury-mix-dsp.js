@@ -8,8 +8,11 @@
       ? [clamp((1 - x) / 0.09, 0, 1), clamp(x / 0.09, 0, 1)]
       : [Math.cos((x * Math.PI) / 2), Math.sin((x * Math.PI) / 2)];
   }
+  function faderBank(hand) {
+    return hand === "right" ? ["m", ",", ".", "/"] : ["z", "x", "c", "v"];
+  }
   function keyPosition(held, hand) {
-    const keys = hand === "right" ? ["j", "k", "l", ";"] : ["a", "s", "d", "f"];
+    const keys = faderBank(hand);
     const values = keys
       .map((key, i) => (held.has(key) ? i / 3 : null))
       .filter((v) => v !== null);
@@ -171,6 +174,7 @@
     clamp,
     fader,
     keyPosition,
+    faderBank,
     wrap,
     time,
     peaks,

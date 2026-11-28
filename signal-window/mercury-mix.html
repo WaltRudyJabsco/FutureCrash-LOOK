@@ -74,7 +74,7 @@
         </div>
         <div class="fader-center">
           <div class="fader-caption">
-            <strong>CROSSFADER</strong><span id="key-hint">A · S · D · F</span>
+            <strong>CROSSFADER</strong><span id="key-hint">Z · X · C · V</span>
           </div>
           <input
             id="crossfader"
@@ -243,8 +243,8 @@
         <div class="section-title">PLAYING STANCE</div>
         <label
           >Fader hand<select id="hand">
-            <option value="left">Left · A S D F</option>
-            <option value="right">Right · J K L ;</option>
+            <option value="left">Left · Z X C V</option>
+            <option value="right">Right · M , . /</option>
           </select></label
         ><label
           >Fader curve<select id="curve">
@@ -262,9 +262,10 @@
           ><input id="hamster" type="checkbox" />Reverse crossfader</label
         >
         <p class="micro">
-          In Manual fader mode, either hand can work either platter. The keys
-          move the shared fader. “Return to A”: hold F (or ;) for B, release for
-          A. Overlapping keys blend; no keys return to your chosen deck.
+          In either keyboard mode, either hand can work either platter. The
+          lower-row keys move the shared fader. “Return to A”: hold V (or /) for
+          B, release for A. Overlapping keys blend; no keys return to your
+          chosen deck.
         </p>
       </aside>
     </dialog>
@@ -339,12 +340,14 @@
           scratch techniques, not a claim to reproduce a human turntablist’s
           articulation.
         </dd>
-        <dt>Manual fader mode · A S D F / J K L ;</dt>
+        <dt>Crossfader in both modes · Z X C V / M , . /</dt>
         <dd>
           Four fader positions. Roll across adjacent keys to sweep; overlapping
-          keys blend their positions.
+          keys blend their positions. These keys remain active while playing
+          scratch moves. Touching the fader gives you manual control of the
+          active move.
         </dd>
-        <dt>1 / 2 · Space · C</dt>
+        <dt>1 / 2 · Space · Backspace</dt>
         <dd>Select a deck · play/pause · return to the cue point.</dd>
         <dt>Drag the record</dt>
         <dd>
@@ -357,7 +360,7 @@
           scroll to scratch. Physical trackpad finger zones are not exposed by
           ordinary browsers.
         </dd>
-        <dt>Z / X · R · V</dt>
+        <dt>← / → · R · B</dt>
         <dd>
           Nudge the selected deck slower/faster · reverse · toggle slip. Slip
           catches up to where playback would have been after a scratch.
@@ -409,7 +412,8 @@
         Moves use the selected track’s real audio at its marked cue, with timed
         record motion and cuts. They add that deck over the current mix while
         held; releasing finishes the phrase and restores your fader. Tempo
-        starts from the other playing deck. Manual fader mode keeps ASDF / JKL;.
+        starts from the other playing deck. ZXCV / M , . / controls the fader in
+        either mode.
       </p>
       <button id="theme" type="button">Switch to paper finish</button>
     </dialog>
