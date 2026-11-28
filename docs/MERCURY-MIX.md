@@ -193,5 +193,8 @@ applies.
 In the record crate, **Play / Stop** auditions a track without loading either
 deck. Only one preview plays at a time. The preview strip includes seek and
 volume controls and stays available while browsing. Loading a deck, closing the
-crate, or leaving the page stops preview playback. Auditions use the browser's
-normal output and stay outside mix recordings.
+crate, or leaving the page stops preview playback. Auditions use the selected separate headphones output when enabled under
+**Mixer / headphones**; otherwise they use the browser's normal output.
+Changing that choice also moves a playing preview, without rerouting the main
+mix. Auditions stay outside mix recordings. Browsers without separate output
+selection retain the normal-output preview.

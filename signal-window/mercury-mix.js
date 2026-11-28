@@ -1163,8 +1163,9 @@ function bindDeck(deck) {
 }
 // One streaming audition voice, separate from deck processing and recording.
 class CrateAudition {
-  constructor(media, update, reportError) {
-    Object.assign(this, { media, update, reportError });
+  constructor(media, update, reportError, destination = () => "") {
+    Object.assign(this, { media, update, reportError, destination });
+    this.outputName = "normal output";
     this.track = null;
     this.loading = false;
     this.serial = 0;
@@ -1186,6 +1187,27 @@ class CrateAudition {
           ". The source may be unavailable or this browser cannot play its audio. Refresh the crate or try another copy.",
       );
     });
+  }
+  routeOutput() {
+    // Use the already-authorized headphones device; no second chooser or bus.
+    const apply = async () => {
+      const sink = this.destination();
+      if (sink && typeof this.media.setSinkId !== "function")
+        throw new Error(
+          "This browser cannot route the crate preview to headphones.",
+        );
+      if (
+        typeof this.media.setSinkId === "function" &&
+        this.media.sinkId !== sink
+      )
+        await this.media.setSinkId(sink);
+      this.outputName = sink ? "headphones" : "normal output";
+      this.update();
+    };
+    this.routing = (this.routing || Promise.resolve())
+      .catch(() => {})
+      .then(apply);
+    return this.routing;
   }
   key(track) {
     return JSON.stringify([track.node, track.id]);
@@ -1220,6 +1242,11 @@ class CrateAudition {
     this.loading = true;
     this.update();
     try {
+      const sink = this.destination();
+      if ((this.media.sinkId || "") !== sink) {
+        await this.routeOutput();
+        if (serial !== this.serial) return;
+      }
       await this.media.play();
       if (serial !== this.serial) return;
       this.loading = false;
@@ -1246,7 +1273,9 @@ const crateAudition = new CrateAudition(
         ? "Loading preview…"
         : crateAudition.media.paused
           ? "Preview paused"
-          : "Preview · outside the recorded mix";
+          : "Preview · " +
+            crateAudition.outputName +
+            " · outside the recorded mix";
     document.querySelectorAll("[data-crate-preview]").forEach((button) => {
       const active =
         track &&
@@ -1263,7 +1292,23 @@ const crateAudition = new CrateAudition(
   (message) => {
     $("library-status").textContent = message;
   },
+  () =>
+    audio.headphones?.mode === "separate"
+      ? audio.headphones.player.sinkId || ""
+      : "",
 );
+async function syncCratePreviewOutput() {
+  try {
+    await crateAudition.routeOutput();
+  } catch (error) {
+    crateAudition.stop();
+    status(
+      "Crate preview output unavailable. Choose headphones again or use normal output. " +
+        error.message,
+      true,
+    );
+  }
+}
 $("crate-preview-stop").onclick = () => crateAudition.stop();
 $("crate-dialog").addEventListener("close", () => crateAudition.stop());
 function openCrate() {
@@ -2113,6 +2158,7 @@ $("cue-route").onchange = async () => {
     $("cue-route").value = "off";
     fail(error);
   }
+  await syncCratePreviewOutput();
 };
 $("choose-headphones").onclick = async () => {
   try {
@@ -2122,6 +2168,7 @@ $("choose-headphones").onclick = async () => {
     await audio.headphones.separate(device, muted);
     $("cue-route").querySelector('[value="separate"]').disabled = false;
     $("cue-route").value = "separate";
+    await syncCratePreviewOutput();
     $("cue-status").textContent =
       "Cue output: " +
       (device.label || "Selected device") +
