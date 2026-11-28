@@ -12,9 +12,10 @@
     <script src="/mix/assets/mercury-mix-dsp.js" defer></script>
     <script src="/mix/assets/mercury-mix-monitor.js" defer></script>
     <script src="/mix/assets/mercury-mix-moves.js" defer></script>
+    <script src="/mix/assets/mercury-mix-sampler.js" defer></script>
     <script src="/mix/assets/mercury-mix.js" defer></script>
   </head>
-  <body>
+  <body class="compact-console">
     <header class="masthead">
       <a class="wordmark" href="/mix" aria-label="Mercury Mix home"
         ><span class="orbit">◎</span
@@ -25,7 +26,9 @@
       <nav>
         <button id="audio" class="audio-button">Enable audio</button
         ><button id="demo">Demo set</button
-        ><button id="moves-shortcut">Scratch moves ↓</button
+        ><button id="library-open">Record crate</button
+        ><button id="mixer-open">Mixer / headphones</button
+        ><button id="moves-shortcut">Pads ↓</button
         ><button id="controls">Controls</button
         ><button id="fullscreen" aria-label="Toggle full screen">
           Full screen</button
@@ -62,107 +65,7 @@
           id="deck-a"
           aria-label="Deck A"
         ></section>
-        <aside class="mixer">
-          <div class="section-title">THE MIXER <span>STEREO</span></div>
-          <div class="master-display">
-            <canvas
-              id="master-meter"
-              width="220"
-              height="70"
-              aria-label="Master audio level"
-            ></canvas>
-            <div>
-              <strong id="master-db">−∞</strong><small>MASTER · dBFS</small>
-            </div>
-          </div>
-          <label class="range-label"
-            >Master output
-            <input
-              id="master"
-              type="range"
-              min="0"
-              max="1"
-              step=".01"
-              value=".8" /></label
-          ><button id="mute" class="wide">Mute output</button>
-          <div class="mixer-rule"></div>
-          <section class="headphone-panel" aria-label="Headphones and preview">
-            <div class="section-title">HEADPHONES / PREVIEW</div>
-            <div class="cue-select">
-              <button id="listen-a" aria-pressed="false">Listen A</button
-              ><button id="listen-b" aria-pressed="false">Listen B</button>
-            </div>
-            <label class="range-label"
-              >Cue → main mix<input
-                id="cue-blend"
-                type="range"
-                min="0"
-                max="1"
-                step=".01"
-                value="0"
-            /></label>
-            <label class="range-label"
-              >Headphone level<input
-                id="cue-level"
-                type="range"
-                min="0"
-                max="1"
-                step=".01"
-                value=".5"
-            /></label>
-            <label
-              >Listen through<select id="cue-route">
-                <option value="off">Main output only</option>
-                <option value="preview">Preview here (replaces main)</option>
-                <option value="split">Split cable: main L / cue R</option>
-                <option value="separate" disabled>
-                  Selected headphones device
-                </option>
-              </select></label
-            >
-            <button id="choose-headphones" class="wide">
-              Choose headphones output…
-            </button>
-            <p class="micro" id="cue-status" role="status">
-              Select a deck to hear it before the crossfader. Private cue needs
-              a separate output device or split cable.
-            </p>
-          </section>
-          <div class="mixer-rule"></div>
-          <div class="section-title">IN THE POCKET</div>
-          <p>
-            Sync matches vinyl speed.<br />Tap a tempo. Set your first beat.<br />Use
-            your ears for the rest.
-          </p>
-          <button id="sync-all" class="wide">Match B to A</button>
-          <div class="mixer-rule"></div>
-          <div class="section-title">PLAYING STANCE</div>
-          <label
-            >Fader hand<select id="hand">
-              <option value="left">Left · A S D F</option>
-              <option value="right">Right · J K L ;</option>
-            </select></label
-          ><label
-            >Fader curve<select id="curve">
-              <option value="smooth">Smooth blend</option>
-              <option value="cut">Sharp cut</option>
-            </select></label
-          ><label
-            >On key release<select id="release">
-              <option value="latch">Stay where I leave it</option>
-              <option value="cut">Silence selected deck</option>
-              <option value="return-a">Return to deck A</option>
-              <option value="return-b">Return to deck B</option>
-            </select></label
-          ><label class="check"
-            ><input id="hamster" type="checkbox" />Reverse crossfader</label
-          >
-          <p class="micro">
-            In Manual fader mode, either hand can work either platter. The keys
-            move the shared fader. “Return to A”: hold F (or ;) for B, release
-            for A. Overlapping keys blend; no keys return to your chosen deck.
-          </p>
-        </aside>
+
         <section class="deck deck-b" id="deck-b" aria-label="Deck B"></section>
       </div>
       <section class="crossfader">
@@ -190,60 +93,185 @@
           <span class="deck-letter b">B</span><span id="gain-b">71%</span>
         </div>
       </section>
-      <section class="moves-panel" aria-label="Scratch moves">
-        <header>
-          <div>
-            <span class="eyebrow">PLAY THE SOUND, NOT THE HARDWARE</span>
-            <h2>Scratch moves</h2>
+      <div class="performance-banks">
+        <section class="moves-panel" aria-label="Scratch moves">
+          <header>
+            <div>
+              <span class="eyebrow">PLAY THE SOUND, NOT THE HARDWARE</span>
+              <h2>Scratch moves</h2>
+            </div>
+            <label
+              >Keyboard mode<select id="keyboard-mode">
+                <option value="moves">Scratch moves</option>
+                <option value="fader">Manual fader</option>
+              </select></label
+            >
+          </header>
+          <p id="move-target">Target: deck A · load a record</p>
+          <div class="move-settings">
+            <button id="mark-sound">Mark sound here</button
+            ><button id="audition-sound">Hear marked sound</button
+            ><label
+              >Sound length<select id="move-span">
+                <option value=".12">Short · ⅛ second</option>
+                <option value=".25" selected>Medium · ¼ second</option>
+                <option value=".5">Long · ½ second</option>
+                <option value="1">Phrase · 1 second</option>
+              </select></label
+            ><label class="scratch-pace"
+              >Scratch pace<input
+                id="move-pace"
+                type="range"
+                min=".5"
+                max="1.5"
+                step=".05"
+                value="1"
+              /><output id="move-pace-value">Natural · 1×</output></label
+            ><button id="stop-moves">Stop moves</button>
           </div>
+          <p id="move-status" role="status">
+            Tap a move; hold to repeat. Mark sound chooses its cue.
+          </p>
+          <div id="move-pads" class="move-pads"></div>
+        </section>
+        <section class="samples-panel" aria-label="Sample pads">
+          <header>
+            <h2>Sample pads</h2>
+            <label
+              >Pad level<input
+                id="sample-level"
+                type="range"
+                min="0"
+                max="1"
+                step=".01"
+                value=".7" /></label
+            ><button id="erase-sample" aria-pressed="false">Erase pad</button
+            ><button id="stop-samples">Stop pads</button>
+          </header>
+          <p id="sample-status" role="status">
+            Hold an empty pad to record the selected deck. Tap to play ·
+            Shift-click to clear.
+          </p>
+          <div id="sample-pads" class="sample-pads"></div>
+          <small>8 seconds per pad · saved in this browser</small>
+        </section>
+      </div>
+
+      <footer class="bottom-line">
+        <span>MERCURY MIX / A SMALL INSTRUMENT FOR A LARGE COLLECTION</span
+        ><span>Local audio. Shared culture.</span>
+      </footer>
+    </main>
+    <dialog id="mixer-dialog" class="utility-dialog">
+      <form method="dialog">
+        <button class="dialog-close">Close mixer</button>
+      </form>
+      <aside class="mixer">
+        <div class="section-title">THE MIXER <span>STEREO</span></div>
+        <div class="master-display">
+          <canvas
+            id="master-meter"
+            width="220"
+            height="70"
+            aria-label="Master audio level"
+          ></canvas>
+          <div>
+            <strong id="master-db">−∞</strong><small>MASTER · dBFS</small>
+          </div>
+        </div>
+        <label class="range-label"
+          >Master output
+          <input
+            id="master"
+            type="range"
+            min="0"
+            max="1"
+            step=".01"
+            value=".8" /></label
+        ><button id="mute" class="wide">Mute output</button>
+        <div class="mixer-rule"></div>
+        <section class="headphone-panel" aria-label="Headphones and preview">
+          <div class="section-title">HEADPHONES / PREVIEW</div>
+          <div class="cue-select">
+            <button id="listen-a" aria-pressed="false">Listen A</button
+            ><button id="listen-b" aria-pressed="false">Listen B</button>
+          </div>
+          <label class="range-label"
+            >Cue → main mix<input
+              id="cue-blend"
+              type="range"
+              min="0"
+              max="1"
+              step=".01"
+              value="0"
+          /></label>
+          <label class="range-label"
+            >Headphone level<input
+              id="cue-level"
+              type="range"
+              min="0"
+              max="1"
+              step=".01"
+              value=".5"
+          /></label>
           <label
-            >Keyboard mode<select id="keyboard-mode">
-              <option value="moves">Scratch moves</option>
-              <option value="fader">Manual fader</option>
+            >Listen through<select id="cue-route">
+              <option value="off">Main output only</option>
+              <option value="preview">Preview here (replaces main)</option>
+              <option value="split">Split cable: main L / cue R</option>
+              <option value="separate" disabled>
+                Selected headphones device
+              </option>
             </select></label
           >
-        </header>
-        <p id="move-target">Target: deck A · load a record</p>
-        <div class="move-settings">
-          <button id="mark-sound">Mark sound here</button
-          ><button id="audition-sound">Hear marked sound</button
-          ><label
-            >Sound length<select id="move-span">
-              <option value=".12">Short · ⅛ second</option>
-              <option value=".25" selected>Medium · ¼ second</option>
-              <option value=".5">Long · ½ second</option>
-              <option value="1">Phrase · 1 second</option>
-            </select></label
-          ><label class="scratch-pace"
-            >Scratch pace<input
-              id="move-pace"
-              type="range"
-              min=".5"
-              max="1.5"
-              step=".05"
-              value="1"
-            /><output id="move-pace-value">Natural · 1×</output></label
-          ><button id="stop-moves">Stop moves</button>
-        </div>
-        <p id="move-status" role="status">
-          Select deck A or B, seek to a useful sound, then Mark sound here. Tap
-          a pad/key for one phrase; hold to repeat. The other deck keeps
-          playing.
+          <button id="choose-headphones" class="wide">
+            Choose headphones output…
+          </button>
+          <p class="micro" id="cue-status" role="status">
+            Select a deck to hear it before the crossfader. Private cue needs a
+            separate output device or split cable.
+          </p>
+        </section>
+        <div class="mixer-rule"></div>
+        <div class="section-title">IN THE POCKET</div>
+        <p>
+          Sync matches vinyl speed.<br />Tap a tempo. Set your first beat.<br />Use
+          your ears for the rest.
         </p>
+        <button id="sync-all" class="wide">Match B to A</button>
+        <div class="mixer-rule"></div>
+        <div class="section-title">PLAYING STANCE</div>
+        <label
+          >Fader hand<select id="hand">
+            <option value="left">Left · A S D F</option>
+            <option value="right">Right · J K L ;</option>
+          </select></label
+        ><label
+          >Fader curve<select id="curve">
+            <option value="smooth">Smooth blend</option>
+            <option value="cut">Sharp cut</option>
+          </select></label
+        ><label
+          >On key release<select id="release">
+            <option value="latch">Stay where I leave it</option>
+            <option value="cut">Silence selected deck</option>
+            <option value="return-a">Return to deck A</option>
+            <option value="return-b">Return to deck B</option>
+          </select></label
+        ><label class="check"
+          ><input id="hamster" type="checkbox" />Reverse crossfader</label
+        >
         <p class="micro">
-          Sound length selects more audio and gives it more time. Scratch pace:
-          left for gentler, longer strokes; right for sharper, faster strokes.
-          Changes apply to the next phrase; song playback stays unchanged.
+          In Manual fader mode, either hand can work either platter. The keys
+          move the shared fader. “Return to A”: hold F (or ;) for B, release for
+          A. Overlapping keys blend; no keys return to your chosen deck.
         </p>
-        <div id="move-pads" class="move-pads"></div>
-        <p class="micro">
-          Moves use the selected track’s real audio at its marked cue, with
-          timed record motion and cuts. They add that deck over the current mix
-          while held; releasing finishes the phrase and restores your fader.
-          Tempo starts from the other playing deck. Manual fader mode keeps ASDF
-          / JKL;.
-        </p>
-      </section>
+      </aside>
+    </dialog>
+    <dialog id="crate-dialog" class="utility-dialog">
+      <form method="dialog">
+        <button class="dialog-close">Close library</button>
+      </form>
       <section class="crate" id="crate">
         <header>
           <div>
@@ -261,6 +289,13 @@
             ><button id="refresh">Refresh library</button>
           </div>
         </header>
+        <div class="crate-view-tools">
+          <button id="crate-albums" aria-pressed="true">Albums</button
+          ><button id="crate-tracks" aria-pressed="false">All tracks</button
+          ><button id="crate-back" hidden>← Albums</button
+          ><span id="crate-album-name"></span>
+        </div>
+        <div id="album-crate" class="album-crate"></div>
         <div class="crate-search">
           <input
             id="search"
@@ -273,11 +308,7 @@
         <div id="tracks" class="tracks"></div>
         <button id="more" hidden>Show more tracks</button>
       </section>
-      <footer class="bottom-line">
-        <span>MERCURY MIX / A SMALL INSTRUMENT FOR A LARGE COLLECTION</span
-        ><span>Local audio. Shared culture.</span>
-      </footer>
-    </main>
+    </dialog>
     <dialog id="help">
       <form method="dialog">
         <button class="dialog-close" aria-label="Close controls">Close</button>
@@ -290,6 +321,15 @@
         platter or transport.
       </p>
       <dl>
+        <dt>Sample pads</dt>
+        <dd>
+          Hold an empty pad while the selected deck plays or scratches. Release
+          to keep up to eight seconds; a quick tap captures a short slice. Tap a
+          loaded pad to replay it; Shift-click clears it. Pads capture that deck
+          before EQ/effects, and playback goes into the master mix and
+          recording. Samples stay in this browser, separately from saved set
+          files. Stop pads stops playback and finishes any current capture.
+        </dd>
         <dt>Scratch moves mode</dt>
         <dd>
           Select a deck with 1/2, mark a sound, then tap or hold A S D F G H J K
@@ -360,6 +400,17 @@
         after reopening. No local files or recordings are uploaded
         automatically.
       </p>
+      <p class="micro">
+        Sound length selects more audio and gives it more time. Scratch pace:
+        left for gentler, longer strokes; right for sharper, faster strokes.
+        Changes apply to the next phrase; song playback stays unchanged.
+      </p>
+      <p class="micro">
+        Moves use the selected track’s real audio at its marked cue, with timed
+        record motion and cuts. They add that deck over the current mix while
+        held; releasing finishes the phrase and restores your fader. Tempo
+        starts from the other playing deck. Manual fader mode keeps ASDF / JKL;.
+      </p>
       <button id="theme" type="button">Switch to paper finish</button>
     </dialog>
     <template id="deck-template"
@@ -416,6 +467,23 @@
           </div>
           <div class="platter-note">TOUCH THE RECORD. MAKE SOMETHING.</div>
         </div>
+      </div>
+      <div class="transport">
+        <button
+          class="cue"
+          title="Pause and return to the cue set with Set beat 1"
+        >
+          Cue ↤</button
+        ><button class="play primary">Play</button
+        ><button
+          class="sync"
+          title="Match the other deck’s tempo and beat phase; vinyl pitch changes too"
+        >
+          Sync
+        </button>
+      </div>
+      <details class="deck-details">
+        <summary>Grid · cues · loops · effects</summary>
         <div class="pitch-strip">
           <label
             >VINYL RATE<input
@@ -430,128 +498,114 @@
           ><button class="pitch-reset" title="Reset vinyl speed">Reset</button>
           <div class="channel-meter"><i></i></div>
         </div>
-      </div>
-      <div class="transport">
         <button
-          class="cue"
-          title="Pause and return to the cue set with Set beat 1"
-        >
-          Cue ↤</button
-        ><button class="play primary">Play</button
-        ><button
-          class="sync"
-          title="Match the other deck’s tempo and beat phase; vinyl pitch changes too"
-        >
-          Sync</button
-        ><button class="reverse" aria-pressed="false">Reverse</button
-        ><button
           class="slip"
           title="After scratching, catch up to where playback would have been"
           aria-pressed="false"
         >
-          Slip
-        </button>
-      </div>
-      <div class="tempo-row">
-        <label
-          >BPM
-          <input
-            class="bpm"
-            type="number"
-            min="40"
-            max="240"
-            step=".1"
-            value="120"
-            aria-label="Original track BPM" /></label
-        ><button class="tap">Tap tempo</button
-        ><button class="beat-one">Set beat 1</button
-        ><span class="tempo-note">VINYL SPEED</span>
-      </div>
-      <div class="performance">
-        <div>
-          <span class="section-title">HOT CUES</span>
-          <div class="hotcues">
-            <button data-cue="0">1</button><button data-cue="1">2</button
-            ><button data-cue="2">3</button><button data-cue="3">4</button>
-          </div>
-          <button class="clear-cues text-button">Clear cues</button>
+          Slip</button
+        ><button class="reverse" aria-pressed="false">Reverse</button>
+        <div class="tempo-row">
+          <label
+            >BPM
+            <input
+              class="bpm"
+              type="number"
+              min="40"
+              max="240"
+              step=".1"
+              value="120"
+              aria-label="Original track BPM" /></label
+          ><button class="tap">Tap tempo</button
+          ><button class="beat-one">Set beat 1</button
+          ><span class="tempo-note">VINYL SPEED</span>
         </div>
-        <div>
-          <span class="section-title">LOOP · BEATS</span>
-          <div class="loops">
-            <button data-loop=".5">½</button><button data-loop="1">1</button
-            ><button data-loop="2">2</button><button data-loop="4">4</button
-            ><button data-loop="8">8</button>
+        <div class="performance">
+          <div>
+            <span class="section-title">HOT CUES</span>
+            <div class="hotcues">
+              <button data-cue="0">1</button><button data-cue="1">2</button
+              ><button data-cue="2">3</button><button data-cue="3">4</button>
+            </div>
+            <button class="clear-cues text-button">Clear cues</button>
           </div>
-          <button class="loop-off text-button">Exit loop</button>
+          <div>
+            <span class="section-title">LOOP · BEATS</span>
+            <div class="loops">
+              <button data-loop=".5">½</button><button data-loop="1">1</button
+              ><button data-loop="2">2</button><button data-loop="4">4</button
+              ><button data-loop="8">8</button>
+            </div>
+            <button class="loop-off text-button">Exit loop</button>
+          </div>
         </div>
-      </div>
-      <div class="eq-controls">
-        <label
-          >LOW
-          <input
-            class="eq-low"
-            type="range"
-            min="-12"
-            max="12"
-            step=".5"
-            value="0" /></label
-        ><label
-          >MID
-          <input
-            class="eq-mid"
-            type="range"
-            min="-12"
-            max="12"
-            step=".5"
-            value="0" /></label
-        ><label
-          >HIGH
-          <input
-            class="eq-high"
-            type="range"
-            min="-12"
-            max="12"
-            step=".5"
-            value="0" /></label
-        ><label
-          >FILTER
-          <input
-            class="filter"
-            type="range"
-            min="-1"
-            max="1"
-            step=".01"
-            value="0" /></label
-        ><label
-          >ECHO
-          <input
-            class="echo"
-            type="range"
-            min="0"
-            max=".7"
-            step=".01"
-            value="0"
-        /></label>
-      </div>
-      <div class="channel-bottom">
-        <label
-          >CHANNEL
-          <input
-            class="volume"
-            type="range"
-            min="0"
-            max="1.25"
-            step=".01"
-            value="1" /></label
-        ><button
-          class="dub"
-          aria-pressed="false"
-          title="Filtered repeating echo plus a warm reverb space"
-        >
-          Dub space</button
-        ><button class="fx-reset text-button">Reset EQ / FX</button>
-      </div></template
+        <div class="eq-controls">
+          <label
+            >LOW
+            <input
+              class="eq-low"
+              type="range"
+              min="-12"
+              max="12"
+              step=".5"
+              value="0" /></label
+          ><label
+            >MID
+            <input
+              class="eq-mid"
+              type="range"
+              min="-12"
+              max="12"
+              step=".5"
+              value="0" /></label
+          ><label
+            >HIGH
+            <input
+              class="eq-high"
+              type="range"
+              min="-12"
+              max="12"
+              step=".5"
+              value="0" /></label
+          ><label
+            >FILTER
+            <input
+              class="filter"
+              type="range"
+              min="-1"
+              max="1"
+              step=".01"
+              value="0" /></label
+          ><label
+            >ECHO
+            <input
+              class="echo"
+              type="range"
+              min="0"
+              max=".7"
+              step=".01"
+              value="0"
+          /></label>
+        </div>
+        <div class="channel-bottom">
+          <label
+            >CHANNEL
+            <input
+              class="volume"
+              type="range"
+              min="0"
+              max="1.25"
+              step=".01"
+              value="1" /></label
+          ><button
+            class="dub"
+            aria-pressed="false"
+            title="Filtered repeating echo plus a warm reverb space"
+          >
+            Dub space</button
+          ><button class="fx-reset text-button">Reset EQ / FX</button>
+        </div>
+      </details></template
     >
   </body>
 </html>

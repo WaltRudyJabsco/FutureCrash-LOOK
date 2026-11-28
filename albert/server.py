@@ -603,7 +603,7 @@ class Handler(BaseHTTPRequestHandler):
             except Exception:return self.send_json(503,{'error':'Fabric node unavailable'})
         path=urlparse(self.path).path
 
-        if path in {'/mix','/mix/','/api/mix/library'} or path.startswith('/mix/assets/'):
+        if path in {'/mix','/mix/','/api/mix/library','/api/mix/cover'} or path.startswith('/mix/assets/'):
             if not self._require_endpoint('lo.use'):return
             import mixer_web
             try:return mixer_web.handle(self,NODE)

@@ -1,5 +1,7 @@
 /* Stereo varispeed deck. No DOM, network, or allocations in the sample loop. */
 const MAX_GESTURE_SECONDS = 30;
+const MAX_PAD_SECONDS = 8;
+const MIN_PAD_SECONDS = 0.12;
 class MercuryDeck extends AudioWorkletProcessor {
   constructor() {
     super();
@@ -17,14 +19,33 @@ class MercuryDeck extends AudioWorkletProcessor {
     this.loop = null;
     this.elapsed = 0;
     this.rms = 0;
+    this.capture = null;
     this.gesture = null;
     this.gestureGate = 0;
     this.port.onmessage = ({ data: m }) => {
+      if (m.type === "capture-start" && this.left) {
+        this.capture = {
+          token: m.token,
+          left: new Float32Array(Math.ceil(sampleRate * MAX_PAD_SECONDS)),
+          right: new Float32Array(Math.ceil(sampleRate * MAX_PAD_SECONDS)),
+          frames: 0,
+          stopAt: Infinity,
+          peak: 0,
+        };
+      }
+      if (m.type === "capture-cancel") this.capture = null;
+      if (m.type === "capture-stop" && this.capture?.token === m.token) {
+        this.capture.stopAt = Math.max(
+          this.capture.frames,
+          Math.ceil(sampleRate * MIN_PAD_SECONDS),
+        );
+      }
       if (m.type === "gesture") this.startGesture(m);
       if (m.type === "gesture-release" && this.gesture?.token === m.token)
         this.gesture.release = true;
       if (m.type === "gesture-stop") this.finishGesture();
       if (m.type === "load") {
+        this.finishCapture();
         this.finishGesture();
         this.left = m.left;
         this.right = m.right;
@@ -41,6 +62,7 @@ class MercuryDeck extends AudioWorkletProcessor {
         this.slipPos = 0;
       }
       if (m.type === "clear") {
+        this.finishCapture();
         this.finishGesture();
         this.left = null;
         this.right = null;
@@ -89,6 +111,23 @@ class MercuryDeck extends AudioWorkletProcessor {
           : Math.max(0, Math.min(this.left.length - 1, target));
       }
     };
+  }
+  finishCapture() {
+    const capture = this.capture;
+    if (!capture) return;
+    this.capture = null;
+    this.port.postMessage(
+      {
+        type: "capture-complete",
+        token: capture.token,
+        frames: capture.frames,
+        rate: sampleRate,
+        peak: capture.peak,
+        left: capture.left,
+        right: capture.right,
+      },
+      [capture.left.buffer, capture.right.buffer],
+    );
   }
   startGesture(m) {
     if (
@@ -259,6 +298,18 @@ class MercuryDeck extends AudioWorkletProcessor {
           this.playing = false;
           this.pos = Math.max(0, Math.min(length - 1, this.pos));
         }
+      }
+      const capture = this.capture;
+      if (capture) {
+        capture.left[capture.frames] = a;
+        capture.right[capture.frames] = b;
+        capture.peak = Math.max(capture.peak, Math.abs(a), Math.abs(b));
+        capture.frames++;
+        if (
+          capture.frames >= capture.left.length ||
+          capture.frames >= capture.stopAt
+        )
+          this.finishCapture();
       }
       l[i] = a;
       r[i] = b;

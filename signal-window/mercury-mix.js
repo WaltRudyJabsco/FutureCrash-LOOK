@@ -31,7 +31,10 @@ let prefs = readPrefs(),
   libraryAbort = null,
   searchTimer = null,
   activeMove = null,
-  moveSerial = 0;
+  moveSerial = 0,
+  pads = null,
+  crateMode = "albums",
+  crateAlbum = null;
 const decks = [0, 1].map((index) => ({
   index,
   track: null,
@@ -82,6 +85,7 @@ function persist() {
 }
 function status(message, error = false) {
   $("status").textContent = message;
+  $("status").title = message;
   $("status").classList.toggle("error", error);
 }
 function safeText(value, fallback = "") {
@@ -237,6 +241,7 @@ const audio = {
       meterData: new Float32Array(256),
     };
     source.port.onmessage = ({ data }) => {
+      if (data.type === "capture-complete") pads?.receive(deck, data);
       if (data.type === "gesture-start" && activeMove?.token === data.token) {
         deck.performing = true;
         updateGain();
@@ -775,7 +780,7 @@ function libraryTrack(row) {
       "/api/media/browser?" +
       new URLSearchParams({ node: row.node, id: row.id }),
     cover_url:
-      "/api/media/cover?" + new URLSearchParams({ node: row.node, id: row.id }),
+      "/api/mix/cover?" + new URLSearchParams({ node: row.node, id: row.id }),
   };
 }
 async function demoSet() {
@@ -949,8 +954,7 @@ function bindDeck(deck) {
   q(".deck-select").onclick = () => selectDeck(deck.index);
   q(".load-deck").onclick = () => {
     selectDeck(deck.index);
-    $("crate").scrollIntoView({ behavior: "smooth" });
-    $("search").focus({ preventScroll: true });
+    openCrate();
   };
   q(".play").onclick = () => play(deck).catch(fail);
   q(".cue").onclick = () => cue(deck);
@@ -1132,6 +1136,96 @@ function bindDeck(deck) {
     }
   });
 }
+function openCrate() {
+  clearGestures();
+  if (!$("crate-dialog").open) $("crate-dialog").showModal();
+  $("search").focus();
+}
+$("library-open").onclick = openCrate;
+$("mixer-open").onclick = () => {
+  clearGestures();
+  $("mixer-dialog").showModal();
+};
+$("crate-albums").onclick = () => {
+  crateMode = "albums";
+  crateAlbum = null;
+  refreshLibrary();
+};
+$("crate-tracks").onclick = () => {
+  crateMode = "tracks";
+  crateAlbum = null;
+  refreshLibrary();
+};
+$("crate-back").onclick = () => {
+  crateAlbum = null;
+  crateMode = "albums";
+  $("search").value = "";
+  refreshLibrary();
+};
+function renderAlbums(rows) {
+  const groups = new Map();
+  for (const row of rows) {
+    const key = [row.node, row.artist, row.album].join("\u001f");
+    if (!groups.has(key))
+      groups.set(key, {
+        node: row.node,
+        artist: row.artist,
+        album: row.album,
+        cover: row.cover_url,
+        tracks: [],
+      });
+    groups.get(key).tracks.push(row);
+  }
+  const fragment = document.createDocumentFragment();
+  for (const group of [...groups.values()].slice(0, libraryLimit)) {
+    const button = document.createElement("button");
+    button.className = "album-card";
+    button.setAttribute(
+      "aria-label",
+      "Open album " +
+        (group.album || "Singles") +
+        " — " +
+        (group.artist || "Unknown artist"),
+    );
+    const cover = document.createElement("span");
+    cover.className = "album-cover";
+    const fallback = document.createElement("span");
+    fallback.textContent = (group.artist || group.album || "M")
+      .slice(0, 2)
+      .toUpperCase();
+    cover.append(fallback);
+    if (group.cover) {
+      const img = document.createElement("img");
+      img.src = group.cover;
+      img.alt = "";
+      img.loading = "lazy";
+      img.onerror = () => img.remove();
+      cover.append(img);
+    }
+    const title = document.createElement("strong");
+    title.textContent = group.album || "Singles";
+    const artist = document.createElement("small");
+    artist.textContent = group.artist || "Unknown artist";
+    button.append(cover, title, artist);
+    button.onclick = () => {
+      crateAlbum = group;
+      crateMode = "tracks";
+      $("search").value = group.album || group.artist || "";
+      libraryLimit = 80;
+      refreshLibrary();
+    };
+    fragment.append(button);
+  }
+  $("album-crate").replaceChildren(fragment);
+  $("library-count").textContent =
+    Math.min(groups.size, libraryLimit) +
+    " albums shown · " +
+    libraryTotal +
+    " albums matched";
+  $("more").textContent = "More albums";
+  $("more").hidden =
+    groups.size <= libraryLimit && library.length >= libraryTotal;
+}
 function renderLibrary() {
   const query = $("search").value.trim().toLowerCase(),
     matches = library.filter((row) =>
@@ -1140,49 +1234,81 @@ function renderLibrary() {
         .toLowerCase()
         .includes(query),
     );
+  $("tracks").hidden = crateMode === "albums";
+  $("album-crate").hidden = crateMode !== "albums";
+  $("crate-back").hidden = !crateAlbum;
+  $("crate-album-name").textContent = crateAlbum?.album || "";
+  $("crate-albums").setAttribute(
+    "aria-pressed",
+    String(crateMode === "albums"),
+  );
+  $("crate-tracks").setAttribute(
+    "aria-pressed",
+    String(crateMode === "tracks"),
+  );
+  if (crateMode === "albums") {
+    renderAlbums(matches);
+    return;
+  }
   const fragment = document.createDocumentFragment();
-  matches.slice(0, libraryLimit).forEach((track, index) => {
-    const row = document.createElement("div");
-    row.className = "track-row";
-    const number = document.createElement("span");
-    number.className = "track-index";
-    number.textContent = String(index + 1).padStart(2, "0");
-    const main = document.createElement("div");
-    main.className = "track-main";
-    const title = document.createElement("strong");
-    title.textContent = track.title;
-    const artist = document.createElement("small");
-    artist.textContent = [
-      track.artist || "Unknown artist",
-      track.node || "This device",
-      track.format || "AUDIO",
-    ].join(" · ");
-    main.append(title, artist);
-    const album = document.createElement("span");
-    album.className = "track-album";
-    album.textContent = track.album || "—";
-    const duration = document.createElement("span");
-    duration.className = "track-duration";
-    duration.textContent = D.time(Number(track.duration) || NaN);
-    const buttons = document.createElement("div");
-    buttons.className = "track-load";
-    for (const i of [0, 1]) {
-      const button = document.createElement("button");
-      button.textContent = "Load " + (i ? "B" : "A");
-      button.setAttribute(
-        "aria-label",
-        "Load " + track.title + " on deck " + (i ? "B" : "A"),
-      );
-      button.onclick = () => {
-        selectDeck(i);
-        load(decks[i], libraryTrack(track));
-      };
-      buttons.append(button);
-    }
-    row.append(number, main, album, duration, buttons);
-    fragment.append(row);
-  });
+  matches
+    .filter(
+      (row) =>
+        !crateAlbum ||
+        (row.album === crateAlbum.album &&
+          row.artist === crateAlbum.artist &&
+          row.node === crateAlbum.node),
+    )
+    .slice(0, libraryLimit)
+    .forEach((track, index) => {
+      const row = document.createElement("div");
+      row.className = "track-row";
+      const number = document.createElement("span");
+      number.className = "track-index";
+      number.textContent = String(index + 1).padStart(2, "0");
+      const main = document.createElement("div");
+      main.className = "track-main";
+      const title = document.createElement("strong");
+      title.textContent = track.title;
+      const artist = document.createElement("small");
+      artist.textContent = [
+        track.artist || "Unknown artist",
+        track.node || "This device",
+        track.format || "AUDIO",
+      ].join(" · ");
+      main.append(title, artist);
+      const album = document.createElement("span");
+      album.className = "track-album";
+      album.textContent = track.album || "—";
+      const duration = document.createElement("span");
+      duration.className = "track-duration";
+      duration.textContent = D.time(Number(track.duration) || NaN);
+      const buttons = document.createElement("div");
+      buttons.className = "track-load";
+      for (const i of [0, 1]) {
+        const button = document.createElement("button");
+        button.textContent = "Load " + (i ? "B" : "A");
+        button.setAttribute(
+          "aria-label",
+          "Load " + track.title + " on deck " + (i ? "B" : "A"),
+        );
+        button.onclick = async () => {
+          selectDeck(i);
+          button.disabled = true;
+          button.textContent = "Loading…";
+          const ok = await load(decks[i], libraryTrack(track));
+          button.disabled = false;
+          button.textContent = "Load " + (i ? "B" : "A");
+          if (ok) $("crate-dialog").close();
+          else $("library-status").textContent = $("status").textContent;
+        };
+        buttons.append(button);
+      }
+      row.append(number, main, album, duration, buttons);
+      fragment.append(row);
+    });
   $("tracks").replaceChildren(fragment);
+  $("more").textContent = "More tracks";
   $("more").hidden =
     matches.length <= libraryLimit && library.length >= libraryTotal;
   $("library-count").textContent = libraryTotal + " tracks";
@@ -1206,7 +1332,12 @@ async function refreshLibrary(append = false) {
   $("library-status").textContent = "Reading your Fabric music catalog…";
   try {
     const response = await fetch(
-      "/api/mix/library?" + new URLSearchParams({ q: query, offset }),
+      "/api/mix/library?" +
+        new URLSearchParams({
+          q: query,
+          offset,
+          view: crateMode === "albums" ? "albums" : "tracks",
+        }),
       { signal: controller.signal },
     );
     if (!response.ok)
@@ -1677,6 +1808,7 @@ function faderKeys() {
 }
 function clearGestures() {
   stopMove();
+  if (pads?.capture) pads.release(pads.capture.index);
   held.clear();
   tHeld = false;
   for (const deck of decks) {
@@ -1745,7 +1877,10 @@ document.addEventListener("keyup", (e) => {
   }
   if (key === "z" || key === "x") decks.forEach((d) => bend(d, 1));
 });
-window.addEventListener("blur", clearGestures);
+window.addEventListener("blur", () => {
+  clearGestures();
+  pads?.stop();
+});
 document.querySelectorAll(".file-button").forEach((label) =>
   label.addEventListener("keydown", (event) => {
     if (event.key === "Enter" || event.key === " ") {
@@ -1756,6 +1891,13 @@ document.querySelectorAll(".file-button").forEach((label) =>
   }),
 );
 for (const deck of decks) bindDeck(deck);
+pads = new MercurySampler({
+  ensure: () => audio.ensure(),
+  selected: () => selected,
+  decks,
+  output: () => audio.master,
+  status,
+});
 selectDeck(0);
 applyPrefs();
 $("audio").onclick = () =>
@@ -1887,6 +2029,7 @@ $("mute").onclick = () => {
 };
 $("files").onchange = (e) => {
   const files = [...e.target.files];
+  if (files.length && $("crate-dialog").open) $("crate-dialog").close();
   files
     .slice(0, 2)
     .forEach((file, i) =>
@@ -1897,6 +2040,10 @@ $("files").onchange = (e) => {
 $("refresh").onclick = () => refreshLibrary();
 $("search").maxLength = 200;
 $("search").oninput = () => {
+  if (crateAlbum) {
+    crateAlbum = null;
+    crateMode = "albums";
+  }
   libraryLimit = 80;
   renderLibrary();
   clearTimeout(searchTimer);
@@ -1924,6 +2071,7 @@ window.addEventListener("pagehide", (event) => {
   decks.forEach((d) => d.abort?.abort());
   if (recording && recording.state !== "inactive") recording.stop();
   stopMove();
+  pads?.stop();
   audio.headphones?.close();
   audio.ctx?.close();
 });

@@ -11,12 +11,12 @@ MAX_RESULTS=200
 CATALOG_CACHE_SECONDS=20
 _CACHE={}
 _CACHE_LOCK=threading.Lock()
-ASSETS={'mercury-mix-moves.js':'text/javascript; charset=utf-8','mercury-mix-monitor.js':'text/javascript; charset=utf-8','mercury-mix.html':'text/html; charset=utf-8','mercury-mix.css':'text/css; charset=utf-8',
+ASSETS={'mercury-mix-sampler.js':'text/javascript; charset=utf-8','mercury-mix-moves.js':'text/javascript; charset=utf-8','mercury-mix-monitor.js':'text/javascript; charset=utf-8','mercury-mix.html':'text/html; charset=utf-8','mercury-mix.css':'text/css; charset=utf-8',
         'mercury-mix.js':'text/javascript; charset=utf-8','mercury-mix-dsp.js':'text/javascript; charset=utf-8',
         'mercury-mix-worklet.js':'text/javascript; charset=utf-8'}
 
 
-def catalog(data,query="",offset=0):
+def catalog(data,query="",offset=0,view="tracks"):
     if not isinstance(query,str) or len(query)>200:raise ValueError("Search text must be at most 200 characters")
     query=query.casefold()
     rows=[];seen=set()
@@ -32,11 +32,18 @@ def catalog(data,query="",offset=0):
         stream_query=urllib.parse.urlencode({'node':node,'id':ident})
         rows.append({'id':ident,'node':node,'title':str(title),'artist':str(row.get('artist') or tags.get('artist') or ''),
                      'album':str(row.get('album') or tags.get('album') or ''),'duration':row.get('duration'),'format':Path(str(row.get('path',''))).suffix[1:].upper(),'_rank':0 if row.get('track') or tags.get('track') else 1,
-                     'audio_url':'/api/media/browser?'+stream_query,'cover_url':'/api/media/cover?'+stream_query})
+                     'audio_url':'/api/media/browser?'+stream_query,'cover_url':'/api/mix/cover?'+stream_query})
     available=len(rows)
     rows=[row for row in rows if query in ' '.join(row.get(k,'') for k in ('artist','title','album','node')).casefold()]
     rows.sort(key=lambda row:(row['_rank'],row['artist'].casefold(),row['title'].casefold()))
     for row in rows:row.pop('_rank')
+    if view=='albums':
+        albums={}
+        for row in rows:
+            key=(row['node'],row['artist'],row['album'])
+            if key not in albums:albums[key]={**row,'album_tracks':0}
+            albums[key]['album_tracks']+=1
+        rows=list(albums.values())
     return {'entries':rows[offset:offset+MAX_RESULTS],'total':len(rows),'available':available,'offset':offset,'has_more':offset+MAX_RESULTS<len(rows),'truncated':len(rows)>MAX_RESULTS,
             'errors':data.get('errors',[]),'refreshing':bool(data.get('refreshing'))}
 
@@ -54,17 +61,27 @@ def asset(name):
 
 def handle(handler,node_url):
     path=urllib.parse.urlsplit(handler.path).path
-    if path=='/api/mix/library':
+    if path=='/api/mix/cover':
         params=urllib.parse.parse_qs(urllib.parse.urlsplit(handler.path).query)
-        query=params.get('q',[''])[0];offset=int(params.get('offset',['0'])[0])
-        if len(query)>200 or not 0<=offset<=1000000:raise ValueError('Invalid library search')
+        node=params.get('node',[''])[0];ident=params.get('id',[''])[0]
+        if not ident or len(ident)>300 or len(node)>200:raise ValueError('Invalid cover reference')
+        query=urllib.parse.urlencode({'node':node,'id':ident})
+        with urllib.request.urlopen(node_url+'/v1/media/cover?'+query,timeout=12) as response:
+            content=response.headers.get('Content-Type','').split(';',1)[0].lower()
+            if content not in {'image/jpeg','image/png','image/webp','image/gif'}:raise ValueError('Unsupported cover image')
+            data=response.read(8*1024*1024+1)
+            if len(data)>8*1024*1024:raise ValueError('Cover image too large')
+    elif path=='/api/mix/library':
+        params=urllib.parse.parse_qs(urllib.parse.urlsplit(handler.path).query)
+        query=params.get('q',[''])[0];offset=int(params.get('offset',['0'])[0]);view=params.get('view',['tracks'])[0]
+        if len(query)>200 or not 0<=offset<=1000000 or view not in {'tracks','albums'}:raise ValueError('Invalid library search')
         with _CACHE_LOCK:
             cached=_CACHE.get(node_url)
             if cached and time.monotonic()-cached[0]<CATALOG_CACHE_SECONDS:data=cached[1]
             else:
                 with urllib.request.urlopen(node_url+'/v1/media/fabric',timeout=12) as response:data=json.load(response)
                 _CACHE[node_url]=(time.monotonic(),data)
-        value=catalog(data,query,offset)
+        value=catalog(data,query,offset,view)
         data=json.dumps(value).encode();content='application/json'
     else:
         name='mercury-mix.html' if path in {'/mix','/mix/'} else path.removeprefix('/mix/assets/')
