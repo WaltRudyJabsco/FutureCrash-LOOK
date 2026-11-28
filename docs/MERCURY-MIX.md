@@ -125,10 +125,22 @@ of a turntablist.
 | Q | Crab-style cuts |
 | W | Echo scratch |
 
-Each phrase follows the effective tempo of the other playing deck, or the
-selected deck’s tempo when the other is paused. This sets phrase duration;
-launch remains immediate and expressive rather than waiting for a beat grid.
-**Sound length** changes how much of the marked sound the motion covers.
+Phrase timing starts from the other playing deck’s tempo, or the selected
+deck’s tempo when the other is paused. Intricate motions get additional time
+to keep audible record speed controlled. Launch remains immediate rather than
+waiting for a beat grid.
+
+**Sound length** selects more of the marked sound and stretches the gesture
+proportionally: one second of source makes a phrase four times as long as a
+quarter-second selection, at the same scratch speed. It does not squeeze a
+larger selection into a fixed interval and raise its pitch.
+
+**Scratch pace** ranges from Gentle (0.5×) through Natural (1×) to Sharp (1.5×).
+It changes subsequent gesture speed and duration independently of either
+track’s playback tempo. Natural keeps audible peaks near normal vinyl speed;
+rounded acceleration and reversals let a stroke move through slower and faster
+motion. Faster motion still raises pitch, as real scratching does. The setting
+is remembered and included in saved sets.
 
 During a phrase, the selected deck is opened over the existing mix without
 moving the main crossfader or interrupting the backing deck. On completion,

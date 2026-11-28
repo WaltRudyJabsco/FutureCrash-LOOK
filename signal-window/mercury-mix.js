@@ -13,6 +13,7 @@ const defaults = {
   hamster: false,
   theme: "night",
   keyboard: "moves",
+  pace: 1,
 };
 let prefs = readPrefs(),
   selected = 0,
@@ -66,6 +67,7 @@ function readPrefs() {
       hamster: !!p.hamster,
       theme: p.theme === "paper" ? "paper" : "night",
       keyboard: p.keyboard === "fader" ? "fader" : "moves",
+      pace: Number.isFinite(p.pace) ? D.clamp(p.pace, 0.5, 1.5) : 1,
     };
   } catch {
     return { ...defaults };
@@ -303,6 +305,8 @@ function applyPrefs() {
   }
   for (const key of ["hand", "curve", "release"]) $(key).value = prefs[key];
   $("keyboard-mode").value = prefs.keyboard;
+  $("move-pace").value = prefs.pace;
+  updatePaceLabel();
   $("move-pads").classList.toggle("keys-off", prefs.keyboard !== "moves");
   $("hamster").checked = prefs.hamster;
   document.body.dataset.theme = prefs.theme;
@@ -1365,6 +1369,7 @@ async function openSet(file) {
       hamster: !!p.hamster,
       theme: p.theme === "paper" ? "paper" : "night",
       keyboard: p.keyboard === "fader" ? "fader" : "moves",
+      pace: Number.isFinite(p.pace) ? D.clamp(p.pace, 0.5, 1.5) : 1,
     };
     persist();
     applyPrefs();
@@ -1519,16 +1524,22 @@ async function startMove(move, key) {
     const tempo = other.playing
       ? other.bpm * rate(other)
       : deck.bpm * rate(deck);
-    const seconds =
+    const span = Math.min(
+      Number($("move-span").value),
+      deck.duration - deck.cue - 2 / SOURCE_RATE,
+    );
+    const phrase =
       move.id === "audition"
-        ? Number($("move-span").value) / rate(deck)
-        : ((move.beats || 1) * 60) / tempo;
+        ? {
+            points: move.points,
+            span,
+            seconds: Math.max(0.1, span / rate(deck)),
+          }
+        : MercuryMoves.plan(move, span, tempo, Number($("move-pace").value));
     audio.send(deck, "gesture", {
       token: current.token,
-      points: move.points,
       cue: deck.cue,
-      span: Number($("move-span").value),
-      seconds: D.clamp(seconds, 0.1, 8),
+      ...phrase,
     });
     if (current.released)
       audio.send(deck, "gesture-release", { token: current.token });
@@ -1540,7 +1551,9 @@ async function startMove(move, key) {
       D.time(deck.cue) +
       " · " +
       Math.round(tempo) +
-      " BPM. " +
+      " BPM · " +
+      phrase.seconds.toFixed(1) +
+      "s phrase. " +
       (current.released ? "One phrase." : "Hold to repeat; release to finish.");
   } catch (error) {
     if (activeMove === current) stopMove();
@@ -1631,6 +1644,19 @@ $("audition-sound").onclick = () => {
   };
   startMove(move, "audition");
   releaseMove("audition");
+};
+function updatePaceLabel() {
+  const value = Number($("move-pace").value);
+  $("move-pace-value").textContent =
+    (value < 0.85 ? "Gentle" : value > 1.15 ? "Sharp" : "Natural") +
+    " · " +
+    value.toFixed(2) +
+    "×";
+}
+$("move-pace").oninput = () => {
+  prefs.pace = Number($("move-pace").value);
+  persist();
+  updatePaceLabel();
 };
 $("stop-moves").onclick = () => {
   stopMove();
