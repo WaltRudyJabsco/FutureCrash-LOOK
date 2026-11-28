@@ -11,7 +11,7 @@ music player or change anyone else’s queue.
 
 ## Your hands
 
-The crossfader is shared. Choose **ASDF** for your left hand or **JKL;** for
+The crossfader is shared. Choose **ZXCV** for your left hand or **M , . /** for
 your right hand. Both layouts move the same fader from left to right; pressing
 adjacent keys together gives an intermediate position. Choose a smooth blend
 or sharp cut, latch on release or close the selected deck, and optionally
@@ -19,9 +19,9 @@ reverse the fader. Platter hand and fader hand are independent.
 
 - **1 / 2:** select a deck.
 - **Space:** play or pause that deck.
-- **C:** pause and return to the main cue.
-- **Z / X:** momentarily nudge the selected deck slower / faster.
-- **R:** reverse; **V:** slip mode.
+- **Backspace:** pause and return to the main cue.
+- **← / →:** momentarily nudge the selected deck slower / faster.
+- **R:** reverse; **B:** slip mode.
 - Drag a record to scratch. Touchscreens support independent pointers on both
   records. Scroll over a record to nudge; hold **T** while scrolling to scratch.
 - Drag the overview waveform to seek. Set hot cues with the four cue buttons;
@@ -84,7 +84,7 @@ restored. Cue audio never enters a recording; recording remains stereo even
 when monitoring uses a split cable.
 
 **On key release → Return to deck A** makes the fader spring back to A after
-all fader keys are released. With the left-hand layout, hold F for B, use S/D
+all fader keys are released. With the left-hand layout, hold V for B, use X/C
 for intermediate blends, then release for A. **Return to deck B** reverses the
 resting deck. **Stay where I leave it** is the original latch behavior;
 **Silence selected deck** closes the deck selected with 1/2.
@@ -149,8 +149,8 @@ cue; a previously playing one rejoins its uninterrupted timeline. Changing
 selected decks, opening Controls or losing window focus cancels the move to
 prevent a held note from getting stuck.
 
-**Keyboard mode → Manual fader** restores ASDF / JKL; crossfader playing.
-The on-screen scratch pads remain playable in either keyboard mode.
+**ZXCV / M , . /** controls the crossfader in either keyboard mode. Choose the active bank with Fader hand under Mixer / headphones. Manual fader mode disables the letter-triggered scratch moves; the on-screen scratch pads remain playable.
+Touching the fader during a scratch phrase takes manual control, so you can cut it in and out. Holding a fader key before triggering a move also keeps it under manual control.
 
 ## Compact console, record crate and sample pads
 
