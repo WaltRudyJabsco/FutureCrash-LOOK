@@ -2,11 +2,12 @@
  * IndexedDB keeps samples out of the set JSON and avoids reloading the library. */
 (function (root) {
   "use strict";
+  const PAD_KEYS = Object.freeze(["e", "r", "t", "y", "u", "i", "o", "p"]);
   const PAD_COUNT = 8,
     MAX_SECONDS = 8;
   class MercurySampler {
-    constructor({ ensure, selected, decks, output, status }) {
-      Object.assign(this, { ensure, selected, decks, output, status });
+    constructor({ ensure, context, selected, decks, output, status }) {
+      Object.assign(this, { ensure, context, selected, decks, output, status });
       this.slots = Array.from({ length: PAD_COUNT }, () => null);
       this.buttons = [];
       this.down = new Set();
@@ -65,7 +66,43 @@
       };
       document.getElementById("stop-samples").onclick = () => this.stop();
       this.render();
-      this.ready = this.restore();
+      this.ready = this.restore().then(() => {
+        this.restored = true;
+      });
+      const picker = document.getElementById("sample-trim-pad");
+      picker.onchange = () => this.renderTrim();
+      for (const edge of ["start", "end"]) {
+        document.getElementById("sample-trim-" + edge).oninput = (event) => {
+          const slot = this.slots[Number(picker.value)];
+          if (!slot) return;
+          const duration = this.duration(slot);
+          const bounds = MercurySampler.bounds(duration, slot.start, slot.end);
+          const value = Number(event.target.value);
+          slot.start =
+            edge === "start"
+              ? Math.min(value, bounds.end - 0.01)
+              : bounds.start;
+          slot.end =
+            edge === "end" ? Math.max(value, slot.start + 0.01) : bounds.end;
+          this.renderTrim();
+          this.render();
+        };
+        document.getElementById("sample-trim-" + edge).onchange = () => {
+          const index = Number(picker.value),
+            slot = this.slots[index];
+          if (slot)
+            this.store(index, this.row(index)).catch(() =>
+              this.status(
+                "Trim changed for this session; local saving failed.",
+                true,
+              ),
+            );
+        };
+      }
+      document.getElementById("sample-audition").onclick = () =>
+        this.trigger(Number(picker.value)).catch((error) =>
+          this.status(error.message, true),
+        );
     }
     async database() {
       if (!this.dbPromise)
@@ -125,13 +162,60 @@
           "Local storage unavailable; pads will last for this session.";
       }
     }
+    duration(slot) {
+      return slot.buffer?.duration || slot.left.length / slot.rate;
+    }
+    prepare(slot, ctx) {
+      if (!slot.buffer) {
+        slot.buffer = ctx.createBuffer(2, slot.left.length, slot.rate);
+        slot.buffer.copyToChannel(slot.left, 0);
+        slot.buffer.copyToChannel(slot.right, 1);
+        delete slot.left;
+        delete slot.right;
+      }
+    }
+    row(index) {
+      const slot = this.slots[index];
+      return {
+        index,
+        title: slot.title,
+        rate: slot.rate,
+        start: slot.start,
+        end: slot.end,
+        left: slot.buffer ? slot.buffer.getChannelData(0) : slot.left,
+        right: slot.buffer ? slot.buffer.getChannelData(1) : slot.right,
+      };
+    }
+    renderTrim() {
+      const slot =
+        this.slots[Number(document.getElementById("sample-trim-pad").value)];
+      const duration = slot ? this.duration(slot) : 0;
+      const bounds = MercurySampler.bounds(duration, slot?.start, slot?.end);
+      for (const edge of ["start", "end"]) {
+        const input = document.getElementById("sample-trim-" + edge);
+        input.disabled = !slot;
+        input.max = duration;
+        input.value = bounds[edge];
+        document.getElementById("sample-trim-" + edge + "-value").textContent =
+          bounds[edge].toFixed(2) + "s";
+      }
+      document.getElementById("sample-audition").disabled = !slot;
+    }
+    paintSoon() {
+      if (this.paintPending) return;
+      this.paintPending = true;
+      requestAnimationFrame(() => {
+        this.paintPending = false;
+        this.render();
+      });
+    }
     render() {
       this.buttons.forEach((button, i) => {
         const slot = this.slots[i],
           recording = this.capture?.index === i;
         button.replaceChildren();
         for (const [tag, text] of [
-          ["b", String(i + 1)],
+          ["b", String(i + 1) + " · " + PAD_KEYS[i].toUpperCase()],
           ["span", recording ? "Recording…" : slot?.title || "Hold to sample"],
           [
             "small",
@@ -139,7 +223,16 @@
               ? "Release to keep"
               : slot
                 ? (
-                    slot.buffer?.duration || slot.left.length / slot.rate
+                    MercurySampler.bounds(
+                      this.duration(slot),
+                      slot.start,
+                      slot.end,
+                    ).end -
+                    MercurySampler.bounds(
+                      this.duration(slot),
+                      slot.start,
+                      slot.end,
+                    ).start
                   ).toFixed(1) + "s"
                 : "Empty",
           ],
@@ -148,6 +241,9 @@
           element.textContent = text;
           button.append(element);
         }
+        button.setAttribute("aria-keyshortcuts", PAD_KEYS[i].toUpperCase());
+        button.title =
+          PAD_KEYS[i].toUpperCase() + " · trigger sample " + (i + 1);
         button.classList.toggle("loaded", !!slot);
         button.classList.toggle("capturing", recording);
         button.classList.toggle("playing", !!slot?.voice);
@@ -155,10 +251,26 @@
           "aria-label",
           "Sample pad " +
             (i + 1) +
+            " (" +
+            PAD_KEYS[i].toUpperCase() +
+            ")" +
             ": " +
             (recording ? "recording" : slot?.title || "empty; hold to sample"),
         );
       });
+      this.renderTrim();
+    }
+    async trigger(index) {
+      if (!this.restored) await this.ready;
+      if (!Number.isInteger(index) || index < 0 || index >= PAD_COUNT) return;
+      if (!this.slots[index]) {
+        document.getElementById("sample-status").textContent =
+          "Pad " +
+          (index + 1) +
+          " is empty. Hold it with the pointer while a deck plays to capture a sample.";
+        return;
+      }
+      await this.play(index);
     }
     async press(index, clear = false) {
       this.down.add(index);
@@ -253,6 +365,9 @@
         right: data.right.slice(0, data.frames),
       };
       this.slots[current.index] = row;
+      const ctx = this.context?.();
+      if (ctx) this.prepare(row, ctx);
+      document.getElementById("sample-trim-pad").value = String(current.index);
       this.render();
       document.getElementById("sample-status").textContent =
         "Pad " +
@@ -261,15 +376,17 @@
         (data.frames / data.rate).toFixed(1) +
         "s · Shift-click to clear";
       try {
-        await this.store(current.index, row);
+        await this.store(current.index, this.row(current.index));
       } catch {
         document.getElementById("sample-status").textContent =
           "Sample ready for this session; local saving failed.";
       }
     }
     async play(index) {
-      const ctx = await this.ensure(),
-        slot = this.slots[index];
+      // An active instrument starts sound before any UI work or promise wait.
+      let ctx = this.context?.();
+      if (!ctx || ctx.state !== "running") ctx = await this.ensure();
+      const slot = this.slots[index];
       if (!slot) return;
       if (!this.bus) {
         this.bus = ctx.createGain();
@@ -278,13 +395,7 @@
         );
         this.bus.connect(this.output());
       }
-      if (!slot.buffer) {
-        slot.buffer = ctx.createBuffer(2, slot.left.length, slot.rate);
-        slot.buffer.copyToChannel(slot.left, 0);
-        slot.buffer.copyToChannel(slot.right, 1);
-        delete slot.left;
-        delete slot.right;
-      }
+      this.prepare(slot, ctx);
       slot.voice?.stop();
       const voice = ctx.createBufferSource();
       voice.buffer = slot.buffer;
@@ -294,11 +405,16 @@
         voice.disconnect();
         if (slot.voice === voice) {
           slot.voice = null;
-          this.render();
+          this.paintSoon();
         }
       };
-      voice.start();
-      this.render();
+      const bounds = MercurySampler.bounds(
+        this.duration(slot),
+        slot.start,
+        slot.end,
+      );
+      voice.start(0, bounds.start, bounds.end - bounds.start);
+      this.paintSoon();
     }
     async clear(index) {
       if (this.capture?.index === index) {
@@ -325,5 +441,23 @@
       this.slots.forEach((slot) => slot?.voice?.stop());
     }
   }
+  MercurySampler.bounds = (duration, start, end) => {
+    const limit = Math.max(0, Number.isFinite(duration) ? duration : 0);
+    const minimum = Math.min(0.01, limit);
+    start = Math.max(
+      0,
+      Math.min(Number.isFinite(start) ? start : 0, limit - minimum),
+    );
+    end = Math.max(
+      start + minimum,
+      Math.min(Number.isFinite(end) ? end : limit, limit),
+    );
+    return { start, end };
+  };
+  MercurySampler.keys = PAD_KEYS;
+  MercurySampler.keyIndex = (key, shift = false) => {
+    key = String(key).toLowerCase();
+    return shift && (key === "r" || key === "t") ? -1 : PAD_KEYS.indexOf(key);
+  };
   root.MercurySampler = MercurySampler;
 })(globalThis);
