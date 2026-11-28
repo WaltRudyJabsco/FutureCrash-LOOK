@@ -564,12 +564,24 @@ function metadata(deck) {
     track?.kind === "demo" ? track.title.toUpperCase() : "MERCURY SESSIONS";
 }
 async function boundedFetch(url, signal) {
-  const response = await fetch(url, { signal, credentials: "same-origin" });
+  let response;
+  try {
+    response = await fetch(url, { signal, credentials: "same-origin" });
+  } catch (error) {
+    if (error.name === "AbortError") throw error;
+    throw new Error(
+      "The browser could not reach the music host. Check the host connection, then retry this track.",
+    );
+  }
   if (!response.ok)
     throw new Error(
       response.status === 425
         ? "The Fabric is preparing this audio. Try loading it again shortly."
-        : "Could not load this track (HTTP " + response.status + ").",
+        : response.status === 404
+          ? "The source file or drive is unavailable. Refresh the crate and choose an available copy, or reconnect the source drive."
+          : response.status === 401 || response.status === 403
+            ? "Music access was refused. Reconnect this browser to the Fabric and check its media permissions."
+            : "Could not load this track (HTTP " + response.status + ").",
     );
   if (Number(response.headers.get("content-length") || 0) > MAX_FILE_BYTES)
     throw new Error("Choose an audio file smaller than 48 MB.");
@@ -596,6 +608,12 @@ async function boundedFetch(url, signal) {
     return new Blob(chunks, {
       type: response.headers.get("content-type") || "audio/mpeg",
     });
+  } catch (error) {
+    if (error.name === "TypeError")
+      throw new Error(
+        "The audio transfer was interrupted before the track finished downloading. Check the music host connection and retry.",
+      );
+    throw error;
   } finally {
     reader.releaseLock();
   }
@@ -700,6 +718,7 @@ async function load(deck, track, file = null) {
       const blob =
         file || (await boundedFetch(track.audio_url, controller.signal));
       if (serial !== deck.serial) return;
+      status("Reading audio for " + track.title + "…");
       const duration = await durationOf(blob);
       if (serial !== deck.serial) return;
       if (!Number.isFinite(duration) || duration > MAX_TRACK_SECONDS)
@@ -709,7 +728,16 @@ async function load(deck, track, file = null) {
       const Decoder =
         window.OfflineAudioContext || window.webkitOfflineAudioContext;
       const decoder = Decoder ? new Decoder(2, 1, SOURCE_RATE) : audio.ctx;
-      const buffer = await decoder.decodeAudioData(await blob.arrayBuffer());
+      let buffer;
+      try {
+        buffer = await decoder.decodeAudioData(await blob.arrayBuffer());
+      } catch {
+        throw new Error(
+          "This browser could not decode the audio for " +
+            track.title +
+            ". Try another copy or an MP3, M4A or WAV file.",
+        );
+      }
       if (serial !== deck.serial) return;
       pcm = resample(buffer);
     }

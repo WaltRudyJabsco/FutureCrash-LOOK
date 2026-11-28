@@ -107,3 +107,29 @@ def test_revision_endpoint_is_small_and_does_not_build_catalog(tmp_path,monkeypa
         assert value=={'node':'owner','revision':node._local_media_catalog_revision()}
         assert len(data)<256
     finally:server.shutdown();server.server_close()
+
+
+def test_published_source_availability_and_drive_changes(tmp_path,monkeypatch):
+    drive=tmp_path/'external';drive.mkdir()
+    song=drive/'song.mp3';song.write_bytes(b'music')
+    missing=tmp_path/'disconnected'/'song.mp3'
+    library=tmp_path/'media_library.json'
+    library.write_text(__import__('json').dumps({'roots':[str(drive)],'entries':[
+        {'path':str(song),'root':str(drive)},
+        {'path':str(missing),'root':str(missing.parent)},
+    ]}))
+    monkeypatch.setattr(node,'LOOK_MEDIA_LIBRARY',library)
+    monkeypatch.setattr(node,'identity',lambda:{'name':'owner'})
+    monkeypatch.setattr(node,'LOCAL_MEDIA_CATALOG_CACHE',{'at':0,'data':None,'stamp':None})
+    result=node._local_media_catalog()
+    assert [r['source_available'] for r in result['entries']]==[True,False]
+    assert str(missing.parent) in result['roots']
+    before=node._local_media_catalog_revision()
+    drive.rename(tmp_path/'disconnected-drive')
+    after=node._local_media_catalog_revision()
+    assert before!=after
+    assert node._local_media_catalog()['entries'][0]['source_available'] is False
+    (tmp_path/'disconnected-drive').rename(drive)
+    assert node._local_media_catalog_revision()!=after
+    assert node._local_media_catalog()['entries'][0]['source_available'] is True
+    assert len(__import__('json').loads(library.read_text())['entries'])==2
